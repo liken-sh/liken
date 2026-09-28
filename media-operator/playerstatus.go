@@ -430,9 +430,10 @@ func playTitle(play *Play) string {
 
 // writePlayerStatus follows the same two rules as the Play's status
 // writer: an unchanged status is not written, and a conflict earns
-// one retry. Nothing watches Players, so a needless write wakes no
-// loop, but the skip still spares the API server a write per settled
-// Player every pass.
+// one retry. The Players watch wakes the pass on every change, this
+// operator's own status writes included, so a needless write would run
+// one more pass, and the skip also spares the API server a write per
+// settled Player every pass.
 func writePlayerStatus(c *Client, player *Player, desired PlayerStatus) error {
 	same, err := samePlayerStatus(player.Status, desired)
 	if err != nil {

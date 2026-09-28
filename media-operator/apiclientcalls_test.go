@@ -16,10 +16,8 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 		name string
 		call func(c *Client) error
 	}{
-		{name: "list plays", call: func(c *Client) error { _, err := ListPlays(c); return err }},
 		{name: "get a play", call: func(c *Client) error { _, err := GetPlay(c, "house", "movie"); return err }},
 		{name: "delete a play", call: func(c *Client) error { return DeletePlay(c, "house", "movie") }},
-		{name: "list players", call: func(c *Client) error { _, err := ListPlayers(c); return err }},
 		{name: "get a player", call: func(c *Client) error { _, err := GetPlayer(c, "house", "theater"); return err }},
 		{name: "put a play status", call: func(c *Client) error {
 			_, err := PutPlayStatus(c, &Play{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
@@ -34,33 +32,21 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 			_, err := PutRemoteStatus(c, &Remote{Metadata: ObjectMeta{Name: "wand", Namespace: "house"}})
 			return err
 		}},
-		{name: "list remotes", call: func(c *Client) error { _, err := ListAllRemotes(c); return err }},
-		{name: "get a keymap", call: func(c *Client) error { _, err := GetKeymap(c, "gamepad"); return err }},
-		{name: "list keymaps", call: func(c *Client) error { _, err := ListKeymaps(c); return err }},
-		{name: "get media preferences", call: func(c *Client) error {
-			_, err := GetMediaPreferences(c, "household")
-			return err
-		}},
-		{name: "list media preferences", call: func(c *Client) error { _, err := ListMediaPreferences(c); return err }},
 		{name: "get a claim", call: func(c *Client) error { _, err := GetResourceClaim(c, "house", "movie"); return err }},
 		{name: "create a claim", call: func(c *Client) error {
 			_, err := CreateResourceClaim(c, &ResourceClaim{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
 			return err
 		}},
 		{name: "delete a claim", call: func(c *Client) error { return DeleteResourceClaim(c, "house", "movie") }},
-		{name: "list playback pods", call: func(c *Client) error { _, err := ListPlaybackPods(c); return err }},
 		{name: "get a pod", call: func(c *Client) error { _, err := GetPod(c, "house", "movie"); return err }},
 		{name: "create a pod", call: func(c *Client) error {
 			_, err := CreatePod(c, &Pod{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
 			return err
 		}},
 		{name: "delete a pod", call: func(c *Client) error { return DeletePod(c, "house", "movie") }},
-		{name: "list resource slices", call: func(c *Client) error { _, err := ListResourceSlices(c); return err }},
-		{name: "get a display", call: func(c *Client) error { _, err := GetDisplay(c, "panel"); return err }},
 		{name: "apply a display override", call: func(c *Client) error {
 			return ApplyDisplayOverride(c, "panel", nil)
 		}},
-		{name: "list receivers", call: func(c *Client) error { _, err := ListReceivers(c); return err }},
 		{name: "apply a receiver session", call: func(c *Client) error {
 			return ApplyReceiverSession(c, "den-receiver", nil)
 		}},
@@ -99,15 +85,13 @@ func TestAnAbsentObjectIsASuccessfulDelete(t *testing.T) {
 	}
 }
 
-// Each read reaches its own path, and the pod list narrows to the
-// operator's own playback pods by the label the pod builder stamps.
+// Each read reaches its own path.
 func TestEachReadNamesItsOwnPath(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
-		"GET /apis/media.liken.sh/v1alpha1/namespaces/house/plays/movie":  Play{Metadata: ObjectMeta{Name: "movie"}},
-		"GET /apis/media.liken.sh/v1alpha1/mediapreferences/household":    MediaPreferences{},
-		"GET /apis/media.liken.sh/v1alpha1/namespaces/house/remotes/wand": Remote{},
-		"GET /api/v1/pods": PodList{Metadata: ListMeta{ResourceVersion: "9"}},
+		"GET /apis/media.liken.sh/v1alpha1/namespaces/house/plays/movie":    Play{Metadata: ObjectMeta{Name: "movie"}},
+		"GET /apis/media.liken.sh/v1alpha1/namespaces/house/remotes/wand":   Remote{},
 		"GET /apis/resource.k8s.io/v1/namespaces/house/resourceclaims/mine": ResourceClaim{},
+		"GET /api/v1/namespaces/house/pods/movie-playback":                  Pod{Metadata: ObjectMeta{Name: "movie-playback"}},
 	}}
 	client := testAPIClient(t, api.handler())
 
@@ -115,18 +99,15 @@ func TestEachReadNamesItsOwnPath(t *testing.T) {
 	mustSucceed(t, err)
 	mustMatch(t, play.Metadata.Name, "movie")
 
-	_, err = GetMediaPreferences(client, "household")
-	mustSucceed(t, err)
-
 	_, err = GetRemote(client, "house", "wand")
 	mustSucceed(t, err)
 
 	_, err = GetResourceClaim(client, "house", "mine")
 	mustSucceed(t, err)
 
-	pods, err := ListPlaybackPods(client)
+	pod, err := GetPod(client, "house", "movie-playback")
 	mustSucceed(t, err)
-	mustMatch(t, pods.Metadata.ResourceVersion, "9")
+	mustMatch(t, pod.Metadata.Name, "movie-playback")
 }
 
 // A Player's status goes through the status subresource, so the write
@@ -223,21 +204,4 @@ func TestTheSpecReleaseCarriesAnEmptySpec(t *testing.T) {
 	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/den-receiver")
 	mustMatch(t, string(api.requests[0].Body),
 		`{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"spec":{}}`)
-}
-
-// The Receivers are read from one cluster-scoped collection.
-func TestListReceiversReadsTheClusterCollection(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET /apis/equipment.liken.sh/v1alpha1/receivers": ReceiverList{
-			Metadata: ListMeta{ResourceVersion: "31"},
-			Items:    []Receiver{*houseReceiver()},
-		},
-	}}
-
-	list, err := ListReceivers(testAPIClient(t, api.handler()))
-	mustSucceed(t, err)
-
-	mustMatch(t, list.Metadata.ResourceVersion, "31")
-	mustMatch(t, len(list.Items), 1)
-	mustMatch(t, list.Items[0].Spec.Inputs[1].Machine, testNode)
 }

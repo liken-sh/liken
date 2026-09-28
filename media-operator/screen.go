@@ -176,11 +176,6 @@ type ResourceSlice struct {
 	Spec     ResourceSliceSpec `json:"spec"`
 }
 
-type ResourceSliceList struct {
-	Metadata ListMeta        `json:"metadata"`
-	Items    []ResourceSlice `json:"items"`
-}
-
 type ResourceSliceSpec struct {
 	Driver string            `json:"driver,omitempty"`
 	Pool   ResourceSlicePool `json:"pool"`
@@ -213,16 +208,16 @@ type screen struct {
 }
 
 // screens resolves each unit's screen to the monitor id that
-// names its Display. It lists the driver's ResourceSlices at most once
-// a pass, because one list answers every unit.
+// names its Display. It reads the driver's ResourceSlices from the view
+// at most once a pass, because one read answers every unit.
 //
 // Each unit's answer is held for the pass, because the panel and the
 // equipment both ask the same question of the same claim. Each
 // Display read is held the same way, because the Screen condition
-// and the panel both read the same one, and a unit costs one GET a
-// pass.
+// and the panel both read the same one, and every caller in the pass
+// then reads the same answer.
 type screens struct {
-	client   *Client
+	view     *clusterView
 	slices   []ResourceSlice
 	listed   bool
 	resolved map[string]screen
@@ -236,9 +231,9 @@ type displayRead struct {
 	err     error
 }
 
-func newScreens(client *Client) *screens {
+func newScreens(view *clusterView) *screens {
 	return &screens{
-		client:   client,
+		view:     view,
 		resolved: map[string]screen{},
 		displays: map[string]displayRead{},
 	}
@@ -249,7 +244,7 @@ func (s *screens) displayFor(monitor string) (*Display, error) {
 	if read, held := s.displays[monitor]; held {
 		return read.display, read.err
 	}
-	display, err := GetDisplay(s.client, monitor)
+	display, err := s.view.Display(monitor)
 	s.displays[monitor] = displayRead{display: display, err: err}
 	return display, err
 }
@@ -258,7 +253,7 @@ func (s *screens) displayFor(monitor string) (*Display, error) {
 // dropped when the pass ends.
 func (o *operator) screenLookup() *screens {
 	if o.screenCache == nil {
-		o.screenCache = newScreens(o.client)
+		o.screenCache = newScreens(o.view)
 	}
 	return o.screenCache
 }
@@ -279,8 +274,7 @@ func (s *screens) screenFor(player *Player) (screen, bool) {
 }
 
 func (s *screens) lookUp(player *Player) (screen, bool) {
-	claim, err := GetResourceClaim(s.client,
-		player.Metadata.Namespace, idleClaimName(player.Metadata.Name))
+	claim, err := s.view.ResourceClaim(player.Metadata.Namespace, idleClaimName(player.Metadata.Name))
 	if err != nil || claim.Status == nil || claim.Status.Allocation == nil {
 		return screen{}, false
 	}
@@ -302,12 +296,12 @@ func (s *screens) lookUp(player *Player) (screen, bool) {
 func (s *screens) screenOf(result DeviceRequestAllocationResult) (screen, bool) {
 	if !s.listed {
 		s.listed = true
-		list, err := ListResourceSlices(s.client)
+		slices, err := s.view.ResourceSlices()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing resource slices: %v\n", err)
+			fmt.Fprintf(os.Stderr, "reading resource slices: %v\n", err)
 			return screen{}, false
 		}
-		s.slices = list.Items
+		s.slices = slices
 	}
 	for _, slice := range s.slices {
 		if slice.Spec.Driver != result.Driver || slice.Spec.Pool.Name != result.Pool {

@@ -4,12 +4,14 @@ package main
 
 // This file replaces leader.go in the pod build, the binary that runs
 // every role but the operator: the command sidecar in every playback
-// pod, the reader in every Remote's pod, the player shim, and the api. leader.go links client-go's
-// leader election, which links client-go's typed clientset and its
-// scheme. That more than doubles the binary and the memory each role
-// takes at start, and those roles never elect anything. The pod build
-// sets the build tag pod, so leader.go and client-go stay out of it.
-// The operator runs from the full build.
+// pod, the reader in every Remote's pod, the player shim, and the api.
+// leader.go links client-go's leader election, which links client-go's
+// typed clientset and its scheme. That more than doubles the binary and
+// the memory each role takes at start, and those roles never elect
+// anything. The pod build sets the build tag pod, so leader.go, the
+// election, and the typed clientset stay out of it. The api's watches
+// link only client-go's reflector and dynamic client (watch.go). The
+// operator runs from the full build.
 
 import (
 	"context"

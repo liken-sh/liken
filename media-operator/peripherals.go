@@ -42,11 +42,6 @@ type Peripheral struct {
 	Status   PeripheralStatus `json:"status"`
 }
 
-type PeripheralList struct {
-	Metadata ListMeta     `json:"metadata"`
-	Items    []Peripheral `json:"items"`
-}
-
 type PeripheralStatus struct {
 	Battery    *PeripheralBattery    `json:"battery,omitempty"`
 	Conditions []PeripheralCondition `json:"conditions,omitempty"`
@@ -149,12 +144,12 @@ func (p *peripheralDesk) batteryFor(name string) *int {
 // observePeripherals reads the cluster's Peripherals and resolves which
 // one each Remote holds. It runs before the pass writes any Player
 // status, because a unit's bus status carries its controllers' links.
-// It reads each Remote's standing claim, which is the one read of that
-// claim the pass makes, and returns those reads by controller key so
-// the standing reconcile makes none of its own. A claim read that fails
-// has no entry, and the reconcile then reads that one claim itself. A
-// Peripherals list that fails leaves the desk holding what it had, so
-// one failed read does not blank every controller on the idle screen.
+// It reads each Remote's standing claim from the view, and returns
+// those reads by controller key so the standing reconcile makes none of
+// its own. A claim read that fails has no entry, and the reconcile then
+// reads that one claim itself. A Peripherals read that fails leaves the
+// desk holding what it had, so one failed read does not blank every
+// controller on the idle screen.
 func (o *operator) observePeripherals(remotes []Remote) map[string]claimRead {
 	claims := make(map[string]claimRead, len(remotes))
 	named := make(map[string]string, len(remotes))
@@ -173,13 +168,13 @@ func (o *operator) observePeripherals(remotes []Remote) map[string]claimRead {
 			named[key] = name
 		}
 	}
-	list, err := ListPeripherals(o.client)
+	list, err := o.view.Peripherals()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing peripherals: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading peripherals: %v\n", err)
 		return claims
 	}
 	before := o.peripherals.links()
-	o.peripherals.hold(list.Items, named)
+	o.peripherals.hold(list, named)
 	o.logLinks(before, o.peripherals.links())
 	return claims
 }

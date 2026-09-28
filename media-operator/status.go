@@ -216,18 +216,27 @@ func playerName(play *Play) string {
 // ten-second backstop would become a write every ten seconds for
 // every settled Play in the cluster.
 func writePlayStatus(c *Client, play *Play, desired PlayStatus) error {
+	_, _, err := writePlayStatusFrom(c, play, desired)
+	return err
+}
+
+// writePlayStatusFrom is writePlayStatus that also answers the phase
+// the API server held before the write, and whether it wrote. The pass
+// reads a Play from the view, which can be one write behind: the
+// operator's own last write can still be on its way. The conflict that
+// follows reads the Play again, and the phase that read answers is the
+// one a line and a counter compare against.
+func writePlayStatusFrom(c *Client, play *Play, desired PlayStatus) (string, bool, error) {
+	was := play.Status.Phase
 	same, err := sameStatus(play.Status, desired)
-	if err != nil {
-		return err
-	}
-	if same {
-		return nil
+	if err != nil || same {
+		return was, false, err
 	}
 
 	play.Status = desired
 	_, err = PutPlayStatus(c, play)
 	if !errors.Is(err, ErrConflict) {
-		return err
+		return was, err == nil, err
 	}
 
 	// A conflict means something wrote the Play between the read and
@@ -236,15 +245,16 @@ func writePlayStatus(c *Client, play *Play, desired PlayStatus) error {
 	// same facts, so it goes on unchanged.
 	fresh, err := GetPlay(c, play.Metadata.Namespace, play.Metadata.Name)
 	if err != nil {
-		return err
+		return was, false, err
 	}
+	was = fresh.Status.Phase
 	same, err = sameStatus(fresh.Status, desired)
 	if err != nil || same {
-		return err
+		return was, false, err
 	}
 	fresh.Status = desired
 	_, err = PutPlayStatus(c, fresh)
-	return err
+	return was, err == nil, err
 }
 
 // onlyPositionChanged reports whether the desired status differs from the

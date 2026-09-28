@@ -42,10 +42,13 @@ COVERAGE_TOOLCHAIN := go1.26.7
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
 # The pod build is the program the sidecar containers, the player shim,
-# and the api run, built with the tag pod (leader_pod.go says why). The check
-# vets it and fails when anything in it links client-go, so a new import
-# cannot bring client-go into every playback pod and every Remote's pod.
-POD_BUILD_CLIENT_GO := go list -tags pod -deps . | grep '^k8s.io/client-go'
+# and the api run, built with the tag pod (leader_pod.go says why). The
+# api's watches link client-go's reflector, its dynamic client, and rest,
+# with the packages they need. The check vets the build and fails when
+# it links the typed clientset, the informer factories, or leader
+# election, which would more than double the program that every
+# playback pod and every Remote's pod runs.
+POD_BUILD_CLIENT_GO := go list -tags pod -deps . | grep -E '^k8s.io/client-go/(kubernetes|informers|dynamic/dynamicinformer|tools/leaderelection)(/|$$)'
 
 .PHONY: test-go
 test-go:
@@ -53,7 +56,7 @@ test-go:
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
 	go vet ./...
 	go vet -tags pod .
-	test -z "$$($(POD_BUILD_CLIENT_GO))" || { echo 'the pod build links client-go:'; $(POD_BUILD_CLIENT_GO); exit 1; }
+	test -z "$$($(POD_BUILD_CLIENT_GO))" || { echo 'the pod build links more of client-go than its watches need:'; $(POD_BUILD_CLIENT_GO); exit 1; }
 	go test -race ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml

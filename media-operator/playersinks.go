@@ -36,7 +36,7 @@ func (o *operator) reconcileSinks(player *Player, play string) []PlayerSinkStatu
 	if play == "" {
 		return remembered
 	}
-	claim, err := GetResourceClaim(o.client, player.Metadata.Namespace, claimName(play))
+	claim, err := o.view.ResourceClaim(player.Metadata.Namespace, claimName(play))
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "reading the playback claim of player %s/%s: %v\n",

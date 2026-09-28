@@ -13,11 +13,10 @@ package main
 //
 // The ending also has to reach the bus as the unit's Idle state, which
 // is what every screen client keys its return on, and that answer comes
-// from memory. A pass reads the Plays and the Players from the API
-// server first, and the k3s server this operator runs against answers a
-// list read in as much as 800 milliseconds at its p99, with nothing
-// bounding the worst case. A person is looking at the screen for the
-// whole wait.
+// from memory. The pass that the report wakes runs only after the pass
+// in flight ends, and a pass waits on the API server for each write it
+// sends, with nothing bounding the worst case. A person is looking at
+// the screen for the whole wait.
 // The operator read both collections on its last pass, and neither the
 // film's last frame nor the pass that follows it changes what those
 // lists say about this unit, so the fold derives the unit's state from

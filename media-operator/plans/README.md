@@ -39,6 +39,18 @@ These plans are designed. Each keeps its number and moves to
 
 ## Completed
 
+* [38, The watches use client-go](completed/38-the-watches-use-client-go.md).
+  Built on 2026-09-27. Every Kubernetes watch in the operator and in
+  the api role runs on client-go's reflector, and the hand-written loop
+  is gone. The operator also watches the claims, the ResourceSlices,
+  the Displays, the Receivers, and its idle and reader pods, and the
+  pass reads every collection from the watches' memory. A run that is
+  not settled reads its objects again from the API server before the
+  pass acts on it. The `Deployment`'s grace period is 60 seconds, so a
+  shutdown releases the `Lease` before the kubelet kills the operator. A settled pass on the test fixture sent 20 reads before and
+  sends none now. The pod build links client-go's reflector for the
+  api's watches, and grows from 12.4MB to 15.6MB stripped and by about
+  0.4MB of anonymous memory at start. The drill on `liken-1` is owed.
 * [37, One operator holds the Lease](completed/37-one-operator-holds-the-lease.md).
   Built on 2026-09-27. The operator runs client-go's leader election
   with a `LeaseLock` on the `Lease` named `media-operator`, so only the

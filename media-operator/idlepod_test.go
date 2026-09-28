@@ -767,17 +767,17 @@ func TestReconcileIdleDeletesThePodAnOlderReleaseStood(t *testing.T) {
 		"claim/theater-idle-devices", "pod/theater-idle"})
 }
 
-// A cluster that never ran the older release holds no such pod, and the
-// pass reads that once and writes nothing.
+// A cluster that never ran the older release holds no such pod. The
+// pods watch does not select that pod, so the operator reads it from the API
+// server, once for each Player, and writes nothing.
 func TestReconcileIdleReadsTheRetiredPodOnceWhenNoneStands(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
 	player := standingIdlePlayer()
-	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 	retired := idlePodName(player.Metadata.Name) + retiredIdleCommandPodSuffix
-	cluster.requests = nil
 
+	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
 	reads := 0

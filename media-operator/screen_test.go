@@ -6,7 +6,6 @@ package main
 // cluster with no Display does instead.
 
 import (
-	"net/http"
 	"testing"
 )
 
@@ -405,15 +404,15 @@ func TestAnUnreadableDisplayKeepsTheHeldCondition(t *testing.T) {
 	}
 }
 
-// The condition and the panel both read the same Display, so a unit
-// costs one read a pass however many questions the pass asks of it.
-func TestAUnitReadsItsDisplayOnceAPass(t *testing.T) {
+// The condition and the panel both read the unit's Display from the
+// view, so the pass asks the API server nothing about it.
+func TestAUnitReadsItsDisplayFromTheView(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
 
-	mustMatch(t, displayReads(cluster), 1)
+	mustMatch(t, displayReads(cluster), 0)
 	mustMatch(t, cluster.players["theater"].Status.Panel, panelOn)
 }
 
@@ -578,7 +577,7 @@ func TestTheScreenIsFoundThroughTheAllocation(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	found, resolved := newScreens(media.client).screenFor(housePlayer())
+	found, resolved := newScreens(media.view).screenFor(housePlayer())
 
 	mustMatch(t, resolved, true)
 	mustMatch(t, found.monitor, testMonitor)
@@ -592,7 +591,7 @@ func TestADeviceWithNoMonitorIDNamesNoScreen(t *testing.T) {
 	cluster.slices[0].Spec.Devices[0].Attributes = nil
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	_, found := newScreens(media.client).screenFor(housePlayer())
+	_, found := newScreens(media.view).screenFor(housePlayer())
 
 	mustMatch(t, found, false)
 }
@@ -630,7 +629,7 @@ func TestTheMonitorLookupWalksPastSlicesThatDoNotHoldTheDevice(t *testing.T) {
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			// The slices are already read, so the lookup needs no
-			// client and reads the list the case names.
+			// view and reads the list the case names.
 			lookup := &screens{slices: each.slices, listed: true}
 
 			_, found := lookup.screenOf(allocatedDrawDevice())
@@ -640,14 +639,13 @@ func TestTheMonitorLookupWalksPastSlicesThatDoNotHoldTheDevice(t *testing.T) {
 	}
 }
 
-// A slice list the API server refuses names no screen, so the pass
-// writes no override rather than one built on a guess.
-func TestTheMonitorLookupAnswersNothingWhenTheSliceListFails(t *testing.T) {
-	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
+// A slice read that fails names no screen, so the pass writes no
+// override rather than one built on a guess.
+func TestTheMonitorLookupAnswersNothingWhenTheSliceReadFails(t *testing.T) {
+	cluster := screenCluster()
+	cluster.fails[slicesPath] = true
 
-	_, found := newScreens(client).screenOf(allocatedDrawDevice())
+	_, found := newScreens(cluster.view()).screenOf(allocatedDrawDevice())
 
 	mustMatch(t, found, false)
 }

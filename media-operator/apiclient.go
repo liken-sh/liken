@@ -74,10 +74,10 @@ func InClusterClient() (*Client, error) {
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 			// Each timeout bounds the same failure: a server that
-			// stops answering without sending anything. There is no
-			// overall client timeout, because the watch is a request
-			// whose response never ends, and a whole-request
-			// deadline would cut the stream on schedule.
+			// stops answering without sending anything. The client
+			// sets no deadline on a whole request. The watches run on
+			// client-go's own client, so no request this client sends
+			// is a stream.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,
@@ -100,12 +100,6 @@ const (
 	applyContentType = "application/apply-patch+yaml"
 	mergePatchType   = "application/merge-patch+json"
 )
-
-// Do sends one request and hands back the open response, which is
-// what the watch needs and what RequestJSON is built on.
-func (c *Client) Do(method, path string, body []byte) (*http.Response, error) {
-	return c.send(method, path, jsonContentType, body)
-}
 
 func (c *Client) send(method, path, contentType string, body []byte) (*http.Response, error) {
 	var reader io.Reader
@@ -175,9 +169,10 @@ func drain(body io.ReadCloser) {
 	_ = body.Close()
 }
 
-// The collection paths. Plays are listed and watched across every
-// namespace and read back per namespace, and the two Kubernetes
-// kinds this operator writes live under their own groups' paths.
+// The collection paths. The watches read each collection through
+// client-go (clusterwatch.go), and this client writes each object
+// under its namespace's path, and under its group's path for a
+// cluster-scoped kind.
 const (
 	playsPath       = "/apis/" + mediaAPIVersion + "/plays"
 	playersPath     = "/apis/" + mediaAPIVersion + "/players"
@@ -191,12 +186,7 @@ const (
 	receiversPath   = "/apis/" + receiverAPIVersion + "/receivers"
 	peripheralsPath = "/apis/" + peripheralAPIVersion + "/peripherals"
 	podPrefix       = "/api/v1/namespaces/"
-	podsAllPath     = "/api/v1/pods"
 )
-
-// playbackPodsQuery narrows a pod list or a pod watch to the operator's own
-// playback pods, by the label buildPod stamps on each one.
-const playbackPodsQuery = "labelSelector=" + playbackLabelKey + "%3D" + playbackLabelValue
 
 func playPath(namespace, name string) string {
 	return mediaPrefix + namespace + "/plays/" + name
@@ -214,29 +204,12 @@ func remotePath(namespace, name string) string {
 	return remotesPath(namespace) + "/" + name
 }
 
-// keymapPath reads one Keymap by name. A Keymap is cluster-scoped, so
-// the path carries no namespace, the way a StorageClass path carries
-// none.
-func keymapPath(name string) string {
-	return keymapsPath + "/" + name
-}
-
 func claimsPath(namespace string) string {
 	return claimPrefix + namespace + "/resourceclaims"
 }
 
 func podsPath(namespace string) string {
 	return podPrefix + namespace + "/pods"
-}
-
-// ListPlays answers a whole pass with one request, and the list's
-// resourceVersion is where a watch resumes from.
-func ListPlays(c *Client) (*PlayList, error) {
-	list := &PlayList{}
-	if err := c.RequestJSON(http.MethodGet, playsPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 func GetPlay(c *Client, namespace, name string) (*Play, error) {
@@ -280,18 +253,6 @@ func PatchPlayFinalizers(c *Client, namespace, name, resourceVersion string, fin
 		return "", err
 	}
 	return patched.Metadata.ResourceVersion, nil
-}
-
-// ListPlayers answers a pass with one request across every
-// namespace, the same shape as ListPlays, because a Player's status
-// is derived from the Plays that name it and the pass already holds
-// every Play.
-func ListPlayers(c *Client) (*PlayerList, error) {
-	list := &PlayerList{}
-	if err := c.RequestJSON(http.MethodGet, playersPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 // PutPlayerStatus writes the Player's status subresource, the one
@@ -359,58 +320,6 @@ func PutRemoteStatus(c *Client, remote *Remote) (*Remote, error) {
 	return written, nil
 }
 
-// ListAllRemotes reads every Remote in the cluster in one request, the
-// same shape as ListPlays, because the operator reconciles a standing
-// pod for each Remote whatever namespace it lives in, and the list's
-// resourceVersion is where the remotes watch resumes from.
-func ListAllRemotes(c *Client) (*RemoteList, error) {
-	list := &RemoteList{}
-	if err := c.RequestJSON(http.MethodGet, remotesAllPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
-func GetKeymap(c *Client, name string) (*Keymap, error) {
-	keymap := &Keymap{}
-	if err := c.RequestJSON(http.MethodGet, keymapPath(name), nil, keymap); err != nil {
-		return nil, err
-	}
-	return keymap, nil
-}
-
-// ListKeymaps reads every Keymap in the cluster in one request, because
-// the operator compiles and publishes each one on every pass, and the
-// list's resourceVersion is where the keymaps watch resumes from.
-func ListKeymaps(c *Client) (*KeymapList, error) {
-	list := &KeymapList{}
-	if err := c.RequestJSON(http.MethodGet, keymapsPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
-// GetMediaPreferences reads the household default by name. MediaPreferences is
-// cluster-scoped, so the path carries no namespace. A missing default is
-// ErrNotFound, which the resolver reads as a skipped tier.
-func GetMediaPreferences(c *Client, name string) (*MediaPreferences, error) {
-	prefs := &MediaPreferences{}
-	if err := c.RequestJSON(http.MethodGet, mediaPrefsPath+"/"+name, nil, prefs); err != nil {
-		return nil, err
-	}
-	return prefs, nil
-}
-
-// ListMediaPreferences reads every MediaPreferences in one request. The list's
-// resourceVersion is where the watch resumes from.
-func ListMediaPreferences(c *Client) (*MediaPreferencesList, error) {
-	list := &MediaPreferencesList{}
-	if err := c.RequestJSON(http.MethodGet, mediaPrefsPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
 func GetResourceClaim(c *Client, namespace, name string) (*ResourceClaim, error) {
 	claim := &ResourceClaim{}
 	if err := c.RequestJSON(http.MethodGet, claimsPath(namespace)+"/"+name, nil, claim); err != nil {
@@ -429,16 +338,6 @@ func CreateResourceClaim(c *Client, claim *ResourceClaim) (*ResourceClaim, error
 		return nil, err
 	}
 	return created, nil
-}
-
-// ListPlaybackPods reads the operator's playback pods across every
-// namespace. The list's resourceVersion is where the pod watch begins.
-func ListPlaybackPods(c *Client) (*PodList, error) {
-	list := &PodList{}
-	if err := c.RequestJSON(http.MethodGet, podsAllPath+"?"+playbackPodsQuery, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 func GetPod(c *Client, namespace, name string) (*Pod, error) {
@@ -490,40 +389,6 @@ func DeletePod(c *Client, namespace, name string) error {
 	return err
 }
 
-// Every driver's slices in one request. The operator reads
-// them for the attributes of the devices its own claims hold, so one
-// list a pass answers every unit.
-func ListResourceSlices(c *Client) (*ResourceSliceList, error) {
-	list := &ResourceSliceList{}
-	if err := c.RequestJSON(http.MethodGet, slicesPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
-// A Display is cluster-scoped, so the path carries no
-// namespace. A screen whose cluster runs no display-operator answers
-// ErrNotFound, and the panel then stays lit.
-func GetDisplay(c *Client, name string) (*Display, error) {
-	display := &Display{}
-	if err := c.RequestJSON(http.MethodGet, displaysPath+"/"+name, nil, display); err != nil {
-		return nil, err
-	}
-	return display, nil
-}
-
-// ListPeripherals reads every bonded device the bluetooth-operator
-// publishes. A Peripheral is cluster-scoped, so the path carries no
-// namespace, and the list's resourceVersion is where the peripherals
-// watch resumes from.
-func ListPeripherals(c *Client) (*PeripheralList, error) {
-	list := &PeripheralList{}
-	if err := c.RequestJSON(http.MethodGet, peripheralsPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
 // ApplyDisplayOverride writes spec.override and nothing else,
 // under this operator's own field manager. A nil override applies an
 // empty spec, and the API server then removes the block this manager
@@ -540,17 +405,6 @@ func ApplyDisplayOverride(c *Client, name string, override *DisplayOverride) err
 	}
 	path := displaysPath + "/" + name + "?fieldManager=" + applyFieldManager
 	return c.requestJSON(http.MethodPatch, path, applyContentType, body, nil)
-}
-
-// ListReceivers reads every Receiver in one request. A Receiver is
-// cluster-scoped, so the path carries no namespace. A cluster that runs
-// no equipment operator answers ErrNotFound.
-func ListReceivers(c *Client) (*ReceiverList, error) {
-	list := &ReceiverList{}
-	if err := c.RequestJSON(http.MethodGet, receiversPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 // ApplyReceiverSession writes status.session and nothing else, under

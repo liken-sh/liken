@@ -1,405 +1,494 @@
 package main
 
-// These tests cover what the watcher does with each kind of event,
-// and how it comes back from a stream that ends and from a server
-// that refuses the watch.
+// These tests run the operator's watches through client-go's real
+// reflector, against a scripted API server. The reflector's own loop is
+// upstream's to test; what these prove is which changes wake the pass,
+// that every collection reaches the view before the first pass, that
+// an optional collection a cluster lacks reads as empty, and that a
+// settled pass reads nothing from the API server.
 
 import (
+	"context"
 	"encoding/json"
-	"io"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"sync/atomic"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/cache"
 )
 
-// The bounds on every wait in this file: long enough that a loaded
-// machine still passes, short enough that a broken watcher fails in
-// seconds.
-const (
-	watchTimeout    = 2 * time.Second
-	watchQuietSpell = 50 * time.Millisecond
-)
+// closeStream, sent as a line, ends the watch the way the API server
+// ends one at its timeout.
+const closeStream = "close"
 
-// A backoff in milliseconds instead of seconds, restored when the test
-// ends. Every watch counts as one that ran, so a stream that a test
-// ends opens again at once, the way a watch that ran for minutes does.
-func useWatchRetryPause(t *testing.T) {
+// servedCollection is one collection the scripted server holds: the
+// objects its reads answer, the status it answers instead when status
+// is not zero, and the lines the test sends to the open watch.
+type servedCollection struct {
+	apiVersion string
+	kind       string
+	items      []json.RawMessage
+	status     int
+	live       chan string
+}
+
+// collectionServer answers client-go's reads and watches of each
+// collection it holds, the way the API server does: a streaming list
+// with one ADDED event for each object and the bookmark that ends the
+// initial events, a plain list when the reflector falls back to one,
+// and the test's lines on the open watch after that.
+type collectionServer struct {
+	mu          sync.Mutex
+	collections map[string]*servedCollection
+	requests    []string
+}
+
+func newCollectionServer() *collectionServer {
+	return &collectionServer{collections: map[string]*servedCollection{}}
+}
+
+// serve adds one collection with its objects.
+func (s *collectionServer) serve(t *testing.T, resource schema.GroupVersionResource, kind string, objects ...any) *servedCollection {
 	t.Helper()
-	startWas, maxWas, lifeWas := watchBackoffStart, watchBackoffMax, watchMinLife
-	t.Cleanup(func() { watchBackoffStart, watchBackoffMax, watchMinLife = startWas, maxWas, lifeWas })
-	watchBackoffStart, watchBackoffMax, watchMinLife = 5*time.Millisecond, 5*time.Millisecond, 0
-}
-
-// One watch request's answer: a status other than 200, or the event
-// lines the stream carries before it ends. A turn with a hold
-// channel keeps the stream open until the test closes the channel.
-type watchTurn struct {
-	status int
-	events []string
-	hold   chan struct{}
-}
-
-// One list request's answer: either a status other than 200 or the
-// collection's resourceVersion.
-type listTurn struct {
-	status  int
-	version string
-}
-
-// An API server for the watch: it answers each watch and each list
-// from a script the test loads, and records what every request asked
-// for.
-type watchAPI struct {
-	turns        chan watchTurn
-	lists        chan listTurn
-	watched      chan url.Values
-	watchedPaths chan string
-	listed       chan string
-	parked       chan struct{}
-}
-
-func newWatchAPI() *watchAPI {
-	return &watchAPI{
-		turns:        make(chan watchTurn, 8),
-		lists:        make(chan listTurn, 8),
-		watched:      make(chan url.Values, 8),
-		watchedPaths: make(chan string, 8),
-		listed:       make(chan string, 8),
-		parked:       make(chan struct{}),
+	collection := &servedCollection{
+		apiVersion: resource.GroupVersion().String(),
+		kind:       kind,
+		live:       make(chan string, 16),
 	}
-}
-
-func (a *watchAPI) answersWatches(turns ...watchTurn) {
-	for _, turn := range turns {
-		a.turns <- turn
+	for _, object := range objects {
+		collection.items = append(collection.items, stamped(t, collection, object))
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.collections[collectionPathOf(resource)] = collection
+	return collection
 }
 
-func (a *watchAPI) answersLists(turns ...listTurn) {
-	for _, turn := range turns {
-		a.lists <- turn
+// collectionPathOf is the path the dynamic client reads a collection
+// in every namespace from.
+func collectionPathOf(resource schema.GroupVersionResource) string {
+	if resource.Group == "" {
+		return "/api/" + resource.Version + "/" + resource.Resource
 	}
+	return "/apis/" + resource.Group + "/" + resource.Version + "/" + resource.Resource
 }
 
-// The two requests the watcher makes against one path, told apart by
-// the watch parameter the way the API server tells them apart.
-func (a *watchAPI) handler() http.Handler {
+// stamped encodes an object with its collection's apiVersion and kind,
+// which client-go's decoder needs.
+func stamped(t *testing.T, collection *servedCollection, object any) json.RawMessage {
+	t.Helper()
+	encoded, err := json.Marshal(object)
+	mustSucceed(t, err)
+	fields := map[string]any{}
+	mustSucceed(t, json.Unmarshal(encoded, &fields))
+	fields["apiVersion"] = collection.apiVersion
+	fields["kind"] = collection.kind
+	encoded, err = json.Marshal(fields)
+	mustSucceed(t, err)
+	return encoded
+}
+
+// send puts one event on the collection's open watch.
+func (c *servedCollection) send(t *testing.T, eventType string, object any) {
+	t.Helper()
+	c.live <- watchLine(eventType, stamped(t, c, object))
+}
+
+func (s *collectionServer) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("watch") == "true" {
-			a.serveWatch(w, r)
+		s.mu.Lock()
+		s.requests = append(s.requests, r.URL.Path+"?"+r.URL.RawQuery)
+		collection, held := s.collections[r.URL.Path]
+		s.mu.Unlock()
+		if !held {
+			http.NotFound(w, r)
 			return
 		}
-		a.serveList(w, r)
-	})
-}
-
-// A watch the script does not answer holds its stream open for the
-// rest of the run, which leaves the watcher in the request instead
-// of reconnecting.
-func (a *watchAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
-	a.watched <- r.URL.Query()
-	a.watchedPaths <- r.URL.Path
-	turn := watchTurn{hold: a.parked}
-	select {
-	case scripted := <-a.turns:
-		turn = scripted
-	default:
-	}
-	if turn.status != 0 {
-		w.WriteHeader(turn.status)
-		return
-	}
-	for _, event := range turn.events {
-		_, _ = io.WriteString(w, event+"\n")
-		w.(http.Flusher).Flush()
-	}
-	if turn.hold != nil {
-		<-turn.hold
-	}
-}
-
-func (a *watchAPI) serveList(w http.ResponseWriter, r *http.Request) {
-	a.listed <- r.URL.Path
-	turn := listTurn{version: "1"}
-	select {
-	case scripted := <-a.lists:
-		turn = scripted
-	default:
-	}
-	if turn.status != 0 {
-		w.WriteHeader(turn.status)
-		return
-	}
-	_ = json.NewEncoder(w).Encode(PlayList{Metadata: ListMeta{ResourceVersion: turn.version}})
-}
-
-// The server outlives the test on purpose. watchPlays has no stop,
-// so every test ends with its watcher held in a watch request; a
-// server that closed would set that watcher reconnecting for the rest
-// of the run.
-func startWatch(t *testing.T, api *watchAPI, from string) chan struct{} {
-	t.Helper()
-	server := httptest.NewServer(api.handler())
-	wake := make(chan struct{}, 1)
-	go watchPlays(NewClient(server.URL, server.Client(), ""), from, wake, nil)
-	return wake
-}
-
-// One line of a watch stream, in the shape the API server sends.
-func watchEvent(kind, version string) string {
-	return `{"type":"` + kind + `","object":{"metadata":{"resourceVersion":"` + version + `"}}}`
-}
-
-func nextWatchRequest(t *testing.T, api *watchAPI) url.Values {
-	t.Helper()
-	select {
-	case query := <-api.watched:
-		return query
-	case <-time.After(watchTimeout):
-		t.Fatal("no watch request arrived")
-		return nil
-	}
-}
-
-func nextListRequest(t *testing.T, api *watchAPI) string {
-	t.Helper()
-	select {
-	case path := <-api.listed:
-		return path
-	case <-time.After(watchTimeout):
-		t.Fatal("no list request arrived")
-		return ""
-	}
-}
-
-func waitForWatchWake(t *testing.T, wake <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-wake:
-	case <-time.After(watchTimeout):
-		t.Fatal("no wake reached the loop")
-	}
-}
-
-func expectNoWatchWake(t *testing.T, wake <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-wake:
-		t.Fatal("a wake reached the loop")
-	case <-time.After(watchQuietSpell):
-	}
-}
-
-// One line of a pod watch stream, carrying the phase the pod reports so
-// the reader can tell a failed pod from a running one.
-func podWatchEvent(kind, version, phase string) string {
-	return `{"type":"` + kind + `","object":{"metadata":{"resourceVersion":"` + version +
-		`"},"status":{"phase":"` + phase + `"}}}`
-}
-
-func startPodWatch(t *testing.T, api *watchAPI, from string) chan struct{} {
-	t.Helper()
-	server := httptest.NewServer(api.handler())
-	wake := make(chan struct{}, 1)
-	go watchPods(NewClient(server.URL, server.Client(), ""), from, wake, nil)
-	return wake
-}
-
-// A device-taint eviction or a lost node deletes the playback pod, and the
-// pod watch wakes the loop for the pass that recreates it. The watch
-// resumes from its version and narrows to the operator's own playback
-// pods by label.
-func TestThePodWatchWakesTheLoopOnADelete(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{events: []string{podWatchEvent("DELETED", "50", "Running")}, hold: api.parked})
-
-	wake := startPodWatch(t, api, "42")
-
-	first := nextWatchRequest(t, api)
-	if got := first.Get("resourceVersion"); got != "42" {
-		t.Errorf("the first watch resumed from %q, want 42", got)
-	}
-	if got := first.Get("labelSelector"); got != "media.liken.sh/component=playback" {
-		t.Errorf("labelSelector = %q, want the playback selector", got)
-	}
-	waitForWatchWake(t, wake)
-}
-
-// A failed pod is a crashed player, which the operator recreates, so it
-// wakes the loop. A running pod's routine update needs no pass, so it
-// wakes nothing and the backstop tick is the only thing that would read
-// it.
-func TestThePodWatchWakesOnFailedButNotOnRunning(t *testing.T) {
-	cases := []struct {
-		name  string
-		phase string
-		wakes bool
-	}{
-		{name: "a running update wakes nothing", phase: "Running", wakes: false},
-		{name: "a failed update wakes the loop", phase: "Failed", wakes: true},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			useWatchRetryPause(t)
-			api := newWatchAPI()
-			api.answersWatches(watchTurn{
-				events: []string{podWatchEvent("MODIFIED", "50", one.phase)},
-				hold:   api.parked,
+		if collection.status != 0 {
+			w.WriteHeader(collection.status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		query := r.URL.Query()
+		if query.Get("watch") != "true" {
+			list, _ := json.Marshal(map[string]any{
+				"apiVersion": collection.apiVersion,
+				"kind":       collection.kind + "List",
+				"metadata":   map[string]string{"resourceVersion": "100"},
+				"items":      collection.items,
 			})
-
-			wake := startPodWatch(t, api, "42")
-			nextWatchRequest(t, api)
-			if one.wakes {
-				waitForWatchWake(t, wake)
-			} else {
-				expectNoWatchWake(t, wake)
+			_, _ = w.Write(list)
+			return
+		}
+		// A streaming list sends every object and then the bookmark. A
+		// watch with no version sends every object too, the way the API
+		// server starts one at the most recent version.
+		if query.Get("sendInitialEvents") == "true" || query.Get("resourceVersion") == "" {
+			for _, item := range collection.items {
+				_, _ = w.Write([]byte(watchLine("ADDED", item) + "\n"))
 			}
-		})
-	}
-}
-
-func TestAChangedPlayOnTheStreamWakesTheLoopOnce(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{events: []string{watchEvent("MODIFIED", "50")}, hold: api.parked})
-
-	wake := startWatch(t, api, "42")
-
-	first := nextWatchRequest(t, api)
-	if got := first.Get("resourceVersion"); got != "42" {
-		t.Errorf("the first watch resumed from %q, want 42", got)
-	}
-	if got := first.Get("allowWatchBookmarks"); got != "true" {
-		t.Errorf("allowWatchBookmarks = %q, want true", got)
-	}
-	waitForWatchWake(t, wake)
-	expectNoWatchWake(t, wake)
-}
-
-// A bookmark carries a resourceVersion and nothing to reconcile, so
-// it moves the resume point and wakes nothing. The next watch opens
-// from it with no list.
-func TestABookmarkMovesTheResumePointAndWakesNothing(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{events: []string{watchEvent("BOOKMARK", "99")}})
-
-	wake := startWatch(t, api, "42")
-
-	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
-	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "99")
-	expectNoWatchWake(t, wake)
-	expectNoList(t, api)
-}
-
-// expectNoList fails the test when the watcher lists in a short
-// spell.
-func expectNoList(t *testing.T, api *watchAPI) {
-	t.Helper()
-	select {
-	case path := <-api.listed:
-		t.Fatalf("the watcher listed %s", path)
-	case <-time.After(watchQuietSpell):
-	}
-}
-
-// A watch that ends, and a watch the server refuses, open again from
-// the last version delivered. Neither one lists, because the version
-// is still good, and a 410 says when it is not.
-func TestTheWatcherResumesWithNoListAfterAWatchEnds(t *testing.T) {
-	cases := []struct {
-		name  string
-		first watchTurn
-		want  string
-	}{
-		{name: "the stream ends", first: watchTurn{events: []string{watchEvent("MODIFIED", "50")}}, want: "50"},
-		{name: "the server refuses the watch", first: watchTurn{status: http.StatusInternalServerError}, want: "42"},
-	}
-	for _, each := range cases {
-		t.Run(each.name, func(t *testing.T) {
-			useWatchRetryPause(t)
-			api := newWatchAPI()
-			api.answersWatches(each.first)
-
-			startWatch(t, api, "42")
-
-			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
-			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), each.want)
-			expectNoList(t, api)
-		})
-	}
-}
-
-// A 410 and an error event both list the collection, wake the loop for
-// the pass that reads it, and open the next watch from the list's
-// version. So does an event whose object does not decode, because a
-// watch from the same version would deliver it again.
-func TestTheWatcherListsAndWakesAfterAWatchFails(t *testing.T) {
-	cases := []struct {
-		name  string
-		first watchTurn
-	}{
-		{name: "a 410 response", first: watchTurn{status: http.StatusGone}},
-		{name: "a 410 event", first: watchTurn{events: []string{`{"type":"ERROR","object":{"code":410}}`}}},
-		{name: "an error event", first: watchTurn{events: []string{`{"type":"ERROR","object":{"code":500}}`}}},
-		{name: "an event that does not decode", first: watchTurn{events: []string{`{"type":"MODIFIED","object":{"metadata":7}}`}}},
-	}
-	for _, each := range cases {
-		t.Run(each.name, func(t *testing.T) {
-			useWatchRetryPause(t)
-			api := newWatchAPI()
-			api.answersWatches(each.first)
-			api.answersLists(listTurn{version: "150"})
-
-			wake := startWatch(t, api, "42")
-
-			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
-			mustMatch(t, nextListRequest(t, api), playsPath)
-			waitForWatchWake(t, wake)
-			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "150")
-		})
-	}
-}
-
-// media_watch_restarts_total counts a watch that ended and that this
-// loop opened again, so the callback runs once per reconnect and not
-// on the loop's first connection.
-func TestAWatchRestartCountsEachReconnectAndNotTheFirstConnect(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{}, watchTurn{})
-
-	server := httptest.NewServer(api.handler())
-	wake := make(chan struct{}, 1)
-	var restarts atomic.Int32
-	go watchPlays(NewClient(server.URL, server.Client(), ""), "1", wake, func() { restarts.Add(1) })
-
-	nextWatchRequest(t, api)
-	nextWatchRequest(t, api)
-	nextWatchRequest(t, api)
-
-	mustMatch(t, restarts.Load(), int32(2))
-}
-
-// A bad event ends the watch at once, while the server still holds the
-// stream open. A loop that read the stream to its end would wait for
-// the server to close it, and every change in that time would be lost.
-func TestABadEventClosesTheStreamTheServerHoldsOpen(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{
-		events: []string{`{"type":"MODIFIED","object":{"metadata":7}}`},
-		hold:   api.parked,
+		}
+		if query.Get("sendInitialEvents") == "true" {
+			_, _ = w.Write([]byte(initialEventsEnd(collection.apiVersion, collection.kind, "100") + "\n"))
+		}
+		w.(http.Flusher).Flush()
+		for {
+			select {
+			case line := <-collection.live:
+				if line == closeStream {
+					return
+				}
+				_, _ = w.Write([]byte(line + "\n"))
+				w.(http.Flusher).Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
 	})
-	api.answersLists(listTurn{version: "150"})
+}
 
-	startWatch(t, api, "42")
+// requested answers each request the server took for one collection.
+func (s *collectionServer) requested(resource schema.GroupVersionResource) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var found []string
+	for _, request := range s.requests {
+		if strings.HasPrefix(request, collectionPathOf(resource)+"?") {
+			found = append(found, request)
+		}
+	}
+	return found
+}
 
-	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
-	mustMatch(t, nextListRequest(t, api), playsPath)
-	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "150")
+// runWatch runs one collection watch until the test ends.
+func runWatch(t *testing.T, server *collectionServer, watch collectionWatch) {
+	t.Helper()
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		stop()
+		<-done
+	})
+	client := testWatcher(t, server.handler())
+	go func() {
+		defer close(done)
+		watchCollection(ctx, client, watch)
+	}()
+}
+
+// wokeWithin reports whether the wake channel received a wake within the
+// quiet spell, and empties it.
+func wokeWithin(wake chan struct{}) bool {
+	select {
+	case <-wake:
+		return true
+	case <-time.After(watchQuietSpell):
+		return false
+	}
+}
+
+// asObject is an object the way the informer hands it to a handler.
+func asObject(t *testing.T, object any) *unstructured.Unstructured {
+	t.Helper()
+	encoded, err := json.Marshal(object)
+	mustSucceed(t, err)
+	fields := map[string]any{}
+	mustSucceed(t, json.Unmarshal(encoded, &fields))
+	return &unstructured.Unstructured{Object: fields}
+}
+
+func labeledPod(name, component, phase string) *Pod {
+	return &Pod{
+		Metadata: ObjectMeta{Name: name, Namespace: "house", Labels: map[string]string{playbackLabelKey: component}},
+		Status:   PodStatus{Phase: phase},
+	}
+}
+
+// Every change to a Play wakes the pass through the real reflector,
+// this operator's own status write included, and so does the first
+// read: the pass after a status write is how a Finished Play retires at
+// once.
+func TestAChangeToAPlayWakesThePass(t *testing.T) {
+	server := newCollectionServer()
+	plays := server.serve(t, playResource, "Play", housePlay("https://nas/film.mkv"))
+	wake := make(chan struct{}, 1)
+	synced := make(chan struct{})
+
+	runWatch(t, server, collectionWatch{resource: playResource, handler: wakeOnChange(wake),
+		synced: func(cache.Store) { close(synced) }})
+	mustMatch(t, closedWithin(synced, watchTimeout), true)
+	<-wake
+
+	written := housePlay("https://nas/film.mkv")
+	written.Metadata.ResourceVersion = "101"
+	written.Status.Phase = phaseRunning
+	plays.send(t, "MODIFIED", written)
+	mustMatch(t, wokeWithin(wake), true)
+
+	plays.send(t, "DELETED", written)
+	mustMatch(t, wokeWithin(wake), true)
+}
+
+// A playback pod wakes the pass when it goes away or turns Failed, and
+// on nothing else. The idle and reader pods wake nothing: the pass
+// reads them from the view on its next tick.
+func TestAPodWakesThePassOnlyWhenAPlaybackPodEnds(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(handler cache.ResourceEventHandler, pod *unstructured.Unstructured)
+		pod    *Pod
+		want   bool
+	}{
+		{name: "a playback pod that runs", pod: labeledPod("movie-playback", playbackLabelValue, podRunning),
+			change: updated, want: false},
+		{name: "a playback pod that failed", pod: labeledPod("movie-playback", playbackLabelValue, podFailed),
+			change: updated, want: true},
+		{name: "a playback pod that went away", pod: labeledPod("movie-playback", playbackLabelValue, podRunning),
+			change: deleted, want: true},
+		{name: "a failed playback pod the watch had not seen", pod: labeledPod("movie-playback", playbackLabelValue, podFailed),
+			change: added, want: true},
+		{name: "a new playback pod", pod: labeledPod("movie-playback", playbackLabelValue, podPending),
+			change: added, want: false},
+		{name: "an idle pod that failed", pod: labeledPod("theater-idle", idleLabelValue, podFailed),
+			change: updated, want: false},
+		{name: "an idle pod that went away", pod: labeledPod("theater-idle", idleLabelValue, podRunning),
+			change: deleted, want: false},
+		{name: "a reader pod that went away", pod: labeledPod("sofa-remote", remoteLabelValue, podRunning),
+			change: deleted, want: false},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			wake := make(chan struct{}, 1)
+
+			each.change(wakeOnPlaybackEnd(wake), asObject(t, each.pod))
+
+			mustMatch(t, len(wake) == 1, each.want)
+		})
+	}
+}
+
+func added(handler cache.ResourceEventHandler, pod *unstructured.Unstructured) {
+	handler.OnAdd(pod, false)
+}
+
+func updated(handler cache.ResourceEventHandler, pod *unstructured.Unstructured) {
+	handler.OnUpdate(pod, pod)
+}
+
+func deleted(handler cache.ResourceEventHandler, pod *unstructured.Unstructured) {
+	handler.OnDelete(pod)
+}
+
+// A removal whose tombstone holds no copy of the pod wakes the pass,
+// because nothing says whose pod it was.
+func TestAPodRemovedWithNoCopyWakesThePass(t *testing.T) {
+	wake := make(chan struct{}, 1)
+
+	wakeOnPlaybackEnd(wake).OnDelete(cache.DeletedFinalStateUnknown{Key: "house/movie-playback"})
+
+	mustMatch(t, len(wake), 1)
+}
+
+// Through the reflector: the pods watch selects the operator's own pods
+// by their component label, and a playback pod that fails wakes the
+// pass.
+func TestThePodsWatchSelectsTheOperatorsOwnPods(t *testing.T) {
+	server := newCollectionServer()
+	pods := server.serve(t, podResource, "Pod", labeledPod("movie-playback", playbackLabelValue, podRunning))
+	wake := make(chan struct{}, 1)
+	synced := make(chan struct{})
+
+	runWatch(t, server, collectionWatch{resource: podResource, labels: ownPodsSelector,
+		handler: wakeOnPlaybackEnd(wake), synced: func(cache.Store) { close(synced) }})
+	mustMatch(t, closedWithin(synced, watchTimeout), true)
+	mustMatch(t, wokeWithin(wake), false)
+	pods.send(t, "MODIFIED", labeledPod("movie-playback", playbackLabelValue, podFailed))
+
+	mustMatch(t, wokeWithin(wake), true)
+	for _, request := range server.requested(podResource) {
+		mustMatch(t, strings.Contains(request, "labelSelector=media.liken.sh%2Fcomponent+in+%28playback%2Cidle%2Cremote%29"), true)
+	}
+}
+
+// Each watch the API server accepts after the first counts as one
+// restart, and the refusals while the API server is away do not.
+func TestAWatchCountsEachReopen(t *testing.T) {
+	server := newCollectionServer()
+	plays := server.serve(t, playResource, "Play")
+	var reopened sync.WaitGroup
+	reopened.Add(1)
+	synced := make(chan struct{})
+
+	runWatch(t, server, collectionWatch{resource: playResource, reopened: reopened.Done,
+		synced: func(cache.Store) { close(synced) }})
+	mustMatch(t, closedWithin(synced, watchTimeout), true)
+	plays.send(t, "ADDED", housePlay("https://nas/film.mkv"))
+	plays.live <- closeStream
+
+	done := make(chan struct{})
+	go func() {
+		reopened.Wait()
+		close(done)
+	}()
+	mustMatch(t, closedWithin(done, watchTimeout), true)
+}
+
+// servedCluster serves every collection the view reads, from what the
+// fake cluster holds.
+func servedCluster(t *testing.T, cluster *fakeCluster) *collectionServer {
+	t.Helper()
+	server := newCollectionServer()
+	view := cluster.view()
+	collections := []struct {
+		resource schema.GroupVersionResource
+		kind     string
+		source   objectSource
+	}{
+		{playResource, "Play", view.plays},
+		{playerResource, "Player", view.players},
+		{remoteResource, "Remote", view.remotes},
+		{keymapResource, "Keymap", view.keymaps},
+		{preferencesResource, "MediaPreferences", view.preferences},
+		{peripheralResource, "Peripheral", view.peripherals},
+		{podResource, "Pod", view.pods},
+		{claimResource, "ResourceClaim", view.claims},
+		{sliceResource, "ResourceSlice", view.slices},
+		{displayResource, "Display", view.displays},
+		{receiverResource, "Receiver", view.receivers},
+	}
+	for _, each := range collections {
+		server.serve(t, each.resource, each.kind, each.source.List()...)
+	}
+	return server
+}
+
+// watchedView runs watchCluster against a server until the test ends,
+// and answers its view.
+func watchedView(t *testing.T, server *collectionServer, wake chan struct{}) *clusterView {
+	t.Helper()
+	ctx, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	wait, cancel := context.WithTimeout(ctx, watchTimeout)
+	defer cancel()
+	view, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), wake, nil)
+	mustSucceed(t, err)
+	return view
+}
+
+// settledHouse is a cluster the operator has already settled: a Player
+// with a screen wired through a Receiver, a Remote with its controller
+// bonded, and a Play running on the Player, each with the claims and
+// the pods the passes built, and the claims allocated. The operator it
+// answers has run a pass over that cluster, so it holds what a running
+// operator holds.
+func settledHouse(t *testing.T, wake chan struct{}) (*fakeCluster, *operator) {
+	t.Helper()
+	cluster := receiverCluster()
+	running := runningCluster(housePlayerWithRemote())
+	bonded := bondedRemote(t)
+	for name, play := range running.plays {
+		cluster.plays[name] = play
+	}
+	for name, pod := range running.pods {
+		cluster.pods[name] = pod
+	}
+	for _, from := range []*fakeCluster{running, bonded} {
+		for name, claim := range from.claims {
+			cluster.claims[name] = claim
+		}
+	}
+	for name, remote := range bonded.remotes {
+		cluster.remotes[name] = remote
+	}
+	for name, keymap := range bonded.keymaps {
+		cluster.keymaps[name] = keymap
+	}
+	for name, peripheral := range bonded.peripherals {
+		cluster.peripherals[name] = peripheral
+	}
+	cluster.players["theater"] = housePlayerWithRemote()
+	media := testOperator(t, cluster, wake)
+	media.idleDisplayClass = "display-draw"
+	for range 4 {
+		media.pass()
+	}
+	// The scheduler allocates the claims the passes created, which the
+	// fake cluster does not do on its own.
+	cluster.claims[idleClaimName("theater")].Status = allocatedIdleClaim().Status
+	cluster.claims[remoteClaimName("sofa")].Status = bonded.claims[remoteClaimName("sofa")].Status
+	for range 2 {
+		media.pass()
+	}
+	return cluster, media
+}
+
+// A pass on a settled cluster reads every collection from the watches
+// and sends the API server nothing: no read and no write.
+func TestASettledPassSendsTheAPIServerNothing(t *testing.T) {
+	wake := make(chan struct{}, 8)
+	cluster, media := settledHouse(t, wake)
+	media.view = watchedView(t, servedCluster(t, cluster), wake)
+	cluster.requests = nil
+
+	media.pass()
+
+	mustMatchAll(t, cluster.requests, nil)
+}
+
+// A collection that a cluster has not installed reads as empty, so the
+// operator starts on a cluster with no equipment-operator or
+// display-operator. When the resource arrives, the watch finds it.
+func TestAnAbsentOptionalCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
+	recheckWas := optionalRecheck
+	optionalRecheck = 50 * time.Millisecond
+	t.Cleanup(func() { optionalRecheck = recheckWas })
+	server := servedCluster(t, newFakeCluster())
+	server.collections[collectionPathOf(receiverResource)].status = http.StatusNotFound
+
+	view := watchedView(t, server, make(chan struct{}, 1))
+	receivers, err := view.Receivers()
+	mustSucceed(t, err)
+	mustMatch(t, len(receivers), 0)
+
+	server.serve(t, receiverResource, "Receiver", houseReceiver())
+	until(t, "the view never held the Receiver that arrived", func() bool {
+		receivers, err := view.Receivers()
+		return err == nil && len(receivers) == 1
+	})
+}
+
+// A collection the operator cannot read ends the wait with an error
+// that names it, so the process ends and says which grant or which
+// resource is missing.
+func TestTheFirstReadNamesACollectionItCannotRead(t *testing.T) {
+	server := servedCluster(t, newFakeCluster())
+	server.collections[collectionPathOf(peripheralResource)].status = http.StatusForbidden
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	wait, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	_, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), make(chan struct{}, 1), nil)
+
+	mustFail(t, err)
+	mustMatch(t, strings.Contains(err.Error(), "not read: "+kindPeripheral+":"), true)
+}
+
+// An object that does not convert is an error that names it, so a log
+// line says which object the operator could not read.
+func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
+	object := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": mediaAPIVersion, "kind": "Play",
+		"metadata": map[string]any{"name": "movie", "namespace": "house"},
+		"spec":     "garbled",
+	}}
+
+	_, err := convert[Play](object)
+
+	mustFail(t, err)
+	mustMatch(t, strings.Contains(err.Error(), "Play house/movie does not convert"), true)
 }

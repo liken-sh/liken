@@ -23,19 +23,37 @@ import (
 
 // coreAPI stands in for the core API: the Secrets and ConfigMaps the
 // namespace holds, and every write it took, so a test reads what the
-// keeper wrote.
+// keeper wrote. It answers client-go's watches too: a streaming list of
+// one named object, and every later change to that object, so a test
+// runs the api role's watches through client-go's own reflector.
 type coreAPI struct {
 	mu      sync.Mutex
 	objects map[string]json.RawMessage
 	hidden  map[string]bool
 	writes  []string
 	version int
+	streams []*coreStream
+	watches int
+	// collections records each list and each watch, as the path and
+	// the field selector it asked for.
+	collections []string
 
 	// revision is the collection's resourceVersion that a list
 	// answers. It is apart from each object's own version, as on a
 	// cluster, where an object that has not changed in a while carries
 	// a version far older than the collection's.
 	revision string
+
+	// refusal, when it is not zero, is the status every list and every
+	// watch answers.
+	refusal int
+}
+
+// coreStream is one open watch: the object it names, and the event
+// lines still to send.
+type coreStream struct {
+	key    string
+	events chan string
 }
 
 func newCoreAPI() *coreAPI {
@@ -43,16 +61,26 @@ func newCoreAPI() *coreAPI {
 }
 
 // handler answers the secrets and configmaps paths, told apart by the
-// kind segment, with a get, a list by name, a create, and an update on
-// each.
+// kind segment, with a get, a list by name, a watch by name, a create,
+// and an update on each.
 func (a *coreAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		kind, name := coreTarget(r.URL.Path)
+		query := r.URL.Query()
+		if r.Method == http.MethodGet && name == "" {
+			a.mu.Lock()
+			a.collections = append(a.collections, r.URL.Path+"?fieldSelector="+query.Get("fieldSelector"))
+			a.mu.Unlock()
+		}
+		if r.Method == http.MethodGet && name == "" && query.Get("watch") == "true" {
+			a.watch(w, r, kind, query.Get("fieldSelector"))
+			return
+		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		kind, name := coreTarget(r.URL.Path)
 		switch {
 		case r.Method == http.MethodGet && name == "":
-			a.list(w, kind, r.URL.Query().Get("fieldSelector"))
+			a.list(w, kind, query.Get("fieldSelector"))
 		case r.Method == http.MethodGet:
 			a.answer(w, kind+"/"+name)
 		case r.Method == http.MethodPost:
@@ -76,6 +104,20 @@ func coreTarget(path string) (kind, name string) {
 	return "", ""
 }
 
+// coreKinds names each collection's kind, which client-go's decoder
+// needs on every object it reads.
+var coreKinds = map[string]string{"configmaps": "ConfigMap", "secrets": "Secret"}
+
+// asCoreObject answers the stored object with its apiVersion and kind.
+func asCoreObject(kind string, body json.RawMessage) json.RawMessage {
+	object := map[string]any{}
+	_ = json.Unmarshal(body, &object)
+	object["apiVersion"] = "v1"
+	object["kind"] = coreKinds[kind]
+	stamped, _ := json.Marshal(object)
+	return stamped
+}
+
 func (a *coreAPI) answer(w http.ResponseWriter, key string) {
 	body, held := a.objects[key]
 	if !held || a.hidden[key] {
@@ -89,6 +131,10 @@ func (a *coreAPI) answer(w http.ResponseWriter, key string) {
 // list the program sends: the one object if the server holds it, and
 // the collection's revision.
 func (a *coreAPI) list(w http.ResponseWriter, kind, selector string) {
+	if a.refusal != 0 {
+		w.WriteHeader(a.refusal)
+		return
+	}
 	name, named := strings.CutPrefix(selector, "metadata.name=")
 	if !named {
 		w.WriteHeader(http.StatusBadRequest)
@@ -97,13 +143,95 @@ func (a *coreAPI) list(w http.ResponseWriter, kind, selector string) {
 	items := []json.RawMessage{}
 	key := kind + "/" + name
 	if body, held := a.objects[key]; held && !a.hidden[key] {
-		items = append(items, body)
+		items = append(items, asCoreObject(kind, body))
 	}
 	body, _ := json.Marshal(map[string]any{
-		"metadata": map[string]string{"resourceVersion": a.revision},
-		"items":    items,
+		"apiVersion": "v1",
+		"kind":       coreKinds[kind] + "List",
+		"metadata":   map[string]string{"resourceVersion": a.revision},
+		"items":      items,
 	})
 	_, _ = w.Write(body)
+}
+
+// watch answers one watch under the field selector metadata.name. A
+// streaming list first sends the object as it is, if the server holds
+// it, and the bookmark that ends the initial events. Every watch then
+// sends each change to the object until the client hangs up.
+func (a *coreAPI) watch(w http.ResponseWriter, r *http.Request, kind, selector string) {
+	name, _ := strings.CutPrefix(selector, "metadata.name=")
+	key := kind + "/" + name
+	a.mu.Lock()
+	a.watches++
+	if a.refusal != 0 {
+		a.mu.Unlock()
+		w.WriteHeader(a.refusal)
+		return
+	}
+	stream := &coreStream{key: key, events: make(chan string, 16)}
+	a.streams = append(a.streams, stream)
+	var initial []string
+	if r.URL.Query().Get("sendInitialEvents") == "true" {
+		if body, held := a.objects[key]; held && !a.hidden[key] {
+			initial = append(initial, watchLine("ADDED", asCoreObject(kind, body)))
+		}
+		initial = append(initial, initialEventsEnd("v1", coreKinds[kind], a.revision))
+	}
+	a.mu.Unlock()
+	defer a.close(stream)
+
+	w.Header().Set("Content-Type", "application/json")
+	for _, line := range initial {
+		_, _ = io.WriteString(w, line+"\n")
+	}
+	w.(http.Flusher).Flush()
+	for {
+		select {
+		case line := <-stream.events:
+			_, _ = io.WriteString(w, line+"\n")
+			w.(http.Flusher).Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func (a *coreAPI) close(stream *coreStream) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for index, open := range a.streams {
+		if open == stream {
+			a.streams = append(a.streams[:index], a.streams[index+1:]...)
+			return
+		}
+	}
+}
+
+// publish sends one change to every watch of the object. The caller
+// holds the lock.
+func (a *coreAPI) publish(key, eventType string, body json.RawMessage) {
+	kind, _, _ := strings.Cut(key, "/")
+	line := watchLine(eventType, asCoreObject(kind, body))
+	for _, stream := range a.streams {
+		if stream.key == key {
+			stream.events <- line
+		}
+	}
+}
+
+// requested answers each list and watch the server took, as the path
+// and the field selector.
+func (a *coreAPI) requested() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string{}, a.collections...)
+}
+
+// opened answers how many watches the server has taken.
+func (a *coreAPI) opened() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.watches
 }
 
 // take handles a create or an update. A create against a hidden
@@ -136,8 +264,17 @@ func (a *coreAPI) take(w http.ResponseWriter, r *http.Request, kind string, crea
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	_, existed := a.objects[key]
 	a.objects[key] = stored
+	a.publish(key, changeType(existed), stored)
 	_, _ = w.Write(stored)
+}
+
+func changeType(existed bool) string {
+	if existed {
+		return "MODIFIED"
+	}
+	return "ADDED"
 }
 
 func (a *coreAPI) holds(t *testing.T, key string, out any) {
@@ -151,13 +288,29 @@ func (a *coreAPI) holds(t *testing.T, key string, out any) {
 	mustSucceed(t, json.Unmarshal(body, out))
 }
 
+// seed places an object, and sends the change to every watch of it.
 func (a *coreAPI) seed(t *testing.T, key string, object any) {
 	t.Helper()
 	body, err := json.Marshal(object)
 	mustSucceed(t, err)
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	_, existed := a.objects[key]
 	a.objects[key] = body
+	a.publish(key, changeType(existed), body)
+}
+
+// remove deletes an object, and sends the deletion to every watch of
+// it.
+func (a *coreAPI) remove(key string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	body, held := a.objects[key]
+	if !held {
+		return
+	}
+	delete(a.objects, key)
+	a.publish(key, "DELETED", body)
 }
 
 // hide takes an object out of every read until a create meets it,

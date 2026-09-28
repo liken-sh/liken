@@ -111,6 +111,7 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 		Metadata: ObjectMeta{
 			Name:            remotePodName(remote.Metadata.Name),
 			Namespace:       remote.Metadata.Namespace,
+			Labels:          map[string]string{playbackLabelKey: remoteLabelValue},
 			OwnerReferences: []OwnerReference{remoteOwner(remote)},
 		},
 		Spec: PodSpec{

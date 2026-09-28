@@ -73,9 +73,9 @@ func TestAnInputWithNoNameMatchesNothing(t *testing.T) {
 	mustMatch(t, matched, false)
 }
 
-// The Receivers are listed at most once a pass, however many units ask,
-// and a unit with no resolved screen asks nothing.
-func TestTheReceiversAreListedOnceAPass(t *testing.T) {
+// The Receivers come from the view, so the lookup answers every unit
+// that asks and sends the API server no request.
+func TestTheReceiversComeFromTheView(t *testing.T) {
 	cluster := receiverCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	lookup := media.receiverLookup()
@@ -89,11 +89,11 @@ func TestTheReceiversAreListedOnceAPass(t *testing.T) {
 	_, _, matched = lookup.matchFor(testNode, testMonitor)
 
 	mustMatch(t, matched, true)
-	mustMatch(t, countPathRequests(cluster.requests, "GET "+receiversPath), 1)
+	mustMatchAll(t, cluster.requests, nil)
 }
 
 // A screen this pass could not resolve names no equipment, and the
-// lookup then makes no request at all.
+// lookup then reads nothing.
 func TestAnUnresolvedScreenMatchesNoReceiver(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -117,7 +117,7 @@ func TestAnUnresolvedScreenMatchesNoReceiver(t *testing.T) {
 }
 
 // A cluster that runs no equipment operator serves no Receiver
-// collection, and a list that fails is the same answer: no match, and
+// collection, and a read that fails is the same answer: no match, and
 // the unit plays as it does today.
 func TestAClusterWithNoReceiversMatchesNothing(t *testing.T) {
 	cases := []struct {
@@ -125,7 +125,7 @@ func TestAClusterWithNoReceiversMatchesNothing(t *testing.T) {
 		shape func(*fakeCluster)
 	}{
 		{name: "the collection is absent", shape: func(c *fakeCluster) { c.receiversAbsent = true }},
-		{name: "the list fails", shape: func(c *fakeCluster) { c.fails[receiversPath] = true }},
+		{name: "the read fails", shape: func(c *fakeCluster) { c.fails[receiversPath] = true }},
 		{name: "the cluster holds no receiver", shape: func(c *fakeCluster) { c.receivers = map[string]*Receiver{} }},
 	}
 	for _, each := range cases {

@@ -43,6 +43,10 @@ const (
 	kindMediaPreferences = "MediaPreferences"
 	kindPod              = "Pod"
 	kindPeripheral       = "Peripheral"
+	kindResourceClaim    = "ResourceClaim"
+	kindResourceSlice    = "ResourceSlice"
+	kindDisplay          = "Display"
+	kindReceiver         = "Receiver"
 )
 
 // The fixed vocabulary for media_playback_failures_total. A Play that

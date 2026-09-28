@@ -110,11 +110,11 @@ type claimRead struct {
 	read  bool
 }
 
-// readClaim reads one standing claim by name. An absent claim is not an
-// error here: it is the state the create answers, so it returns a read
-// that found nothing.
+// readClaim reads one standing claim by name from the view. An absent
+// claim is not an error here: it is the state the create answers, so
+// it returns a read that found nothing.
 func (o *operator) readClaim(namespace, name string) (claimRead, error) {
-	claim, err := GetResourceClaim(o.client, namespace, name)
+	claim, err := o.view.ResourceClaim(namespace, name)
 	if errors.Is(err, ErrNotFound) {
 		return claimRead{read: true}, nil
 	}
@@ -124,12 +124,34 @@ func (o *operator) readClaim(namespace, name string) (claimRead, error) {
 	return claimRead{claim: claim, read: true}, nil
 }
 
+// standingObjects is what one read found for a standing pair. A nil
+// object is absent.
+type standingObjects struct {
+	claim *ResourceClaim
+	pod   *Pod
+}
+
 // reconcileStanding brings one standing pair into line with the claim and
 // the pod this pass would build. It stamps both with their template
 // hashes, reads what the cluster holds, and replaces whichever object no
 // longer matches. It creates whatever is missing, which is how a
 // replacement comes back: the delete returns, and the next pass finds the
 // object absent and creates it.
+//
+// The rule decides from the view first. A pair the view shows as the
+// pass would build it costs no request, which is every pass on a settled
+// cluster. A pair that needs a create or a delete is read again from
+// the API server, and the rule acts on that read, because the view can
+// still hold an object this operator deleted on the last pass, or lack
+// one it created.
+//
+// A pod the pass wants gone is read from the API server once in each
+// process even when the view does not hold it. The pods watch selects
+// on the component label, and older releases created pods without it,
+// such as the Remotes' reader pods and the idle command pod. Nothing in
+// this release creates a pod without the label, so once a read finds
+// the pod absent, absenceChecked records it, and the pass trusts the
+// view for that pod from then on.
 //
 // The two divergences are not the same repair. A claim is immutable and
 // the pod holds its allocation, so a changed claim replaces both. A
@@ -145,11 +167,11 @@ func (o *operator) readClaim(namespace, name string) (claimRead, error) {
 // A 409 on either create means another pass, or another copy of this
 // operator, created the object first, which is success.
 //
-// known is the claim the pass already read for this object, and it
-// saves the read here. The pass reads every Remote's standing claim
-// once, to resolve the controller's Peripheral, and hands that same
-// read down. A zero known is a caller with no read of its own, and the
-// rule reads the claim itself.
+// known is the claim the pass already read from the view for this
+// object, and it saves the read here. The pass reads every Remote's
+// standing claim once, to resolve the controller's Peripheral, and
+// hands that same read down. A zero known is a caller with no read of
+// its own, and the rule reads the claim itself.
 func (o *operator) reconcileStanding(want standing, known claimRead) error {
 	if want.claim != nil {
 		if err := stampTemplateHash(&want.claim.Metadata, want.claim.Spec); err != nil {
@@ -161,25 +183,107 @@ func (o *operator) reconcileStanding(want standing, known claimRead) error {
 			return err
 		}
 	}
-	namespace := want.namespace
+	viewed, err := o.viewStanding(want, known)
+	if err != nil {
+		return err
+	}
+	absence := namespacedKey(want.namespace, want.podName)
+	unconfirmed := want.pod == nil && viewed.pod == nil && !o.absenceChecked[absence]
+	if standingSettled(want, viewed) && !unconfirmed {
+		return nil
+	}
+	live, err := o.liveStanding(want)
+	if err != nil {
+		return err
+	}
+	if err := o.settleStanding(want, live); err != nil {
+		return err
+	}
+	// Only a read that found no pod is recorded. A pod that stood is
+	// deleted, or waits on a delete in progress, and the next pass reads
+	// it again until it is gone.
+	if want.pod == nil && live.pod == nil {
+		if o.absenceChecked == nil {
+			o.absenceChecked = map[string]bool{}
+		}
+		o.absenceChecked[absence] = true
+	}
+	return nil
+}
 
-	var liveClaim *ResourceClaim
-	claimStands := false
+// viewStanding reads the pair from the view.
+func (o *operator) viewStanding(want standing, known claimRead) (standingObjects, error) {
+	var found standingObjects
 	if want.claimName != "" {
 		if !known.read {
 			var err error
-			if known, err = o.readClaim(namespace, want.claimName); err != nil {
-				return err
+			if known, err = o.readClaim(want.namespace, want.claimName); err != nil {
+				return found, err
 			}
 		}
-		liveClaim, claimStands = known.claim, known.claim != nil
+		found.claim = known.claim
 	}
-
-	livePod, err := GetPod(o.client, namespace, want.podName)
+	pod, err := o.view.Pod(want.namespace, want.podName)
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
+		return found, err
 	}
-	podStands := err == nil
+	found.pod = pod
+	return found, nil
+}
+
+// liveStanding reads the pair from the API server.
+func (o *operator) liveStanding(want standing) (standingObjects, error) {
+	var found standingObjects
+	if want.claimName != "" {
+		claim, err := GetResourceClaim(o.client, want.namespace, want.claimName)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return found, err
+		}
+		found.claim = claim
+	}
+	pod, err := GetPod(o.client, want.namespace, want.podName)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return found, err
+	}
+	found.pod = pod
+	return found, nil
+}
+
+// standingSettled reports whether a read shows nothing for the rule to
+// do: each object is present with the pass's template or absent with no
+// wish for it, or one of them is on its way out.
+func standingSettled(want standing, found standingObjects) bool {
+	if found.claim != nil && found.claim.Metadata.deleting() {
+		return true
+	}
+	if found.pod != nil && found.pod.Metadata.deleting() {
+		return true
+	}
+	if want.claimName != "" && !claimSettled(want.claim, found.claim) {
+		return false
+	}
+	return podSettled(want.pod, found.pod)
+}
+
+func claimSettled(wanted, found *ResourceClaim) bool {
+	if wanted == nil || found == nil {
+		return wanted == nil && found == nil
+	}
+	return sameTemplate(&found.Metadata, &wanted.Metadata)
+}
+
+func podSettled(wanted, found *Pod) bool {
+	if wanted == nil || found == nil {
+		return wanted == nil && found == nil
+	}
+	return sameTemplate(&found.Metadata, &wanted.Metadata)
+}
+
+// settleStanding acts on a read from the API server.
+func (o *operator) settleStanding(want standing, live standingObjects) error {
+	namespace := want.namespace
+	liveClaim, claimStands := live.claim, live.claim != nil
+	livePod, podStands := live.pod, live.pod != nil
 
 	// An object with a deletionTimestamp counts as still present. The
 	// delete this operator sent is in progress, and the pass leaves the
@@ -221,6 +325,18 @@ func (o *operator) reconcileStanding(want standing, known claimRead) error {
 		}
 		o.logStanding(want, "deleted pod "+want.podName, want.pod == nil)
 		return nil
+	}
+	// A pod an older release created can carry the template this pass
+	// builds and no component label. The pods watch selects on the label,
+	// so the view never holds such a pod, and every pass would read it
+	// here. The label goes on in place, and the pod keeps running.
+	if podStands && want.pod != nil {
+		key := playbackLabelKey
+		if value := want.pod.Metadata.Labels[key]; value != "" && livePod.Metadata.Labels[key] != value {
+			if err := PatchPodLabels(o.client, namespace, want.podName, map[string]string{key: value}); err != nil {
+				return err
+			}
+		}
 	}
 
 	if want.claim != nil && !claimStands {

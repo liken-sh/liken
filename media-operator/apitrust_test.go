@@ -7,11 +7,8 @@ package main
 import (
 	"context"
 	"crypto/x509"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -46,15 +43,26 @@ func chainsTo(t *testing.T, ca *authority, pool *x509.CertPool) error {
 	return err
 }
 
+// followTrust runs the trust store's watches until the test ends, and
+// waits for the first read of every ConfigMap.
+func followTrust(t *testing.T, api *coreAPI, store *trustStore) {
+	t.Helper()
+	ctx, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	read := store.follow(ctx, testWatcher(t, api.handler()))
+	waiting, cancel := context.WithTimeout(context.Background(), watchTimeout)
+	defer cancel()
+	mustMatch(t, awaitSynced(waiting, read...), true)
+}
+
 func TestTrustStoreCarriesEverySiblingsAnchor(t *testing.T) {
 	api := newCoreAPI()
 	display, audio := testAuthority(t), testAuthority(t)
 	api.seed(t, "configmaps/"+displayCAConfigMapName, caConfigMap(displayCAConfigMapName, display.certPEM))
 	api.seed(t, "configmaps/"+audioCAConfigMapName, caConfigMap(audioCAConfigMapName, audio.certPEM))
+	store := newTrustStore("liken-system", displayCAConfigMapName, audioCAConfigMapName)
 
-	store := newTrustStore(testAPIClient(t, api.handler()), "liken-system",
-		displayCAConfigMapName, audioCAConfigMapName)
-	mustSucceed(t, store.load())
+	followTrust(t, api, store)
 
 	mustSucceed(t, chainsTo(t, display, store.pool()))
 	mustSucceed(t, chainsTo(t, audio, store.pool()))
@@ -66,10 +74,9 @@ func TestTrustStoreToleratesAnAbsentConfigMap(t *testing.T) {
 	api := newCoreAPI()
 	display, audio := testAuthority(t), testAuthority(t)
 	api.seed(t, "configmaps/"+displayCAConfigMapName, caConfigMap(displayCAConfigMapName, display.certPEM))
+	store := newTrustStore("liken-system", displayCAConfigMapName, audioCAConfigMapName)
 
-	store := newTrustStore(testAPIClient(t, api.handler()), "liken-system",
-		displayCAConfigMapName, audioCAConfigMapName)
-	mustSucceed(t, store.load())
+	followTrust(t, api, store)
 
 	mustSucceed(t, chainsTo(t, display, store.pool()))
 	mustFail(t, chainsTo(t, audio, store.pool()))
@@ -82,96 +89,70 @@ func TestTrustStoreTakesEveryCertificateInTheFile(t *testing.T) {
 	retiring, coming := testAuthority(t), testAuthority(t)
 	api.seed(t, "configmaps/"+displayCAConfigMapName,
 		caConfigMap(displayCAConfigMapName, retiring.certPEM, coming.certPEM))
+	store := newTrustStore("liken-system", displayCAConfigMapName)
 
-	store := newTrustStore(testAPIClient(t, api.handler()), "liken-system", displayCAConfigMapName)
-	mustSucceed(t, store.load())
+	followTrust(t, api, store)
 
 	mustSucceed(t, chainsTo(t, retiring, store.pool()))
 	mustSucceed(t, chainsTo(t, coming, store.pool()))
 }
 
-func TestTrustStoreCarriesTheServersFailure(t *testing.T) {
-	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = io.WriteString(w, "the server said no")
-	}))
-	store := newTrustStore(client, "liken-system", displayCAConfigMapName)
+// An API server that refuses the read leaves the ConfigMap unread, and
+// the pool trusts nothing from it.
+func TestTrustStoreTrustsNothingItCouldNotRead(t *testing.T) {
+	api := newCoreAPI()
+	authority := testAuthority(t)
+	api.seed(t, "configmaps/"+displayCAConfigMapName, caConfigMap(displayCAConfigMapName, authority.certPEM))
+	api.refusal = http.StatusInternalServerError
+	store := newTrustStore("liken-system", displayCAConfigMapName)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
 
-	err := store.load()
-	mustFail(t, err)
-	if !strings.Contains(err.Error(), "the server said no") {
-		t.Errorf("the error lost the server's words: %v", err)
-	}
+	read := store.follow(ctx, testWatcher(t, api.handler()))
+
+	mustMatch(t, closedWithin(read[0], watchQuietSpell), false)
+	mustFail(t, chainsTo(t, authority, store.pool()))
 }
 
 // The watch keeps the pool current, taking up an appended anchor and
-// dropping a deleted one. It opens from the list's resourceVersion,
-// not the ConfigMap's own, which can be older than the watch window.
+// dropping a deleted one.
 func TestTrustStoreWatchTakesUpANewAnchor(t *testing.T) {
 	api := newCoreAPI()
 	was, next := testAuthority(t), testAuthority(t)
 	api.seed(t, "configmaps/"+displayCAConfigMapName, caConfigMap(displayCAConfigMapName, was.certPEM))
+	store := newTrustStore("liken-system", displayCAConfigMapName)
+	followTrust(t, api, store)
 
-	events := make(chan string, 1)
-	defer close(events)
-	watched := make(chan *url.URL, 4)
-	store := newTrustStore(testAPIClient(t, watchingAPI(api, events, watched)), "liken-system",
-		displayCAConfigMapName)
-	mustSucceed(t, store.load())
-
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	store.watch(ctx)
-
-	opened := <-watched
-	mustMatch(t, opened.Query().Get("fieldSelector"), "metadata.name="+displayCAConfigMapName)
-	mustMatch(t, opened.Query().Get("resourceVersion"), "900")
-
-	events <- objectEvent(t, "MODIFIED", caConfigMap(displayCAConfigMapName, was.certPEM, next.certPEM))
+	api.seed(t, "configmaps/"+displayCAConfigMapName, caConfigMap(displayCAConfigMapName, was.certPEM, next.certPEM))
 	until(t, "the pool never took up the anchor the watch delivered", func() bool {
 		return chainsTo(t, next, store.pool()) == nil
 	})
 
-	events <- objectEvent(t, "DELETED", caConfigMap(displayCAConfigMapName, was.certPEM))
+	api.remove("configmaps/" + displayCAConfigMapName)
 	until(t, "the pool kept an anchor the watch deleted", func() bool {
 		return chainsTo(t, was, store.pool()) != nil
 	})
 }
 
-// A sibling this cluster has not deployed yet is one line at load, and
-// its ConfigMap is trusted when the watch delivers it, with one more
-// line that says so.
+// A sibling this cluster has not deployed yet is one line at the first
+// read, and its ConfigMap is trusted when the watch delivers it, with
+// one more line that says so.
 func TestTrustStoreReportsASiblingThatAppears(t *testing.T) {
 	api := newCoreAPI()
-	events := make(chan string, 1)
-	defer close(events)
-	watched := make(chan *url.URL, 4)
-	store := newTrustStore(testAPIClient(t, watchingAPI(api, events, watched)), "liken-system",
-		displayCAConfigMapName)
-	var lines []string
-	var said sync.Mutex
-	store.report = func(line string) {
-		said.Lock()
-		defer said.Unlock()
-		lines = append(lines, line)
-	}
-	mustSucceed(t, store.load())
-
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	store.watch(ctx)
-	opened := <-watched
-	mustMatch(t, opened.Query().Get("resourceVersion"), "900")
+	store := newTrustStore("liken-system", displayCAConfigMapName)
+	lines := &reportedLines{}
+	store.report = lines.report
+	followTrust(t, api, store)
 
 	authority := testAuthority(t)
-	events <- objectEvent(t, "ADDED", caConfigMap(displayCAConfigMapName, authority.certPEM))
+	api.seed(t, "configmaps/"+displayCAConfigMapName, caConfigMap(displayCAConfigMapName, authority.certPEM))
 	until(t, "the pool never took up the sibling that appeared", func() bool {
 		return chainsTo(t, authority, store.pool()) == nil
 	})
 
-	said.Lock()
-	defer said.Unlock()
-	mustMatch(t, len(lines), 2)
-	mustMatch(t, strings.Contains(lines[0], "composes no stream through that API"), true)
-	mustMatch(t, strings.Contains(lines[1], "is present and media-api trusts it"), true)
+	lines.mu.Lock()
+	defer lines.mu.Unlock()
+	mustMatch(t, len(lines.lines), 2)
+	mustMatch(t, strings.Contains(lines.lines[0], "composes no stream through that API"), true)
+	mustMatch(t, strings.Contains(lines.lines[1], "is present and media-api trusts it"), true)
 }

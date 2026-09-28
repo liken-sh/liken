@@ -12,7 +12,6 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,13 +174,13 @@ func TestASiblingIsReachedOnlyThroughATrustedAnchor(t *testing.T) {
 	defer sibling.Close()
 	anchor := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: sibling.Certificate().Raw})
 
-	empty := newTrustStore(clusterHolding(t, ""), defaultAPINamespace, displayCAConfigMapName)
-	mustSucceed(t, empty.load())
+	empty := newTrustStore(defaultAPINamespace, displayCAConfigMapName)
+	followTrust(t, clusterHolding(t, ""), empty)
 	_, err := siblingClient(empty).Get(sibling.URL)
 	mustFail(t, err)
 
-	trusted := newTrustStore(clusterHolding(t, string(anchor)), defaultAPINamespace, displayCAConfigMapName)
-	mustSucceed(t, trusted.load())
+	trusted := newTrustStore(defaultAPINamespace, displayCAConfigMapName)
+	followTrust(t, clusterHolding(t, string(anchor)), trusted)
 	response, err := siblingClient(trusted).Get(sibling.URL)
 
 	mustSucceed(t, err)
@@ -192,7 +191,7 @@ func TestASiblingIsReachedOnlyThroughATrustedAnchor(t *testing.T) {
 // clusterHolding stands in for an API server that holds one CA
 // ConfigMap with the given anchor, or nothing when the anchor is
 // empty.
-func clusterHolding(t *testing.T, anchor string) *Client {
+func clusterHolding(t *testing.T, anchor string) *coreAPI {
 	t.Helper()
 	api := newCoreAPI()
 	if anchor != "" {
@@ -201,7 +200,7 @@ func clusterHolding(t *testing.T, anchor string) *Client {
 			Data:     map[string]string{apiCACertKey: anchor},
 		})
 	}
-	return testAPIClient(t, api.handler())
+	return api
 }
 
 // A body that goes quiet past the idle timeout ends the composition
@@ -278,20 +277,23 @@ func TestTheApiServesWhileASiblingAnchorIsAbsent(t *testing.T) {
 // review.
 func TestTheServingPairFollowsTheSecret(t *testing.T) {
 	api := newCoreAPI()
-	events := make(chan string)
-	defer close(events)
-	watched := make(chan *url.URL, 1)
-	client := testAPIClient(t, watchingAPI(api, events, watched))
+	client := testAPIClient(t, api.handler())
 	keeper := newCertificateKeeper(client, "liken-system")
 	server := &apiServer{}
 	mustSucceed(t, refreshCertificate(server, keeper, newAPIMetrics("test")))
 
 	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	go watchServingPair(client, "liken-system", server, keeper, newAPIMetrics("test")).follow(ctx, "")
-	opened := <-watched
-	mustMatch(t, opened.Path, "/api/v1/namespaces/liken-system/secrets")
-	mustMatch(t, opened.Query().Get("fieldSelector"), "metadata.name="+apiTLSSecretName)
+	done := make(chan struct{})
+	defer func() {
+		stop()
+		<-done
+	}()
+	watcher := testWatcher(t, api.handler())
+	go func() {
+		defer close(done)
+		watchServingPair(ctx, watcher, "liken-system", server, keeper, newAPIMetrics("test"))
+	}()
+	until(t, "the watch never opened", func() bool { return api.opened() > 0 })
 
 	certPEM, keyPEM, caPEM := ownersPair(t, time.Now())
 	owners := &Secret{
@@ -299,10 +301,12 @@ func TestTheServingPairFollowsTheSecret(t *testing.T) {
 		Data:     map[string][]byte{apiTLSCertKey: certPEM, apiTLSKeyKey: keyPEM, apiCACertKey: caPEM},
 	}
 	api.seed(t, "secrets/"+apiTLSSecretName, owners)
-	events <- objectEvent(t, "MODIFIED", owners)
 
 	until(t, "the listener never served the pair the watch delivered", func() bool {
 		serving, err := server.servingCertificate()
 		return err == nil && string(serving.Certificate[0]) == string(derOf(t, certPEM))
 	})
+	for _, request := range api.requested() {
+		mustMatch(t, request, "/api/v1/namespaces/liken-system/secrets?fieldSelector=metadata.name="+apiTLSSecretName)
+	}
 }

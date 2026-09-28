@@ -1,221 +1,239 @@
 package main
 
-// The collection watches wake the reconcile loop. They carry no object
-// to the loop: every pass lists what it reads, so a change here is
-// only a wake, and the loop decides what to read. watchloop.go holds
-// the recovery they share with the watch on one named object.
+// A watch keeps this program's view of a collection current without a
+// timer. The API server sends each change to the collection as it
+// happens, and a watch with no change to send costs nothing. The
+// operator watches the collections its pass reads (clusterwatch.go),
+// and the api role watches the named objects that hold its
+// certificates (namedwatch.go).
+//
+// client-go's reflector runs each watch. It reads the whole collection
+// first, as a list or as the initial events of a streaming list, and
+// then watches from the version that read returned, so it receives
+// every change made after the read. It resumes a watch that the API
+// server closed from the last version it delivered, reads the
+// collection again after a 410 Gone, and backs off while the API
+// server fails. Upstream maintains and tests that loop, so this
+// program keeps none of its own.
+//
+// The program imports only three parts of client-go for this: the
+// reflector and informer in tools/cache, the dynamic client that lists
+// and watches any resource with no generated code, and rest for the
+// in-cluster configuration. The typed clientset and the informer
+// factories link a client and an informer for every built-in kind, and
+// the pod build, which every playback pod runs, must stay small. The
+// program's own Client (apiclient.go) still sends every write, and
+// every read that must include this program's own last write.
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 )
 
-// collectionWatch is one collection the loop is woken by: the watch
-// path with its query, the list that sets the version after a 410 or a
-// failure, and what each event does.
+// inClusterWatcher builds the dynamic client for the watches from the
+// pod's ServiceAccount, the same credentials InClusterClient reads.
+func inClusterWatcher() (dynamic.Interface, error) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+	return dynamic.NewForConfig(config)
+}
+
+// collectionWatch names the part of one collection a watch covers, and
+// what it does with each change.
 type collectionWatch struct {
-	subject string
-	path    string
-	list    func(c *Client) (string, error)
-	event   func(eventType string, object []byte, wake chan<- struct{}) error
+	resource schema.GroupVersionResource
+	// namespace is empty for a watch across every namespace, and for a
+	// cluster-scoped resource.
+	namespace string
+	// labels and fields narrow the list and the watch alike. The API
+	// server applies them, so a change outside them never reaches this
+	// process.
+	labels string
+	fields string
+
+	// optional marks a collection whose resource another operator
+	// defines, which a cluster may not have installed. optionalWatch
+	// says how the watch treats its absence.
+	optional bool
+
+	// handler, when it is not nil, takes each change the informer
+	// reports. A watch with no handler only keeps its store current.
+	handler cache.ResourceEventHandler
+	// synced, when it is not nil, runs once, after the handler has
+	// taken every object of the first read. It receives the informer's
+	// store, which holds that read and every change after it.
+	synced func(cache.Store)
+	// reopened, when it is not nil, runs each time the API server
+	// accepts a watch after the first one it accepted.
+	reopened func()
 }
 
-// follow runs one collection's watch for the life of the process. A
-// list wakes the loop too, because it can carry a change the watch
-// never delivered, such as one inside the window a 410 lost.
+// watchCollection keeps one collection current until the context ends.
+// It returns after the last call to the handler and to synced, so a
+// caller that closes a channel after it returns never has a send on
+// the closed channel.
+func watchCollection(ctx context.Context, client dynamic.Interface, w collectionWatch) {
+	var collection dynamic.ResourceInterface = client.Resource(w.resource)
+	if w.namespace != "" {
+		collection = client.Resource(w.resource).Namespace(w.namespace)
+	}
+	scope := func(options *metav1.ListOptions) {
+		options.LabelSelector = w.labels
+		options.FieldSelector = w.fields
+	}
+	// The reflector calls the watch function from one goroutine, one
+	// call at a time, so the count needs no lock. Only a watch that the
+	// API server accepted counts: a refusal while the API server is
+	// down is a retry, not a restart.
+	opened := 0
+	source := &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			scope(&options)
+			list, err := collection.List(ctx, options)
+			if w.optional && apierrors.IsNotFound(err) {
+				return &unstructured.UnstructuredList{}, nil
+			}
+			return list, err
+		},
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			scope(&options)
+			stream, err := collection.Watch(ctx, options)
+			if w.optional && apierrors.IsNotFound(err) && options.SendInitialEvents == nil {
+				return optionalWatch(ctx), nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			if opened > 0 && w.reopened != nil {
+				w.reopened()
+			}
+			opened++
+			return stream, nil
+		},
+	}
+	// The informer calls its handler for every change, so a watch that
+	// only keeps a store current gets one that does nothing.
+	handler := w.handler
+	if handler == nil {
+		handler = cache.ResourceEventHandlerFuncs{}
+	}
+	store, informer := cache.NewInformerWithOptions(cache.InformerOptions{
+		ListerWatcher: source,
+		ObjectType:    &unstructured.Unstructured{},
+		Handler:       handler,
+		Transform:     dropManagedFields,
+	})
+	var group sync.WaitGroup
+	if w.synced != nil {
+		group.Go(func() {
+			select {
+			case <-informer.HasSyncedChecker().Done():
+				w.synced(store)
+			case <-ctx.Done():
+			}
+		})
+	}
+	informer.RunWithContext(ctx)
+	group.Wait()
+}
+
+// optionalRecheck is how long the watch of an absent optional
+// collection waits before it asks the API server again. It is a
+// variable so a test drives it in milliseconds.
 //
-// onRestart runs before each watch after the first, so
-// media_watch_restarts_total counts what its name says: a watch that
-// ended and that this loop opened again. A caller with nothing to count
-// passes nil.
-func (w collectionWatch) follow(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	loop := watchLoop{
-		subject: w.subject,
-		list: func() (string, error) {
-			version, err := w.list(c)
-			if err != nil {
-				return "", fmt.Errorf("listing %s: %w", w.subject, err)
-			}
-			poke(wake)
-			return version, nil
-		},
-		open: func(ctx context.Context, version string, live func()) watchEnd {
-			return openWatch(ctx, c, w.path, version, live, func(eventType string, object []byte) error {
-				return w.event(eventType, object, wake)
-			})
-		},
-		restarted:    onRestart,
-		backoffStart: watchBackoffStart,
-		backoffMax:   watchBackoffMax,
-		minLife:      watchMinLife,
-		now:          time.Now,
-		pause:        waiting,
-		report:       func(line string) { fmt.Fprintln(os.Stderr, line) },
+// An operator that defines the resource can be installed at any time,
+// and nothing this program watches reports that. So the watch of an
+// absent resource is a quiet stream that closes after this wait, and
+// the reflector opens the next watch, which finds the resource once it
+// exists. The list before it answers an empty collection, so the pass
+// reads an absent resource as a resource with no objects, which is
+// what the API server's 404 means. Without
+// the quiet stream the reflector would back off and log a failure
+// every 30 seconds for as long as the resource is absent.
+var optionalRecheck = 5 * time.Minute
+
+// optionalWatch is the quiet stream. It sends no event, and closes when
+// the context ends or the recheck is due.
+func optionalWatch(ctx context.Context) watch.Interface {
+	stream := watch.NewFake()
+	go func() {
+		timer := time.NewTimer(optionalRecheck)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+		stream.Stop()
+	}()
+	return stream
+}
+
+// dropManagedFields removes metadata.managedFields from each object
+// before the informer stores it. The field records which client set
+// each field of the object. This program never reads it, and without
+// the transform the informer holds a copy of it for every object.
+func dropManagedFields(object any) (any, error) {
+	if item, ok := object.(*unstructured.Unstructured); ok {
+		item.SetManagedFields(nil)
 	}
-	loop.run(context.Background(), resourceVersion)
+	return object, nil
 }
 
-// watchQuery asks for a watch with bookmarks, so the version moves
-// while nothing changes and the next watch resumes inside the API
-// server's window.
-const watchQuery = "?watch=true&allowWatchBookmarks=true"
-
-// wakeOnChange wakes the loop on every change. A bookmark moves the
-// resume point and reconciles nothing, so it earns no wake.
-func wakeOnChange(eventType string, _ []byte, wake chan<- struct{}) error {
-	if eventType != "BOOKMARK" {
-		poke(wake)
+// convert decodes one object from a watch into this program's own
+// struct. The informer hands a handler an *unstructured.Unstructured,
+// or, for an object that was deleted while the watch was down, a
+// tombstone that holds the last copy the informer knew.
+//
+// An object that does not convert has a field whose type differs from
+// the struct, so the schema and the struct disagree. The error names
+// the object, and the caller logs it, because an object that is
+// dropped with no word leaves nobody a way to find out why the program
+// ignored a change.
+func convert[T any](object any) (T, error) {
+	var out T
+	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok {
+		if tombstone.Obj == nil {
+			return out, fmt.Errorf("the tombstone for %s holds no copy of the object", tombstone.Key)
+		}
+		object = tombstone.Obj
 	}
-	return nil
-}
-
-// wakeOnPodEnd wakes the loop when k8s removes a playback pod or when
-// one turns Failed, and on nothing else, because a routine update to a
-// running pod needs no pass.
-func wakeOnPodEnd(eventType string, object []byte, wake chan<- struct{}) error {
-	var pod struct {
-		Status struct {
-			Phase string `json:"phase"`
-		} `json:"status"`
+	item, ok := object.(*unstructured.Unstructured)
+	if !ok {
+		return out, fmt.Errorf("the watch delivered a %T, not an object", object)
 	}
-	if err := json.Unmarshal(object, &pod); err != nil {
-		return err
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &out); err != nil {
+		return out, fmt.Errorf("%s %s does not convert: %w", item.GetKind(), watchedName(item), err)
 	}
-	switch {
-	case eventType == "DELETED":
-		poke(wake)
-	case eventType == "MODIFIED" && pod.Status.Phase == podFailed:
-		poke(wake)
+	return out, nil
+}
+
+// watchedName is namespace/name for a namespaced object and name for a
+// cluster-scoped one.
+func watchedName(item *unstructured.Unstructured) string {
+	if item.GetNamespace() == "" {
+		return item.GetName()
 	}
-	return nil
+	return item.GetNamespace() + "/" + item.GetName()
 }
 
-// watchPlays wakes the loop on a Play change.
-func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	collectionWatch{
-		subject: "plays",
-		path:    playsPath + watchQuery,
-		list: func(c *Client) (string, error) {
-			list, err := ListPlays(c)
-			if err != nil {
-				return "", err
-			}
-			return list.Metadata.ResourceVersion, nil
-		},
-		event: wakeOnChange,
-	}.follow(c, resourceVersion, wake, onRestart)
-}
-
-// watchRemotes wakes the loop on a Remote change, and the loop
-// reconciles a standing pod for every Remote on the pass that wake
-// triggers.
-func watchRemotes(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	collectionWatch{
-		subject: "remotes",
-		path:    remotesAllPath + watchQuery,
-		list: func(c *Client) (string, error) {
-			list, err := ListAllRemotes(c)
-			if err != nil {
-				return "", err
-			}
-			return list.Metadata.ResourceVersion, nil
-		},
-		event: wakeOnChange,
-	}.follow(c, resourceVersion, wake, onRestart)
-}
-
-// watchPlayers wakes the loop on a Player change. The wake carries no
-// object, so the pass it triggers reconciles every Play again, and a
-// Play whose Player reshaped its pod is recreated then.
-func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	collectionWatch{
-		subject: "players",
-		path:    playersPath + watchQuery,
-		list: func(c *Client) (string, error) {
-			list, err := ListPlayers(c)
-			if err != nil {
-				return "", err
-			}
-			return list.Metadata.ResourceVersion, nil
-		},
-		event: wakeOnChange,
-	}.follow(c, resourceVersion, wake, onRestart)
-}
-
-// watchPeripherals wakes the loop on a Peripheral change. A controller
-// that connects, disconnects, or reports a new charge changes its
-// Peripheral, and the pass that wake triggers republishes the Player
-// status the idle screen draws.
-func watchPeripherals(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	collectionWatch{
-		subject: "peripherals",
-		path:    peripheralsPath + watchQuery,
-		list: func(c *Client) (string, error) {
-			list, err := ListPeripherals(c)
-			if err != nil {
-				return "", err
-			}
-			return list.Metadata.ResourceVersion, nil
-		},
-		event: wakeOnChange,
-	}.follow(c, resourceVersion, wake, onRestart)
-}
-
-// watchKeymaps wakes the loop on a Keymap change, so the pass it
-// triggers compiles and publishes every Remote's table again, and an
-// edit reaches a running standing pod within one pass.
-func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	collectionWatch{
-		subject: "keymaps",
-		path:    keymapsPath + watchQuery,
-		list: func(c *Client) (string, error) {
-			list, err := ListKeymaps(c)
-			if err != nil {
-				return "", err
-			}
-			return list.Metadata.ResourceVersion, nil
-		},
-		event: wakeOnChange,
-	}.follow(c, resourceVersion, wake, onRestart)
-}
-
-// watchMediaPreferences wakes the loop on a MediaPreferences edit, so
-// the resolved fields on a running Play's status refresh within one
-// pass.
-func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	collectionWatch{
-		subject: "media preferences",
-		path:    mediaPrefsPath + watchQuery,
-		list: func(c *Client) (string, error) {
-			list, err := ListMediaPreferences(c)
-			if err != nil {
-				return "", err
-			}
-			return list.Metadata.ResourceVersion, nil
-		},
-		event: wakeOnChange,
-	}.follow(c, resourceVersion, wake, onRestart)
-}
-
-// watchPods wakes the loop when k8s removes a playback pod or when one
-// turns Failed, so an eviction or a crash reaches the reconcile at once
-// instead of waiting for the backstop tick.
-func watchPods(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	collectionWatch{
-		subject: "playback pods",
-		path:    podsAllPath + watchQuery + "&" + playbackPodsQuery,
-		list: func(c *Client) (string, error) {
-			list, err := ListPlaybackPods(c)
-			if err != nil {
-				return "", err
-			}
-			return list.Metadata.ResourceVersion, nil
-		},
-		event: wakeOnPodEnd,
-	}.follow(c, resourceVersion, wake, onRestart)
+// reportUnconverted logs an object that convert refused.
+func reportUnconverted(what string, err error) {
+	fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 }
 
 // poke never blocks, and the wake channel buffers exactly one. A

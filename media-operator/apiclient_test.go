@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 )
 
@@ -53,78 +52,6 @@ func (c *cannedAPI) handler() http.Handler {
 		}
 		_ = json.NewEncoder(w).Encode(answer)
 	})
-}
-
-func TestListPlaysReadsTheCollectionAcrossNamespaces(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET /apis/media.liken.sh/v1alpha1/plays": PlayList{
-			Metadata: ListMeta{ResourceVersion: "77"},
-			Items: []Play{{
-				Metadata: ObjectMeta{Name: "movie", Namespace: "house"},
-				Spec:     PlaySpec{Players: []string{"theater"}, Items: []PlayItem{{URI: "https://nas/film.mkv"}}},
-			}},
-		},
-	}}
-
-	list, err := ListPlays(testAPIClient(t, api.handler()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if list.Metadata.ResourceVersion != "77" {
-		t.Errorf("resourceVersion = %q, want 77", list.Metadata.ResourceVersion)
-	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "movie" {
-		t.Fatalf("items = %+v", list.Items)
-	}
-	if list.Items[0].Spec.Players[0] != "theater" {
-		t.Errorf("players = %v", list.Items[0].Spec.Players)
-	}
-}
-
-func TestListPlaysCarriesItemPresentations(t *testing.T) {
-	full := &Presentation{
-		Type:         "video",
-		Hint:         "series",
-		Role:         "trailer",
-		Title:        "The Pilot",
-		Series:       "Example Series",
-		Season:       2,
-		Episode:      5,
-		EpisodeTitle: "The Pilot",
-		Year:         2017,
-		Date:         "2017-03-05",
-		Logo:         "nfs://nas/export/s02/logo.png",
-	}
-	api := &cannedAPI{answers: map[string]any{
-		"GET /apis/media.liken.sh/v1alpha1/plays": PlayList{
-			Metadata: ListMeta{ResourceVersion: "88"},
-			Items: []Play{{
-				Metadata: ObjectMeta{Name: "season", Namespace: "house"},
-				Spec: PlaySpec{
-					Players: []string{"theater"},
-					Items: []PlayItem{
-						{URI: "nfs://nas/export/s02e05.mkv", Presentation: full},
-						{URI: "https://nas/loose.mkv"},
-					},
-				},
-			}},
-		},
-	}}
-
-	list, err := ListPlays(testAPIClient(t, api.handler()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	items := list.Items[0].Spec.Items
-	if len(items) != 2 {
-		t.Fatalf("items = %+v", items)
-	}
-	if !reflect.DeepEqual(items[0].Presentation, full) {
-		t.Errorf("presentation = %+v, want %+v", items[0].Presentation, full)
-	}
-	if items[1].Presentation != nil {
-		t.Errorf("bare item presentation = %+v, want nil", items[1].Presentation)
-	}
 }
 
 func TestGetPlayerReadsOneNamespacedObject(t *testing.T) {
@@ -186,50 +113,6 @@ func TestPutPlayStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 }
 
-// A Keymap is cluster-scoped, so its path carries no namespace.
-func TestGetKeymapReadsOneClusterScopedObject(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET /apis/media.liken.sh/v1alpha1/keymaps/gamepad": Keymap{
-			Metadata: ObjectMeta{Name: "gamepad"},
-			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Key: "KEY_PLAYPAUSE"}}},
-		},
-	}}
-
-	keymap, err := GetKeymap(testAPIClient(t, api.handler()), "gamepad")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if keymap.Metadata.Name != "gamepad" {
-		t.Errorf("name = %q", keymap.Metadata.Name)
-	}
-	if api.requests[0].Path != "/apis/media.liken.sh/v1alpha1/keymaps/gamepad" {
-		t.Errorf("path = %s", api.requests[0].Path)
-	}
-}
-
-func TestListKeymapsReadsTheClusterScopedCollection(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET /apis/media.liken.sh/v1alpha1/keymaps": KeymapList{
-			Metadata: ListMeta{ResourceVersion: "88"},
-			Items:    []Keymap{{Metadata: ObjectMeta{Name: "gamepad"}}},
-		},
-	}}
-
-	list, err := ListKeymaps(testAPIClient(t, api.handler()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if list.Metadata.ResourceVersion != "88" {
-		t.Errorf("resourceVersion = %q, want 88", list.Metadata.ResourceVersion)
-	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "gamepad" {
-		t.Fatalf("items = %+v", list.Items)
-	}
-	if api.requests[0].Path != "/apis/media.liken.sh/v1alpha1/keymaps" {
-		t.Errorf("path = %s", api.requests[0].Path)
-	}
-}
-
 func TestCreatePodPostsToTheNamespacesCollection(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"POST /api/v1/namespaces/house/pods": Pod{Metadata: ObjectMeta{Name: "movie-playback"}},
@@ -288,10 +171,10 @@ func TestTheClientNamesTheTwoOrdinaryAnswers(t *testing.T) {
 // broken deployment says what the API server said.
 func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
 	api := &cannedAPI{statuses: map[string]int{
-		"GET /apis/media.liken.sh/v1alpha1/plays": http.StatusInternalServerError,
+		"GET /apis/media.liken.sh/v1alpha1/namespaces/house/plays/movie": http.StatusInternalServerError,
 	}}
 
-	_, err := ListPlays(testAPIClient(t, api.handler()))
+	_, err := GetPlay(testAPIClient(t, api.handler()), "house", "movie")
 	if err == nil {
 		t.Fatal("a 500 answer produced no error")
 	}

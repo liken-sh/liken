@@ -151,14 +151,15 @@ func repeatDuration(keymap, entry, field, value string, fallback time.Duration) 
 	return parsed, nil
 }
 
-// gatherRemotes reads every Remote a Player owns. It reads
+// gatherRemotes reads every Remote a Player owns, with read, which is
+// the view or the API server (viewReads says which). It reads
 // spec.remotes in name order, because the result becomes a pod spec,
 // and a pod spec built twice from the same resources must be the same
 // spec. A named Remote that does not exist fails the gather, and the
 // message names it. The table is the standing pod's business,
 // published on the Remote's own keys topic, so nothing here reads a
 // Keymap.
-func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
+func gatherRemotes(read func(namespace, name string) (*Remote, error), player *Player) ([]boundRemote, error) {
 	namespace := player.Metadata.Namespace
 
 	entries := make([]PlayerRemote, len(player.Spec.Remotes))
@@ -167,7 +168,7 @@ func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
 
 	bound := make([]boundRemote, 0, len(entries))
 	for _, entry := range entries {
-		remote, err := GetRemote(c, namespace, entry.Name)
+		remote, err := read(namespace, entry.Name)
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("the Player %s names the Remote %s, which does not exist in this namespace",
 				player.Metadata.Name, entry.Name)

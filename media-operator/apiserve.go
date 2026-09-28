@@ -20,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // The api role's own environment. The address is where HTTPS is
@@ -256,6 +258,15 @@ func serviceAccountToken() (string, error) {
 	return string(token), nil
 }
 
+// firstReadWait bounds how long the api role waits for its first read
+// of the certificate authorities before it listens. The read is one
+// request per ConfigMap, so a healthy API server answers well inside
+// it.
+const firstReadWait = 10 * time.Second
+
+// writeReport writes one line about the state of a watch.
+func writeReport(line string) { fmt.Fprintln(os.Stderr, line) }
+
 // runAPI is the api role's start-up, in the order a failure matters:
 // the API client, which nothing works without; the metrics, so a
 // failure later is visible; the sibling trust, which a missing sibling
@@ -276,11 +287,15 @@ func runAPI() {
 	metrics := newAPIMetrics(version)
 	metrics.serve(os.Getenv(metricsAddressVariable))
 
-	trust := newTrustStore(client, namespace, apiCAConfigMapName, displayCAConfigMapName, audioCAConfigMapName)
-	if err := trust.load(); err != nil {
-		fmt.Fprintf(os.Stderr, "reading the sibling certificate authorities: %v\n", err)
+	// The watches read through client-go's dynamic client, with the same
+	// ServiceAccount the API client reads with.
+	watcher, err := inClusterWatcher()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "in-cluster config for the watches: %v\n", err)
+		os.Exit(1)
 	}
-	go trust.watch(context.Background())
+	trust := newTrustStore(namespace, apiCAConfigMapName, displayCAConfigMapName, audioCAConfigMapName)
+	trustRead := trust.follow(context.Background(), watcher)
 
 	keeper := newCertificateKeeper(client, namespace)
 	certificate, err := keeper.ensure()
@@ -313,19 +328,22 @@ func runAPI() {
 	server.holdCertificate(certificate)
 	metrics.observeExpiry(keeper.expirySeconds())
 	go reviewCertificate(server, keeper, metrics)
-	go watchServingPair(client, namespace, server, keeper, metrics).follow(context.Background(), "")
+	go watchServingPair(context.Background(), watcher, namespace, server, keeper, metrics)
 
-	// The cluster's client authority is read before the listener
-	// starts, and watched after. A read that fails is reported and
-	// never fatal: an API that cannot read the ConfigMap still answers
-	// every caller that sends a token, and the watch loads the
-	// authority once the grant or the API server is back.
-	anchorWatch := watchClientAnchors(client, &server.anchors)
-	anchorVersion, err := anchorWatch.read()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading the cluster's client certificate authority: %v\n", err)
+	// The sibling authorities and the cluster's client authority are
+	// read before the listener starts, and watched after. A read that
+	// does not arrive in time is reported and never fatal: an API that
+	// cannot read the ConfigMaps still answers every caller that sends a
+	// token and redirects every capture, and each watch loads its
+	// ConfigMap once the grant or the API server is back.
+	anchorRead := make(chan struct{})
+	go keepClientAnchors(context.Background(), watcher, &server.anchors, writeReport, anchorRead)
+	firstRead, cancelFirstRead := context.WithTimeout(context.Background(), firstReadWait)
+	if !awaitSynced(firstRead, append(trustRead, anchorRead)...) {
+		fmt.Fprintf(os.Stderr, "the certificate authorities were not read within %s; media-api serves and loads them when they arrive\n",
+			firstReadWait)
 	}
-	go anchorWatch.follow(context.Background(), anchorVersion)
+	cancelFirstRead()
 
 	if reviewsAnswer(auth) {
 		server.ready.Store(true)
@@ -426,21 +444,17 @@ func reviewCertificate(server *apiServer, keeper *certificateKeeper, metrics *ap
 // deleted Secret is minted again at once, because the listener cannot
 // serve without a pair.
 //
-// The watch starts with no resourceVersion, so it lists the Secret
-// first and hands it to the owner as it is now, then watches from the
-// list's version. The keeper's own writes return as events too, and
-// each one costs one read that changes nothing.
-func watchServingPair(client *Client, namespace string, server *apiServer, keeper *certificateKeeper,
-	metrics *apiMetrics) *namedWatch {
-	refresh := func() error { return refreshCertificate(server, keeper, metrics) }
-	watch := newNamedWatch(client, namespace, "secrets", apiTLSSecretName,
-		func(json.RawMessage) error { return refresh() }, nil)
-	watch.removed = func() {
-		if err := refresh(); err != nil {
-			watch.report(fmt.Sprintf("minting the serving certificate again: %v", err))
-		}
-	}
-	return watch
+// The first read hands the Secret to the owner as it is now. The
+// keeper's own writes return as events too, and each one costs one
+// read that changes nothing.
+func watchServingPair(ctx context.Context, watcher dynamic.Interface, namespace string, server *apiServer,
+	keeper *certificateKeeper, metrics *apiMetrics) {
+	watchNamed(ctx, watcher, secretResource, namespace, apiTLSSecretName, "secret "+namespace+"/"+apiTLSSecretName,
+		func(*Secret) {
+			if err := refreshCertificate(server, keeper, metrics); err != nil {
+				fmt.Fprintf(os.Stderr, "minting the serving certificate again: %v\n", err)
+			}
+		}, nil)
 }
 
 // refreshCertificate reads the pair, renews the leaf when it nears

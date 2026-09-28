@@ -6,10 +6,12 @@ package main
 //
 // A pass reads the whole collection instead of acting on the object
 // an event carried. The event is only a wake. Every pass derives
-// every status from what the API server holds right now, so a lost
+// every status from what the cluster holds right now, so a lost
 // event costs at most one backstop tick, a reordered burst collapses
 // into one pass, and a restarted operator starts correct with no
-// replay.
+// replay. The pass reads the cluster from the watches' memory
+// (clusterview.go), so a pass that has nothing to change sends the
+// API server no request.
 
 import (
 	"context"
@@ -76,21 +78,21 @@ const (
 // of a new broker session goes out when catchUpGrace ends. Each of
 // them is a moment, and nothing in the cluster announces a moment.
 //
-// As a backstop, it covers the objects the operator reads and does
-// not watch: each Display the panel and the Screen condition read,
-// the Receivers, the ResourceSlices that name a unit's monitor, the
-// ResourceClaims and their allocations, and the standing idle and
-// remote pods, which the pods watch does not select. A monitor that
-// goes dark, a receiver that changes input, or a claim that the
-// scheduler allocates reaches the status on the next tick. The watches
-// on Plays, Players, Remotes, Keymaps, MediaPreferences, Peripherals,
-// and playback pods wake the pass at once, so the tick adds no delay
-// for them.
+// As a backstop, it covers the objects whose change wakes no pass:
+// each Display the panel and the Screen condition read, the Receivers,
+// the ResourceSlices that name a unit's monitor, the ResourceClaims and
+// their allocations, and the standing idle and remote pods. The
+// watches keep each of them current in memory (clusterwatch.go), and
+// the tick is when a pass reads them. A monitor that goes dark, a
+// receiver that changes input, or a claim that the scheduler allocates
+// reaches the status on the next tick. The watches on Plays, Players,
+// Remotes, Keymaps, MediaPreferences, Peripherals, and playback pods
+// wake the pass at once, so the tick adds no delay for them.
 //
-// A pass costs one list each of Plays, Players, Remotes, Keymaps,
-// Peripherals, ResourceSlices, and Receivers, and a few GETs for each
-// unit: its claims, its pods, and its Display. On a cluster of a few
-// units that is a few requests a second.
+// A pass reads every collection from memory, so a tick on a settled
+// cluster sends the API server no request. It writes only what
+// changed, and it reads an object from the API server only for a run
+// or a standing pod it is about to act on.
 const backstopInterval = 10 * time.Second
 
 // positionWriteInterval bounds how often a bare position advance reaches
@@ -133,7 +135,11 @@ const defaultTTLSecondsAfterFinished = 300
 // are fields rather than globals so a test builds an operator around a
 // desk it can inspect.
 type operator struct {
+	// client sends every write, and every read that must include this
+	// operator's own last write. view answers every other read, from
+	// the watches. clusterview.go says which read goes where.
 	client *Client
+	view   *clusterView
 	image  string
 	// idleImage is the client an idle container runs where no tier
 	// states spec.idle.image. It is a release decision, so it arrives
@@ -197,6 +203,12 @@ type operator struct {
 	// desire changed, and a deleted Player's dark panel still has a
 	// screen to lift. Only the pass goroutine touches it.
 	panelOverrides map[string]panelOverride
+
+	// absenceChecked names each standing pod, as namespace/name, that
+	// the pass wants gone and has read from the API server since this
+	// process started. standing.go says why one read is enough. Only the
+	// pass goroutine touches it.
+	absenceChecked map[string]bool
 
 	// panelFaults holds the last panel fault reported per unit,
 	// so a screen with no Display logs once and not once a pass. Only
@@ -428,59 +440,56 @@ func operate() {
 		media.bus.Run(busContext)
 		close(busDone)
 	}()
+	// quiet ends the bus session and answers whether it ended in time.
+	// stepDown runs it before it releases the Lease.
+	quiet := func() bool {
+		stopBus()
+		select {
+		case <-busDone:
+			return true
+		case <-time.After(5 * time.Second):
+			return false
+		}
+	}
 
-	// The first lists do two jobs: they prove the operator can read the
-	// collections, and their resourceVersions are where the watches
-	// start.
-	plays, err := ListPlays(client)
+	// The watches start here, after the Lease, so a copy that waits
+	// watches nothing. The first pass waits until every watch has read
+	// its collection, because a pass that read an empty view would
+	// release every run and every standing pod it did not read. The wait
+	// also proves the operator can read each collection: one it cannot
+	// read in time ends the process. A cluster whose bluetooth-operator
+	// serves no Peripheral is one of those, so the operator ends rather
+	// than run with no record of any controller's link. The Displays and
+	// the Receivers are optional (clusterwatch.go).
+	//
+	// A signal during the wait ends it, and the operator steps down
+	// with no pass. Either way out of a failed wait releases the Lease
+	// first, so a waiting copy takes it on its next read instead of
+	// after the Lease's duration.
+	watcher, err := inClusterWatcher()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
+		fmt.Fprintf(os.Stderr, "in-cluster config for the watches: %v\n", err)
+		leader.stepDown(quiet)
 		os.Exit(1)
 	}
-	remotes, err := ListAllRemotes(client)
+	watching, stopWatching := context.WithCancel(context.Background())
+	defer stopWatching()
+	firstRead, cancelFirstRead := context.WithTimeout(stop, clusterSyncWait)
+	media.view, err = watchCluster(watching, firstRead, watcher, wake, metrics)
+	cancelFirstRead()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
+		if stop.Err() != nil {
+			leader.stepDown(quiet)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "watching the cluster: %v\n", err)
+		leader.stepDown(quiet)
 		os.Exit(1)
 	}
-	players, err := ListPlayers(client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
-		os.Exit(1)
-	}
-	keymaps, err := ListKeymaps(client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
-		os.Exit(1)
-	}
-	prefs, err := ListMediaPreferences(client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing media preferences: %v\n", err)
-		os.Exit(1)
-	}
-	pods, err := ListPlaybackPods(client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing playback pods: %v\n", err)
-		os.Exit(1)
-	}
-	// The Peripherals are listed on the same terms as the other
-	// collections. A cluster whose bluetooth-operator serves no Peripheral
-	// answers an error here, and the operator ends rather than run with no
-	// record of any controller's link.
-	peripherals, err := ListPeripherals(client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing peripherals: %v\n", err)
-		os.Exit(1)
-	}
+	plays, _ := media.view.Plays()
+	remotes, _ := media.view.Remotes()
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
-		len(plays.Items), len(remotes.Items), busAddress)
-	go watchPlays(client, plays.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPlay))
-	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindRemote))
-	go watchPlayers(client, players.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPlayer))
-	go watchKeymaps(client, keymaps.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindKeymap))
-	go watchMediaPreferences(client, prefs.Metadata.ResourceVersion, wake,
-		watchRestartFunc(metrics, kindMediaPreferences))
-	go watchPods(client, pods.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPod))
-	go watchPeripherals(client, peripherals.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPeripheral))
+		len(plays), len(remotes), busAddress)
 
 	ticker := time.NewTicker(backstopInterval)
 	for {
@@ -489,15 +498,7 @@ func operate() {
 		case <-wake:
 		case <-ticker.C:
 		case <-stop.Done():
-			leader.stepDown(func() bool {
-				stopBus()
-				select {
-				case <-busDone:
-					return true
-				case <-time.After(5 * time.Second):
-					return false
-				}
-			})
+			leader.stepDown(quiet)
 			return
 		}
 	}
@@ -516,27 +517,27 @@ func (o *operator) pass() {
 	if o.busReconnected.Swap(false) {
 		o.reestablishRetained()
 	}
-	list, err := ListPlays(o.client)
+	plays, err := o.view.Plays()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading plays: %v\n", err)
 		return
 	}
-	o.snapshot.recordPlays(list.Items)
+	o.snapshot.recordPlays(plays)
 	// The endings are marked before anything else the pass does. The
 	// sidecar holds mpv alive for a short grace after its ending report,
 	// and the label is what the compositor fades the surface on, so the
 	// label has that grace to reach display-operator and no longer. The
 	// loop is its own, ahead of the read below, so the read does not
 	// delay the label. ending.go says what reads it.
-	for index := range list.Items {
-		o.labelEnding(&list.Items[index])
+	for index := range plays {
+		o.labelEnding(&plays[index])
 	}
 	// Each unit's presentable state comes from the plays list and the
 	// report desk, and the pass holds both by now, so it publishes here.
 	// A person is waiting: the browser's return and the room's lights key
-	// on the unit reading Idle. Everything the pass reads below is a read
-	// the answer does not come from, and a dozen of them cost a few
-	// milliseconds each on a quiet API server and hundreds on a busy one.
+	// on the unit reading Idle. Everything the pass does below is work
+	// the answer does not come from, and each write it sends costs a few
+	// milliseconds on a quiet API server and hundreds on a busy one.
 	// reconcilePlayers publishes the same state again at the end of the
 	// pass, once the focus mark and the controllers' links are settled,
 	// and an unchanged payload is not published twice.
@@ -546,29 +547,29 @@ func (o *operator) pass() {
 	// moment the report arrives. This publish is the confirmation, and it
 	// writes nothing where the two agree. It is also the whole answer for
 	// a run the last pass had not listed yet.
-	players, playersErr := ListPlayers(o.client)
+	players, playersErr := o.view.Players()
 	if playersErr != nil {
-		fmt.Fprintf(os.Stderr, "listing players: %v\n", playersErr)
+		fmt.Fprintf(os.Stderr, "reading players: %v\n", playersErr)
 	} else {
-		o.snapshot.recordPlayers(players.Items)
-		o.publishPlayerStatuses(players.Items, list.Items)
+		o.snapshot.recordPlayers(players)
+		o.publishPlayerStatuses(players, plays)
 	}
 	// Read the household default once per pass. A missing default is not an error,
 	// and a read that fails skips the tier this pass.
-	defaults, err := GetMediaPreferences(o.client, mediaPreferencesName)
+	defaults, err := o.view.MediaPreferences(mediaPreferencesName)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "reading media preferences: %v\n", err)
 		}
 		defaults = nil
 	}
-	live := make(map[string]bool, len(list.Items))
+	live := make(map[string]bool, len(plays))
 	// One unit runs one Play, and the newest Play is the one that runs. So
 	// the pass reads the whole list before it reconciles any Play, and it
 	// names the Plays a newer one replaces.
-	superseded := supersededPlays(list.Items)
-	for index := range list.Items {
-		play := &list.Items[index]
+	superseded := supersededPlays(plays)
+	for index := range plays {
+		play := &plays[index]
 		namespace, name := play.Metadata.Namespace, play.Metadata.Name
 		live[runKey(namespace, name)] = true
 		// A deleting Play keeps its pod until its finalizers clear, because
@@ -606,15 +607,10 @@ func (o *operator) pass() {
 			}
 			continue
 		}
-		previousPhase := play.Status.Phase
 		start := time.Now()
 		err := o.reconcile(play, defaults)
 		if o.metrics != nil {
 			o.metrics.observeReconcile(kindPlay, time.Since(start), err)
-			// reconcile mutates play.Status in place before it returns, on
-			// every path including the ones that write no error, so the
-			// phase this reads is always the one this pass just settled on.
-			o.metrics.notePlaybackPhase(previousPhase, play.Status)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling play %s/%s: %v\n",
@@ -648,18 +644,18 @@ func (o *operator) pass() {
 		}
 	}
 	o.reclaimPlays(live)
-	// The Remotes are listed once for the whole pass. The Peripherals are
+	// The Remotes are read once for the whole pass. The Peripherals are
 	// folded in here, before any Player status is written, because a
 	// unit's bus status carries each controller's link and charge. The same
-	// list reconciles the standing pods at the end of the pass. A list that
+	// read reconciles the standing pods at the end of the pass. A read that
 	// fails skips both, so no desk shrinks to a collection the operator
 	// could not read.
-	remotes, remotesErr := ListAllRemotes(o.client)
+	remotes, remotesErr := o.view.Remotes()
 	var remoteClaims map[string]claimRead
 	if remotesErr != nil {
-		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", remotesErr)
+		fmt.Fprintf(os.Stderr, "reading remotes: %v\n", remotesErr)
 	} else {
-		remoteClaims = o.observePeripherals(remotes.Items)
+		remoteClaims = o.observePeripherals(remotes)
 	}
 	// The reconcile reads the Players this pass listed before it published
 	// each unit's presentable state, so one pass lists the collection
@@ -680,9 +676,9 @@ func (o *operator) pass() {
 		// of a unit's bus status carries whether the mark names that unit.
 		// Arbitrating after would publish the previous pass's mark and
 		// leave the indicator one pass behind.
-		o.reconcileFocus(players.Items)
+		o.reconcileFocus(players)
 		start := time.Now()
-		o.reconcilePlayers(players.Items, list.Items, zone, defaultIdle)
+		o.reconcilePlayers(players, plays, zone, defaultIdle)
 		if o.metrics != nil {
 			o.metrics.observeReconcile(kindPlayer, time.Since(start), nil)
 		}
@@ -692,7 +688,7 @@ func (o *operator) pass() {
 		// Keymap folded over the base, and the pass compiles one table per
 		// Remote.
 		start := time.Now()
-		o.reconcileRemotes(remotes.Items, remoteClaims, o.loadKeymaps())
+		o.reconcileRemotes(remotes, remoteClaims, o.loadKeymaps())
 		if o.metrics != nil {
 			o.metrics.observeReconcile(kindRemote, time.Since(start), nil)
 		}
@@ -983,13 +979,13 @@ func finishedTime(play *Play, now time.Time) (time.Time, bool) {
 // Keymap, and a Remote with no Keymap still needs the base.
 func (o *operator) loadKeymaps() map[string]*Keymap {
 	keymaps := map[string]*Keymap{}
-	list, err := ListKeymaps(o.client)
+	list, err := o.view.Keymaps()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading keymaps: %v\n", err)
 		return keymaps
 	}
-	for index := range list.Items {
-		keymap := &list.Items[index]
+	for index := range list {
+		keymap := &list[index]
 		keymaps[keymap.Metadata.Name] = keymap
 	}
 	return keymaps
@@ -1079,7 +1075,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// a dark panel it left behind takes a lift.
 	drawn := make(map[string]bool, len(players))
 	// One screens for the pass, so the driver's ResourceSlices
-	// are listed at most once however many units the cluster holds.
+	// are read at most once however many units the cluster holds.
 	lookup := o.screenLookup()
 	// The units whose screen matches a Receiver input, which is what keeps
 	// the session on their equipment. The session stands idle or playing,
@@ -1417,6 +1413,50 @@ func sameRemoteStatus(current, desired RemoteStatus) (bool, error) {
 // and every URI resolves, so a Play that can never run leaves no
 // half-built objects behind.
 func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
+	err := o.reconcileFrom(play, defaults, o.viewReads(), false)
+	if errors.Is(err, errReadLive) {
+		return o.reconcileFrom(play, defaults, o.liveReads(), true)
+	}
+	return err
+}
+
+// errReadLive is how a reconcile from the view says that the run must
+// be read again from the API server before the pass acts on it.
+var errReadLive = errors.New("the run needs a read from the API server")
+
+// runReads is where one run reads its Player and the Player's Remotes.
+type runReads struct {
+	player func(namespace, name string) (*Player, error)
+	remote func(namespace, name string) (*Remote, error)
+}
+
+// A run reads its Player and Remotes from the view first. A run the
+// view shows as settled needs nothing more, and costs no request. A run
+// the pass would act on reads them again from the API server: a Player
+// or a Remote the view does not hold, which would fail the Play, and a
+// pod the pass would create or replace, which is built from them. Each
+// collection has a watch of its own, and nothing orders one watch's
+// events against another's, so a Play applied in one file with its
+// Player and its Remote can reach the view before them, and a Player
+// edit can reach it after the pod the edit reshaped. The second read
+// answers what the API server holds, so the pass never fails a Play for
+// an object that exists, and never builds or compares a pod against a
+// Player spec that an edit already replaced.
+func (o *operator) viewReads() runReads {
+	return runReads{player: o.view.Player, remote: o.view.Remote}
+}
+
+func (o *operator) liveReads() runReads {
+	return runReads{
+		player: func(namespace, name string) (*Player, error) { return GetPlayer(o.client, namespace, name) },
+		remote: func(namespace, name string) (*Remote, error) { return GetRemote(o.client, namespace, name) },
+	}
+}
+
+// reconcileFrom is one reconcile with one source of reads. live says
+// the reads come from the API server. A reconcile from the view answers
+// errReadLive where the run needs the pass to act.
+func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads runReads, live bool) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	// The default tier's spec, or nil when the cluster has no default.
 	var defaultSpec *MediaPreferencesSpec
@@ -1430,8 +1470,11 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 		})
 	}
 
-	player, err := GetPlayer(o.client, namespace, playerName(play))
+	player, err := reads.player(namespace, playerName(play))
 	if errors.Is(err, ErrNotFound) {
+		if !live {
+			return errReadLive
+		}
 		prefs := resolvePreferences(&play.Spec, nil, defaultSpec)
 		return o.writePlay(play, derivePlayStatus(play, nil, nil, nil, nil, prefs))
 	}
@@ -1452,14 +1495,24 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	// compiled and published on the bus per Remote by reconcileRemotes,
 	// and a broken Keymap edit leaves the last good table in place
 	// instead.
-	remotes, remoteErr := gatherRemotes(o.client, player)
+	remotes, remoteErr := gatherRemotes(reads.remote, player)
 	if remoteErr != nil {
-		_, err := GetPod(o.client, namespace, podName(name))
-		if errors.Is(err, ErrNotFound) {
-			return o.writePlay(play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
-		}
-		if err != nil {
-			return err
+		// The pod decides whether the Play fails. A pod the view holds
+		// keeps the run. A pod the view does not hold is read from the API
+		// server, because a pod this operator created on the last pass can
+		// still be on its way to the view.
+		if !live {
+			if _, err := o.view.Pod(namespace, podName(name)); err != nil {
+				return errReadLive
+			}
+		} else {
+			_, err := GetPod(o.client, namespace, podName(name))
+			if errors.Is(err, ErrNotFound) {
+				return o.writePlay(play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
+			}
+			if err != nil {
+				return err
+			}
 		}
 		remotes = nil
 	}
@@ -1472,9 +1525,21 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	}
 
 	claim := buildClaim(play, player)
-	pod, fresh, err := o.ensurePlayback(play, player, claim, resolved, prefs, remotes, remoteErr != nil)
-	if err != nil {
-		return err
+	var pod *Pod
+	fresh := false
+	if live {
+		pod, fresh, err = o.ensurePlayback(play, player, claim, resolved, prefs, remotes, remoteErr != nil)
+		if err != nil {
+			return err
+		}
+	} else {
+		var settled bool
+		if pod, settled = o.viewedPlayback(play, claim, remotes, remoteErr != nil); !settled {
+			return errReadLive
+		}
+		if pod != nil {
+			delete(o.replacements, runKey(namespace, name))
+		}
 	}
 	// A genuinely new Play steals its controllers, the most-recent-steals
 	// default. A graceful recreate resumes the same Play, so it steals
@@ -1503,20 +1568,26 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 //
 // A phase that moves is the answer to a person's play request, so the
 // write that moves it gets a line, with the message a failed phase
-// carries.
+// carries, and a count on the playback counters. The phase it moved
+// from is the one the API server held, which writePlayStatusFrom
+// answers, so a pass that read the Play one write behind neither logs
+// nor counts the move twice.
 func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	if onlyPositionChanged(play.Status, desired) &&
 		time.Since(o.positionWrites[key]) < positionWriteInterval {
 		return nil
 	}
-	was := play.Status.Phase
-	if err := writePlayStatus(o.client, play, desired); err != nil {
+	was, wrote, err := writePlayStatusFrom(o.client, play, desired)
+	if err != nil {
 		return err
 	}
 	o.positionWrites[key] = time.Now()
-	if desired.Phase != was {
+	if wrote && desired.Phase != was {
 		logLine(o.log, "play %s: phase %s, was %s%s", key, desired.Phase, phaseName(was), messageOf(desired))
+		if o.metrics != nil {
+			o.metrics.notePlaybackPhase(was, desired)
+		}
 	}
 	return nil
 }
@@ -1553,6 +1624,9 @@ func messageOf(status PlayStatus) string {
 func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	key := runKey(namespace, name)
+	// ensurePlayback runs only for a run the view shows something to act
+	// on, so it reads the pod from the API server and acts on that read.
+	// clusterview.go says why.
 	running, err := GetPod(o.client, namespace, podName(name))
 	if errors.Is(err, ErrNotFound) {
 		if reason, owed := o.replacements[key]; owed {
@@ -1638,6 +1712,38 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	pod, err := o.replace(play, claim, resolved, prefs, remotes, claimChanged,
 		"a spec edit changed "+changed+" on player "+player.Metadata.Name)
 	return pod, false, err
+}
+
+// viewedPlayback answers from the view when the run needs nothing done:
+// its pod stands, runs or waits to run, and holds the claim and the
+// Remotes the current Player produces, or the pod is on its way out and
+// the pass waits for it to go. The bool is false for every other case,
+// and the reconcile then reads the API server and runs ensurePlayback.
+// The branches match ensurePlayback's own, so a settled run costs no
+// request.
+func (o *operator) viewedPlayback(play *Play, claim *ResourceClaim, remotes []boundRemote, keepExisting bool) (*Pod, bool) {
+	pod, err := o.view.Pod(play.Metadata.Namespace, podName(play.Metadata.Name))
+	if err != nil {
+		return nil, false
+	}
+	if pod.Metadata.deleting() {
+		return nil, true
+	}
+	if pod.Status.Phase == podFailed {
+		return nil, false
+	}
+	if keepExisting {
+		return pod, true
+	}
+	current, err := o.view.ResourceClaim(claim.Metadata.Namespace, claim.Metadata.Name)
+	if err != nil {
+		return nil, false
+	}
+	same, err := sameClaimSpec(current.Spec, claim.Spec)
+	if err != nil || !same || !sameRemoteSet(pod, remotes) {
+		return nil, false
+	}
+	return pod, true
 }
 
 // startName names the place a pod starts at, for a line.

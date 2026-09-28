@@ -15,8 +15,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -238,6 +238,43 @@ func verifiesAgainst(t *testing.T, anchors *clientAnchors, authority *clientAuth
 	return err == nil
 }
 
+// reportedLines collects what a watch reports.
+type reportedLines struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *reportedLines) report(line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, line)
+}
+
+func (r *reportedLines) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.lines)
+}
+
+// keepAnchors runs the watch on the client authority until the test
+// ends, and answers the channel that closes on its first read.
+func keepAnchors(t *testing.T, handler http.Handler, anchors *clientAnchors, lines *reportedLines) <-chan struct{} {
+	t.Helper()
+	ctx, stop := context.WithCancel(context.Background())
+	synced := make(chan struct{})
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		stop()
+		<-done
+	})
+	watcher := testWatcher(t, handler)
+	go func() {
+		defer close(done)
+		keepClientAnchors(ctx, watcher, anchors, lines.report, synced)
+	}()
+	return synced
+}
+
 // The pool comes from the ConfigMap, and the watch delivers the
 // ConfigMap the API server rewrote when it rotated its authority, so
 // the pool changes with no clock and no restart.
@@ -245,45 +282,36 @@ func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	first, second := newClientAuthority(t), newClientAuthority(t)
 	api := newCoreAPI()
 	publishAuthority(t, api, string(first.certPEM))
-	events := make(chan string)
-	defer close(events)
-	watched := make(chan *url.URL, 1)
 	anchors := &clientAnchors{}
-	watch := watchClientAnchors(testAPIClient(t, watchingAPI(api, events, watched)), anchors)
 
-	version, err := watch.read()
-	mustSucceed(t, err)
+	synced := keepAnchors(t, api.handler(), anchors, &reportedLines{})
+	mustMatch(t, closedWithin(synced, watchTimeout), true)
 	mustMatch(t, verifiesAgainst(t, anchors, first), true)
 	mustMatch(t, verifiesAgainst(t, anchors, second), false)
 
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	go watch.follow(ctx, version)
-	opened := <-watched
-	mustMatch(t, opened.Path, "/api/v1/namespaces/kube-system/configmaps")
-	mustMatch(t, opened.Query().Get("fieldSelector"), "metadata.name="+clientCAConfigMap)
-	mustMatch(t, opened.Query().Get("resourceVersion"), "900")
-
-	events <- objectEvent(t, "MODIFIED", authenticationConfigMap(string(second.certPEM), "8"))
+	api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(string(second.certPEM), "8"))
 	until(t, "the anchors never took up the rotated authority", func() bool {
 		return verifiesAgainst(t, anchors, second)
 	})
+	for _, request := range api.requested() {
+		mustMatch(t, request, "/api/v1/namespaces/kube-system/configmaps?fieldSelector=metadata.name="+clientCAConfigMap)
+	}
 }
 
-// A ConfigMap the API cannot read answers an error and leaves an empty
-// pool behind, because the API still answers every token caller.
+// A ConfigMap the API cannot read leaves an empty pool behind, because
+// the API still answers every token caller.
 func TestAConfigMapThisAPICannotReadLeavesAnEmptyPool(t *testing.T) {
-	refusing := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	})
+	authority := newClientAuthority(t)
+	api := newCoreAPI()
+	publishAuthority(t, api, string(authority.certPEM))
+	api.refusal = http.StatusForbidden
 	anchors := &clientAnchors{}
 
-	_, err := watchClientAnchors(testAPIClient(t, refusing), anchors).read()
+	synced := keepAnchors(t, api.handler(), anchors, &reportedLines{})
+	until(t, "the watch never asked for the ConfigMap", func() bool { return len(api.requested()) > 0 })
 
-	mustFail(t, err)
-	if anchors.held() == nil {
-		t.Fatal("the pool is nil, so a handshake would verify against the system roots")
-	}
+	mustMatch(t, closedWithin(synced, watchQuietSpell), false)
+	mustMatch(t, verifiesAgainst(t, anchors, authority), false)
 }
 
 // A deleted ConfigMap leaves the pool as it is and says so, because
@@ -294,23 +322,18 @@ func TestADeletedConfigMapKeepsThePool(t *testing.T) {
 	api := newCoreAPI()
 	publishAuthority(t, api, string(authority.certPEM))
 	anchors := &clientAnchors{}
-	watch := watchClientAnchors(testAPIClient(t, api.handler()), anchors)
-	var lines []string
-	watch.report = func(line string) { lines = append(lines, line) }
-	_, err := watch.read()
-	mustSucceed(t, err)
+	lines := &reportedLines{}
+	synced := keepAnchors(t, api.handler(), anchors, lines)
+	mustMatch(t, closedWithin(synced, watchTimeout), true)
 
-	api.hide("configmaps/" + clientCAConfigMap)
-	_, err = watch.read()
+	api.remove("configmaps/" + clientCAConfigMap)
 
-	mustSucceed(t, err)
+	until(t, "the deletion was never reported", func() bool { return lines.count() == 1 })
 	mustMatch(t, verifiesAgainst(t, anchors, authority), true)
-	mustMatch(t, len(lines), 1)
 }
 
 // A ConfigMap that carries no usable authority is reported, and the
-// read still answers the list's version, so the watch opens and a later
-// valid authority arrives. The pool stays empty.
+// pool stays empty until a valid authority arrives.
 func TestAConfigMapWithNoAuthorityIsReported(t *testing.T) {
 	rows := []struct {
 		name  string
@@ -321,18 +344,20 @@ func TestAConfigMapWithNoAuthorityIsReported(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
+			authority := newClientAuthority(t)
 			api := newCoreAPI()
 			publishAuthority(t, api, row.caPEM)
 			anchors := &clientAnchors{}
-			watch := watchClientAnchors(testAPIClient(t, api.handler()), anchors)
-			var lines []string
-			watch.report = func(line string) { lines = append(lines, line) }
+			lines := &reportedLines{}
 
-			version, err := watch.read()
+			synced := keepAnchors(t, api.handler(), anchors, lines)
+			mustMatch(t, closedWithin(synced, watchTimeout), true)
+			mustMatch(t, lines.count(), 1)
 
-			mustSucceed(t, err)
-			mustMatch(t, version, "900")
-			mustMatch(t, len(lines), 1)
+			publishAuthority(t, api, string(authority.certPEM))
+			until(t, "the pool never took up the valid authority", func() bool {
+				return verifiesAgainst(t, anchors, authority)
+			})
 		})
 	}
 }

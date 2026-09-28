@@ -16,7 +16,8 @@ import (
 	"net/http"
 	"os"
 	"sync"
-	"time"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // ConfigMap is the core ConfigMap as this program reads and writes it.
@@ -59,66 +60,28 @@ type trustAnchor struct {
 // trustStore holds the anchors, one per named ConfigMap, and the pool
 // built from them that every request goroutine reads at dial time.
 type trustStore struct {
-	client    *Client
 	namespace string
 	names     []string
 
-	// The bounds of the wait after a failed watch, and the shortest
-	// watch that counts as one that ran. They are fields so a test
-	// drives the watch in milliseconds.
-	backoffStart time.Duration
-	backoffMax   time.Duration
-	minLife      time.Duration
-
-	// pause is the wait itself, and report is where a change of state
-	// goes. Both are fields so a test drives the loop with no clock of
-	// its own and reads what the loop said.
-	pause  func(ctx context.Context, wait time.Duration) bool
+	// report is where a change of state goes. It is a field so a test
+	// reads what the store said.
 	report func(line string)
 
 	mu      sync.RWMutex
 	anchors map[string]trustAnchor
 	absent  map[string]bool
 	roots   *x509.CertPool
-
-	// listed holds, per name, the resourceVersion of the list that
-	// load read. Each watch starts from it, not from the ConfigMap's
-	// own version, which can be older than the API server's watch
-	// window.
-	listed map[string]string
 }
 
-func newTrustStore(client *Client, namespace string, names ...string) *trustStore {
+func newTrustStore(namespace string, names ...string) *trustStore {
 	return &trustStore{
-		client:       client,
-		namespace:    namespace,
-		names:        names,
-		backoffStart: watchBackoffStart,
-		backoffMax:   watchBackoffMax,
-		minLife:      watchMinLife,
-		pause:        waiting,
-		report:       func(line string) { fmt.Fprintln(os.Stderr, line) },
-		anchors:      map[string]trustAnchor{},
-		absent:       map[string]bool{},
-		roots:        x509.NewCertPool(),
-		listed:       map[string]string{},
+		namespace: namespace,
+		names:     names,
+		report:    func(line string) { fmt.Fprintln(os.Stderr, line) },
+		anchors:   map[string]trustAnchor{},
+		absent:    map[string]bool{},
+		roots:     x509.NewCertPool(),
 	}
-}
-
-// load reads every named ConfigMap once. A cluster may run one sibling
-// and not the other, so an absent ConfigMap is not a failure; only an
-// API server that will not answer is.
-func (t *trustStore) load() error {
-	for _, name := range t.names {
-		version, err := t.follower(name).read()
-		if err != nil {
-			return err
-		}
-		t.mu.Lock()
-		t.listed[name] = version
-		t.mu.Unlock()
-	}
-	return nil
 }
 
 func (t *trustStore) pool() *x509.CertPool {
@@ -127,38 +90,29 @@ func (t *trustStore) pool() *x509.CertPool {
 	return t.roots
 }
 
-// watch follows each ConfigMap in a goroutine of its own, because the
-// Role scopes the list and the watch by resourceNames, and a field
-// selector names one object, so one watch cannot cover three.
-func (t *trustStore) watch(ctx context.Context) {
+// follow watches each ConfigMap in a goroutine of its own until the
+// context ends, because the Role scopes the list and the watch by
+// resourceNames, and a field selector names one object, so one watch
+// cannot cover three. It answers one channel per ConfigMap, which
+// closes when the store has taken that ConfigMap's first read. A
+// cluster may run one sibling and not the other, so an absent
+// ConfigMap is a read like any other.
+func (t *trustStore) follow(ctx context.Context, watcher dynamic.Interface) []<-chan struct{} {
+	read := make([]<-chan struct{}, 0, len(t.names))
 	for _, name := range t.names {
-		go t.follow(ctx, name)
+		synced := make(chan struct{})
+		read = append(read, synced)
+		go watchNamed(ctx, watcher, configMapResource, t.namespace, name,
+			"configmap "+t.namespace+"/"+name,
+			func(configMap *ConfigMap) {
+				if configMap == nil {
+					t.forget(name)
+					return
+				}
+				t.remember(name, configMap)
+			}, synced)
 	}
-}
-
-// follow watches one ConfigMap from the version of the list that
-// load read.
-func (t *trustStore) follow(ctx context.Context, name string) {
-	t.follower(name).follow(ctx, t.version(name))
-}
-
-func (t *trustStore) follower(name string) *namedWatch {
-	watch := newNamedWatch(t.client, t.namespace, "configmaps", name,
-		func(object json.RawMessage) error {
-			var configMap ConfigMap
-			if err := json.Unmarshal(object, &configMap); err != nil {
-				return err
-			}
-			t.remember(name, &configMap)
-			return nil
-		},
-		func() { t.forget(name) })
-	watch.minLife = t.minLife
-	watch.backoffStart = t.backoffStart
-	watch.backoffMax = t.backoffMax
-	watch.pause = t.pause
-	watch.report = t.report
-	return watch
+	return read
 }
 
 // remember takes up a ConfigMap's anchors. A ConfigMap that returns
@@ -202,10 +156,4 @@ func (t *trustStore) rebuild() {
 		roots.AppendCertsFromPEM(t.anchors[name].certificates)
 	}
 	t.roots = roots
-}
-
-func (t *trustStore) version(name string) string {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.listed[name]
 }

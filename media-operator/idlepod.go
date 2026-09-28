@@ -450,8 +450,9 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 		return err
 	}
 	// The pod an older release stood. This pass wants none under that
-	// name, so a live one is deleted and an absent one costs the one
-	// GET the standing rule makes. See retiredIdleCommandPodSuffix.
+	// name, so a live one is deleted. The pod carries no component
+	// label, so the pods watch does not select it, and the standing rule
+	// reads it from the API server once. See retiredIdleCommandPodSuffix.
 	return o.reconcileStanding(standing{
 		subject:   "player " + namespace + "/" + name,
 		absent:    "the idle screen runs in one pod now, and an older release made this one",

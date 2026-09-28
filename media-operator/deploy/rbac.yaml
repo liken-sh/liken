@@ -10,12 +10,14 @@
 # The one object a person created that it deletes is a Play that
 # finished and outlived its own window.
 #
-# Two writes stand beyond those, and each is one field of one object's
+# Three writes stand beyond those, and each is one field of one object's
 # metadata. The finalizer media.liken.sh/bus-topics goes onto every
 # Play, and comes off again once the run's retained bus topics are
 # cleared. The label media.liken.sh/ending goes onto a playback pod when
 # its run reports the ending, so the compositor fades the film out while
-# the pod still draws it.
+# the pod still draws it. The label media.liken.sh/component goes onto a
+# Remote's reader pod that an older release created without it, so the
+# operator's pod watch selects the pod.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -29,8 +31,8 @@ metadata:
 rules:
   # The plays, across every namespace, because a household runs its
   # media in whatever namespace it likes and the operator is one
-  # Deployment for the cluster. The watch is the wake signal; every
-  # pass re-reads with a list.
+  # Deployment for the cluster. The watch is the wake signal, and every
+  # pass reads the whole collection from the watch's memory.
   #
   # The delete verb is the one place this operator deletes an object a
   # person created, and it uses it in one state only: a Play that
@@ -52,12 +54,9 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [plays/status]
     verbs: [update]
-  # Players are read one at a time by the name a play carries, listed
-  # once a pass to publish each one's status, and watched so that an
-  # edited Player wakes the pass. Without the watch verb the operator's
-  # watch request is refused, and its loop re-lists the collection and
-  # runs a whole pass every two seconds, which is a load the API server
-  # answers with list reads in the hundreds of milliseconds.
+  # Players are watched, so the pass reads each one from memory and an
+  # edited Player wakes the pass. The get verb reads a Player again when
+  # a status write meets a conflict.
   - apiGroups: [media.liken.sh]
     resources: [players]
     verbs: [get, list, watch]
@@ -69,8 +68,8 @@ rules:
     verbs: [update]
   # The remotes bound to a player. A Remote is watched like a Play,
   # because each Remote reconciles into one standing pod, and the watch
-  # is the wake signal for that pod. Nothing indexes a Remote by the
-  # player it binds, so every pass re-reads with a list.
+  # is the wake signal for that pod. The get verb reads a Remote again
+  # when a status write meets a conflict.
   - apiGroups: [media.liken.sh]
     resources: [remotes]
     verbs: [get, list, watch]
@@ -80,38 +79,42 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [remotes/status]
     verbs: [update]
-  # The keymaps, cluster-scoped now. The operator lists them to compile
+  # The keymaps, cluster-scoped now. The operator watches them to compile
   # every Keymap and publish its table to the bus retained on each pass,
   # and the watch is the wake signal for a keymap edit. Read-only,
   # because a person writes these and the operator only reads them.
   - apiGroups: [media.liken.sh]
     resources: [keymaps]
     verbs: [get, list, watch]
-  # The household default preferences, cluster-scoped. The operator reads
-  # the default by name each pass to resolve a run's languages, lists it
-  # to start the watch, and the watch is the wake signal for an edit.
+  # The household default preferences, cluster-scoped. The operator
+  # watches them, reads the default by name from the watch each pass to
+  # resolve a run's languages, and the watch is the wake signal for an
+  # edit.
   # Read-only, because a person writes it and the operator only reads it.
   - apiGroups: [media.liken.sh]
     resources: [mediapreferences]
     verbs: [get, list, watch]
   # The claims a play becomes, and the standing claim behind each
   # Player's idle pod and each Remote's reader pod. Created once, read
-  # back on every pass, and deleted only to rebuild a claim that no
-  # longer matches what the pass builds: one a Player reshaped, or one
-  # whose template hash differs. The owning Play, Player, or Remote
-  # still owns them, so deleting that object is the ordinary teardown.
+  # on every pass from the watch, and deleted only to rebuild a claim
+  # that no longer matches what the pass builds: one a Player reshaped,
+  # or one whose template hash differs. The owning Play, Player, or
+  # Remote still owns them, so deleting that object is the ordinary
+  # teardown. The list and watch verbs are cluster-scoped, because a
+  # claim carries no label of this operator's, and the operator creates
+  # it in the namespace of its Play, Player, or Remote. The get verb reads a
+  # claim again before the operator creates or deletes one.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
-    verbs: [get, create, delete]
-  # The drivers' published inventory. The operator lists it to read
+    verbs: [get, list, watch, create, delete]
+  # The drivers' published inventory. The operator watches it to read
   # the attributes of the devices its own claims hold, which is how
-  # an allocated screen names its Display. Read-only, and one list a
-  # pass answers every unit.
+  # an allocated screen names its Display. Read-only.
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
-    verbs: [list]
+    verbs: [list, watch]
   # The bluetooth-operator's bonded devices, cluster-scoped. The
-  # operator lists them each pass to read whether a controller's link is
+  # operator watches them to read whether a controller's link is
   # up and what charge it reports, and folds both into the unit's status
   # on the bus. The watch is the wake signal, so a controller that
   # connects or disconnects reaches the screen within one pass.
@@ -119,17 +122,17 @@ rules:
   - apiGroups: [bluetooth.liken.sh]
     resources: [peripherals]
     verbs: [get, list, watch]
-  # The display-operator's panels. The operator reads a screen's
-  # Display to fold what the panel last showed into the Player status,
-  # and patches spec.override under its own field manager when the idle
-  # screen states the panel should go dark. Server-side apply keeps the
-  # write to that one block, so the cluster owner's resting fields stay
-  # the cluster owner's.
+  # The display-operator's panels. The operator watches the Displays and
+  # reads a screen's Display to fold what the panel last showed into the
+  # Player status, and patches spec.override under its own field manager
+  # when the idle screen states the panel should go dark. Server-side
+  # apply keeps the write to that one block, so the cluster owner's
+  # resting fields stay the cluster owner's.
   - apiGroups: [display.liken.sh]
     resources: [displays]
-    verbs: [get, patch]
+    verbs: [get, list, watch, patch]
   # The equipment operator's receivers, cluster-scoped. The operator
-  # lists them to find the input a unit's cable lands on, and folds the
+  # watches them to find the input a unit's cable lands on, and folds the
   # match into the Player status. It applies status.session under its
   # own field manager while the unit matches an input, because a status
   # write changes no metadata.generation. The patch on the receiver
@@ -147,7 +150,11 @@ rules:
   # pod at the film's place or a standing pod on a template that
   # changed. The list and watch verbs are cluster-scoped, because a Play
   # lives in any namespace and the pod watch wakes the loop when
-  # Kubernetes removes a playback pod anywhere.
+  # Kubernetes removes a playback pod anywhere. The watch selects the
+  # operator's own pods by their media.liken.sh/component label.
+  #
+  # The patch verb also puts that label on a reader pod an older release
+  # created without it, so the watch selects the pod.
   #
   # the delete verb also deletes pods this operator did not
   # create. A display claim names every pod that holds it in

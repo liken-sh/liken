@@ -24,17 +24,17 @@ func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 	sent := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent <- r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(PlayList{})
+		_ = json.NewEncoder(w).Encode(Play{})
 	}))
 	t.Cleanup(server.Close)
 	client := NewClient(server.URL, server.Client(), credentials)
 
-	_, err := ListPlays(client)
+	_, err := GetPlay(client, "house", "movie")
 	mustSucceed(t, err)
 	mustMatch(t, <-sent, "Bearer first-token")
 
 	mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("second-token"), 0o600))
-	_, err = ListPlays(client)
+	_, err = GetPlay(client, "house", "movie")
 	mustSucceed(t, err)
 	mustMatch(t, <-sent, "Bearer second-token")
 }
@@ -44,12 +44,12 @@ func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 func TestTheClientFailsBeforeItSends(t *testing.T) {
 	t.Run("the token is not there", func(t *testing.T) {
 		client := NewClient("http://127.0.0.1:1", http.DefaultClient, filepath.Join(t.TempDir(), "absent"))
-		_, err := client.Do(http.MethodGet, playsPath, nil)
+		err := client.RequestJSON(http.MethodGet, playPath("house", "movie"), nil, nil)
 		mustFail(t, err)
 	})
 	t.Run("the method is not a method", func(t *testing.T) {
 		client := NewClient("http://127.0.0.1:1", http.DefaultClient, "")
-		_, err := client.Do("GET PLAYS", playsPath, nil)
+		err := client.RequestJSON("GET PLAYS", playPath("house", "movie"), nil, nil)
 		mustFail(t, err)
 	})
 }

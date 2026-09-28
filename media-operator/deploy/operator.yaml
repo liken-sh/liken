@@ -51,6 +51,18 @@ spec:
         app: media-operator
     spec:
       serviceAccountName: media-operator
+      # A shutdown finishes the pass in flight, waits up to 5 s for the
+      # bus session to end, and then releases the Lease. The release
+      # waits up to 11 s for client-go's election to end (its 10 s renew
+      # deadline and 1 s), and then up to 5 s (half the renew deadline)
+      # for the release that follows a late renewal. That is up to 21 s
+      # after the pass, and the default 30 s grace would leave the pass 9
+      # s. A pass that writes waits on the API server for each write,
+      # each bounded by the client's 10 s header timeout, so 60 s leaves
+      # it 39 s. A kill before the release leaves the Lease to expire,
+      # and a waiting copy then takes it 30 to 41 s after the last
+      # renewal instead of within about 11 s.
+      terminationGracePeriodSeconds: 60
       containers:
         - name: operator
           image: ghcr.io/liken-sh/media-operator:latest

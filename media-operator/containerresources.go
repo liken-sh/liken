@@ -80,8 +80,9 @@ func defaultResourceSettings() resourceSettings {
 		// The command sidecar reads mpv's socket and the bus. It measured
 		// 11Mi and 9m at the 90th percentile, and 13Mi at most, on
 		// either screen. It runs the pod build, which leaves out
-		// client-go, and whose memory at start matches the measured
-		// build's within 1MB.
+		// client-go's typed clientset and leader election, and whose
+		// anonymous memory at start matches the measured build's
+		// within 1MB.
 		commandContainer: {CPU: "10m", Memory: "12Mi", MemoryLimit: "32Mi"},
 		// The idle client draws the idle screen while nothing plays. It
 		// measured 95Mi and 1m on a 3840x1600 test screen, over one

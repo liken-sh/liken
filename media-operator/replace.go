@@ -20,9 +20,12 @@ import (
 )
 
 // claimReleaseWait is how long a replacement waits before it reads a
-// deleting claim again. The operator watches no claims, and a claim that
-// the old pod held finishes its delete only after the pod is gone, so the
-// pass that sees the pod gone can still find the claim on its way out.
+// deleting claim again. A claim that the old pod held finishes its
+// delete only after the pod is gone, so the pass that finds the pod gone
+// can still find the claim on its way out. The claim's removal wakes no
+// pass, because the claims watch only keeps the view current, so the
+// replacement asks for its own wake. It reads the claim from the API
+// server, because it acts on the read.
 const claimReleaseWait = time.Second
 
 // replace deletes the run's pod, and its claim when the claim itself

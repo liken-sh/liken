@@ -183,20 +183,23 @@ func gatherPlayer(remotes ...string) *Player {
 	}
 }
 
-func remoteURL(name string) string {
-	return "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes/" + name
+// remotesView is a view that holds the given Remotes in the house
+// namespace.
+func remotesView(remotes ...Remote) *clusterView {
+	cluster := newFakeCluster()
+	for index := range remotes {
+		cluster.remotes[remotes[index].Metadata.Name] = &remotes[index]
+	}
+	return cluster.view()
 }
 
 // The Player's remotes gather in name order whatever order the spec lists
 // them in, because the pod spec they become must not change between
 // passes.
 func TestGatherRemotesReadsThePlayersRemotesInNameOrder(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET " + remoteURL("sofa"):     testRemote("sofa", "gamepad"),
-		"GET " + remoteURL("armchair"): testRemote("armchair", "gamepad"),
-	}}
+	view := remotesView(testRemote("sofa", "gamepad"), testRemote("armchair", "gamepad"))
 
-	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa", "armchair"))
+	remotes, err := gatherRemotes(view.Remote, gatherPlayer("sofa", "armchair"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +214,7 @@ func TestGatherRemotesReadsThePlayersRemotesInNameOrder(t *testing.T) {
 }
 
 func TestGatherRemotesFindsNoneWhenThePlayerNamesNoRemote(t *testing.T) {
-	remotes, err := gatherRemotes(testAPIClient(t, (&cannedAPI{}).handler()), gatherPlayer())
+	remotes, err := gatherRemotes(remotesView().Remote, gatherPlayer())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +226,7 @@ func TestGatherRemotesFindsNoneWhenThePlayerNamesNoRemote(t *testing.T) {
 // A Player that names a Remote nobody wrote is a failure the person
 // who wrote the Player can read.
 func TestGatherRemotesFailsWhenTheRemoteIsAbsent(t *testing.T) {
-	_, err := gatherRemotes(testAPIClient(t, (&cannedAPI{}).handler()), gatherPlayer("ghost"))
+	_, err := gatherRemotes(remotesView().Remote, gatherPlayer("ghost"))
 	if err == nil {
 		t.Fatal("a missing Remote produced no error")
 	}

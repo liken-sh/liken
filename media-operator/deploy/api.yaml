@@ -244,9 +244,9 @@ rules:
   # anchors, watched so a rotation reaches the next connection with
   # no restart. Both verbs keep their resourceNames. The list and the
   # watch name their ConfigMap with the field selector metadata.name,
-  # and RBAC reads the name from that selector. The watch starts from
-  # the list's resourceVersion, because a ConfigMap's own version can
-  # be older than the API server's watch window.
+  # and RBAC reads the name from that selector. client-go's reflector
+  # reads each ConfigMap with a streaming list, which is a watch, and
+  # falls back to a list when the API server refuses one.
   - apiGroups: [""]
     resources: [configmaps]
     resourceNames: [display-api-ca, audio-api-ca, media-api-ca]

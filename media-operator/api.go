@@ -94,12 +94,6 @@ type OwnerReference struct {
 	Controller bool   `json:"controller"`
 }
 
-// A list's own resourceVersion is the revision of the whole
-// collection, which is what a watch resumes from.
-type ListMeta struct {
-	ResourceVersion string `json:"resourceVersion,omitempty"`
-}
-
 // A Player is equipment, not a running thing. It holds no claims of
 // its own. The operator reads the spec and writes the status: the
 // spec is the equipment a person declared, and the status is what
@@ -283,11 +277,6 @@ const (
 	playerStarting = "Starting"
 	playerIdle     = "Idle"
 )
-
-type PlayerList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Player `json:"items"`
-}
 
 // The three device roles. Display and render are single because one
 // pod drives one screen through one GPU; sinks is a list because a
@@ -671,11 +660,6 @@ func finishedPhase(phase string) bool {
 	return phase == phaseFinished
 }
 
-type PlayList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Play   `json:"items"`
-}
-
 // The three subtitle modes a preference tier may state.
 const (
 	subtitlesOn   = "on"
@@ -712,11 +696,6 @@ type MediaPreferencesSpec struct {
 	// Idle is the household default idle screen policy, read for each
 	// field a Player's own block leaves unset.
 	Idle *IdlePolicy `json:"idle,omitempty"`
-}
-
-type MediaPreferencesList struct {
-	Metadata ListMeta           `json:"metadata"`
-	Items    []MediaPreferences `json:"items"`
 }
 
 // A Remote is one physical controller: its device and, where
@@ -787,11 +766,6 @@ type RemoteDevice struct {
 	Parameters *DeviceParameters `json:"parameters,omitempty"`
 }
 
-type RemoteList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Remote `json:"items"`
-}
-
 // A Keymap is one controller model's table from its odd controls to
 // the kernel key names they should report, written once per model and
 // shared by every Remote of that model. A model whose kernel names are
@@ -809,14 +783,6 @@ type Keymap struct {
 type KeymapSpec struct {
 	Buttons []KeymapButton `json:"buttons,omitempty"`
 	Axes    []KeymapAxis   `json:"axes,omitempty"`
-}
-
-// KeymapList is the cluster-scoped collection the operator lists and
-// watches, so a Keymap edit wakes the loop that recompiles and
-// republishes it.
-type KeymapList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Keymap `json:"items"`
 }
 
 // A KeymapRepeat makes a row repeat while the control is held. The
@@ -943,13 +909,6 @@ type Pod struct {
 	Metadata   ObjectMeta `json:"metadata"`
 	Spec       PodSpec    `json:"spec"`
 	Status     PodStatus  `json:"status"`
-}
-
-// PodList is the pod collection ListPlaybackPods returns. Its
-// resourceVersion is where the pod watch begins.
-type PodList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Pod    `json:"items"`
 }
 
 // The pod spec's few fields: restartPolicy Never because the pod's

@@ -70,9 +70,14 @@ type fakeCluster struct {
 	// and trying again.
 	applyFails bool
 
-	// The collection paths this server refuses, so a test proves what a
-	// pass does with a read it cannot make.
+	// The collection paths this server refuses, and whose objects the
+	// view answers in a form that does not convert, so a test proves
+	// what a pass does with a read it cannot make.
 	fails map[string]bool
+
+	// unseen names the objects the view does not hold yet, the way a
+	// watch can still be carrying an object the API server already has.
+	unseen map[string]bool
 
 	// The requests this server answers only once the test releases them,
 	// keyed the way requests holds them. A held request is a slow API
@@ -114,6 +119,7 @@ func newFakeCluster() *fakeCluster {
 
 		peripherals: map[string]*Peripheral{},
 		fails:       map[string]bool{},
+		unseen:      map[string]bool{},
 		held:        map[string]chan struct{}{},
 	}
 }
@@ -141,14 +147,6 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		}
 		name := path.Base(r.URL.Path)
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == playsPath:
-			// The list is sorted so one pass reads the collection in one
-			// order every time.
-			list := PlayList{Metadata: ListMeta{ResourceVersion: "1"}}
-			for _, key := range sortedNames(f.plays) {
-				list.Items = append(list.Items, *f.plays[key])
-			}
-			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/players/") && strings.HasSuffix(r.URL.Path, "/status"):
 			var written Player
 			_ = json.NewDecoder(r.Body).Decode(&written)
@@ -160,65 +158,33 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			f.remotes[written.Metadata.Name] = &written
 			_ = json.NewEncoder(w).Encode(written)
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/status"):
+			// A status write names the resourceVersion it read, and a Play
+			// written since answers 409, the way the API server refuses a
+			// write from a stale read. An accepted write moves the version
+			// on.
 			var written Play
 			_ = json.NewDecoder(r.Body).Decode(&written)
+			if held, standing := f.plays[written.Metadata.Name]; standing &&
+				held.Metadata.ResourceVersion != written.Metadata.ResourceVersion {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			version, _ := strconv.Atoi(written.Metadata.ResourceVersion)
+			written.Metadata.ResourceVersion = strconv.Itoa(version + 1)
 			f.plays[written.Metadata.Name] = &written
 			_ = json.NewEncoder(w).Encode(written)
-		case r.Method == http.MethodGet && r.URL.Path == playersPath:
-			list := PlayerList{Metadata: ListMeta{ResourceVersion: "1"}}
-			for _, key := range sortedNames(f.players) {
-				list.Items = append(list.Items, *f.players[key])
-			}
-			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/plays/"):
 			answer(w, f.plays[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/players/"):
 			answer(w, f.players[name])
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/remotes"):
-			list := RemoteList{Metadata: ListMeta{ResourceVersion: "1"}}
-			for _, key := range sortedNames(f.remotes) {
-				list.Items = append(list.Items, *f.remotes[key])
-			}
-			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/remotes/"):
 			answer(w, f.remotes[name])
-		case r.Method == http.MethodGet && r.URL.Path == keymapsPath:
-			list := KeymapList{Metadata: ListMeta{ResourceVersion: "1"}}
-			for _, key := range sortedNames(f.keymaps) {
-				list.Items = append(list.Items, *f.keymaps[key])
-			}
-			_ = json.NewEncoder(w).Encode(list)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/keymaps/"):
-			answer(w, f.keymaps[name])
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/mediapreferences/"):
-			answer(w, f.mediaprefs[name])
-		case r.Method == http.MethodGet && r.URL.Path == slicesPath:
-			_ = json.NewEncoder(w).Encode(ResourceSliceList{
-				Metadata: ListMeta{ResourceVersion: "1"}, Items: f.slices})
-		case r.Method == http.MethodGet && r.URL.Path == peripheralsPath:
-			list := PeripheralList{Metadata: ListMeta{ResourceVersion: "1"}}
-			for _, key := range sortedNames(f.peripherals) {
-				list.Items = append(list.Items, *f.peripherals[key])
-			}
-			_ = json.NewEncoder(w).Encode(list)
-		case r.Method == http.MethodGet && r.URL.Path == receiversPath:
-			if f.receiversAbsent {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			list := ReceiverList{Metadata: ListMeta{ResourceVersion: "1"}}
-			for _, key := range sortedNames(f.receivers) {
-				list.Items = append(list.Items, *f.receivers[key])
-			}
-			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
 			f.patchPlay(w, r, name)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/") && name == "status":
 			f.applySession(w, r, path.Base(path.Dir(r.URL.Path)))
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/"):
 			f.releaseSpecSession(w, r, name)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/displays/"):
-			answer(w, f.displays[name])
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/displays/"):
 			f.apply(w, r, name)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/resourceclaims/"):
@@ -427,6 +393,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 	t.Helper()
 	return &operator{
 		client:       testAPIClient(t, cluster.handler(t)),
+		view:         cluster.view(),
 		image:        "registry.example/player:test",
 		idleImage:    testIdleImage,
 		sidecarImage: "registry.example/sidecar:test",
@@ -621,7 +588,9 @@ func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 
 // A Play the operator already retired, still inside its window, is read
 // and left alone. The one write the first pass makes about it is the
-// finalizer, which every later pass reads as already there.
+// finalizer, which every later pass reads as already there, so a later
+// pass reads the collections from the view and sends the API server
+// nothing.
 func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
@@ -637,13 +606,7 @@ func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	cluster.requests = nil
 	media.pass()
 
-	want := "GET " + playsPath + ",GET " + playersPath +
-		",GET " + mediaPrefsPath + "/" + mediaPreferencesName +
-		",GET " + remotesAllPath + ",GET " + peripheralsPath +
-		",GET " + keymapsPath
-	if strings.Join(cluster.requests, ",") != want {
-		t.Errorf("requests = %v, want the collection lists and the default MediaPreferences", cluster.requests)
-	}
+	mustMatchAll(t, cluster.requests, nil)
 }
 
 // stampAgo is a finishedAt the given time before now, in the form the
@@ -1117,44 +1080,29 @@ func bondedRemote(t *testing.T) *fakeCluster {
 	return cluster
 }
 
-// A pass reads a Remote's standing claim once. The read that resolves the
-// controller's Peripheral is the read the standing reconcile uses, so a
-// controller costs the API server one claim read a pass however many
-// things need the claim.
-func TestAPassReadsARemotesClaimOnce(t *testing.T) {
-	cluster := bondedRemote(t)
-	media := testOperator(t, cluster, make(chan struct{}, 1))
+// A pass reads a Remote's standing claim from the view, and the read
+// that resolves the controller's Peripheral is the read the standing
+// reconcile uses, so a settled controller costs the API server nothing.
+func TestAPassReadsARemotesClaimFromTheView(t *testing.T) {
+	cluster, media := settledHouse(t, make(chan struct{}, 8))
+	cluster.requests = nil
 
 	media.pass()
 
-	read := "GET " + claimsPath("house") + "/" + remoteClaimName("sofa")
-	reads := 0
-	for _, request := range cluster.requests {
-		if request == read {
-			reads++
-		}
-	}
-	mustMatch(t, reads, 1)
+	mustMatch(t, countPathRequests(cluster.requests, "GET "+claimsPath("house")+"/"+remoteClaimName("sofa")), 0)
+	mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, "aa-bb-cc-dd-ee-ff")
 }
 
 // A claim read that fails carries no entry, so the standing reconcile
 // makes its own read rather than acting on a claim nothing read. The
 // controller names no Peripheral on that pass.
-func TestAPassReadsAClaimItselfWhenTheFirstReadFailed(t *testing.T) {
+func TestAPassNamesNoPeripheralWhenTheClaimReadFailed(t *testing.T) {
 	cluster := bondedRemote(t)
-	read := claimsPath("house") + "/" + remoteClaimName("sofa")
-	cluster.fails[read] = true
+	cluster.fails[claimsPath("house")+"/"+remoteClaimName("sofa")] = true
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.pass()
 
-	reads := 0
-	for _, request := range cluster.requests {
-		if request == "GET "+read {
-			reads++
-		}
-	}
-	mustMatch(t, reads, 2)
 	mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, "")
 }
 
@@ -1790,6 +1738,7 @@ func keysOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	waitForConnect(t, connected)
 	return &operator{
 		client:        testAPIClient(t, cluster.handler(t)),
+		view:          cluster.view(),
 		topicBase:     defaultTopicBase,
 		bus:           bus,
 		keysPublished: map[string]string{},
@@ -1880,6 +1829,7 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 	waitForConnect(t, connected)
 	return &operator{
 		client:      testAPIClient(t, cluster.handler(t)),
+		view:        cluster.view(),
 		topicBase:   defaultTopicBase,
 		bus:         bus,
 		reports:     newReports(nil),

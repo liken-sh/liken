@@ -77,7 +77,7 @@ func TestAnEndingLabelThatFailsIsPatchedAgain(t *testing.T) {
 }
 
 // The browser's return and the room's lights key on the unit reading
-// Idle, so a pass publishes that state before it reads anything the
+// Idle, so a pass publishes that state before it sends anything the
 // state does not come from. Each case holds one such request until the
 // status has reached the broker. A pass that published the state at the
 // end of its work would never reach the publish, and the case would fail
@@ -89,8 +89,8 @@ func TestAnEndingPublishesIdleBeforeTheRestOfThePass(t *testing.T) {
 		phase   string
 	}{
 		{
-			name:    "before the pass lists the Remotes",
-			request: http.MethodGet + " " + remotesAllPath,
+			name:    "before the pass writes the running Play",
+			request: http.MethodPatch + " " + playPath("house", "movie"),
 			phase:   phaseRunning,
 		},
 		{

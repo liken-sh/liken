@@ -24,17 +24,19 @@ const (
 	podClaimName     = "devices"
 )
 
-// Every pod this operator builds to draw carries this label, and the
-// value names which part of a unit the pod draws. Two readers select on
-// it. The pod watch asks for the playback value alone, so it reads the
-// operator's own playback pods and nothing else on the node. A Layout in
-// display-operator gives each value a region of the screen, so the
-// Layout alone places both surfaces and neither client states a
-// position.
+// Every pod this operator builds carries this label, and the value
+// names which part of a unit the pod is. Two readers select on it. The
+// operator's pod watch asks for the three values, so it reads the
+// operator's own pods and nothing else in the cluster. A Layout in
+// display-operator gives each drawing value, playback and idle, a
+// region of the screen, so the Layout alone places both surfaces and
+// neither client states a position. A Remote's reader pod draws
+// nothing, so no Layout names its value.
 const (
 	playbackLabelKey   = "media.liken.sh/component"
 	playbackLabelValue = "playback"
 	idleLabelValue     = "idle"
+	remoteLabelValue   = "remote"
 )
 
 // A playback pod carries this label from the moment its run reports the

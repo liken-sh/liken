@@ -10,14 +10,16 @@ package main
 // way the API server spells them.
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // The ConfigMap the API server publishes the cluster's client
@@ -66,11 +68,7 @@ func (a *clientAnchors) held() *x509.CertPool {
 // that carries no usable authority leaves the pool as it is, because
 // the certificates that pool holds are still the ones the cluster
 // issued.
-func (a *clientAnchors) take(object json.RawMessage) error {
-	var configMap ConfigMap
-	if err := json.Unmarshal(object, &configMap); err != nil {
-		return err
-	}
+func (a *clientAnchors) take(configMap *ConfigMap) error {
 	anchorPEM := configMap.Data[clientCAKey]
 	if anchorPEM == "" {
 		return fmt.Errorf("the configmap carries no %s", clientCAKey)
@@ -83,19 +81,26 @@ func (a *clientAnchors) take(object json.RawMessage) error {
 	return nil
 }
 
-// watchClientAnchors is the watch on the cluster's client authority.
+// keepClientAnchors is the watch on the cluster's client authority.
 // The API server rewrites the ConfigMap when the authority rotates,
 // and the watch delivers that write, so the rotated authority reaches
 // the next handshake with no restart. A deleted ConfigMap leaves the
-// pool as it is, for the reason take gives, and reports one line.
-func watchClientAnchors(client *Client, anchors *clientAnchors) *namedWatch {
-	watch := newNamedWatch(client, clientCANamespace, "configmaps", clientCAConfigMap, anchors.take, nil)
-	watch.removed = func() {
-		watch.report(fmt.Sprintf(
-			"configmap %s/%s is absent; media-api verifies client certificates against the authority it read last",
-			clientCANamespace, clientCAConfigMap))
-	}
-	return watch
+// pool as it is, for the reason take gives, and reports one line. A
+// copy that holds no authority is reported, and the pool stays as it
+// is.
+func keepClientAnchors(ctx context.Context, watcher dynamic.Interface, anchors *clientAnchors,
+	report func(string), synced chan<- struct{}) {
+	subject := "configmap " + clientCANamespace + "/" + clientCAConfigMap
+	watchNamed(ctx, watcher, configMapResource, clientCANamespace, clientCAConfigMap, subject,
+		func(configMap *ConfigMap) {
+			if configMap == nil {
+				report(subject + " is absent; media-api verifies client certificates against the authority it read last")
+				return
+			}
+			if err := anchors.take(configMap); err != nil {
+				report(fmt.Sprintf("reading %s: %v", subject, err))
+			}
+		}, synced)
 }
 
 // certificateCaller reads the caller out of a connection that carries

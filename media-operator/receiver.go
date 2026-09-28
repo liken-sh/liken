@@ -35,11 +35,6 @@ type Receiver struct {
 	Status     ReceiverStatus `json:"status"`
 }
 
-type ReceiverList struct {
-	Metadata ListMeta   `json:"metadata"`
-	Items    []Receiver `json:"items"`
-}
-
 // The cluster owner states the inputs and the topics. The equipment
 // operator reads spec.session when the status holds no session, so this
 // operator reads it to adopt it, and releases it once status.session
@@ -133,24 +128,24 @@ func standingSession(receiver *Receiver) *ReceiverSession {
 	return receiver.Spec.Session
 }
 
-// receivers lists the cluster's Receivers at most once a pass, and only
-// for a unit whose screen resolved. A cluster that runs no equipment
-// operator makes no request at all.
+// receivers reads the cluster's Receivers from the view at most once a
+// pass, and only for a unit whose screen resolved. A cluster that runs
+// no equipment operator has no Receivers in the view.
 type receivers struct {
-	client *Client
+	view   *clusterView
 	items  []Receiver
 	listed bool
 }
 
-func newReceivers(client *Client) *receivers {
-	return &receivers{client: client}
+func newReceivers(view *clusterView) *receivers {
+	return &receivers{view: view}
 }
 
 // receiverLookup is the pass's one receivers. It is built on first use
 // and dropped when the pass ends.
 func (o *operator) receiverLookup() *receivers {
 	if o.receiverCache == nil {
-		o.receiverCache = newReceivers(o.client)
+		o.receiverCache = newReceivers(o.view)
 	}
 	return o.receiverCache
 }
@@ -164,14 +159,12 @@ func (r *receivers) matchFor(node, monitor string) (*Receiver, string, bool) {
 	}
 	if !r.listed {
 		r.listed = true
-		list, err := ListReceivers(r.client)
+		items, err := r.view.Receivers()
 		if err != nil {
-			if !errors.Is(err, ErrNotFound) {
-				fmt.Fprintf(os.Stderr, "listing receivers: %v\n", err)
-			}
+			fmt.Fprintf(os.Stderr, "reading receivers: %v\n", err)
 			return nil, "", false
 		}
-		r.items = list.Items
+		r.items = items
 	}
 	for index := range r.items {
 		receiver := &r.items[index]
