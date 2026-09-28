@@ -122,7 +122,7 @@ func TestTheEndingOutlivesTheOfflineDrop(t *testing.T) {
 	desk.fold("house", "movie", ended)
 	waitForReportWake(t, wake)
 
-	desk.availability("house", "movie", false)
+	desk.availability("house", "movie", false, "")
 
 	if stored := desk.latestFor("house", "movie"); stored != nil {
 		t.Errorf("the offline run's report = %+v, want none", *stored)
@@ -188,7 +188,7 @@ func TestAvailabilityOfflineDropsTheReportAndWakes(t *testing.T) {
 	desk.fold("house", "movie", runningReport())
 	waitForReportWake(t, wake)
 
-	desk.availability("house", "movie", false)
+	desk.availability("house", "movie", false, "")
 
 	if stored := desk.latestFor("house", "movie"); stored != nil {
 		t.Errorf("the offline run's report = %+v, want none", *stored)
@@ -203,7 +203,7 @@ func TestAvailabilityOnlineKeepsTheReportAndDoesNotWake(t *testing.T) {
 	desk.fold("house", "movie", runningReport())
 	waitForReportWake(t, wake)
 
-	desk.availability("house", "movie", true)
+	desk.availability("house", "movie", true, "")
 
 	if desk.latestFor("house", "movie") == nil {
 		t.Error("an online signal dropped the report")
@@ -233,7 +233,7 @@ func TestTheDeskForgetsARunThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {
 func TestTheDeskReportsSeenRunsAsStaleUntilForgotten(t *testing.T) {
 	desk, _ := reportDesk(t)
 	desk.fold("house", "movie", runningReport())
-	desk.availability("attic", "radio", false)
+	desk.availability("attic", "radio", false, "")
 
 	stale := desk.stale(map[string]bool{runKey("house", "movie"): true})
 	if len(stale) != 1 || stale[0] != runKey("attic", "radio") {

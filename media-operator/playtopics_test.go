@@ -62,7 +62,7 @@ func TestTheSweepClearsTheTopicsOfARunWhosePlayIsGone(t *testing.T) {
 
 			// The desk has seen the run, the way the broker's retained
 			// availability marks it seen the moment the operator subscribes.
-			media.reports.availability("den", test.play, false)
+			media.reports.availability("den", test.play, false, "")
 			if test.disconnected {
 				waitForDisconnect(t, media.bus, broker)
 			}

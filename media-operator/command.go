@@ -135,9 +135,10 @@ type commander struct {
 	// press path already takes.
 	holds map[string]int
 
-	// podUID is this pod's own UID, stamped on every report. The operator
-	// refuses the reports of a pod it has replaced, and the UID is how it
-	// tells that pod from the new one under the same name.
+	// podUID is this pod's own UID, stamped on every report and on the
+	// availability. The operator takes a message only from the run's
+	// current pod, and the UID is how it tells that pod from an older one
+	// under the same name.
 	podUID string
 
 	reportMutex sync.Mutex
@@ -258,9 +259,7 @@ func runCommand() {
 	// two closing publishes still have a live connection to leave on
 	// after the grace signal ends the report side.
 	busCtx, stopBus := context.WithCancel(context.Background())
-	cmd.bus = newBus(busAddress, "play-"+namespace+"-"+name,
-		&busWill{Topic: cmd.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
-		cmd.onConnect, cmd.handle)
+	cmd.bus = newBus(busAddress, "play-"+namespace+"-"+name, cmd.will(), cmd.onConnect, cmd.handle)
 	// The subscription is made once. The Bus remembers the filter and
 	// re-sends it on every reconnect, so a broker restart does not need
 	// the command sidecar to subscribe again.
@@ -294,9 +293,19 @@ func runCommand() {
 	// availability offline, and hold the bus open long enough to send both
 	// before the connection ends.
 	cmd.bus.Publish(cmd.statusTopic, nil, true)
-	cmd.bus.Publish(cmd.availabilityTopic, []byte(availabilityOffline), true)
+	cmd.bus.Publish(cmd.availabilityTopic, playAvailability(availabilityOffline, cmd.podUID), true)
 	time.Sleep(busFlushGrace)
 	stopBus()
+}
+
+// will is the Last Will the broker publishes when this pod's session dies
+// without a clean disconnect: offline, retained, with the pod's UID.
+func (c *commander) will() *busWill {
+	return &busWill{
+		Topic:    c.availabilityTopic,
+		Payload:  playAvailability(availabilityOffline, c.podUID),
+		Retained: true,
+	}
 }
 
 // onConnect refills the broker the moment a session reaches a CONNACK.
@@ -316,7 +325,7 @@ func (c *commander) onConnect(bus *Bus) {
 	c.volumeCaughtUp = false
 	held, state := c.haveVolume, c.volume
 	c.volumeMutex.Unlock()
-	bus.Publish(c.availabilityTopic, []byte(availabilityOnline), true)
+	bus.Publish(c.availabilityTopic, playAvailability(availabilityOnline, c.podUID), true)
 	if held && c.volumeTopic != "" {
 		if payload, err := marshalVolumeState(state); err == nil {
 			bus.Publish(c.volumeTopic, payload, true)

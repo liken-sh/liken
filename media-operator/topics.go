@@ -38,6 +38,25 @@ const (
 	availabilityOffline = "offline"
 )
 
+// playAvailability is what the playback pod publishes on its availability
+// topic: the word, a space, and the pod's UID. The UID lets the operator
+// refuse the Last Will of a dead pod that the broker publishes after the
+// run's new pod came online. A pod that read no UID publishes the word
+// alone.
+func playAvailability(word, pod string) []byte {
+	if pod == "" {
+		return []byte(word)
+	}
+	return []byte(word + " " + pod)
+}
+
+// parsePlayAvailability reads a playback pod's availability: whether it
+// says online, and the pod UID it names, empty for the word alone.
+func parsePlayAvailability(payload []byte) (online bool, pod string) {
+	word, pod, _ := strings.Cut(string(payload), " ")
+	return word == availabilityOnline, pod
+}
+
 // The kind at the end of a plays topic. parsePlayTopic returns one of
 // these so the operator folds a status report and an availability
 // signal through separate paths.

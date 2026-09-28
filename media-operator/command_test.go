@@ -378,6 +378,23 @@ func TestEveryReportNamesThePodThatSentIt(t *testing.T) {
 	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true, Pod: "pod-one"})
 }
 
+// The availability names the pod too, the online the sidecar publishes
+// and the Last Will the broker publishes for a dead pod, so the operator
+// can refuse a late offline from a pod that is gone.
+func TestTheAvailabilityNamesThePodThatSentIt(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	c := &commander{
+		availabilityTopic: playAvailabilityTopic(defaultTopicBase, "house", "movie"),
+		podUID:            "pod-one",
+	}
+
+	c.onConnect(bus)
+
+	mustMatch(t, string(waitForPublish(t, brokers[0].pubs).payload), "online pod-one")
+	mustMatch(t, string(c.will().Payload), "offline pod-one")
+}
+
 // A run that never reported publishes no ending, the rule the reporter
 // follows: mpv never named an item, so there are no numbers to carry and
 // the pod's own death is what ends such a run.

@@ -74,12 +74,23 @@ the same run. The pod takes seconds to terminate, so the operator
 reads this mark and returns the unit to idle at once instead of
 waiting out the pod.
 
-`pod` is the UID of the playback pod that sent the report. When the
-operator recreates a pod, for example after an edit to the `Player`'s
-remotes, the new pod has the same name, and the old pod reports the
-`ended` field when it stops. The operator ignores every report from a
-pod it replaced, so the unit reads `Starting` and then `Playing`, and
-never `Idle`, while the `Play` moves to the new pod.
+`pod` is the UID of the playback pod that sent the report. A run's pod
+can stop while the `Play` goes on: the operator recreates it after an
+edit to the `Player`, resumes the run after the player crashes, or
+replaces a pod that something else deleted, such as an eviction. The
+new pod has the same name, and the old pod reports the `ended` field
+when it stops. The operator refuses a report from a pod that its pod
+watch shows deleting, from a pod other than the one the watch shows
+standing, and from a pod it knows is gone or replaced. So the old pod's
+ending does not move the unit to `Idle`, and the new pod's ending is
+marked and labeled on its own. While the watch shows no pod for the
+run, the operator takes a report from any pod it does not know is gone,
+because the new pod can report before the watch shows it.
+
+The operator takes a report with no `pod` field as the run's, so a pod
+that runs an older sidecar image still reports. Two such pods of one
+run look the same to the operator, so the limits above do not apply to
+them.
 
 The operator folds each report into the `Play`'s Kubernetes status,
 so a program that only needs the current position can read either
@@ -97,11 +108,21 @@ report on the broker.
 
 ### `availability`
 
-`online` or `offline`, retained, the
+`online` or `offline`, a space, and the pod's UID, retained, the
 [availability](/docs/reference/bus/#availability) signal for the
-report above. The pod names this topic as its MQTT Last Will with
-`offline` as the payload, publishes `online` once it connects, and
-publishes `offline` itself when its run ends cleanly.
+report above. For example, `offline 5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90`.
+The pod names this topic as its MQTT Last Will with `offline` and its
+UID as the payload, publishes `online` and its UID once it connects,
+and publishes `offline` and its UID itself when its run ends cleanly.
+
+The broker publishes a dead pod's Last Will only when the pod's
+keepalive runs out, which can be after the run's new pod is online.
+The operator takes an availability on the same terms as a report, so
+a late `offline` from an old pod does not drop the new pod's report.
+It takes the word with no UID as the run's. An operator that has just
+started knows no pod as gone until its pod watch has read the cluster,
+so the retained `offline` of an old pod can drop the report it read.
+The new pod reports again within a second.
 
 The operator clears this topic with an empty retained payload on the
 same terms as `status`: on its finalizer, once the `Play` is deleted and

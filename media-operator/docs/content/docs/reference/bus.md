@@ -84,6 +84,11 @@ clean disconnect, the broker publishes the will, so retained state a
 dead pod left behind does not read as live. A reader that folds state
 from one of these trees reads the availability topic beside it.
 
+The playback pod adds a space and its own pod UID after the word, and
+it puts the same UID on each report. A run's new pod has the old pod's
+name, and the broker can publish the old pod's Last Will after the new
+pod is online, so the UID is how a reader tells the two pods apart.
+
 The same pattern carries the owner mark on a unit's level. The
 equipment operator names the mark's topic as its Last Will with an
 empty retained payload, so a dead session clears its own mark.
@@ -116,7 +121,7 @@ shape.
 |---|---|---|---|---|
 | `plays/{namespace}/{name}/commands` | any program | the playback pod | no | [one named command](/docs/reference/plays/#commands) |
 | `plays/{namespace}/{name}/status` | the playback pod; the operator clears it | the operator | yes | [the run's report](/docs/reference/plays/#status-1) |
-| `plays/{namespace}/{name}/availability` | the playback pod and its Last Will; the operator clears it | the operator | yes | [`online` or `offline`](/docs/reference/plays/#availability) |
+| `plays/{namespace}/{name}/availability` | the playback pod and its Last Will; the operator clears it | the operator | yes | [`online` or `offline`, and the pod's UID](/docs/reference/plays/#availability) |
 | `players/{namespace}/{name}/status` | the operator | the idle pod, or a delegate's client | yes | [the unit's name, activity, `Play`, and parts](/docs/reference/players/#status-1) |
 | `players/{namespace}/{name}/volume` | the operator, the pod that handles a press, and the equipment operator | the playback pod, the idle pod or a delegate's client, the equipment operator, and the operator | yes | [the level and the muted flag](/docs/reference/players/#volume) |
 | `players/{namespace}/{name}/volume/owner` | the equipment operator and its Last Will | the playback pod, a delegate's client, and the operator | yes | [the owner mark, or empty](/docs/reference/players/#volumeowner) |
@@ -150,8 +155,8 @@ kind it folds into a status or a decision:
 
 | Filter | What the operator does with it |
 |---|---|
-| `plays/+/+/status` | folds each report into the `Play`'s status |
-| `plays/+/+/availability` | gates a retained report on a live sidecar |
+| `plays/+/+/status` | folds each report from the run's current pod into the `Play`'s status |
+| `plays/+/+/availability` | gates a retained report on a live sidecar, from the run's current pod only |
 | `remotes/+/+/focus` | reads its own marks back after a restart, and publishes again only a mark a restarted broker lost |
 | `remotes/+/+/focus/cycle` | advances the mark to the next bound `Player` |
 | `remotes/+/+/availability` | gates the declared codes on a live pod |

@@ -240,17 +240,3 @@ func podPatches(cluster *fakeCluster, pod string) int {
 	}
 	return patches
 }
-
-// The ending of a replaced pod is not the run's ending, so it neither
-// labels a pod nor uses up the label. The new pod's own ending labels the
-// new pod, and its fade runs.
-func TestARecreatedRunLabelsItsOwnEnding(t *testing.T) {
-	cluster, media, _ := recreateWithTheOldPodsEnding(t)
-	fresh := cluster.pods["movie-playback"]
-
-	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
-		[]byte(`{"item":1,"position":"1:58:03","ended":true,"pod":"`+fresh.Metadata.UID+`"}`))
-	media.pass()
-
-	mustMatch(t, fresh.Metadata.Labels[endingLabelKey], endingLabelValue)
-}

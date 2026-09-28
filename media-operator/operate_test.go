@@ -418,7 +418,7 @@ func sortedNames[T any](objects map[string]*T) []string {
 
 func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *operator {
 	t.Helper()
-	return &operator{
+	media := &operator{
 		client:       testAPIClient(t, cluster.handler(t)),
 		view:         cluster.view(),
 		image:        "registry.example/player:test",
@@ -440,7 +440,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		receiverSessions: map[string]receiverSession{},
 		specReleased:     map[string]bool{},
 		volumes:          newVolumeDesk(),
-		endingLabeled:    map[string]bool{},
+		endingLabeled:    map[string]string{},
 		positionWrites:   map[string]time.Time{},
 		displayRestarts:  map[string]displayRestartMemo{},
 		keysPublished:    map[string]string{},
@@ -448,6 +448,8 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		replacements:     map[string]string{},
 		wake:             wake,
 	}
+	media.reports.readPodsFrom(media.view)
+	return media
 }
 
 func housePlay(uris ...string) *Play {
@@ -1661,7 +1663,7 @@ func TestStashedPositionFallsBackToTheStatusWhenTheReportIsCleared(t *testing.T)
 	play := housePlay("https://nas/film.mkv")
 	play.Status.Position = "0:41:00"
 
-	media.reports.availability("house", "movie", false)
+	media.reports.availability("house", "movie", false, "")
 
 	if got := media.reports.latestFor("house", "movie"); got != nil {
 		t.Fatalf("the desk still holds a report: %+v", *got)

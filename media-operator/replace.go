@@ -23,12 +23,12 @@ import "errors"
 //
 // The report desk learns the old pod's UID before the delete goes out, so
 // the ending its sidecar reports on the SIGTERM is not read as the Play's.
-// report.go says what that ending would do.
+// runpod.go says what that ending would do.
 func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason string) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	o.reports.replacing(namespace, name, running.Metadata.UID)
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
-		o.reports.keeping(namespace, name)
+		o.reports.keeping(namespace, name, running.Metadata.UID)
 		return nil, err
 	}
 	if claimChanged {

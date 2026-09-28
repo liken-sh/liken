@@ -291,36 +291,85 @@ the memo that labels each run once then kept the label off the new pod,
 so the new pod's own ending did not fade.
 
 The name does not tell the two pods apart, because the new pod reuses
-it. The UID does. The command sidecar now reads its pod's UID from the
-downward API (`MEDIA_POD_UID`, from `metadata.uid`) and stamps it on
-every report as `pod`. `replace` gives the report desk the old pod's
-UID before it sends the delete, and the desk drops every report from
-that pod: it marks nothing, wakes nothing, and answers no ending. A
-delete that fails takes the record back, because the pod still runs as
-the run's pod. A
-report with no UID comes from a sidecar that predates the field, and
-the desk takes it as the run's, so a pod that runs an older sidecar
-image after an upgrade still ends its run.
+it. The UID does. The command sidecar reads its pod's UID from the
+downward API (`MEDIA_POD_UID`, from `metadata.uid`). It stamps the UID
+on every report as `pod`, and it adds it after the word on the
+availability topic: `online <uid>`, `offline <uid>`, and the same in its
+Last Will.
 
-Two endings still move a unit to `Idle` and back. When mpv exits
-non-zero, the sidecar reports the ending before the operator reads the
-failed pod, and the run is interrupted on the screen. When something
-other than this operator deletes the pod, such as an eviction, the
-operator did not replace the pod, and it takes the ending as the run's.
-In both cases the old pod's ending also uses up the run's ending label,
-so the new pod's own ending gets no label and its fade does not run.
-These cases stay open.
+The report desk takes a report or an availability only from the run's
+current pod (`runpod.go`). The pod store names that pod: a standing pod
+with the message's UID counts as the run's, and a deleting pod does not.
+The store can be a moment behind, so the desk also keeps, per run, the
+UIDs of the pods it knows are gone:
+
+* `replace` gives the desk the old pod's UID before it sends the
+  delete, because the delete is what sends the `SIGTERM`. A delete that
+  fails takes the record back, because the pod still runs as the run's
+  pod.
+* Each pass reads each run's pod from the store before it reads the
+  ending marks. A deleting pod is gone. A pod the store held on an
+  earlier pass is gone once the store holds another pod or none.
+
+With no pod in the store, a UID the desk does not know counts as the
+run's, because the new pod can report before the store holds it. A
+message with no UID counts as the run's, so a pod that runs an older
+sidecar image during a rollout still reports and ends its run.
+
+The ending mark holds the UID of the pod that reported it, and it
+counts only while that pod counts as the run's. So the ending of a pod
+that crashed, or that something else deleted, stops counting once the
+run moves on, and the unit reads `Starting` for the new pod. The
+ending label's memo holds the same UID, so the new pod's own ending is
+labeled. A merge patch names a pod by its name alone, and a UID in the
+patch is not a precondition (the API server answers 422, because the
+field is immutable). So the pass reads the pod from the API server
+before it patches, and labels it only when the UID matches. Only the
+pass creates a playback pod, so no new pod takes the name between the
+read and the patch.
+
+The three ways a pod stops while its `Play` goes on:
+
+| What stops the pod | The unit reads |
+|---|---|
+| A recreate after a `Player` edit | `Starting`, `Playing` |
+| An eviction, or any delete this operator did not send | `Starting`, `Playing` |
+| An mpv crash | `Idle`, `Starting`, `Playing` |
+
+The crash still reads `Idle`. The sidecar reports the ending when mpv
+closes its socket, while the pod still runs and is the run's pod, and
+the film has stopped on the screen. The operator cannot tell that from
+the end of the last item until the pod reads `Failed`. After that, the
+run resumes in a new pod, and the old mark stops counting.
+
+Two limits stay. Two pods of one run that both run an older sidecar
+image send no UID, and the operator cannot tell them apart, so during
+that rollout a crash or an eviction reads as before. An operator that
+has just started knows no pod as gone until its pod watch has read the
+cluster, and the bus reader starts before the watches. A retained
+`offline` from an old pod can then drop the report the operator read,
+until the new pod's next report, a second later.
+
+An eviction reads `Idle` for a moment in one case: when the old pod's
+ending reaches the bus reader before the pod watch delivers the
+deletion mark. The pass that the watch wakes then reads the pod as gone
+and publishes `Starting`.
 
 | What | Test |
 |---|---|
-| A recreate reads `Starting`, then `Playing` | `TestARecreatePublishesStartingThenPlaying` |
-| The new pod's own ending labels the new pod | `TestARecreatedRunLabelsItsOwnEnding` |
+| The unit moves forward only, for each of the three | `TestAnInterruptedRunMovesItsUnitForwardOnly` |
+| The new pod's own ending labels the new pod, for each of the three | `TestAnInterruptedRunLabelsTheNewPodsEnding` |
+| A late `offline` from a dead pod leaves the new pod's report | `TestALateOfflineFromADeadPodLeavesTheNewPodsReport` |
+| A message counts only from the run's pod, for each store state | `TestAMessageCountsOnlyFromTheRunsPod`, `TestAMessageCountsBeforeTheStoreIsRead`, `TestAPodTheStoreNoLongerHoldsIsGone`, `TestTheRecordOfAPlayThatIsGoneGoes` |
 | A pod whose delete failed still ends its run | `TestAPodWhoseDeleteFailedStillEndsTheRun` |
 | Every report, the ending included, names its pod | `TestEveryReportNamesThePodThatSentIt` |
+| The availability and the Last Will name the pod | `TestTheAvailabilityNamesThePodThatSentIt` |
 | The command sidecar reads its UID from the downward API | `TestBuildPodRunsOneCommandSidecar` |
 
-The first two fail without the fix. The first reads `Starting`,
-`Idle`, `Starting`, `Playing`.
+Without the fix, the recreate and the eviction read `Idle` between
+`Starting` and `Playing`, the crash and the eviction leave the new
+pod's ending unlabeled, and the late `offline` drops the new pod's
+report in all three.
 
 ## The drill still owed
 

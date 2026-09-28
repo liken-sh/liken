@@ -109,17 +109,41 @@ func findPlayer(players []Player, namespace, name string) *Player {
 // still draws. The ending report is what wakes that pass, so the label
 // lands within milliseconds of the film's last frame.
 //
-// A patch for a pod that has already gone answers ErrNotFound. That
-// run's fade is over or never started, so the memo records it as done.
-// A patch that fails for any other reason is reported and tried again
-// on the next pass.
+// The memo holds the UID of the pod that reported the ending it
+// labeled, so the ending of a new pod under the same name is labeled on
+// its own. A merge patch names the pod by its name alone, and a new pod
+// can hold the name before the pod store shows it, so for an ending that
+// names its pod the pass reads the pod from the API server first and
+// labels it only when the UID matches. Only the pass creates a playback
+// pod, and the pass is where this runs, so no new pod can take the name
+// between the read and the patch. A pod that has gone, or whose name
+// another pod holds, is nothing to label: that pod's fade is over or
+// never started, so the memo records it as done. A read or a patch that
+// fails for any other reason is reported and tried again on the next
+// pass.
 func (o *operator) labelEnding(play *Play) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	key := runKey(namespace, name)
-	if o.endingLabeled[key] || !o.reports.endedFor(namespace, name) {
+	uid, ended := o.reports.endedBy(namespace, name)
+	if !ended {
+		return
+	}
+	if labeled, done := o.endingLabeled[key]; done && labeled == uid {
 		return
 	}
 	pod := podName(name)
+	if uid != "" {
+		held, err := GetPod(o.client, namespace, pod)
+		switch {
+		case errors.Is(err, ErrNotFound) || (err == nil && held.Metadata.UID != uid):
+			o.endingLabeled[key] = uid
+			return
+		case err != nil:
+			fmt.Fprintf(os.Stderr, "reading pod %s/%s to label its ending: %v\n",
+				namespace, pod, err)
+			return
+		}
+	}
 	err := PatchPodLabels(o.client, namespace, pod,
 		map[string]string{endingLabelKey: endingLabelValue})
 	if err != nil && !errors.Is(err, ErrNotFound) {
@@ -127,5 +151,5 @@ func (o *operator) labelEnding(play *Play) {
 			namespace, pod, err)
 		return
 	}
-	o.endingLabeled[key] = true
+	o.endingLabeled[key] = uid
 }

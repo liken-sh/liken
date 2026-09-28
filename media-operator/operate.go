@@ -237,12 +237,13 @@ type operator struct {
 	// catch-up that has not started. Only the pass goroutine touches it.
 	catchUpEnds time.Time
 
-	// endingLabeled names the runs whose playback pod already carries the
-	// ending label, so one run patches its pod once and not once a pass.
-	// The pass drops a run the collection no longer holds, so a Play
-	// created later under the same name is labeled on its own ending. Only
-	// the pass goroutine touches it.
-	endingLabeled map[string]bool
+	// endingLabeled holds, per run, the UID of the pod whose ending the
+	// pass labeled, so each pod is patched once and not once a pass, and
+	// a new pod of the same run is labeled on its own ending. The pass
+	// drops a run the collection no longer holds, so a Play created later
+	// under the same name is labeled on its own ending too. Only the pass
+	// goroutine touches it.
+	endingLabeled map[string]string
 
 	// positionWrites stamps when each run last wrote its position, so a
 	// bare position advance writes no more than once per
@@ -395,7 +396,7 @@ func operate() {
 		receiverSessions: map[string]receiverSession{},
 		specReleased:     map[string]bool{},
 		volumes:          newVolumeDesk(),
-		endingLabeled:    map[string]bool{},
+		endingLabeled:    map[string]string{},
 		positionWrites:   map[string]time.Time{},
 		displayRestarts:  map[string]displayRestartMemo{},
 		keysPublished:    map[string]string{},
@@ -482,6 +483,7 @@ func operate() {
 		leader.stepDown(quiet)
 		os.Exit(1)
 	}
+	media.reports.readPodsFrom(media.view)
 	plays, _ := media.view.Plays(media.client)
 	remotes, _ := media.view.Remotes()
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
@@ -519,6 +521,19 @@ func (o *operator) pass() {
 		return
 	}
 	o.snapshot.recordPlays(plays)
+	// The desk learns each run's pod from the store before the endings
+	// below read their marks, so the mark of a pod that is gone no longer
+	// counts. runpod.go says why.
+	for index := range plays {
+		namespace, name := plays[index].Metadata.Namespace, plays[index].Metadata.Name
+		pod, err := o.view.Pod(namespace, podName(name))
+		switch {
+		case errors.Is(err, ErrNotFound):
+			o.reports.observe(namespace, name, nil)
+		case err == nil:
+			o.reports.observe(namespace, name, pod)
+		}
+	}
 	// The endings are marked before anything else the pass does. The
 	// sidecar holds mpv alive for a short grace after its ending report,
 	// and the label is what the compositor fades the surface on, so the
@@ -714,7 +729,8 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 				o.answerEnding(namespace, name)
 			}
 		case playAvailabilityKind:
-			o.reports.availability(namespace, name, string(payload) == availabilityOnline)
+			online, pod := parsePlayAvailability(payload)
+			o.reports.availability(namespace, name, online, pod)
 		}
 		return
 	}
