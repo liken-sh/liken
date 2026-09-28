@@ -32,6 +32,8 @@ Each top-level directory is one component, named for what it ships:
   directory that stays on the node it runs on.
 - [`brand/`](brand/) holds the mark, the stylesheet, the Hugo theme,
   the voice rules, and the tools that build the sites.
+- [`kubernetes/`](kubernetes/) is the Go module that the operators
+  import to read, write, and watch Kubernetes objects.
 
 Each component has its own `README.md`, `AGENTS.md`, and `Makefile`.
 [`liken.sh/`](liken.sh/) declares the project's public presence in

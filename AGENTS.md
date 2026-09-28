@@ -4,7 +4,9 @@ The `liken` project is one system, and this repository holds all of
 it. Each top-level directory is one component, named for what it
 ships. `liken/` is the OS. The operators claim a machine's hardware
 and serve its interfaces. The CSI drivers attach storage, and `brand/`
-holds the theme, the voice rules, and the site tools. `ci/` reads each
+holds the theme, the voice rules, and the site tools. `kubernetes/`
+is the Go module that the operators import to read, write, and watch
+Kubernetes objects. `ci/` reads each
 component's `package.toml` and writes the CI workflows. `liken.sh/`
 declares the domain, the release channel, and the organization's
 repositories in Terraform. `plans/` holds the plans that cover more

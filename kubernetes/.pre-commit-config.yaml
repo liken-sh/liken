@@ -1,0 +1,28 @@
+# These checks run before every commit, through prek. The gate is the
+# same `make` target CI runs, so a commit that passes here passes there.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+  - repo: local
+    hooks:
+      - id: go-mod-tidy
+        name: go mod tidy
+        # -diff reports what a tidy would change, without changing it,
+        # so a stale go.mod fails the commit instead of changing under
+        # it.
+        entry: bash -c 'go mod tidy -diff'
+        language: system
+        files: \.go$|^go\.(mod|sum)$
+        pass_filenames: false
+      - id: test-go
+        name: go checks and coverage gate
+        entry: make test
+        language: system
+        files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$|^Makefile$
+        pass_filenames: false

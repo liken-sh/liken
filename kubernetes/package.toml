@@ -1,0 +1,12 @@
+# The client, the watch, and the cache that the operators import.
+[package]
+name = "kubernetes"
+license = "MIT"
+
+# gofmt, vet, the race tests, and the coverage gate on its pinned
+# toolchain. The Makefile says why the gate pins a toolchain, and
+# .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test"

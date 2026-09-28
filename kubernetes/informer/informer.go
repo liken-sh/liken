@@ -1,0 +1,205 @@
+// Package informer keeps an operator's copy of a Kubernetes collection
+// current, and answers a pass's reads from that copy.
+//
+// The API server sends each change to a collection as it happens, on a
+// watch, and a watch with no change to send costs nothing. client-go's
+// reflector runs each watch. It reads the whole collection first, as a
+// streaming list or as a plain list, and then watches from the version
+// that read returned, so it receives every change made after the read.
+// It resumes a watch that the API server closed from the last version
+// it delivered, reads the collection again after a 410 Gone, and backs
+// off while the API server fails. Upstream maintains and tests that
+// loop, so no operator keeps one of its own.
+//
+// The package imports only three parts of client-go: the reflector and
+// the informer in tools/cache, the dynamic client that lists and
+// watches any kind with no generated code, and rest for the in-cluster
+// configuration. The typed clientset and the informer factories link a
+// client and an informer for every built-in kind, which doubles the
+// size of a binary. The apiclient package sends every write, and every
+// read that the copy does not answer (cache.go).
+package informer
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
+)
+
+// InCluster builds the dynamic client for the watches from the pod's
+// ServiceAccount, the same credentials apiclient.InCluster reads.
+func InCluster() (dynamic.Interface, error) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+	return dynamic.NewForConfig(config)
+}
+
+// Source names one collection and the part of it to watch. A watch
+// covers only the objects the operator reads, so the API server filters
+// the rest and never sends them. An empty Namespace watches a
+// cluster-scoped kind, or every namespace of a namespaced kind.
+type Source struct {
+	Resource      schema.GroupVersionResource
+	Namespace     string
+	LabelSelector string
+	FieldSelector string
+}
+
+// String names the source in a log line.
+func (s Source) String() string {
+	name := s.Resource.Resource
+	if s.Namespace != "" {
+		name = s.Namespace + "/" + name
+	}
+	if s.FieldSelector != "" {
+		name += " (" + s.FieldSelector + ")"
+	}
+	if s.LabelSelector != "" {
+		name += " [" + s.LabelSelector + "]"
+	}
+	return name
+}
+
+// Options are the optional parts of a watch.
+type Options struct {
+	// Handler receives each change after the copy holds it. A nil
+	// Handler receives nothing, for a watch that only keeps a copy for
+	// the pass to read.
+	Handler cache.ResourceEventHandler
+
+	// Synced runs once, after the first read of the collection is in
+	// the copy and the handler has taken each object of it. A pass that
+	// started before then read the API server, and an edit made between
+	// that read and the watch's first read is in no event. A wake here
+	// makes the pass read again.
+	Synced func()
+
+	// Reopened runs each time the API server accepts a watch after the
+	// first one it accepted. The API server ends a watch on its own
+	// schedule, so a low rate is normal, and a high rate says the stream
+	// breaks faster than the watch can use it. A refused watch opened
+	// nothing, so it does not count.
+	Reopened func()
+}
+
+// Collection is the copy of one watched collection.
+//
+// A nil *Collection is valid and never syncs. Its View answers nothing,
+// and each read goes to the API server.
+type Collection struct {
+	store      cache.Store
+	controller cache.Controller
+	done       chan struct{}
+
+	// watching is true while the API server accepted the last watch the
+	// reflector opened. Synced says why it matters.
+	watching atomic.Bool
+}
+
+// Start opens the watch and returns at once. The watch runs until the
+// context ends. Done closes after the informer has stopped and the last
+// handler call and the Synced call have returned, so a caller that
+// closes a channel after Done never sends on a closed channel.
+func Start(ctx context.Context, client dynamic.Interface, source Source, options Options) *Collection {
+	var collection dynamic.ResourceInterface = client.Resource(source.Resource)
+	if source.Namespace != "" {
+		collection = client.Resource(source.Resource).Namespace(source.Namespace)
+	}
+	c := &Collection{done: make(chan struct{})}
+	scope := func(list *metav1.ListOptions) {
+		list.LabelSelector = source.LabelSelector
+		list.FieldSelector = source.FieldSelector
+	}
+	var opened atomic.Int64
+	lister := &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, list metav1.ListOptions) (runtime.Object, error) {
+			scope(&list)
+			return collection.List(ctx, list)
+		},
+		WatchFuncWithContext: func(ctx context.Context, list metav1.ListOptions) (watch.Interface, error) {
+			scope(&list)
+			stream, err := collection.Watch(ctx, list)
+			c.watching.Store(err == nil)
+			// The first accepted watch is the streaming list of the first
+			// read, or the watch after a plain list.
+			if err == nil && opened.Add(1) > 1 && options.Reopened != nil {
+				options.Reopened()
+			}
+			return stream, err
+		},
+	}
+	handler := options.Handler
+	if handler == nil {
+		handler = cache.ResourceEventHandlerFuncs{}
+	}
+	c.store, c.controller = cache.NewInformerWithOptions(cache.InformerOptions{
+		ListerWatcher: lister,
+		ObjectType:    &unstructured.Unstructured{},
+		Handler:       handler,
+		Transform:     dropManagedFields,
+	})
+	go func() {
+		defer close(c.done)
+		var group sync.WaitGroup
+		if options.Synced != nil {
+			group.Go(func() {
+				select {
+				case <-c.controller.HasSyncedChecker().Done():
+					options.Synced()
+				case <-ctx.Done():
+				}
+			})
+		}
+		c.controller.RunWithContext(ctx)
+		group.Wait()
+	}()
+	return c
+}
+
+// Done closes when the watch has stopped.
+func (c *Collection) Done() <-chan struct{} { return c.done }
+
+// Synced answers whether the copy holds the whole collection and the
+// watch keeps it current. Until the first read is done, a read of the
+// copy could miss an object that exists.
+//
+// A copy whose watch the API server refuses is not current, even after
+// a list. The case is a release skew: a new binary under the previous
+// release's RBAC, which grants list and not watch. The reflector then
+// lists the collection again after each backoff, up to thirty seconds
+// apart, and in between the copy holds no change at all. So the copy
+// answers only while the API server accepted the last watch the
+// reflector opened, and otherwise the pass reads the API server.
+func (c *Collection) Synced() bool {
+	return c != nil && c.controller.HasSynced() && c.watching.Load()
+}
+
+// View answers the copy for a pass to read (cache.go).
+func (c *Collection) View() View {
+	if c == nil {
+		return View{}
+	}
+	return View{Store: c.store, Synced: c.Synced}
+}
+
+// dropManagedFields removes metadata.managedFields from each object
+// before the informer stores it. The field records which client set
+// each field of the object. No operator reads it, and without the
+// transform the copy holds it for every object.
+func dropManagedFields(object any) (any, error) {
+	if item, ok := object.(*unstructured.Unstructured); ok {
+		item.SetManagedFields(nil)
+	}
+	return object, nil
+}
