@@ -15,9 +15,13 @@ var version = "dev"
 // cannot derive, so the Deployment states it and this program reads
 // it here.
 const (
-	// POD_NAMESPACE is the namespace the Deployment runs in. Nothing reads
-	// it until the Service front lands.
+	// POD_NAMESPACE is the namespace the Deployment runs in, which holds
+	// the Lease its copies compete for (leader.go).
 	podNamespaceVariable = "POD_NAMESPACE"
+
+	// POD_NAME is the pod's own name, the start of the identity the
+	// operator holds the Lease under.
+	podNameVariable = "POD_NAME"
 
 	// EQUIPMENT_BUS_ADDRESS is the broker a session's volume topic is read
 	// from, as host:port.
@@ -33,6 +37,7 @@ const (
 // settings is the whole of the operator's configuration.
 type settings struct {
 	namespace      string
+	pod            string
 	busAddress     string
 	metricsAddress string
 }
@@ -43,14 +48,24 @@ type settings struct {
 func readSettings() settings {
 	return settings{
 		namespace:      os.Getenv(podNamespaceVariable),
+		pod:            os.Getenv(podNameVariable),
 		busAddress:     os.Getenv(busAddressVariable),
 		metricsAddress: os.Getenv(metricsAddressVariable),
 	}
 }
 
+// The image holds two builds of this program, so the two halves stay
+// at one version. operatorBinary is the full build, which the
+// Deployment runs. nodeBinary is the build with the tag node, which
+// the cec DaemonSet runs with the argument cec. It leaves out the
+// leader election that only the Deployment needs (leader_node.go).
+const (
+	operatorBinary = "/equipment-operator"
+	nodeBinary     = "/equipment-operator-node"
+)
+
 // main runs the Deployment's operator, or with the argument cec, the
-// node workload that holds one CEC adapter. One binary in one image
-// keeps the two halves at one version.
+// node workload that holds one CEC adapter.
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "cec" {
 		runCEC()

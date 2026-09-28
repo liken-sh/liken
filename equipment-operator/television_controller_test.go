@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/wiim"
 )
 
 // scannedBus is a bus in Control whose adapter on node-1 reported a
@@ -196,23 +198,73 @@ func TestTheDeploymentLoopFollowsADisplaysAddress(t *testing.T) {
 	})
 }
 
+// runServe runs the whole Deployment against the fake until the test
+// ends, with no search for devices. Its Receiver loop and its CECBus
+// loop share one Receiver watch.
+func runServe(t *testing.T, api *cecAPI) {
+	t.Helper()
+	restore := discover
+	discover = func(context.Context, time.Duration) []wiim.Device { return nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = serve(ctx, api.client, "127.0.0.1:1", testMetrics(t))
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		discover = restore
+	})
+}
+
 // A Receiver whose spec starts to name a Display's machine appears as
 // the Display's path at once, because the loop watches the Receivers'
-// specs.
+// specs: through a watch of its own when it runs alone, and through
+// the Receiver loop's watch in the Deployment. The edit wakes no other
+// watch, so the test fails if the loop waits for its clock.
 func TestTheDeploymentLoopFollowsAReceiversSpec(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, *cecAPI)
+	}{
+		{"the CECBus loop alone", runDeploymentLoop},
+		{"the whole Deployment", runServe},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := startCECAPI(t)
+			api.putBus(scannedBus("den", tvDevice, receiverDevice))
+			api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+			api.putReceiver(wiredReceiver("den", "node-2", "acm-0001-receiver"))
+			api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+			c.run(t, api)
+			api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
+
+			api.editReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
+
+			api.waitForTelevision(t, "lounge", func(television Television) bool {
+				return len(television.Status.Displays) == 1 && television.Status.Displays[0].Via != nil
+			})
+		})
+	}
+}
+
+// The Deployment's Receiver loop and CECBus loop share one watch of the
+// Receivers, so the process holds each Receiver once.
+func TestTheDeploymentWatchesTheReceiversOnce(t *testing.T) {
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice, receiverDevice))
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putReceiver(wiredReceiver("den", "node-2", "acm-0001-receiver"))
+	api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
 	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	runDeploymentLoop(t, api)
+	runServe(t, api)
 	api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
+	time.Sleep(watchQuiet)
 
-	api.editReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
-
-	api.waitForTelevision(t, "lounge", func(television Television) bool {
-		return len(television.Status.Displays) == 1 && television.Status.Displays[0].Via != nil
-	})
+	api.mutex.Lock()
+	defer api.mutex.Unlock()
+	mustMatch(t, api.watches[receiversPath], 1)
 }
 
 // A read that fails skips the Television pass, because a status

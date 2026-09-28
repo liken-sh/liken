@@ -158,7 +158,7 @@ func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 		watch      watchFunc
 	}{
 		{"the Receivers", receiversPath, equipmentAPIVersion, "Receiver", func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), held *watchStore) {
-			watchReceivers(ctx, client, wake, testMetrics(t), held)
+			watchReceivers(ctx, client, wake, nil, testMetrics(t), held)
 		}},
 		{"the Receivers' specs", receiversPath, equipmentAPIVersion, "Receiver", watchReceiverSpecs},
 		{"the CECBuses", cecBusesPath, equipmentAPIVersion, "CECBus", watchCECBuses},
@@ -178,9 +178,19 @@ func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 	}
 }
 
+// sharedSpecWake runs the Deployment's shared Receiver watch, and
+// answers its wake of the CECBus loop as the watch's wake.
+func sharedSpecWake(t *testing.T) watchFunc {
+	return func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), held *watchStore) {
+		watchReceivers(ctx, client, make(chan struct{}, 1), wake, testMetrics(t), held)
+	}
+}
+
 // Through the reflector: a watch that reads only a Receiver's spec
 // wakes the loop for a spec edit and not for a status write, and a
-// watch that reads the whole Receiver wakes it for both.
+// watch that reads the whole Receiver wakes it for both. The
+// Deployment's shared watch wakes the CECBus loop as the spec watch
+// does.
 func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -191,8 +201,10 @@ func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 		{"a status write, to the spec watch", receiverAt("uid-1", 1, "192.0.2.10"), watchReceiverSpecs, false},
 		{"a spec edit, to the spec watch", receiverAt("uid-1", 2, ""), watchReceiverSpecs, true},
 		{"a status write, to the Receiver loop's watch", receiverAt("uid-1", 1, "192.0.2.10"), func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), held *watchStore) {
-			watchReceivers(ctx, client, wake, testMetrics(t), held)
+			watchReceivers(ctx, client, wake, nil, testMetrics(t), held)
 		}, true},
+		{"a status write, to the shared watch's CECBus wake", receiverAt("uid-1", 1, "192.0.2.10"), sharedSpecWake(t), false},
+		{"a spec edit, to the shared watch's CECBus wake", receiverAt("uid-1", 2, ""), sharedSpecWake(t), true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -71,8 +71,9 @@ type cecAPI struct {
 	// field manager.
 	entryWrites map[string]int
 	// reads counts each GET that is not a watch, a list or a read of
-	// one object, by path.
-	reads map[string]int
+	// one object, by path, and watches counts the watches by path.
+	reads   map[string]int
+	watches map[string]int
 }
 
 // refuse turns the refusals on or off.
@@ -296,6 +297,10 @@ func (a *cecAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	watcher := &fakeWatcher{path: r.URL.Path, events: make(chan string, 1024)}
 	a.mutex.Lock()
+	if a.watches == nil {
+		a.watches = map[string]int{}
+	}
+	a.watches[r.URL.Path]++
 	var opening []string
 	switch {
 	case query.Get("sendInitialEvents") == "true":

@@ -48,6 +48,9 @@ var statusDebounce = 250 * time.Millisecond
 // status writer, the settings and zones it drives, and the session that
 // holds the level.
 type receiverUnit struct {
+	// ctx is the unit's own context. Each goroutine the unit starts runs
+	// under it, and is counted in the group it carries (work.go).
+	ctx           context.Context
 	name          string
 	address       string
 	settingsTopic string
@@ -635,7 +638,7 @@ func (u *receiverUnit) startBus(ctx context.Context) {
 	if u.commandsTopic != "" {
 		bus.Subscribe(u.commandsTopic)
 	}
-	go bus.Run(ctx)
+	goWork(ctx, func() { bus.Run(ctx) })
 }
 
 // busMessage routes one message off the unit's own bus. Each handler
@@ -647,9 +650,9 @@ func (u *receiverUnit) startBus(ctx context.Context) {
 func (u *receiverUnit) busMessage(topic string, payload []byte) {
 	switch topic {
 	case u.settingsTopic:
-		go u.handleSettings(payload)
+		goWork(u.ctx, func() { u.handleSettings(payload) })
 	case u.commandsTopic:
-		go u.handleCommand(payload)
+		goWork(u.ctx, func() { u.handleCommand(payload) })
 	}
 }
 
@@ -861,6 +864,9 @@ type controller struct {
 	// live says the first pass has ended. A session the first pass finds
 	// was there when the operator started, and it adopts its flags.
 	live bool
+	// stopped says that at the end of run, every goroutine that a unit or
+	// a session started, and discovery, had stopped (work.go).
+	stopped bool
 	// log takes the lines a person reads to follow the receivers, the
 	// way the node workload's log does for its adapter.
 	log io.Writer
@@ -1022,6 +1028,7 @@ func protocolAddress(spec *ReceiverSpec) string {
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
+		ctx:           ctx,
 		name:          receiver.Metadata.Name,
 		address:       c.resolvedAddress(&receiver.Spec),
 		settingsTopic: receiver.Spec.SettingsTopic,
@@ -1043,8 +1050,8 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
-	go unit.driver.Run(ctx)
-	go unit.report(ctx)
+	goWork(ctx, func() { unit.driver.Run(ctx) })
+	goWork(ctx, func() { unit.report(ctx) })
 	unit.startBus(ctx)
 	// The first write says the operator holds the receiver and has not
 	// reached it yet, before any line arrives.
@@ -1074,7 +1081,13 @@ func (u *receiverUnit) startDriver(receiver *Receiver, address string, report fu
 // run reconciles once before any event arrives, then on every wake and
 // every tick of backstopInterval, until ctx ends.
 func (c *controller) run(ctx context.Context) {
-	go c.discovery.run(ctx)
+	// Discovery and every goroutine a unit or a session starts are
+	// counted, and run waits for them after it stops every unit, because
+	// each one can write, and the Deployment releases its Lease after
+	// run returns (work.go).
+	var working sync.WaitGroup
+	ctx = withWork(ctx, &working)
+	goWork(ctx, func() { c.discovery.run(ctx) })
 	ticker := time.NewTicker(backstopInterval)
 	defer ticker.Stop()
 	for {
@@ -1084,6 +1097,7 @@ func (c *controller) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			c.stopAll()
+			c.stopped = awaitWork(&working, workStopWait)
 			return
 		case <-c.wake:
 		case <-ticker.C:
@@ -1121,10 +1135,10 @@ func drainPokes(wake <-chan struct{}) {
 	}
 }
 
-// operate reads the configuration and hands it to serve. Every failure
-// here ends the process, because the kubelet restarts the pod with
-// backoff and the failure shows in kubectl instead of hiding in a retry
-// loop.
+// operate reads the configuration, waits for the Lease, and then hands
+// it to operateAsLeader. Every failure here ends the process, because
+// the kubelet restarts the pod with backoff and the failure shows in
+// kubectl instead of hiding in a retry loop.
 func operate() {
 	config := readSettings()
 	if config.busAddress == "" {
@@ -1139,23 +1153,34 @@ func operate() {
 	}
 
 	// The kubelet stops a pod with SIGTERM. The context ends on it, so
-	// the loop stops every receiver's unit before the process exits.
+	// the loop stops every receiver's unit, and then the operator
+	// releases its Lease, before the process exits. A signal that
+	// arrives while the copy waits for the Lease ends the wait.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
-	readings := newMetrics(version)
-	if _, err := readings.Serve(ctx, config.metricsAddress); err != nil {
-		fmt.Fprintf(os.Stderr, "metrics listener: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := serve(ctx, client, config.busAddress, readings); err != nil {
+	_, err = lead(client, config).actWhileLeading(ctx, func() error {
+		return operateAsLeader(ctx, client, config)
+	})
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
+// operateAsLeader is everything the Deployment's operator does once it
+// holds the Lease: it binds the metrics listener and runs serve. It
+// returns when ctx ends, after every part that writes has stopped.
+func operateAsLeader(ctx context.Context, client *Client, config settings) error {
+	readings := newMetrics(version)
+	if _, err := readings.Serve(ctx, config.metricsAddress); err != nil {
+		return fmt.Errorf("metrics listener: %w", err)
+	}
+	return serve(ctx, client, config.busAddress, readings)
+}
+
 // serve proves the collection can be read, starts the watch, and runs
-// the loop until ctx ends.
+// the loop until ctx ends. It answers errStillWriting when a goroutine
+// that can write did not stop in time (work.go).
 func serve(ctx context.Context, client *Client, busAddress string, readings *metrics) error {
 	err := retryThrottled(ctx, func() error {
 		_, err := ListReceivers(client)
@@ -1169,9 +1194,14 @@ func serve(ctx context.Context, client *Client, busAddress string, readings *met
 	// of them reads the API after it.
 	operator := newController(client, busAddress, readings)
 	var started sync.WaitGroup
-	started.Go(func() { watchReceivers(ctx, client, operator.wake, readings, nil) })
-	started.Go(func() { newCECBusController(client).run(ctx, readings) })
+	buses := newCECBusController(client)
+	buses.sharedReceivers = true
+	started.Go(func() { watchReceivers(ctx, client, operator.wake, buses.wake, readings, buses.receivers) })
+	started.Go(func() { buses.run(ctx, readings) })
 	operator.run(ctx)
 	started.Wait()
+	if !operator.stopped {
+		return errStillWriting
+	}
 	return nil
 }

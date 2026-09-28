@@ -1,6 +1,6 @@
 package main
 
-// The node workload, `equipment-operator cec`: one pod on each machine
+// The node workload, `equipment-operator-node cec`: one pod on each machine
 // that carries a CEC adapter. The pod holds the DRA claim on the
 // adapter's -cec device, finds the CECBus that names its machine, runs
 // the adapter in the bus's mode, and writes its own entry under that

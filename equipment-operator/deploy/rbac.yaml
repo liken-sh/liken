@@ -81,6 +81,40 @@ subjects:
     name: equipment-operator
     namespace: liken-system
 ---
+# The Lease that elects the one copy of the Deployment's operator that
+# acts (leader.go). client-go's election reads the Lease with a get,
+# takes and renews it with an update, and releases it with an update. A
+# namespaced Role, because the Lease is in the operator's own namespace
+# and every kubelet's heartbeat is a Lease in kube-node-lease that this
+# operator has no reason to read.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: equipment-operator-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [equipment-operator]
+    verbs: [get, update]
+  # create carries no resourceNames, because RBAC cannot read a name off
+  # a create. The first copy to start creates the Lease.
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: equipment-operator-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: equipment-operator-lease
+subjects:
+  - kind: ServiceAccount
+    name: equipment-operator
+    namespace: liken-system
+---
 # The CEC node workload's identity, apart from the Deployment's, so the
 # pod on an adapter's machine can reach only the CECBus and Television
 # objects and the Displays it reads.

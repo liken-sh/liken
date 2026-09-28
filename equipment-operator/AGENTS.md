@@ -29,16 +29,23 @@ answers by itself, and how to run the tests against the kernel's
 `vivid` driver. The first adapter is the Pulse-Eight USB-CEC adapter
 ([product page](https://www.pulse-eight.com/p/104/usb-hdmi-cec-adapter)).
 
-A CEC adapter is attached to one node, so the binary has a second
-mode, `equipment-operator cec`, which `deploy/cec.yaml` runs as a
-`DaemonSet` from the same image. Its pod claims the adapter's `-cec`
-device, runs the adapter in its `CECBus`'s mode, and writes its own
-entry under that `CECBus`'s `status.adapters`. The `Deployment`
+A CEC adapter is attached to one node, so the program has a second
+mode, `cec`, which `deploy/cec.yaml` runs as a `DaemonSet` from the
+same image. The `DaemonSet`'s pod claims the adapter's `-cec` device,
+runs the adapter in its `CECBus`'s mode, and writes its own entry
+under that `CECBus`'s `status.adapters`. The `Deployment`
 derives `status.devices` and the conditions from those entries. The
 node workload's own files are `cecnode*.go`, and the `Deployment`'s
 own files are `cecbus_derive.go` and `cecbus_controller.go`. Both
 workloads use the `CECBus` types in `cecbus.go` and the API calls in
 `cecbus_client.go`.
+
+The image holds two builds of the program. The `Deployment` runs
+`/equipment-operator`, which holds the leader election in `leader.go`.
+The `DaemonSet` runs `/equipment-operator-node`, built with the tag
+`node`, which leaves the election and client-go's typed clientset out
+(`leader_node.go`). `make test` vets both builds, and fails when the
+node build links the election or the typed clientset.
 
 A `Television` is the TV of one `CECBus`. The `Deployment` derives
 its status from the bus, the `Display` objects, and the `Receiver`

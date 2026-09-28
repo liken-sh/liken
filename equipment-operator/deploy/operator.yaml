@@ -15,13 +15,24 @@ kind: Deployment
 metadata:
   name: equipment-operator
 spec:
+  # One replica acts at a time, because each copy takes the Lease
+  # equipment-operator before it does anything (leader.go). A copy
+  # that waits binds no port, searches for no device, and opens no
+  # receiver session. So replicas: 2 is safe: the pod uses the host
+  # network, the API server gives a host-network pod a hostPort for each
+  # port it declares, and the scheduler places no two pods with the
+  # same hostPort on one node. The second copy runs on another node and
+  # waits there, or stays Pending on a one-node cluster.
   replicas: 1
   selector:
     matchLabels:
       app: equipment-operator
-  # Recreate, so two copies never reconcile at once. Two operators
-  # would agree on every derived status, but each write they raced
-  # would surface as a conflict for one of them to report.
+  # Recreate, because the pod uses the host network and port 9260: a
+  # RollingUpdate that starts the new pod before it stops the old one
+  # needs a second node for it, and on a one-node cluster the new pod
+  # stays Pending and the rollout never finishes. The Lease still
+  # guards against a second copy that a node partition or a patch of
+  # the replica count starts.
   strategy:
     type: Recreate
   template:
@@ -40,6 +51,13 @@ spec:
         - name: operator
           image: ghcr.io/liken-sh/equipment-operator:latest
           env:
+            # The Lease is in the pod's namespace, and the pod's name
+            # starts the identity it holds the Lease under, so the
+            # operator exits when either is unset.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

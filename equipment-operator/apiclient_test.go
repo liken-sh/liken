@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -373,6 +374,35 @@ func TestInClusterClientReadsThePodsOwnConfig(t *testing.T) {
 	mustSucceed(t, err)
 	mustMatch(t, client.base, "https://10.43.0.1:443")
 	mustMatch(t, client.credentials, dir)
+}
+
+// A request whose body stops part way ends at apiRequestTimeout with an
+// error, so a stalled API server cannot hold a pass.
+func TestTheInClusterClientBoundsAWholeRequest(t *testing.T) {
+	shorten(t, &apiRequestTimeout, 200*time.Millisecond)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"metadata":`)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	address, err := url.Parse(server.URL)
+	mustSucceed(t, err)
+	t.Setenv("KUBERNETES_SERVICE_HOST", address.Hostname())
+	t.Setenv("KUBERNETES_SERVICE_PORT", address.Port())
+	dir := useServiceAccountDir(t, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+	mustSucceed(t, os.WriteFile(filepath.Join(dir, "token"), []byte("token"), 0o600))
+	client, err := InClusterClient()
+	mustSucceed(t, err)
+	began := time.Now()
+
+	_, err = ListReceivers(client)
+
+	mustFail(t, err)
+	if took := time.Since(began); took > testTimeout {
+		t.Errorf("the request ended after %s", took)
+	}
 }
 
 // Every config a pod cannot supply fails at startup rather than at the

@@ -44,6 +44,9 @@ type cecBusController struct {
 	// The stores of the Display and Receiver watches, which each pass
 	// reads. This loop writes neither kind.
 	displays, receivers *watchStore
+	// sharedReceivers says another watch feeds receivers and wakes this
+	// loop for a Receiver's spec, so run starts no Receiver watch.
+	sharedReceivers bool
 }
 
 func newCECBusController(client *Client) *cecBusController {
@@ -133,13 +136,18 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 			}
 			return listed.Metadata.ResourceVersion, nil
 		}},
-		{watch: watchReceiverSpecs, restarted: readings.watchRestarted, held: c.receivers, list: func() (string, error) {
+	}
+	// In the Deployment, the Receiver loop's watch also feeds this loop
+	// (watchReceivers), so the process holds each Receiver once. A loop
+	// that runs alone watches the Receivers' specs itself.
+	if !c.sharedReceivers {
+		follows = append(follows, &follow{watch: watchReceiverSpecs, restarted: readings.watchRestarted, held: c.receivers, list: func() (string, error) {
 			listed, err := ListReceivers(c.client)
 			if err != nil {
 				return "", err
 			}
 			return listed.Metadata.ResourceVersion, nil
-		}},
+		}})
 	}
 	ticker := time.NewTicker(cecBusClock)
 	defer ticker.Stop()

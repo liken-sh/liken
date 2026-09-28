@@ -1,5 +1,8 @@
 # The CEC node workload: one pod on each machine that carries a USB
-# CEC adapter, from the operator's own image, with the argument cec.
+# CEC adapter, from the operator's own image. The pod runs the image's
+# node build, /equipment-operator-node, with the argument cec. That
+# build leaves out the leader election that only the Deployment needs
+# (leader_node.go), so each node runs a program of about half the size.
 # The pod holds the adapter, runs it in the mode its CECBus states,
 # and writes its own entry under that CECBus's status. The Deployment
 # in operator.yaml derives the rest of the status. plans/09-cec.md
@@ -66,7 +69,7 @@ spec:
       containers:
         - name: cec
           image: ghcr.io/liken-sh/equipment-operator:latest
-          args: ["cec"]
+          command: ["/equipment-operator-node", "cec"]
           env:
             # liken names each node after its Machine, and a CECBus
             # names the Machine that carries an adapter, so the node

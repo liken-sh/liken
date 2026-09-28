@@ -182,8 +182,8 @@ func newSession(ctx context.Context, receiver string, spec ReceiverSession, driv
 // runs no step, and only a later flip runs one.
 func (s *session) start(active, awake, adopting bool) {
 	s.mark(s.driver.State())
-	go s.bus.Run(s.ctx)
-	go s.adopt(s.ctx)
+	goWork(s.ctx, func() { s.bus.Run(s.ctx) })
+	goWork(s.ctx, func() { s.adopt(s.ctx) })
 	if !adopting {
 		s.flags(active, awake, true)
 		return
@@ -248,7 +248,7 @@ func (s *session) flags(active, awake, opening bool) {
 		s.room.slept()
 	}
 	if played || woke {
-		go s.selectInput(s.ctx, words)
+		goWork(s.ctx, func() { s.selectInput(s.ctx, words) })
 	}
 }
 
@@ -322,7 +322,7 @@ func (s *session) publishOwner(payload []byte) {
 // still reads as a toggle.
 func (s *session) receive(topic string, payload []byte) {
 	if topic == s.spec.PowerTopic {
-		go s.togglePower(payload)
+		goWork(s.ctx, func() { s.togglePower(payload) })
 		return
 	}
 	if topic != s.spec.VolumeTopic {
@@ -831,7 +831,7 @@ func (s *session) ensureInput() {
 		s.log.printf("the commands topic asks %s; sent nothing, because Player %s's session names no input", commandEnsureInput, s.spec.Player)
 		return
 	}
-	go s.ensureInputOnce()
+	goWork(s.ctx, s.ensureInputOnce)
 }
 
 // ensureInputOnce is the ensure under the one-shot lock, serialized

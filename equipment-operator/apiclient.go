@@ -38,6 +38,14 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
+// apiRequestTimeout bounds one request of the Client from the dial to
+// the last byte of the body. Every request the Client sends is one
+// read or one write, and none streams: the watches run on client-go's
+// own client (watch.go). A pass that waits on a request waits at most
+// this long, and the backstop or the next event tries it again. It is
+// a variable so a test holds it short.
+var apiRequestTimeout = 30 * time.Second
+
 // serviceAccountDir is a variable so a test points it at a directory
 // it controls.
 var serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
@@ -88,13 +96,13 @@ func InClusterClient() (*Client, error) {
 	}
 
 	return NewClient("https://"+host+":"+port, &http.Client{
+		Timeout: apiRequestTimeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 			// Each timeout bounds the same failure: a server that
-			// stops answering without sending anything. The client
-			// sets no deadline on a whole request, so a body that
-			// stops part way holds its caller until the connection
-			// fails.
+			// stops answering without sending anything.
+			// apiRequestTimeout bounds the whole request as well, so
+			// a body that stops part way cannot hold a pass.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,

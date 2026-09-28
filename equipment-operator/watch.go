@@ -49,20 +49,26 @@ var (
 	displayResource    = schema.GroupVersionResource{Group: "display.liken.sh", Version: "v1alpha1", Resource: "displays"}
 )
 
-// watcher answers the dynamic client the watches use. It reaches the
-// same API server with the same credentials as the Client's own
-// requests: the ServiceAccount's CA and token in a pod, and nothing in
-// a test. client-go reads the token file again as the kubelet renews
-// it, the way send does. The client is built once and shared, so every
-// watch uses one connection pool.
+// restConfig answers the client-go configuration that reaches the same
+// API server with the same credentials as the Client's own requests:
+// the ServiceAccount's CA and token in a pod, and nothing in a test.
+// client-go reads the token file again as the kubelet renews it, the
+// way send does. The watches and the Deployment's leader election
+// both use it.
+func (c *Client) restConfig() *rest.Config {
+	config := &rest.Config{Host: c.base}
+	if c.credentials != "" {
+		config.TLSClientConfig.CAFile = c.credentials + "/ca.crt"
+		config.BearerTokenFile = c.credentials + "/token"
+	}
+	return config
+}
+
+// watcher answers the dynamic client the watches use. The client is
+// built once and shared, so every watch uses one connection pool.
 func (c *Client) watcher() (dynamic.Interface, error) {
 	c.watchOnce.Do(func() {
-		config := &rest.Config{Host: c.base}
-		if c.credentials != "" {
-			config.TLSClientConfig.CAFile = c.credentials + "/ca.crt"
-			config.BearerTokenFile = c.credentials + "/token"
-		}
-		c.watchClient, c.watchErr = dynamic.NewForConfig(config)
+		c.watchClient, c.watchErr = dynamic.NewForConfig(c.restConfig())
 	})
 	return c.watchClient, c.watchErr
 }
@@ -238,8 +244,41 @@ func reportUnconverted(what string, err error) {
 	fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 }
 
-// watchReceivers wakes the Receiver loop on every change to a
-// Receiver, its status included, because a pass reads both.
-func watchReceivers(ctx context.Context, client *Client, wake chan<- struct{}, readings *metrics, held *watchStore) {
-	watchCollection(ctx, client, receiverResource, wakeOnEvery(wake), func() { poke(wake) }, readings.watchRestarted, held)
+// watchReceivers is the Deployment's one watch of the Receivers, which
+// both of its loops share, so the process holds each Receiver once. It
+// wakes the Receiver loop on every change, its status included,
+// because that pass reads both. It wakes the CECBus loop through
+// specWake only for a change that watchReceiverSpecs would report,
+// because that loop reads a Receiver's spec and not its status. held
+// holds the store for the CECBus loop. specWake may be nil.
+func watchReceivers(ctx context.Context, client *Client, wake, specWake chan<- struct{}, readings *metrics, held *watchStore) {
+	handler := wakeOnEvery(wake)
+	synced := func() { poke(wake) }
+	if specWake != nil {
+		specs := markHandler[Receiver, specMark]{what: "the Receivers", wake: specWake, mark: receiverSpecMark}
+		handler = bothHandlers(handler, specs.handler())
+		synced = func() {
+			poke(wake)
+			poke(specWake)
+		}
+	}
+	watchCollection(ctx, client, receiverResource, handler, synced, readings.watchRestarted, held)
+}
+
+// bothHandlers sends each change to two handlers, in order.
+func bothHandlers(first, second cache.ResourceEventHandler) cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc: func(object any) {
+			first.OnAdd(object, false)
+			second.OnAdd(object, false)
+		},
+		UpdateFunc: func(before, after any) {
+			first.OnUpdate(before, after)
+			second.OnUpdate(before, after)
+		},
+		DeleteFunc: func(object any) {
+			first.OnDelete(object)
+			second.OnDelete(object)
+		},
+	}
 }
