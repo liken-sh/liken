@@ -154,8 +154,8 @@ func parseNode(args []string, out io.Writer) (*config, error) {
 	// An empty --metrics serves no metrics.
 	metrics := flags.String("metrics", ":9200",
 		"the address the metrics listener takes; empty serves none")
-	// The node plugin never learns that a PersistentVolume was
-	// deleted, so a work tree nothing stages for this long is removed.
+	// A deleted PersistentVolume does not end its work tree, so a work
+	// tree nothing stages for this long is removed. sweep.go says why.
 	sweepAfter := flags.Duration("sweep-after", defaultSweepAfter,
 		"how long a work tree nothing stages is kept before it is removed")
 	// A burst of demands on one repository costs one pull per interval.

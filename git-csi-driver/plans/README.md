@@ -22,7 +22,7 @@ becomes a new plan or an open problem.
 
 ## Planned
 
-Nothing is planned. One open problem is written down.
+Nothing is planned. Two open problems are written down.
 
 ## Designs
 
@@ -106,6 +106,9 @@ so the next plan can start from the facts.
 * [Every node watches every `PersistentVolume`](open-problems/every-node-watches-every-persistentvolume.md).
   No selector names the driver, so each node plugin lists, stores, and
   watches the `PersistentVolume`s of every driver in the cluster.
+* [A kept work tree with no volume](open-problems/a-kept-work-tree-with-no-volume.md).
+  The sweep never removes a work tree with unpushed commits, so a tree
+  whose volume and remote are both gone stays on the node for good.
 
 ## Rejected
 

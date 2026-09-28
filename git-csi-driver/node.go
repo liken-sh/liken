@@ -63,9 +63,12 @@ type node struct {
 	staged   map[string]*volume
 	watchers map[string]*watcher
 	armings  map[string]context.CancelFunc
-	// The work trees the sweep kept because they hold commits the
-	// remote does not, by the repository each one follows.
+	// The work trees the sweep kept because they hold commits that the
+	// followed ref does not, by the repository each one follows.
 	abandoned map[string]abandonedTree
+	// The unstage time of each work tree the last sweep pass kept, by
+	// volume. Only the sweep reads and writes it, one pass at a time.
+	kept map[string]time.Time
 }
 
 // newNode builds the service. base is the driver's run, so every fetch

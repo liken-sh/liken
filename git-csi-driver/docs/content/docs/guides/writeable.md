@@ -213,10 +213,13 @@ with its modes and empty directories replayed.
 A work tree stays on the node after the pod stops, so the next stage on
 the same node is not a clone. Once an hour the driver removes work trees
 that nothing has staged for `--sweep-after`, 30 days by default, and
-whose every commit the remote holds. A tree with unpushed commits is
-never removed. Its age is named in the log and the abnormal gauge of
-the next volume of the same repository, so a person learns that work
-stays on the node with no claim that reaches it.
+whose every commit the last push sent. A tree with unpushed commits, or
+a diverged tree, is never removed. The log names it once each time the
+plugin starts, and the abnormal gauge of the
+next volume of the same repository names its age, so a person learns
+that work stays on the node with no claim that reaches it. When no
+volume of that repository comes, the tree stays until a person removes
+it from the store.
 
 The same hourly pass deletes the refs under `refs/git-csi/` that no
 volume follows, and runs `git gc` in each bare repository that stays.

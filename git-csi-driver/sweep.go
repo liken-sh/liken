@@ -1,8 +1,10 @@
 package main
 
 // sweep.go removes what nothing stages any more. The node plugin
-// never learns that a PersistentVolume was deleted, so age is the only
-// evidence the store has that a work tree is finished with.
+// watches PersistentVolumes, but a deleted one does not say that its
+// work tree is finished with: a person can make a new PersistentVolume
+// with the same volume handle, and its first stage reuses the tree. So
+// age is the evidence the sweep uses.
 
 import (
 	"context"
@@ -27,7 +29,7 @@ const (
 const unstagedFile = "unstaged"
 
 // abandonedTree is a work tree the sweep kept because it holds
-// commits the remote does not, named in the report of the next volume
+// commits that the followed ref does not, named in the report of the next volume
 // that stages the same repository.
 type abandonedTree struct {
 	id       string
@@ -101,15 +103,19 @@ func (n *node) sweepVolumes(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	kept := map[string]time.Time{}
 	for _, entry := range entries {
-		n.sweepVolume(ctx, entry.Name())
+		n.sweepVolume(ctx, entry.Name(), kept)
 	}
+	n.kept = kept
 }
 
 // sweepVolume removes one work tree the node does not hold, whose
-// last unstage is older than the age, and whose every commit the remote
-// holds. A tree with commits nothing pushed is kept and named instead.
-func (n *node) sweepVolume(ctx context.Context, id string) {
+// last unstage is older than the age, whose every commit the last push
+// sent, and that is not diverged. It reads only the tree's own refs and
+// config, never the remote. A tree with commits that no push sent, or a
+// diverged tree, is kept and named instead.
+func (n *node) sweepVolume(ctx context.Context, id string, kept map[string]time.Time) {
 	if n.holds(id) {
 		return
 	}
@@ -126,6 +132,7 @@ func (n *node) sweepVolume(ctx context.Context, id string) {
 		return
 	}
 	if work.refCommit(ctx, pushedRef) != head || work.divergedBranch(ctx) != "" {
+		kept[id] = when
 		n.abandon(ctx, work, id, when)
 		return
 	}
@@ -151,8 +158,15 @@ func (n *node) holds(id string) bool {
 // the volume that reports it is the next one to stage that repository.
 func (n *node) abandon(ctx context.Context, work *workTree, id string, when time.Time) {
 	url := work.originURL()
-	n.logger.InfoContext(ctx, "the work tree holds unpushed commits",
-		"volume", id, "url", url, "unstaged", when)
+	// A kept tree stays until a volume stages it again or a person
+	// removes it, and the sweep passes over it every hour. The line goes
+	// out on the first pass of this process that keeps the tree, and
+	// again only after a later unstage, so a kept tree adds one line to
+	// the log for each run of the plugin and not one line an hour.
+	if last, logged := n.kept[id]; !logged || !last.Equal(when) {
+		n.logger.InfoContext(ctx, "the work tree holds unpushed commits",
+			"volume", id, "url", url, "unstaged", when)
+	}
 	if url == "" {
 		return
 	}
