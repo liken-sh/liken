@@ -1,3 +1,9 @@
-[submodule "docs/themes/brand"]
+[submodule "liken/docs/themes/brand"]
 	path = liken/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "audio-operator/docs/themes/brand"]
+	path = audio-operator/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "bluetooth-operator/docs/themes/brand"]
+	path = bluetooth-operator/docs/themes/brand
 	url = https://github.com/liken-sh/brand

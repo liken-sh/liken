@@ -1,8 +1,9 @@
-# This is the build environment, shared by every workflow that
-# assembles the operating system. The build and release workflows run
-# the same Makefiles and need the same runner preparation: toolchain,
-# virtual hardware, and caches. So that preparation lives here once,
-# and the two workflows cannot grow apart.
+# This is the build environment for every job that assembles the
+# operating system. Each such job runs liken's Makefiles and needs the
+# same runner preparation: toolchain, virtual hardware, and caches. So
+# that preparation lives here once, and the jobs cannot grow apart.
+# The paths are from the repository root, because a composite action
+# does not take the working directory of the job that uses it.
 name: build setup
 description: Toolchain, KVM access, and vendored-input caches for building liken
 
@@ -11,7 +12,7 @@ runs:
   steps:
     - uses: actions/setup-go@v6
       with:
-        go-version-file: go.mod
+        go-version-file: liken/go.mod
 
     # The fetch scripts document their own host requirements, and the
     # runner image already has most of them (curl, tar, ar, zstd,
@@ -52,7 +53,7 @@ runs:
         sudo udevadm trigger --name-match=kvm
 
     # This is one cache for each vendored domain, keyed on the same
-    # prerequisites that the root Makefile declares for that domain's
+    # prerequisites that liken/Makefile declares for that domain's
     # artifact. A pin bump changes the key, so only that domain
     # rebuilds cold; the kernel's 187M does not download again just
     # because k3s moved. The Go programs are deliberately not cached
@@ -60,24 +61,24 @@ runs:
     # code under test, and they rebuild on every run.
     - uses: actions/cache@v6
       with:
-        path: kernel/dist
-        key: kernel-${{ hashFiles('kernel/VERSION', 'kernel/fetch.sh') }}
+        path: liken/kernel/dist
+        key: kernel-${{ hashFiles('liken/kernel/VERSION', 'liken/kernel/fetch.sh') }}
     - uses: actions/cache@v6
       with:
-        path: k3s/dist
-        key: k3s-${{ hashFiles('k3s/VERSION', 'k3s/fetch.sh') }}
+        path: liken/k3s/dist
+        key: k3s-${{ hashFiles('liken/k3s/VERSION', 'liken/k3s/fetch.sh') }}
     - uses: actions/cache@v6
       with:
-        path: xtables/dist
-        key: xtables-${{ hashFiles('xtables/VERSION', 'xtables/fetch.sh') }}
+        path: liken/xtables/dist
+        key: xtables-${{ hashFiles('liken/xtables/VERSION', 'liken/xtables/fetch.sh') }}
     - uses: actions/cache@v6
       with:
-        path: trust/dist
-        key: trust-${{ hashFiles('trust/VERSION', 'trust/fetch.sh') }}
+        path: liken/trust/dist
+        key: trust-${{ hashFiles('liken/trust/VERSION', 'liken/trust/fetch.sh') }}
     - uses: actions/cache@v6
       with:
-        path: e2fsprogs/dist
-        key: e2fsprogs-${{ hashFiles('e2fsprogs/VERSION', 'e2fsprogs/fetch.sh') }}
+        path: liken/e2fsprogs/dist
+        key: e2fsprogs-${{ hashFiles('liken/e2fsprogs/VERSION', 'liken/e2fsprogs/fetch.sh') }}
     # The cache carries only what fetch.sh built. The iscsid image
     # tar in it is always stale, because the tar bakes in the liken
     # version, and that version now changes with every commit. The
@@ -87,30 +88,30 @@ runs:
     # the cache exists to avoid.
     - uses: actions/cache@v6
       with:
-        path: open-iscsi/dist
-        key: open-iscsi-${{ hashFiles('open-iscsi/VERSION', 'open-iscsi/fetch.sh') }}
+        path: liken/open-iscsi/dist
+        key: open-iscsi-${{ hashFiles('liken/open-iscsi/VERSION', 'liken/open-iscsi/fetch.sh') }}
     - uses: actions/cache@v6
       with:
-        path: nfs-utils/dist
-        key: nfs-utils-${{ hashFiles('nfs-utils/VERSION', 'nfs-utils/fetch.sh') }}
+        path: liken/nfs-utils/dist
+        key: nfs-utils-${{ hashFiles('liken/nfs-utils/VERSION', 'liken/nfs-utils/fetch.sh') }}
     # The key covers build.config too, because the feature list
     # decides what the binary contains.
     - uses: actions/cache@v6
       with:
-        path: wpa-supplicant/dist
-        key: wpa-supplicant-${{ hashFiles('wpa-supplicant/VERSION', 'wpa-supplicant/fetch.sh', 'wpa-supplicant/build.config') }}
+        path: liken/wpa-supplicant/dist
+        key: wpa-supplicant-${{ hashFiles('liken/wpa-supplicant/VERSION', 'liken/wpa-supplicant/fetch.sh', 'liken/wpa-supplicant/build.config') }}
     - uses: actions/cache@v6
       with:
-        path: systemd-boot/dist
-        key: systemd-boot-${{ hashFiles('systemd-boot/VERSION', 'systemd-boot/fetch.sh') }}
+        path: liken/systemd-boot/dist
+        key: systemd-boot-${{ hashFiles('liken/systemd-boot/VERSION', 'liken/systemd-boot/fetch.sh') }}
     # grub's dist carries the fetched module tree and tool, plus the
     # core image linked from them. So the key also covers the inputs
     # to the link step: the embedded config and the module list in
     # the Makefile.
     - uses: actions/cache@v6
       with:
-        path: grub/dist
-        key: grub-${{ hashFiles('grub/VERSION', 'grub/fetch.sh', 'grub/early.cfg', 'grub/Makefile') }}
+        path: liken/grub/dist
+        key: grub-${{ hashFiles('liken/grub/VERSION', 'liken/grub/fetch.sh', 'liken/grub/early.cfg', 'liken/grub/Makefile') }}
     # The firmware cache carries the derived set, not the upstream
     # tarball, so a hit skips both the 400 MB download and the
     # derivation. The key includes the kernel pin because the derived
@@ -118,14 +119,14 @@ runs:
     # must re-derive even when the firmware pin is unchanged.
     - uses: actions/cache@v6
       with:
-        path: linux-firmware/dist
-        key: linux-firmware-${{ hashFiles('linux-firmware/VERSION', 'linux-firmware/fetch.sh', 'linux-firmware/derive.sh', 'kernel/VERSION') }}
+        path: liken/linux-firmware/dist
+        key: linux-firmware-${{ hashFiles('liken/linux-firmware/VERSION', 'liken/linux-firmware/fetch.sh', 'liken/linux-firmware/derive.sh', 'liken/kernel/VERSION') }}
     # The microcode key includes the linux-firmware pin because the
     # AMD half comes from that domain's tree.
     - uses: actions/cache@v6
       with:
-        path: microcode/dist
-        key: microcode-${{ hashFiles('microcode/VERSION', 'microcode/fetch.sh', 'linux-firmware/VERSION') }}
+        path: liken/microcode/dist
+        key: microcode-${{ hashFiles('liken/microcode/VERSION', 'liken/microcode/fetch.sh', 'liken/linux-firmware/VERSION') }}
 
     # Make determines staleness by timestamps, and the two halves of
     # this working tree carry different timestamps: checkout stamps
@@ -139,6 +140,7 @@ runs:
     - name: refresh cached artifact timestamps
       shell: bash
       run: |
+        cd liken
         for dist in kernel/dist k3s/dist xtables/dist trust/dist \
                     e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
                     wpa-supplicant/dist \

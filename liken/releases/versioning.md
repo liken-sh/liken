@@ -55,6 +55,11 @@ Tags never move, for the same reason.
 
 ## Cutting a release
 
+Releases are paused while the components move into one repository,
+under plan 69 in `plans/` at the repository root. The release workflow
+that the steps below name does not run. Do not push a tag. Step 2 of
+plan 69 brings back a release path for every component.
+
 The git tag is the act of release. Everything else follows from it.
 
 1. Pick the next version. Use today's date, and use the serial number

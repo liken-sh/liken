@@ -84,13 +84,12 @@ server pointed at it is an exact preview.
 
 ## The deploy path
 
-A push to main publishes the site, whatever it changed. CI builds
-`dist/site/` and deploys the tree to GitHub Pages, which serves it
-at liken.sh. The publish job is in `.github/workflows/checks.yaml`,
-and it runs only after the checks pass. Nothing filters it by path,
-because the site carries the test coverage report at
-`/coverage.html`, and a change to any Go file moves a number the
-site serves.
+The site does not publish while the components move into one
+repository, under plan 69 in `plans/` at the repository root. The
+`liken / docs` job in `.github/workflows/ci.yaml` at the root builds
+`dist/site/` and checks it, and it deploys nothing. GitHub Pages
+serves the last tree it received at liken.sh. The site carries the
+test coverage report at `/coverage.html`.
 
 The name reaches Pages through DNS: the apex records in
 `liken.sh/terraform.tf` point liken.sh at GitHub's published Pages

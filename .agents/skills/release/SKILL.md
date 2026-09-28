@@ -10,6 +10,10 @@ Additional context from me: $ARGUMENTS
 If that context names a version, a different target commit, or says to
 stop after a step, it wins over the defaults below.
 
+**Releases are paused.** The components are moving into one
+repository under plan 69, and the release workflow does not run. Stop
+and tell me; do not push a tag.
+
 **Core principle: the tag is the release act. Everything after it is
 verification.**
 

@@ -1,0 +1,385 @@
+# This is the gate for every component in the repository. Each
+# component is a top-level directory, and each one has its own jobs
+# here: the same make targets that a workstation runs, the docs build,
+# and a build of every image. No job publishes anything. No job pushes
+# an image, a layer cache, a release, or a site.
+#
+# The jobs for a component run only when the push changes a file in
+# that component's directory. The filter is the whole directory, so a
+# new file in a component is always inside it. A change to .github/ or
+# to .gitmodules runs every job, because those files change how every
+# component builds. The changes job below computes the filter once, so
+# the rule is in this file and not in a third-party action.
+#
+# The graph is written by hand while the components move into the
+# repository. A generator will write this file from each component's
+# own description of its builds and dependencies (plan 69, step 2).
+name: ci
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  # A dispatch runs every job, whatever changed.
+  workflow_dispatch:
+
+# This runs one job per ref at a time. On a branch or a pull request,
+# a new push supersedes the old run, so there is no reason to let the
+# old run finish. On main, every push gets its own group (the commit
+# SHA), and nothing is cancelled, because each commit on main gets its
+# own verdict.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      liken: ${{ steps.diff.outputs.liken }}
+      audio-operator: ${{ steps.diff.outputs.audio-operator }}
+      bluetooth-operator: ${{ steps.diff.outputs.bluetooth-operator }}
+    steps:
+      # The diff needs the commit it starts from, and a shallow
+      # checkout has only the one commit it builds.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # A push compares against the commit the branch pointed at
+      # before the push, and a pull request against its base. A new
+      # branch has no earlier commit, and a force push can name one
+      # that no longer exists, so both of those run every job, the
+      # same as a dispatch.
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case "$EVENT" in
+            push) base="$BEFORE" ;;
+            pull_request) base="$BASE" ;;
+            *) base="" ;;
+          esac
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$base" HEAD)"
+          else
+            changed="*"
+          fi
+          for component in liken audio-operator bluetooth-operator; do
+            if [ "$changed" = "*" ] \
+              || grep -qE "^($component/|\.github/|\.gitmodules$)" <<<"$changed"; then
+              echo "$component=true"
+            else
+              echo "$component=false"
+            fi
+          done | tee -a "$GITHUB_OUTPUT"
+
+  # The files at the top of the repository belong to no component:
+  # the plans, the agent files, and this workflow. The root
+  # .pre-commit-config.yaml checks them. The skips name each component,
+  # because each component's hooks run in that component's own jobs.
+  repository:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: j178/prek-action@v2
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files --skip liken/ --skip audio-operator/ --skip bluetooth-operator/
+
+  # The OS's quality checks are the hooks in liken/.pre-commit-config.yaml,
+  # the same config that runs at commit time on a workstation, so CI and
+  # a workstation use the same definition of "clean". staticcheck and
+  # go-test-coverage are tool directives in liken/go.mod, and the Go
+  # version comes from that file too.
+  liken-checks:
+    name: liken / checks
+    needs: changes
+    if: needs.changes.outputs.liken == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: liken/go.mod
+          cache-dependency-path: liken/go.sum
+
+      # prek runs the hooks of the liken project only. The action
+      # caches the environments of the remote hooks between runs, and
+      # it runs with --show-diff-on-failure, so a hook that modifies a
+      # file fails with the diff it would make.
+      - uses: j178/prek-action@v2
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files liken/
+
+  # The docs domain is a nested Go module, so the hooks above never
+  # see it. This job runs its checks and builds the site.
+  liken-docs:
+    name: liken / docs
+    needs: changes
+    if: needs.changes.outputs.liken == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: liken
+    steps:
+      # The submodule is the brand theme; the site cannot build
+      # without it.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # Hugo is a tool dependency of the docs module, so `go tool hugo`
+      # compiles it from the module cache, and the cache paths cover
+      # both go.sum files.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: liken/go.mod
+          cache-dependency-path: |
+            liken/go.sum
+            liken/docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # tracks the go.sum files, so between two bumps the Go build
+      # cache inside the entry never refreshes, and Go trims the
+      # compiled Hugo and crdref objects out of it. This entry saves on
+      # every run, under a key that ends in the commit, and restores
+      # the newest entry for the same docs/go.sum.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-
+
+      # The make target generates the reference pages first, because
+      # the link check reads them as sources and as targets.
+      - name: test the docs
+        run: make -C docs test
+
+      - name: build the site
+        run: make -C docs build
+
+  # The build proves that the tree still assembles an operating system,
+  # and that the operating system still boots to a Ready Kubernetes
+  # node under both firmware types that liken supports. The runner
+  # preparation (toolchain, KVM, vendored-input caches) is the
+  # build-setup action.
+  liken-build:
+    name: liken / build
+    needs: changes
+    if: needs.changes.outputs.liken == 'true'
+    runs-on: ubuntu-26.04
+    # A warm-cache build takes 3 to 6 minutes, and a cold-cache build
+    # takes about 15, so 20 stops a hung run without killing a real
+    # one. A pin bump empties that pin's cache on purpose, so cold
+    # runs are routine, not rare.
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: liken
+    steps:
+      # The build names itself with git describe (liken/version.mk):
+      # the most recent release tag and the distance past it. A shallow
+      # checkout would leave describe unable to see the tags.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/build-setup
+
+      # Every vendored input fetched and verified, the Go programs
+      # compiled, a fresh identity minted, and the bootable image
+      # assembled.
+      - run: make all
+
+      # The UEFI smoke drill (liken/dev-cluster/smoke.sh) installs
+      # node-1 onto a blank disk, boots that disk through OVMF's NVRAM
+      # boot entries, and passes when its node reports Ready over the
+      # cluster's API.
+      - run: make smoke-uefi
+
+      # The same drill under BIOS firmware proves the other boot chain:
+      # MBR boot code, GRUB's core image, its config on the boot home,
+      # and the chosen slot's kernel.
+      - run: make smoke-bios
+
+      # The serial console is the record of the boot, and it is worth
+      # keeping when the drill passes, not only when it fails: a
+      # healthy boot is the baseline for the next unhealthy one.
+      # qemu.log holds the failure when QEMU never reaches a console.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: liken-node-1-logs
+          path: liken/dev-cluster/guests/node-1/*.log
+          if-no-files-found: ignore
+
+  audio-operator-go:
+    name: audio-operator / go
+    needs: changes
+    if: needs.changes.outputs.audio-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: audio-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: audio-operator/go.mod
+          cache-dependency-path: audio-operator/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain. audio-operator/Makefile says why the gate pins a
+      # toolchain, and .testcoverage.yml holds the floor.
+      - run: make test-go
+
+  audio-operator-docs:
+    name: audio-operator / docs
+    needs: changes
+    if: needs.changes.outputs.audio-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: audio-operator
+    steps:
+      # The theme is the brand repository, a submodule at
+      # audio-operator/docs/themes/brand.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The docs domain is its own Go module, and Hugo is a tool
+      # directive in it, so the Go toolchain is the only build
+      # dependency.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: audio-operator/docs/go.mod
+          cache-dependency-path: audio-operator/docs/go.sum
+
+      # The same cache entry as liken / docs, for the same reason.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: audio-operator-docs-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: audio-operator-docs-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-
+
+      # The link check, then the site build.
+      - run: make test-docs
+
+  # The layer cache is in ghcr, as a :buildcache tag beside each image.
+  # This job only reads it, and the packages are public, so it needs
+  # no login.
+  audio-operator-images:
+    name: audio-operator / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.audio-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: audio-operator
+            file: Dockerfile
+          - image: audio-operator-cli
+            file: Dockerfile.cli
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: audio-operator
+          file: audio-operator/${{ matrix.file }}
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  bluetooth-operator-go:
+    name: bluetooth-operator / go
+    needs: changes
+    if: needs.changes.outputs.bluetooth-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: bluetooth-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bluetooth-operator/go.mod
+          cache-dependency-path: bluetooth-operator/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  bluetooth-operator-docs:
+    name: bluetooth-operator / docs
+    needs: changes
+    if: needs.changes.outputs.bluetooth-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: bluetooth-operator
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bluetooth-operator/docs/go.mod
+          cache-dependency-path: bluetooth-operator/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: bluetooth-operator-docs-build-${{ runner.os }}-${{ hashFiles('bluetooth-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: bluetooth-operator-docs-build-${{ runner.os }}-${{ hashFiles('bluetooth-operator/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  bluetooth-operator-images:
+    name: bluetooth-operator / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.bluetooth-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: bluetooth-operator
+            file: Dockerfile
+          - image: bluetooth-bondfetch
+            file: bondfetch/Dockerfile
+          - image: bluetoothd
+            file: bluetoothd/Dockerfile
+          - image: bluetooth-operator-cli
+            file: Dockerfile.cli
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: bluetooth-operator
+          file: bluetooth-operator/${{ matrix.file }}
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache

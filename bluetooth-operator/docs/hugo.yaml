@@ -28,8 +28,8 @@ params:
   # project's name, taken from the last path segment.
   repository: https://github.com/liken-sh/bluetooth-operator
 
-  # CI renders the test coverage report and copies it into the built
-  # tree, so the site serves it at /coverage.html. The theme's footer
+  # The site serves the test coverage report at /coverage.html. The
+  # theme's footer
   # links that page only when this parameter is set.
   coverage: true
 
