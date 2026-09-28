@@ -51,11 +51,14 @@ test-media-browser:
 test-docs:
 	$(MAKE) -C docs test
 # skills/ is generated from the guides and committed, so a checkout
-# carries it. The check regenerates it and fails when git reports a
-# change or an untracked file there, which means a guide changed and
-# nobody ran `make -C docs skills`.
+# carries it. The check regenerates it and fails when the result differs
+# from what git has staged, or adds an untracked file, which means a
+# guide changed and nobody ran `make -C docs skills`. The comparison is
+# with the index, not with the last commit, so a commit that stages a
+# guide and its regenerated skill together passes.
 	$(MAKE) -C docs skills
-	test -z "$$(git status --porcelain -- skills)" || { git status --short -- skills; exit 1; }
+	git diff --quiet -- skills && test -z "$$(git ls-files --others --exclude-standard -- skills)" \
+		|| { git status --short -- skills; exit 1; }
 	$(MAKE) -C docs build
 
 # The report is the coverage data as one page the site publishes at
