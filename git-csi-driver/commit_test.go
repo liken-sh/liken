@@ -14,7 +14,7 @@ import (
 
 // unwatched stops the volume's own loops, so a test drives one pass of
 // the driver's work with nothing running beside it.
-func unwatched(t *testing.T, answering *node, held *volume) {
+func unwatched(t testing.TB, answering *node, held *volume) {
 	t.Helper()
 	answering.mu.Lock()
 	defer answering.mu.Unlock()

@@ -37,6 +37,9 @@ spec:
     volumeAttributes:
       url: git@code.example.com:home/configuration.git
       ref: main
+    nodeStageSecretRef:
+      name: assistant-deploy-key
+      namespace: home
     nodePublishSecretRef:
       name: assistant-deploy-key
       namespace: home
@@ -56,13 +59,18 @@ spec:
     volumeAttributes:
       url: git@code.example.com:home/configuration.git
       ref: main
+    nodeStageSecretRef:
+      name: maps-deploy-key
+      namespace: home
     nodePublishSecretRef:
       name: maps-deploy-key
       namespace: home
 ```
 
-Each volume names its own deploy key here. Two volumes can name one
-`Secret` instead, because they push to one repository.
+Each volume names its own deploy key here, in both references. Two
+volumes can name one `Secret` instead, because they push to one
+repository. [The credential](../writeable/#the-credential) says why a
+volume names its `Secret` twice.
 
 ## A claim for each application
 

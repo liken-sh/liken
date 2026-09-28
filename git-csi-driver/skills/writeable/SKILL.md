@@ -32,6 +32,9 @@ spec:
     volumeAttributes:
       url: git@code.example.com:home/homeassistant.git
       ref: main
+    nodeStageSecretRef:
+      name: homeassistant-deploy-key
+      namespace: home
     nodePublishSecretRef:
       name: homeassistant-deploy-key
       namespace: home
@@ -40,6 +43,9 @@ spec:
 `capacity` is required by the API, and the driver ignores it. The
 access mode must be `ReadWriteOncePod`. `ReadWriteOnce` allows two pods
 on one node to write the same tree, and the driver refuses it.
+
+A private repository names one `Secret` in both references.
+[The credential](#the-credential) says why.
 
 ## The claim
 
@@ -96,6 +102,47 @@ the `PersistentVolume`. A bound claim takes a class change without that.
 
 The [class reference](https://git.liken.sh/docs/reference/classes/) lists every parameter,
 its values, and its default.
+
+## The credential
+
+The kubelet sends a volume's `Secret` inside its calls to the driver,
+and the driver keeps it in memory, never on the node's disk. The stage
+call carries `nodeStageSecretRef`, and the driver fetches the ref with
+it before the pod starts. Each publish call carries
+`nodePublishSecretRef`. The kubelet calls publish again for every
+mounted volume on each pod sync, about once a minute, and reads the
+`Secret` again for each call.
+
+So a driver that restarts, for example in an upgrade, holds no
+credential until the next publish. Then it pushes what the tree
+committed at once, with no restart of the application. Until then, the
+volume's report and the abnormal gauge say the volume waits for its
+credential.
+
+A rotated `Secret` reaches the driver at the next publish, so the next
+push uses the new key. A publish whose `Secret` differs from the stage's
+is refused with `GitVolumeRefused`, because the driver cannot choose
+between two credentials for one volume.
+
+A `PersistentVolume` with `nodeStageSecretRef` and no
+`nodePublishSecretRef` works until the driver restarts, and then every
+push fails until the pod is deleted and started again. The driver posts
+`GitVolumeNoPublishSecret` on the pod and the claim when it publishes
+such a volume. The `csi` block cannot change, so give the volume a new
+`PersistentVolume`. Do it before an upgrade of the driver, because the
+upgrade restarts the driver. After a restart, the push at step 1 fails
+too, and the commits stay in the node's work tree until the volume is
+staged on the same node again.
+
+1. Scale the application to zero. The driver pushes what the tree holds
+   when the pod stops.
+2. Delete the claim and then the `PersistentVolume`. With
+   `persistentVolumeReclaimPolicy: Retain`, the repository and the
+   node's work tree stay.
+3. Create the `PersistentVolume` again with the same `volumeHandle` and
+   both references, and create the claim again.
+4. Scale the application up. On the same node, the stage starts from
+   the work tree the node kept.
 
 ## What happens after a write
 
@@ -180,7 +227,8 @@ object it names, and a writeable volume takes no `depth`.
 The pod's events and the claim's events include `GitVolumeArmed`,
 `GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
 `GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeRebased`,
-`GitVolumeDiverged`, `GitVolumeHealed`, and `GitVolumeSwept`. The node plugin's `/metrics`
+`GitVolumeDiverged`, `GitVolumeHealed`, `GitVolumeSwept`, and
+`GitVolumeNoPublishSecret`. The node plugin's `/metrics`
 listener exports `git_csi_volume_abnormal`, one while anything is wrong
 with a volume, and `git_csi_armed`, `git_csi_pending_paths`,
 `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,

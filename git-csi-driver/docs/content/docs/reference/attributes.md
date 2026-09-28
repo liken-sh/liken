@@ -48,13 +48,18 @@ volume carries no access mode and is always read-only.
 
 A read-only claim takes `pull`, `depth`, `offline`, and
 `webhookSecret`. A writeable volume refuses all four, because it
-follows its ref at stage alone. A read-only claim names its `Secret` through `nodeStageSecretRef`, and a
-pod mounts it with `readOnly: true` on its `persistentVolumeClaim`
-volume, or the publish is refused.
+follows its ref at stage alone. A pod mounts a read-only claim with
+`readOnly: true` on its `persistentVolumeClaim` volume, or the publish
+is refused.
 
 ## Credentials
 
-`nodePublishSecretRef` names a `Secret` in the pod's namespace. The
+An inline volume names its `Secret` with `nodePublishSecretRef`, in the
+pod's namespace. A `PersistentVolume` names one `Secret` in both
+`nodeStageSecretRef` and `nodePublishSecretRef`. The stage fetches with
+the first. The kubelet sends the second with every publish, and again
+on each pod sync, which is how a restarted driver takes the credential
+back. A publish whose `Secret` differs from the stage's is refused. The
 driver reads these keys:
 
 | Key | Use |
@@ -73,6 +78,7 @@ A `Secret` with neither `ssh-privatekey` nor `token` is refused.
 | `GitVolumeRefused` | The publish was refused. The message says why. |
 | `GitVolumeStale` | The fetch failed and `offline: allowStale` published the node's copy. |
 | `GitFetchFailed` | A fetch failed after one that worked. Posted once, until a fetch succeeds. |
+| `GitVolumeNoPublishSecret` | The `PersistentVolume` names `nodeStageSecretRef` and no `nodePublishSecretRef`, so a restart of the driver loses the credential. Posted once for each stage and for each restart. |
 
 ## The gauge
 

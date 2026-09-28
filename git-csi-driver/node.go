@@ -138,8 +138,13 @@ func (n *node) NodeGetCapabilities(
 // NodePublishVolume binds a tree under the pod. For an inline volume the
 // tree is a checkout of the ref made here. For a staged volume it is the
 // tree the stage made, bound read-only for a claim and read-write for a
-// writeable volume. A repeated call for a published volume answers
-// success, because the kubelet may retry the call.
+// writeable volume.
+//
+// The kubelet repeats the call for every mounted volume on each pod
+// sync, because the CSIDriver sets requiresRepublish. A repeated call
+// for a published target mounts nothing and fetches nothing. It takes
+// the credential the call carries and answers success, so its cost is
+// the parse of the call.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -180,6 +185,7 @@ func (n *node) NodePublishVolume(
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"volume_id: %s is published at %s", id, published.target)
 		}
+		n.takeSecret(ctx, published, holder)
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
@@ -254,7 +260,7 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 		depth = mounting.attributes.depth
 	}
 
-	env, remove, err := mounting.credentials.use(mounting.directory)
+	env, remove, err := mounting.credential().use(mounting.directory)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}

@@ -40,7 +40,10 @@ type watcher struct {
 	sweep   time.Duration
 	cancel  context.CancelFunc
 	changes chan struct{}
-	running sync.WaitGroup
+	// returned wakes the loop to push when a republish returns a
+	// credential a restart lost.
+	returned chan struct{}
+	running  sync.WaitGroup
 
 	// The raw descriptor adds watches, and the file reads events. Calling
 	// Fd on the file would take it out of the runtime's poller and make
@@ -63,14 +66,15 @@ func (n *node) watch(published *volume) {
 	}
 	ctx, cancel := context.WithCancel(n.base)
 	seeing := &watcher{
-		node:    n,
-		volume:  published,
-		quiesce: n.quiesce,
-		sweep:   n.sweep,
-		cancel:  cancel,
-		changes: make(chan struct{}, 1),
-		watched: map[int32]string{},
-		written: time.Now(),
+		node:     n,
+		volume:   published,
+		quiesce:  n.quiesce,
+		sweep:    n.sweep,
+		cancel:   cancel,
+		changes:  make(chan struct{}, 1),
+		returned: make(chan struct{}, 1),
+		watched:  map[int32]string{},
+		written:  time.Now(),
 	}
 	n.watchers[published.id] = seeing
 	seeing.running.Add(2)
@@ -238,6 +242,8 @@ func (w *watcher) run(ctx context.Context) {
 			w.scan(ctx)
 		case <-sweep.C:
 			w.scan(ctx)
+		case <-w.returned:
+			w.pushReturned(ctx)
 		}
 	}
 }

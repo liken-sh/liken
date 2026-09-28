@@ -9,7 +9,7 @@ import (
 
 // repositoryWithACommit makes a repository with one commit and returns
 // its directory.
-func repositoryWithACommit(t *testing.T, files map[string]string) string {
+func repositoryWithACommit(t testing.TB, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	git(t, dir, "init", "--quiet", "--initial-branch=main")
@@ -42,7 +42,7 @@ func commitFiles(t *testing.T, dir string, files map[string]string) string {
 
 // git runs the tests' own git, so a test never proves the driver right
 // with the driver's own code.
-func git(t *testing.T, dir string, args ...string) string {
+func git(t testing.TB, dir string, args ...string) string {
 	t.Helper()
 	command := exec.Command("git", args...)
 	command.Dir = dir

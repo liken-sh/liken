@@ -100,8 +100,9 @@ volumes:
 
 The driver publishes one tree to many pods on one node, each at its own
 mount, and keeps the tree until the last of them stops. A private
-repository names its `Secret` through `nodeStageSecretRef`, and the
-keys are the ones the inline form takes through `nodePublishSecretRef`.
+repository names one `Secret` in both `nodeStageSecretRef` and
+`nodePublishSecretRef`, with the keys the inline form takes.
+[Private repositories](#private-repositories) says why.
 The driver ignores a `VolumeAttributesClass` on such a claim, because a
 read-only volume commits nothing and pushes nothing.
 
@@ -144,7 +145,8 @@ same URL on that node updates with it. Twenty demands inside
 `--demand-min-interval`, which defaults to ten seconds, cost one pull
 at the end of the interval. A driver that restarts pulls once for every
 volume that is not `never`, because the driver loses a demand that
-arrives while it is down.
+arrives while it is down. A volume of a private repository pulls when
+the kubelet's next publish returns its credential.
 
 An inline volume has no `PersistentVolume`, so nothing can demand it.
 An inline volume with `pull: on-demand` is refused, and the pod's
@@ -256,6 +258,25 @@ driver reads two kinds of credential from it:
 
 The credential reaches the node's disk only for the length of one git
 invocation, and the token never appears on a command line.
+
+The driver keeps the credential in memory. The kubelet calls the
+driver's publish again for every mounted volume on each pod sync, about
+once a minute, and reads the `Secret` again for each call. A driver
+that restarts, for example in an upgrade, holds no credential until the
+next of those calls, and then fetches at once, with no restart of the
+pod. A rotated `Secret` reaches the driver the same way.
+
+A claim's stage fetches with `nodeStageSecretRef`, and its publishes
+carry `nodePublishSecretRef`, so a claim names one `Secret` in both. A
+publish whose `Secret` differs from the one the volume holds is
+refused. A `PersistentVolume` with `nodeStageSecretRef` alone works
+until the driver restarts, and then every fetch fails until every pod on
+the node that mounts it stops. The driver posts
+`GitVolumeNoPublishSecret` on the pods and the claim when it publishes
+such a volume. The `csi` block cannot change, so stop the pods that
+mount the claim, delete the claim and the `PersistentVolume`, create
+both again with both references, and start the pods. Do it before an
+upgrade of the driver, because the upgrade restarts the driver.
 
 ## What the driver does not serve
 

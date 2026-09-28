@@ -19,7 +19,7 @@ import (
 )
 
 // fakeEvents posts to a client-go fake instead of a cluster.
-func fakeEvents(t *testing.T, logs io.Writer) *events {
+func fakeEvents(t testing.TB, logs io.Writer) *events {
 	t.Helper()
 	client := fake.NewClientset()
 	nameEvents(client)

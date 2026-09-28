@@ -202,7 +202,7 @@ func (n *node) claimFor(ctx context.Context, held *volume) claimReference {
 // deleteSide sends the deletion in a credential window of its
 // own, the way every other call to the remote does.
 func (n *node) deleteSide(ctx context.Context, held *volume, branch string) error {
-	env, remove, err := held.credentials.use(held.directory)
+	env, remove, err := held.credential().use(held.directory)
 	if err != nil {
 		return err
 	}

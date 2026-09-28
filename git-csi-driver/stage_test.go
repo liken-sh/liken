@@ -15,7 +15,7 @@ import (
 
 // stageRequest is the stage call the kubelet makes for a persistent volume
 // of the URL.
-func stageRequest(t *testing.T, id, url string, extra map[string]string) *csi.NodeStageVolumeRequest {
+func stageRequest(t testing.TB, id, url string, extra map[string]string) *csi.NodeStageVolumeRequest {
 	t.Helper()
 	attributes := map[string]string{"url": url}
 	for key, value := range extra {
@@ -38,7 +38,7 @@ func capabilityOf(mode csi.VolumeCapability_AccessMode_Mode) *csi.VolumeCapabili
 
 // persistentPublish is the publish call the kubelet makes after the stage,
 // which carries the pod and the same attributes.
-func persistentPublish(t *testing.T, staged *csi.NodeStageVolumeRequest) *csi.NodePublishVolumeRequest {
+func persistentPublish(t testing.TB, staged *csi.NodeStageVolumeRequest) *csi.NodePublishVolumeRequest {
 	t.Helper()
 	attributes := map[string]string{
 		podNameKey:      "writer",

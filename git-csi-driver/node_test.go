@@ -22,7 +22,7 @@ import (
 //
 // The quiesce and the sweep are short, so a test that writes in a tree
 // waits milliseconds for the driver to read it.
-func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
+func testNode(t testing.TB, logs io.Writer) (*node, *recordedMounts) {
 	t.Helper()
 	calls := &recordedMounts{}
 	answering := newNode(
@@ -49,7 +49,7 @@ func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
 
 // publishRequest is the publish call the kubelet makes for an inline
 // volume of the URL.
-func publishRequest(t *testing.T, id, url string, extra map[string]string) *csi.NodePublishVolumeRequest {
+func publishRequest(t testing.TB, id, url string, extra map[string]string) *csi.NodePublishVolumeRequest {
 	t.Helper()
 	context := map[string]string{"url": url}
 	for key, value := range extra {

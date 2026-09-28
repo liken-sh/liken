@@ -16,7 +16,7 @@ import (
 
 // readOnlyStage is the stage call the kubelet makes for a claim whose
 // access mode is ReadOnlyMany.
-func readOnlyStage(t *testing.T, id, url string, extra map[string]string) *csi.NodeStageVolumeRequest {
+func readOnlyStage(t testing.TB, id, url string, extra map[string]string) *csi.NodeStageVolumeRequest {
 	t.Helper()
 	request := stageRequest(t, id, url, extra)
 	request.VolumeCapability = capabilityOf(
@@ -27,7 +27,7 @@ func readOnlyStage(t *testing.T, id, url string, extra map[string]string) *csi.N
 // readOnlyPublish is the publish call one pod makes for a staged
 // read-only claim, at a target of its own.
 func readOnlyPublish(
-	t *testing.T, staged *csi.NodeStageVolumeRequest, pod string,
+	t testing.TB, staged *csi.NodeStageVolumeRequest, pod string,
 ) *csi.NodePublishVolumeRequest {
 	t.Helper()
 	request := persistentPublish(t, staged)

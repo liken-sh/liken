@@ -12,7 +12,7 @@ import (
 
 // writeFiles writes every named file under dir, making the directories
 // it needs.
-func writeFiles(t *testing.T, dir string, files map[string]string) {
+func writeFiles(t testing.TB, dir string, files map[string]string) {
 	t.Helper()
 	for name, content := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))

@@ -72,13 +72,14 @@ func (n *node) stageReadOnly(
 // publishReadOnly binds the staged tree read-only at one more target.
 //
 // Many pods on one node publish one staged tree, so the volume keeps
-// every target it bound. A publish at a target it already holds answers
-// success.
+// every target it bound. A publish at a target it already holds takes
+// the credential it carries and answers success.
 func (n *node) publishReadOnly(
 	ctx context.Context,
 	staged *volume,
 	request *csi.NodePublishVolumeRequest,
 	parsed *attributes,
+	holder *credentials,
 ) error {
 	// The kubelet binds the target into the pod read-write unless the
 	// pod asked for read-only, whatever this driver's own bind says, so
@@ -91,7 +92,11 @@ func (n *node) publishReadOnly(
 	}
 	target := request.GetTargetPath()
 	if staged.boundAt(target) {
+		n.takeSecret(ctx, staged, holder)
 		return nil
+	}
+	if err := checkSecret(staged, holder); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return status.Error(codes.Internal, err.Error())
@@ -105,6 +110,7 @@ func (n *node) publishReadOnly(
 		return status.Error(codes.Internal, err.Error())
 	}
 	staged.bind(target, parsed.pod)
+	n.takeSecret(ctx, staged, holder)
 	n.record(ctx, staged)
 
 	n.mu.Lock()

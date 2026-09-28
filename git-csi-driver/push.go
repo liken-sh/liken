@@ -235,7 +235,7 @@ func (n *node) fetchUpstream(ctx context.Context, held *volume) (string, error) 
 	repo := held.work.repository
 	defer repo.lock()()
 
-	env, remove, err := held.credentials.use(held.directory)
+	env, remove, err := held.credential().use(held.directory)
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +254,7 @@ func (n *node) fetchUpstream(ctx context.Context, held *volume) (string, error) 
 // sendTo opens the credential window, pushes, and closes it, so
 // no key file outlives the invocation that reads it.
 func (n *node) sendTo(ctx context.Context, held *volume, remote string) (gitOutput, error) {
-	env, remove, err := held.credentials.use(held.directory)
+	env, remove, err := held.credential().use(held.directory)
 	if err != nil {
 		return gitOutput{}, err
 	}

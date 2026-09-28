@@ -30,8 +30,10 @@ const (
 // writes, and the claim and class that determine whether commits are
 // allowed.
 type volume struct {
-	id          string
-	attributes  *attributes
+	id         string
+	attributes *attributes
+	// credentials is read through credential(), because a republish
+	// replaces it while the loops run.
 	credentials *credentials
 	directory   string
 	tree        string
@@ -90,6 +92,12 @@ type volume struct {
 	// What report() last said, so the gauge and the log carry a
 	// volume's health at the moment it turns and never on every poll.
 	abnormal bool
+	// credentialLost marks a resumed volume that had a credential and
+	// waits for a republish to return it. noPublishSecret records that
+	// the volume said its PersistentVolume names no publish Secret.
+	// republish.go says how both move.
+	credentialLost  bool
+	noPublishSecret bool
 }
 
 // reportDiverged records the side branch the volume pushes to.
@@ -352,9 +360,7 @@ func (v *volume) overdue(now time.Time) bool {
 }
 
 // report is the one source of the volume's health, which the
-// gauge and the log carry. A failure comes first, then a class the
-// driver cannot read, then the work the driver may not commit or has
-// not pushed, then the commit the tree stands on.
+// gauge and the log carry. standingReport gives the order.
 func (v *volume) report() (bool, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -383,10 +389,14 @@ func (v *volume) reportNow() (bool, string) {
 	return abnormal, message + v.pulling()
 }
 
-// standingReport is what the volume's state says. A failure comes
-// first, then a class the driver cannot read, then work the driver may
-// not commit or has not pushed, then the commit the tree stands on.
+// standingReport is what the volume's state says. A missing
+// credential comes first, then a failure, then a class the driver
+// cannot read, then work the driver may not commit or has not pushed,
+// then the commit the tree stands on.
 func (v *volume) standingReport() (bool, string) {
+	if waiting, lost := v.credentialReport(); lost {
+		return true, waiting
+	}
 	switch {
 	case v.trouble != "":
 		return true, v.trouble

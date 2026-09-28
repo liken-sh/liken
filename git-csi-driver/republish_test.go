@@ -1,0 +1,462 @@
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// The two Secrets the tests below publish with. A token has no effect on
+// a file URL, so a test that needs no forge can still carry one.
+var (
+	secretA = map[string]string{tokenKey: "token-a"}
+	secretB = map[string]string{tokenKey: "token-b"}
+)
+
+// gitInvocations puts a git on PATH that writes each invocation to a
+// log and then runs the real git, and answers a function that counts
+// the invocations since this call.
+func gitInvocations(t *testing.T) func() int {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("finding git: %v", err)
+	}
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %s\nexec %s \"$@\"\n", quote(calls), quote(real))
+	writeFiles(t, dir, map[string]string{"git": script})
+	if err := os.Chmod(filepath.Join(dir, "git"), 0o755); err != nil {
+		t.Fatalf("making the git wrapper runnable: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() int {
+		content, _ := os.ReadFile(calls)
+		return strings.Count(string(content), "\n")
+	}
+}
+
+// publishedOnce stages, where the kind has a stage, and publishes one
+// volume of the kind with the two Secrets, and answers the publish call
+// and what the node holds. No loop of the volume runs git after this:
+// the read-only kinds pull never, and the writeable volume's watch is
+// stopped.
+func publishedOnce(
+	t testing.TB, answering *node, kind volumeKind, url string, stageSecret, publishSecret map[string]string,
+) (*csi.NodePublishVolumeRequest, *volume) {
+	t.Helper()
+	var request *csi.NodePublishVolumeRequest
+	switch kind {
+	case inlineVolume:
+		request = publishRequest(t, "csi-1", url, map[string]string{"pull": "never"})
+	case readOnlyClaim:
+		staged := readOnlyStage(t, "franchises", url, map[string]string{"pull": "never"})
+		staged.Secrets = stageSecret
+		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("NodeStageVolume: %v", err)
+		}
+		request = readOnlyPublish(t, staged, "reader-a")
+	case writeableVolume:
+		staged := stageRequest(t, "config", url, nil)
+		staged.Secrets = stageSecret
+		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("NodeStageVolume: %v", err)
+		}
+		request = persistentPublish(t, staged)
+	}
+	request.Secrets = publishSecret
+	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	answering.mu.Lock()
+	held := answering.volumes[request.VolumeId]
+	answering.mu.Unlock()
+	if kind == writeableVolume {
+		unwatched(t, answering, held)
+	}
+	return request, held
+}
+
+// tokenOf is the token the volume holds, and the empty string when it
+// holds no credential.
+func tokenOf(held *volume) string {
+	if holding := held.credential(); holding != nil {
+		return holding.token
+	}
+	return ""
+}
+
+func TestARepeatPublishTakesTheFreshCredentialAndDoesNothingElse(t *testing.T) {
+	for _, kind := range []volumeKind{inlineVolume, readOnlyClaim, writeableVolume} {
+		for _, c := range []struct {
+			name   string
+			repeat map[string]string
+			holds  string
+		}{
+			{name: "the same Secret", repeat: secretA, holds: "token-a"},
+			{name: "a rotated Secret", repeat: secretB, holds: "token-b"},
+			{name: "no Secret", repeat: nil, holds: "token-a"},
+		} {
+			t.Run(kindNames[kind]+", "+c.name, func(t *testing.T) {
+				answering, calls := testNode(t, io.Discard)
+				source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+				request, held := publishedOnce(t, answering, kind, fileURL(source), secretA, secretA)
+				binds, unbinds := len(calls.mounts), len(calls.unmounts)
+				invocations := gitInvocations(t)
+
+				request.Secrets = c.repeat
+				if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+					t.Fatalf("a repeated NodePublishVolume: %v", err)
+				}
+				if got := tokenOf(held); got != c.holds {
+					t.Errorf("the volume holds %q, want %q", got, c.holds)
+				}
+				if got := invocations(); got != 0 {
+					t.Errorf("a repeated publish ran git %d times, want none", got)
+				}
+				if len(calls.mounts) != binds || len(calls.unmounts) != unbinds {
+					t.Errorf("a repeated publish made %d mounts and %d unmounts, want none",
+						len(calls.mounts)-binds, len(calls.unmounts)-unbinds)
+				}
+			})
+		}
+	}
+}
+
+func TestAFirstPublishRefusesASecretThatDiffersFromTheStage(t *testing.T) {
+	for _, kind := range []volumeKind{readOnlyClaim, writeableVolume} {
+		for _, c := range []struct {
+			name    string
+			stage   map[string]string
+			publish map[string]string
+			refused bool
+			holds   string
+			warned  int
+		}{
+			{name: "the same Secret", stage: secretA, publish: secretA, holds: "token-a"},
+			{name: "different Secrets", stage: secretA, publish: secretB, refused: true, holds: "token-a"},
+			{name: "a Secret at the publish alone", stage: nil, publish: secretA, holds: "token-a"},
+			{name: "a Secret at the stage alone", stage: secretA, publish: nil, holds: "token-a", warned: 1},
+		} {
+			t.Run(kindNames[kind]+", "+c.name, func(t *testing.T) {
+				answering, _ := testNode(t, io.Discard)
+				source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+				url := fileURL(source)
+				var staged *csi.NodeStageVolumeRequest
+				var request *csi.NodePublishVolumeRequest
+				if kind == readOnlyClaim {
+					staged = readOnlyStage(t, "franchises", url, map[string]string{"pull": "never"})
+				} else {
+					staged = stageRequest(t, "config", url, nil)
+				}
+				staged.Secrets = c.stage
+				if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+					t.Fatalf("NodeStageVolume: %v", err)
+				}
+				if kind == readOnlyClaim {
+					request = readOnlyPublish(t, staged, "reader-a")
+				} else {
+					request = persistentPublish(t, staged)
+				}
+				request.Secrets = c.publish
+
+				_, err := answering.NodePublishVolume(t.Context(), request)
+				if refused := status.Code(err) == codes.InvalidArgument; refused != c.refused {
+					t.Fatalf("NodePublishVolume answered %v, want refused: %v", err, c.refused)
+				}
+				if c.refused && !strings.Contains(status.Convert(err).Message(), "both nodeStageSecretRef and nodePublishSecretRef") {
+					t.Errorf("the refusal says %q, want it to name both references", status.Convert(err).Message())
+				}
+				answering.mu.Lock()
+				held := answering.staged[staged.VolumeId]
+				answering.mu.Unlock()
+				if got := tokenOf(held); got != c.holds {
+					t.Errorf("the volume holds %q, want %q", got, c.holds)
+				}
+				if got := len(eventsWithReason(t, answering, reasonNoPublishSecret)); got != c.warned {
+					t.Errorf("the node posted %d %s Events, want %d", got, reasonNoPublishSecret, c.warned)
+				}
+			})
+		}
+	}
+}
+
+// restartedQuiet is a second driver on the same store whose mount
+// table holds every target, and whose sweep and fetch timers are an
+// hour, so only a republish can make it fetch or push within a test.
+func restartedQuiet(t *testing.T, answering *node) *node {
+	t.Helper()
+	again, _ := testNode(t, io.Discard)
+	again.store = answering.store
+	again.events = answering.events
+	again.arms.client = answering.arms.client
+	again.sweep = time.Hour
+	again.mounted = func(string) bool { return true }
+	again.resume(t.Context())
+	return again
+}
+
+// waitForFile waits until the tree holds the file, or fails on the
+// deadline.
+func waitForFile(t *testing.T, tree, name string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(tree, name)); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s holds no %s within 10s", tree, name)
+}
+
+func TestAResumedVolumeFetchesAtTheRepublishThatReturnsItsCredential(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		kind  volumeKind
+		pulls map[string]string
+	}{
+		{name: "an inline volume", kind: inlineVolume, pulls: map[string]string{"pull": "1h"}},
+		{name: "a read-only claim", kind: readOnlyClaim, pulls: map[string]string{"pull": "on-demand"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			answering, _ := testNode(t, io.Discard)
+			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+			var request *csi.NodePublishVolumeRequest
+			if c.kind == inlineVolume {
+				request = publishRequest(t, "csi-1", fileURL(source), c.pulls)
+				request.Secrets = secretA
+				if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+					t.Fatalf("NodePublishVolume: %v", err)
+				}
+			} else {
+				staged := readOnlyStage(t, "franchises", fileURL(source), c.pulls)
+				staged.Secrets = secretA
+				if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+					t.Fatalf("NodeStageVolume: %v", err)
+				}
+				request = readOnlyPublish(t, staged, "reader-a")
+				request.Secrets = secretA
+				if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+					t.Fatalf("NodePublishVolume: %v", err)
+				}
+			}
+			commitFiles(t, source, map[string]string{"b.txt": "two"})
+
+			again := restartedQuiet(t, answering)
+			again.mu.Lock()
+			resumed := again.volumes[request.VolumeId]
+			again.mu.Unlock()
+			if abnormal, message := resumed.report(); !abnormal || !strings.Contains(message, "no credential") {
+				t.Errorf("the resumed volume reports %q, want the credential it waits for", message)
+			}
+
+			if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+				t.Fatalf("the republish: %v", err)
+			}
+			waitForFile(t, resumed.tree, "b.txt")
+			waitForCondition(t, resumed, "main at")
+			if got := tokenOf(resumed); got != "token-a" {
+				t.Errorf("the resumed volume holds %q, want the republished token", got)
+			}
+		})
+	}
+}
+
+func TestAResumedWriteableVolumePushesAtTheRepublish(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	remote := bareRemote(t, map[string]string{"a.txt": "one"})
+	boundVolume(t, answering, "config", "config-eager")
+	armingClass(t, answering, "config-eager", nil)
+	staged := stageRequest(t, "config", fileURL(remote), nil)
+	staged.Secrets = secretA
+	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+		t.Fatalf("NodeStageVolume: %v", err)
+	}
+	request := persistentPublish(t, staged)
+	request.Secrets = secretA
+	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	answering.mu.Lock()
+	held := answering.volumes["config"]
+	answering.mu.Unlock()
+	waitForArmed(t, held, true)
+	unwatched(t, answering, held)
+	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+	answering.commit(t.Context(), held, held.policyNow())
+	committed := held.work.refCommit(t.Context(), "HEAD")
+
+	again := restartedQuiet(t, answering)
+	again.mu.Lock()
+	resumed := again.volumes["config"]
+	again.mu.Unlock()
+	if got := git(t, remote, "rev-parse", "main"); strings.TrimSpace(got) == committed {
+		t.Fatal("the remote holds the commit before the republish")
+	}
+
+	if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("the republish: %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && strings.TrimSpace(git(t, remote, "rev-parse", "main")) != committed {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != committed {
+		t.Errorf("the remote holds %s within 10s of the republish, want %s", got, committed)
+	}
+	waitForCondition(t, resumed, "main at")
+}
+
+func TestAResumedVolumeWithNoPublishSecretSaysWhatItNeeds(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	boundVolume(t, answering, "franchises", "")
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	staged := readOnlyStage(t, "franchises", fileURL(source), map[string]string{"pull": "never"})
+	staged.Secrets = secretA
+	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+		t.Fatalf("NodeStageVolume: %v", err)
+	}
+	request := publishedTo(t, answering, staged, "reader-a")
+	before := len(eventsWithReason(t, answering, reasonNoPublishSecret))
+
+	again := restartedQuiet(t, answering)
+	again.mu.Lock()
+	resumed := again.volumes["franchises"]
+	again.mu.Unlock()
+	// A fetch that failed without the credential leaves its error, and
+	// the report still says what the volume waits for.
+	resumed.reportTrouble("git fetch: Permission denied (publickey)")
+	for range 3 {
+		if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("the republish: %v", err)
+		}
+	}
+	abnormal, message := resumed.report()
+	if !abnormal || !strings.Contains(message, "nodePublishSecretRef") {
+		t.Errorf("the resumed volume reports %q, want it to name nodePublishSecretRef", message)
+	}
+	// A resumed claim knows its claim and none of its pods, so one Event
+	// goes to the claim, however many republishes arrive.
+	if got := len(eventsWithReason(t, again, reasonNoPublishSecret)) - before; got != 1 {
+		t.Errorf("three republishes posted %d %s Events, want 1", got, reasonNoPublishSecret)
+	}
+	if !recordOf(t, again, "franchises").Credentials {
+		t.Error("the record no longer says the volume needs a credential")
+	}
+}
+
+func TestAPrivateRepositoryFetchesAgainAtTheRepublishAfterARestart(t *testing.T) {
+	dir := t.TempDir()
+	port, holder := sshdOrSkip(t, dir)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	url := fmt.Sprintf("ssh://127.0.0.1:%d%s", port, source)
+	secrets := map[string]string{privateKeyKey: holder.privateKey, knownHostsKey: holder.knownHosts}
+
+	answering, _ := testNode(t, io.Discard)
+	request := publishRequest(t, "csi-1", url, map[string]string{"pull": "1h"})
+	request.Secrets = secrets
+	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	commitFiles(t, source, map[string]string{"b.txt": "two"})
+
+	again := restartedQuiet(t, answering)
+	again.mu.Lock()
+	resumed := again.volumes["csi-1"]
+	again.mu.Unlock()
+	if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("the republish: %v", err)
+	}
+	waitForFile(t, resumed.tree, "b.txt")
+}
+
+// BenchmarkARepeatPublish measures the call the kubelet makes for every
+// volume on every pod sync once requiresRepublish is set.
+func BenchmarkARepeatPublish(b *testing.B) {
+	for _, kind := range []volumeKind{inlineVolume, readOnlyClaim, writeableVolume} {
+		b.Run(kindNames[kind], func(b *testing.B) {
+			answering, _ := testNode(b, io.Discard)
+			source := repositoryWithACommit(b, map[string]string{"a.txt": "one"})
+			request, _ := publishedOnce(b, answering, kind, fileURL(source), secretA, secretA)
+			for b.Loop() {
+				if _, err := answering.NodePublishVolume(b.Context(), request); err != nil {
+					b.Fatalf("a repeated NodePublishVolume: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestAResumedVolumeThatPullsNeverIsNormalAfterItsRepublish(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		secrets map[string]string
+	}{
+		{name: "a public repository", secrets: nil},
+		{name: "a private repository", secrets: secretA},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			answering, _ := testNode(t, io.Discard)
+			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+			request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
+			request.Secrets = c.secrets
+			if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+				t.Fatalf("NodePublishVolume: %v", err)
+			}
+
+			again := restartedQuiet(t, answering)
+			again.mu.Lock()
+			resumed := again.volumes["csi-1"]
+			again.mu.Unlock()
+			if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+				t.Fatalf("the republish: %v", err)
+			}
+			if abnormal, message := resumed.report(); abnormal {
+				t.Errorf("the resumed volume reports %q after its republish, want it normal", message)
+			}
+		})
+	}
+}
+
+func TestAReturnedCredentialPassesOverAVolumeTheLoopDropped(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	loop := followerOf(answering, "file:///nowhere")
+	loop.returned = make(chan struct{}, 1)
+	loop.wanted = map[string]*volume{}
+	dropped := &volume{id: "csi-1"}
+
+	loop.credentialReturned(dropped)
+	if len(loop.wanted) != 0 || len(loop.returned) != 0 {
+		t.Errorf("a volume off the loop left %d wanted and %d wakes, want none",
+			len(loop.wanted), len(loop.returned))
+	}
+}
+
+func TestAReturnedCredentialWakesEachLoopOnce(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	held := &volume{id: "csi-1"}
+	loop := followerOf(answering, "file:///nowhere")
+	loop.returned = make(chan struct{}, 1)
+	loop.wanted = map[string]*volume{}
+	loop.volumes[held.id] = held
+	seeing := &watcher{returned: make(chan struct{}, 1)}
+
+	for range 2 {
+		loop.credentialReturned(held)
+		seeing.credentialReturned()
+	}
+	if len(loop.returned) != 1 || len(seeing.returned) != 1 {
+		t.Errorf("two returns left %d wakes on the loop and %d on the watch, want one each",
+			len(loop.returned), len(seeing.returned))
+	}
+}

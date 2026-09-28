@@ -24,9 +24,15 @@ spec:
     - Persistent
     - Ephemeral
 
-  # The driver publishes once and watches the tree from there, so the
-  # kubelet never repeats NodePublishVolume.
-  requiresRepublish: false
+  # A volume's Secret reaches the driver only inside a kubelet call, and
+  # the driver keeps it in memory, never on the node's disk. With
+  # requiresRepublish, the kubelet calls NodePublishVolume again for
+  # every mounted volume on each pod sync, and reads the volume's
+  # nodePublishSecretRef Secret again for each call. A driver that
+  # restarted takes its credentials back from the next call, with no
+  # grant to read Secrets. A repeated call mounts nothing and fetches
+  # nothing.
+  requiresRepublish: true
 
   # The driver provisions nothing, so it reports no capacity for the
   # scheduler to weigh.

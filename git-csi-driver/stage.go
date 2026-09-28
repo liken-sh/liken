@@ -129,7 +129,7 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
-	env, remove, err := staging.credentials.use(staging.directory)
+	env, remove, err := staging.credential().use(staging.directory)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
@@ -234,7 +234,7 @@ func (n *node) refDeleted(ctx context.Context, staging *volume) error {
 // is fetched in a credential window of its own, and a restore that
 // fails is reported and does not fail the stage.
 func (n *node) restore(ctx context.Context, staging *volume) {
-	env, remove, err := staging.credentials.use(staging.directory)
+	env, remove, err := staging.credential().use(staging.directory)
 	if err != nil {
 		n.logger.WarnContext(ctx, "the metadata was not fetched",
 			"volume", staging.id, "error", err)
@@ -307,7 +307,7 @@ func (n *node) publishStaged(
 			"volume_id: %s is not staged on this node", id)
 	}
 	if staged.kind == readOnlyClaim {
-		if err := n.publishReadOnly(ctx, staged, request, parsed); err != nil {
+		if err := n.publishReadOnly(ctx, staged, request, parsed, holder); err != nil {
 			return n.refusedClaim(ctx, staged, err)
 		}
 		return nil
@@ -317,15 +317,15 @@ func (n *node) publishStaged(
 			return status.Errorf(codes.FailedPrecondition,
 				"volume_id: %s is published at %s", id, published.target)
 		}
+		n.takeSecret(ctx, published, holder)
 		return nil
 	}
 
-	staged.setPod(parsed.pod)
-	// A Secret named on the publish reaches the driver here and nowhere
-	// else, so it replaces what the stage held.
-	if holder != nil {
-		staged.credentials = holder
+	if err := checkSecret(staged, holder); err != nil {
+		return err
 	}
+	staged.setPod(parsed.pod)
+	n.takeSecret(ctx, staged, holder)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}

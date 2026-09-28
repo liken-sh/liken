@@ -91,7 +91,7 @@ func (n *node) record(ctx context.Context, published *volume) {
 		Staging:     published.staging,
 		Ephemeral:   published.kind == inlineVolume,
 		Kind:        kindNames[published.kind],
-		Credentials: published.credentials != nil,
+		Credentials: published.needsCredential(),
 	}
 	content, err := json.Marshal(written)
 	if err == nil {
@@ -166,9 +166,11 @@ func (n *node) drop(ctx context.Context, held *record, directory string) {
 }
 
 // resumeOne rebuilds one volume and starts the loops it had. It
-// holds no credential: the Secret came with a call the kubelet makes
-// again only when the pod restarts, so a fetch that needs one fails and
-// the volume's report says so.
+// holds no credential: the Secret came with a kubelet call, and the
+// driver keeps it in memory alone. The kubelet's next NodePublishVolume
+// for the volume carries it again, and republish.go starts the fetch or
+// the push the volume missed. Until then, the volume's report says what
+// it waits for.
 func (n *node) resumeOne(ctx context.Context, held *record, directory string, mounted []string) {
 	parsed, err := parseVolumeContext(held.Attributes)
 	if err != nil {
@@ -189,7 +191,7 @@ func (n *node) resumeOne(ctx context.Context, held *record, directory string, mo
 		pod:        parsed.pod,
 	}
 	if held.Credentials {
-		resumed.reportTrouble("the driver restarted and holds no credential for this volume")
+		resumed.loseCredential()
 	}
 	if resumed.kind == readOnlyClaim {
 		// The record names no pod for a target, so the resumed volume
@@ -211,15 +213,21 @@ func (n *node) resumeOne(ctx context.Context, held *record, directory string, mo
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.volumes[resumed.id] = resumed
+	// A volume that waits for its credential pulls when the credential
+	// returns, because a pull now fails without it.
 	if resumed.kind == readOnlyClaim {
 		n.staged[resumed.id] = resumed
 		n.follow(resumed)
-		n.resumePull(resumed)
+		if !held.Credentials {
+			n.resumePull(resumed)
+		}
 		return
 	}
 	if resumed.kind == inlineVolume {
 		n.follow(resumed)
-		n.resumePull(resumed)
+		if !held.Credentials {
+			n.resumePull(resumed)
+		}
 		return
 	}
 	resumed.work = n.store.workTree(n.store.repository(parsed.url), resumed.id)

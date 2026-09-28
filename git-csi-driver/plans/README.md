@@ -11,8 +11,8 @@ before implementation.
 
 A plan moves to [`completed/`](completed/) when it is built. A plan that is set aside moves to [`rejected/`](rejected/)
 with the reasons that decided it. A question the current work cannot
-answer is written to [`open-problems/`](open-problems/). Those
-documents have no number because no work item exists for them yet.
+answer is written to `open-problems/`. Those documents have no number
+because no work item exists for them yet.
 
 A plan closes in the commit that builds it. That commit moves the
 document to `completed/`, dates its header, and states what the lab
@@ -22,8 +22,7 @@ becomes a new plan or an open problem.
 
 ## Planned
 
-Nothing is planned. The next work comes out of
-[`open-problems/`](open-problems/).
+Nothing is planned, and no open problem is written down.
 
 ## Designs
 
@@ -90,15 +89,19 @@ Nothing is planned. The next work comes out of
   clientset the driver already links, and the loop written by hand is
   gone. The controller's resizer sidecar elects a leader, so two
   replicas are safe.
+* [15, Credentials return by republish](completed/15-credentials-return-by-republish.md).
+  Built on 2026-09-28; the drill on liken-1 is still owed. The
+  CSIDriver sets `requiresRepublish`, so the kubelet sends each
+  volume's `nodePublishSecretRef` `Secret` again on every pod sync. A
+  restarted driver takes its credentials back from those calls and
+  fetches or pushes at once, and a repeated publish mounts nothing and
+  runs no git. This closes the open problem "Credentials after a
+  restart".
 
 ## Open problems
 
 Each one is a question the current work does not answer, written down
-so the next plan can start from the facts.
-
-* [Credentials after a restart](open-problems/credentials-after-a-restart.md).
-  A writeable volume resumes with no credential, so every push fails
-  until its pod restarts.
+so the next plan can start from the facts. None is open.
 
 ## Rejected
 

@@ -32,6 +32,7 @@ first bad one.
 | `GitVolumeDiverged` | The volume moved to its side branch, after a push still rejected after three rebases, an aborted rebase, or a file the application and upstream both changed. |
 | `GitVolumeHealed` | Upstream took the side branch's work, and the volume is back on its ref. |
 | `GitVolumeSwept` | The sweep removed a work tree nothing had staged for `--sweep-after`. |
+| `GitVolumeNoPublishSecret` | The `PersistentVolume` names `nodeStageSecretRef` and no `nodePublishSecretRef`, so a restart of the driver loses the credential. Posted once for each stage and for each restart. |
 
 ## The abnormal gauge
 
