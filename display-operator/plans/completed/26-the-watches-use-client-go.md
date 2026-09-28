@@ -85,7 +85,9 @@ and `PodList`'s resource version.
 
 The program's own `Client` in `apiclient.go` sends every read and
 write that a pass makes. Only the watching moved. Each watch keeps its
-rule for what a change does:
+rule for what a change does. "The passes read the stores" below
+changes both: the passes now read from the watches' stores, and the
+`Display` watch wakes only on an edit.
 
 * **The wake watches.** `watchWakes` wakes the pass on every add,
   update, and delete, and converts nothing, because the pass that
@@ -153,6 +155,111 @@ The reflector reads each collection with a streaming list, a watch
 with `sendInitialEvents=true`, and falls back to a plain list when the
 API server refuses it. Its watches time out after a random 5 to 10
 minutes, where the hand-written loop asked for 290 seconds.
+
+### The passes read the stores
+
+Built on 2026-09-27, after the port. The operator's passes read the
+objects that a watch holds from the watch's store, not from the API
+server (`objectcache.go`). Each store holds the same selection the
+passes read:
+
+* The `Display` store holds every `Display`. The Display controller
+  reads each present panel's `Display` from it on every pass, and its
+  sweep lists it. The placement pass reads each screen's `Display` and
+  lists the `Display`s when the compositor is dark. One `displayStore`
+  serves both passes.
+* The `Layout` store holds every `Layout`. Once it holds its first
+  read, a name it does not hold is a `Layout` that does not exist, and
+  the pass reads nothing from the API server for it.
+* The pod store holds this node's pods. The placement pass reads the
+  holders of a claim from it, and the compositor's restart count reads
+  the operator's own pod from it. A holder on another node is read from
+  the API server.
+
+A list comes from a store only after the store holds its first read.
+
+A `Display`'s copy in the store can be older than the operator's own
+last write. The Display controller acts on the hardware from its
+status: a captured value, a mode the compositor declined, a write it
+made. A test showed a pass from an older copy capture the dark panel's
+brightness over the saved one. So the `displayStore` remembers the
+`resourceVersion` of each `Display`'s newest copy that the operator
+wrote or read from the API server, and reads a `Display` from the API
+server when the store's copy has another version. Both passes write
+`Display` status on their own goroutines, so the `displayStore` sends
+one `Display` request to the API server at a time, and the memo notes
+the versions in the order the API server answered them. A read that
+the store answers takes only the memo's lock, so it never waits on the
+other pass's request.
+
+A write from a copy that another writer changed since gets `409
+Conflict`:
+
+* The placement pass's report and its dark report read the `Display`
+  again, compose their fields onto the fresh status, and write once
+  more. The dark report leaves a `Display` whose fresh copy names
+  another node.
+* The Display controller's sweep does the same, and leaves a `Display`
+  whose monitor moved to another node since the copy.
+* The Display controller's pass over one panel wakes the next pass,
+  which reads the card and the `Display` again. The fresh status lacks
+  the records the refused write held, so the next pass can actuate
+  again what this one did. The prepare path's budget of compositor
+  restarts bounds a mode switch that repeats. This matches what a
+  refused write did before the stores, when the next wake ran the
+  pass.
+
+These reads stay on the API server, each for a reason:
+
+* The `ResourceSlice`, once per pass that publishes. A watch of one
+  slice needs `list` and `watch` on every slice in the cluster, because
+  RBAC cannot name one node's slice.
+* A `ResourceClaim`, once per claim per placement pass. A claim has no
+  field that selects a node, so a watch would send every node's
+  operator every claim in the cluster, for the few claims on its
+  screens.
+* The `Display`s that seed the link history and the declare
+  container's resting modes, once at the start. display-api reads a
+  `Display` for each request, and opens no `Display` watch.
+
+### The Display watch wakes on an edit
+
+The `Display` watch woke both passes on every `Display` event in the
+cluster, the status writes of every node's operator included. A search
+of the code for what a pass reads from another writer's status found
+one field it acts on: the placement pass reports a dark screen on each
+`Display` whose `status.node` names this node, so a `Display` that the
+Display controller adopts must wake it. The rest of the status is this
+node's own record. So the watch now wakes the passes as the
+`bluetooth-operator` edit watch does, on a new `Display`, a removed
+one, and an update that changes `metadata.generation`, the deletion
+mark, or `metadata.uid`, and also on an update that changes
+`status.node`. That field changes only when a monitor moves. The
+poll's tick of 10 seconds and the hardware's events still wake the
+Display controller.
+
+Requests to the API server, counted in the tests' fixtures
+(`TestADisplayPassFromTheStoreSendsNoRead`,
+`TestAPlacementPassFromTheStoresReadsOnlyTheClaim`,
+`TestTheRestartCountReadsThePodFromTheStore`):
+
+| Pass | Before | After |
+|---|---|---|
+| Display controller, settled, one panel | 1 `GET` | 0 |
+| Display controller, a pass that sweeps | 1 `GET`, 1 `LIST` | 0 |
+| Placement, one screen, one claim, a named `Layout` | 3 `GET`s, 1 `LIST` | 1 `GET` (the claim) |
+| Placement, compositor dark | 1 `LIST` | 0 |
+| Slice publish | 2 `GET`s (the slice, this pod) | 1 `GET` (the slice) |
+
+The Display controller runs at least once every 10 seconds on each
+node, so the settled pass alone was 6 reads a minute for each panel.
+Each status write also woke both passes on every node in the cluster.
+A write from a copy that another writer changed costs a refused write,
+a `GET`, and a second write. The pass after the operator's own write
+reads that `Display` from the API server once, if the watch has not
+delivered the write yet. The stripped binary grew from 20,213,920 to
+20,250,784 bytes, and the linked package count stayed at 472. The pass
+model does not change.
 
 ## Measurements
 

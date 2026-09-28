@@ -562,6 +562,11 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 	name := sliceName(nodeName)
 	path := ResourceSlicesPath + "/" + name
 
+	// The slice is read from the API server on every pass that
+	// publishes, and no watch holds it. A watch of one slice needs list
+	// and watch on every ResourceSlice in the cluster, because RBAC
+	// cannot name the slice of one node, and the grant (deploy/rbac.yaml)
+	// keeps every other driver's inventory out of this operator's reach.
 	current, err := get[ResourceSlice](c, path)
 	if err == ErrNotFound {
 		slice := &ResourceSlice{

@@ -68,6 +68,9 @@ type displayFixture struct {
 	journal  *journal
 	refuse   int
 	lists    int
+	// requests is every request the API server received, as the
+	// method and the path.
+	requests []string
 	present  map[string]bool
 	version  int
 	// The restore's own goroutine reaches these, so the count
@@ -207,6 +210,7 @@ func labDisplayName() string {
 
 func (f *displayFixture) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 		name := strings.TrimPrefix(r.URL.Path, DisplaysPath+"/")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == DisplaysPath:
@@ -255,6 +259,13 @@ func (f *displayFixture) writeStatus(w http.ResponseWriter, r *http.Request, nam
 	held, stored := f.displays[name]
 	if !stored {
 		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	// A write from a version older than the stored one is refused, the
+	// way the API server refuses it.
+	if version := written.Metadata.ResourceVersion; version != "" && version != held.Metadata.ResourceVersion {
+		f.journal.add("status conflict")
+		w.WriteHeader(http.StatusConflict)
 		return
 	}
 	held.Status = written.Status

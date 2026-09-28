@@ -138,5 +138,13 @@ func listPods(c *Client, node string) ([]Pod, error) {
 // because the labels a region's selector matches are the pods' own. It
 // carries the same field selector the listing does.
 func watchPods(ctx context.Context, client dynamic.Interface, node string, wake func(), readings *metrics) {
-	watchWakes(ctx, client, kindPod, collectionWatch{resource: podResource, fields: podsOnNodeField + node}, wake, readings)
+	openPods(client, node, wake, readings).run(ctx)
+}
+
+// openPods builds the pod watch. Its store holds every pod on this
+// node, which the placement pass reads for the holders of a claim, and
+// the compositor's restart count reads for this operator's own pod
+// (objectcache.go).
+func openPods(client dynamic.Interface, node string, wake func(), readings *metrics) openWatch {
+	return wakeWatch(client, kindPod, collectionWatch{resource: podResource, fields: podsOnNodeField + node}, wake, readings)
 }

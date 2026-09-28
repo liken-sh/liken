@@ -676,6 +676,9 @@ type westonRestarts struct {
 	client    *Client
 	namespace string
 	pod       string
+	// pods is the store of this node's pods, which holds this pod, and
+	// which growth reads in place of the API server (objectcache.go).
+	pods clusterStores
 	// The count of the last read, and whether there was one. The first
 	// read is the baseline: an operator container that restarted alone
 	// finds a compositor whose count is already above zero, and none
@@ -698,7 +701,7 @@ func (r *westonRestarts) growth() (int, error) {
 	if r == nil {
 		return 0, nil
 	}
-	pod, err := getPod(r.client, r.namespace, r.pod)
+	pod, err := r.pods.pod(r.client, r.namespace, r.pod)
 	if err != nil {
 		return 0, err
 	}

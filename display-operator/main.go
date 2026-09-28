@@ -331,7 +331,6 @@ func operate() {
 	// lock that a restart takes.
 	go plugin.restartMasterless(ctx, plugin.gate.masterless)
 	go watch.run(ctx)
-	go panels.run(ctx)
 
 	// The placement pass reads the surfaces the module reports and
 	// draws each screen to the Layout its Display names. It probes the
@@ -353,12 +352,25 @@ func operate() {
 		default:
 		}
 	}
-	go watchPods(ctx, watcher, nodeName, resourceWake, readings)
-	go watchLayouts(ctx, watcher, resourceWake, readings)
-	go watchDisplays(ctx, watcher, func() {
+	pods := openPods(watcher, nodeName, resourceWake, readings)
+	layouts := openLayouts(watcher, resourceWake, readings)
+	displays := openDisplays(watcher, func() {
 		panels.wake()
 		resourceWake()
 	}, readings)
+	go pods.run(ctx)
+	go layouts.run(ctx)
+	go displays.run(ctx)
+	// Both passes read the objects the watches hold from their stores,
+	// and share one Display store, so each reads the other's writes
+	// (objectcache.go).
+	stores := clusterStores{layouts: layouts.view(), pods: pods.view()}
+	shared := newDisplayStore(client, displays.view())
+	panels.displays = shared
+	places.displays, places.stores = shared, stores
+	// The Display controller starts once its store is set, because its
+	// goroutine reads the store from its first pass.
+	go panels.run(ctx)
 
 	// How often the kubelet has started the compositor's container
 	// again, read from this pod's own status on the passes that publish
@@ -367,6 +379,9 @@ func operate() {
 	// it is from the downward API, and an operator run by hand names
 	// no pod and counts nothing.
 	restarts := newWestonRestarts(client, os.Getenv("POD_NAMESPACE"), os.Getenv("POD_NAME"))
+	if restarts != nil {
+		restarts.pods = stores
+	}
 
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses. The retry costs the loop no

@@ -22,8 +22,8 @@ package main
 // in-cluster configuration. The typed clientset and the informer
 // factories link a client and an informer for every built-in kind, and
 // the image carries this binary into every node's operator pod. The
-// program's own Client (apiclient.go) still sends every read and write
-// that a pass makes.
+// program's own Client (apiclient.go) sends every write, and every read
+// that a watch's store does not answer (objectcache.go).
 
 import (
 	"context"
@@ -83,11 +83,17 @@ type collectionWatch struct {
 	reopened func()
 }
 
-// watchCollection keeps one collection current until the context ends.
-// It returns after the last call to the handler and to synced, so a
-// caller that closes a channel after it returns never has a send on
-// the closed channel.
-func watchCollection(ctx context.Context, client dynamic.Interface, w collectionWatch) {
+// openWatch is one watch, built and not yet running: the informer
+// that keeps the collection current, and the store it keeps the
+// collection in.
+type openWatch struct {
+	scope    collectionWatch
+	store    cache.Store
+	informer cache.Controller
+}
+
+// openCollection builds the watch of one collection.
+func openCollection(client dynamic.Interface, w collectionWatch) openWatch {
 	var collection dynamic.ResourceInterface = client.Resource(w.resource)
 	if w.namespace != "" {
 		collection = client.Resource(w.resource).Namespace(w.namespace)
@@ -125,18 +131,37 @@ func watchCollection(ctx context.Context, client dynamic.Interface, w collection
 		Handler:       w.handler,
 		Transform:     dropManagedFields,
 	})
+	return openWatch{scope: w, store: store, informer: informer}
+}
+
+// view answers the watch's store, which a pass reads in place of the
+// API server (objectcache.go).
+func (o openWatch) view() storeView {
+	return storeView{store: o.store, synced: o.informer.HasSynced}
+}
+
+// run keeps the collection current until the context ends. It returns
+// after the last call to the handler and to synced, so a caller that
+// closes a channel after it returns never has a send on the closed
+// channel.
+func (o openWatch) run(ctx context.Context) {
 	var group sync.WaitGroup
-	if w.synced != nil {
+	if o.scope.synced != nil {
 		group.Go(func() {
 			select {
-			case <-informer.HasSyncedChecker().Done():
-				w.synced(store)
+			case <-o.informer.HasSyncedChecker().Done():
+				o.scope.synced(o.store)
 			case <-ctx.Done():
 			}
 		})
 	}
-	informer.RunWithContext(ctx)
+	o.informer.RunWithContext(ctx)
 	group.Wait()
+}
+
+// watchCollection keeps one collection current until the context ends.
+func watchCollection(ctx context.Context, client dynamic.Interface, w collectionWatch) {
+	openCollection(client, w).run(ctx)
 }
 
 // dropManagedFields removes metadata.managedFields from each object
@@ -192,11 +217,11 @@ func reportUnconverted(what string, err error) {
 	fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 }
 
-// watchWakes turns every change to a collection into one wake. The
-// watches on Displays, on Layouts, and on this node's pods carry
+// wakeWatch builds a watch that turns every change to a collection
+// into one wake. The watches on Layouts and on this node's pods carry
 // nothing a pass uses but their arrival, because the pass that follows
-// reads every object again, the same way every other wake in this
-// operator works. So the handler converts nothing.
+// reads every object again from the watch's store, the same way every
+// other wake in this operator works. So the handler converts nothing.
 //
 // The first read is a wake of its own, even a read that finds no
 // object. At a start, a pass can read the collection before the watch
@@ -210,15 +235,17 @@ func reportUnconverted(what string, err error) {
 //
 // Each watch the API server accepts after the first counts as one
 // restart on display_watch_restarts_total.
-func watchWakes(ctx context.Context, client dynamic.Interface, kind reconcileKind, scope collectionWatch, wake func(), readings *metrics) {
-	scope.handler = cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(any) { wake() },
-		UpdateFunc: func(any, any) { wake() },
-		DeleteFunc: func(any) { wake() },
+func wakeWatch(client dynamic.Interface, kind reconcileKind, scope collectionWatch, wake func(), readings *metrics) openWatch {
+	if scope.handler == nil {
+		scope.handler = cache.ResourceEventHandlerFuncs{
+			AddFunc:    func(any) { wake() },
+			UpdateFunc: func(any, any) { wake() },
+			DeleteFunc: func(any) { wake() },
+		}
 	}
 	scope.synced = func(cache.Store) { wake() }
 	scope.reopened = func() { readings.watchRestarted(kind) }
-	watchCollection(ctx, client, scope)
+	return openCollection(client, scope)
 }
 
 // watchNamed calls seen with the object each time it changes, and with

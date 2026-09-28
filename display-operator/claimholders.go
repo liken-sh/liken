@@ -10,8 +10,9 @@ package main
 // index from UID to both: prepareClaim fills it, because that is the
 // one call that holds all three, and a miss refills it once from the
 // CDI specs on disk and one listing of every claim. In the steady
-// state a pass costs one claim read per surface and one pod listing
-// on this node, and no listing of claims at all.
+// state a pass costs one claim read per claim, and no listing of
+// claims at all. The pods come from the store of this node's pods
+// (objectcache.go).
 //
 // The labels a region's selector reads are the ones every holder of
 // the claim carries with the same value. Pods that share one claim
@@ -165,7 +166,7 @@ type claimHolders struct {
 	labels map[string]string
 }
 
-// holderReader answers that for each claim once per pass, and lists
+// holderReader answers that for each claim once per pass, and reads
 // this node's pods once. A screen that shows a film over an idle
 // client holds several surfaces of the same two claims, so one pass
 // asks the API server for each claim once.
@@ -173,17 +174,21 @@ type holderReader struct {
 	client *Client
 	node   string
 	claims *claimIndex
+	// stores holds this node's pods, which the reader reads in place of
+	// the API server (objectcache.go).
+	stores clusterStores
 
 	read   map[string]claimHolders
 	pods   map[string]Pod
 	listed bool
 }
 
-func newHolderReader(client *Client, node string, claims *claimIndex) *holderReader {
+func newHolderReader(client *Client, node string, claims *claimIndex, stores clusterStores) *holderReader {
 	return &holderReader{
 		client: client,
 		node:   node,
 		claims: claims,
+		stores: stores,
 		read:   map[string]claimHolders{},
 	}
 }
@@ -217,6 +222,10 @@ func (h *holderReader) resolve(uid string) (claimHolders, error) {
 	if ref.Name == "" {
 		return claimHolders{}, nil
 	}
+	// The claim is read from the API server, once per pass. No watch
+	// holds the claims: a claim carries no field that selects this
+	// node, so a watch would send every node's operator every claim in
+	// the cluster, for the few claims on this node's screens.
 	claim, err := GetResourceClaim(h.client, ref.Namespace, ref.Name)
 	if errors.Is(err, ErrNotFound) {
 		return claimHolders{}, nil
@@ -261,7 +270,7 @@ func (h *holderReader) pod(namespace, name string) (*Pod, error) {
 	if pod, running := listed[namespace+"/"+name]; running {
 		return &pod, nil
 	}
-	pod, err := getPod(h.client, namespace, name)
+	pod, err := h.stores.pod(h.client, namespace, name)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil
 	}
@@ -274,7 +283,7 @@ func (h *holderReader) onThisNode() (map[string]Pod, error) {
 	if h.listed {
 		return h.pods, nil
 	}
-	pods, err := listPods(h.client, h.node)
+	pods, err := h.stores.podsOn(h.client, h.node)
 	if err != nil {
 		return nil, err
 	}

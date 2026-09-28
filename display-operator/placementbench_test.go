@@ -71,6 +71,9 @@ type placementFixture struct {
 	podGets      int
 	displayLists int
 	refuse       map[string]int
+	// requests is every request the API server received, as the
+	// method and the path.
+	requests []string
 
 	ids     int
 	version int
@@ -325,6 +328,7 @@ func assertSent(t *testing.T, got, want []string) {
 
 func (f *placementFixture) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 		if f.refuse[r.URL.Path] > 0 {
 			f.refuse[r.URL.Path]--
 			w.WriteHeader(http.StatusInternalServerError)
@@ -397,6 +401,12 @@ func (f *placementFixture) serveDisplay(w http.ResponseWriter, r *http.Request) 
 		held, stored := f.displays[strings.TrimSuffix(name, "/status")]
 		if !stored {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// A write from a version older than the stored one is refused,
+		// the way the API server refuses it.
+		if version := written.Metadata.ResourceVersion; version != "" && version != held.Metadata.ResourceVersion {
+			w.WriteHeader(http.StatusConflict)
 			return
 		}
 		held.Status = written.Status

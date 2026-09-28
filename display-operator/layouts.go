@@ -138,5 +138,11 @@ func listLayouts(c *Client) ([]Layout, error) {
 
 // The watch turns a Layout a person edited into one wake.
 func watchLayouts(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-	watchWakes(ctx, client, kindLayout, collectionWatch{resource: layoutResource}, wake, readings)
+	openLayouts(client, wake, readings).run(ctx)
+}
+
+// openLayouts builds the Layout watch. Its store holds every Layout,
+// and the placement pass reads a Layout from it (objectcache.go).
+func openLayouts(client dynamic.Interface, wake func(), readings *metrics) openWatch {
+	return wakeWatch(client, kindLayout, collectionWatch{resource: layoutResource}, wake, readings)
 }

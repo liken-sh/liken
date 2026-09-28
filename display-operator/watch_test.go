@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
 )
@@ -131,8 +133,9 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 	}
 }
 
-// The three watches that wake a pass, each with the collection it
-// watches and the objects it reads there.
+// The two watches that wake a pass on every change, each with the
+// collection it watches and the objects it reads there. The Display
+// watch wakes on an edit alone, and its tests follow these.
 var wakeWatches = []struct {
 	kind       string
 	collection string
@@ -140,7 +143,6 @@ var wakeWatches = []struct {
 	fields     string
 	start      func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics)
 }{
-	{"Display", DisplaysPath, DisplayAPIVersion, "", watchDisplays},
 	{"Layout", LayoutsPath, DisplayAPIVersion, "", watchLayouts},
 	{"Pod", PodsPath, "v1", "spec.nodeName=node-1", func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
 		watchPods(ctx, client, "node-1", wake, readings)
@@ -207,6 +209,83 @@ func TestAWakeWatchWakesOnItsFirstReadAndOnEveryChange(t *testing.T) {
 				if got := query.Get("fieldSelector"); got != watch.fields {
 					t.Errorf("a request selected %q, want %q", got, watch.fields)
 				}
+			}
+		})
+	}
+}
+
+// displayAt is a Display at one generation, with a status that names
+// the node it is on and the connector it is on.
+func displayAt(generation int64, node, connector string) map[string]any {
+	return map[string]any{
+		"metadata": map[string]any{"name": "gsm-7716-lg-hdr-wqhd", "generation": generation, "uid": "uid-1"},
+		"status":   map[string]any{"node": node, "connector": connector},
+	}
+}
+
+// Through the reflector: the Display watch wakes the passes on its
+// first read, a new Display, a spec edit, a Display another node's
+// controller adopted, and a removal. Any other status write wakes
+// nothing.
+func TestTheDisplayWatchWakesOnAnEditAndNotOnAStatusWrite(t *testing.T) {
+	store := newObjectStore(t, DisplaysPath, DisplayAPIVersion, "Display")
+	wakes := runWakeWatch(t, store, watchDisplays, nil)
+	awaitWake(t, wakes, "the first read")
+	eventually(t, "the watch opening", func() bool { return store.watching() > 0 })
+
+	store.put(displayAt(1, "node-1", "HDMI-A-1"))
+	awaitWake(t, wakes, "a new Display")
+	store.put(displayAt(1, "node-1", "HDMI-A-2"))
+	select {
+	case <-wakes:
+		t.Fatal("a status write woke a pass")
+	case <-time.After(300 * time.Millisecond):
+	}
+	store.put(displayAt(2, "node-1", "HDMI-A-2"))
+	awaitWake(t, wakes, "a spec edit")
+	store.put(displayAt(2, "node-2", "HDMI-A-2"))
+	awaitWake(t, wakes, "an adoption")
+	store.remove("gsm-7716-lg-hdr-wqhd")
+	awaitWake(t, wakes, "a removal")
+}
+
+// The mark the Display watch compares. A change to the generation, the
+// deletion mark, the UID, or status.node is an edit, and so is
+// anything that is not an object, because nothing says what it
+// changed.
+func TestADisplayEditIsAChangeToItsMark(t *testing.T) {
+	adopted := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"node": "node-2"}}}
+	adopted.SetGeneration(1)
+	adopted.SetUID("uid-1")
+	object := func(generation int64, uid string, deleting bool) any {
+		item := &unstructured.Unstructured{Object: map[string]any{}}
+		item.SetGeneration(generation)
+		item.SetUID(types.UID(uid))
+		if deleting {
+			now := metav1.Now()
+			item.SetDeletionTimestamp(&now)
+		}
+		return item
+	}
+	cases := []struct {
+		name  string
+		after any
+		want  bool
+	}{
+		{"a status write", object(1, "uid-1", false), false},
+		{"a spec edit", object(2, "uid-1", false), true},
+		{"a deletion request", object(1, "uid-1", true), true},
+		{"a Display deleted and created again", object(1, "uid-2", false), true},
+		{"a Display another node adopted", adopted, true},
+		{"something that is not an object", "not an object", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			woke := false
+			watch := openDisplays(idleWatcher(t), func() { woke = true }, nil)
+			watch.scope.handler.OnUpdate(object(1, "uid-1", false), c.after)
+			if woke != c.want {
+				t.Errorf("the change woke a pass: %t, want %t", woke, c.want)
 			}
 		})
 	}

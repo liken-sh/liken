@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"reflect"
 	"slices"
 	"time"
 )
@@ -77,9 +76,14 @@ type placedSurface struct {
 // module, and writes each Display's status.
 type placementPass struct {
 	client *Client
-	node   string
-	link   *layoutLink
-	claims *claimIndex
+	// displays and stores answer the Displays, the Layouts, and this
+	// node's pods from the watches' stores (objectcache.go). A pass
+	// built with no watch reads them from the API server.
+	displays *displayStore
+	stores   clusterStores
+	node     string
+	link     *layoutLink
+	claims   *claimIndex
 	// Outputs is the same walk of the card the slice publisher and the
 	// Display controller make, so all three name one set of
 	// connectors and monitors.
@@ -113,6 +117,7 @@ func newPlacementPass(client *Client, node, socketPath string, link *layoutLink,
 	outputs func() []Output) *placementPass {
 	return &placementPass{
 		client:     client,
+		displays:   newDisplayStore(client, storeView{}),
 		node:       node,
 		link:       link,
 		claims:     claims,
@@ -228,23 +233,25 @@ func (p *placementPass) forget() {
 func (p *placementPass) dark(live compositorLiveness) error {
 	p.forget()
 	p.metrics.forgetSurfaces()
-	displays, err := listDisplays(p.client)
+	displays, err := p.displays.list()
 	if err != nil {
 		return err
+	}
+	// A retry after a conflict composes again from the fresh copy, and
+	// leaves a Display that another node took since.
+	dark := func(published DisplayStatus) (DisplayStatus, bool) {
+		status := published
+		status.Surfaces = nil
+		status.Layout = nil
+		status.Conditions = setCondition(status.Conditions, p.serving(live))
+		return status, published.Node == p.node
 	}
 	var failures []error
 	for _, display := range displays {
 		if display.Status.Node != p.node {
 			continue
 		}
-		status := display.Status
-		status.Surfaces = nil
-		status.Layout = nil
-		status.Conditions = setCondition(status.Conditions, p.serving(live))
-		if reflect.DeepEqual(display.Status, status) {
-			continue
-		}
-		if _, err := writeDisplayStatus(p.client, &display, status); err != nil {
+		if err := p.displays.settleStatus(&display, dark); err != nil && !errors.Is(err, ErrNotFound) {
 			failures = append(failures, fmt.Errorf("%s: %w", display.Metadata.Name, err))
 		}
 	}
@@ -286,7 +293,7 @@ func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSo
 		}
 	}
 
-	holders := newHolderReader(p.client, p.node, p.claims)
+	holders := newHolderReader(p.client, p.node, p.claims, p.stores)
 	screens := map[string]*screenSurfaces{}
 	for _, reported := range state.Surfaces {
 		on := screenSurface{layoutSurface: reported, id: surfaceID("", reported.ID)}
@@ -374,7 +381,7 @@ func (p *placementPass) display(connector string, outputs []Output) (*Display, e
 	if name == "" {
 		return nil, nil
 	}
-	display, err := getDisplay(p.client, name)
+	display, err := p.displays.get(name)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil
 	}
@@ -394,7 +401,7 @@ func (p *placementPass) layoutOf(named string) (*LayoutSpec, DisplayCondition, e
 		return nil, p.condition(true, DefaultLayoutReason,
 			"this screen names no layout, so every surface is drawn over the whole screen with the newest on top"), nil
 	}
-	layout, err := getLayout(p.client, named)
+	layout, err := p.stores.layout(p.client, named)
 	if errors.Is(err, ErrNotFound) {
 		return nil, p.condition(false, LayoutNotFoundReason,
 			"no Layout is named "+named+", so this screen is drawn to the default"), nil
@@ -485,19 +492,25 @@ func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids 
 // and the two write different fields of it: this pass writes the
 // surfaces, the layout, and the LayoutResolved condition, and the
 // controller writes the panel's own facts. Each starts from the
-// status it read, so neither drops what the other wrote, and a write
-// the two raced costs one pass.
+// status it read, so neither drops what the other wrote. A write the
+// two raced is refused with a conflict, and this pass reads the
+// Display again and composes its fields onto the fresh status.
 func (p *placementPass) report(display *Display, on []screenSurface, decision screenPlacement,
 	name string, resolved, serving DisplayCondition) error {
-	status := display.Status
-	status.Surfaces = surfaceStatus(on, decision)
-	status.Layout = &DisplayLayout{Name: name, Regions: regionStatus(decision)}
-	status.Conditions = setCondition(status.Conditions, resolved)
-	status.Conditions = setCondition(status.Conditions, serving)
-	if reflect.DeepEqual(display.Status, status) {
+	compose := func(published DisplayStatus) (DisplayStatus, bool) {
+		status := published
+		status.Surfaces = surfaceStatus(on, decision)
+		status.Layout = &DisplayLayout{Name: name, Regions: regionStatus(decision)}
+		status.Conditions = setCondition(status.Conditions, resolved)
+		status.Conditions = setCondition(status.Conditions, serving)
+		return status, true
+	}
+	err := p.displays.settleStatus(display, compose)
+	if errors.Is(err, ErrNotFound) {
+		// A Display somebody deleted is the Display controller's to
+		// create again, and this pass reports the screen after that.
 		return nil
 	}
-	_, err := writeDisplayStatus(p.client, display, status)
 	return err
 }
 

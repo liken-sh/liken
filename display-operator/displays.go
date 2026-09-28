@@ -14,7 +14,9 @@ import (
 	"net/http"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 // The API group is the driver's own name, so one domain names
@@ -452,8 +454,82 @@ func writeDisplayStatus(c *Client, display *Display, status DisplayStatus) (*Dis
 	return updated, nil
 }
 
-// The watch turns every Display event in the cluster into one wake,
-// and the pass that follows reads every Display this node serves.
+// The watch wakes the passes for an edit to a Display, and the pass
+// that follows reads every Display this node serves from the watch's
+// store (objectcache.go).
 func watchDisplays(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-	watchWakes(ctx, client, kindDisplay, collectionWatch{resource: displayResource}, wake, readings)
+	openDisplays(client, wake, readings).run(ctx)
+}
+
+// openDisplays builds the Display watch. It covers the whole cluster,
+// because a monitor carried to this node brings its Display with it,
+// under the name its EDID gives.
+//
+// A change wakes the passes when it is an edit:
+//
+//   - a new Display, and a Display the API server removed,
+//   - a change to the spec, which raises metadata.generation,
+//   - a deletion request, and a Display deleted and created again
+//     with the same name, which has a new UID,
+//   - a change to status.node, which is a monitor that a node's
+//     Display controller adopted. The placement pass reports a dark
+//     screen on each Display whose status.node names this node, so the
+//     adoption must wake it.
+//
+// Any other status write wakes nothing. Both passes on this node write
+// status, and a wake on each write would run both passes again only to
+// find nothing to change. No pass acts on the rest of a status that
+// another writer wrote: it is this node's own record, which the passes
+// read back from the store or the API server at their next wake. The
+// DDC poll's tick and the hardware's events wake the Display
+// controller on this node's own schedule.
+func openDisplays(client dynamic.Interface, wake func(), readings *metrics) openWatch {
+	edits := cache.ResourceEventHandlerFuncs{
+		AddFunc: func(any) { wake() },
+		UpdateFunc: func(before, after any) {
+			was, is := editOf(before), editOf(after)
+			if !was.read || !is.read || was != is {
+				wake()
+			}
+		},
+		DeleteFunc: func(any) { wake() },
+	}
+	return wakeWatch(client, kindDisplay, collectionWatch{resource: displayResource, handler: edits}, wake, readings)
+}
+
+// editMark is what an edit changes on an object: its UID, its
+// generation, which counts spec changes, and its deletion mark. The
+// informer hands an update both the copy it held and the new copy, so
+// the handler compares the two and keeps no copy of its own. After a
+// gap in the watch, an object deleted and created again with the same
+// name reaches the handler as an update, and its generation can equal
+// the old one's, so the UID is part of the mark.
+type editMark struct {
+	uid        string
+	generation int64
+	deleting   bool
+	node       string
+	// read is false for something that is not an object, and such a
+	// change counts as an edit, because nothing says what it changed.
+	read bool
+}
+
+// nodeOf answers the node a Display's status names.
+func nodeOf(item *unstructured.Unstructured) string {
+	node, _, _ := unstructured.NestedString(item.Object, "status", "node")
+	return node
+}
+
+func editOf(object any) editMark {
+	item, ok := object.(*unstructured.Unstructured)
+	if !ok {
+		return editMark{}
+	}
+	return editMark{
+		uid:        string(item.GetUID()),
+		generation: item.GetGeneration(),
+		deleting:   item.GetDeletionTimestamp() != nil,
+		node:       nodeOf(item),
+		read:       true,
+	}
 }

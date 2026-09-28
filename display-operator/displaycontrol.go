@@ -55,7 +55,10 @@ const (
 // sysfs walk the slice publisher makes, and the clock and the wait are
 // fields for the reason the DDC client's sleep is one.
 type displayControl struct {
-	client   *Client
+	client *Client
+	// displays reads and writes the Displays, from the watch's store
+	// where it can (objectcache.go).
+	displays *displayStore
 	node     string
 	controls *panelControls
 	outputs  func() []Output
@@ -118,6 +121,7 @@ type displayControl struct {
 func newDisplayControl(client *Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
 	return &displayControl{
 		client:     client,
+		displays:   newDisplayStore(client, storeView{}),
 		node:       node,
 		controls:   controls,
 		outputs:    outputs,
@@ -153,17 +157,18 @@ func (d *displayControl) wake() {
 	}
 }
 
-// The loop. The Display watch wakes it on every Display event in the
-// cluster, the operator's own status writes included, and a pass after
-// its own write finds nothing to change. The slice publisher wakes it
-// on hardware that moved, and a restore wakes it when it ends.
+// The loop. The Display watch wakes it on an edit to a Display, and
+// not on a status write (displays.go). The slice publisher wakes it on
+// hardware that moved, a restore wakes it when it ends, and a status
+// write that another writer raced wakes it once.
 //
 // The tick has two jobs. It is the clock of the poll window, which is
 // how a value a person changed at a lit panel's own buttons is found,
 // because DDC/CI sends the host no event. It is also the only retry of
 // a pass that failed, for example on a failed read of a Display or a
-// failed status write. A tick reads each present Display from the API
-// server, and it reads a panel only through the poll's guards.
+// failed status write. A tick reads each present Display from the
+// watch's store (objectcache.go), and it reads a panel only through
+// the poll's guards.
 func (d *displayControl) run(ctx context.Context) {
 	tick := time.NewTicker(d.tick)
 	defer tick.Stop()
@@ -207,7 +212,7 @@ func (d *displayControl) pass(ctx context.Context) error {
 	sweep := d.sweepDue(present)
 	var published []Display
 	if sweep {
-		listed, err := listDisplays(d.client)
+		listed, err := d.displays.list()
 		if err != nil {
 			return err
 		}
@@ -345,13 +350,30 @@ func (d *displayControl) claimed() (map[string]bool, error) {
 	return held, nil
 }
 
-// One panel. The resource is created empty when it is absent,
-// the panel is actuated, and the status is written last, so it reports
-// what the actuation left behind.
+// One panel. A status write that another writer raced, such as the
+// placement pass writing the same Display, is refused with a conflict,
+// and the pass wakes the next pass, which reads the card and the
+// Display again. A status write wakes no pass, so without the wake the
+// next pass would wait for the poll's tick. The next pass reads a
+// status that lacks the records this pass failed to write, such as a
+// mode the compositor declined, so it can actuate again what this pass
+// did. The prepare path's own budget of compositor restarts bounds a
+// mode switch that repeats.
 func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held map[string]bool, ambiguous string) error {
-	display, err := getDisplay(d.client, name)
+	err := d.reconcileOnce(ctx, name, output, held, ambiguous)
+	if errors.Is(err, ErrConflict) {
+		d.wake()
+	}
+	return err
+}
+
+// One run over one panel. The resource is created empty when it is
+// absent, the panel is actuated, and the status is written last, so it
+// reports what the actuation left behind.
+func (d *displayControl) reconcileOnce(ctx context.Context, name string, output Output, held map[string]bool, ambiguous string) error {
+	display, err := d.displays.get(name)
 	if errors.Is(err, ErrNotFound) {
-		display, err = createDisplay(d.client, name)
+		display, err = d.displays.create(name)
 	}
 	if err != nil {
 		return err
@@ -929,16 +951,27 @@ func (d *displayControl) responsive(facts panelFacts) DisplayCondition {
 
 // The panel is gone from this node, and the resource stays with
 // what it held.
+//
+// A retry after a conflict composes again from the fresh copy, and
+// leaves a Display whose status now names another node, because its
+// monitor moved there since the copy.
 func (d *displayControl) absent(display *Display) error {
-	status := display.Status
-	status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, false,
-		"NoPanel", "no panel on "+status.Connector))
-	// The connector serves no EDID, or the EDID of another monitor,
-	// such as the TV's EDID that a receiver in standby can pass
-	// through. Either way the port this machine's cable is in has not
-	// moved, so the address stays.
-	status = d.retainAddress(status, status.Connector+" no longer serves this monitor's EDID")
-	return d.publish(display, status)
+	absent := func(published DisplayStatus) (DisplayStatus, bool) {
+		status := published
+		status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, false,
+			"NoPanel", "no panel on "+status.Connector))
+		// The connector serves no EDID, or the EDID of another monitor,
+		// such as the TV's EDID that a receiver in standby can pass
+		// through. Either way the port this machine's cable is in has
+		// not moved, so the address stays.
+		status = d.retainAddress(status, status.Connector+" no longer serves this monitor's EDID")
+		return status, published.Node == d.node
+	}
+	err := d.displays.settleStatus(display, absent)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (d *displayControl) condition(kind string, met bool, reason, message string) DisplayCondition {
@@ -961,7 +994,7 @@ func (d *displayControl) publish(display *Display, status DisplayStatus) error {
 	if reflect.DeepEqual(display.Status, status) {
 		return nil
 	}
-	updated, err := writeDisplayStatus(d.client, display, status)
+	updated, err := d.displays.writeStatus(display, status)
 	if err != nil {
 		return err
 	}
