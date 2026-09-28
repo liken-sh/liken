@@ -5,9 +5,11 @@ package main
 //
 // It follows liken's own client (kubernetes/apiclient.go) and for
 // the same reason: the Kubernetes API is HTTPS that serves JSON, and
-// this program reads and writes seven kinds of object. client-go would
-// bring informers, work queues, and generated types this program does
-// not use, into an image that is otherwise one static binary.
+// this program reads and writes seven kinds of object. Every read and
+// write a pass makes goes through this client. Only the watches use
+// client-go (watch.go), because its reflector is a loop that upstream
+// maintains and tests. The typed clientset and its generated types
+// stay out of the binary.
 //
 // Every pod starts with what it needs to reach the API server.
 // Kubernetes injects two environment variables that name the server's
@@ -17,7 +19,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -49,22 +50,14 @@ var (
 type Client struct {
 	base        string
 	http        *http.Client
-	stream      *http.Client
 	credentials string
 }
 
 // NewClient builds a client from its three parts. InClusterClient
 // gets these parts from the pod's environment, and tests get them
 // from an httptest server.
-//
-// The stream client is the same transport with no limit on the whole
-// request. A watch keeps its response open for as long as the API
-// server keeps it, and the 30-second limit on a read of one object
-// would end every watch after 30 seconds.
 func NewClient(base string, httpClient *http.Client, credentials string) *Client {
-	stream := *httpClient
-	stream.Timeout = 0
-	return &Client{base: base, http: httpClient, stream: &stream, credentials: credentials}
+	return &Client{base: base, http: httpClient, credentials: credentials}
 }
 
 func InClusterClient() (*Client, error) {
@@ -169,38 +162,6 @@ func (c *Client) authorize(req *http.Request) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+string(token))
 	return nil
-}
-
-// Watch opens a streaming GET and returns the open body. The caller
-// reads events until the stream ends, and then closes the body. The
-// context ends the request early.
-//
-// A 410 Gone answer returns errWatchExpired, because the caller must
-// list the collection again to get a version it can watch from.
-func (c *Client) Watch(ctx context.Context, path string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.authorize(req); err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.stream.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode == http.StatusGone {
-		drain(resp.Body)
-		return nil, errWatchExpired
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		drain(resp.Body)
-		return nil, fmt.Errorf("GET %s: %s: %s", path, resp.Status, message)
-	}
-	return resp.Body, nil
 }
 
 // get sends a GET request for a single object.

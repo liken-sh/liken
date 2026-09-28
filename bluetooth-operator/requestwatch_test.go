@@ -7,10 +7,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
+
+	"k8s.io/client-go/tools/cache"
 )
 
 // The watcher wakes the loop for a request that is unfinished and for
@@ -103,22 +104,12 @@ func TestTheNextCollectionIsTheEarliestOneStillAhead(t *testing.T) {
 	}
 }
 
-// requestJSON is one request as the API server sends it in a list or
-// an event.
-func requestJSON(t *testing.T, request PairingRequest) string {
-	t.Helper()
-	encoded, err := json.Marshal(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(encoded)
-}
-
-// watchRequests runs the watcher against a server until the test ends.
+// watchRequests runs the request watcher against a server until the
+// test ends.
 func watchRequests(t *testing.T, server *watchServer) <-chan struct{} {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	wakes := watchPairingRequests(ctx, testClient(t, server), time.Now)
+	wakes := watchPairingRequests(ctx, testWatcher(t, server.handler(t)), time.Now)
 	t.Cleanup(func() {
 		cancel()
 		for range wakes {
@@ -127,18 +118,9 @@ func watchRequests(t *testing.T, server *watchServer) <-chan struct{} {
 	return wakes
 }
 
-func awaitWake(t *testing.T, wakes <-chan struct{}, within time.Duration) {
-	t.Helper()
-	select {
-	case <-wakes:
-	case <-time.After(within):
-		t.Fatalf("the loop had no wake within %s", within)
-	}
-}
-
 func TestANewRequestWakesTheLoopAtOnce(t *testing.T) {
-	created := fmt.Sprintf(`{"type":"ADDED","object":%s}`, requestJSON(t, *openRequest("")))
-	server := newWatchServer(pairingRequestsPath(), "[]", []string{created, holdOpen})
+	created := fmt.Sprintf(`{"type":"ADDED","object":%s}`, encode(t, openRequest("")))
+	server := newWatchServer(pairingRequestsPath(), "PairingRequestList", []string{"[]"}, []string{created, holdOpen})
 
 	awaitWake(t, watchRequests(t, server), 5*time.Second)
 }
@@ -154,14 +136,28 @@ func TestAFinishedRequestWakesTheLoopWhenItsTTLIsUp(t *testing.T) {
 		Phase:      phasePaired,
 		FinishedAt: timestamp(time.Now().Add(-58 * time.Second)),
 	}
-	server := newWatchServer(pairingRequestsPath(), "["+requestJSON(t, request)+"]", []string{holdOpen})
+	server := newWatchServer(pairingRequestsPath(), "PairingRequestList", []string{"[" + encode(t, request) + "]"}, []string{holdOpen})
 	wakes := watchRequests(t, server)
 	server.awaitWatches(t, 1)
 
-	select {
-	case <-wakes:
+	if wokeWithin(wakes, 500*time.Millisecond) {
 		t.Fatal("a request inside its TTL woke the loop")
-	case <-time.After(500 * time.Millisecond):
 	}
 	awaitWake(t, wakes, 3*time.Second)
+}
+
+// A deleted request can arrive as a tombstone that holds no copy of
+// it. The watcher forgets the request by the tombstone's key, so a
+// request that no longer exists does not wake the loop again.
+func TestARequestDeletedWithNoCopyIsForgotten(t *testing.T) {
+	wakes := make(chan struct{}, 1)
+	request := *openRequest("")
+	watcher := &requestWatcher{now: time.Now, wake: wakes, held: map[string]PairingRequest{requestKey(request): request}}
+
+	watcher.apply(cache.DeletedFinalStateUnknown{Key: requestKey(request)}, true)
+	watcher.fire()
+
+	if len(wakes) != 0 {
+		t.Fatal("a deleted request woke the loop")
+	}
 }

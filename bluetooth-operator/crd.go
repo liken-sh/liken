@@ -421,8 +421,13 @@ func statusPath(path string) string { return path + "/status" }
 // operator must never write another radio's objects.
 func byAdapter(path, adapterKey string) string {
 	query := url.Values{}
-	query.Set("labelSelector", bonds.AdapterLabel+"="+adapterKey)
+	query.Set("labelSelector", adapterSelector(adapterKey))
 	return path + "?" + query.Encode()
+}
+
+// adapterSelector is the label selector for the objects of one radio.
+func adapterSelector(adapterKey string) string {
+	return bonds.AdapterLabel + "=" + adapterKey
 }
 
 // fromCache makes the API server serve a list from its watch cache
@@ -430,9 +435,9 @@ func byAdapter(path, adapterKey string) string {
 // through to etcd every time.
 //
 // The cache can be behind, and the two readers pay for that
-// differently. The request watcher (watch.go) starts its watch at the
-// version its list returned, so it receives every change after that
-// version and loses nothing. The pass in reconcileRequests lists the
+// differently. The request watcher (requestwatch.go) watches from the
+// version its first read returned, so it receives every change after
+// that version and loses nothing. The pass in reconcileRequests lists the
 // requests with no watch after it, possibly from a different API
 // server than the watcher's. A change the watcher reported wakes the
 // loop once. If that pass reads a cache that does not have the change

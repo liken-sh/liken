@@ -30,9 +30,10 @@ require (
 	github.com/prometheus/client_model v0.6.2
 )
 
-// The CLI plugin. It shares no code with the operator, and it reaches
-// the cluster through client-go and the standard kube flags, so it
-// pins the same Kubernetes libraries the operator builds against.
+// The CLI plugin reaches the cluster through client-go and the
+// standard kube flags. The operator's watches run on client-go's
+// reflector with the dynamic client. Both follow the same pin as the
+// kubelet library above: the Kubernetes minor that liken ships.
 require (
 	github.com/spf13/pflag v1.0.9
 	k8s.io/api v0.36.3
@@ -88,6 +89,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/narqo/go-badge v0.0.0-20230821190521-c9a75c019a59 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect

@@ -22,6 +22,11 @@ package main
 // the status subresource does not change it, so the watcher compares
 // the generation and the deletion mark and nothing else.
 //
+// Each watch also wakes the loop once, when its first read of the
+// collection is done. At a start, the pass can read the objects before
+// the watch does, and an edit made between the two reads is in the
+// watch's read and in no event.
+//
 // Each watch is scoped to the objects this pod acts on:
 //
 //   - The Peripherals are listed and watched with the adapter's label,
@@ -40,6 +45,9 @@ package main
 import (
 	"context"
 	"sync"
+
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 // editWatch holds the two watches and the channel that wakes the loop.
@@ -63,16 +71,16 @@ type editWatch struct {
 // watchEdits starts the Adapter watch at once and the Peripheral watch
 // at the first call to follow. The wake channel closes when the context
 // ends and both watches have stopped.
-func watchEdits(ctx context.Context, client *Client, nodeName string) *editWatch {
+func watchEdits(ctx context.Context, client dynamic.Interface, nodeName string) *editWatch {
 	w := &editWatch{
 		wake:     make(chan struct{}, 1),
 		nodeName: nodeName,
 		moved:    make(chan struct{}, 1),
 	}
-	adapters := &editTracker[Adapter]{wake: w.signal, mark: w.adapterMark}
+	adapters := editHandler[Adapter]{what: "the Adapters", wake: w.signal, mark: w.adapterMark}
 	var group sync.WaitGroup
 	group.Go(func() {
-		listThenWatch(ctx, client, adaptersPath(), "the Adapters", adapters.replace, adapters.apply)
+		watchCollection(ctx, client, adapterResource, "", adapters.handler(), w.signal)
 	})
 	group.Go(func() { w.followPeripherals(ctx, client) })
 	go func() {
@@ -116,10 +124,12 @@ func (w *editWatch) signal() {
 }
 
 // followPeripherals runs one Peripheral watch for the radio this pod
-// holds. When the radio's address changes, it stops the watch for the
-// old address before it opens the watch for the new one, so the
-// Peripherals of the old radio stop waking the loop.
-func (w *editWatch) followPeripherals(ctx context.Context, client *Client) {
+// holds. A label selector is fixed for the life of an informer, so when
+// the radio's address changes, this stops the informer for the old
+// address and waits until it has returned, and then starts a new one
+// for the new address. The Peripherals of the old radio stop waking
+// the loop, and two informers never run at once.
+func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interface) {
 	watching := ""
 	stop := func() {}
 	for {
@@ -141,11 +151,10 @@ func (w *editWatch) followPeripherals(ctx context.Context, client *Client) {
 			cancel()
 			<-done
 		}
-		peripherals := &editTracker[Peripheral]{wake: w.signal, mark: peripheralMark}
+		peripherals := editHandler[Peripheral]{what: "the Peripherals of " + key, wake: w.signal, mark: peripheralMark}
 		go func() {
 			defer close(done)
-			listThenWatch(watchCtx, client, byAdapter(peripheralsPath(), key), "the Peripherals of "+key,
-				peripherals.replace, peripherals.apply)
+			watchCollection(watchCtx, client, peripheralResource, adapterSelector(key), peripherals.handler(), w.signal)
 		}()
 	}
 }
@@ -153,67 +162,101 @@ func (w *editWatch) followPeripherals(ctx context.Context, client *Client) {
 // adapterMark reads the parts of an Adapter that an edit changes. An
 // Adapter matters to this pod when it names this pod's radio, when its
 // status names this node, and when no node has written its status yet.
-func (w *editWatch) adapterMark(adapter Adapter) (string, editMark, bool) {
+func (w *editWatch) adapterMark(adapter Adapter) (editMark, bool) {
 	node := adapter.Status.Node
 	ours := adapter.Metadata.Name == w.followed() || node == w.nodeName || node == ""
-	return adapter.Metadata.Name, markOf(adapter.Metadata), ours
+	return markOf(adapter.Metadata), ours
 }
 
 // peripheralMark reads the parts of a Peripheral that an edit changes.
 // Every Peripheral the watch delivers carries this radio's label, so
 // every one matters.
-func peripheralMark(peripheral Peripheral) (string, editMark, bool) {
-	return peripheral.Metadata.Name, markOf(peripheral.Metadata), true
+func peripheralMark(peripheral Peripheral) (editMark, bool) {
+	return markOf(peripheral.Metadata), true
 }
 
 // editMark is what an edit changes on an object: the generation, which
 // counts spec changes, and the deletion mark. The watcher compares the
 // deletion mark as well, so a deletion request wakes the loop whether
 // or not the API server raises the generation when it sets
-// deletionTimestamp.
+// deletionTimestamp. It compares the UID too. After a gap in the
+// watch, an object that somebody deleted and created again with the
+// same name reaches the handler as an update, and the new object can
+// have the same generation as the old one.
 type editMark struct {
+	uid        string
 	generation int64
 	deleting   bool
 }
 
 func markOf(meta ObjectMeta) editMark {
-	return editMark{generation: meta.Generation, deleting: meta.deleting()}
+	return editMark{uid: meta.UID, generation: meta.Generation, deleting: meta.deleting()}
 }
 
-// editTracker holds the last mark of each object that one watch
-// delivered, and wakes the loop when an event changes a mark. The
-// watch calls replace and apply from one goroutine, so the map needs no
-// lock.
-type editTracker[T any] struct {
-	held map[string]editMark
+// editHandler wakes the loop when a change from one watch carries an
+// edit. The informer hands an update both the copy it held and the new
+// copy, so the handler compares their marks and keeps no copy of its
+// own. After a gap in the watch, the informer reads the collection
+// again and reports each difference from what it held as an addition,
+// an update, or a deletion, so an edit made during the gap reaches the
+// handler as well.
+type editHandler[T any] struct {
+	what string
 	wake func()
-	mark func(T) (name string, mark editMark, ours bool)
+	mark func(T) (mark editMark, ours bool)
 }
 
-// replace takes the whole collection from a list, and wakes the loop.
-// A list follows a start or a gap in the watch, and the watcher cannot
-// tell which edits the gap held. At a start, the list can also be read
-// after the pass read the same objects, so an edit between the two
-// reads is in the list and in no event.
-func (t *editTracker[T]) replace(items []T) {
-	t.held = make(map[string]editMark, len(items))
-	for _, item := range items {
-		name, mark, _ := t.mark(item)
-		t.held[name] = mark
+func (h editHandler[T]) handler() cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    h.added,
+		UpdateFunc: h.updated,
+		DeleteFunc: h.removed,
 	}
-	t.wake()
 }
 
-// apply takes one event from the watch.
-func (t *editTracker[T]) apply(event string, item T) {
-	name, mark, ours := t.mark(item)
-	before, known := t.held[name]
-	if event == "DELETED" {
-		delete(t.held, name)
-	} else {
-		t.held[name] = mark
+// added takes a new object, and wakes the loop when it is this pod's.
+func (h editHandler[T]) added(object any) {
+	item, err := convert[T](object)
+	if err != nil {
+		reportUnconverted(h.what, err)
+		return
 	}
-	if ours && (event == "DELETED" || !known || before != mark) {
-		t.wake()
+	if _, ours := h.mark(item); ours {
+		h.wake()
+	}
+}
+
+// removed takes an object the API server removed, and wakes the loop
+// when it is this pod's. A tombstone can hold no copy of the object,
+// and then nothing says whose it was, so the removal wakes the loop.
+// One extra pass costs less than a missed unpair.
+func (h editHandler[T]) removed(object any) {
+	item, err := convert[T](object)
+	if err != nil {
+		reportUnconverted(h.what, err)
+		h.wake()
+		return
+	}
+	if _, ours := h.mark(item); ours {
+		h.wake()
+	}
+}
+
+// updated takes a change to an object the informer held. Only a change
+// to the mark wakes the loop, so this operator's own status write does
+// not.
+func (h editHandler[T]) updated(before, after any) {
+	item, err := convert[T](after)
+	if err != nil {
+		reportUnconverted(h.what, err)
+		return
+	}
+	mark, ours := h.mark(item)
+	// A held copy that does not convert was logged when it arrived.
+	// Nothing says what it held, so the change counts as an edit.
+	old, err := convert[T](before)
+	was, _ := h.mark(old)
+	if ours && (err != nil || was != mark) {
+		h.wake()
 	}
 }

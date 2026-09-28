@@ -1,17 +1,26 @@
 package main
 
-// These tests cover the list and the watch that keep a collection
-// current: the watch starts at the list's version, a stream that the
-// API server closes resumes at the last version it delivered, and a
-// version the API server no longer holds makes the watcher list again.
+// These tests run the handlers of the three watches through client-go's
+// real reflector, against a scripted API server. The reflector's own
+// loop is upstream's to test; what these tests prove is that each
+// change the API server sends reaches this operator's handlers, and
+// that an object that does not convert is reported.
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 )
 
 // holdOpen, as the last line of a script, keeps the stream open until
@@ -19,148 +28,129 @@ import (
 // its last line, the way the API server does at timeoutSeconds.
 const holdOpen = "hold"
 
-// refuseSlowly, as the first line of a script, answers the watch with
-// a 500 a little later than shortWatch, so the refusal outlasts the
-// time a watch must run to reset the backoff.
-const refuseSlowly = "refuse slowly"
-
-// resetConnection, as a line of a script, drops the connection in the
-// middle of the stream, so the watcher's read fails with an error that
-// is not a clean end of the stream.
-const resetConnection = "reset"
-
-// linger, as a line of a script, keeps the stream open a little longer
-// than shortWatch, so the watch counts as one that ran.
-const linger = "linger"
-
-// forbid, as the first line of a script, answers the watch with a 403
-// at once, the way an API server answers a grant that is missing.
-const forbid = "forbid"
-
-// expire, as the first line of a script, answers the watch with a 410
-// response at once, and expireSlowly answers it a little later than
-// shortWatch.
-const (
-	expire       = "expire"
-	expireSlowly = "expire slowly"
-)
-
-// acceptSlowly, as the first line of a script, waits a little longer
-// than shortWatch before the 200, and then plays the rest of the
-// script.
-const acceptSlowly = "accept slowly"
-
 // pause, as a line of a script, holds the stream open until the test
 // calls release, and then plays the rest of the script.
 const pause = "pause"
 
-// watchServer is an API server for one collection. Each list answers
-// the version "list-N", where N counts the lists. Each watch
-// connection plays the next script of events.
+// watchServer is an API server for one collection. Each read of the
+// collection answers the next of reads, and the last one again after
+// that. Each watch connection plays the next script of events.
+//
+// The reflector reads a collection with a streaming list: a watch that
+// asks for the initial events. The server answers it the way the API
+// server does, with one ADDED event for each object and a bookmark
+// that marks the end of the initial events, and then plays the
+// connection's script on the same stream. It answers a plain list too,
+// which the reflector sends when a streaming list fails.
 type watchServer struct {
 	collection string
-	items      string
+	listKind   string
+	reads      []string
 	scripts    [][]string
 
-	mu         sync.Mutex
-	lists      int
-	listTimes  []time.Time
-	watchTimes []time.Time
-	versions   []string
-	selectors  []string
-	holding    int
-	opened     chan struct{}
-	released   chan struct{}
+	mu        sync.Mutex
+	readCount int
+	watches   int
+	selectors []string
+	holding   int
+	opened    chan struct{}
+	released  chan struct{}
 }
 
-func newWatchServer(collection, items string, scripts ...[]string) *watchServer {
+func newWatchServer(collection, listKind string, reads []string, scripts ...[]string) *watchServer {
 	return &watchServer{
 		collection: collection,
-		items:      items,
+		listKind:   listKind,
+		reads:      reads,
 		scripts:    scripts,
-		opened:     make(chan struct{}, len(scripts)+1),
+		opened:     make(chan struct{}, len(scripts)+8),
 		released:   make(chan struct{}, 1),
 	}
 }
 
-func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != s.collection {
-		http.NotFound(w, r)
-		return
-	}
-	query := r.URL.Query()
+// read answers the objects of the next read, and the version it was
+// made at.
+func (s *watchServer) read(t testing.TB) ([]json.RawMessage, string) {
 	s.mu.Lock()
-	s.selectors = append(s.selectors, query.Get("labelSelector"))
-	if query.Get("watch") != "true" {
-		s.lists++
-		s.listTimes = append(s.listTimes, time.Now())
-		version := fmt.Sprintf("list-%d", s.lists)
-		s.mu.Unlock()
-		fmt.Fprintf(w, `{"metadata":{"resourceVersion":%q},"items":%s}`, version, s.items)
-		return
-	}
-	connection := len(s.versions)
-	s.versions = append(s.versions, query.Get("resourceVersion"))
-	s.watchTimes = append(s.watchTimes, time.Now())
+	index := min(s.readCount, len(s.reads)-1)
+	s.readCount++
+	version := fmt.Sprint(100 * s.readCount)
 	s.mu.Unlock()
-	s.opened <- struct{}{}
+	var items []json.RawMessage
+	if err := json.Unmarshal([]byte(s.reads[index]), &items); err != nil {
+		t.Errorf("the server's read %d is not a JSON array: %v", index, err)
+	}
+	return items, version
+}
 
-	if connection >= len(s.scripts) {
-		<-r.Context().Done()
-		return
-	}
-	for _, line := range s.scripts[connection] {
-		if line == holdOpen {
-			w.(http.Flusher).Flush()
-			s.hold(1)
-			<-r.Context().Done()
-			s.hold(-1)
+func (s *watchServer) handler(t testing.TB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != s.collection {
+			http.NotFound(w, r)
 			return
 		}
-		if line == forbid {
-			http.Error(w, "the service account may not watch this collection", http.StatusForbidden)
+		query := r.URL.Query()
+		s.mu.Lock()
+		s.selectors = append(s.selectors, query.Get("labelSelector"))
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+
+		if query.Get("watch") != "true" {
+			items, version := s.read(t)
+			list, _ := json.Marshal(map[string]any{
+				"apiVersion": pairingAPI,
+				"kind":       s.listKind,
+				"metadata":   map[string]string{"resourceVersion": version},
+				"items":      items,
+			})
+			_, _ = w.Write(list)
 			return
 		}
-		if line == expire || line == expireSlowly {
-			if line == expireSlowly {
-				time.Sleep(shortWatch + 200*time.Millisecond)
+
+		s.mu.Lock()
+		connection := s.watches
+		s.watches++
+		s.mu.Unlock()
+		if query.Get("sendInitialEvents") == "true" {
+			items, version := s.read(t)
+			for _, item := range items {
+				fmt.Fprintf(w, `{"type":"ADDED","object":%s}`+"\n", item)
 			}
-			http.Error(w, "too old resource version", http.StatusGone)
-			return
+			fmt.Fprintln(w, initialEventsEnd(strings.TrimSuffix(s.listKind, "List"), version))
 		}
-		if line == pause {
-			w.(http.Flusher).Flush()
-			select {
-			case <-s.released:
-			case <-r.Context().Done():
+		w.(http.Flusher).Flush()
+		s.opened <- struct{}{}
+
+		script := []string{holdOpen}
+		if connection < len(s.scripts) {
+			script = s.scripts[connection]
+		}
+		for _, line := range script {
+			switch line {
+			case holdOpen:
+				s.hold(1)
+				<-r.Context().Done()
+				s.hold(-1)
 				return
+			case pause:
+				select {
+				case <-s.released:
+				case <-r.Context().Done():
+					return
+				}
+			default:
+				fmt.Fprintln(w, line)
+				w.(http.Flusher).Flush()
 			}
-			continue
 		}
-		if line == acceptSlowly {
-			time.Sleep(shortWatch + 200*time.Millisecond)
-			continue
-		}
-		if line == refuseSlowly {
-			time.Sleep(shortWatch + 200*time.Millisecond)
-			http.Error(w, "the server is overloaded", http.StatusInternalServerError)
-			return
-		}
-		if line == resetConnection {
-			w.(http.Flusher).Flush()
-			connection, _, err := w.(http.Hijacker).Hijack()
-			if err == nil {
-				connection.Close()
-			}
-			return
-		}
-		if line == linger {
-			w.(http.Flusher).Flush()
-			time.Sleep(shortWatch + 200*time.Millisecond)
-			continue
-		}
-		fmt.Fprintln(w, line)
-	}
+	})
+}
+
+// initialEventsEnd is the bookmark that closes the initial events of a
+// streaming list.
+func initialEventsEnd(kind, version string) string {
+	return fmt.Sprintf(`{"type":"BOOKMARK","object":{"apiVersion":%q,"kind":%q,"metadata":{"resourceVersion":%q,"annotations":{"k8s.io/initial-events-end":"true"}}}}`,
+		pairingAPI, kind, version)
 }
 
 // release lets a paused stream play the rest of its script.
@@ -174,22 +164,14 @@ func (s *watchServer) hold(change int) {
 }
 
 // held answers how many streams the server holds open, and the label
-// selector of each request, lists and watches in the order they came.
+// selector of each request in the order they came.
 func (s *watchServer) held() (int, []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.holding, append([]string{}, s.selectors...)
 }
 
-// seen answers how many lists the server answered, and the version
-// each watch asked for.
-func (s *watchServer) seen() (int, []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.lists, append([]string{}, s.versions...)
-}
-
-// awaitWatches waits until the watcher has opened count watch
+// awaitWatches waits until the watcher has opened count more watch
 // connections.
 func (s *watchServer) awaitWatches(t *testing.T, count int) {
 	t.Helper()
@@ -202,308 +184,98 @@ func (s *watchServer) awaitWatches(t *testing.T, count int) {
 	}
 }
 
-func bookmark(version string) string {
-	return fmt.Sprintf(`{"type":"BOOKMARK","object":{"metadata":{"resourceVersion":%q}}}`, version)
-}
-
-func TestTheWatchStartsWhereItsLastSourceEnded(t *testing.T) {
-	cases := []struct {
-		name         string
-		scripts      [][]string
-		wantLists    int
-		wantVersions []string
-	}{
-		{
-			name:         "the first watch starts at the list's version",
-			scripts:      [][]string{{holdOpen}},
-			wantLists:    1,
-			wantVersions: []string{"list-1"},
-		},
-		{
-			name:         "a stream the server closed resumes at its last version",
-			scripts:      [][]string{{bookmark("20")}, {holdOpen}},
-			wantLists:    1,
-			wantVersions: []string{"list-1", "20"},
-		},
-		{
-			name:         "an expired version lists again",
-			scripts:      [][]string{{`{"type":"ERROR","object":{"kind":"Status","code":410}}`}, {holdOpen}},
-			wantLists:    2,
-			wantVersions: []string{"list-1", "list-2"},
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			server := newWatchServer("/things", "[]", c.scripts...)
-			client := testClient(t, server)
-			ctx, cancel := context.WithCancel(context.Background())
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				listThenWatch(ctx, client, "/things", "the things",
-					func([]ObjectMeta) {}, func(string, ObjectMeta) {})
-			}()
-
-			server.awaitWatches(t, len(c.scripts))
-			cancel()
-			<-done
-
-			lists, versions := server.seen()
-			if lists != c.wantLists {
-				t.Errorf("the watcher listed %d times, want %d", lists, c.wantLists)
-			}
-			if fmt.Sprint(versions) != fmt.Sprint(c.wantVersions) {
-				t.Errorf("the watches started at %v, want %v", versions, c.wantVersions)
-			}
-		})
-	}
-}
-
-func TestTheWatchDeliversTheListAndEachChange(t *testing.T) {
-	server := newWatchServer("/things", `[{"name":"first"}]`, []string{
-		`{"type":"ADDED","object":{"metadata":{"resourceVersion":"2"},"name":"second"}}`,
-		`{"type":"DELETED","object":{"metadata":{"resourceVersion":"3"},"name":"first"}}`,
-		holdOpen,
-	})
-	client := testClient(t, server)
-	type thing struct {
-		Name string `json:"name"`
-	}
-	var mu sync.Mutex
-	var seen []string
-	record := func(line string) {
-		mu.Lock()
-		defer mu.Unlock()
-		seen = append(seen, line)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		listThenWatch(ctx, client, "/things", "the things",
-			func(items []thing) { record(fmt.Sprintf("listed %v", items)) },
-			func(event string, item thing) { record(event + " " + item.Name) })
-	}()
-
-	want := "[listed [{first}] ADDED second DELETED first]"
-	deadline := time.After(5 * time.Second)
-	for {
-		mu.Lock()
-		got := fmt.Sprint(seen)
-		mu.Unlock()
-		if got == want {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("the watcher delivered %s, want %s", got, want)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	cancel()
-	<-done
-}
-
-// runWatcher runs listThenWatch against a server, and returns the
-// function that stops it.
-func runWatcher(t *testing.T, server *watchServer) func() {
+// testWatcher points a dynamic client at a test server.
+func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
-	client := testClient(t, server)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		listThenWatch(ctx, client, "/things", "the things",
-			func([]ObjectMeta) {}, func(string, ObjectMeta) {})
-	}()
-	return func() {
-		cancel()
-		<-done
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+// asObject is an object the way the informer hands it to a handler.
+func asObject[T any](t *testing.T, item T) *unstructured.Unstructured {
+	t.Helper()
+	fields, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &unstructured.Unstructured{Object: fields}
+}
+
+func encode(t *testing.T, item any) string {
+	t.Helper()
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
+
+func awaitWake(t *testing.T, wakes <-chan struct{}, within time.Duration) {
+	t.Helper()
+	select {
+	case <-wakes:
+	case <-time.After(within):
+		t.Fatalf("the loop had no wake within %s", within)
 	}
 }
 
-// repeat builds count copies of one script, so every watch the watcher
-// opens gets the same answer.
-func repeat(count int, script ...string) [][]string {
-	scripts := make([][]string, count)
-	for index := range scripts {
-		scripts[index] = script
+// settleWakes reads wakes until none arrives for quiet. A watch wakes
+// the loop at its start, and the test reads those wakes before the
+// events it scripts.
+func settleWakes(wakes <-chan struct{}, quiet time.Duration) {
+	for {
+		select {
+		case <-wakes:
+		case <-time.After(quiet):
+			return
+		}
 	}
-	return scripts
 }
 
-// A failed watch waits out the backoff before the next request. Without
-// the wait, a fault that lasts turns into thousands of requests each
-// second. The one exception is the first 410 Gone, which lists again at
-// once. A watch that closes in under a second is a failure whatever it
-// delivered, and an object that does not decode is an error event.
-func TestAFailedWatchWaitsBeforeTheNextRequest(t *testing.T) {
-	added := `{"type":"ADDED","object":{"metadata":{"resourceVersion":"2"},"name":"first"}}`
+// wokeWithin answers whether a wake arrives within the given time.
+func wokeWithin(wakes <-chan struct{}, within time.Duration) bool {
+	select {
+	case <-wakes:
+		return true
+	case <-time.After(within):
+		return false
+	}
+}
+
+// An object that does not convert to the operator's struct is an
+// error that names the object, and a handler logs it. A tombstone, which
+// the informer hands a handler for an object deleted while the watch
+// was down, converts as the object it holds.
+func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
+	good := Peripheral{APIVersion: pairingAPI, Kind: peripheralKind, Metadata: ObjectMeta{Name: "a0-ab-51-33-b7-12", Generation: 2}}
+	mistyped := asObject(t, good)
+	if err := unstructured.SetNestedField(mistyped.Object, "two", "metadata", "generation"); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
-		name        string
-		script      []string
-		wantLists   int
-		wantWatches int
+		name    string
+		object  any
+		wantErr string
 	}{
-		{
-			name:        "a watch that closed at once with no events",
-			script:      []string{},
-			wantLists:   1,
-			wantWatches: 1,
-		},
-		{
-			name:        "a watch that closed at once after an event",
-			script:      []string{added},
-			wantLists:   1,
-			wantWatches: 1,
-		},
-		{
-			name:        "a 410 on the watch from a fresh list",
-			script:      []string{`{"type":"ERROR","object":{"kind":"Status","code":410}}`},
-			wantLists:   2,
-			wantWatches: 2,
-		},
-		{
-			name:        "an error event",
-			script:      []string{`{"type":"ERROR","object":{"kind":"Status","code":500}}`},
-			wantLists:   1,
-			wantWatches: 1,
-		},
-		{
-			name:        "an object that does not decode",
-			script:      []string{`{"type":"ADDED","object":{"metadata":{"resourceVersion":"2"},"name":42}}`},
-			wantLists:   1,
-			wantWatches: 1,
-		},
+		{name: "an object", object: asObject(t, good)},
+		{name: "a tombstone", object: cache.DeletedFinalStateUnknown{Key: good.Metadata.Name, Obj: asObject(t, good)}},
+		{name: "a field of the wrong type", object: mistyped, wantErr: "Peripheral a0-ab-51-33-b7-12 does not convert"},
+		{name: "something that is not an object", object: "a0-ab-51-33-b7-12", wantErr: "not an object"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			server := newWatchServer("/things", "[]", repeat(100, c.script...)...)
-			stop := runWatcher(t, server)
-
-			server.awaitWatches(t, c.wantWatches)
-			time.Sleep(300 * time.Millisecond)
-			stop()
-
-			lists, versions := server.seen()
-			if lists != c.wantLists || len(versions) != c.wantWatches {
-				t.Fatalf("in 300 ms the watcher listed %d times and opened %d watches, want %d and %d",
-					lists, len(versions), c.wantLists, c.wantWatches)
+			got, err := convert[Peripheral](c.object)
+			if c.wantErr == "" && (err != nil || got.Metadata.Generation != 2) {
+				t.Fatalf("convert = %+v, %v; want generation 2 and no error", got.Metadata, err)
+			}
+			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
+				t.Fatalf("convert error = %v, want one that says %q", err, c.wantErr)
 			}
 		})
-	}
-}
-
-// A watch that ran for a second or longer resets the backoff, even when
-// it ended with an error. The first watch fails at once, so the wait
-// before the second list is one second and the next wait would be two.
-// The second watch runs past shortWatch before its error, so the wait
-// before the third list is one second again.
-func TestAWatchThatRanResetsTheBackoff(t *testing.T) {
-	failure := `{"type":"ERROR","object":{"kind":"Status","code":500}}`
-	server := newWatchServer("/things", "[]", []string{failure}, []string{linger, failure}, []string{holdOpen})
-	stop := runWatcher(t, server)
-	server.awaitWatches(t, 3)
-	stop()
-
-	server.mu.Lock()
-	gap := server.listTimes[2].Sub(server.listTimes[1])
-	server.mu.Unlock()
-	// The second watch lasts shortWatch plus 200 ms, and the wait after
-	// it is one second: about 2.2 seconds. A wait of two seconds would
-	// make it about 3.2.
-	if gap > shortWatch+200*time.Millisecond+1500*time.Millisecond {
-		t.Fatalf("the third list came %s after the second, want about %s",
-			gap, shortWatch+200*time.Millisecond+watchRetry)
-	}
-}
-
-// A watch that fails while the API server still holds its stream open
-// closes the stream at once. A real server holds a stream open until
-// timeoutSeconds, which is minutes, and a watcher that read the rest of
-// that stream before it listed again would miss every change until
-// then.
-func TestAFailedWatchThatStaysOpenListsAgainAfterTheBackoff(t *testing.T) {
-	cases := []struct {
-		name  string
-		event string
-	}{
-		{
-			name:  "an object that does not decode",
-			event: `{"type":"ADDED","object":{"metadata":{"resourceVersion":"2"},"name":42}}`,
-		},
-		{
-			name:  "an error event",
-			event: `{"type":"ERROR","object":{"kind":"Status","code":500}}`,
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			server := newWatchServer("/things", "[]", []string{c.event, holdOpen}, []string{holdOpen})
-			stop := runWatcher(t, server)
-			defer stop()
-
-			server.awaitWatches(t, 2)
-
-			if lists, _ := server.seen(); lists != 2 {
-				t.Fatalf("the watcher listed %d times, want 2", lists)
-			}
-		})
-	}
-}
-
-// A watch's life starts when the server accepts it, not when the
-// request begins. A refusal that takes longer than shortWatch is still
-// a watch that never ran, so the backoff grows. The first refusal waits
-// one second, and the second waits two: the gap between the second and
-// the third watch is the slow refusal plus two seconds, about 3.2
-// seconds, and a reset backoff would make it about 2.2.
-func TestASlowRefusalStillGrowsTheBackoff(t *testing.T) {
-	server := newWatchServer("/things", "[]", []string{refuseSlowly}, []string{refuseSlowly}, []string{holdOpen})
-	stop := runWatcher(t, server)
-	server.awaitWatches(t, 3)
-	stop()
-
-	server.mu.Lock()
-	gap := server.watchTimes[2].Sub(server.watchTimes[1])
-	server.mu.Unlock()
-	if want := shortWatch + 200*time.Millisecond + 2*watchRetry; gap < want-300*time.Millisecond {
-		t.Fatalf("the third watch came %s after the second, want about %s", gap, want)
-	}
-}
-
-// A watch that ran for a second or longer clears the mark of a list
-// made at once after a 410. So a 410 that ends such a watch is a first
-// 410 again, and lists at once. The second list comes after the first
-// 410, and the third comes after the second watch's life of about 1.2
-// seconds. A wait of one second before the third list would make the
-// gap about 2.2 seconds.
-func TestA410AfterAWatchThatRanListsAtOnce(t *testing.T) {
-	expired := `{"type":"ERROR","object":{"kind":"Status","code":410}}`
-	server := newWatchServer("/things", "[]", []string{expired}, []string{linger, expired}, []string{holdOpen})
-	stop := runWatcher(t, server)
-	server.awaitWatches(t, 3)
-	stop()
-
-	server.mu.Lock()
-	gap := server.listTimes[2].Sub(server.listTimes[1])
-	server.mu.Unlock()
-	if limit := shortWatch + 700*time.Millisecond; gap > limit {
-		t.Fatalf("the third list came %s after the second, want under %s", gap, limit)
-	}
-}
-
-// A connection that drops in the middle of a stream loses no event the
-// watcher has not read, so the next watch resumes at the last version
-// the stream delivered, and the watcher does not list again.
-func TestADroppedConnectionResumesAtTheLastVersion(t *testing.T) {
-	server := newWatchServer("/things", "[]", []string{bookmark("7"), linger, resetConnection}, []string{holdOpen})
-	stop := runWatcher(t, server)
-	server.awaitWatches(t, 2)
-	stop()
-
-	lists, versions := server.seen()
-	if lists != 1 || fmt.Sprint(versions) != "[list-1 7]" {
-		t.Fatalf("the watcher listed %d times and watched from %v, want 1 list and [list-1 7]", lists, versions)
 	}
 }

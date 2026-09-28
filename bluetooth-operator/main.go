@@ -143,6 +143,10 @@ func main() {
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
+	watcher, err := inClusterWatcher()
+	if err != nil {
+		fatal("in-cluster config for the watches: %v", err)
+	}
 	owner, err := NodeOwner(client, nodeName)
 	if err != nil {
 		fatal("reading node %s: %v", nodeName, err)
@@ -178,8 +182,8 @@ func main() {
 	// sources of wakes like the kernel and the bus are, so they go
 	// through the same settle window as everything else.
 	retries := make(chan struct{}, 1)
-	requests := watchPairingRequests(ctx, client, time.Now)
-	edits := watchEdits(ctx, client, nodeName)
+	requests := watchPairingRequests(ctx, watcher, time.Now)
+	edits := watchEdits(ctx, watcher, nodeName)
 	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests, edits.wakes()), settleWindow, settleLimit)
 
 	// readings is this operator's Prometheus registry. Every method on

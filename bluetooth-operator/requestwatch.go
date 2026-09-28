@@ -20,17 +20,20 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 // watchPairingRequests wakes the loop while a request needs attention.
 // The channel closes when the context ends.
-func watchPairingRequests(ctx context.Context, client *Client, now func() time.Time) <-chan struct{} {
+func watchPairingRequests(ctx context.Context, client dynamic.Interface, now func() time.Time) <-chan struct{} {
 	wake := make(chan struct{}, 1)
 	watcher := &requestWatcher{now: now, wake: wake, held: map[string]PairingRequest{}}
 	go func() {
 		defer close(wake)
 		defer watcher.stop()
-		listThenWatch(ctx, client, pairingRequestsPath(), "the PairingRequests", watcher.replace, watcher.apply)
+		watchCollection(ctx, client, pairingRequestResource, "", watcher.handler(), nil)
 	}()
 	return wake
 }
@@ -47,26 +50,48 @@ type requestWatcher struct {
 	stopped bool
 }
 
-// replace takes the whole collection from a list.
-func (w *requestWatcher) replace(requests []PairingRequest) {
+// handler sends each change the informer reports to apply. The
+// informer reports the first read as one addition for each object, and
+// a later read as the difference from what it held, so held follows
+// the collection through every gap in the watch.
+func (w *requestWatcher) handler() cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(object any) { w.apply(object, false) },
+		UpdateFunc: func(_, object any) { w.apply(object, false) },
+		DeleteFunc: func(object any) { w.apply(object, true) },
+	}
+}
+
+// apply takes one change from the watch.
+func (w *requestWatcher) apply(object any, deleted bool) {
+	request, err := convert[PairingRequest](object)
+	if err != nil {
+		reportUnconverted("the PairingRequests", err)
+		w.forget(object, deleted)
+		return
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.held = make(map[string]PairingRequest, len(requests))
-	for _, request := range requests {
+	if deleted {
+		delete(w.held, requestKey(request))
+	} else {
 		w.held[requestKey(request)] = request
 	}
 	w.look()
 }
 
-// apply takes one change from the watch.
-func (w *requestWatcher) apply(event string, request PairingRequest) {
+// forget removes a deleted request that did not convert. A tombstone
+// can hold no copy of the request, but its key is namespace/name, the
+// same key held uses. Without this, a removed request would stay in
+// held, and keep waking the loop and setting the clock.
+func (w *requestWatcher) forget(object any, deleted bool) {
+	tombstone, ok := object.(cache.DeletedFinalStateUnknown)
+	if !deleted || !ok {
+		return
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if event == "DELETED" {
-		delete(w.held, requestKey(request))
-	} else {
-		w.held[requestKey(request)] = request
-	}
+	delete(w.held, tombstone.Key)
 	w.look()
 }
 

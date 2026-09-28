@@ -65,6 +65,12 @@ considered and why.
   instead of at the backstop tick. Answers and replaces the open
   problem "An Adapter or Peripheral edit waits for the backstop".
 
+* [09, The watches use client-go](completed/09-the-watches-use-client-go.md).
+  Built on 2026-09-27; the drill on liken-1 is still owed. The three
+  watches run on client-go's reflector with the dynamic client, and
+  the loop written by hand is gone. The reference port for the other
+  operators.
+
 ## Open problems
 
 * [The restore set is tested on one BR/EDR device only](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
