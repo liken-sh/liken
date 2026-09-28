@@ -125,8 +125,9 @@ operator runs no pod between the bus and the client.
 
 There are two ways to hold that contract:
 
-* Take the `media-screen` crate from this repository as a git
-  dependency pinned to a release tag. It reads the variables below,
+* Take the `media-screen` crate from the `liken-sh/liken` repository
+  as a git dependency pinned to a release tag. Cargo finds the crate
+  by its name inside the repository. It reads the variables below,
   runs every rule, and hands the client what it draws: a press, the
   shade down or up, and a focus. Name topics of your own when you open
   the reader. Every message on one comes back on the same connection,

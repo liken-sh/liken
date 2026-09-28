@@ -2,7 +2,8 @@
 
 # The media browser's image: the Rust client, and the Wayland and Vulkan
 # libraries it opens by name on a real machine. The build context is this
-# directory alone, so the crate is the only source the image sees.
+# directory, and brand/ and media-operator/ arrive as named build
+# contexts for the two path crates below.
 
 # The runtime base of the last stage. An argument a FROM line reads has
 # to be declared before the first stage, so it is here and not beside
@@ -28,13 +29,22 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 # dependency layer cached.
 COPY --from=brand iced/Cargo.toml iced/Cargo.lock /brand/iced/
 
-# A stub library and a stub binary for this crate, and a stub library for
-# liken-iced, give cargo something to compile the dependencies against. That
-# build is the layer the image cache keeps.
-RUN mkdir -p src /brand/iced/src \
+# media-screen is a path dependency in media-operator/, which the build
+# takes as a third build context named media-operator and copies to
+# /media-operator, the same way. The crate takes its dependency versions
+# from media-operator's workspace, so the workspace's Cargo.toml comes
+# with the crate's own manifest.
+COPY --from=media-operator Cargo.toml /media-operator/
+COPY --from=media-operator media-screen/Cargo.toml /media-operator/media-screen/
+
+# A stub library and a stub binary for this crate, and stub libraries for
+# liken-iced and media-screen, give cargo something to compile the
+# dependencies against. That build is the layer the image cache keeps.
+RUN mkdir -p src /brand/iced/src /media-operator/media-screen/src \
     && echo 'fn main() {}' > src/main.rs \
     && : > src/lib.rs \
-    && : > /brand/iced/src/lib.rs
+    && : > /brand/iced/src/lib.rs \
+    && : > /media-operator/media-screen/src/lib.rs
 
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
@@ -52,6 +62,7 @@ COPY assets/ ./assets/
 COPY --from=brand iced/src/ /brand/iced/src/
 COPY --from=brand liken.svg liken.css /brand/
 COPY --from=brand fonts/ /brand/fonts/
+COPY --from=media-operator media-screen/src/ /media-operator/media-screen/src/
 
 # The release this build makes, for the `liken_build_info` gauge milestone
 # 65 puts on every process. release.yaml names a version for the image tag
@@ -65,11 +76,12 @@ COPY --from=brand fonts/ /brand/fonts/
 # change regardless.
 ARG VERSION=dev
 
-# The touch marks both crates' own sources newer than the stub build, so cargo
-# compiles them again and leaves the dependencies as they are.
+# The touch marks the three crates' own sources newer than the stub build,
+# so cargo compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch src/main.rs src/lib.rs /brand/iced/src/*.rs \
+        /media-operator/media-screen/src/lib.rs \
     && MEDIA_BROWSER_VERSION="$VERSION" cargo build --release --locked
 
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD

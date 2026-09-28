@@ -62,11 +62,10 @@ rusqlite = { version = "=0.40.2", features = ["bundled"] }
 # and the panel desire. media-operator ships it and its own idle client
 # links it, so the two clients of one contract hold the same rules. It
 # brings rumqttc, so this manifest names no broker client of its own.
-# The pin is a media-operator release tag, the way the cluster overlays
-# pin an image, or the full sha of a commit on main while the browser
-# needs a change of the crate that no release carries yet. Cargo.lock
-# holds the commit either way.
-media-screen = { git = "https://github.com/liken-sh/media-operator", rev = "803634287c8777b737c9194476dcb921bf49a3c2" }
+# The crate takes its dependency versions from media-operator's
+# workspace, so a build that has this path also needs that workspace's
+# Cargo.toml.
+media-screen = { path = "../../media-operator/media-screen" }
 # ureq holds the streaming update subscriptions; it decodes the chunked
 # body and puts a timeout on every read; the defaults come off because the
 # agent answers on loopback with no TLS and no compression.
