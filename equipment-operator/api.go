@@ -10,10 +10,10 @@ import (
 
 // The wire types are hand-written, the way liken and the sibling
 // operators write theirs. The Kubernetes API is HTTPS that serves
-// JSON, and importing client-go for a dozen structs brings informers,
-// work queues, and a release cadence this program does not use. Each
-// type carries only the fields this operator reads or writes; the
-// API server fills in the rest.
+// JSON, and generated types would bring a typed client for every kind
+// that this program does not use. Each type carries only the fields
+// this operator reads or writes; the API server fills in the rest. The
+// watches decode each object into these same types (watch.go).
 
 // The group this operator serves.
 const equipmentAPIVersion = "equipment.liken.sh/v1alpha1"
@@ -32,7 +32,8 @@ type ObjectMeta struct {
 }
 
 // A list's own resourceVersion is the revision of the whole
-// collection, which is what a watch resumes from.
+// collection. A list that answers none comes from a kind with no
+// definition, and a caller starts no watch on it.
 type ListMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }

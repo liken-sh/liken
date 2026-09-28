@@ -33,7 +33,6 @@ func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
 type fakeAPI struct {
 	client   *Client
 	written  chan ReceiverStatus
-	watched  chan string
 	powers   chan equipment.Power
 	settings chan []byte
 
@@ -45,14 +44,14 @@ type fakeAPI struct {
 	powersSet    []equipment.Power
 	settingsSet  [][]byte
 	refusing     bool
-	events       []string
-	endStream    bool
 	settingsGate chan struct{}
+	// lists counts the lists of the Receivers.
+	lists int
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	api := &fakeAPI{written: make(chan ReceiverStatus, 64), watched: make(chan string, 8), powers: make(chan equipment.Power, 64), settings: make(chan []byte, 64)}
+	api := &fakeAPI{written: make(chan ReceiverStatus, 64), powers: make(chan equipment.Power, 64), settings: make(chan []byte, 64)}
 	api.client = testAPIClient(t, http.HandlerFunc(api.handle))
 	return api
 }
@@ -79,6 +78,7 @@ func (a *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 
 func (a *fakeAPI) serveList(w http.ResponseWriter) {
 	a.mutex.Lock()
+	a.lists++
 	broken, list := a.broken, a.list
 	a.mutex.Unlock()
 	if broken {
@@ -88,34 +88,24 @@ func (a *fakeAPI) serveList(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(list)
 }
 
-// The watch writes the events a test queued and then holds the
-// connection open, the way the API server holds one, unless the test
-// asked for a stream that ends.
+// The watch answers a streaming list with the Receivers a test set,
+// the way the API server does, and then holds the connection open.
+// This fake sends no later event: a test runs each pass itself.
 func (a *fakeAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	a.mutex.Lock()
-	events, ends := a.events, a.endStream
+	list := a.list
 	a.mutex.Unlock()
-
-	select {
-	case a.watched <- r.URL.Query().Get("resourceVersion"):
-	default:
-	}
-	for _, event := range events {
-		_, _ = io.WriteString(w, event+"\n")
+	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Query().Get("sendInitialEvents") == "true" {
+		for _, receiver := range list.Items {
+			receiver.APIVersion, receiver.Kind = equipmentAPIVersion, "Receiver"
+			encoded, _ := json.Marshal(map[string]any{"type": "ADDED", "object": receiver})
+			_, _ = w.Write(append(encoded, '\n'))
+		}
+		_, _ = io.WriteString(w, initialEventsEnd(equipmentAPIVersion, "Receiver", list.Metadata.ResourceVersion)+"\n")
 	}
 	w.(http.Flusher).Flush()
-	if ends {
-		return
-	}
 	<-r.Context().Done()
-}
-
-// queueWatchEvents states what every watch on this server writes before
-// it holds or ends.
-func (a *fakeAPI) queueWatchEvents(ends bool, events ...string) {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-	a.events, a.endStream = events, ends
 }
 
 func (a *fakeAPI) recordStatus(w http.ResponseWriter, r *http.Request) {
@@ -529,7 +519,6 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
-	api.queueWatchEvents(false)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	stopped := make(chan struct{})

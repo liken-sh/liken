@@ -122,7 +122,10 @@ func (t *televisionSessions) retry() {
 	}
 }
 
-// list reads the Televisions, and waits out a 429.
+// list reads the Televisions from the API server, and waits out a 429.
+// It does not read the CECBus loop's store: a session event reads the
+// status.session it wrote on the event before, and the store can hold
+// the copy from before that write until the write's own event arrives.
 func (t *televisionSessions) list() (*TelevisionList, error) {
 	var list *TelevisionList
 	err := retryThrottled(t.ctx, func() error {
@@ -310,7 +313,7 @@ func (r *roomTelevision) television() (string, string) {
 		fmt.Fprintf(os.Stderr, "asking the node workload to read Television %s's power: %v\n", name, err)
 		return name, television.Status.Power
 	}
-	power, answered := t.awaitPowerRead(name, asked.PowerReadAt, list.Metadata.ResourceVersion)
+	power, answered := t.awaitPowerRead(name, asked.PowerReadAt)
 	if !answered {
 		fmt.Fprintf(os.Stderr, "the node workload did not read Television %s's power within %s, so the power press decides from status.power %q\n",
 			name, cecPowerReadWait, television.Status.Power)
@@ -329,18 +332,21 @@ func readable(television *Television) bool {
 
 // awaitPowerRead waits until a Television's status.powerRead answers
 // the request at, and answers the power it states. It reads the
-// Television on each event of a watch from resourceVersion, so it
-// waits on the API server's events and not on a timer. It answers
-// false when cecPowerReadWait ends first.
-func (t *televisionSessions) awaitPowerRead(name, at, resourceVersion string) (string, bool) {
+// Televisions once, and again on each event of a watch on them, so it
+// waits on the API server's events and not on a timer. The watch's
+// first read wakes it too, so an answer written before the watch
+// opened is not lost. It answers false when cecPowerReadWait ends
+// first.
+func (t *televisionSessions) awaitPowerRead(name, at string) (string, bool) {
 	ctx, cancel := context.WithTimeout(t.ctx, cecPowerReadWait)
 	var watching sync.WaitGroup
 	defer watching.Wait()
 	defer cancel()
 	wake := make(chan struct{}, 1)
-	watching.Go(func() { watchTelevisions(ctx, t.client, resourceVersion, wake, func() {}) })
+	held := &watchStore{}
+	watching.Go(func() { watchTelevisions(ctx, t.client, wake, nil, held) })
 	for {
-		if list, err := ListTelevisions(t.client); err == nil {
+		if list, err := readTelevisions(t.client, held); err == nil {
 			for _, television := range list.Items {
 				read := television.Status.PowerRead
 				if television.Metadata.Name == name && read != nil && read.At == at {

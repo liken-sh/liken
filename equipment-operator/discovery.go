@@ -211,6 +211,10 @@ func discoveredName(uuid string) string {
 // searches have missed discoveryMisses times in a row, or whose
 // identity a person's Receiver now claims.
 func (d *discovery) reconcile() error {
+	// The list goes to the API server and not to the Receiver watch's
+	// store. Discovery creates and deletes Receivers, and the next search
+	// reads its own writes: a store that has not yet received a create
+	// would make discovery create the same Receiver again.
 	list, err := ListReceivers(d.client)
 	if err != nil {
 		return err

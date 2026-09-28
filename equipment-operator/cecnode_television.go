@@ -19,8 +19,9 @@ import (
 
 // readPower reads the TV's power into the directory, and asks the loop
 // to write the entry when the read changed what the directory holds.
-// Each wake of the loop runs a pass, which reads the API server, so a
-// read that changes nothing does not wake it. An error that means the
+// Each wake of the loop runs a pass, which lists the CECBuses and the
+// Televisions from the API server, so a read that changes nothing does
+// not wake it. An error that means the
 // adapter left ends the node workload; any other error is logged, and
 // the answer is unknown. askPower is the one caller.
 func (n *cecNode) readPower(own cec.LogicalAddress) (cec.PowerStatus, error) {

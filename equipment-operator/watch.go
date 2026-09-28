@@ -1,274 +1,245 @@
 package main
 
-// The watch is an ordinary GET whose response never ends. The API
-// server holds the connection open and writes one JSON event per
-// change. The event carries no object to the loop, because every pass
-// lists, so an event is only a wake.
+// A watch keeps this operator's view of a collection current without a
+// timer. The API server sends each change to the collection as it
+// happens, and a watch with no change to send costs nothing.
+//
+// client-go's reflector runs each watch. It reads the whole collection
+// first, as a list or as the initial events of a streaming list, and
+// then watches from the version that read returned, so it receives
+// every change made after the read. It resumes a watch that the API
+// server closed from the last version it delivered, reads the
+// collection again after a 410 Gone, and backs off while the API
+// server fails. Upstream maintains and tests that loop, so this
+// operator keeps none of its own.
+//
+// The operator imports only three parts of client-go for this: the
+// reflector and informer in tools/cache, the dynamic client that lists
+// and watches a custom resource with no generated code, and rest for
+// the connection's configuration. The typed clientset and the informer
+// factories link a client for every built-in kind, and this operator
+// watches none of them. The operator's own Client (apiclient.go) still
+// sends every write, and every list of a kind the pass writes.
+//
+// A handler only wakes the loop, and reads an object only to decide
+// whether the change is one the pass must see. A pass reads the kinds
+// it does not write from the informers' stores (watchcache.go).
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"time"
+	"sync"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 )
 
-// The clocks of the watch loop. A watch that closed sooner than
-// watchShortLife after the server accepted it is a failure, whatever
-// it delivered. A failure waits a backoff that starts at watchBackoffFirst and
-// doubles to watchBackoffMax, and a watch that lived watchShortLife or
-// longer starts the backoff again from the first delay. They are
-// variables so a test holds them short.
+// The collections this operator watches. Each one is cluster-scoped.
 var (
-	watchShortLife    = time.Second
-	watchBackoffFirst = time.Second
-	watchBackoffMax   = 30 * time.Second
+	receiverResource   = schema.GroupVersionResource{Group: "equipment.liken.sh", Version: "v1alpha1", Resource: "receivers"}
+	cecBusResource     = schema.GroupVersionResource{Group: "equipment.liken.sh", Version: "v1alpha1", Resource: "cecbuses"}
+	televisionResource = schema.GroupVersionResource{Group: "equipment.liken.sh", Version: "v1alpha1", Resource: "televisions"}
+	displayResource    = schema.GroupVersionResource{Group: "display.liken.sh", Version: "v1alpha1", Resource: "displays"}
 )
 
-// watchReceivers wakes the loop on every change to a Receiver.
-func watchReceivers(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, readings *metrics) {
-	watchCollection(ctx, client, receiversPath, resourceVersion, wake, readings.watchRestarted, func() (string, error) {
-		list, err := ListReceivers(client)
-		if err != nil {
-			return "", err
+// watcher answers the dynamic client the watches use. It reaches the
+// same API server with the same credentials as the Client's own
+// requests: the ServiceAccount's CA and token in a pod, and nothing in
+// a test. client-go reads the token file again as the kubelet renews
+// it, the way send does. The client is built once and shared, so every
+// watch uses one connection pool.
+func (c *Client) watcher() (dynamic.Interface, error) {
+	c.watchOnce.Do(func() {
+		config := &rest.Config{Host: c.base}
+		if c.credentials != "" {
+			config.TLSClientConfig.CAFile = c.credentials + "/ca.crt"
+			config.BearerTokenFile = c.credentials + "/token"
 		}
-		return list.Metadata.ResourceVersion, nil
+		c.watchClient, c.watchErr = dynamic.NewForConfig(config)
 	})
+	return c.watchClient, c.watchErr
 }
 
-// watchCollection wakes the loop on every change in one collection. It
-// keeps the three guards a watch loop written by hand needs:
+// watchCollection keeps one collection current until the context ends,
+// and sends each change to the handler.
 //
-//   - A watch that closes opens again from the last resourceVersion it
-//     delivered, a bookmark's included, and lists nothing, because the
-//     API server sends every change after that version.
-//   - A 410 Gone, as a response or as an ERROR event, means the version
-//     is too old. The loop lists at once, wakes the loop, and watches
-//     from the list's version. When that watch also gets a 410, the
-//     loop waits out the backoff before it lists again. Any other error,
-//     a failed request, an ERROR event, or an event that does not
-//     decode, waits out the backoff before the list, so a fault that
-//     lasts makes no tight loop of lists.
-//   - On any error the loop closes the stream at once and does not read
-//     it to its end, because a server can hold it open for minutes.
-//   - A watch that closed sooner than watchShortLife after the server
-//     accepted it is a failure, whatever it delivered, so the backoff
-//     applies. A watch
-//     that lived that long resets the backoff, even when it ended with
-//     an error, and a 410 that ends it counts as a first 410.
+// synced, when it is not nil, runs once, after the handler has taken
+// every object of the first read. A caller that lists before the
+// informer reads needs it: an object deleted between the two reads is
+// in neither the informer's read nor any event.
 //
-// Every time but the first, opening a watch calls restarted, which
-// counts it in equipment_watch_restarts_total.
-func watchCollection(ctx context.Context, client *Client, path, resourceVersion string, wake chan<- struct{}, restarted func(), list func() (string, error)) {
-	watchCollectionBy(ctx, client, path, resourceVersion, wake, restarted, list, nil)
-}
-
-// watchKey answers the part of one object that a loop reads. An event
-// that leaves it as it was wakes nothing. A nil key wakes the loop on
-// every event.
-type watchKey func(object json.RawMessage) string
-
-// watchCollectionBy is watchCollection for a loop that reads only part
-// of each object, such as a Receiver's spec but not its status. The
-// memory of each object's key lasts for the whole watch, across the
-// streams and the lists, because each list wakes the loop anyway.
-func watchCollectionBy(ctx context.Context, client *Client, path, resourceVersion string, wake chan<- struct{}, restarted func(), list func() (string, error), key watchKey) {
-	memory := newWatchMemory(key)
-	backoff := watchBackoff{}
-	// gone says the version the next watch opens from came from a list
-	// made at once after a 410.
-	gone := false
-	first := true
-	for ctx.Err() == nil {
-		if !first {
-			restarted()
-		}
-		first = false
-		var ended watchEnd
-		var lived time.Duration
-		resourceVersion, ended, lived = memory.watch(ctx, client, path, resourceVersion, wake)
-		if ctx.Err() != nil {
-			return
-		}
-		if lived >= watchShortLife {
-			// A watch that ran this long was a working watch, so a 410
-			// that ends it is a first 410.
-			backoff.reset()
-			gone = false
-		} else if ended == watchClosed {
-			ended = watchShort
-		}
-		relistAtOnce := ended == watchGone && !gone
-		gone = ended == watchGone
-		switch {
-		case ended == watchClosed:
-			continue
-		case relistAtOnce:
-		default:
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(backoff.next()):
-			}
-		}
-		if ended == watchShort {
-			continue
-		}
-		listed, err := list()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing %s to resume the watch: %v\n", path, err)
-			continue
-		}
-		resourceVersion = listed
-		poke(wake)
-	}
-}
-
-// watchEnd is how one watch ended.
-type watchEnd int
-
-const (
-	// watchClosed is a stream that closed with no error.
-	watchClosed watchEnd = iota
-	// watchShort is a stream that closed with no error sooner than
-	// watchShortLife after the server accepted it.
-	watchShort
-	// watchGone is a 410: the version the watch asked for is too old.
-	watchGone
-	// watchFailed is every other error: a failed request, a response
-	// other than 200 or 410, an ERROR event, or an event that does not
-	// decode.
-	watchFailed
-)
-
-// watchBackoff is the wait before the next try after a failure.
-type watchBackoff struct {
-	delay time.Duration
-}
-
-// next answers the wait for this failure, and doubles the one after it.
-func (b *watchBackoff) next() time.Duration {
-	wait := max(b.delay, watchBackoffFirst)
-	b.delay = min(wait*2, watchBackoffMax)
-	return wait
-}
-
-// reset starts the backoff again from watchBackoffFirst.
-func (b *watchBackoff) reset() {
-	b.delay = 0
-}
-
-// watch opens one watch from resourceVersion and reads it until it
-// ends. It answers the version the next watch opens from, how this one
-// ended, and how long it lived. The life starts when the server
-// accepted the watch with a 200, not when the request began, so a slow
-// dial or a slow refusal is no watch that ran and resets no backoff.
-// The request carries the context, because a read of a stream that
-// never ends blocks until the far end writes, and closing the body from
-// elsewhere waits on that same read.
-func (m *watchMemory) watch(ctx context.Context, client *Client, path, resourceVersion string, wake chan<- struct{}) (string, watchEnd, time.Duration) {
-	resp, err := WatchCollection(ctx, client, path, resourceVersion)
+// restarted, when it is not nil, runs for each watch the reflector
+// opens after the first, and counts it in
+// equipment_watch_restarts_total. The first read is itself a watch
+// when the reflector reads with a streaming list.
+//
+// held, when it is not nil, holds the informer's store while the
+// informer runs, so a pass reads the collection from it
+// (watchcache.go).
+func watchCollection(ctx context.Context, client *Client, resource schema.GroupVersionResource, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
+	watcher, err := client.watcher()
 	if err != nil {
-		return resourceVersion, watchFailed, 0
+		fmt.Fprintf(os.Stderr, "watching %s: %v\n", resource.Resource, err)
+		return
 	}
-	// The body closes at once and is never drained. After an error the
-	// server can hold the stream open for minutes, and a loop that read
-	// it to its end would lose every change in that time.
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		accepted := time.Now()
-		version, ended := m.readEnd(resp, resourceVersion, wake)
-		return version, ended, time.Since(accepted)
-	case http.StatusGone:
-		return resourceVersion, watchGone, 0
-	default:
-		return resourceVersion, watchFailed, 0
-	}
-}
-
-// readWatchStream reads one connection's events and wakes the loop on
-// each one. The returned version is where the next watch resumes.
-func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {
-	return newWatchMemory(nil).read(resp, resourceVersion, wake)
-}
-
-// watchMemory holds the key each object last showed on one watch.
-type watchMemory struct {
-	key  watchKey
-	seen map[string]string
-}
-
-func newWatchMemory(key watchKey) *watchMemory {
-	return &watchMemory{key: key, seen: map[string]string{}}
-}
-
-// read reads one connection's events. The returned version is where the
-// next watch resumes.
-func (m *watchMemory) read(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {
-	version, _ := m.readEnd(resp, resourceVersion, wake)
-	return version
-}
-
-// readEnd reads one connection's events, and answers the version the
-// next watch resumes from and how the stream ended.
-func (m *watchMemory) readEnd(resp *http.Response, resourceVersion string, wake chan<- struct{}) (string, watchEnd) {
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var event struct {
-			Type   string          `json:"type"`
-			Object json.RawMessage `json:"object"`
-		}
-		if err := decoder.Decode(&event); err != nil {
-			if errors.Is(err, io.EOF) {
-				return resourceVersion, watchClosed
+	collection := watcher.Resource(resource)
+	var opens sync.Mutex
+	opened := false
+	source := &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			return collection.List(ctx, options)
+		},
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			opens.Lock()
+			again := opened
+			opened = true
+			opens.Unlock()
+			if again && restarted != nil {
+				restarted()
 			}
-			return resourceVersion, watchFailed
-		}
-		if event.Type == "ERROR" {
-			var status struct {
-				Code int `json:"code"`
+			return collection.Watch(ctx, options)
+		},
+	}
+	store, informer := cache.NewInformerWithOptions(cache.InformerOptions{
+		ListerWatcher: source,
+		ObjectType:    &unstructured.Unstructured{},
+		Handler:       handler,
+		Transform:     dropManagedFields,
+	})
+	// The informer's handlers and synced both run before this returns,
+	// so a caller that stops reading the wake channel after it returns
+	// loses no send.
+	var group sync.WaitGroup
+	if synced != nil {
+		group.Go(func() {
+			select {
+			case <-informer.HasSyncedChecker().Done():
+				synced()
+			case <-ctx.Done():
 			}
-			_ = json.Unmarshal(event.Object, &status)
-			if status.Code == http.StatusGone {
-				return resourceVersion, watchGone
-			}
-			return resourceVersion, watchFailed
-		}
-		var object struct {
-			Metadata ObjectMeta `json:"metadata"`
-		}
-		if err := json.Unmarshal(event.Object, &object); err != nil {
-			return resourceVersion, watchFailed
-		}
-		if object.Metadata.ResourceVersion != "" {
-			resourceVersion = object.Metadata.ResourceVersion
-		}
-		if event.Type == "BOOKMARK" {
-			continue
-		}
-		if m.moved(event.Type, object.Metadata.Name, event.Object) {
-			poke(wake)
-		}
+		})
+	}
+	held.hold(store, informer.HasSynced)
+	defer held.release()
+	informer.RunWithContext(ctx)
+	group.Wait()
+}
+
+// dropManagedFields removes metadata.managedFields from each object
+// before the informer stores it. The field records which client set
+// each field of the object. The operator never reads it, and without
+// the transform the informer holds a copy of it for every object.
+func dropManagedFields(object any) (any, error) {
+	if item, ok := object.(*unstructured.Unstructured); ok {
+		item.SetManagedFields(nil)
+	}
+	return object, nil
+}
+
+// convert decodes one object from a watch into the operator's own
+// struct. The informer hands a handler an *unstructured.Unstructured,
+// or, for an object that was deleted while the watch was down, a
+// tombstone that holds the last copy the informer knew, or no copy.
+//
+// An object that does not convert has a field whose type differs from
+// the operator's struct, so the CRD schema and the struct disagree.
+// The error names the object, and the caller logs it, because an
+// object that is dropped with no word leaves nobody a way to find out
+// why the operator ignored an edit.
+func convert[T any](object any) (T, error) {
+	var out T
+	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok {
+		object = tombstone.Obj
+	}
+	item, ok := object.(*unstructured.Unstructured)
+	if !ok {
+		return out, fmt.Errorf("the watch delivered a %T, not an object", object)
+	}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &out); err != nil {
+		return out, fmt.Errorf("%s %s does not convert: %w", item.GetKind(), item.GetName(), err)
+	}
+	return out, nil
+}
+
+// wakeOnEvery wakes the loop on every change the informer reports. A
+// loop that reads the whole object, its status included, uses it. The
+// informer reports a read after a gap in the watch as one update for
+// each object it held, so a gap wakes the loop as well.
+func wakeOnEvery(wake chan<- struct{}) cache.ResourceEventHandler {
+	signal := func() { poke(wake) }
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(any) { signal() },
+		UpdateFunc: func(any, any) { signal() },
+		DeleteFunc: func(any) { signal() },
 	}
 }
 
-// moved answers whether one event changes what the loop reads: any
-// event with no key, an object the watch has not seen, a deleted
-// object, and an object whose key differs from the one it last showed.
-func (m *watchMemory) moved(kind, name string, object json.RawMessage) bool {
-	if m.key == nil {
-		return true
+// markHandler wakes the loop when a change moves the part of an object
+// that the loop reads, which mark returns. A new object and a removed
+// object always wake it. The informer hands an update both the copy it
+// held and the new copy, so the handler compares their marks and keeps
+// no copy of its own. After a gap in the watch, the informer reports
+// each difference from what it held as an addition, an update, or a
+// deletion, so a change made during the gap reaches the handler too.
+//
+// An object that does not convert is logged and wakes the loop. The
+// handler cannot tell what changed, and one extra pass costs less than
+// a missed edit.
+type markHandler[T any, M comparable] struct {
+	what string
+	wake chan<- struct{}
+	mark func(T) M
+}
+
+func (h markHandler[T, M]) handler() cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    h.arrived,
+		UpdateFunc: h.updated,
+		DeleteFunc: h.arrived,
 	}
-	if kind == "DELETED" {
-		delete(m.seen, name)
-		return true
+}
+
+// arrived takes a new or a removed object. Both change what the loop
+// reads, so both wake it. The object is converted only to report one
+// that does not convert.
+func (h markHandler[T, M]) arrived(object any) {
+	if _, err := convert[T](object); err != nil {
+		reportUnconverted(h.what, err)
 	}
-	now := m.key(object)
-	before, held := m.seen[name]
-	m.seen[name] = now
-	return !held || before != now
+	poke(h.wake)
+}
+
+// updated takes a change to an object the informer held, and wakes the
+// loop only when the mark moved.
+func (h markHandler[T, M]) updated(before, after any) {
+	now, err := convert[T](after)
+	if err != nil {
+		reportUnconverted(h.what, err)
+		poke(h.wake)
+		return
+	}
+	// A held copy that does not convert was logged when it arrived.
+	// Nothing says what it held, so the change counts as a move.
+	was, err := convert[T](before)
+	if err != nil || h.mark(was) != h.mark(now) {
+		poke(h.wake)
+	}
+}
+
+// reportUnconverted logs an object that convert refused.
+func reportUnconverted(what string, err error) {
+	fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
+}
+
+// watchReceivers wakes the Receiver loop on every change to a
+// Receiver, its status included, because a pass reads both.
+func watchReceivers(ctx context.Context, client *Client, wake chan<- struct{}, readings *metrics, held *watchStore) {
+	watchCollection(ctx, client, receiverResource, wakeOnEvery(wake), func() { poke(wake) }, readings.watchRestarted, held)
 }

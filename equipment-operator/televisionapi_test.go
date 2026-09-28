@@ -308,7 +308,7 @@ func (a *cecAPI) editReceiver(receiver Receiver) {
 	defer a.mutex.Unlock()
 	receiver.Metadata.Generation = a.receivers[receiver.Metadata.Name].Metadata.Generation + 1
 	a.receivers[receiver.Metadata.Name] = receiver
-	a.changedIn(receiversPath, receiver.Metadata.Name, receiver)
+	a.changedIn(receiversPath)
 }
 
 // writes answers how many status writes each writer made to the

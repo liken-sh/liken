@@ -103,7 +103,11 @@ func serveCEC(ctx context.Context, devices string) error {
 
 // cecNode is one adapter on one machine.
 type cecNode struct {
-	client    *Client
+	client *Client
+	// displays holds the Display watch's store, which each pass reads.
+	// The node workload writes no Display.
+	displays *watchStore
+
 	machine   string
 	device    *cec.Device
 	caps      cec.Caps
@@ -211,6 +215,7 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 		retryAsk:  make(chan struct{}, 1),
 		failed:    make(chan error, 1),
 		stopMode:  func() {},
+		displays:  &watchStore{},
 		source:    cec.InvalidPhysicalAddress,
 		sources:   make(chan struct{}, 1),
 	}, nil
@@ -298,16 +303,18 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 // which the handle takes before it claims an address, and the baseline
 // is the scan when the adapter joins; startMode states the rest. In the
 // API, the subscriptions are the watches of CECBuses, Televisions, and
-// Displays, and the baseline is each pass's list; a watch that drops
-// opens again from its last version, and lists again only after a 410
-// or an error, as watchCollection states. No timer re-reads a state. The
-// timers here are clocks: the heartbeat that keeps reportedAt current,
-// and the retry of a join or an API call that failed.
+// Displays, and the baseline is each pass's read: a list of the
+// CECBuses and the Televisions, which the node workload writes, and
+// the Display watch's store (watchcache.go). client-go's
+// reflector runs each watch: it resumes a watch that drops from its
+// last version and reads again after a 410, and the watch wakes the
+// loop when its own first read is done (watch.go). No timer re-reads
+// a state. The timers here are clocks: the heartbeat that keeps
+// reportedAt current, and the retry of a join or an API call that
+// failed.
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
-	var list *CECBusList
 	err := retryThrottled(ctx, func() error {
-		var err error
-		list, err = ListCECBuses(n.client)
+		_, err := ListCECBuses(n.client)
 		return err
 	})
 	if ctx.Err() != nil {
@@ -316,9 +323,7 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("listing CECBuses: %w", err)
 	}
-	started.Go(func() {
-		watchCECBuses(ctx, n.client, list.Metadata.ResourceVersion, n.wake, func() {})
-	})
+	started.Go(func() { watchCECBuses(ctx, n.client, n.wake, nil, nil) })
 	// A change of a Television's spec.power or status.session wakes the
 	// loop, because the pass is where the adapter acts on it. A change of
 	// a Display's physical address wakes it too, because the adapter
@@ -326,14 +331,14 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	// version and gets no watch yet; watchLater starts it once a pass
 	// lists a version.
 	watches := []*lateWatch{
-		{path: televisionsPath, list: func() (string, error) {
+		{path: televisionsPath, watch: watchTelevisions, list: func() (string, error) {
 			listed, err := ListTelevisions(n.client)
 			if err != nil {
 				return "", err
 			}
 			return listed.Metadata.ResourceVersion, nil
 		}},
-		{path: displaysPath, list: func() (string, error) {
+		{path: displaysPath, watch: watchAllDisplays, held: n.displays, list: func() (string, error) {
 			listed, err := ListDisplays(n.client)
 			if err != nil {
 				return "", err
@@ -398,6 +403,8 @@ func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <
 // pass for a definition installed after the node workload started.
 type lateWatch struct {
 	path    string
+	watch   func(context.Context, *Client, chan<- struct{}, func(), *watchStore)
+	held    *watchStore
 	list    func() (string, error)
 	running bool
 }
@@ -427,10 +434,8 @@ func (n *cecNode) watchLater(ctx context.Context, started *sync.WaitGroup, watch
 			continue
 		}
 		watch.running = true
-		path, list := watch.path, watch.list
-		started.Go(func() {
-			watchCollection(ctx, n.client, path, version, n.wake, func() {}, list)
-		})
+		start, held := watch.watch, watch.held
+		started.Go(func() { start(ctx, n.client, n.wake, nil, held) })
 	}
 	return nil
 }

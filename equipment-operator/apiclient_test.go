@@ -124,35 +124,6 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
 }
 
-// The watch is an ordinary GET whose response the caller owns, so the
-// test reads the stream the way the loop would.
-func TestWatchReceiversOpensTheStreamAtAResourceVersion(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET /apis/equipment.liken.sh/v1alpha1/receivers": map[string]any{
-			"type":   "ADDED",
-			"object": Receiver{Metadata: ObjectMeta{Name: "theater", ResourceVersion: "78"}},
-		},
-	}}
-
-	resp, err := WatchReceivers(t.Context(), testAPIClient(t, api.handler()), "77")
-	mustSucceed(t, err)
-	t.Cleanup(func() { drain(resp.Body) })
-
-	mustMatch(t, resp.StatusCode, http.StatusOK)
-	query := api.requests[0].Query
-	mustMatch(t, query.Get("watch"), "true")
-	mustMatch(t, query.Get("allowWatchBookmarks"), "true")
-	mustMatch(t, query.Get("resourceVersion"), "77")
-
-	var event struct {
-		Type   string   `json:"type"`
-		Object Receiver `json:"object"`
-	}
-	mustSucceed(t, json.NewDecoder(resp.Body).Decode(&event))
-	mustMatch(t, event.Type, "ADDED")
-	mustMatch(t, event.Object.Metadata.ResourceVersion, "78")
-}
-
 // The settings write is a server-side apply on the main resource that
 // owns exactly one leaf of spec.denon.settings, so a bus write to one
 // key never claims the keys around it.
@@ -357,12 +328,12 @@ func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 func TestTheClientFailsBeforeItSends(t *testing.T) {
 	t.Run("the token is not there", func(t *testing.T) {
 		client := NewClient("http://127.0.0.1:1", http.DefaultClient, filepath.Join(t.TempDir(), "absent"))
-		_, err := client.Do(t.Context(), http.MethodGet, receiversPath, nil)
+		_, err := client.send(t.Context(), http.MethodGet, receiversPath, jsonContentType, nil)
 		mustFail(t, err)
 	})
 	t.Run("the method is not a method", func(t *testing.T) {
 		client := NewClient("http://127.0.0.1:1", http.DefaultClient, "")
-		_, err := client.Do(t.Context(), "GET RECEIVERS", receiversPath, nil)
+		_, err := client.send(t.Context(), "GET RECEIVERS", receiversPath, jsonContentType, nil)
 		mustFail(t, err)
 	})
 }

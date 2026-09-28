@@ -38,16 +38,12 @@ func ListCECBuses(c *Client) (*CECBusList, error) {
 	return list, nil
 }
 
-// watchCECBuses wakes a loop on every change to a CECBus. restarted
+// watchCECBuses wakes a loop on every change to a CECBus, its status
+// included: the Deployment derives its status from the entries the node
+// workloads write, and a node workload reads the Deployment's. restarted
 // is called for each watch opened again after the first.
-func watchCECBuses(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, restarted func()) {
-	watchCollection(ctx, client, cecBusesPath, resourceVersion, wake, restarted, func() (string, error) {
-		list, err := ListCECBuses(client)
-		if err != nil {
-			return "", err
-		}
-		return list.Metadata.ResourceVersion, nil
-	})
+func watchCECBuses(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
+	watchCollection(ctx, client, cecBusResource, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyCECBus sends one apply body under one field manager. force
@@ -164,49 +160,77 @@ func GetDisplay(c *Client, name string) (*Display, error) {
 	return display, nil
 }
 
+// readDisplays answers every Display from the watch's store, and lists
+// them from the API server while the store has nothing to give.
+func readDisplays(c *Client, held *watchStore) (*DisplayList, error) {
+	if items, ok := cachedList[Display](held, "the Displays"); ok {
+		return &DisplayList{Items: items}, nil
+	}
+	return ListDisplays(c)
+}
+
+// readDisplay answers one Display from the watch's store, or
+// ErrNotFound when the store does not hold it, and reads it from the
+// API server while the store has nothing to give.
+func readDisplay(c *Client, held *watchStore, name string) (*Display, error) {
+	display, found, ok := cachedGet[Display](held, "the Displays", name)
+	switch {
+	case !ok:
+		return GetDisplay(c, name)
+	case !found:
+		return nil, ErrNotFound
+	}
+	return &display, nil
+}
+
 // watchDisplays wakes a loop when a Display appears, goes, or moves to
 // another node or physical address, which is all a Television reads of
 // it. display-operator writes other status fields of a Display, and
 // those writes wake nothing.
-func watchDisplays(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, restarted func()) {
-	watchCollectionBy(ctx, client, displaysPath, resourceVersion, wake, restarted, func() (string, error) {
-		list, err := ListDisplays(client)
-		if err != nil {
-			return "", err
-		}
-		return list.Metadata.ResourceVersion, nil
-	}, displayKey)
+func watchDisplays(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
+	displays := markHandler[Display, displayPlace]{what: "the Displays", wake: wake, mark: displayMark}
+	watchCollection(ctx, client, displayResource, displays.handler(), func() { poke(wake) }, restarted, held)
 }
 
-// displayKey is the part of a Display that a Television reads.
-func displayKey(object json.RawMessage) string {
-	var display Display
-	_ = json.Unmarshal(object, &display)
-	return display.Status.Node + " " + display.Status.PhysicalAddress
+// watchAllDisplays wakes a loop on every change to a Display. The node
+// workload uses it, and wakes on each Display write.
+func watchAllDisplays(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
+	watchCollection(ctx, client, displayResource, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+}
+
+// displayPlace is the part of a Display that a Television reads, and
+// the Display's UID. After a gap in the watch, a Display deleted and
+// created again with the same name reaches the handler as an update,
+// and the UID tells the two apart.
+type displayPlace struct {
+	uid, node, physicalAddress string
+}
+
+func displayMark(display Display) displayPlace {
+	return displayPlace{uid: display.Metadata.UID, node: display.Status.Node, physicalAddress: display.Status.PhysicalAddress}
 }
 
 // watchReceiverSpecs wakes a loop when a Receiver appears, goes, or
 // changes its spec. A Television reads a Receiver's spec.inputs and no
 // status, and a Receiver's status moves with every volume step, so a
 // status write wakes nothing.
-func watchReceiverSpecs(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, restarted func()) {
-	watchCollectionBy(ctx, client, receiversPath, resourceVersion, wake, restarted, func() (string, error) {
-		list, err := ListReceivers(client)
-		if err != nil {
-			return "", err
-		}
-		return list.Metadata.ResourceVersion, nil
-	}, generationKey)
+func watchReceiverSpecs(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
+	receivers := markHandler[Receiver, specMark]{what: "the Receivers", wake: wake, mark: receiverSpecMark}
+	watchCollection(ctx, client, receiverResource, receivers.handler(), func() { poke(wake) }, restarted, held)
 }
 
-// generationKey is an object's metadata.generation, which the API
-// server moves on each spec change and on no status change.
-func generationKey(object json.RawMessage) string {
-	var meta struct {
-		Metadata ObjectMeta `json:"metadata"`
-	}
-	_ = json.Unmarshal(object, &meta)
-	return fmt.Sprint(meta.Metadata.Generation)
+// specMark is an object's metadata.generation, which the API server
+// moves on each spec change and on no status change, and its UID. After
+// a gap in the watch, an object deleted and created again with the same
+// name reaches the handler as an update, and the new object can have
+// the same generation as the old one.
+type specMark struct {
+	uid        string
+	generation int64
+}
+
+func receiverSpecMark(receiver Receiver) specMark {
+	return specMark{uid: receiver.Metadata.UID, generation: receiver.Metadata.Generation}
 }
 
 type DisplayList struct {

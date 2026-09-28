@@ -31,6 +31,7 @@ becomes a new plan or an open problem.
 * [04, Declarative settings and the bus controller](04-declarative-settings-and-bus.md). Every setting the driver reads becomes declarable in `spec.denon.settings` and settable over a bus settings topic, one-shot actions go over a bus commands topic, and each setting key has exactly one writer.
 * [07, The receiver's HTTP interface and the TV wake](07-receiver-http-and-tv-wake.md). The receiver answers a second interface over HTTP, and it carries HDMI Control and the video controls. The receiver is a CEC responder, so it cannot wake the TV, and the wake needs a node-attached CEC adapter from plan 05. Plan 09 designs the wake, and its phase 3 builds it; the hardware drill is open. The HTTP driver design is not written.
 * [09, The TV and the receiver over HDMI-CEC](09-cec.md). A USB CEC adapter on a node joins the HDMI tree's CEC wire through the kernel's CEC API. A declared `CECBus` in `Listen` or `Control` mode reports every device on the wire, a new `Television` kind holds the TV's power and the displays that reach it, a `Receiver` gains a `cec:` block, and the wake job closes plan 07's TV wake. It depends on `liken` plan 70 and display-operator plan 23. Phase 1 is built and tested against the kernel's `vivid` driver: `cec/`, the `equipment-operator cec` node workload, and the `CECBus` in `Listen` and `Control`. Phase 2 is built and tested against `vivid` with `cec-follower` playing the TV: the `Television` with `spec.power`, `status.power`, and `status.displays`. Phase 3 is built and tested against `vivid` with a second output playing a streaming player: the session match, the wake job, and `status.activeSource`. The power press that turns the room off, TV included, is built and tested against `vivid` and the fakes: `status.session.standbyAt` and `StandbyApplied`. The adapter sends nothing on a timer, tested against `vivid` and the fakes: one scan when it joins, one set of questions for a device that announces itself, the TV's power from what the bus carries, and a read for each power press through `status.session.powerReadAt`. The hardware drills of phases 1 to 3, of the power press, and of the quiet bus, and phases 4 and 5, are open.
+* [10, The watches use client-go](completed/10-the-watches-use-client-go.md). Built on 2026-09-27. Every watch of the API server runs on client-go's reflector through the dynamic client, the loop written by hand is gone, and a pass reads the kinds it does not write from the informers' stores. The leader election that would let the `Deployment` roll with no gap is not built: the same binary runs the `cec` `DaemonSet`, and the `Deployment` uses the host network. The plan gives the options. The drill on a cluster is open.
 
 ## Open problems
 
@@ -73,3 +74,8 @@ becomes a new plan or an open problem.
   one amp itself reached the room's topic in the same
   second while the poll stayed at ten seconds. Development build
   `2026.09.19-002-dev-028-ab218213`.
+
+* Plan 10, the watches use client-go. Built on 2026-09-27 and tested
+  on the laptop against scripted API servers. The stripped binary
+  grew from 10,981,536 to 15,618,208 bytes. No drill has run on a
+  cluster yet.

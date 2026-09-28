@@ -900,6 +900,12 @@ func (c *controller) pass(ctx context.Context) error {
 }
 
 func (c *controller) doPass(ctx context.Context) error {
+	// The Receivers come from the API server and not from the watch's
+	// store. Each unit writes its Receiver's status, and a new unit
+	// takes what the old one settled from the stored status. The store
+	// can hold the copy from before the last write until the write's own
+	// event arrives, and a unit that read it would send a receiver a
+	// setting again.
 	list, err := ListReceivers(c.client)
 	if err != nil {
 		return err
@@ -1148,13 +1154,11 @@ func operate() {
 	}
 }
 
-// serve proves the collection can be read, starts the watch from the
-// version that first list carried, and runs the loop until ctx ends.
+// serve proves the collection can be read, starts the watch, and runs
+// the loop until ctx ends.
 func serve(ctx context.Context, client *Client, busAddress string, readings *metrics) error {
-	var list *ReceiverList
 	err := retryThrottled(ctx, func() error {
-		var err error
-		list, err = ListReceivers(client)
+		_, err := ListReceivers(client)
 		return err
 	})
 	if err != nil {
@@ -1165,7 +1169,7 @@ func serve(ctx context.Context, client *Client, busAddress string, readings *met
 	// of them reads the API after it.
 	operator := newController(client, busAddress, readings)
 	var started sync.WaitGroup
-	started.Go(func() { watchReceivers(ctx, client, list.Metadata.ResourceVersion, operator.wake, readings) })
+	started.Go(func() { watchReceivers(ctx, client, operator.wake, readings, nil) })
 	started.Go(func() { newCECBusController(client).run(ctx, readings) })
 	operator.run(ctx)
 	started.Wait()

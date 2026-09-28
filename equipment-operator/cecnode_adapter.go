@@ -55,7 +55,7 @@ func (n *cecNode) desired(bus string, mode CECMode, display string) adapterConfi
 		want.problem = fmt.Sprintf("the CECBus names no display for machine %s", n.machine)
 		return want
 	}
-	found, err := GetDisplay(n.client, display)
+	found, err := readDisplay(n.client, n.displays, display)
 	if err != nil {
 		n.retryLater()
 	}

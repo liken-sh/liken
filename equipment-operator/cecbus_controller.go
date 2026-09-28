@@ -41,14 +41,26 @@ type cecBusController struct {
 	// log takes a line for each Television discovery creates or
 	// deletes.
 	log io.Writer
+	// The stores of the Display and Receiver watches, which each pass
+	// reads. This loop writes neither kind.
+	displays, receivers *watchStore
 }
 
 func newCECBusController(client *Client) *cecBusController {
-	return &cecBusController{client: client, now: time.Now, wake: make(chan struct{}, 1), log: os.Stderr}
+	return &cecBusController{
+		client: client, now: time.Now, wake: make(chan struct{}, 1), log: os.Stderr,
+		displays: &watchStore{}, receivers: &watchStore{},
+	}
 }
 
 // pass derives and writes every bus, and then every Television. A
 // write that fails is logged, and the next pass tries it again.
+//
+// The CECBuses come from the API server and not from the watch's
+// store, because the pass compares each bus's derived status with the
+// stored one. The store can hold the copy from before the pass's last
+// write until the write's own event arrives, and a pass that read it
+// would write the status again with a new lastTransitionTime.
 func (c *cecBusController) pass() error {
 	list, err := ListCECBuses(c.client)
 	if err != nil {
@@ -105,9 +117,7 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	// outlives it.
 	var watching sync.WaitGroup
 	defer watching.Wait()
-	watching.Go(func() {
-		watchCECBuses(ctx, c.client, list.Metadata.ResourceVersion, c.wake, readings.cecBusWatchRestarted)
-	})
+	watching.Go(func() { watchCECBuses(ctx, c.client, c.wake, readings.cecBusWatchRestarted, nil) })
 	follows := []*follow{
 		{watch: watchTelevisions, restarted: readings.televisionWatchRestarted, list: func() (string, error) {
 			listed, err := ListTelevisions(c.client)
@@ -116,14 +126,14 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 			}
 			return listed.Metadata.ResourceVersion, nil
 		}},
-		{watch: watchDisplays, restarted: readings.displayWatchRestarted, list: func() (string, error) {
+		{watch: watchDisplays, restarted: readings.displayWatchRestarted, held: c.displays, list: func() (string, error) {
 			listed, err := ListDisplays(c.client)
 			if err != nil {
 				return "", err
 			}
 			return listed.Metadata.ResourceVersion, nil
 		}},
-		{watch: watchReceiverSpecs, restarted: readings.watchRestarted, list: func() (string, error) {
+		{watch: watchReceiverSpecs, restarted: readings.watchRestarted, held: c.receivers, list: func() (string, error) {
 			listed, err := ListReceivers(c.client)
 			if err != nil {
 				return "", err
@@ -151,10 +161,14 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 
 // follow is one watch the loop opens once its kind lists a version: at
 // once on a cluster with the definition, and at a later pass for a
-// definition installed after the operator started.
+// definition installed after the operator started. The watch waits
+// for the list, because a reflector on a kind with no definition
+// retries its own list and logs each failure, for as long as the
+// definition is missing.
 type follow struct {
-	watch     func(context.Context, *Client, string, chan<- struct{}, func())
+	watch     func(context.Context, *Client, chan<- struct{}, func(), *watchStore)
 	restarted func()
+	held      *watchStore
 	list      func() (string, error)
 	running   bool
 }
@@ -172,6 +186,6 @@ func (c *cecBusController) startFollows(ctx context.Context, watching *sync.Wait
 			continue
 		}
 		one.running = true
-		watching.Go(func() { one.watch(ctx, c.client, version, c.wake, one.restarted) })
+		watching.Go(func() { one.watch(ctx, c.client, c.wake, one.restarted, one.held) })
 	}
 }

@@ -18,18 +18,26 @@ import (
 // pass derived them. A read that fails skips the pass, because a
 // status derived from a partial read would remove facts that are still
 // true, and the next pass reads again.
+//
+// The Televisions come from the API server and not from the watch's
+// store, because this pass creates, deletes, and writes the status of
+// Televisions, and compares each status with the one stored. The store
+// can hold the copy from before the pass's last write until the
+// write's own event arrives, and a pass that read it would create a
+// Television again or write a status again. The Displays and the
+// Receivers come from the stores: this loop writes neither.
 func (c *cecBusController) passTelevisions(buses []CECBus) {
 	televisions, err := ListTelevisions(c.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions: %v\n", err)
 		return
 	}
-	displays, err := ListDisplays(c.client)
+	displays, err := readDisplays(c.client, c.displays)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Displays: %v\n", err)
 		return
 	}
-	receivers, err := ListReceivers(c.client)
+	receivers, err := readReceivers(c.client, c.receivers)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Receivers: %v\n", err)
 		return

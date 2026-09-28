@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -38,7 +37,7 @@ type cecAPI struct {
 	wakeWrites         int
 	sessionWrites      int
 	version            int
-	watchers           []fakeWatcher
+	watchers           []*fakeWatcher
 	deleted            []string
 	client             *Client
 	// refusing makes every list and every status write fail with a
@@ -71,6 +70,9 @@ type cecAPI struct {
 	// entryWrites counts the status writes of each node workload's
 	// field manager.
 	entryWrites map[string]int
+	// reads counts each GET that is not a watch, a list or a read of
+	// one object, by path.
+	reads map[string]int
 }
 
 // refuse turns the refusals on or off.
@@ -90,18 +92,62 @@ func startCECAPI(t *testing.T) *cecAPI {
 	return api
 }
 
-// fakeWatcher is one open watch and the collection it watches.
+// fakeWatcher is one open watch, the collection it watches, and the
+// copy of each object it last sent, which is what the informer on the
+// far end holds.
 type fakeWatcher struct {
 	path   string
+	sent   map[string]map[string]any
 	events chan string
 }
 
-// changed bumps the collection's version and wakes every watch. The
-// caller holds the mutex.
+// changed bumps the version and sends every watch the change in its
+// collection. The caller holds the mutex.
 func (a *cecAPI) changed() {
 	a.version++
-	event := fmt.Sprintf(`{"type":"MODIFIED","object":{"metadata":{"resourceVersion":"%d"}}}`, a.version)
 	for _, watcher := range a.watchers {
+		a.send(watcher)
+	}
+}
+
+// changedIn bumps the version and sends the change to the watches of
+// one collection alone, the way the API server does. The caller holds
+// the mutex.
+func (a *cecAPI) changedIn(path string) {
+	a.version++
+	for _, watcher := range a.watchers {
+		if watcher.path == path {
+			a.send(watcher)
+		}
+	}
+}
+
+// send tells one watch what its collection holds now: an ADDED event
+// for each new object, a DELETED event for each object that is gone,
+// and a MODIFIED event for every other object, changed or not, so each
+// change wakes a loop that wakes on every event, the way an unrelated
+// edit of an object it holds does. A collection with no object gets a
+// bookmark, which wakes nothing. The caller holds the mutex.
+func (a *cecAPI) send(watcher *fakeWatcher) {
+	now := a.collection(watcher.path)
+	var events []string
+	for _, name := range sortedKeys(now) {
+		kind := "MODIFIED"
+		if _, held := watcher.sent[name]; !held {
+			kind = "ADDED"
+		}
+		events = append(events, watchEvent(kind, now[name]))
+	}
+	for _, name := range sortedKeys(watcher.sent) {
+		if _, held := now[name]; !held {
+			events = append(events, watchEvent("DELETED", watcher.sent[name]))
+		}
+	}
+	if len(events) == 0 {
+		events = append(events, a.bookmark(watcher.path, false))
+	}
+	watcher.sent = now
+	for _, event := range events {
 		select {
 		case watcher.events <- event:
 		default:
@@ -109,31 +155,70 @@ func (a *cecAPI) changed() {
 	}
 }
 
-// changedIn bumps the version and sends one object's event to the
-// watches of its own collection alone, the way the API server does.
-// The caller holds the mutex.
-func (a *cecAPI) changedIn(path, name string, object any) {
-	a.version++
-	encoded, _ := json.Marshal(object)
-	var fields map[string]any
-	_ = json.Unmarshal(encoded, &fields)
-	meta, _ := fields["metadata"].(map[string]any)
-	if meta == nil {
-		meta = map[string]any{}
-	}
-	meta["name"] = name
-	meta["resourceVersion"] = fmt.Sprint(a.version)
-	fields["metadata"] = meta
-	body, _ := json.Marshal(map[string]any{"type": "MODIFIED", "object": fields})
-	for _, watcher := range a.watchers {
-		if watcher.path != path {
-			continue
+// fakeKinds names the kind the fake serves at each collection path.
+var fakeKinds = map[string][2]string{
+	cecBusesPath:    {equipmentAPIVersion, "CECBus"},
+	televisionsPath: {equipmentAPIVersion, "Television"},
+	receiversPath:   {equipmentAPIVersion, "Receiver"},
+	displaysPath:    {"display.liken.sh/v1alpha1", "Display"},
+}
+
+// collection answers each object of one collection by name, as a watch
+// event carries it. The caller holds the mutex.
+func (a *cecAPI) collection(path string) map[string]map[string]any {
+	objects := map[string]any{}
+	switch path {
+	case cecBusesPath:
+		for name, bus := range a.buses {
+			objects[name] = bus
 		}
-		select {
-		case watcher.events <- string(body):
-		default:
+	case televisionsPath:
+		for name, television := range a.televisions {
+			objects[name] = television
+		}
+	case receiversPath:
+		for name, receiver := range a.receivers {
+			objects[name] = receiver
+		}
+	case displaysPath:
+		for name, display := range a.displays {
+			objects[name] = display
 		}
 	}
+	kind := fakeKinds[path]
+	fields := make(map[string]map[string]any, len(objects))
+	for name, object := range objects {
+		encoded, _ := json.Marshal(object)
+		var one map[string]any
+		_ = json.Unmarshal(encoded, &one)
+		meta, _ := one["metadata"].(map[string]any)
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["name"] = name
+		meta["resourceVersion"] = fmt.Sprint(a.version)
+		one["metadata"] = meta
+		one["apiVersion"], one["kind"] = kind[0], kind[1]
+		fields[name] = one
+	}
+	return fields
+}
+
+func watchEvent(kind string, object map[string]any) string {
+	encoded, _ := json.Marshal(map[string]any{"type": kind, "object": object})
+	return string(encoded)
+}
+
+// bookmark is a bookmark at the collection's version. The last one of
+// a streaming list marks the end of its initial events. The caller
+// holds the mutex.
+func (a *cecAPI) bookmark(path string, initialEventsEnd bool) string {
+	kind := fakeKinds[path]
+	meta := map[string]any{"resourceVersion": fmt.Sprint(a.version)}
+	if initialEventsEnd {
+		meta["annotations"] = map[string]string{"k8s.io/initial-events-end": "true"}
+	}
+	return watchEvent("BOOKMARK", map[string]any{"apiVersion": kind[0], "kind": kind[1], "metadata": meta})
 }
 
 func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +227,14 @@ func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
 	refusing := a.refusing
 	a.mutex.Unlock()
 	watch := r.URL.Query().Get("watch") == "true"
+	if r.Method == http.MethodGet && !watch {
+		a.mutex.Lock()
+		if a.reads == nil {
+			a.reads = map[string]int{}
+		}
+		a.reads[path]++
+		a.mutex.Unlock()
+	}
 	if refusing && !watch && (r.Method == http.MethodGet && path == cecBusesPath || strings.HasSuffix(path, "/status")) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -193,28 +286,60 @@ func (a *cecAPI) serveList(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(list)
 }
 
+// serveWatch answers a watch the way the API server does. A streaming
+// list, the read client-go's reflector sends first, gets an ADDED event
+// for each object and a bookmark that ends the initial events. A watch
+// that resumes from the current version gets what changes after it,
+// and one that resumes from an older version gets a 410, which makes
+// the reflector read the collection again.
 func (a *cecAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
-	events := make(chan string, 16)
+	query := r.URL.Query()
+	watcher := &fakeWatcher{path: r.URL.Path, events: make(chan string, 1024)}
 	a.mutex.Lock()
-	a.watchers = append(a.watchers, fakeWatcher{path: r.URL.Path, events: events})
-	// A watch resumes from the version its list gave it, as on a real
-	// API server, so a change made between the list and the watch still
-	// reaches the loop.
-	if from, err := strconv.Atoi(r.URL.Query().Get("resourceVersion")); err == nil && from < a.version {
-		events <- fmt.Sprintf(`{"type":"MODIFIED","object":{"metadata":{"resourceVersion":"%d"}}}`, a.version)
+	var opening []string
+	switch {
+	case query.Get("sendInitialEvents") == "true":
+		watcher.sent = a.collection(watcher.path)
+		for _, name := range sortedKeys(watcher.sent) {
+			opening = append(opening, watchEvent("ADDED", watcher.sent[name]))
+		}
+		opening = append(opening, a.bookmark(watcher.path, true))
+	case query.Get("resourceVersion") == fmt.Sprint(a.version):
+		watcher.sent = a.collection(watcher.path)
+	default:
+		opening = append(opening, `{"type":"ERROR","object":{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Expired","code":410}}`)
+		watcher = nil
+	}
+	if watcher != nil {
+		a.watchers = append(a.watchers, watcher)
 	}
 	a.mutex.Unlock()
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	for _, event := range opening {
+		_, _ = io.WriteString(w, event+"\n")
+	}
 	w.(http.Flusher).Flush()
+	if watcher == nil {
+		return
+	}
+	defer a.forget(watcher)
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case event := <-events:
+		case event := <-watcher.events:
 			_, _ = io.WriteString(w, event+"\n")
 			w.(http.Flusher).Flush()
 		}
 	}
+}
+
+// forget drops a watch whose connection ended.
+func (a *cecAPI) forget(watcher *fakeWatcher) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	a.watchers = slices.DeleteFunc(a.watchers, func(one *fakeWatcher) bool { return one == watcher })
 }
 
 func (a *cecAPI) applySpec(w http.ResponseWriter, r *http.Request, name string) {
@@ -318,7 +443,7 @@ func (a *cecAPI) moveDisplay(name, physicalAddress string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.displays[name].Status.PhysicalAddress = physicalAddress
-	a.changedIn(displaysPath, name, a.displays[name])
+	a.changedIn(displaysPath)
 }
 
 func (a *cecAPI) putDisplay(name, node, physicalAddress string) {

@@ -79,50 +79,6 @@ func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 	}
 }
 
-// A watch that ends is opened again, and each reopening is counted.
-func TestTheDeploymentsWatchesReopen(t *testing.T) {
-	was := watchBackoffFirst
-	watchBackoffFirst = time.Millisecond
-	t.Cleanup(func() { watchBackoffFirst = was })
-	type watcher func(context.Context, *Client, string, chan<- struct{}, func())
-	cases := []struct {
-		name  string
-		path  string
-		list  any
-		watch watcher
-	}{
-		{"CECBus", cecBusesPath, CECBusList{Metadata: ListMeta{ResourceVersion: "7"}}, watchCECBuses},
-		{"Television", televisionsPath, TelevisionList{Metadata: ListMeta{ResourceVersion: "7"}}, watchTelevisions},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			api := &cannedAPI{answers: map[string]any{"GET " + c.path: c.list}}
-			client := testAPIClient(t, api.handler())
-			ctx, cancel := context.WithCancel(context.Background())
-			wake := make(chan struct{}, 1)
-			restarts := make(chan struct{}, 64)
-			stopped := make(chan struct{})
-			go func() {
-				defer close(stopped)
-				c.watch(ctx, client, "1", wake, func() {
-					select {
-					case restarts <- struct{}{}:
-					default:
-					}
-				})
-			}()
-
-			select {
-			case <-restarts:
-			case <-time.After(testTimeout):
-				t.Error("the watch never reopened")
-			}
-			cancel()
-			<-stopped
-		})
-	}
-}
-
 func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -3,8 +3,11 @@ package main
 // This is a Kubernetes client written straight against the HTTP API,
 // following liken's own (kubernetes/apiclient.go) and the media
 // operator's, for the same reason: the API is HTTPS that serves
-// JSON, and client-go would bring informers, work queues, and
-// generated types this program does not use.
+// JSON, and each read and write is one request. It sends every write,
+// and every read of a kind that the reader also writes. The watches run
+// on client-go's reflector, in watch.go, through a dynamic client that
+// this Client builds from the same address and credentials, and a pass
+// reads the other kinds from the watches' stores (watchcache.go).
 //
 // Every pod already holds what it needs to reach the API server.
 // Kubernetes injects two environment variables that name the
@@ -26,8 +29,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
+
+	"k8s.io/client-go/dynamic"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 )
@@ -49,6 +55,11 @@ type Client struct {
 	base        string
 	http        *http.Client
 	credentials string
+
+	// The dynamic client of the watches, which watcher builds once.
+	watchOnce   sync.Once
+	watchClient dynamic.Interface
+	watchErr    error
 }
 
 // NewClient builds a client from its three parts. InClusterClient
@@ -80,10 +91,10 @@ func InClusterClient() (*Client, error) {
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 			// Each timeout bounds the same failure: a server that
-			// stops answering without sending anything. There is no
-			// overall client timeout, because the watch is a request
-			// whose response never ends, and a whole-request
-			// deadline would cut the stream on schedule.
+			// stops answering without sending anything. The client
+			// sets no deadline on a whole request, so a body that
+			// stops part way holds its caller until the connection
+			// fails.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,
@@ -107,14 +118,6 @@ const (
 // server-side apply gives it the fields it applies and leaves every
 // other writer's fields alone.
 const fieldManager = "equipment-operator"
-
-// Do sends one request and hands back the open response, which is
-// what the watch needs and what RequestJSON is built on. The context
-// governs the whole exchange, the response body included, so
-// cancelling it is what ends a read of a stream that never ends.
-func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
-	return c.send(ctx, method, path, jsonContentType, body)
-}
 
 func (c *Client) send(ctx context.Context, method, path, contentType string, body []byte) (*http.Response, error) {
 	var reader io.Reader
@@ -256,8 +259,7 @@ func receiverPath(name string) string {
 	return receiversPath + "/" + name
 }
 
-// ListReceivers answers a whole pass with one request, and the list's
-// resourceVersion is where a watch resumes from.
+// ListReceivers answers a whole pass with one request.
 func ListReceivers(c *Client) (*ReceiverList, error) {
 	list := &ReceiverList{}
 	if err := c.RequestJSON(http.MethodGet, receiversPath, nil, list); err != nil {
@@ -266,27 +268,21 @@ func ListReceivers(c *Client) (*ReceiverList, error) {
 	return list, nil
 }
 
+// readReceivers answers every Receiver from the watch's store, and
+// lists them from the API server while the store has nothing to give.
+func readReceivers(c *Client, held *watchStore) (*ReceiverList, error) {
+	if items, ok := cachedList[Receiver](held, "the Receivers"); ok {
+		return &ReceiverList{Items: items}, nil
+	}
+	return ListReceivers(c)
+}
+
 func GetReceiver(c *Client, name string) (*Receiver, error) {
 	receiver := &Receiver{}
 	if err := c.RequestJSON(http.MethodGet, receiverPath(name), nil, receiver); err != nil {
 		return nil, err
 	}
 	return receiver, nil
-}
-
-// WatchReceivers opens the stream the loop wakes on. A watch is an
-// ordinary GET whose response never ends: the API server holds the
-// connection open and writes one JSON event per change. The caller
-// owns the body, and resumes from the resourceVersion a list gave it,
-// so no change is missed between reconnects. Bookmarks cost one line
-// each and keep the resume point current while nothing changes.
-func WatchReceivers(ctx context.Context, c *Client, resourceVersion string) (*http.Response, error) {
-	return WatchCollection(ctx, c, receiversPath, resourceVersion)
-}
-
-// WatchCollection opens the same stream on any collection path.
-func WatchCollection(ctx context.Context, c *Client, path, resourceVersion string) (*http.Response, error) {
-	return c.Do(ctx, http.MethodGet, path+"?watch=true&allowWatchBookmarks=true&resourceVersion="+resourceVersion, nil)
 }
 
 // receiverStatusApply is the partial object an apply sends: the

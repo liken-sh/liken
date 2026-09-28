@@ -47,16 +47,21 @@ func ListTelevisions(c *Client) (*TelevisionList, error) {
 	return list, nil
 }
 
-// watchTelevisions wakes a loop on every change to a Television.
-// restarted is called for each watch opened again after the first.
-func watchTelevisions(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, restarted func()) {
-	watchCollection(ctx, client, televisionsPath, resourceVersion, wake, restarted, func() (string, error) {
-		list, err := ListTelevisions(client)
-		if err != nil {
-			return "", err
-		}
-		return list.Metadata.ResourceVersion, nil
-	})
+// readTelevisions answers every Television from the watch's store, and
+// lists them from the API server while the store has nothing to give.
+func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
+	if items, ok := cachedList[Television](held, "the Televisions"); ok {
+		return &TelevisionList{Items: items}, nil
+	}
+	return ListTelevisions(c)
+}
+
+// watchTelevisions wakes a loop on every change to a Television, its
+// status included, because each workload acts on status the other
+// writes. restarted is called for each watch opened again after the
+// first.
+func watchTelevisions(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
+	watchCollection(ctx, client, televisionResource, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyTelevision sends one apply body under one field manager. force
