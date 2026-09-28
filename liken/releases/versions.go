@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 // A Versions document lists every release a channel serves, newest

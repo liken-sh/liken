@@ -41,8 +41,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/kubernetes"
 	"golang.org/x/crypto/ssh"
 	"sigs.k8s.io/yaml"
 )

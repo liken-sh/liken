@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // bootedSlot points the boot parameters at a slot and puts the mark

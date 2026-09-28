@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // passphraseFiles points both passphrase homes at directories of their

@@ -24,7 +24,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // applyRlimits applies a set of resource limits to init itself. If one

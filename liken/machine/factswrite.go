@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 // RejectionKind names one of the four standing quarantine records under

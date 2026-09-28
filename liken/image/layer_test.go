@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/identity"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/identity"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // fixtureManifests writes a minimal deployment: one cluster document

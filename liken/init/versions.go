@@ -28,7 +28,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // componentsPath is where the image build stages the record. It is

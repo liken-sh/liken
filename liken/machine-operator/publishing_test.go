@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/liken-sh/liken/hardware"
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 func TestPublishSplitsAGraphicsDeviceFromItsMonitorBuses(t *testing.T) {

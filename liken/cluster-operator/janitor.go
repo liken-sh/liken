@@ -38,9 +38,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 // featureAnnotation names the feature a workload belongs to. It is

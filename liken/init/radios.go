@@ -23,8 +23,8 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // How long the boot waits for a raise to return. A healthy radio

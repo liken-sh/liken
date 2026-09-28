@@ -26,7 +26,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // slotEntryDescription is the name liken writes on a slot's entry.

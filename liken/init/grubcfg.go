@@ -41,7 +41,7 @@ package main
 import (
 	"strings"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 func renderGRUBConfig(machineName string, consoles []string) string {

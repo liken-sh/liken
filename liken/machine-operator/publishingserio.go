@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // publishFor is the policy's entry point. A device that carries a

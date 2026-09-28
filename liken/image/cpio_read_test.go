@@ -11,7 +11,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/liken-sh/liken/identity"
+	"github.com/liken-sh/liken/liken/identity"
 )
 
 func TestReadCPIOReturnsWhatFollowsTheTrailer(t *testing.T) {

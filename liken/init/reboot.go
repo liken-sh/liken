@@ -43,7 +43,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // watchForOperatorIntents watches the operator's channel and delivers

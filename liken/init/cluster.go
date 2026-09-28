@@ -31,8 +31,8 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // checkSeedCluster parses the image's cluster document and reports why

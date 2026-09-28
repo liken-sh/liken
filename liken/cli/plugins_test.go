@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/plugins"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/plugins"
 )
 
 func workloadFixture(domain, image string) kubernetes.Workload {

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // fakeSerioMachine points sysfs, /dev, and /sys/module at tempdirs,

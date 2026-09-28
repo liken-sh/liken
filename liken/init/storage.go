@@ -43,8 +43,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // This comment lists where each role lands in the filesystem. liken

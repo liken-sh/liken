@@ -54,9 +54,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // rolloutStallAfter sets how long a granted machine may stay

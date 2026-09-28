@@ -20,8 +20,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/plugins"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/plugins"
 )
 
 // clusterClient resolves the deployment's credential and builds a

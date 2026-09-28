@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 func nodeWearing(labels, annotations map[string]string) *nodeObject {

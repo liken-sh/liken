@@ -52,7 +52,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // pstoreDir is where the kernel serves the platform store's records.

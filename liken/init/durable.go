@@ -25,7 +25,7 @@ package main
 import (
 	"os"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // verifyFile checks one file on disk against its release artifact.

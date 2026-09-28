@@ -47,9 +47,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/identity"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/identity"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // Layer packs a deployment's archive from its manifests and identity.

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 func machineRunning(name, version string) machine.Machine {

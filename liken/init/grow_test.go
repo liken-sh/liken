@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // grownTable is a claimed 1 GiB disk's table: a 64 MiB machineState

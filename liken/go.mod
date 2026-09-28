@@ -10,7 +10,7 @@
 // nothing here does, so a single module fits. It also means a shared
 // package is just an import, with no publishing or replace directives
 // required.
-module github.com/liken-sh/liken
+module github.com/liken-sh/liken/liken
 
 go 1.26.5
 

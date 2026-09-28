@@ -41,7 +41,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // moduleLoader owns the subtrees a live load rewrites: modules/,

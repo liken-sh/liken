@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // The observation's inputs are variables, so tests can point them

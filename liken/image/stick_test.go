@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // stickFixture builds a release directory (with the boot menu

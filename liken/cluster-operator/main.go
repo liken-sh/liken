@@ -34,11 +34,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/kubernetes/informer"
-	"github.com/liken-sh/liken/machine"
-	"github.com/liken-sh/liken/metrics"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/machine"
+	"github.com/liken-sh/liken/liken/metrics"
 )
 
 // component is this program's name in every metric that carries one.

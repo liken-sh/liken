@@ -30,7 +30,7 @@ $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../metrics/*.go) \
 		seed/gotk-components.yaml $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
+		-ldflags "-X github.com/liken-sh/liken/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-cluster-operator .
 
 # The operator polls release channels over HTTPS. Its image has no

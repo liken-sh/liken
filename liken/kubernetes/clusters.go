@@ -9,7 +9,7 @@ package kubernetes
 import (
 	"encoding/json"
 
-	"github.com/liken-sh/liken/cluster"
+	"github.com/liken-sh/liken/liken/cluster"
 )
 
 func GetCluster(c *Client, name string) (*cluster.Cluster, error) {

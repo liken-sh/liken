@@ -6,9 +6,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // pulse8Line is the Pulse-Eight's communications interface, the one

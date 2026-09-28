@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/hardware"
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // fakeBus points the hardware walk at a sysfs tree of the test's

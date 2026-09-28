@@ -50,8 +50,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // isBlank reports whether a disk carries nothing recognizable: no MBR

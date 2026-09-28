@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/cluster"
+	"github.com/liken-sh/liken/liken/cluster"
 	"golang.org/x/crypto/ssh"
 )
 

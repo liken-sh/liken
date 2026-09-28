@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
+	"github.com/liken-sh/liken/liken/disks"
 )
 
 // fakeMachine points discovery at an empty fake /sys/block and /dev,

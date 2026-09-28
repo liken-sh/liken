@@ -10,7 +10,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/liken-sh/liken/hardware"
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // delivering builds an inspect function that reports the same

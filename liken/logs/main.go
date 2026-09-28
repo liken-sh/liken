@@ -37,7 +37,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // These are the host paths each verb reads, and the emptyDir where

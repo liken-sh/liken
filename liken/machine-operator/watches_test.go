@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/kubernetes/informer"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/machine"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
 )

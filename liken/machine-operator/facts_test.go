@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // writeFacts builds a facts tree in a tempdir from a status, by calling

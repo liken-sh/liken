@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/kubernetes/fakeapi"
-	"github.com/liken-sh/liken/kubernetes/informer"
-	"github.com/liken-sh/liken/machine"
-	"github.com/liken-sh/liken/metrics"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
+	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/machine"
+	"github.com/liken-sh/liken/liken/metrics"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 )

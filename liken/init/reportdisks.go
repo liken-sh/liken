@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // installStick is the report's one answer about the installation

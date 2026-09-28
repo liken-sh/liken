@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 func specWith(storage machine.StorageSpec) machine.MachineSpec {

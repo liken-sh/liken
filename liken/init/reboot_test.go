@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // watchIntents starts the watcher over a temporary directory, and it

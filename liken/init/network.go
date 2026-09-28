@@ -37,8 +37,8 @@ import (
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/vishvananda/netlink"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // connection holds the facts that the code gathers while it brings up

@@ -34,7 +34,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // These are package variables rather than constants, so tests can

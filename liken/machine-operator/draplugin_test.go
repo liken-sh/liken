@@ -25,7 +25,7 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 
-	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 // draFixture builds everything one prepare call touches: a fake

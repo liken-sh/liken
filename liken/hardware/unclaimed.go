@@ -20,7 +20,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // Catalog holds everything needed to judge a device. It holds the

@@ -9,7 +9,7 @@
 // and go.sum pins the digest of every module in the graph, which is
 // the same guarantee the vendored domains get from a VERSION file and
 // a fetch script, so this domain needs neither.
-module github.com/liken-sh/liken/docs
+module github.com/liken-sh/liken/liken/docs
 
 go 1.27.0
 

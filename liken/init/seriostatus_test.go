@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // A holder in its read with no port yet has no CEC device, so the line

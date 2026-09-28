@@ -27,7 +27,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // Every variable's filename carries its owner's GUID, because

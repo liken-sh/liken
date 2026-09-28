@@ -33,9 +33,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // The operator reads the host's sysfs directly, because this pod

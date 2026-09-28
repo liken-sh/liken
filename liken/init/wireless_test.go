@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // addressed is an interface that came up and holds an address.

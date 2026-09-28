@@ -58,7 +58,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // A fetchAsk is one reconcile decision's request: fetch this

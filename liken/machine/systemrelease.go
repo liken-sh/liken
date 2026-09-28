@@ -26,7 +26,7 @@ package machine
 import (
 	"fmt"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 	"sigs.k8s.io/yaml"
 )
 

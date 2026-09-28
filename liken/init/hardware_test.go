@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // stick is the recurring unclaimed device in these tests: the lab's

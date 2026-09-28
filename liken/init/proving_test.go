@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // slotFirmware is a fake efivarfs that carries both slots' entries

@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 // Read assembles a MachineStatus from the facts tree. A missing root is

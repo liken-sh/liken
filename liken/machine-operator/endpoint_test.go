@@ -7,7 +7,7 @@ package main
 import (
 	"testing"
 
-	"github.com/liken-sh/liken/cluster"
+	"github.com/liken-sh/liken/liken/cluster"
 )
 
 func TestLocalAPIEndpointByRole(t *testing.T) {

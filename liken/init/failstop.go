@@ -39,7 +39,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // failStopReasonCap bounds the recorded reason, matching the maxLength

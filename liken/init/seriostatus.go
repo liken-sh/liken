@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // entryStatuses reports one declared entry: one status for each

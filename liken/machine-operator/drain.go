@@ -29,8 +29,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 const (

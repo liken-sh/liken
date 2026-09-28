@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // crashT is the moment the fixture machine crashed. Tests that need

@@ -15,7 +15,7 @@ package main
 // the verdict this file computes to judge a missing-mount failure as
 // that ordinary lag instead of a fault on the machine.
 
-import "github.com/liken-sh/liken/kubernetes"
+import "github.com/liken-sh/liken/liken/kubernetes"
 
 // osVersionAnnotation names the release a pod's template shipped
 // with. image/build.sh stamps this annotation onto the

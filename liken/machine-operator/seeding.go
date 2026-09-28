@@ -12,10 +12,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // ensureMachine makes the manifest's Machine real in the cluster.

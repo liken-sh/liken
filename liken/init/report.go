@@ -59,7 +59,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/hardware"
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // stickCeiling bounds the one wait the report makes for the

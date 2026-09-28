@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // buildScript is the image build, read from the repository rather than

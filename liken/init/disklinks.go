@@ -68,7 +68,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/hardware"
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // These are the roots this file reads and writes. They are variables

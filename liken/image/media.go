@@ -38,7 +38,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // payloadDir is the path where the wrapper archive carries the

@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // observer builds one operator's registry with this machine's layer 3

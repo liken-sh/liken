@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 var requestBootTime = time.Date(2026, 7, 6, 9, 30, 0, 0, time.UTC)

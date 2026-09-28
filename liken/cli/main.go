@@ -26,12 +26,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/liken-sh/liken/identity"
-	"github.com/liken-sh/liken/image"
-	"github.com/liken-sh/liken/machine"
-	"github.com/liken-sh/liken/plugins"
-	"github.com/liken-sh/liken/releases"
-	"github.com/liken-sh/liken/scaffold"
+	"github.com/liken-sh/liken/liken/identity"
+	"github.com/liken-sh/liken/liken/image"
+	"github.com/liken-sh/liken/liken/machine"
+	"github.com/liken-sh/liken/liken/plugins"
+	"github.com/liken-sh/liken/liken/releases"
+	"github.com/liken-sh/liken/liken/scaffold"
 )
 
 // A consoleList collects repeated -console flags in order.

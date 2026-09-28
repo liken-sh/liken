@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // sampleReport is a two-disk BIOS machine with one Realtek NIC that

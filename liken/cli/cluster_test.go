@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/identity"
+	"github.com/liken-sh/liken/liken/identity"
 	"golang.org/x/sys/unix"
 )
 

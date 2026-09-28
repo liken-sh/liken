@@ -31,7 +31,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // firmwareWrites serializes the two firmware writers that can overlap

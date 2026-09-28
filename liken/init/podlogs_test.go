@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // onPartition builds the storage status of a machine whose declared

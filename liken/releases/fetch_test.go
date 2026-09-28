@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // servedChannel bundles a release and exposes it over HTTP. It

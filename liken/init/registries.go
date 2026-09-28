@@ -46,8 +46,8 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // registriesConfigPath is the path where k3s expects the file. It is

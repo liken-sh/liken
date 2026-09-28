@@ -52,8 +52,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // fatCheckMount is where a slot is mounted read-only while its

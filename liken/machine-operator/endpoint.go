@@ -3,7 +3,7 @@ package main
 import (
 	"slices"
 
-	"github.com/liken-sh/liken/cluster"
+	"github.com/liken-sh/liken/liken/cluster"
 )
 
 // localAPIEndpoint returns the machine's own path to the API

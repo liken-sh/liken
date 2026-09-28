@@ -47,7 +47,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/liken-sh/liken/hardware"
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // rebindClaimDevices binds a kernel driver again to each USB

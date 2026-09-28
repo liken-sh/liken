@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/cluster"
+	"github.com/liken-sh/liken/liken/cluster"
 )
 
 // The runtime section is an opt-in. An unset section adds no variable,

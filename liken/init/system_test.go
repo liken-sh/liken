@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // fakeSysctlDir builds a directory shaped like /proc/sys, with an

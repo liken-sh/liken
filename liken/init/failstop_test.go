@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 var failStopAt = time.Date(2026, 7, 27, 4, 15, 0, 0, time.UTC)

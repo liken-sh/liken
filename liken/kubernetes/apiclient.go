@@ -50,7 +50,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 // serviceAccountDir names the path where kubelet mounts each

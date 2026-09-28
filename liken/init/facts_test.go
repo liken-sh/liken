@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 var factsNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)

@@ -35,8 +35,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // bootMenuArtifact is systemd-boot's canonical name in a release.

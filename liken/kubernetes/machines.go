@@ -11,7 +11,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 func GetMachine(c *Client, name string) (*machine.Machine, error) {

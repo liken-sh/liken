@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/machine"
-	"github.com/liken-sh/liken/metrics"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/machine"
+	"github.com/liken-sh/liken/liken/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

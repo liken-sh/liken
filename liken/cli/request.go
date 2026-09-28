@@ -21,8 +21,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // renderRequest reports what the request set in motion. What happens

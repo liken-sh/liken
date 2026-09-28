@@ -18,7 +18,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // These are the sizes the layout starts from. The boot and system

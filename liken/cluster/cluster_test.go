@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 func writeClusterManifest(t *testing.T, content string) string {

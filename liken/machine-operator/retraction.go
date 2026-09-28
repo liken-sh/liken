@@ -47,8 +47,8 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 // A featureHold is one feature that keeps running although the

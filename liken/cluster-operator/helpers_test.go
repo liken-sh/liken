@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
-	"github.com/liken-sh/liken/metrics"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
+	"github.com/liken-sh/liken/liken/metrics"
 )
 
 // fleetMetrics builds one operator registry with the fleet's layer 3

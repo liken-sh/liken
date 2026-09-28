@@ -30,7 +30,7 @@ $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../machine/*.go) $(wildcard ../disks/*.go) \
 		$(wildcard ../hardware/*.go) $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION) -X main.fault=$(LIKEN_FAULT)" \
+		-ldflags "-X github.com/liken-sh/liken/liken/machine.Version=$(LIKEN_VERSION) -X main.fault=$(LIKEN_FAULT)" \
 		-o $(DIST)/liken .
 
 .PHONY: all clean

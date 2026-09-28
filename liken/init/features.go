@@ -32,8 +32,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // These are package variables rather than constants, so tests can

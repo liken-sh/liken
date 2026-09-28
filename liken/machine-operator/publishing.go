@@ -55,7 +55,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/liken/hardware"
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // publishedDevice is one slice device derived from one physical

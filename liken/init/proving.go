@@ -47,7 +47,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // settleSystemRelease reads the system store at boot and determines

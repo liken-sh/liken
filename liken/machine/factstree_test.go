@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 // writeAll drives every per-subtree writer with the matching fields of

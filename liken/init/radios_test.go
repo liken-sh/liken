@@ -20,9 +20,9 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // wired is one wired interface as a spec names it.

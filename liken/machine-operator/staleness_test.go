@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 func withOSVersion(version string) func(*kubernetes.Pod) {

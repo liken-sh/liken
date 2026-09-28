@@ -37,7 +37,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 // K3sAgentDir names the tree this record covers: k3s's agent state,

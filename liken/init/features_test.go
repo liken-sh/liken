@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 func TestActuateFeaturesWithNoClusterReportsNothing(t *testing.T) {

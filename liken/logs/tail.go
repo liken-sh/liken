@@ -53,7 +53,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 	"golang.org/x/sys/unix"
 )
 

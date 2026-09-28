@@ -37,7 +37,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // Fetch downloads one release from a channel's source URL into

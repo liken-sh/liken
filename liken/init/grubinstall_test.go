@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
+	"github.com/liken-sh/liken/liken/disks"
 )
 
 // testGRUBImages builds a recognizable fake boot.img and core.img:

@@ -42,8 +42,8 @@ import (
 
 	"github.com/liken-sh/brand"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 //go:embed page.html.tmpl index.html.tmpl release.html.tmpl sources.html.tmpl

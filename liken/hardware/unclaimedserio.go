@@ -23,7 +23,7 @@ package hardware
 import (
 	"fmt"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // cdcCommunicationsClass is the USB interface class of a CDC

@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 	"sigs.k8s.io/yaml"
 )
 

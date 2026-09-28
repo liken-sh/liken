@@ -44,7 +44,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // ramImage is where a cpio-wrapped system image lands in rootfs. If

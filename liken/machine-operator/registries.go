@@ -29,8 +29,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // dockerConfig is the .dockerconfigjson payload: registry host

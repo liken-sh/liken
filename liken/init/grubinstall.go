@@ -32,7 +32,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/liken-sh/liken/disks"
+	"github.com/liken-sh/liken/liken/disks"
 )
 
 // The offsets that grub-bios-setup patches, fixed by boot.img's layout:

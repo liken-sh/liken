@@ -10,8 +10,8 @@ import (
 	"encoding/binary"
 	"os"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // formatSlot formats one of the FAT32 roles' partitions. It labels

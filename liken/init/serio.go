@@ -38,8 +38,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // serioQuiet is how long a walk waits for a burst of uevents to stop.

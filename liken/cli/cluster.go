@@ -30,8 +30,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/identity"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/identity"
 	"golang.org/x/sys/unix"
 )
 

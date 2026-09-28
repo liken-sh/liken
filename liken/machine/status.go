@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/liken/api"
 )
 
 type MachineStatus struct {

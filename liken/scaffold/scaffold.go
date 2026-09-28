@@ -25,8 +25,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 //go:embed cluster.yaml.tmpl machine.yaml.tmpl

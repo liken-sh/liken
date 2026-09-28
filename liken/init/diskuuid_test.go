@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
+	"github.com/liken-sh/liken/liken/disks"
 )
 
 // ext4DeviceWithUUID builds a device image carrying ext4's magic and a

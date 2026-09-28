@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // The shape of the declared-disk wait. These are variables so a

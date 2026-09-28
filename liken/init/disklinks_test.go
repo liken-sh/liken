@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
+	"github.com/liken-sh/liken/liken/disks"
 )
 
 // fakeInitiator points the three link trees, and the two iSCSI class

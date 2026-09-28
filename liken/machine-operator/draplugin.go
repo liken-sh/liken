@@ -46,9 +46,9 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 
-	"github.com/liken-sh/liken/hardware"
-	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // The kubelet's plugin directories. The registry is where the

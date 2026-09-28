@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // fakeEFIVars builds a directory that stands in for efivarfs. Each

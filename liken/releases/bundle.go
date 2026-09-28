@@ -46,8 +46,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // slotHeadroom is the room a boot slot must keep beyond the release

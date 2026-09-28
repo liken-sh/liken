@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 func TestApplyHostEntriesWritesAMissingFile(t *testing.T) {

@@ -19,7 +19,7 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // twoPorts is a machine with two ports, which the kernel numbered in

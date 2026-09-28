@@ -12,8 +12,8 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 func leaderDB(t *testing.T) string {

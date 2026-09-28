@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // The size of one message. Upstream's own client reads into a buffer

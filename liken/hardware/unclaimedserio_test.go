@@ -3,7 +3,7 @@ package hardware
 import (
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // pulse8Interfaces is a Pulse-Eight adapter after cdc_acm bound it: the

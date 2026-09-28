@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/disks"
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/disks"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // installedGRUBHome builds a boot home the way the installer leaves

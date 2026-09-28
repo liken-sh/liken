@@ -14,7 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/liken-sh/liken/plugins"
+	"github.com/liken-sh/liken/liken/plugins"
 )
 
 // findPlugin locates a domain's CLI. It reads PATH first, because a

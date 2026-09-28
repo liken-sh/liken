@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/liken/machine"
 )
 
 // An added serio entry applies in the same live load as an added

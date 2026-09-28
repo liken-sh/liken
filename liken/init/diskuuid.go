@@ -31,7 +31,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/liken-sh/liken/disks"
+	"github.com/liken-sh/liken/liken/disks"
 )
 
 func filesystemUUID(devPath string) string {
