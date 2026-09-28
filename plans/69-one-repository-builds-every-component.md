@@ -185,8 +185,9 @@ vulkan/  vaapi/  ffmpeg/  mpv/  weston/
 audio-operator/  bluetooth-operator/  display-operator/  equipment-operator/
 media-operator/  library-operator/  people-operator/
 git-csi-driver/  per-node-csi-driver/
+liken.sh/                  the DNS zone, the release channel, and the organization's repositories
 plans/
-AGENTS.md  skills/
+AGENTS.md  .agents/skills/  Makefile
 ```
 
 - `liken/` holds today's tree. Inside it, the paths do not change:
@@ -201,7 +202,15 @@ AGENTS.md  skills/
 - `brand/` comes in. The sites read it from the tree, so no
   submodule pin can lag.
 - `.agents` comes in. Its `AGENTS.md` becomes the root `AGENTS.md`,
-  and its skills go to `skills/`.
+  and its skills join `liken`'s agent skills in `.agents/skills/`. A
+  component's own `skills/` holds a different kind of skill: the ones
+  its manual publishes for its users.
+- `liken.sh/` moves to the top, because the domain, the release
+  channel, and the settings of every repository cover the whole
+  project. `.envrc`, which hands its Terraform the credentials, moves
+  with it.
+- The root `Makefile` runs targets across components, such as
+  `make preview`, which serves every manual together.
 
 Four repositories stay out:
 
@@ -851,6 +860,16 @@ how any vendored domain gets its bytes.
    images it builds on. It runs each component's `make` targets and
    publishes nothing. The branch merges when that workflow is green
    for every component.
+
+   Built 2026-09-28. Every component moved at once, on one branch,
+   and the old repositories were archived after the merge. The root
+   workflow has 57 jobs and no `needs:` between components yet,
+   because the base images are still stages in `display-operator`'s
+   Dockerfile until step 5. `brand/` replaced its eleven submodules in
+   the same step: the sites set `themesDir`, the Go modules take a
+   `replace`, and the Rust image builds take `brand/` as a second
+   build context. The operator sites still serve from the archived
+   repositories' Pages until the one site replaces them.
 2. **The graph and the tag.** Add a `package.toml` to each tracked
    component. Build the driver's graph, the path diff, the release
    record, and the development builds. Replace the hand-written root
@@ -1060,9 +1079,6 @@ the release numbers do not.
   `*.liken.sh` over HTTPS with a wildcard certificate. Linode DNS
   has no redirect feature, and a Linode community answer says that
   Object Storage does not serve redirects.
-- **The order inside step 1.** Which component moves first, and
-  whether the old repositories keep building until the last one
-  moves.
 - **Absent `version` means tracked.** A tracked component has no
   `version` field. A misspelled field then also reads as tracked.
   An explicit field, such as `track = "tag"`, would make the choice
