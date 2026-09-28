@@ -1,6 +1,6 @@
 ---
 name: operators
-description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, timers, device traffic, and the decision to watch through client-go with the shape of the reference port. Use when writing or reviewing an operator's watch, reconcile pass, backstop, timer, or device polling.
+description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, timers, device traffic, the node label that keeps a device DaemonSet off a node, and the decision to watch through client-go with the shape of the reference port. Use when writing or reviewing an operator's watch, reconcile pass, backstop, timer, device polling, or device DaemonSet.
 ---
 
 # Writing and reviewing operators
@@ -104,6 +104,50 @@ correct result.
   pid can reach a later process that reused it. `os.Process` holds a
   pidfd, and a signal after the process was reaped returns
   `ErrProcessDone`.
+
+## A device DaemonSet stays off a node labeled none
+
+A device operator's `DaemonSet` makes a pod on every node, and the pod
+claims the node's hardware. On a node with no such hardware the claim
+matches no device, and the pod stays `Pending` for good. Every such
+`DaemonSet` ships this node affinity in its own `deploy/` manifest, so
+a person keeps the pod off a node with one label:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: <operator group>/<hardware>
+              operator: NotIn
+              values: ["none"]
+```
+
+- **The key.** One key for each kind of hardware, in the operator's
+  own API group, with the value `none`. The keys in use are
+  `bluetooth.liken.sh/bluetooth`, `equipment.liken.sh/cec`,
+  `audio.liken.sh/sound-card`, and `display.liken.sh/display`. A new
+  `DaemonSet` takes a new key of the same form.
+- **The default.** `NotIn` also matches a node that has no such label,
+  as the Kubernetes page on set-based requirements states. So with no
+  label the `DaemonSet` makes a pod on every node, and the claim
+  decides where it can start. Use one term with one expression: a
+  second term is ORed with the first and lets the pod back onto a
+  labeled node, and a second expression narrows where the pod runs.
+  `nodeSelectorTerms` is an atomic list, so a cluster owner's patch
+  that sets a node affinity replaces the term, and the guide says so.
+- **The label.** A person sets it with `kubectl label node`. A
+  `Machine`'s `spec.nodeLabels` refuses every key in `liken.sh` and its
+  subdomains, so it cannot declare the label. `liken` leaves a label it
+  did not declare in place. When the label changes, the `DaemonSet`
+  controller deletes or adds the pod.
+- **The test.** A test in the repository reads the `DaemonSet` from
+  `deploy/` and checks for the one term with its key
+  (`nodeaffinity_test.go`).
+- **The guide.** The install guide has the section "Keep the pods off
+  nodes with no ...", in the same words as the other operators'
+  guides.
 
 ## Decision: every watch runs on client-go
 
