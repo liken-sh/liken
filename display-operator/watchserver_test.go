@@ -206,15 +206,19 @@ func (o *objectStore) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && query.Get("watch") == "true":
 		o.stream(w, r)
 	case r.Method == http.MethodGet && named:
+		// Each answer marshals under the lock, because remove and land
+		// change a stored object in place, and an encode after the
+		// unlock would read it while they write.
 		o.mu.Lock()
 		held, there := o.objects[name]
+		raw, _ := json.Marshal(held)
 		o.mu.Unlock()
 		if !there {
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprint(w, `{"kind":"Status","code":404}`)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(held)
+		_, _ = w.Write(raw)
 	case r.Method == http.MethodGet:
 		o.mu.Lock()
 		o.queries = append(o.queries, query)
@@ -224,8 +228,9 @@ func (o *objectStore) serve(w http.ResponseWriter, r *http.Request) {
 			"metadata":   map[string]any{"resourceVersion": strconv.Itoa(o.version)},
 			"items":      o.matching(selectedName(query)),
 		}
+		raw, _ := json.Marshal(list)
 		o.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(list)
+		_, _ = w.Write(raw)
 	default:
 		var held map[string]any
 		body, _ := io.ReadAll(r.Body)
@@ -235,8 +240,9 @@ func (o *objectStore) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		o.mu.Lock()
 		o.land(held)
+		raw, _ := json.Marshal(held)
 		o.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(held)
+		_, _ = w.Write(raw)
 	}
 }
 
