@@ -100,5 +100,4 @@ reinterprets them. Between releases, development builds name
 themselves from the same tags. `git describe` yields a name such as
 2026.08.18-002-5-gabc123, which means five commits past the release,
 at that commit. A dev machine reports this name as
-status.version.liken. version.mk at the repository root explains the
-mechanism.
+status.version.liken. liken/version.mk explains the mechanism.

@@ -11,6 +11,12 @@
 # version bump. A dev machine's status.version.liken points at the
 # exact commit it was built from.
 #
+# The repository also holds the other components, and their tags
+# carry the component's name, such as display-operator/2026.09.28-001.
+# Their tagged commits are ancestors of every later commit, so an
+# unfiltered `git describe` can name one of them. The exclude pattern
+# keeps the name to the OS's own tags, which have no slash.
+#
 # Make's model needs a file to notice a version change, and git does
 # not keep one. The stamp file provides that file: every make run
 # recomputes the version (the phony prerequisite forces the recipe)
@@ -21,7 +27,7 @@
 # and must not make the ordinary dev artifacts look stale.
 
 VERSION_MK_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-GIT_VERSION := $(shell git -C $(VERSION_MK_DIR) describe --tags --always --dirty)
+GIT_VERSION := $(shell git -C $(VERSION_MK_DIR) describe --tags --exclude '*/*' --always --dirty)
 LIKEN_VERSION ?= $(GIT_VERSION)
 LIKEN_VERSION_STAMP := $(VERSION_MK_DIR)/.version
 
