@@ -219,20 +219,24 @@ func (m *metrics) setAdapterPresent(present bool) {
 	m.adapterPresent.Set(gauge(present))
 }
 
-// setPeripheralConnected records one Peripheral's link state, and
-// counts a disconnect when this pass observed the link go from up to
-// down. first is true only for a Peripheral this pass is reporting on
-// for the first time, which is a creation and never a transition: a
-// disconnect measures an edge this operator watched happen, not the
-// gap between not knowing and knowing.
-func (m *metrics) setPeripheralConnected(peripheral string, connected, wasConnected, first bool) {
+// setPeripheralConnected records one Peripheral's link state.
+func (m *metrics) setPeripheralConnected(peripheral string, connected bool) {
 	if m == nil {
 		return
 	}
 	m.peripheralConnected.WithLabelValues(peripheral).Set(gauge(connected))
-	if !first && wasConnected && !connected {
-		m.disconnects.WithLabelValues(peripheral).Inc()
+}
+
+// countDisconnect counts one disconnect: a status write that moved a
+// Peripheral's Connected condition from True to False. The caller does
+// not count a Peripheral that held no condition before, which is a
+// creation and never a transition: a disconnect measures an edge this
+// operator watched happen, not the gap between not knowing and knowing.
+func (m *metrics) countDisconnect(peripheral string) {
+	if m == nil {
+		return
 	}
+	m.disconnects.WithLabelValues(peripheral).Inc()
 }
 
 // setPeripheralBonded records whether BlueZ holds a link key for this

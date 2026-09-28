@@ -109,7 +109,7 @@ func TestTheNextCollectionIsTheEarliestOneStillAhead(t *testing.T) {
 func watchRequests(t *testing.T, server *watchServer) <-chan struct{} {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	wakes := watchPairingRequests(ctx, testWatcher(t, server.handler(t)), time.Now)
+	wakes, _ := watchPairingRequests(ctx, testWatcher(t, server.handler(t)), time.Now)
 	t.Cleanup(func() {
 		cancel()
 		for range wakes {

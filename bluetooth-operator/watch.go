@@ -16,11 +16,11 @@ package main
 // The operator imports only three parts of client-go for this: the
 // reflector and informer in tools/cache, the dynamic client that lists
 // and watches a custom resource with no generated code, and rest for
-// the in-cluster configuration. The
-// typed clientset and the informer factories link a client for every
-// built-in kind, and this operator watches none of them. The
-// operator's own Client (apiclient.go) still sends every read and
-// write that a pass makes.
+// the in-cluster configuration. The typed clientset and the informer
+// factories link a client for every built-in kind, and this operator
+// watches one of them, the Secrets. The operator's own Client
+// (apiclient.go) sends every write, and every read that a watch's
+// store does not answer (objectcache.go).
 
 import (
 	"context"
@@ -38,11 +38,12 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The three collections this operator watches.
+// The four collections this operator watches.
 var (
 	adapterResource        = schema.GroupVersionResource{Group: pairingGroup, Version: pairingVersion, Resource: "adapters"}
 	peripheralResource     = schema.GroupVersionResource{Group: pairingGroup, Version: pairingVersion, Resource: "peripherals"}
 	pairingRequestResource = schema.GroupVersionResource{Group: pairingGroup, Version: pairingVersion, Resource: "pairingrequests"}
+	secretResource         = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
 )
 
 // inClusterWatcher builds the dynamic client for the watches from the
@@ -55,16 +56,19 @@ func inClusterWatcher() (dynamic.Interface, error) {
 	return dynamic.NewForConfig(config)
 }
 
-// watchCollection keeps one collection current until the context ends,
-// and sends each change to the handler. A label selector, when it is
-// not empty, narrows the list and the watch to the objects that carry
-// that label. The watch of a namespaced resource covers every
-// namespace.
-//
-// synced, when it is not nil, runs once, after the handler has taken
-// every object of the first read.
-func watchCollection(ctx context.Context, client dynamic.Interface, resource schema.GroupVersionResource, selector string, handler cache.ResourceEventHandler, synced func()) {
-	collection := client.Resource(resource)
+// collectionWatch is one watch: the informer that keeps a collection
+// current, and the store it keeps the collection in.
+type collectionWatch struct {
+	store    cache.Store
+	informer cache.Controller
+}
+
+// newCollectionWatch builds the watch of one collection, and sends
+// each change to the handler. A label selector, when it is not empty,
+// narrows the list and the watch to the objects that carry that label.
+// An empty namespace watches a namespaced resource in every namespace.
+func newCollectionWatch(client dynamic.Interface, resource schema.GroupVersionResource, namespace, selector string, handler cache.ResourceEventHandler) collectionWatch {
+	collection := client.Resource(resource).Namespace(namespace)
 	source := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			options.LabelSelector = selector
@@ -75,12 +79,26 @@ func watchCollection(ctx context.Context, client dynamic.Interface, resource sch
 			return collection.Watch(ctx, options)
 		},
 	}
-	_, informer := cache.NewInformerWithOptions(cache.InformerOptions{
+	store, informer := cache.NewInformerWithOptions(cache.InformerOptions{
 		ListerWatcher: source,
 		ObjectType:    &unstructured.Unstructured{},
 		Handler:       handler,
 		Transform:     dropManagedFields,
 	})
+	return collectionWatch{store: store, informer: informer}
+}
+
+// view answers the watch's store, which a pass reads in place of the
+// API server (objectcache.go).
+func (w collectionWatch) view() storeView {
+	return storeView{store: w.store, synced: w.informer.HasSynced}
+}
+
+// run keeps the collection current until the context ends.
+//
+// synced, when it is not nil, runs once, after the handler has taken
+// every object of the first read.
+func (w collectionWatch) run(ctx context.Context, synced func()) {
 	// The informer's handlers and synced both run before this returns,
 	// so a caller that closes a channel after it returns never has a
 	// send on the closed channel.
@@ -88,13 +106,13 @@ func watchCollection(ctx context.Context, client dynamic.Interface, resource sch
 	if synced != nil {
 		group.Go(func() {
 			select {
-			case <-informer.HasSyncedChecker().Done():
+			case <-w.informer.HasSyncedChecker().Done():
 				synced()
 			case <-ctx.Done():
 			}
 		})
 	}
-	informer.RunWithContext(ctx)
+	w.informer.RunWithContext(ctx)
 	group.Wait()
 }
 

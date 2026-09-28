@@ -24,6 +24,7 @@ package main
 // no change to these objects can lose them.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -34,21 +35,50 @@ import (
 // holds, and returns the object that owns every Peripheral.
 func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 	name := state.Address.Key()
-	adapter, err := get[Adapter](i.client, adapterPath(name))
-	if err == ErrNotFound {
+	adapter, err := readOne[Adapter](i.client, i.cache.adapters, name, adapterPath(name))
+	if errors.Is(err, ErrNotFound) {
 		adapter, err = i.createAdapter(state)
 	}
 	if err != nil {
 		return nil, err
 	}
 
+	if !adapter.Metadata.deleting() {
+		if err := i.reconcileAdapterAlias(adapter, state); err != nil {
+			fmt.Fprintf(os.Stderr, "naming the radio %q: %v\n", adapter.Spec.Alias, err)
+		}
+	}
+
+	err = i.settleAdapter(adapter, state)
+	if stale(err) {
+		// Another writer changed the object since the copy, or removed
+		// it. The fresh copy is settled once more.
+		adapter, err = readFresh[Adapter](i.client, i.cache.adapters.versions, name, adapterPath(name))
+		if errors.Is(err, ErrNotFound) {
+			adapter, err = i.createAdapter(state)
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = i.settleAdapter(adapter, state)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return adapter, nil
+}
+
+// settleAdapter holds one copy of the Adapter against deletion and
+// writes its status. A deleting Adapter takes the refusal instead.
+func (i *inventory) settleAdapter(adapter *Adapter, state adapterState) error {
+	name := adapter.Metadata.Name
 	if adapter.Metadata.deleting() {
 		// The radio is here, so the delete is refused. A cascade would
 		// take every Peripheral under this Adapter and every bond Secret
 		// under those, which is a mass unpair of hardware that is
 		// working. The object stays, with the reason in its status, until
 		// the radio is gone.
-		return adapter, i.refuseDeletion(adapter, state)
+		return i.refuseDeletion(adapter, state)
 	}
 
 	if !adapter.Metadata.holds(adapterFinalizer) {
@@ -57,23 +87,18 @@ func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 		version, err := patchFinalizers(i.client, adapterPath(name), adapter.Metadata.ResourceVersion,
 			adapter.Metadata.with(adapterFinalizer))
 		if err != nil {
-			return nil, fmt.Errorf("holding %s against deletion: %w", name, err)
+			return fmt.Errorf("holding %s against deletion: %w", name, err)
 		}
+		i.cache.adapters.versions.note(name, version)
 		adapter.Metadata.Finalizers = adapter.Metadata.with(adapterFinalizer)
 		adapter.Metadata.ResourceVersion = version
 	}
 
-	if err := i.reconcileAdapterAlias(adapter, state); err != nil {
-		fmt.Fprintf(os.Stderr, "naming the radio %q: %v\n", adapter.Spec.Alias, err)
-	}
-	if err := i.writeAdapterStatus(adapter, AdapterStatus{
+	return i.writeAdapterStatus(adapter, AdapterStatus{
 		Address: state.Address.Directory(),
 		Node:    i.nodeName,
 		Powered: state.Powered,
-	}); err != nil {
-		return nil, err
-	}
-	return adapter, nil
+	})
 }
 
 // createAdapter puts a radio in the API for the first time.
@@ -96,11 +121,12 @@ func (i *inventory) createAdapter(state adapterState) (*Adapter, error) {
 	if err == ErrConflict {
 		// Another writer created it between the read and this write, so
 		// read it again. Nothing more is needed.
-		return get[Adapter](i.client, adapterPath(name))
+		return readFresh[Adapter](i.client, i.cache.adapters.versions, name, adapterPath(name))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("creating the Adapter for %s: %w", state.Address, err)
 	}
+	i.cache.adapters.versions.note(name, adapter.Metadata.ResourceVersion)
 	fmt.Printf("adapter: created %s for the radio at %s\n", name, state.Address)
 	return adapter, nil
 }
@@ -145,30 +171,80 @@ func (i *inventory) refuseDeletion(adapter *Adapter, state adapterState) error {
 // belongs to a radio that is gone, so its cascade is the intended
 // cleanup.
 func (i *inventory) releaseDepartedAdapters(present bonds.Address) {
-	list, err := get[AdapterList](i.client, adaptersPath())
+	adapters, err := i.listAdapters()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing the Adapters: %v\n", err)
 		return
 	}
-	for _, adapter := range list.Items {
-		if !adapter.Metadata.deleting() || !adapter.Metadata.holds(adapterFinalizer) {
+	for _, adapter := range adapters {
+		if !i.departed(adapter, present) {
 			continue
 		}
-		if adapter.Status.Node != i.nodeName {
-			continue
-		}
-		if !present.IsZero() && adapter.Metadata.Name == present.Key() {
-			continue
-		}
-		path := adapterPath(adapter.Metadata.Name)
-		if _, err := patchFinalizers(i.client, path, adapter.Metadata.ResourceVersion,
-			adapter.Metadata.without(adapterFinalizer)); err != nil {
+		released, err := i.releaseAdapter(adapter, present)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "releasing %s for deletion: %v\n", adapter.Metadata.Name, err)
 			continue
 		}
-		fmt.Printf("adapter: released %s, whose radio is no longer on %s; its Peripherals and their Secrets go with it\n",
-			adapter.Metadata.Name, i.nodeName)
+		if released {
+			fmt.Printf("adapter: released %s, whose radio is no longer on %s; its Peripherals and their Secrets go with it\n",
+				adapter.Metadata.Name, i.nodeName)
+		}
 	}
+}
+
+// listAdapters answers every Adapter in the cluster, from the store
+// once it holds its first read.
+func (i *inventory) listAdapters() ([]Adapter, error) {
+	if i.cache.adapters.view.ready() {
+		return currentList[Adapter](i.client, i.cache.adapters, adapterPath)
+	}
+	list, err := get[AdapterList](i.client, adaptersPath())
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// departed reports whether an Adapter is one this node must release:
+// it is deleting, this operator's finalizer holds it, its status names
+// this node, and its radio is not the one this pod holds.
+func (i *inventory) departed(adapter Adapter, present bonds.Address) bool {
+	if !adapter.Metadata.deleting() || !adapter.Metadata.holds(adapterFinalizer) {
+		return false
+	}
+	if adapter.Status.Node != i.nodeName {
+		return false
+	}
+	return present.IsZero() || adapter.Metadata.Name != present.Key()
+}
+
+// releaseAdapter patches the finalizer off one departed Adapter, and
+// reports whether the patch landed. A copy older than the API server's
+// is read again, and released only if the fresh copy is still this
+// node's to release, because another node can have adopted the radio
+// since. An Adapter that is already gone needs nothing.
+func (i *inventory) releaseAdapter(adapter Adapter, present bonds.Address) (bool, error) {
+	name := adapter.Metadata.Name
+	path := adapterPath(name)
+	version, err := patchFinalizers(i.client, path, adapter.Metadata.ResourceVersion, adapter.Metadata.without(adapterFinalizer))
+	if errors.Is(err, ErrConflict) {
+		current, readErr := readFresh[Adapter](i.client, i.cache.adapters.versions, name, path)
+		if readErr != nil {
+			err = readErr
+		} else if !i.departed(*current, present) {
+			return false, nil
+		} else {
+			version, err = patchFinalizers(i.client, path, current.Metadata.ResourceVersion, current.Metadata.without(adapterFinalizer))
+		}
+	}
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	i.cache.adapters.versions.note(name, version)
+	return true, nil
 }
 
 // reconcileAdapterAlias writes spec.alias into BlueZ's Adapter1.Alias,
@@ -205,5 +281,6 @@ func (i *inventory) writeAdapterStatus(adapter *Adapter, status AdapterStatus) e
 	if err := replaceStatus(i.client, adapterPath(adapter.Metadata.Name), adapter); err != nil {
 		return fmt.Errorf("writing the status of %s: %w", adapter.Metadata.Name, err)
 	}
+	i.cache.adapters.versions.note(adapter.Metadata.Name, adapter.Metadata.ResourceVersion)
 	return nil
 }

@@ -16,6 +16,7 @@ package main
 // no separate migration path to keep working.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -31,7 +32,7 @@ import (
 // each one is published under.
 func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapshot, batteries map[bonds.Address]*hidBattery, claimed map[string]bool, pass *inventoryPass) {
 	adapterKey := adapter.Metadata.Name
-	list, err := get[PeripheralList](i.client, byAdapter(peripheralsPath(), adapterKey))
+	peripherals, err := i.listPeripherals(adapterKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing the Peripherals for %s: %v\n", adapterKey, err)
 		pass.ok = false
@@ -39,8 +40,8 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 	}
 
 	known := map[bonds.Address]*Peripheral{}
-	for index := range list.Items {
-		peripheral := &list.Items[index]
+	for index := range peripherals {
+		peripheral := &peripherals[index]
 		address, err := bonds.ParseAddress(peripheral.Metadata.Name)
 		if err != nil {
 			// A Peripheral this operator did not name. Its bond, if it has
@@ -88,6 +89,19 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 	}
 }
 
+// listPeripherals answers the Peripherals of one radio, from the store
+// once the watch for that radio holds its first read.
+func (i *inventory) listPeripherals(adapterKey string) ([]Peripheral, error) {
+	if held := i.cache.peripheralsOf(adapterKey); held.view.ready() {
+		return currentList[Peripheral](i.client, held, peripheralPath)
+	}
+	list, err := get[PeripheralList](i.client, byAdapter(peripheralsPath(), adapterKey))
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 // createPeripheral records a bond in the API. request names the
 // PairingRequest that produced the bond, and is empty for a bond the
 // operator adopted.
@@ -97,6 +111,16 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 // hardware that is working. A device the operator paired itself was
 // trusted during the peripheral, so its value here is true.
 func (i *inventory) createPeripheral(adapter *Adapter, device deviceState, request string) (*Peripheral, error) {
+	// The owner reference names the Adapter by its UID. The pass's copy
+	// can come from the store, and the store can still hold an Adapter
+	// that somebody deleted and this operator created again, whose UID
+	// is gone. Garbage collection would then take the new Peripheral and
+	// start its unpair. A new Peripheral is rare, so its owner is read
+	// from the API server.
+	owner, err := readFresh[Adapter](i.client, i.cache.adapters.versions, adapter.Metadata.Name, adapterPath(adapter.Metadata.Name))
+	if err != nil {
+		return nil, fmt.Errorf("reading the Adapter that owns the bond: %w", err)
+	}
 	trusted := device.Trusted
 	name := device.Address.Key()
 	peripheral := &Peripheral{
@@ -109,19 +133,20 @@ func (i *inventory) createPeripheral(adapter *Adapter, device deviceState, reque
 			OwnerReferences: []OwnerReference{{
 				APIVersion: pairingAPI,
 				Kind:       adapterKind,
-				Name:       adapter.Metadata.Name,
-				UID:        adapter.Metadata.UID,
+				Name:       owner.Metadata.Name,
+				UID:        owner.Metadata.UID,
 			}},
 		},
 		Spec: PeripheralSpec{Trusted: &trusted},
 	}
 	created, err := createObject(i.client, peripheralsPath(), peripheral)
 	if err == ErrConflict {
-		return get[Peripheral](i.client, peripheralPath(name))
+		return readFresh[Peripheral](i.client, i.cache.peripheralVersions, name, peripheralPath(name))
 	}
 	if err != nil {
 		return nil, err
 	}
+	i.cache.peripheralVersions.note(name, created.Metadata.ResourceVersion)
 	// pairedAt is when the operator first observed the bond. For a bond it
 	// made itself that is the pairing; for one it adopted it is the
 	// adoption, because bluetoothd's own storage records no time.
@@ -170,11 +195,63 @@ func (i *inventory) reconcileDeviceSpec(peripheral *Peripheral, device deviceSta
 // device, and nil when it reports none. claimed reports whether a
 // prepared claim holds this controller right now.
 func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery, claimed bool) {
-	// first is true for a Peripheral this pass reports on before it has
+	status := i.peripheralStatus(peripheral.Status, adapter, address, device, present, kernel)
+
+	// The metrics report this pass's reading whether or not it changes
+	// what the object holds, because a scrape must see the current
+	// state and not only the passes that happened to write it.
+	name := peripheral.Metadata.Name
+	connected := status.Conditions[0].Status == conditionTrue
+	i.metrics.setPeripheralConnected(name, connected)
+	i.metrics.setPeripheralClaimed(name, claimed)
+	i.metrics.setPeripheralBonded(name, status.Bond.Bonded)
+	if status.Battery != nil {
+		i.metrics.setPeripheralBattery(name, &status.Battery.Percentage)
+	} else {
+		i.metrics.setPeripheralBattery(name, nil)
+	}
+
+	// replaced is the status the last write went against. A copy from
+	// the store can be older than the API server's, so the disconnect
+	// and the lost bond are reported from the copy that a landed write
+	// replaced, and a stale copy never reports the same change twice.
+	var replaced PeripheralStatus
+	apply := func(held *Peripheral) bool {
+		next := i.peripheralStatus(held.Status, adapter, address, device, present, kernel)
+		// The status holds a pointer and a slice, so the comparison is
+		// deep.
+		if reflect.DeepEqual(held.Status, next) {
+			return false
+		}
+		replaced = held.Status
+		held.Status = next
+		held.APIVersion, held.Kind = pairingAPI, peripheralKind
+		return true
+	}
+	wrote, err := settleStatus(i.client, i.cache.peripheralVersions, peripheralPath(name), peripheral, apply)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		// A Peripheral that is gone needs no status. Its delete event
+		// wakes the pass that adopts the bond again.
+		fmt.Fprintf(os.Stderr, "writing the status of %s: %v\n", name, err)
+	}
+	if !wrote {
+		return
+	}
+	// first is true for a Peripheral this write reports on before it
 	// ever held a Connected condition, which is a creation or an
 	// adoption and never a transition this operator watched happen.
-	first := len(peripheral.Status.Conditions) == 0
-	wasConnected := connectionWas(peripheral.Status.Conditions, conditionTrue)
+	first := len(replaced.Conditions) == 0
+	if !first && connectionWas(replaced.Conditions, conditionTrue) && !connected {
+		i.metrics.countDisconnect(name)
+	}
+	if replaced.Bond.Held && !status.Bond.Held {
+		fmt.Fprintf(os.Stderr, "peripheral: %s reports no bond in bluetoothd; the object stays until somebody deletes it\n", name)
+	}
+}
+
+// peripheralStatus composes one Peripheral's status from this pass's
+// reading and the status the object publishes now.
+func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery) PeripheralStatus {
 	status := PeripheralStatus{
 		Address: address.Directory(),
 		Name:    attributeString(deviceReportedName(device)),
@@ -188,11 +265,11 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 			Trusted:   present && device.Trusted,
 			Connected: present && device.Connected,
 			Secret:    i.namespace + "/" + bonds.BondSecretName(address),
-			PairedAt:  peripheral.Status.Bond.PairedAt,
-			Request:   peripheral.Status.Bond.Request,
+			PairedAt:  published.Bond.PairedAt,
+			Request:   published.Bond.Request,
 		},
 		Conditions: []Condition{
-			connectedCondition(peripheral.Status.Conditions, device, present, i.now()),
+			connectedCondition(published.Conditions, device, present, i.now()),
 		},
 	}
 	if status.Bond.PairedAt == "" {
@@ -216,34 +293,7 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 			Source:     device.Battery.Source,
 		}
 	}
-
-	// The metrics report this pass's reading whether or not it changes
-	// what the object holds, because a scrape must see the current
-	// state and not only the passes that happened to write it.
-	name := peripheral.Metadata.Name
-	connected := status.Conditions[0].Status == conditionTrue
-	i.metrics.setPeripheralConnected(name, connected, wasConnected, first)
-	i.metrics.setPeripheralClaimed(name, claimed)
-	i.metrics.setPeripheralBonded(name, status.Bond.Bonded)
-	if status.Battery != nil {
-		i.metrics.setPeripheralBattery(name, &status.Battery.Percentage)
-	} else {
-		i.metrics.setPeripheralBattery(name, nil)
-	}
-
-	// The status holds a pointer and a slice, so the comparison is deep.
-	if reflect.DeepEqual(peripheral.Status, status) {
-		return
-	}
-	if peripheral.Status.Bond.Held && !status.Bond.Held {
-		fmt.Fprintf(os.Stderr, "peripheral: %s reports no bond in bluetoothd; the object stays until somebody deletes it\n",
-			peripheral.Metadata.Name)
-	}
-	peripheral.Status = status
-	peripheral.APIVersion, peripheral.Kind = pairingAPI, peripheralKind
-	if err := replaceStatus(i.client, peripheralPath(peripheral.Metadata.Name), peripheral); err != nil {
-		fmt.Fprintf(os.Stderr, "writing the status of %s: %v\n", peripheral.Metadata.Name, err)
-	}
+	return status
 }
 
 // The Connected condition, and the reasons it carries.

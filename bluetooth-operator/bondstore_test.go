@@ -45,7 +45,8 @@ func testAddress(t *testing.T, literal string) bonds.Address {
 
 // bondSecretFixture is a small API server that holds the bond Secrets
 // by name. It remembers the requests it received, and writeStatus
-// makes every write fail.
+// makes every write fail. It refuses a create of a Secret it holds and
+// a write from an older version, with 409 Conflict.
 type bondSecretFixture struct {
 	existing    map[string]*bonds.Secret
 	created     *bonds.Secret
@@ -70,12 +71,25 @@ func (f *bondSecretFixture) handler(t *testing.T) http.Handler {
 			}
 			_ = json.NewEncoder(w).Encode(secret)
 		case http.MethodPost:
-			f.created = &bonds.Secret{}
-			_ = json.NewDecoder(r.Body).Decode(f.created)
+			created := &bonds.Secret{}
+			_ = json.NewDecoder(r.Body).Decode(created)
+			if _, exists := f.existing[r.URL.Path+"/"+created.Metadata.Name]; exists {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			f.created = created
 			_ = json.NewEncoder(w).Encode(f.created)
 		case http.MethodPut:
-			f.updated = &bonds.Secret{}
-			_ = json.NewDecoder(r.Body).Decode(f.updated)
+			updated := &bonds.Secret{}
+			_ = json.NewDecoder(r.Body).Decode(updated)
+			// A write from a version older than the stored one is
+			// refused, the way the API server refuses it.
+			if stored, found := f.existing[r.URL.Path]; found &&
+				stored.Metadata.ResourceVersion != updated.Metadata.ResourceVersion {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			f.updated = updated
 			_ = json.NewEncoder(w).Encode(f.updated)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)

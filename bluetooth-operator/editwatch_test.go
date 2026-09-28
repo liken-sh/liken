@@ -274,3 +274,32 @@ func TestAPassReportsTheRadioItHolds(t *testing.T) {
 		t.Fatalf("the pass reported %v, want [%s]", followed, testAdapterName)
 	}
 }
+
+// Through the reflector: the stores the pass reads fill from the two
+// watches. The Peripheral store answers only for the radio the watch
+// follows.
+func TestTheEditWatchesFillTheStoresThePassReads(t *testing.T) {
+	adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[" + encode(t, adapterOn(testAdapterName, "node-1", 1)) + "]"})
+	peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[" + encode(t, peripheralAt(1, false)) + "]"})
+	watch := runEditWatch(t, editServers(t, adapters, peripherals))
+	watch.follow(testAdapterName)
+	stores := watch.cache(storeView{})
+
+	deadline := time.After(5 * time.Second)
+	for !stores.adapters.view.ready() || !stores.peripherals.of(testAdapterName).ready() {
+		select {
+		case <-deadline:
+			t.Fatal("the stores never held their first reads")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if held := cachedList[Adapter](stores.adapters.view); len(held) != 1 || held[0].Metadata.Name != testAdapterName {
+		t.Errorf("the Adapter store holds %+v", held)
+	}
+	if held := cachedList[Peripheral](stores.peripherals.of(testAdapterName)); len(held) != 1 {
+		t.Errorf("the Peripheral store holds %+v", held)
+	}
+	if stores.peripherals.of("00-1a-7d-da-71-13").ready() {
+		t.Error("the Peripheral store answered for a radio the watch does not follow")
+	}
+}

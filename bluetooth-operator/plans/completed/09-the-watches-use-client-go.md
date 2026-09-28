@@ -138,6 +138,95 @@ event and ends the initial events with a bookmark. The
 `WatchListClient` feature is on by default in v0.36. The reflector
 falls back to a plain list when the API server refuses it.
 
+### The pass reads the stores
+
+Built on 2026-09-27, after the port. The pass reads the objects that a
+watch holds from the watch's store, not from the API server
+(`objectcache.go`). Each store holds the same selection the pass
+listed:
+
+* The `Adapter` store holds every `Adapter`. `ensureAdapter` reads the
+  radio's `Adapter` from it, and `releaseDepartedAdapters` lists it.
+* The `Peripheral` store holds one radio's `Peripheral`s. The store
+  answers only for the radio the watch follows, so the first pass for a
+  new radio lists from the API server.
+* The `PairingRequest` store holds every request.
+* A new watch holds this radio's bond `Secret`s, in the pod's namespace
+  with the adapter label. It wakes nothing: `persist` reads it in place
+  of one `GET` for each bond on every pass. The `Role` gains `watch` on
+  `secrets` for it. The watch starts when the bond store learns the
+  radio, which is then fixed for the life of the process.
+
+A list comes from a store only after the store holds its first read.
+An object a store does not hold is read from the API server.
+
+A copy in a store can be older than the operator's own last write,
+because the watch delivers the write a moment after the API server
+answers it, and later while the watch is down. A pass that acted on such
+a copy would act again on a change it made: a test showed a pass open
+the pairing window again for a request it had paired. So the operator
+remembers the `resourceVersion` of each object's newest copy that it
+wrote or read from the API server (`versionMemo`), and reads an object
+from the API server when the store's copy has another version. The
+versions are compared only for equality.
+
+A copy that another writer changed since gets `409 Conflict` on a
+write, and the write reads the object again and writes once more if the
+fresh copy still needs it:
+
+* An `Adapter`'s finalizer patch and status write settle again from
+  the fresh copy. The release of a departed `Adapter` reads it again
+  and releases it only if the fresh copy still names this node.
+* A `Peripheral`'s status is composed again from the fresh copy. The
+  disconnect counter and the lost-bond line come from the copy that a
+  landed write replaced, so an older copy never counts a drop twice.
+* A `PairingRequest`'s status cannot be composed again, because the pass
+  pairs and opens the radio's window while it composes. When the fresh
+  copy holds the status the pass composed from, a spec edit made the
+  conflict, and the status lands on the fresh copy. When it holds a
+  newer status, the pass writes nothing and the follow-up pass composes
+  from it.
+* A bond `Secret` is compared again with the fresh copy, and written
+  once more when it still differs.
+
+These reads stay on the API server, each for a reason:
+
+* The `ResourceSlice`, once per pass. A watch of one slice needs `list`
+  and `watch` on every slice in the cluster, because RBAC cannot name
+  one node's slice, and the `ClusterRole` keeps other drivers'
+  inventories out of reach.
+* A deleting `Peripheral`, once per pass of its teardown. The store can
+  still hold a `Peripheral` whose finalizer this operator released, and
+  a teardown from that copy would retire a device that no `Peripheral`
+  names.
+* The owner `Adapter` of a new `Peripheral`, once per creation. The
+  store can hold an `Adapter` that somebody deleted and the operator
+  created again, and an owner reference to its old UID would let
+  garbage collection take the new `Peripheral`.
+* The node, the older per-adapter `Secret`, and the list of bond
+  `Secret`s that `restore` makes, once each at the start.
+
+Requests to the API server for one pass, counted in the tests'
+fixtures (`TestAPassFromTheStoresSendsNoRead`,
+`TestPersistFromTheStoreSendsNoRead`), for a settled pass with N bonds:
+
+| Reads | Before | After |
+|---|---|---|
+| `Adapter`s | 1 `LIST`, 1 `GET` | 0 |
+| `Peripheral`s | 1 `LIST` | 0 |
+| `PairingRequest`s | 1 `LIST` | 0 |
+| bond `Secret`s | N `GET`s | 0 |
+| `ResourceSlice` | 1 `GET` | 1 `GET` |
+| Total | 5 + N | 1 |
+
+A write from a current copy costs what it did. A write from an older
+copy that another writer changed costs a refused write, a `GET`, and a
+second write. The pass after the operator's own write reads each object
+it wrote from the API server once, if the watch has not delivered the
+write yet. The stripped binary grew from 19,964,064 to 20,013,216
+bytes, and the linked package count stayed at 474. The pass model does not change: one full pass for
+each wake, through the settle window.
+
 ## Measurements
 
 Each binary ran only its watches, on the laptop, against a k3s

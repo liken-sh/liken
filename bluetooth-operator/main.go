@@ -182,7 +182,7 @@ func main() {
 	// sources of wakes like the kernel and the bus are, so they go
 	// through the same settle window as everything else.
 	retries := make(chan struct{}, 1)
-	requests := watchPairingRequests(ctx, watcher, time.Now)
+	requests, requestStore := watchPairingRequests(ctx, watcher, time.Now)
 	edits := watchEdits(ctx, watcher, nodeName)
 	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests, edits.wakes()), settleWindow, settleLimit)
 
@@ -206,8 +206,12 @@ func main() {
 	held := newRelays(linuxInput{})
 	held.metrics = readings
 	publish := &publisher{client: client, nodeName: nodeName, owner: owner, relays: held}
-	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot(), relays: held}
+	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot(), relays: held,
+		watchSecrets: func(adapter bonds.Address) storeView { return watchBondSecrets(ctx, watcher, namespace, adapter) }}
 	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace, readings)
+	// The pass reads the objects the watches hold from their stores
+	// (objectcache.go).
+	objects.cache = edits.cache(requestStore)
 	readPairedSet := func() (map[string]controller, error) { return pairedControllers(conn) }
 	readAdapter := func() (bonds.Address, error) { return adapterAddress(conn) }
 	wake := func() {

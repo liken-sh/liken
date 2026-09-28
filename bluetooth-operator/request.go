@@ -21,8 +21,10 @@ package main
 // radio to pair with something that is no longer listening.
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
@@ -31,7 +33,7 @@ import (
 // reconcileRequests runs every open window aimed at this radio, and
 // collects the finished requests whose time is up.
 func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, pass *inventoryPass) {
-	list, err := get[PairingRequestList](i.client, fromCache(pairingRequestsPath()))
+	requests, err := i.listRequests()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing the PairingRequests: %v\n", err)
 		pass.ok = false
@@ -39,8 +41,8 @@ func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, 
 	}
 
 	windows := 0
-	for index := range list.Items {
-		request := &list.Items[index]
+	for index := range requests {
+		request := &requests[index]
 		if request.Spec.Adapter != adapter.Metadata.Name || request.Metadata.deleting() {
 			// Another radio's request. The operator that holds that radio
 			// serves it, and this one must not open a window on a
@@ -59,6 +61,22 @@ func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, 
 	if windows == 0 {
 		i.closeIdleWindow(snapshot)
 	}
+}
+
+// listRequests answers every PairingRequest, from the store once it
+// holds its first read.
+func (i *inventory) listRequests() ([]PairingRequest, error) {
+	if i.cache.requests.view.ready() {
+		return currentList[PairingRequest](i.client, i.cache.requests, func(key string) string {
+			namespace, name, _ := strings.Cut(key, "/")
+			return pairingRequestPath(namespace, name)
+		})
+	}
+	list, err := get[PairingRequestList](i.client, fromCache(pairingRequestsPath()))
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
 }
 
 // runWindow advances one unfinished request, and reports whether its
@@ -262,6 +280,7 @@ func (i *inventory) collectRequest(request *PairingRequest, pass *inventoryPass)
 		pass.ok = false
 		return
 	}
+	i.cache.requests.versions.note(requestKey(*request), "")
 	fmt.Printf("request %s/%s: collected %s after it finished\n",
 		request.Metadata.Namespace, request.Metadata.Name, ttl)
 }
@@ -294,14 +313,34 @@ func (i *inventory) closeIdleWindow(snapshot radioSnapshot) {
 
 // writeRequestStatus writes a request's status when it differs from
 // what the object already has.
+//
+// A copy from the store can be older than the API server's. The write
+// from it is refused, and the request is read again. When the fresh
+// copy holds the status this pass composed from, a spec edit made the
+// conflict, and the status is written onto the fresh copy. When the
+// fresh copy holds a newer status, that status is this operator's own
+// last write, and this pass composed from an older one: the pass
+// writes nothing, and the follow-up pass composes again from the newer
+// status. A window's status is not a pure function of the object, so it
+// cannot be composed again here: the pass pairs a device and opens the
+// radio's window while it composes.
 func (i *inventory) writeRequestStatus(request *PairingRequest, status PairingRequestStatus, pass *inventoryPass) {
-	if sameRequestStatus(request.Status, status) {
-		return
+	published := request.Status
+	apply := func(held *PairingRequest) bool {
+		if !sameRequestStatus(held.Status, published) {
+			pass.runAgainIn(followUpDelay)
+			return false
+		}
+		if sameRequestStatus(held.Status, status) {
+			return false
+		}
+		held.Status = status
+		held.APIVersion, held.Kind = pairingAPI, pairingRequestKind
+		return true
 	}
-	request.Status = status
-	request.APIVersion, request.Kind = pairingAPI, pairingRequestKind
 	path := pairingRequestPath(request.Metadata.Namespace, request.Metadata.Name)
-	if err := replaceStatus(i.client, path, request); err != nil {
+	if _, err := settleStatus(i.client, i.cache.requests.versions, path, request, apply); err != nil && !errors.Is(err, ErrNotFound) {
+		// A request somebody deleted needs no status.
 		fmt.Fprintf(os.Stderr, "writing the status of %s/%s: %v\n",
 			request.Metadata.Namespace, request.Metadata.Name, err)
 		pass.ok = false

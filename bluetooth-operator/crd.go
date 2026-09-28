@@ -434,19 +434,15 @@ func adapterSelector(adapterKey string) string {
 // instead of the datastore. A list with no resourceVersion reads
 // through to etcd every time.
 //
-// The cache can be behind, and the two readers pay for that
-// differently. The request watcher (requestwatch.go) watches from the
-// version its first read returned, so it receives every change after
-// that version and loses nothing. The pass in reconcileRequests lists the
-// requests with no watch after it, possibly from a different API
-// server than the watcher's. A change the watcher reported wakes the
-// loop once. If that pass reads a cache that does not have the change
-// yet, the wake is spent, and the pass acts on the change at the next
-// wake of any kind: a uevent, a bluetoothd signal, another change to a
-// request, or the backstop tick, which is at most 60 seconds. The
-// settle window delays each pass by at least 1.5 seconds after the
-// wake, and a cache is seldom that far behind, so the delay is
-// unlikely but possible.
+// The pass lists the PairingRequests from the request watcher's store
+// (objectcache.go), and sends this list only while that store has not
+// finished its first read. The informer puts each change in its store
+// before it calls the handler, so a pass that the watcher woke reads
+// the change from the store. The API server's cache, which this list
+// reads, can be behind. If a pass at the start reads a cache that does
+// not have a change yet, the pass acts on the change at the next wake
+// of any kind: a uevent, a bluetoothd signal, another change to a
+// request, or the backstop tick, which is at most 60 seconds.
 func fromCache(path string) string {
 	separator := "?"
 	if strings.Contains(path, "?") {

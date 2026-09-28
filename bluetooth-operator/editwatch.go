@@ -66,6 +66,11 @@ type editWatch struct {
 	// full, so a second change before the read is not lost: the read
 	// returns the latest key.
 	moved chan struct{}
+
+	// adapters and peripherals are the two watches' stores, which the
+	// pass reads in place of the API server (objectcache.go).
+	adapters    storeView
+	peripherals followedView
 }
 
 // watchEdits starts the Adapter watch at once and the Peripheral watch
@@ -77,11 +82,11 @@ func watchEdits(ctx context.Context, client dynamic.Interface, nodeName string) 
 		nodeName: nodeName,
 		moved:    make(chan struct{}, 1),
 	}
-	adapters := editHandler[Adapter]{what: "the Adapters", wake: w.signal, mark: w.adapterMark}
+	handler := editHandler[Adapter]{what: "the Adapters", wake: w.signal, mark: w.adapterMark}
+	adapters := newCollectionWatch(client, adapterResource, "", "", handler.handler())
+	w.adapters = adapters.view()
 	var group sync.WaitGroup
-	group.Go(func() {
-		watchCollection(ctx, client, adapterResource, "", adapters.handler(), w.signal)
-	})
+	group.Go(func() { adapters.run(ctx, w.signal) })
 	group.Go(func() { w.followPeripherals(ctx, client) })
 	go func() {
 		group.Wait()
@@ -92,6 +97,17 @@ func watchEdits(ctx context.Context, client dynamic.Interface, nodeName string) 
 
 // wakes is the channel the loop reads.
 func (w *editWatch) wakes() <-chan struct{} { return w.wake }
+
+// cache answers the stores the pass reads, together with the store of
+// the PairingRequests, which another watch keeps.
+func (w *editWatch) cache(requests storeView) objectCache {
+	return objectCache{
+		adapters:           heldObjects{view: w.adapters, versions: newVersionMemo()},
+		requests:           heldObjects{view: requests, versions: newVersionMemo()},
+		peripherals:        &w.peripherals,
+		peripheralVersions: newVersionMemo(),
+	}
+}
 
 // follow names the radio this pod holds. The pass calls it on every
 // pass that reads the radio, and only a change of address moves the
@@ -128,7 +144,9 @@ func (w *editWatch) signal() {
 // the radio's address changes, this stops the informer for the old
 // address and waits until it has returned, and then starts a new one
 // for the new address. The Peripherals of the old radio stop waking
-// the loop, and two informers never run at once.
+// the loop, and two informers never run at once. The pass reads the
+// store of the new informer only for the new address, so it never
+// reads the old radio's Peripherals as its own.
 func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interface) {
 	watching := ""
 	stop := func() {}
@@ -143,6 +161,10 @@ func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interf
 		if key == watching {
 			continue
 		}
+		// The old store stops following its radio once its informer
+		// stops, so the pass reads no store for any radio until the new
+		// one is set.
+		w.peripherals.set("", storeView{})
 		stop()
 		watching = key
 		watchCtx, cancel := context.WithCancel(ctx)
@@ -151,10 +173,12 @@ func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interf
 			cancel()
 			<-done
 		}
-		peripherals := editHandler[Peripheral]{what: "the Peripherals of " + key, wake: w.signal, mark: peripheralMark}
+		handler := editHandler[Peripheral]{what: "the Peripherals of " + key, wake: w.signal, mark: peripheralMark}
+		peripherals := newCollectionWatch(client, peripheralResource, "", adapterSelector(key), handler.handler())
+		w.peripherals.set(key, peripherals.view())
 		go func() {
 			defer close(done)
-			watchCollection(watchCtx, client, peripheralResource, adapterSelector(key), peripherals.handler(), w.signal)
+			peripherals.run(watchCtx, w.signal)
 		}()
 	}
 }

@@ -10,12 +10,17 @@ package main
 // owner every bond Secret needs, and a PairingRequest that pairs a
 // device creates a Peripheral under the same Adapter.
 //
-// Nothing here holds a cache of the objects between passes. Every pass
-// reads the Adapter, lists the Peripherals for this radio, and lists
-// the PairingRequests, and acts on what it read. The one piece of state
-// that does survive a pass is which devices the publisher has already
-// dropped from the slice, because that is a fact about a write this
-// program made and cannot read back from the objects.
+// Every pass reads the Adapter, lists the Adapters, the Peripherals for
+// this radio, and the PairingRequests, and acts on what it read. The
+// reads come from the watches' stores (objectcache.go), which hold what
+// the API server sent last, and the pass keeps no copy of its own. A
+// copy older than the pass's own last write, a store that has not
+// finished its first read, and a Peripheral whose unpair runs are read
+// from the API server instead. The
+// one piece of state that does survive a pass is which devices the
+// publisher has already dropped from the slice, because that is a fact
+// about a write this program made and cannot read back from the
+// objects.
 
 import (
 	"encoding/json"
@@ -44,6 +49,11 @@ type inventory struct {
 	radio     radio
 	nodeName  string
 	namespace string
+
+	// cache is the watches' stores, which the pass reads in place of
+	// the API server (objectcache.go). The zero value reads the API
+	// server.
+	cache objectCache
 
 	// now is the clock. It is a field so that a test can run a window
 	// out without waiting for it.

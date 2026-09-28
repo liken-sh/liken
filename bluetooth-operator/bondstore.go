@@ -53,6 +53,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,6 +61,8 @@ import (
 	"os"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 const (
@@ -110,6 +113,18 @@ type bondStore struct {
 	// never restored and whose tree is therefore not under root.
 	adapter bonds.Address
 
+	// watchSecrets starts the watch of one radio's bond Secrets, and
+	// answers its store. It runs once, when the store first learns the
+	// radio, because the radio is fixed from then on. A store with no
+	// watch reads every Secret from the API server.
+	watchSecrets func(adapter bonds.Address) storeView
+
+	// secrets is the watch's store, which persist reads in place of the
+	// API server, and secretVersions the memo of the copies this store
+	// wrote or read (objectcache.go).
+	secrets        storeView
+	secretVersions *versionMemo
+
 	// reportedLegacy records that the operator has already named the
 	// older per-adapter Secret. The migration leaves that object alone,
 	// so the line is printed once for a person to act on rather than on
@@ -137,7 +152,7 @@ func (s *bondStore) persist(readAdapter adapterAddressReader, owners map[bonds.A
 			fmt.Fprintf(os.Stderr, "reading the adapter's address: %v\n", err)
 			return false
 		}
-		s.adapter = address
+		s.learn(address)
 	}
 
 	tree, err := bonds.ReadTree(s.root, s.adapter)
@@ -168,6 +183,16 @@ func (s *bondStore) persist(readAdapter adapterAddressReader, owners map[bonds.A
 	return stored
 }
 
+// learn fixes the radio this store serves, and starts the watch of its
+// Secrets.
+func (s *bondStore) learn(address bonds.Address) {
+	s.adapter = address
+	if s.watchSecrets != nil {
+		s.secrets = s.watchSecrets(address)
+		s.secretVersions = newVersionMemo()
+	}
+}
+
 // restore hands every stored evdev capability snapshot to the input
 // relay, so that each bonded controller has its virtual node before
 // the first pass publishes the slice. It runs once, at startup.
@@ -177,6 +202,9 @@ func (s *bondStore) persist(readAdapter adapterAddressReader, owners map[bonds.A
 // BlueZ owns that tree. A failure here costs nothing permanent: the
 // controller's next connect reads its capabilities from the real node
 // again.
+//
+// The list goes to the API server. It runs once, before the watch of
+// the Secrets has read anything.
 func (s *bondStore) restore(readAdapter adapterAddressReader) {
 	if s.adapter.IsZero() {
 		address, err := readAdapter()
@@ -184,7 +212,7 @@ func (s *bondStore) restore(readAdapter adapterAddressReader) {
 			fmt.Fprintf(os.Stderr, "reading the adapter's address for the relays: %v\n", err)
 			return
 		}
-		s.adapter = address
+		s.learn(address)
 	}
 	list, err := get[bonds.SecretList](s.client, byAdapter(bonds.SecretsPath(s.namespace), s.adapter.Key()))
 	if err != nil {
@@ -211,7 +239,11 @@ func (s *bondStore) persistBond(device bonds.Address, files bonds.Files, owner O
 	name := bonds.BondSecretName(device)
 	path := bonds.BondSecretPath(s.namespace, device)
 	snapshot := s.relays.snapshot(macFromDeviceName(device.Key()))
-	current, err := get[bonds.Secret](s.client, path)
+	// A Secret the store does not hold is read from the API server, so
+	// a Secret this operator created on the pass before, which the watch
+	// has not delivered yet, is compared and not created twice.
+	key := s.namespace + "/" + name
+	current, err := s.readBond(key, path)
 	if errors.Is(err, ErrNotFound) {
 		return s.create(device, files, snapshot, owner)
 	}
@@ -222,7 +254,46 @@ func (s *bondStore) persistBond(device bonds.Address, files bonds.Files, owner O
 	if current.Tree()[device].Equal(files) && bytes.Equal(current.Snapshot(device), snapshot) {
 		return true
 	}
-	return s.update(current, device, files, snapshot, owner)
+	err = s.update(current, device, files, snapshot, owner)
+	if errors.Is(err, ErrConflict) {
+		// The copy from the store was older than the API server's, such
+		// as one from before this operator's own last write. The fresh
+		// copy is compared, and written once more when it still differs.
+		current, err = s.fetchBond(key, path)
+		if err == nil && current.Tree()[device].Equal(files) && bytes.Equal(current.Snapshot(device), snapshot) {
+			return true
+		}
+		if err == nil {
+			err = s.update(current, device, files, snapshot, owner)
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "updating %s: %v\n", name, err)
+		return false
+	}
+	return true
+}
+
+// readBond answers one bond's Secret: the store's copy when it holds a
+// current one, and the API server's copy when it does not.
+func (s *bondStore) readBond(key, path string) (*bonds.Secret, error) {
+	if held, ok := cachedCopy[bonds.Secret](s.secrets, key); ok && s.secretVersions.current(key, held.Metadata.ResourceVersion) {
+		return held, nil
+	}
+	return s.fetchBond(key, path)
+}
+
+// fetchBond reads one bond's Secret from the API server and notes its
+// version.
+func (s *bondStore) fetchBond(key, path string) (*bonds.Secret, error) {
+	fresh, err := get[bonds.Secret](s.client, path)
+	switch {
+	case err == nil:
+		s.secretVersions.note(key, fresh.Metadata.ResourceVersion)
+	case errors.Is(err, ErrNotFound):
+		s.secretVersions.note(key, "")
+	}
+	return fresh, err
 }
 
 // create puts one bond in the API for the first time. A create names
@@ -236,10 +307,12 @@ func (s *bondStore) create(device bonds.Address, files bonds.Files, snapshot []b
 		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", name, err)
 		return false
 	}
-	if err := s.client.RequestJSON(http.MethodPost, bonds.SecretsPath(s.namespace), body, nil); err != nil {
+	created := &bonds.Secret{}
+	if err := s.client.RequestJSON(http.MethodPost, bonds.SecretsPath(s.namespace), body, created); err != nil {
 		fmt.Fprintf(os.Stderr, "creating %s: %v\n", name, err)
 		return false
 	}
+	s.secretVersions.note(s.namespace+"/"+name, created.Metadata.ResourceVersion)
 	fmt.Printf("bonds: created %s for the bond with %s\n", name, device)
 	return true
 }
@@ -248,22 +321,22 @@ func (s *bondStore) create(device bonds.Address, files bonds.Files, snapshot []b
 //
 // The write includes the resourceVersion from the read, so a second
 // writer gets ErrConflict instead of losing the first writer's bond,
-// and the next pass reads again and writes again.
-func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bonds.Files, snapshot []byte, owner OwnerReference) bool {
+// and the caller reads the Secret again.
+func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bonds.Files, snapshot []byte, owner OwnerReference) error {
 	name := bonds.BondSecretName(device)
 	secret := bonds.NewBondSecret(s.namespace, s.adapter, device, files, snapshot, bondOwner(owner))
 	secret.Metadata.ResourceVersion = current.Metadata.ResourceVersion
 	body, err := json.Marshal(secret)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", name, err)
-		return false
+		return fmt.Errorf("encoding: %w", err)
 	}
-	if err := s.client.RequestJSON(http.MethodPut, bonds.BondSecretPath(s.namespace, device), body, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "updating %s: %v\n", name, err)
-		return false
+	written := &bonds.Secret{}
+	if err := s.client.RequestJSON(http.MethodPut, bonds.BondSecretPath(s.namespace, device), body, written); err != nil {
+		return err
 	}
+	s.secretVersions.note(s.namespace+"/"+name, written.Metadata.ResourceVersion)
 	fmt.Printf("bonds: wrote %s\n", name)
-	return true
+	return nil
 }
 
 // reportLegacySecret names the older per-adapter Secret once, if one is
@@ -300,4 +373,22 @@ func bondOwner(owner OwnerReference) bonds.Owner {
 		Name:       owner.Name,
 		UID:        owner.UID,
 	}
+}
+
+// watchBondSecrets keeps one radio's bond Secrets in a store until the
+// context ends. persist reads the store on every pass, where it would
+// otherwise read each bond's Secret from the API server, and a watch
+// with no change to send costs no read. No change to a Secret wakes
+// the loop, because the Secrets follow the tree on disk and not the
+// other way round: the next pass of any kind writes a Secret again that
+// somebody deleted or edited.
+//
+// The watch selects by the adapter label in this pod's namespace, the
+// same selection restore lists. A Secret that does not convert is
+// logged when the pass reads it, and the pass reads that one from the
+// API server.
+func watchBondSecrets(ctx context.Context, client dynamic.Interface, namespace string, adapter bonds.Address) storeView {
+	secrets := newCollectionWatch(client, secretResource, namespace, adapterSelector(adapter.Key()), cache.ResourceEventHandlerFuncs{})
+	go secrets.run(ctx, nil)
+	return secrets.view()
 }

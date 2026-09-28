@@ -26,16 +26,19 @@ import (
 )
 
 // watchPairingRequests wakes the loop while a request needs attention.
-// The channel closes when the context ends.
-func watchPairingRequests(ctx context.Context, client dynamic.Interface, now func() time.Time) <-chan struct{} {
+// The channel closes when the context ends. The store it answers holds
+// every request, and the pass reads it in place of the API server
+// (objectcache.go).
+func watchPairingRequests(ctx context.Context, client dynamic.Interface, now func() time.Time) (<-chan struct{}, storeView) {
 	wake := make(chan struct{}, 1)
 	watcher := &requestWatcher{now: now, wake: wake, held: map[string]PairingRequest{}}
+	requests := newCollectionWatch(client, pairingRequestResource, "", "", watcher.handler())
 	go func() {
 		defer close(wake)
 		defer watcher.stop()
-		watchCollection(ctx, client, pairingRequestResource, "", watcher.handler(), nil)
+		requests.run(ctx, nil)
 	}()
-	return wake
+	return wake, requests.view()
 }
 
 // requestWatcher holds the requests the watch reported, and the clock

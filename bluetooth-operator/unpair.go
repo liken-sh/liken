@@ -26,6 +26,7 @@ package main
 // published inventory before the pass that removes the bond starts.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -35,6 +36,22 @@ import (
 // unpair advances one Peripheral's teardown by at most one step.
 func (i *inventory) unpair(peripheral *Peripheral, address bonds.Address, device deviceState, present bool, pass *inventoryPass) {
 	name := peripheral.Metadata.Name
+	// The teardown reads the Peripheral from the API server, not from
+	// the store. The store can still hold a copy of a Peripheral whose
+	// finalizer this operator released on the pass before, and a
+	// teardown from that copy would retire a device again that no
+	// Peripheral names. A teardown lasts a few passes, so the read
+	// costs one request on each of them.
+	current, err := readFresh[Peripheral](i.client, i.cache.peripheralVersions, name, peripheralPath(name))
+	if errors.Is(err, ErrNotFound) {
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unpair %s: reading the object: %v\n", name, err)
+		pass.ok = false
+		return
+	}
+	peripheral = current
 	if !peripheral.Metadata.holds(peripheralFinalizer) {
 		// Nothing holds the object. The API server removes it as soon as
 		// the last finalizer is gone, so there is no teardown to run.
@@ -95,12 +112,14 @@ func (i *inventory) unpair(peripheral *Peripheral, address bonds.Address, device
 		pass.ok = false
 		return
 	}
-	if _, err := patchFinalizers(i.client, peripheralPath(name), peripheral.Metadata.ResourceVersion,
-		peripheral.Metadata.without(peripheralFinalizer)); err != nil {
+	version, err := patchFinalizers(i.client, peripheralPath(name), peripheral.Metadata.ResourceVersion,
+		peripheral.Metadata.without(peripheralFinalizer))
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "unpair %s: releasing the object: %v\n", name, err)
 		pass.ok = false
 		return
 	}
+	i.cache.peripheralVersions.note(name, version)
 	delete(i.retired, address)
 	delete(i.retiring, address)
 	// The object is gone the moment the last finalizer lifts, so its
