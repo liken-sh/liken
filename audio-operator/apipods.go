@@ -21,6 +21,8 @@ import (
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // operatorSelector is the label the DaemonSet's pods carry.
@@ -157,11 +159,8 @@ func supersedes(incoming, current capturePod) bool {
 // watchPods follows the operator's pods into the index until the
 // context ends.
 func watchPods(ctx context.Context, client dynamic.Interface, namespace string, index *podIndex) {
-	collectionWatch{
-		collection:    client.Resource(podResource).Namespace(namespace),
-		labelSelector: operatorSelector,
-		handler:       podHandler{index}.handler(),
-	}.start(ctx)
+	informer.Start(ctx, client, informer.Source{Resource: podResource, Namespace: namespace, LabelSelector: operatorSelector},
+		informer.Options{Handler: podHandler{index}.handler()})
 }
 
 // podHandler reads the watch's objects as pods into the index.
@@ -178,9 +177,9 @@ func (h podHandler) handler() cache.ResourceEventHandler {
 // put holds a pod the watch added or changed. A pod that does not
 // convert is logged, and the index keeps what it held for that name.
 func (h podHandler) put(object any) {
-	held, err := convert[pod](object)
+	held, err := informer.Convert[pod](object)
 	if err != nil {
-		reportUnconverted("the operator's pods", err)
+		informer.Report("the operator's pods", err)
 		return
 	}
 	h.index.put(held)
@@ -193,7 +192,7 @@ func (h podHandler) removed(object any) {
 	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok && tombstone.Obj == nil {
 		_, name, err := cache.SplitMetaNamespaceKey(tombstone.Key)
 		if err != nil {
-			reportUnconverted("the operator's pods", err)
+			informer.Report("the operator's pods", err)
 			return
 		}
 		h.index.forget(name)
@@ -201,7 +200,7 @@ func (h podHandler) removed(object any) {
 	}
 	item, err := unwrap(object)
 	if err != nil {
-		reportUnconverted("the operator's pods", err)
+		informer.Report("the operator's pods", err)
 		return
 	}
 	h.index.forget(item.GetName())

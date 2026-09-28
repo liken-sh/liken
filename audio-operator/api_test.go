@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // clusterFake stands in for the API server: the two reviews, the two
@@ -247,7 +249,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 		t.Fatal(err)
 	}
 
-	client := NewClient(cluster.server.URL, cluster.server.Client(), "")
+	client := apiclient.New(cluster.server.URL, cluster.server.Client(), "")
 	server := &apiServer{
 		client:     client,
 		review:     newReviewer(client, apiAudience),

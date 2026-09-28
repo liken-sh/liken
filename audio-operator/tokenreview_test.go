@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // reviewServer stands in for the API server's TokenReview endpoint. It
@@ -41,7 +43,7 @@ func newReviewServer(t *testing.T, answer tokenReviewStatus) *reviewServer {
 }
 
 func (f *reviewServer) reviewer(audience string) *reviewer {
-	return newReviewer(NewClient(f.server.URL, f.server.Client(), ""), audience)
+	return newReviewer(apiclient.New(f.server.URL, f.server.Client(), ""), audience)
 }
 
 func TestAReviewCarriesTheAudienceAndReadsTheAnswersOwn(t *testing.T) {

@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The API group is the driver's own name, so one domain names the
@@ -265,10 +267,12 @@ func condition(kind string, met bool, reason, message string, now time.Time) End
 func sinkPath(name string) string   { return SinksPath + "/" + name }
 func sourcePath(name string) string { return SourcesPath + "/" + name }
 
-func getSink(c *Client, name string) (*Sink, error) { return get[Sink](c, sinkPath(name)) }
+func getSink(c *apiclient.Client, name string) (*Sink, error) {
+	return apiclient.Get[Sink](c, sinkPath(name))
+}
 
-func getSource(c *Client, name string) (*Source, error) {
-	return get[Source](c, sourcePath(name))
+func getSource(c *apiclient.Client, name string) (*Source, error) {
+	return apiclient.Get[Source](c, sourcePath(name))
 }
 
 // machineSelector is the field selector that takes the resources whose
@@ -281,16 +285,16 @@ func machineSelector(machine string) string {
 
 // listSinks and listSources read the resources whose status.node is
 // one machine.
-func listSinks(c *Client, machine string) ([]Sink, error) {
-	list, err := get[SinkList](c, SinksPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
+func listSinks(c *apiclient.Client, machine string) ([]Sink, error) {
+	list, err := apiclient.Get[SinkList](c, SinksPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
 	if err != nil {
 		return nil, err
 	}
 	return list.Items, nil
 }
 
-func listSources(c *Client, machine string) ([]Source, error) {
-	list, err := get[SourceList](c, SourcesPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
+func listSources(c *apiclient.Client, machine string) ([]Source, error) {
+	list, err := apiclient.Get[SourceList](c, SourcesPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +305,7 @@ func listSources(c *Client, machine string) ([]Source, error) {
 // about how an endpoint should rest: the resource exists so that a
 // person or a machine writer can, and an empty spec writes nothing to
 // the hardware.
-func createSink(c *Client, name string) (*Sink, error) {
+func createSink(c *apiclient.Client, name string) (*Sink, error) {
 	return post(c, SinksPath, &Sink{
 		APIVersion: EndpointAPIVersion,
 		Kind:       SinkKind,
@@ -309,7 +313,7 @@ func createSink(c *Client, name string) (*Sink, error) {
 	})
 }
 
-func createSource(c *Client, name string) (*Source, error) {
+func createSource(c *apiclient.Client, name string) (*Source, error) {
 	return post(c, SourcesPath, &Source{
 		APIVersion: EndpointAPIVersion,
 		Kind:       SourceKind,
@@ -317,39 +321,15 @@ func createSource(c *Client, name string) (*Source, error) {
 	})
 }
 
-// replaceStatus writes one object's status to the status
-// subresource, so a spec a person edited between the read and the
-// write is not overwritten. The caller states the object's apiVersion
-// and kind. The API server's copy replaces the caller's, because a
-// write produces a new resourceVersion, and the next write must state
-// it.
-func replaceStatus[T any](c *Client, path string, object *T) error {
-	stored, err := put(c, path+"/status", object)
-	if err != nil {
-		return err
-	}
-	*object = *stored
-	return nil
-}
-
 // post creates one object and answers with what the API server
 // stored, which carries the resourceVersion the next write needs.
-func post[T any](c *Client, path string, object *T) (*T, error) {
-	return send[T](c, http.MethodPost, path, object)
-}
-
-// put replaces one object.
-func put[T any](c *Client, path string, object *T) (*T, error) {
-	return send[T](c, http.MethodPut, path, object)
-}
-
-func send[T any](c *Client, method, path string, object *T) (*T, error) {
+func post[T any](c *apiclient.Client, path string, object *T) (*T, error) {
 	body, err := json.Marshal(object)
 	if err != nil {
 		return nil, err
 	}
 	stored := new(T)
-	if err := c.RequestJSON(method, path, body, stored); err != nil {
+	if err := c.RequestJSON(http.MethodPost, path, body, stored); err != nil {
 		return nil, err
 	}
 	return stored, nil

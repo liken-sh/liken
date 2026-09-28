@@ -41,8 +41,12 @@ import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // watchEndpoints turns an edit to one of this machine's resources, on
@@ -50,20 +54,15 @@ import (
 // context ends. It answers the two stores with a memo each, which the
 // pass reads in place of the API server (objectcache.go).
 func watchEndpoints(ctx context.Context, client dynamic.Interface, machine string, wake func(), readings *metrics) objectCache {
-	watch := func(kind string, resource dynamic.ResourceInterface, handler cache.ResourceEventHandler) heldObjects {
-		store, synced := collectionWatch{
-			collection:    resource,
-			fieldSelector: machineSelector(machine),
-			handler:       handler,
-			synced:        wake,
-			reopened:      func() { readings.watchRestarted(kind) },
-		}.start(ctx)
-		return heldObjects{view: storeView{store: store, synced: synced}, versions: newVersionMemo()}
+	watch := func(kind string, resource schema.GroupVersionResource, handler cache.ResourceEventHandler) informer.Held {
+		collection := informer.Start(ctx, client, informer.Source{Resource: resource, FieldSelector: machineSelector(machine)},
+			informer.Options{Handler: handler, Synced: wake, Reopened: func() { readings.watchRestarted(kind) }})
+		return informer.Held{View: collection.View(), Versions: memo.New()}
 	}
 	return objectCache{
-		sinks: watch(SinkKind, client.Resource(sinkResource),
+		sinks: watch(SinkKind, sinkResource,
 			editHandler[Sink]{what: "the Sinks of " + machine, wake: wake}.handler()),
-		sources: watch(SourceKind, client.Resource(sourceResource),
+		sources: watch(SourceKind, sourceResource,
 			editHandler[Source]{what: "the Sources of " + machine, wake: wake}.handler()),
 	}
 }
@@ -113,8 +112,8 @@ func (h editHandler[T]) handler() cache.ResourceEventHandler {
 
 // added takes a resource that entered the selection.
 func (h editHandler[T]) added(object any) {
-	if _, err := convert[T](object); err != nil {
-		reportUnconverted(h.what, err)
+	if _, err := informer.Convert[T](object); err != nil {
+		informer.Report(h.what, err)
 		return
 	}
 	h.wake()
@@ -125,8 +124,8 @@ func (h editHandler[T]) added(object any) {
 // loop: the pass reads the collection again, and one extra pass costs
 // less than a Sink that is not created again.
 func (h editHandler[T]) removed(object any) {
-	if _, err := convert[T](object); err != nil {
-		reportUnconverted(h.what, err)
+	if _, err := informer.Convert[T](object); err != nil {
+		informer.Report(h.what, err)
 	}
 	h.wake()
 }
@@ -135,8 +134,8 @@ func (h editHandler[T]) removed(object any) {
 // change to the mark wakes the loop, so this operator's own status
 // write does not.
 func (h editHandler[T]) updated(before, after any) {
-	if _, err := convert[T](after); err != nil {
-		reportUnconverted(h.what, err)
+	if _, err := informer.Convert[T](after); err != nil {
+		informer.Report(h.what, err)
 		return
 	}
 	now, _ := unwrap(after)

@@ -32,6 +32,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // version is the release this binary was built from. The Dockerfile
@@ -159,7 +162,7 @@ func operate() {
 	// has no retry logic of its own, because the kubelet already
 	// provides it: a pod that exits nonzero restarts with backoff, and
 	// the failure shows in kubectl instead of hiding in a log.
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
@@ -233,7 +236,7 @@ func operate() {
 	// so that a change it carries wakes the loop from the moment it
 	// runs. Its stores are what the pass reads this machine's Sinks and
 	// Sources from.
-	watcher, err := inClusterWatcher()
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}

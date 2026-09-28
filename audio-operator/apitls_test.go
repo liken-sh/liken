@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // objectStore stands in for the API server's Secrets and ConfigMaps.
@@ -92,7 +94,7 @@ func (s *objectStore) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *objectStore) certificates() *certificates {
-	return newCertificates(NewClient(s.server.URL, s.server.Client(), ""), "liken-system", apiService)
+	return newCertificates(apiclient.New(s.server.URL, s.server.Client(), ""), "liken-system", apiService)
 }
 
 func (s *objectStore) holdsSecret(name string) bool {

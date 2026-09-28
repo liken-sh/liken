@@ -19,6 +19,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // run is the operator's loop. It returns nil when the process is
@@ -61,7 +63,7 @@ func run(ctx context.Context, operator *reconciler, settled <-chan struct{}) err
 // The graph read is a field rather than a call to readGraph, so a
 // test drives the failure paths without a PipeWire to break.
 type reconciler struct {
-	client   *Client
+	client   *apiclient.Client
 	nodeName string
 	owner    OwnerReference
 	graph    func(context.Context) (pwGraph, error)

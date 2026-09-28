@@ -33,6 +33,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The settings this Deployment reads from its environment: where the
@@ -62,7 +65,7 @@ const certificateCheck = time.Hour
 
 // apiServer is the whole of this mode's state.
 type apiServer struct {
-	client   *Client
+	client   *apiclient.Client
 	review   *reviewer
 	access   *authorizer
 	pods     *podIndex
@@ -93,7 +96,7 @@ func serveAPI() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
@@ -121,7 +124,7 @@ func serveAPI() {
 	if err := server.anchors.load(client); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
 	}
-	watcher, err := inClusterWatcher()
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}
@@ -163,7 +166,7 @@ func serveAPI() {
 	}
 }
 
-func newAPIServer(client *Client, namespace string) *apiServer {
+func newAPIServer(client *apiclient.Client, namespace string) *apiServer {
 	certs := newCertificates(client, namespace, apiService)
 	return &apiServer{
 		client:     client,
@@ -222,17 +225,17 @@ func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 // with no restart. The API never writes it, so the copy the watch
 // delivers is the one the pool takes, and a change costs no read.
 func (s *apiServer) followCertificateObjects(ctx context.Context, watcher dynamic.Interface, complain func(error)) {
-	followObject(ctx, watcher.Resource(secretResource).Namespace(s.certs.namespace), captureTLSSecret,
+	followObject(ctx, watcher, informer.Source{Resource: secretResource, Namespace: s.certs.namespace}, captureTLSSecret,
 		func(*unstructured.Unstructured) {
 			if err := s.certs.keepCaptureLeaf(); err != nil {
 				complain(fmt.Errorf("keeping the capture container's leaf: %w", err))
 			}
 		})
-	followObject(ctx, watcher.Resource(configMapResource).Namespace(clientCANamespace), clientCAConfigMap,
+	followObject(ctx, watcher, informer.Source{Resource: configMapResource, Namespace: clientCANamespace}, clientCAConfigMap,
 		func(held *unstructured.Unstructured) {
 			var published *configMap
 			if held != nil {
-				converted, err := convert[configMap](held)
+				converted, err := informer.Convert[configMap](held)
 				if err != nil {
 					complain(fmt.Errorf("reading the cluster's client authority: %w", err))
 					return
@@ -255,7 +258,7 @@ func (s *apiServer) followCertificateObjects(ctx context.Context, watcher dynami
 // The informer calls the handler on one goroutine and the synced check
 // on another. The lock runs one changed at a time, in the order of the
 // events.
-func followObject(ctx context.Context, collection dynamic.ResourceInterface, name string,
+func followObject(ctx context.Context, watcher dynamic.Interface, source informer.Source, name string,
 	changed func(held *unstructured.Unstructured)) {
 	var one sync.Mutex
 	seen := false
@@ -266,15 +269,14 @@ func followObject(ctx context.Context, collection dynamic.ResourceInterface, nam
 		held, _ := object.(*unstructured.Unstructured)
 		changed(held)
 	}
-	collectionWatch{
-		collection:    collection,
-		fieldSelector: "metadata.name=" + name,
-		handler: cache.ResourceEventHandlerFuncs{
+	source.FieldSelector = "metadata.name=" + name
+	informer.Start(ctx, watcher, source, informer.Options{
+		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc:    serial,
 			UpdateFunc: func(_, after any) { serial(after) },
 			DeleteFunc: func(any) { serial(nil) },
 		},
-		synced: func() {
+		Synced: func() {
 			one.Lock()
 			defer one.Unlock()
 			if !seen {
@@ -282,7 +284,7 @@ func followObject(ctx context.Context, collection dynamic.ResourceInterface, nam
 				changed(nil)
 			}
 		},
-	}.start(ctx)
+	})
 }
 
 // servedLeaf is the certificate the public listener serves, swapped in

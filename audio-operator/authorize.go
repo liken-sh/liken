@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // accessReviewPath is where a SubjectAccessReview is created.
@@ -92,10 +94,10 @@ func attributesFor(route apiRoute, name string) *resourceAttributes {
 // be withdrawn at any moment, and the API server's own authorizer
 // caches on its side.
 type authorizer struct {
-	client *Client
+	client *apiclient.Client
 }
 
-func newAuthorizer(client *Client) *authorizer {
+func newAuthorizer(client *apiclient.Client) *authorizer {
 	return &authorizer{client: client}
 }
 

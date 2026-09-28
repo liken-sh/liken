@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The two audiences. An audience is what keeps every pod's ordinary
@@ -101,7 +103,7 @@ type tokenUserInfo struct {
 // reviewer reviews tokens for one audience and keeps the positive
 // verdicts.
 type reviewer struct {
-	client   *Client
+	client   *apiclient.Client
 	audience string
 
 	// now is a field so a test reads a fixed clock off the cache
@@ -118,7 +120,7 @@ type keptVerdict struct {
 	until time.Time
 }
 
-func newReviewer(client *Client, audience string) *reviewer {
+func newReviewer(client *apiclient.Client, audience string) *reviewer {
 	return &reviewer{
 		client:   client,
 		audience: audience,

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // accessServer stands in for the API server's SubjectAccessReview
@@ -39,7 +41,7 @@ func newAccessServer(t *testing.T, answer accessReviewStatus) *accessServer {
 }
 
 func (f *accessServer) authorizer() *authorizer {
-	return newAuthorizer(NewClient(f.server.URL, f.server.Client(), ""))
+	return newAuthorizer(apiclient.New(f.server.URL, f.server.Client(), ""))
 }
 
 // listener is the caller a TokenReview reported, with every field a

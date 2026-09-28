@@ -107,8 +107,8 @@ jobs:
           prek-version: 0.5.2
           extra-args: >-
             --all-files
-            --skip audio-operator/
             --skip kubernetes/
+            --skip audio-operator/
             --skip bluetooth-operator/
             --skip brand/
             --skip ci/
@@ -145,17 +145,6 @@ jobs:
         working-directory: ci
         run: go run . deps -root ..
 
-  audio-operator:
-    needs: [plan]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
-    uses: ./.github/workflows/component-audio-operator.yaml
-    with:
-      version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
-    permissions:
-      contents: read
-      packages: write
-
   kubernetes:
     needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['kubernetes'].check }}
@@ -163,6 +152,17 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  audio-operator:
+    needs: [plan, kubernetes]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
+    uses: ./.github/workflows/component-audio-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
     permissions:
       contents: read
       packages: write
@@ -310,7 +310,7 @@ jobs:
   # A component whose jobs did not run in this push has no new
   # coverage profile, so its report is the one the site serves now.
   site:
-    needs: [plan, audio-operator, kubernetes, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
+    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -331,16 +331,16 @@ jobs:
           cache-dependency-path: '**/docs/go.sum'
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
-        with:
-          name: coverage-audio-operator-go
-          path: audio-operator
-
-      - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check }}
         with:
           name: coverage-kubernetes-go
           path: kubernetes
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
+        with:
+          name: coverage-audio-operator-go
+          path: audio-operator
 
       - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
@@ -475,7 +475,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, audio-operator, kubernetes, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
+    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

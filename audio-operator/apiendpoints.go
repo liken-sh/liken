@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // capturedEndpoint is one Sink or Source as this API reads it: the
@@ -67,7 +69,7 @@ func (s *apiServer) serveEndpoint(w http.ResponseWriter, r *http.Request, route 
 	name string, form representation, knobs captureKnobs, who caller,
 	id string, at time.Time, outcome *answered) answered {
 	held, err := s.readEndpoint(route, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return s.refuseAs(w, r, route, name, who, http.StatusNotFound, problemNoNode, id,
 			fmt.Sprintf("this cluster holds no %s named %s", singular(route.Resource), name))
 	}
@@ -289,4 +291,18 @@ func (s *apiServer) relayProblem(w http.ResponseWriter, r *http.Request, route a
 // takes: a document this API asked for, and nothing more.
 func readJSON(body io.Reader, into any) error {
 	return json.NewDecoder(io.LimitReader(body, maxDrain)).Decode(into)
+}
+
+// maxDrain bounds each read of an answer from the private leg. The
+// largest answer the API asks a capture container for is one small
+// document, so a body past this size is not one the API asked for.
+const maxDrain = 4 << 20
+
+// drain reads what the caller left in an answer's body, then closes
+// it. Go returns a connection to its pool only when the body reaches
+// EOF, so a body closed early costs a new TCP connection and TLS
+// handshake on the next request to the same container.
+func drain(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
+	_ = body.Close()
 }

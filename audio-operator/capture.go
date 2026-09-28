@@ -28,6 +28,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The settings this container reads from its environment, which is
@@ -81,7 +83,7 @@ func capture() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}

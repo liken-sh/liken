@@ -10,15 +10,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-func testClient(t *testing.T, handler http.Handler) *Client {
+func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	// The credentials are empty, so the client sends no bearer token
 	// and reads no file from disk.
-	return NewClient(server.URL, server.Client(), "")
+	return apiclient.New(server.URL, server.Client(), "")
 }
 
 func testOwner() OwnerReference {

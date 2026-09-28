@@ -9,7 +9,14 @@ WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.
 COPY go.mod go.sum ./
+# go.mod replaces the shared kubernetes module with ../kubernetes, and
+# the build takes that directory as a second build context named
+# kubernetes. It lands at /kubernetes, the same place relative to /src
+# that kubernetes/ has relative to this component. Its module file
+# comes first for the same reason as this module's.
+COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
+COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
 # The version reaches the binary through -ldflags, so liken_build_info
 # names the release a running pod was built from.

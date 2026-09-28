@@ -13,6 +13,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // cacheOf is a cache that holds what the fixture holds now, the way the
@@ -34,8 +37,8 @@ func cacheOf(t *testing.T, api *endpointAPI) objectCache {
 	}
 	synced := func() bool { return true }
 	return objectCache{
-		sinks:   heldObjects{view: storeView{store: sinks, synced: synced}},
-		sources: heldObjects{view: storeView{store: sources, synced: synced}},
+		sinks:   informer.Held{View: informer.View{Store: sinks, Synced: synced}},
+		sources: informer.Held{View: informer.View{Store: sources, Synced: synced}},
 	}
 }
 
@@ -143,8 +146,8 @@ func TestAStatusWriteFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 // store.
 func withMemos(control *endpointControl) {
 	control.cache = objectCache{
-		sinks:   heldObjects{versions: newVersionMemo()},
-		sources: heldObjects{versions: newVersionMemo()},
+		sinks:   informer.Held{Versions: memo.New()},
+		sources: informer.Held{Versions: memo.New()},
 	}
 }
 
@@ -154,8 +157,8 @@ func delivered(t *testing.T, api *endpointAPI, control *endpointControl) {
 	t.Helper()
 	memos := control.cache
 	control.cache = cacheOf(t, api)
-	control.cache.sinks.versions = memos.sinks.versions
-	control.cache.sources.versions = memos.sources.versions
+	control.cache.sinks.Versions = memos.sinks.Versions
+	control.cache.sources.Versions = memos.sources.Versions
 }
 
 // forget clears the requests the fixture received.
@@ -384,7 +387,7 @@ func TestTheSweepReadsACopyThatDoesNotConvertFromTheAPIServer(t *testing.T) {
 	if err := unstructured.SetNestedField(broken.Object, "loud", "spec", "volume"); err != nil {
 		t.Fatal(err)
 	}
-	if err := control.cache.sinks.view.store.Update(broken); err != nil {
+	if err := control.cache.sinks.View.Store.Update(broken); err != nil {
 		t.Fatal(err)
 	}
 
@@ -394,49 +397,5 @@ func TestTheSweepReadsACopyThatDoesNotConvertFromTheAPIServer(t *testing.T) {
 
 	if connected := conditionOf(api.sinks[testAnalogName].Status, ConnectedCondition); connected != conditionFalse {
 		t.Errorf("the Sink reports Connected %q, want the absence reported", connected)
-	}
-}
-
-// arrivingStore is a store whose informer takes one object just after
-// the first read of its keys, the way the watch event of a create
-// lands while a pass lists.
-type arrivingStore struct {
-	cache.Store
-	arriving *unstructured.Unstructured
-}
-
-func (s *arrivingStore) ListKeys() []string {
-	keys := s.Store.ListKeys()
-	if s.arriving != nil {
-		_ = s.Store.Add(s.arriving)
-		s.arriving = nil
-	}
-	return keys
-}
-
-// A list from a whole store answers a Sink the operator created, even
-// when the watch event of the create reaches the store during the
-// list. A pass reads the list to decide whether a Sink already exists,
-// and a list that left it out would make the pass create the Sink
-// again.
-func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
-	api := newEndpointAPI()
-	control := testEndpointControl(t, api, &writeRecord{})
-	created := asObject(t, Sink{Metadata: EndpointMeta{Name: testAnalogName, ResourceVersion: "5"}})
-	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: created}
-	versions := newVersionMemo()
-	versions.note(testAnalogName, "5")
-	view := storeView{store: store, synced: func() bool { return true }, whole: true}
-
-	list, err := currentList[Sink](control.client, heldObjects{view: view, versions: versions}, sinkPath)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 {
-		t.Errorf("the list holds %d Sinks, want 1", len(list))
-	}
-	if got := reads(api); got != 0 {
-		t.Errorf("the list sent %d reads, want none: %v", got, api.requests)
 	}
 }

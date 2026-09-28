@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // A certificate authority in the shape the API server publishes in
@@ -277,8 +279,8 @@ func (m *authenticationConfigMap) holds(caPEM string) {
 	m.caPEM = caPEM
 }
 
-func (m *authenticationConfigMap) client() *Client {
-	return NewClient(m.server.URL, m.server.Client(), "")
+func (m *authenticationConfigMap) client() *apiclient.Client {
+	return apiclient.New(m.server.URL, m.server.Client(), "")
 }
 
 func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {

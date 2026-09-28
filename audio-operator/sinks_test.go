@@ -173,29 +173,6 @@ func TestCreateCarriesAnEmptySpec(t *testing.T) {
 	}
 }
 
-// The status write goes to the status subresource, so a spec a person
-// edited between the read and the write is not overwritten.
-func TestStatusWritesGoToTheSubresource(t *testing.T) {
-	api := newEndpointAPI()
-	client := testClient(t, api.handler(t))
-	sink, err := createSink(client, testSinkName)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sink.Status = EndpointStatus{Node: "liken-1"}
-	if err := replaceStatus(client, sinkPath(testSinkName), sink); err != nil {
-		t.Fatal(err)
-	}
-	if sink.Status.Node != "liken-1" {
-		t.Errorf("status = %+v", sink.Status)
-	}
-	want := "PUT " + SinksPath + "/" + testSinkName + "/status"
-	if got := api.requests[len(api.requests)-1]; got != want {
-		t.Errorf("request = %q, want %q", got, want)
-	}
-}
-
 func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 	api := newEndpointAPI()
 	client := testClient(t, api.handler(t))

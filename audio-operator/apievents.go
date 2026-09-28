@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // capturedReason is the one reason this API writes.
@@ -65,7 +67,7 @@ type eventSource struct {
 // recordCapture writes one Captured event. A failure here is reported
 // and never fails the request: the sound is already on the wire, and
 // the log line holds the same record.
-func recordCapture(client *Client, kind, name, uid, aspect, format, who string, at time.Time) error {
+func recordCapture(client *apiclient.Client, kind, name, uid, aspect, format, who string, at time.Time) error {
 	stamp := at.UTC().Format(time.RFC3339)
 	body, err := json.Marshal(&event{
 		APIVersion: "v1",

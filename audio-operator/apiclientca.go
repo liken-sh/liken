@@ -17,6 +17,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"sync"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The ConfigMap the API server publishes the cluster's client
@@ -61,8 +63,8 @@ func (a *clientAnchors) held() *x509.CertPool {
 // with what it holds. The API calls it once at the start, before the
 // listener opens and before the watch has read the ConfigMap. After
 // that, the watch hands each change to adopt.
-func (a *clientAnchors) load(client *Client) error {
-	held, err := get[configMap](client, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
+func (a *clientAnchors) load(client *apiclient.Client) error {
+	held, err := apiclient.Get[configMap](client, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
 	if err != nil {
 		return fmt.Errorf("reading the ConfigMap %s: %w", clientCAConfigMap, err)
 	}

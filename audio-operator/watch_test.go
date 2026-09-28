@@ -2,10 +2,10 @@ package main
 
 // These tests run the handlers of the watches through client-go's real
 // reflector, against a scripted API server. The reflector's own loop
-// is upstream's to test. What these tests prove is that each change
-// the API server sends reaches this program's handlers, that each
-// watch carries its selector, and that an object that does not convert
-// is reported.
+// is upstream's to test, and the shared informer package tests the
+// copy it keeps and the decode of each object. What these tests prove
+// is that each change the API server sends reaches this program's
+// handlers, and that each watch carries its selector.
 
 import (
 	"context"
@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,7 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
 )
 
 // holdOpen, as the last line of a script, keeps the stream open until
@@ -244,61 +242,6 @@ func next[T any](t *testing.T, from chan T, what string) T {
 		t.Fatalf("no %s within five seconds", what)
 		var none T
 		return none
-	}
-}
-
-// An object that does not convert to the program's struct is an error
-// that names the object. A tombstone, which the informer hands a
-// handler for an object deleted while the watch was down, converts as
-// the object it holds.
-func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
-	volume := 40
-	good := Sink{APIVersion: EndpointAPIVersion, Kind: SinkKind,
-		Metadata: EndpointMeta{Name: testSinkName}, Spec: SinkSpec{Volume: &volume}}
-	mistyped := asObject(t, good)
-	if err := unstructured.SetNestedField(mistyped.Object, "loud", "spec", "volume"); err != nil {
-		t.Fatal(err)
-	}
-	cases := []struct {
-		name    string
-		object  any
-		wantErr string
-	}{
-		{name: "an object", object: asObject(t, good)},
-		{name: "a tombstone", object: cache.DeletedFinalStateUnknown{Key: testSinkName, Obj: asObject(t, good)}},
-		{name: "a field of the wrong type", object: mistyped, wantErr: "Sink " + testSinkName + " does not convert"},
-		{name: "a tombstone with no copy", object: cache.DeletedFinalStateUnknown{Key: testSinkName}, wantErr: "not an object"},
-		{name: "something that is not an object", object: testSinkName, wantErr: "not an object"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := convert[Sink](c.object)
-			if c.wantErr == "" && (err != nil || got.Spec.Volume == nil || *got.Spec.Volume != 40) {
-				t.Fatalf("convert = %+v, %v; want volume 40 and no error", got.Spec, err)
-			}
-			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
-				t.Fatalf("convert error = %v, want one that says %q", err, c.wantErr)
-			}
-		})
-	}
-}
-
-// The transform removes managedFields before the informer stores an
-// object, and leaves the rest of the object as it was.
-func TestTheInformerStoresNoManagedFields(t *testing.T) {
-	item := &unstructured.Unstructured{Object: map[string]any{
-		"metadata": map[string]any{
-			"name":          testSinkName,
-			"managedFields": []any{map[string]any{"manager": "kubectl"}},
-		},
-	}}
-	stored, err := dropManagedFields(item)
-	if err != nil {
-		t.Fatal(err)
-	}
-	kept := stored.(*unstructured.Unstructured)
-	if kept.GetManagedFields() != nil || kept.GetName() != testSinkName {
-		t.Errorf("the stored metadata is %v", kept.Object["metadata"])
 	}
 }
 

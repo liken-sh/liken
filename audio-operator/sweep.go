@@ -22,6 +22,8 @@ import (
 	"maps"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // sweep reports the endpoints this machine held a resource for and no
@@ -47,7 +49,7 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 			continue
 		}
 		e.readings.endpoint(sink.Metadata.Name, false, false, false)
-		if err := e.settleSinkStatus(&sink, absent); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := e.settleSinkStatus(&sink, absent); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 			failures = append(failures, err)
 		}
 	}
@@ -60,7 +62,7 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 			continue
 		}
 		e.readings.endpoint(source.Metadata.Name, false, false, false)
-		if err := e.settleSourceStatus(&source, absent); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := e.settleSourceStatus(&source, absent); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 			failures = append(failures, err)
 		}
 	}

@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // secret is the part of a Kubernetes Secret this API reads and writes.
@@ -55,7 +57,7 @@ func configMapsPath(namespace string) string {
 
 // certificates holds the API's own TLS material and keeps it current.
 type certificates struct {
-	client    *Client
+	client    *apiclient.Client
 	namespace string
 	service   string
 
@@ -77,7 +79,7 @@ type certificates struct {
 	pass sync.Mutex
 }
 
-func newCertificates(client *Client, namespace, service string) *certificates {
+func newCertificates(client *apiclient.Client, namespace, service string) *certificates {
 	return &certificates{client: client, namespace: namespace, service: service, now: time.Now}
 }
 
@@ -88,7 +90,7 @@ func (c *certificates) ensure() (tls.Certificate, error) {
 	defer c.pass.Unlock()
 	held, err := c.readSecret(apiTLSSecret)
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, apiclient.ErrNotFound):
 		if err := c.mintEverything(); err != nil {
 			return tls.Certificate{}, err
 		}
@@ -208,7 +210,7 @@ func (c *certificates) publishAnchor() error {
 	}
 	published, err := c.readConfigMap(apiCAConfigMap)
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, apiclient.ErrNotFound):
 		_, _, err := c.createConfigMap(apiCAConfigMap, map[string]string{tlsCABundle: anchor})
 		return err
 	case err != nil:
@@ -246,7 +248,7 @@ func (c *certificates) publishCaptureLeaf() error {
 			signedBy(current, signer) {
 			return nil
 		}
-	} else if !errors.Is(err, ErrNotFound) {
+	} else if !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
 
@@ -259,7 +261,7 @@ func (c *certificates) publishCaptureLeaf() error {
 		tlsKeyFile:  leaf.Key,
 		tlsCABundle: signer.Pair.Certificate,
 	}
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		// A create that loses the race leaves the winner's leaf in
 		// place, which this API's own CA signed too.
 		_, _, createErr := c.createSecret(captureTLSSecret, data)
@@ -304,7 +306,7 @@ func (c *certificates) nearestExpiry() time.Time {
 }
 
 func (c *certificates) readSecret(name string) (map[string][]byte, error) {
-	held, err := get[secret](c.client, secretsPath(c.namespace)+"/"+name)
+	held, err := apiclient.Get[secret](c.client, secretsPath(c.namespace)+"/"+name)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +347,7 @@ func (c *certificates) createSecret(name string, data map[string][]byte) (map[st
 		return nil, false, err
 	}
 	err = c.client.RequestJSON(http.MethodPost, secretsPath(c.namespace), body, nil)
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		winner, readErr := c.readSecret(name)
 		return winner, true, readErr
 	}
@@ -367,7 +369,7 @@ func (c *certificates) updateSecret(name string, data map[string][]byte) error {
 }
 
 func (c *certificates) readConfigMap(name string) (map[string]string, error) {
-	held, err := get[configMap](c.client, configMapsPath(c.namespace)+"/"+name)
+	held, err := apiclient.Get[configMap](c.client, configMapsPath(c.namespace)+"/"+name)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +387,7 @@ func (c *certificates) createConfigMap(name string, data map[string]string) (map
 		return nil, false, err
 	}
 	err = c.client.RequestJSON(http.MethodPost, configMapsPath(c.namespace), body, nil)
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		winner, readErr := c.readConfigMap(name)
 		return winner, true, readErr
 	}

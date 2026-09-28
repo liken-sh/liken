@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // namedObject is a named object of a kind at a version, with nothing
@@ -50,7 +52,7 @@ func TestADeletedCaptureSecretIsMintedAgainWhenTheWatchReportsIt(t *testing.T) {
 	})
 	api := httptest.NewServer(serveCollections(t, objects, secrets, configMaps))
 	t.Cleanup(api.Close)
-	server := newAPIServer(NewClient(api.URL, api.Client(), ""), "liken-system")
+	server := newAPIServer(apiclient.New(api.URL, api.Client(), ""), "liken-system")
 	if _, err := server.certs.ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +100,7 @@ func TestAnAbsentCaptureSecretIsMintedWhenTheFirstReadIsDone(t *testing.T) {
 	configMaps := newWatchServer(configMapsPath(clientCANamespace), "v1", "ConfigMap", []string{`[]`})
 	api := httptest.NewServer(serveCollections(t, http.HandlerFunc(store.serve), secrets, configMaps))
 	t.Cleanup(api.Close)
-	server := newAPIServer(NewClient(api.URL, api.Client(), ""), "liken-system")
+	server := newAPIServer(apiclient.New(api.URL, api.Client(), ""), "liken-system")
 	if _, err := server.certs.ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +147,7 @@ func TestARotatedClientAuthorityIsLoadedWhenTheWatchReportsIt(t *testing.T) {
 	})
 	api := httptest.NewServer(serveCollections(t, others, secrets, configMaps))
 	t.Cleanup(api.Close)
-	server := newAPIServer(NewClient(api.URL, api.Client(), ""), "liken-system")
+	server := newAPIServer(apiclient.New(api.URL, api.Client(), ""), "liken-system")
 
 	server.followCertificateObjects(watchContext(t), testWatcher(t, api.Config.Handler), func(error) {})
 	configMaps.awaitWatches(t, 1)
