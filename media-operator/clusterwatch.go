@@ -96,12 +96,14 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 	view := &clusterView{}
 	wakes := wakeOnChange(wake)
 	collections := []watchedCollection{
-		// The Play watch takes every Play, so its store holds the whole
-		// collection.
+		// The Play and Player watches take every object of their kind,
+		// so each store holds the whole collection.
 		{kindPlay, collectionWatch{resource: playResource, handler: wakes}, func(store cache.Store) {
 			view.plays = heldObjects{view: storeView{store: store, whole: true}, versions: newVersionMemo()}
 		}},
-		{kindPlayer, collectionWatch{resource: playerResource, handler: wakes}, keepIn(&view.players)},
+		{kindPlayer, collectionWatch{resource: playerResource, handler: wakes}, func(store cache.Store) {
+			view.players = heldObjects{view: storeView{store: store, whole: true}, versions: newVersionMemo()}
+		}},
 		{kindRemote, collectionWatch{resource: remoteResource, handler: wakes}, keepIn(&view.remotes)},
 		{kindKeymap, collectionWatch{resource: keymapResource, handler: wakes}, keepIn(&view.keymaps)},
 		{kindMediaPreferences, collectionWatch{resource: preferencesResource, handler: wakes}, keepIn(&view.preferences)},

@@ -94,7 +94,7 @@ func TestTheViewConvertsAPlayersDeviceParameters(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = brightPlayer()
 
-	player, err := cluster.view().Player("house", "theater")
+	player, err := cluster.view().Player(nil, "house", "theater")
 
 	mustSucceed(t, err)
 	mustMatch(t, string(player.Spec.Display.Parameters.Values), `{"brightness":80}`)

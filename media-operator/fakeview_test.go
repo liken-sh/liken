@@ -138,7 +138,13 @@ func (f *fakeCluster) view() *clusterView {
 			},
 			versions: newVersionMemo(),
 		},
-		players:     fakeSource[Player]{f, valuesOf(f.players), playersPath, playerPath},
+		players: heldObjects{
+			view: storeView{
+				store: fakeStore[Player]{source: fakeSource[Player]{f, valuesOf(f.players), playersPath, playerPath}},
+				whole: true,
+			},
+			versions: newVersionMemo(),
+		},
 		remotes:     fakeSource[Remote]{f, valuesOf(f.remotes), remotesAllPath, remotePath},
 		keymaps:     fakeSource[Keymap]{f, valuesOf(f.keymaps), keymapsPath, clusterPath(keymapsPath)},
 		preferences: fakeSource[MediaPreferences]{f, valuesOf(f.mediaprefs), mediaPrefsPath, clusterPath(mediaPrefsPath)},

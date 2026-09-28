@@ -16,10 +16,9 @@ package main
 // API server (reconcile, ensurePlayback, and reconcileStanding), and
 // acts on that read.
 //
-// The Plays are the one collection the view reads through the object
-// cache (objectcache.go), with a memo of the operator's own writes,
-// because the pass publishes what it derives from a Play's phase before
-// it acts on anything.
+// The Plays and the Players are read through the object cache
+// (objectcache.go), with a memo of the operator's own writes, because a
+// pass acts on what their status holds.
 //
 // The other accessors answer the operator's own structs. An object that
 // does not convert fails the read that holds it, with an error that
@@ -44,7 +43,7 @@ type objectSource interface {
 // clusterView holds one source per collection a pass reads.
 type clusterView struct {
 	plays       heldObjects
-	players     objectSource
+	players     heldObjects
 	remotes     objectSource
 	keymaps     objectSource
 	preferences objectSource
@@ -110,7 +109,6 @@ func oneOf[T any](source objectSource, key string) (*T, error) {
 
 func namespacedKey(namespace, name string) string { return namespace + "/" + name }
 
-func (v *clusterView) Players() ([]Player, error) { return listOf[Player](v.players) }
 func (v *clusterView) Remotes() ([]Remote, error) { return listOf[Remote](v.remotes) }
 func (v *clusterView) Keymaps() ([]Keymap, error) { return listOf[Keymap](v.keymaps) }
 
@@ -123,10 +121,6 @@ func (v *clusterView) ResourceSlices() ([]ResourceSlice, error) {
 }
 
 func (v *clusterView) Receivers() ([]Receiver, error) { return listOf[Receiver](v.receivers) }
-
-func (v *clusterView) Player(namespace, name string) (*Player, error) {
-	return oneOf[Player](v.players, namespacedKey(namespace, name))
-}
 
 func (v *clusterView) Remote(namespace, name string) (*Remote, error) {
 	return oneOf[Remote](v.remotes, namespacedKey(namespace, name))

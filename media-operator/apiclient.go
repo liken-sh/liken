@@ -263,43 +263,12 @@ func PatchPlayFinalizers(c *Client, namespace, name, resourceVersion string, fin
 	return patched.Metadata.ResourceVersion, nil
 }
 
-// PutPlayerStatus writes the Player's status subresource, the one
-// write path this operator has onto a Player.
-func PutPlayerStatus(c *Client, player *Player) (*Player, error) {
-	body, err := json.Marshal(player)
-	if err != nil {
-		return nil, err
-	}
-	written := &Player{}
-	path := playerPath(player.Metadata.Namespace, player.Metadata.Name) + "/status"
-	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
-}
-
 func GetPlayer(c *Client, namespace, name string) (*Player, error) {
 	player := &Player{}
 	if err := c.RequestJSON(http.MethodGet, playerPath(namespace, name), nil, player); err != nil {
 		return nil, err
 	}
 	return player, nil
-}
-
-// PutPlayStatus writes through the status subresource, which is its
-// own write path: this request can never touch a spec. The
-// resourceVersion in the body is what makes the write conditional.
-func PutPlayStatus(c *Client, play *Play) (*Play, error) {
-	body, err := json.Marshal(play)
-	if err != nil {
-		return nil, err
-	}
-	written := &Play{}
-	path := playPath(play.Metadata.Namespace, play.Metadata.Name) + "/status"
-	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
 }
 
 // GetRemote reads one Remote by name in a namespace, the name a

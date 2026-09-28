@@ -1,37 +1,53 @@
 package main
 
-// A pass reads the Plays from the Play watch's store, through the same
-// types and functions every liken-sh operator reads its stores with.
-// The view (clusterview.go) holds the store, and the store holds every
-// Play in the cluster, so a settled pass sends the API server no read of
-// a Play. The pass reads the Plays only as a whole list, and the view
-// exists only after every watch has read its collection once, so this
-// file holds the list half of the shared code: currentList, and not
-// readOne, cachedList, or storeView.ready.
+// A pass reads the Plays and the Players from their watches' stores,
+// through the same types and functions every liken-sh operator reads its
+// stores with. The view (clusterview.go) holds the stores, and each store
+// holds its whole kind, so a settled pass sends the API server no read
+// of a Play or a Player. The view exists only after every watch has read
+// its collection once, so a list always comes from the store, and this
+// file leaves out the shared code for a store that is not ready yet
+// (storeView.ready) and for a list with no memo (cachedList).
 //
-// A Play's copy in the store can be older than this operator's own last
-// write, because the watch delivers the write a moment after the API
-// server answers it, and later still while the watch is down. The pass
-// derives a unit's activity from each Play's phase, and publishes it on
-// the bus before it reads anything else. A pass that read the copy its
-// own write replaced would publish the phase the Play already left, and
-// then, when the reconcile wrote the phase again, the phase it had
-// moved to: Playing, Starting, Playing on a subscriber's screen. So the
-// operator remembers the resourceVersion of each Play's newest copy that
-// it wrote or read from the API server (versionMemo), and reads a Play
-// from the API server when the store's copy has another version. Once
-// the watch delivers the write, the versions match and the store
-// answers again.
+// A copy in a store can be older than this operator's own last write,
+// because the watch delivers the write a moment after the API server
+// answers it, and later still while the watch is down. The operator
+// writes the status of both kinds, and a pass acts on what that status
+// holds:
+//
+//   - The pass derives a unit's activity from each Play's phase, and
+//     publishes it on the bus before it reads anything else. A pass that
+//     read the copy its own write replaced would publish the phase the
+//     Play already left, and then, when the reconcile wrote the phase
+//     again, the phase it had moved to: Playing, Starting, Playing on a
+//     subscriber's screen.
+//   - A Player's status remembers the unit's screen and its Sinks, which
+//     the pass carries forward when no claim says better. A pass that
+//     read the copy its own write replaced would carry forward the older
+//     memory and write it back, and the unit would forget the screen or
+//     the Sinks it learned.
+//
+// So the operator remembers the resourceVersion of each object's newest
+// copy that it wrote or read from the API server (versionMemo), and
+// reads an object from the API server when the store's copy has another
+// version. Once the watch delivers the write, the versions match and the
+// store answers again.
 //
 // A status write from a copy that another writer changed since carries
 // an older resourceVersion, and the API server answers 409 Conflict.
-// settleStatus then reads the Play from the API server, and writes once
-// more if the fresh copy still needs the write.
+// settleStatus then reads the object from the API server, and writes
+// once more if the fresh copy still needs the write. Only this operator
+// writes the status of either kind, and the memo keeps each pass on a
+// copy at least as new as the operator's last write, so the status on
+// the fresh copy is the one the pass composed from. The conflict comes
+// from a change to the spec or the metadata. The status the retry writes
+// can still carry what the pass derived from the older spec, such as a
+// Player's idle controller. The spec edit's own watch event wakes the
+// next pass, and that pass writes the status the new spec derives.
 //
-// The memo covers only the Plays. The operator writes the status of
-// Players and Remotes too, and their stores answer through
-// clusterview.go with no memo, because no unit's activity on the bus
-// comes from either status.
+// The Remotes' store answers through clusterview.go with no memo. The
+// pass reads no memory back from a Remote's status: it composes the
+// whole status from the claim and the Peripherals each pass.
 
 import (
 	"encoding/json"
@@ -163,7 +179,8 @@ type heldObjects struct {
 // its metadata in ObjectMeta.
 type metaObject interface{ meta() *ObjectMeta }
 
-func (p *Play) meta() *ObjectMeta { return &p.Metadata }
+func (p *Play) meta() *ObjectMeta   { return &p.Metadata }
+func (p *Player) meta() *ObjectMeta { return &p.Metadata }
 
 // storeKey is the key a store holds an object under: namespace/name for
 // a namespaced object and the name for a cluster-scoped one.
@@ -193,6 +210,18 @@ func cachedCopy[T any](view storeView, key string) (*T, bool) {
 	return &item, true
 }
 
+// readOne answers one object: the store's copy when it holds a current
+// one, and the API server's copy when it does not.
+func readOne[T any, P interface {
+	*T
+	metaObject
+}](c *Client, held heldObjects, key, path string) (*T, error) {
+	if copied, ok := cachedCopy[T](held.view, key); ok && held.versions.current(key, P(copied).meta().ResourceVersion) {
+		return copied, nil
+	}
+	return readFresh[T, P](c, held.versions, key, path)
+}
+
 // readFresh reads one object from the API server and notes its version.
 func readFresh[T any, P interface {
 	*T
@@ -220,13 +249,17 @@ func currentList[T any, P interface {
 	*T
 	metaObject
 }](c *Client, held heldObjects, path func(key string) string) ([]T, error) {
-	keys := held.view.store.ListKeys()
+	// The informer can take a created object between the two reads, so
+	// the memo's keys are read first. In the other order, the store's
+	// keys miss the object, the memo skips it because the store now
+	// holds it, and the list leaves it out, so a pass creates it again.
+	// In this order the key is in one read or in both.
+	var keys []string
 	if held.view.whole {
-		keys = append(keys, held.versions.unheld(held.view.store)...)
+		keys = held.versions.unheld(held.view.store)
 	}
+	keys = append(keys, held.view.store.ListKeys()...)
 	slices.Sort(keys)
-	// The store can take a key between the two reads, so a key can
-	// appear twice.
 	keys = slices.Compact(keys)
 	current := make([]T, 0, len(keys))
 	for _, key := range keys {
@@ -320,10 +353,33 @@ func replaceStatus[T any](c *Client, path string, object *T) error {
 	return nil
 }
 
-// playPathOf answers the API path of the Play a store key names.
-func playPathOf(key string) string {
-	namespace, name, _ := strings.Cut(key, "/")
-	return playPath(namespace, name)
+// namespacedPath answers the API path of the object a store key names,
+// from the path of one object by its namespace and name.
+func namespacedPath(path func(namespace, name string) string) func(key string) string {
+	return func(key string) string {
+		namespace, name, _ := strings.Cut(key, "/")
+		return path(namespace, name)
+	}
+}
+
+// currentKind answers every object of one kind through currentList, and
+// forgets the memo's record of each object that is gone. Plays come and
+// go with every film, and a Player can be deleted, so without that the
+// memo would keep a record of every object for the life of the process.
+func currentKind[T any, P interface {
+	*T
+	metaObject
+}](c *Client, held heldObjects, path func(namespace, name string) string) ([]T, error) {
+	objects, err := currentList[T, P](c, held, namespacedPath(path))
+	if err != nil {
+		return nil, err
+	}
+	listed := make(map[string]bool, len(objects))
+	for index := range objects {
+		listed[storeKey(P(&objects[index]).meta())] = true
+	}
+	held.versions.forgetGone(held.view.store, listed)
+	return objects, nil
 }
 
 // playKey is the store key of one Play.
@@ -331,25 +387,26 @@ func playKey(play *Play) string { return storeKey(&play.Metadata) }
 
 // Plays answers every Play: the store's copy of each Play when it holds
 // a current one, and the API server's copy when it does not. A Play the
-// API server no longer holds is left out. The view exists only once the
-// Play watch has read the whole collection, so the list always comes
-// from the store.
-//
-// A Play is created by a person or another program, and it goes when
-// its run is over, so each one the memo noted is forgotten once the API
-// server and the store both no longer hold it. Without that, the memo
-// would keep a record of every Play for the life of the process.
+// API server no longer holds is left out.
 func (v *clusterView) Plays(c *Client) ([]Play, error) {
-	plays, err := currentList[Play](c, v.plays, playPathOf)
-	if err != nil {
-		return nil, err
-	}
-	listed := make(map[string]bool, len(plays))
-	for index := range plays {
-		listed[playKey(&plays[index])] = true
-	}
-	v.plays.versions.forgetGone(v.plays.view.store, listed)
-	return plays, nil
+	return currentKind[Play](c, v.plays, playPath)
+}
+
+// Players answers every Player the same way.
+func (v *clusterView) Players(c *Client) ([]Player, error) {
+	return currentKind[Player](c, v.players, playerPath)
+}
+
+// Player answers one Player: the store's copy when it holds a current
+// one, and the API server's copy when it does not.
+func (v *clusterView) Player(c *Client, namespace, name string) (*Player, error) {
+	return readOne[Player](c, v.players, namespacedKey(namespace, name), playerPath(namespace, name))
+}
+
+// FreshPlayer reads one Player from the API server, and notes its
+// version.
+func (v *clusterView) FreshPlayer(c *Client, namespace, name string) (*Player, error) {
+	return readFresh[Player](c, v.players.versions, namespacedKey(namespace, name), playerPath(namespace, name))
 }
 
 // forgetGone drops the record of each object that the list did not

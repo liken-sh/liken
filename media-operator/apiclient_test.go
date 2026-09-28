@@ -77,7 +77,7 @@ func TestGetPlayerReadsOneNamespacedObject(t *testing.T) {
 	}
 }
 
-func TestPutPlayStatusWritesTheStatusSubresource(t *testing.T) {
+func TestAPlayStatusWritesTheStatusSubresource(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"PUT /apis/media.liken.sh/v1alpha1/namespaces/house/plays/movie/status": Play{},
 	}}
@@ -86,7 +86,7 @@ func TestPutPlayStatusWritesTheStatusSubresource(t *testing.T) {
 		Status:   PlayStatus{Phase: phaseRunning, Position: "0:01:00"},
 	}
 
-	if _, err := PutPlayStatus(testAPIClient(t, api.handler()), play); err != nil {
+	if err := replaceStatus(testAPIClient(t, api.handler()), playPath("house", "movie"), play); err != nil {
 		t.Fatal(err)
 	}
 	if len(api.requests) != 1 {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // activityLines keeps the lines about the house unit's activity.
@@ -88,13 +90,14 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	})
 }
 
-// The pass derives each unit's activity and publishes it at the end of
-// the unit's work, and the bus reader publishes Idle the moment an
-// ending arrives. An ending that arrives between the two must not be
-// published over with the Playing the pass derived before it. The
+// passWithAnEndingDuringIt runs one pass over a running unit and folds
+// the run's ending while the pass works on the unit. The pass derives
+// each unit's activity and publishes it at the end of the unit's work,
+// and the bus reader publishes Idle the moment an ending arrives. The
 // receiver session is a request the pass sends between the two, so the
 // test holds it and folds the ending while the pass waits.
-func TestAnEndingDuringThePassIsNotPublishedOver(t *testing.T) {
+func passWithAnEndingDuringIt(t *testing.T) (*fakeCluster, *operator, *logBuffer) {
+	t.Helper()
 	cluster := runningCluster(housePlayer())
 	screen := screenCluster()
 	cluster.claims[idleClaimName("theater")] = screen.claims[idleClaimName("theater")]
@@ -106,6 +109,7 @@ func TestAnEndingDuringThePassIsNotPublishedOver(t *testing.T) {
 	defer release()
 	cluster.arrived = make(chan string, 1)
 	media, _ := busOperator(t, cluster)
+	media.metrics = newMediaMetrics("test")
 	var log logBuffer
 	media.log = &log
 
@@ -128,10 +132,27 @@ func TestAnEndingDuringThePassIsNotPublishedOver(t *testing.T) {
 	case <-time.After(busTestTimeout):
 		t.Fatal("the pass did not finish after the release")
 	}
+	return cluster, media, &log
+}
+
+// An ending that arrives while the pass works on a unit is not
+// published over with the Playing the pass derived before it.
+func TestAnEndingDuringThePassIsNotPublishedOver(t *testing.T) {
+	_, media, log := passWithAnEndingDuringIt(t)
 	media.pass()
 
-	mustMatchAll(t, activityLines(&log), []string{
+	mustMatchAll(t, activityLines(log), []string{
 		"player house/theater: activity Idle, was Playing, published to " +
 			playerStatusTopic(defaultTopicBase, "house", "theater"),
 	})
+}
+
+// The Player's status and the media_players gauge say the state the
+// pass published, not the state it derived before an ending arrived.
+func TestAnEndingDuringThePassReachesTheStatusAndTheGauge(t *testing.T) {
+	cluster, media, _ := passWithAnEndingDuringIt(t)
+
+	mustMatch(t, cluster.players["theater"].Status.Activity, playerIdle)
+	mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricIdle)), 1.0)
+	mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricPlaying)), 0.0)
 }

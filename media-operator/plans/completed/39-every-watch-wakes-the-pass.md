@@ -144,8 +144,9 @@ When a `Play` was deleted, its `Player`'s activity on the bus read
 flicker showed while a playback pod was recreated. A bus client, such
 as the idle screen or a remote, read a `Playing` that was false.
 
-Three defects let a unit publish a state it had already left for the
-same `Play`:
+The first three defects let a unit publish a state it had already left
+for the same `Play`. The fourth, found in review, let a pass write a
+`Player`'s older memory back:
 
 1. **The pass derived a unit's state before it published it, outside
    the lock.** `reconcilePlayers` derives each unit's activity, then
@@ -172,8 +173,11 @@ same `Play`:
    as `Starting` over the `Playing` the pass published, until the next
    pass. A superseded `Play` ends seconds before its successor runs, so
    this is unlikely. The `Player`'s Kubernetes status and the
-   `media_players` gauge also keep the state the pass derived before
-   the ending, until the next pass.
+   `media_players` gauge take the activity and the `Play` from the
+   derivation the publish made, so they say the state the pass
+   published. An ending that arrives after the pass published a unit
+   still leaves that unit's status and the gauge one pass behind the
+   bus; the ending wakes that next pass.
 2. **A deleting `Play` still named its unit.** `derivePlayerStatus`
    skipped a `Play` whose sidecar reported the ending, and did not
    skip a `Play` with a deletion mark. The pass that finds the pod gone
@@ -197,35 +201,48 @@ same `Play`:
    delete notes no version, so the next pass reads the `Play` from the
    API server.
 
-`objectcache.go` holds the shared code without changes to what it
-keeps. The pass reads the Plays only as one list, from a view that
-exists only after each watch's first read, so the file leaves out
-`readOne`, `cachedList`, `storedObjects`, `objectKey`, and
-`storeView.ready` with its `synced` field. It adds `get` and
-`replaceStatus`, which `display-operator` keeps in other files, and
-`forgetGone`. Plays come and go with each film, so `forgetGone` drops
-the memo's record of a `Play` once the API server and the store both
-no longer hold it.
+4. **The `Player` store's copy can be older than the operator's own
+   write.** `reconcilePlayers` carries a `Player`'s remembered screen
+   and `Sink`s forward from the copy it reads when no claim says
+   better, and `writePlayerStatus` answered a `409` by writing that
+   composed status onto the fresh copy. A pass that read the copy its
+   own write replaced wrote the older memory back, and the unit forgot
+   the `Sink`s its last run resolved. The Players now go through the
+   same memo as the Plays: `Players`, `Player`, and the live read of a
+   run (`FreshPlayer`) note each copy, and `writePlayerStatus` writes
+   through `settleStatus`. Only this operator writes either status, and
+   the memo keeps each pass on a copy at least as new as the operator's
+   last write, so after a `409` the status on the fresh copy is the one
+   the pass composed from. The `409` comes from a change to the spec
+   or the metadata. The retry can still write what the pass derived
+   from the older spec, such as the idle controller in `status.idle`,
+   until the pass that the spec edit wakes.
 
-The memo covers only the Plays, because no unit's activity on the bus
-comes from the status of a `Player` or a `Remote`. One gap of the same
-kind stays open. `reconcilePlayers` composes a `Player`'s remembered
-screen and sinks from the copy it reads, and `writePlayerStatus`
-answers a `409` by writing that composed status onto the fresh copy.
-So a pass that reads a `Player` copy older than the operator's own
-write can write an older memory back. Moving the Players to the memo,
-with a conflict retry that composes again from the fresh copy
-(`settleStatus`), closes it.
+`objectcache.go` holds the shared code without changes to what it
+keeps, including the order `currentList` reads its keys in: the memo's
+keys first, then the store's, as in `equipment-operator` 94b3b35. The
+view exists only after each watch's first read, so the file leaves out
+`cachedList`, `storedObjects`, `objectKey`, and `storeView.ready` with
+its `synced` field. It adds `get` and `replaceStatus`, which
+`display-operator` keeps in other files, and `forgetGone`. Plays come
+and go with each film, and a `Player` can be deleted, so `forgetGone`
+drops the memo's record of an object once the API server and the store
+both no longer hold it. `PutPlayStatus` and `PutPlayerStatus` are gone,
+because `replaceStatus` sends both writes.
+
+The `Remote`s' store answers with no memo. The pass composes a
+`Remote`'s whole status from the claim and the `Peripheral`s each pass,
+and reads no memory back from it.
 
 A settled pass still sends the API server no request
 (`TestASettledPassSendsTheAPIServerNothing`). A pass that reads a
-`Play`'s copy older than the operator's own write sends one `GET` for
-that `Play`, until the watch delivers the write.
+`Play`'s or a `Player`'s copy older than the operator's own write sends
+one `GET` for that object, until the watch delivers the write.
 
-A recreate still moves the unit to `Starting` or `Idle` when the old
-pod stops, and back to `Playing` when the new pod plays, seconds later.
-Whether a recreate of the same `Play` should hold `Playing` through
-that gap is a design question this change does not settle.
+A recreate moves the unit to `Starting` or `Idle` when the old pod
+stops, and back to `Playing` when the new pod plays, seconds later.
+That is the true state: the screen does not play during the gap, so
+the unit does not hold `Playing` through it.
 
 | What | Test |
 |---|---|
@@ -234,9 +251,18 @@ that gap is a design question this change does not settle.
 | A store's copy older than the operator's own status write does not move the unit back | `TestAPassDoesNotActOnACopyOlderThanItsOwnWrite` |
 | A `Play` the operator deleted is not listed from the store's copy | `TestAPlayTheOperatorDeletedIsNotListedFromTheStore` |
 | The memo forgets a `Play` only once the store does not hold it | `TestTheMemoForgetsAPlayOnlyOnceItIsGoneFromTheStore` |
+| A store's `Player` copy older than the operator's own write does not make the unit forget its `Sink`s | `TestAPassKeepsThePlayerMemoryItWroteOverAnOlderCopy` |
+| A `Player` status write after a spec edit lands on the fresh copy and keeps the edit | `TestAPlayerStatusWriteAfterASpecEditLandsOnTheFreshCopy` |
+| The `Player`'s status and the gauge say what the bus says after an ending during the pass | `TestAnEndingDuringThePassReachesTheStatusAndTheGauge` |
+| A list answers an object whose watch event lands during the list | `TestAListAnswersACreateThatArrivesDuringTheList`, as in `equipment-operator` |
 | The memo itself | `versionmemo_test.go`, the same file as in the other four operators |
 
-Each of the first three tests fails without its fix. The drill below
+These six tests each fail without their fix: `TestAnEndingDuringThePassIsNotPublishedOver`,
+`TestADeletedPlayNeverTurnsItsPlayerBackToPlaying`,
+`TestAPassDoesNotActOnACopyOlderThanItsOwnWrite`,
+`TestAPassKeepsThePlayerMemoryItWroteOverAnOlderCopy`,
+`TestAnEndingDuringThePassReachesTheStatusAndTheGauge`, and
+`TestAListAnswersACreateThatArrivesDuringTheList`. The drill below
 gains one step: delete a playing `Play`, and delete the playback pod of
 another, and read the unit's activity lines. A deleted `Play` must read
 one move to `Idle`. A recreated pod must read no `Playing` between its

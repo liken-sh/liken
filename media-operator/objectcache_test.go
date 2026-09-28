@@ -60,3 +60,42 @@ func TestAPlayTheOperatorDeletedIsNotListedFromTheStore(t *testing.T) {
 	mustMatch(t, len(plays), 0)
 	mustMatch(t, countPathRequests(cluster.requests, "GET "+playPath("house", "movie")), 1)
 }
+
+// arrivingStore is a store whose informer takes one object just after
+// the first read of its keys, the way the watch event of a write lands
+// while a pass lists.
+type arrivingStore struct {
+	cache.Store
+	arriving *unstructured.Unstructured
+}
+
+func (s *arrivingStore) ListKeys() []string {
+	keys := s.Store.ListKeys()
+	if s.arriving != nil {
+		_ = s.Store.Add(s.arriving)
+		s.arriving = nil
+	}
+	return keys
+}
+
+// A list from a whole store answers an object the memo noted, even when
+// its watch event reaches the store during the list. This operator
+// creates no Play and no Player, so the race does not reach its pass.
+// The test keeps the order of the shared code proven here as in
+// the operators that create what they list.
+func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
+	cluster := newFakeCluster()
+	client := testAPIClient(t, cluster.handler(t))
+	play := housePlay("https://nas/film.mkv")
+	play.Metadata.ResourceVersion = "5"
+	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: asObject(t, play)}
+	versions := newVersionMemo()
+	versions.note("house/movie", "5")
+	held := heldObjects{view: storeView{store: store, whole: true}, versions: versions}
+
+	list, err := currentList[Play](client, held, namespacedPath(playPath))
+
+	mustSucceed(t, err)
+	mustMatch(t, len(list), 1)
+	mustMatchAll(t, cluster.requests, nil)
+}

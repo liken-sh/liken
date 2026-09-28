@@ -156,3 +156,54 @@ func TestAPlayerWithNoSinkRemembersNone(t *testing.T) {
 
 	mustMatch(t, len(cluster.players["theater"].Status.Sinks), 0)
 }
+
+// The store's copy of a Player can be older than the operator's own
+// status write. A pass that carried the Sinks forward from that copy
+// would write the older memory back, and the unit would forget the Sinks
+// its last run resolved. The pass reads the Player from the API server
+// instead, and keeps them.
+func TestAPassKeepsThePlayerMemoryItWroteOverAnOlderCopy(t *testing.T) {
+	cluster := runningCluster(twoSinkPlayer())
+	cluster.claims[claimName("movie")] = allocatedPlaybackClaim(
+		audioResult(audioRequestPrefix+"0", testWiredSink),
+		audioResult(audioRequestPrefix+"1", testSpeakerSink),
+	)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.pass()
+	want := []PlayerSinkStatus{
+		{Request: audioRequestPrefix + "0", Name: testWiredSink},
+		{Request: audioRequestPrefix + "1", Name: testSpeakerSink},
+	}
+	mustMatch(t, reflect.DeepEqual(cluster.players["theater"].Status.Sinks, want), true)
+
+	// The run is over, so no claim says which Sinks the unit plays
+	// through, and the watch has not delivered the Player write.
+	delete(cluster.plays, "movie")
+	delete(cluster.pods, podName("movie"))
+	media.view.players.view.store = runningCluster(twoSinkPlayer()).view().players.view.store
+	media.pass()
+
+	if got := cluster.players["theater"].Status.Sinks; !reflect.DeepEqual(got, want) {
+		t.Errorf("sinks = %+v, want the memory %+v", got, want)
+	}
+}
+
+// A Player whose spec a person edited since the pass read it answers the
+// status write with 409. The write reads the Player again and writes
+// the status onto the fresh copy, and the spec edit stands.
+func TestAPlayerStatusWriteAfterASpecEditLandsOnTheFreshCopy(t *testing.T) {
+	cluster := newFakeCluster()
+	read := twoSinkPlayer()
+	read.Metadata.ResourceVersion = "4"
+	edited := twoSinkPlayer()
+	edited.Metadata.ResourceVersion = "5"
+	edited.Spec.Zone = "den"
+	cluster.players["theater"] = edited
+	desired := PlayerStatus{Activity: playerIdle, Sinks: []PlayerSinkStatus{{Request: audioRequestPrefix + "0", Name: testWiredSink}}}
+
+	mustSucceed(t, writePlayerStatus(testAPIClient(t, cluster.handler(t)), newVersionMemo(), read, desired))
+
+	mustMatch(t, reflect.DeepEqual(cluster.players["theater"].Status, desired), true)
+	mustMatch(t, cluster.players["theater"].Spec.Zone, "den")
+	mustMatch(t, countMethod(cluster.requests, "PUT"), 2)
+}

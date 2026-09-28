@@ -20,12 +20,10 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 		{name: "delete a play", call: func(c *Client) error { return DeletePlay(c, "house", "movie") }},
 		{name: "get a player", call: func(c *Client) error { _, err := GetPlayer(c, "house", "theater"); return err }},
 		{name: "put a play status", call: func(c *Client) error {
-			_, err := PutPlayStatus(c, &Play{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
-			return err
+			return replaceStatus(c, playPath("house", "movie"), &Play{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
 		}},
 		{name: "put a player status", call: func(c *Client) error {
-			_, err := PutPlayerStatus(c, &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}})
-			return err
+			return replaceStatus(c, playerPath("house", "theater"), &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}})
 		}},
 		{name: "get a remote", call: func(c *Client) error { _, err := GetRemote(c, "house", "wand"); return err }},
 		{name: "put a remote status", call: func(c *Client) error {
@@ -112,7 +110,7 @@ func TestEachReadNamesItsOwnPath(t *testing.T) {
 
 // A Player's status goes through the status subresource, so the write
 // can never touch the spec a person declared.
-func TestPutPlayerStatusWritesTheStatusSubresource(t *testing.T) {
+func TestAPlayerStatusWritesTheStatusSubresource(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"PUT /apis/media.liken.sh/v1alpha1/namespaces/house/players/theater/status": Player{
 			Metadata: ObjectMeta{Name: "theater", Namespace: "house", ResourceVersion: "13"},
@@ -123,9 +121,8 @@ func TestPutPlayerStatusWritesTheStatusSubresource(t *testing.T) {
 		Status:   PlayerStatus{Activity: "playing", Play: "movie"},
 	}
 
-	written, err := PutPlayerStatus(testAPIClient(t, api.handler()), player)
-	mustSucceed(t, err)
-	mustMatch(t, written.Metadata.ResourceVersion, "13")
+	mustSucceed(t, replaceStatus(testAPIClient(t, api.handler()), playerPath("house", "theater"), player))
+	mustMatch(t, player.Metadata.ResourceVersion, "13")
 	mustMatch(t, api.requests[0].Method, http.MethodPut)
 	mustMatch(t, api.requests[0].Path, "/apis/media.liken.sh/v1alpha1/namespaces/house/players/theater/status")
 }

@@ -8,7 +8,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"sync"
 )
 
@@ -449,35 +448,29 @@ func playTitle(play *Play) string {
 // operator's own status writes included, so a needless write would run
 // one more pass, and the skip also spares the API server a write per
 // settled Player every pass.
-func writePlayerStatus(c *Client, player *Player, desired PlayerStatus) error {
-	same, err := samePlayerStatus(player.Status, desired)
-	if err != nil {
-		return err
+//
+// versions is the memo of the Player store (objectcache.go), which notes
+// each copy the API server answers, so the next pass composes the
+// remembered screen and Sinks from a copy at least as new as this write.
+// A nil memo notes nothing.
+func writePlayerStatus(c *Client, versions *versionMemo, player *Player, desired PlayerStatus) error {
+	var compared error
+	_, err := settleStatus(c, versions, playerPath(player.Metadata.Namespace, player.Metadata.Name), player,
+		func(held *Player) bool {
+			same, err := samePlayerStatus(held.Status, desired)
+			if err != nil {
+				compared = err
+				return false
+			}
+			if same {
+				return false
+			}
+			held.Status = desired
+			return true
+		})
+	if compared != nil {
+		return compared
 	}
-	if same {
-		return nil
-	}
-
-	player.Status = desired
-	_, err = PutPlayerStatus(c, player)
-	if !errors.Is(err, ErrConflict) {
-		return err
-	}
-
-	// A conflict means the Player changed between the read and the
-	// write. The fresh copy carries the resourceVersion the API
-	// server accepts, and the desired status still describes the
-	// same Plays, so it goes on unchanged.
-	fresh, err := GetPlayer(c, player.Metadata.Namespace, player.Metadata.Name)
-	if err != nil {
-		return err
-	}
-	same, err = samePlayerStatus(fresh.Status, desired)
-	if err != nil || same {
-		return err
-	}
-	fresh.Status = desired
-	_, err = PutPlayerStatus(c, fresh)
 	return err
 }
 

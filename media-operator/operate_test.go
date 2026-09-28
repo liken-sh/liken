@@ -155,8 +155,17 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		name := path.Base(r.URL.Path)
 		switch {
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/players/") && strings.HasSuffix(r.URL.Path, "/status"):
+			// A Player status write answers 409 from a stale read and moves
+			// the version on, the same terms as a Play's below.
 			var written Player
 			_ = json.NewDecoder(r.Body).Decode(&written)
+			if held, standing := f.players[written.Metadata.Name]; standing &&
+				held.Metadata.ResourceVersion != written.Metadata.ResourceVersion {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			version, _ := strconv.Atoi(written.Metadata.ResourceVersion)
+			written.Metadata.ResourceVersion = strconv.Itoa(version + 1)
 			f.players[written.Metadata.Name] = &written
 			_ = json.NewEncoder(w).Encode(written)
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/remotes/") && strings.HasSuffix(r.URL.Path, "/status"):
