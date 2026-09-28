@@ -5,6 +5,12 @@ description: How the liken-sh repositories version and release. Covers the CalVe
 
 # Releases and development builds
 
+**Releases are paused.** The components are moving into one
+repository under plan 69, and no release or development build workflow
+runs. Stop and tell me; do not push a tag. The rest of this skill
+describes the flow from before the move, when each component was its
+own repository. Step 2 of plan 69 replaces it.
+
 Every repository in the organization versions on the same calendar
 scheme, with a few exceptions. This skill carries the scheme and the
 release flow for each kind of repository, so a session at the

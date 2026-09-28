@@ -20,7 +20,8 @@ to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 72.
+milestone is 72. Each component also keeps the plans for work inside
+that component in its own `plans/` directory, with its own numbers.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
 questions. Each document explains the evidence, possible remedies, and
@@ -250,6 +251,18 @@ milestone number because their implementation scope is not settled.
   new pod in beside the old one. A fence for the reboot grants of a
   paused former leader stays open. A copy under an older release's
   RBAC acts without an election until the `Lease` answers.
+
+* [The polling audit](completed/the-polling-audit.md). Completed on
+  2026-09-27, before the components shared one repository, so it has no
+  milestone number. The audit read every component against the rule
+  "Keep state current with events", and measured the API server's load
+  on a nine-machine home cluster. The measurement overturned the
+  ranking from reading the code and found four causes: a USB sound
+  card's serial shared by three machines, a wake storm in
+  library-operator, a 30 s relist of every `PersistentVolume`, and a
+  5 s list of `PairingRequest` objects. After the fixes, the rate at
+  rest went from about 549,000 requests an hour to about 227,000. The
+  audit also produced the three guards of a watch loop.
 
 ## Rejected
 

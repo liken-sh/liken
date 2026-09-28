@@ -1,53 +1,34 @@
-# The liken-sh organization
+# The liken repository
 
-The `liken` project is one system split across the repositories under
-the `liken-sh` organization on GitHub. The OS is `liken`. The operators
-claim a machine's hardware and serve its interfaces. The CSI drivers
-attach storage, and `brand`, `log`, `corrosion`, and the cluster
-repositories support the project. Each repository has its own
+The `liken` project is one system, and this repository holds all of
+it. Each top-level directory is one component, named for what it
+ships. `liken/` is the OS. The operators claim a machine's hardware
+and serve its interfaces. The CSI drivers attach storage, and `brand/`
+holds the theme, the voice rules, and the site tools. `plans/` holds
+the plans that cover more than one component, and each component keeps
+its own plans in its own `plans/`. Each component has its own
 `AGENTS.md` for the work inside it.
 
-This repository holds what the repositories share. A session reaches
-these rules when it starts at the organization root, the directory that
-holds the repositories side by side. For example, the checkouts here
-live under `~/src/github.com/liken-sh`.
+Four repositories stay outside: `corrosion`, `plugins`, `log`, and
+`liken-dev-cluster`. Plan 69 in `plans/` gives the reasons.
 
-## Set up a checkout
+## Work across components
 
-Clone this repository as `.agents` beside the other repositories, and
-point the organization root's `AGENTS.md` at this file:
-
-```sh
-cd ~/src/github.com/liken-sh
-git clone git@github.com:liken-sh/.agents.git .agents
-./.agents/setup.sh
-```
-
-The harnesses read every `AGENTS.md` on the path from the repository
-they work in up to the filesystem root. They read `AGENTS.md` at the
-organization root; they do not look inside `.agents` for it. `setup.sh`
-creates that file as a symlink to `.agents/AGENTS.md`. Run it after the
-first clone, and again after the organization directory moves. Without
-the symlink, the repositories still work, and these rules do not reach
-them.
-
-## Work at the organization level
-
-Start the session at the organization root when a change crosses a
-repository boundary, when a task names more than one repository, or
-when the work is to reason about the project as a whole. From there the
-whole tree is visible, and each change can land in the repository that
-owns it. A session inside one repository reads that repository's
+Start the session at the repository root when a change crosses a
+component boundary, when a task names more than one component, or when
+the work is to reason about the project as a whole. From there the
+whole tree is visible, and each change can land in the component that
+owns it. A session inside one component reads that component's
 `AGENTS.md` and the rules here.
 
-The skills under `.agents/skills` load when the session starts at the
-organization root. A session inside one repository stops its search at
-that repository's own git root, so it does not reach them.
+The agent skills are under `.agents/skills`. The `skills/` directory
+inside a component holds a different kind of skill: the skills that
+the component's manual publishes for its users.
 
 ## Voice
 
-Every word the project publishes follows the rules in the `brand`
-repository at `brand/voice.md`. The rules cover the sites, the guides,
+Every word the project publishes follows the rules in
+`brand/voice.md`. The rules cover the sites, the guides,
 the reference text, the comments in the source files, the plans, and
 the commit messages. Read the file before you write, and check your
 text against it before you publish it.
@@ -55,7 +36,7 @@ text against it before you publish it.
 @brand/voice.md
 
 The rules are ASD-STE100, Simplified Technical English, with additions.
-Four of them matter most in a cross-repository session: name the
+Four of them matter most in a session that crosses components: name the
 component and the object it acts on, give the reason before the
 description, keep the code face on every identifier, and describe the
 system as it is now. `liken` names the code, so it takes the code face
@@ -63,7 +44,7 @@ too.
 
 ## Privacy
 
-The repositories and everything written into them are public. Many
+The repository and everything written into it are public. Many
 people here test against their own home clusters, and a home cluster
 holds that person's real hardware, workloads, services, and data. Keep
 those details out of every comment, plan, document, commit message,
@@ -75,7 +56,7 @@ When a fact comes from a home cluster, describe the cluster only as far
 as the point needs: "a home cluster", "a three-node fleet". When you
 need detail, use a cluster the project ships: the `dev-cluster/` in
 `liken`, the `lab` fleet of `node-1` through `node-5`, and the test
-clusters named in a repository's own documentation.
+clusters named in a component's own documentation.
 
 ## Keep state current with events
 
@@ -124,15 +105,20 @@ comment at the timer gives the failure it covers.
 
 ## Branch names
 
-Every repository works on `main` except `corrosion`. `corrosion` is a
-shallow fork of superfly/corrosion: its `main` mirrors upstream and takes
-no commits, and its own work is on the `liken` branch. Treat `liken` as
-`corrosion`'s main branch in any process that names one.
+This repository works on `main`. `corrosion`, outside this repository,
+is a shallow fork of superfly/corrosion: its `main` mirrors upstream and
+takes no commits, and its own work is on the `liken` branch. Treat
+`liken` as `corrosion`'s main branch in any process that names one.
 
 ## Releases and development builds
 
-Every repository versions on the same calendar scheme. The `releases`
-skill under `.agents/skills` holds the scheme, the operator release
-and development build flow, and the way the `liken` OS publishes a
-release. Load it before tagging a repository, publishing an image, or
-pinning a development build.
+Releases are paused while the components move into this repository,
+under plan 69. `.github/workflows/ci.yaml` runs every component's
+tests, docs checks, and image builds, and it publishes nothing. Do not
+push a tag. Step 2 of plan 69 brings back one release path for every
+component.
+
+The `releases` skill under `.agents/skills` holds the calendar scheme
+that every component versions on, and the release and development
+build flow that each component used before the move. Load it before
+tagging, publishing an image, or pinning a development build.
