@@ -1,6 +1,6 @@
 ---
 name: operators
-description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, timers, device traffic, and the open plan for one shared watch loop. Use when writing or reviewing an operator's watch, reconcile pass, backstop, timer, or device polling.
+description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, timers, device traffic, and the decision to watch through client-go with the shape of the reference port. Use when writing or reviewing an operator's watch, reconcile pass, backstop, timer, or device polling.
 ---
 
 # Writing and reviewing operators
@@ -11,11 +11,12 @@ once, and open it again and read again when it fails. A timer is
 correct only as a clock. This skill carries the detail that the rule
 needs in an operator.
 
-Every operator in the organization writes its own Kubernetes watch
-loop. In 2026-09, reviews of seven of these loops found the same
+In 2026-09, reviews of seven hand-written watch loops found the same
 faults again and again, and each loop needed several rounds to meet
-the guards below. Read this skill before you write or change a watch
-loop, and test the loop against every scenario in it.
+the guards below. The organization then chose client-go's reflector
+for every operator (see the decision at the end). Read this skill
+before you write, change, or review a watch, and check it against
+every guard and scenario here.
 
 ## The three guards of a watch loop
 
@@ -104,79 +105,137 @@ correct result.
   pidfd, and a signal after the process was reaped returns
   `ErrProcessDone`.
 
-## Open plan: one watch loop for every operator
+## Decision: every watch runs on client-go
 
-Open problem. Eight repositories each hold one hand-written watch loop:
-about 2,470 lines in all (1,530 of code) and 4,900 lines of tests for
-the loop alone. The loops drift apart, and each fix lands in one
-repository at a time. `per-node-csi-driver` already uses a client-go
-informer, and `git-csi-driver` already links client-go's typed
-clientset under its hand-written loop. Two answers are on the table,
-and neither is chosen.
+Decided on 2026-09-27: every operator in the organization watches the
+API server through client-go's reflector, in the lean form below, and
+deletes its hand-written loop. The reason is maintenance. Eight
+repositories each held one loop, about 2,470 lines in all (1,530 of
+code) and 4,900 lines of tests for the loops alone. The loops drifted
+apart, and each fix landed in one repository at a time. Upstream
+maintains and tests the reflector, so the project stops owning eight
+loops. The choice set aside was one shared Go module with a loop of the
+project's own. It kept the guards exactly and cost no memory, and the
+project would have maintained the loop, its fake API server, and a
+release that every operator must take.
 
-**Measured cost of client-go.** On 2026-09-27, the `PairingRequest`
-watch in `bluetooth-operator` was ported to client-go in a throwaway
-copy. Each build watched 50, then 250, `PairingRequest` objects on a
-k3s v1.36.3 API server in Docker, with client-go v0.36.3. The
-operator cannot run outside its pod, so each binary ran only its
-watch. The binary still linked every package, so every package
-initialized.
+**The lean form.** An operator imports only
+`k8s.io/client-go/tools/cache`, `k8s.io/client-go/dynamic`, and
+`k8s.io/client-go/rest`, and decodes each object into its own struct
+with `runtime.DefaultUnstructuredConverter`. It never imports
+`dynamicinformer`, `informers`, or `kubernetes` (the typed clientset).
+Those link a client and an informer for every built-in kind, which
+doubles the binary. The operator's own client for reads and writes
+stays; only the watching moves.
 
-| | Hand-written | `cache.NewSharedIndexInformer` and `dynamic` | `dynamicinformer` |
-|---|---|---|---|
-| Stripped binary (the image is `FROM scratch`, so the same) | 14.9 MB | 20.0 MB | 39.1 MB |
-| Linked Go packages | 354 | 474 | 807 |
-| RSS, idle, 50 objects | 14.8 MB | 22.1 MB | 31.0 MB |
-| RSS, idle, 250 objects | 16.6 MB | 24.0 MB | 32.8 MB |
-| Cold build | 11.0 s | 14.3 s | 33.0 s |
+**The measured cost.** `bluetooth-operator` plan 09 measured its port
+on 2026-09-27. Each binary ran only its three watches against a k3s
+v1.36.3 API server in Docker, with client-go v0.36.3, and linked every
+package of the operator.
 
-`dynamicinformer` links the typed clientset and the informers for
-every built-in kind. The middle column links only `tools/cache` and
-`dynamic`, and it decodes each object into the operator's own struct
-with `runtime.DefaultUnstructuredConverter`, so it needs no code
-generation. `go mod graph` did not change (729 to 730 lines), because
-the CLI already requires client-go. In the port, 270 lines of loop
-code and 439 lines of loop tests were removed, and 55 lines were
-added. The port added no tests.
+| | Hand-written loop | client-go, lean form |
+|---|---|---|
+| Stripped binary (the image is `FROM scratch`, so the same) | 15.0 MB | 19.9 MB |
+| Linked Go packages | 354 | 474 |
+| RSS, idle, 50 objects | 16.0 to 16.9 MB | 21.0 to 22.4 MB |
+| RSS, idle, 250 objects | 18.4 MB | 25.5 MB |
 
-- **client-go's reflector and informer.** This is the Kubernetes-native
-  answer. Upstream maintains and tests the guards, and it adds
-  streaming lists (`WatchListClient`, on by default in v0.36). It
-  fixes the drift, because no loop code stays in the repositories.
-  It costs about 5 MB of image and 6 to 7 MB of RSS for each process.
-  A two-node test cluster ran seven and four operator pods on its
-  nodes that do not link client-go now, so the cost is about 25 to
-  50 MB on each node, which matters on a 1 GB machine. Maintenance is
-  a client-go version bump with each Kubernetes pin, and a handler
-  for each watched collection (about 45 lines in the port).
-  The reflector does not meet the guards above exactly:
-  - After a `410`, it waits a backoff of 0.8 to 1.6 seconds before it
-    lists.
-  - A watch that closes in under a second with no event makes it list
-    again after the backoff. It does not resume.
-  - A watch that delivered an event is never short.
-  - It measures a watch's life from the request, not from the `200`.
-  - Its backoff resets after two minutes with no failure, not after
-    one watch that ran a second.
+The earlier research, with one watch, measured 39.1 MB for a binary
+that used `dynamicinformer`. A transform that removes
+`metadata.managedFields` before the informer stores an object took the
+RSS at 250 objects from 28.2 MB to 25.5 MB. A two-node test cluster
+ran seven and four operator pods on its nodes that do not link
+client-go yet. At 5 to 7 MB for each pod, the cost is about 20 to 50 MB
+on each node, which matters on a 1 GB machine. The port removed 309
+lines of code and 682 lines of tests, and added 264 lines of code and
+326 lines of tests.
 
-  Each handler must also report an object that does not convert to
-  the operator's struct. The port drops such an object with no error.
-- **One shared Go module**, `github.com/liken-sh/watch`. It holds one
-  loop and a conformance test built from the scenarios above. The
-  scripted fake API server from the 2026-09 reviews (524 lines) is the
-  start of that test. The module removes about 2,300 lines from the
-  eight repositories, and it costs no memory. It fixes the drift and
-  keeps the guards exactly as written above. The project then
-  maintains the loop, the fake server, and a release that every
-  operator must take. Each new API server behavior, such as streaming
-  lists, is work for the project.
+**The differences from the guards.** The reflector does not meet the
+three guards above exactly. A reading of client-go v0.36.3's
+`tools/cache/reflector.go` gives five differences:
 
-**Recommendation:** client-go, in the form of the middle column.
-Accept the reflector's differences from the guards; none of them
-loses an event. An operator that does not link client-go now imports
-only `k8s.io/client-go/tools/cache` and `k8s.io/client-go/dynamic`,
-never `dynamicinformer`, `informers`, or `kubernetes`. Move one
-operator first, and measure its pod on a 1 GB machine before the
-others move. Choose the shared module if that memory is too much for
-the 1 GB machines. Until the choice, test every hand-written loop
-against the scenarios above.
+1. After a `410`, it waits a backoff of 0.8 to 1.6 seconds before it
+   reads the collection again.
+2. A watch that closes in under a second with no event makes it read
+   the collection again after the backoff. It does not resume.
+3. A watch that delivered an event is never short.
+4. It measures a watch's life from the request, not from the `200`.
+5. Its backoff resets after two minutes with no failure, not after one
+   watch that ran a second.
+
+The organization accepts them because none of them loses an event.
+Differences 1 and 2 cost one more read of the collection, or a read a
+second later, and 3, 4, and 5 change only how long the reflector waits
+during a fault. The reflector also reads with a streaming list
+(`WatchListClient`, on by default in v0.36), and falls back to a plain
+list when the API server refuses it.
+
+The guards and the scenarios above still describe what any watch must
+do, and a reviewer checks an operator's use of the reflector against
+them. A handler that drops an object, a selector that does not follow
+its source, and a loop of the operator's own around the informer each
+break a guard.
+
+**The migration order.** `bluetooth-operator` is done, and it is the
+reference port (plan 09). The other operators follow one repository at
+a time. `per-node-csi-driver` already runs a client-go informer, and
+`git-csi-driver` already links client-go's typed clientset under its
+hand-written loop. Each port measures its binary, its image, and the
+idle RSS of its watches before and after, and records them in a plan. Until a
+repository moves, its hand-written loop must still pass every scenario
+above.
+
+## Watch a collection with client-go
+
+The reference port is `bluetooth-operator`: `watch.go` runs one watch,
+`requestwatch.go` and `editwatch.go` hold the handlers, and
+`watch_test.go` runs them through the real reflector.
+
+- **Imports.** Allowed: `k8s.io/client-go/tools/cache`,
+  `k8s.io/client-go/dynamic`, `k8s.io/client-go/rest`, and
+  `k8s.io/client-go/util/workqueue` only when a queue for each object
+  makes the code simpler. Forbidden: `dynamicinformer`, `informers`,
+  and `kubernetes`. The client-go version follows the Kubernetes minor
+  in `liken`'s `k3s/VERSION`: v1.36.x takes v0.36.x.
+- **One informer for each collection.** Build a `cache.ListWatch`
+  whose `ListWithContextFunc` and `WatchFuncWithContext` call the
+  dynamic client, set the label selector in both, and pass it to
+  `cache.NewInformerWithOptions` with `&unstructured.Unstructured{}` as
+  the object type. Run it with `RunWithContext`, which returns after
+  the last handler call. Pass a `Transform` that removes
+  `metadata.managedFields`.
+- **Convert, and report what does not convert.** A handler receives an
+  `*unstructured.Unstructured`, or a `cache.DeletedFinalStateUnknown`
+  tombstone for an object deleted while the watch was down. Unwrap the
+  tombstone, decode with `runtime.DefaultUnstructuredConverter`, and
+  log an object that does not convert, with its kind and name. Never
+  drop one silently. A tombstone can hold no copy at all. Then forget
+  the object by the tombstone's key, or wake the pass.
+- **A handler wakes the pass.** An operator that runs one full pass for
+  each wake needs no queue. The handler sends on a channel with one
+  slot, with a `select` that has a `default`, so a burst of events
+  makes one wake. When the pass can read a collection before the
+  informer's first read does, the watch also wakes the pass once when
+  the informer has synced, so an edit between the two reads is not
+  lost. Wait on `HasSyncedChecker().Done()`, not `WaitForCacheSync`,
+  which polls. Join that goroutine before the channel closes.
+- **Filter the operator's own status writes.** `UpdateFunc` receives
+  the copy the informer held and the new copy. Wake only when
+  `metadata.generation`, `metadata.deletionTimestamp`, or
+  `metadata.uid` differ between them. A write to the status
+  subresource changes none of them. After a gap in the watch, the
+  informer reports each difference from what it held as an add, an
+  update, or a delete, so the same rule covers the gap. The UID is in
+  the compare because an object deleted and created again with the
+  same name during the gap arrives as an update.
+- **Restart a watch whose selector changes.** A selector is fixed for
+  the life of an informer. When its source changes, such as the
+  address of the radio the pass reads, cancel the informer's context,
+  wait until `RunWithContext` has returned, and start a new informer
+  with the new selector (`followPeripherals` in `editwatch.go`).
+- **Test the handlers, not the reflector.** Point the dynamic client
+  at an `httptest` server that answers a streaming list: an `ADDED`
+  event for each object, then a `BOOKMARK` whose annotations hold
+  `k8s.io/initial-events-end: "true"`, then the script's events on the
+  same stream. Test the wake rule through that server, and leave the
+  reflector's faults to upstream.

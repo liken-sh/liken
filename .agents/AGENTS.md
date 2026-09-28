@@ -102,12 +102,13 @@ and then the changes, so each open costs as much as a list. Start a
 watch from a version, and open it again from the last version it
 delivered.
 
-A watch loop written by hand needs three guards: resume from the last
-version instead of listing, list again only for a 410 and only once,
-and decide the wait by how long the server kept the watch open. Each
-guard has failed in review. The `operators` skill under
-`.agents/skills` holds the guards in full, the scenarios a watch loop
-must pass in a test, and the open plan for one shared loop. Load it
+A watch loop needs three guards: resume from the last version instead
+of listing, list again only for a 410 and only once, and decide the
+wait by how long the server kept the watch open. Each guard failed in
+review in a hand-written loop, so the operators watch through
+client-go's reflector, which upstream maintains. The `operators` skill
+under `.agents/skills` holds the guards in full, the scenarios a watch
+must pass in a test, and the shape of the client-go port. Load it
 before you write or review an operator's watch, pass, or timer.
 
 Every other source has no version to resume from, so the subscription
