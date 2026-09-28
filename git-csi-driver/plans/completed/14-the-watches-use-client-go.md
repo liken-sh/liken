@@ -301,6 +301,61 @@ On liken-1, with the driver on a build of this change:
 2. Annotate a read-only claim's `PersistentVolume` and time the pull.
 3. Change a writeable claim's class and check that the volume arms
    with the new class.
-4. Roll the controller Deployment and check that one resizer holds
-   `external-resizer-git-liken-sh` and that a class change after the
-   rollout arms the volume.
+
+Rolling the controller Deployment and checking the Lease hand-off is
+done. Its finding is below.
+
+## The controller's rollout leaves its old Lease behind
+
+Drilled on 2026-09-27 on liken-1, by rolling the controller
+Deployment with the resizer sidecar unchanged at `--leader-election`
+and `--leader-election-lease-duration=30s`. The old pod's resizer
+container did not release its Lease when the rollout sent it
+SIGTERM. The new pod's resizer took the Lease 34 seconds after that
+SIGTERM. The old pod ended in phase `Failed`.
+
+`registry.k8s.io/sig-storage/csi-resizer:v2.2.1` gets its leader
+election flags from [`github.com/kubernetes-csi/csi-lib-utils`
+v0.24.0](https://github.com/kubernetes-csi/csi-lib-utils/blob/v0.24.0/standardflags/flags.go).
+That package names `--leader-election-lease-duration`,
+`--leader-election-renew-deadline`, and
+`--leader-election-retry-period`. It names nothing to release the
+Lease on exit.
+
+`external-resizer` v2.2.1 carries that behavior as a feature gate
+instead:
+[`ReleaseLeaderElectionOnExit`](https://github.com/kubernetes-csi/external-resizer/blob/v2.2.1/pkg/features/features.go),
+alpha since Kubernetes v1.34, off by default. Its
+[`main.go`](https://github.com/kubernetes-csi/external-resizer/blob/v2.2.1/cmd/csi-resizer/main.go)
+installs a signal handler for SIGTERM and SIGINT only when the gate
+is on. With the gate off, as the drilled manifest ran it, the kernel
+ends the process on SIGTERM before any of the sidecar's own code
+runs, so the Lease stands until its 30-second duration runs out.
+With the gate on, the signal handler stops the resize controller,
+waits for it to finish, then cancels the context that
+[`csi-lib-utils` runs leader election
+under](https://github.com/kubernetes-csi/csi-lib-utils/blob/v0.24.0/leaderelection/leader_election.go).
+The gate also turns on `ReleaseOnCancel` for that context, so the
+exiting resizer releases the Lease instead of leaving it to expire.
+`deploy/controller.yaml` now sets
+`--feature-gates=VolumeAttributesClass=true,ReleaseLeaderElectionOnExit=true`.
+
+No flag fixes the `Failed` phase. `csi-lib-utils`'s
+`OnStoppedLeading` callback calls `klog.FlushAndExit` with exit code
+1 every time the elector's `Run` returns, whether `Run` returns from
+a canceled context or from a lost Lease. So the resizer container
+exits 1 on a graceful SIGTERM with the gate on, the same as it exits
+143 on an unhandled SIGTERM with the gate off: neither is 0. A pod
+with `restartPolicy: Always` that is being deleted still moves
+briefly to phase `Failed` when one of its containers ends with a
+nonzero exit code, ahead of the pod object's removal.
+`terminationGracePeriodSeconds` only changes how long the kubelet
+waits before it sends SIGKILL. It does not change the exit code a
+container ends with, and the drilled manifest does not set it, so
+the rollout ran the cluster's default. `external-resizer` v2.2.1 has
+no flag that changes `OnStoppedLeading`'s exit code.
+
+The gate now releases the Lease within moments of SIGTERM, instead of
+up to 30 seconds later. The old pod's `Failed` phase during a rollout
+stays, because no flag or grace period change in this sidecar's
+v2.2.1 changes its exit code.

@@ -176,10 +176,15 @@ spec:
           image: registry.k8s.io/sig-storage/csi-resizer:v2.2.1
           args:
             - --csi-address=/csi/csi.sock
-            # The sidecar turns the feature off by itself when the
-            # cluster serves no v1 VolumeAttributesClass, so the gate is
-            # named here to keep it on.
-            - --feature-gates=VolumeAttributesClass=true
+            # VolumeAttributesClass keeps the class-change feature on;
+            # the sidecar turns it off by itself when the cluster serves
+            # no v1 VolumeAttributesClass. ReleaseLeaderElectionOnExit
+            # makes the sidecar catch SIGTERM and SIGINT, finish the
+            # write it holds, and release its Lease before it exits.
+            # Without the gate, the sidecar has no signal handler at
+            # all, and a rollout leaves the old Lease to expire on its
+            # own before the new resizer can take it.
+            - --feature-gates=VolumeAttributesClass=true,ReleaseLeaderElectionOnExit=true
             # Two resizers that both act on one claim race on its
             # status, so each one acts only while it holds the Lease.
             # A leader tries to renew for the 10-second renew deadline,
@@ -187,8 +192,13 @@ spec:
             # renew, so it gives up up to 15 seconds after that renew,
             # and it still writes while it exits. A 15-second Lease,
             # the sidecar's default, lets the next leader start at that
-            # same moment. The 30-second Lease leaves 15 seconds for
-            # the old resizer to exit.
+            # same moment. The 30-second Lease leaves 15 seconds for a
+            # resizer that cannot renew, but still writes while it
+            # gives up, to finish before a new leader starts. A resizer
+            # that is killed outright, before it renews or catches a
+            # signal, holds the Lease for its full 30 seconds instead:
+            # ReleaseLeaderElectionOnExit only releases it early when
+            # the resizer catches SIGTERM.
             - --leader-election
             - --leader-election-lease-duration=30s
           securityContext:
