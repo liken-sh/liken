@@ -82,7 +82,7 @@ func newMetrics() *metrics {
 		watchRestarts: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "per_node_csi_watch_restarts_total",
-				Help: "Times a watch dropped and opened again.",
+				Help: "Watches the driver opened again after one ended.",
 			}, kindLabel),
 		volumes: prometheus.NewGauge(
 			prometheus.GaugeOpts{

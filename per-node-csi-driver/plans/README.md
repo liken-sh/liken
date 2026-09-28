@@ -30,3 +30,7 @@ becomes a new plan or an open problem.
   driver serves Prometheus metrics on port 9200 under liken's shared
   contract: CSI operations as the reconcile layer, volumes mounted, and
   mount failures.
+* [02, The watch uses tools/cache](completed/02-the-watch-uses-tools-cache.md).
+  Built on 2026-09-27. The sweep's watch on `PersistentVolume`s is
+  built with `tools/cache` in the organization's lean form, drops
+  `managedFields`, and counts every watch it opens again.

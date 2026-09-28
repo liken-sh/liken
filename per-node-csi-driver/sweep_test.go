@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,10 +13,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/cache"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 // aVolume builds a PersistentVolume of this driver whose handle is its
@@ -217,77 +215,53 @@ func TestACopyTheDriverCannotRemoveIsLoggedAndTheSweepGoesOn(t *testing.T) {
 	}
 }
 
-func TestHandleWatchErrorCountsARestartAndLogsIt(t *testing.T) {
+func TestARestartedWatchCountsOnPerNodeCSIWatchRestartsTotal(t *testing.T) {
 	answering := testDriver(t)
-	written := &bytes.Buffer{}
-	sweeper := newSweeping(answering.node, fake.NewClientset(), time.Hour,
-		slog.New(slog.NewTextHandler(written, nil)))
+	client := fake.NewClientset()
+	// Every watch the API server answers closes at once, so the sweep
+	// opens it again.
+	client.PrependWatchReactor("persistentvolumes",
+		func(k8stesting.Action) (bool, watch.Interface, error) {
+			closed := watch.NewFake()
+			closed.Stop()
+			return true, closed, nil
+		})
+	ctx, stop := context.WithCancel(t.Context())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		newSweeping(answering.node, client, time.Hour, quietLogger()).follow(ctx)
+	}()
 
-	sweeper.handleWatchError(nil, io.ErrUnexpectedEOF)
-
-	if got := testutil.ToFloat64(answering.readings.watchRestarts.WithLabelValues(watchedKind)); got != 1 {
-		t.Errorf("per_node_csi_watch_restarts_total reads %v, want 1", got)
+	restarts := answering.readings.watchRestarts.WithLabelValues(watchedKind)
+	deadline := time.Now().Add(20 * time.Second)
+	for testutil.ToFloat64(restarts) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(written.String(), "the watch restarted") {
-		t.Errorf("the log reads %q, want it to say the watch restarted", written)
+	stop()
+	select {
+	case <-stopped:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the sweep did not stop with the run")
 	}
-}
 
-func TestWatchErrorsLogsAHandlerAnInformerThatHasStartedRefuses(t *testing.T) {
-	answering := testDriver(t)
-	written := &bytes.Buffer{}
-	sweeper := newSweeping(answering.node, fake.NewClientset(), time.Hour,
-		slog.New(slog.NewTextHandler(written, nil)))
-
-	informer := startedInformer(t, sweeper.client)
-	sweeper.watchErrors(informer)
-
-	if !strings.Contains(written.String(), "the watch restarts are not counted") {
-		t.Errorf("the log reads %q, want it to say the restarts are not counted", written)
-	}
-}
-
-// startedInformer returns an informer whose run has begun, which is
-// what makes SetWatchErrorHandler refuse a handler set after the fact.
-func startedInformer(t *testing.T, client kubernetes.Interface) cache.SharedIndexInformer {
-	t.Helper()
-	informer := informers.NewSharedInformerFactory(client, time.Hour).
-		Core().V1().PersistentVolumes().Informer()
-	stop := make(chan struct{})
-	t.Cleanup(func() { close(stop) })
-	go informer.Run(stop)
-	cache.WaitForCacheSync(stop, informer.HasSynced)
-	return informer
-}
-
-func TestAnInformerThatHasStoppedWatchesNoDeletes(t *testing.T) {
-	answering := testDriver(t)
-	written := &bytes.Buffer{}
-	sweeper := newSweeping(answering.node, fake.NewClientset(), time.Hour,
-		slog.New(slog.NewTextHandler(written, nil)))
-	sweeper.watchDeletes(t.Context(), stoppedInformer(t, sweeper.client), make(chan struct{}, 1))
-
-	if !strings.Contains(written.String(), "the deletes are not watched") {
-		t.Errorf("the log reads %q, want it to say the deletes are not watched", written)
+	if got := testutil.ToFloat64(restarts); got == 0 {
+		t.Errorf("per_node_csi_watch_restarts_total reads %v, want at least one restart", got)
 	}
 }
 
-// stoppedInformer returns an informer whose run is over. A stopped
-// informer refuses a new handler, and nothing else makes
-// AddEventHandler fail.
-func stoppedInformer(t *testing.T, client kubernetes.Interface) cache.SharedIndexInformer {
-	t.Helper()
-	informer := informers.NewSharedInformerFactory(client, time.Hour).
-		Core().V1().PersistentVolumes().Informer()
-	stop := make(chan struct{})
-	go informer.Run(stop)
-	cache.WaitForCacheSync(stop, informer.HasSynced)
-	close(stop)
-	deadline := time.Now().Add(10 * time.Second)
-	for !informer.IsStopped() && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+func TestTheInformerStoresNoManagedFields(t *testing.T) {
+	held := aVolume("example-store")
+	held.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "kubectl"}}
+
+	stored, err := dropManagedFields(held)
+
+	if err != nil {
+		t.Fatalf("the transform failed: %v", err)
 	}
-	return informer
+	if fields := stored.(*corev1.PersistentVolume).ManagedFields; fields != nil {
+		t.Errorf("the informer stores managedFields %v, want none", fields)
+	}
 }
 
 // waitForCopies waits until the store holds exactly the wanted handles,
