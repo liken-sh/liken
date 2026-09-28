@@ -1,0 +1,222 @@
+# The controller plugin validates a VolumeAttributesClass, marks the
+# PersistentVolumes a webhook names, and holds no volume, so one
+# replica serves the whole cluster and a restart costs nothing. A
+# second replica is safe too: the driver container answers each
+# webhook and each CSI call on its own, and the resizer sidecar acts
+# only while it holds its Lease.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: git-csi-driver-controller
+---
+# The rules the external-resizer's own release notes list, and the two
+# the driver container needs beside them. The driver patches a
+# PersistentVolume to demand a pull, and it reads the Secret a webhook
+# path names. RBAC cannot narrow the Secret rule to the ones a volume
+# names, so the driver holds get on every Secret in the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: git-csi-driver-controller
+rules:
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, patch, update]
+  # The resizer records the class in force on the claim's status.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims/status]
+    verbs: [patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, list, watch, patch, update]
+  # The driver container verifies a webhook against the Secret the
+  # request's path names, in the namespace of the claim.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+  - apiGroups: [storage.k8s.io]
+    resources: [volumeattributesclasses]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: git-csi-driver-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: git-csi-driver-controller
+subjects:
+  - kind: ServiceAccount
+    name: git-csi-driver-controller
+    namespace: liken-system
+---
+# The resizer sidecar elects one leader through a Lease in the
+# controller's namespace, so only one replica writes a claim's status.
+# client-go's leader election reads, creates, and renews the one Lease.
+# The sidecar names it external-resizer- and the driver name with each
+# character that is not a letter, a digit, or a dash made a dash. RBAC
+# cannot narrow create to one name, because the name of an object that
+# does not exist yet is not in the request's path.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: git-csi-driver-controller
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [external-resizer-git-liken-sh]
+    verbs: [get, update]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: git-csi-driver-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: git-csi-driver-controller
+subjects:
+  - kind: ServiceAccount
+    name: git-csi-driver-controller
+    namespace: liken-system
+---
+# The one address a forge posts to. The listener speaks plain HTTP, and
+# the Ingress the person writes terminates TLS, because that is where
+# the cluster already holds its certificates.
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-csi-driver-webhook
+spec:
+  selector:
+    app: git-csi-driver-controller
+  ports:
+    - name: webhook
+      port: 80
+      targetPort: webhook
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-csi-driver-controller
+spec:
+  # One replica, because the plugin holds no volume and a claim
+  # whose class is not validated for a minute costs nothing. 2 is safe:
+  # the resizers elect one leader, and either driver container answers
+  # a webhook.
+  replicas: 1
+  # The new pod starts before the old one stops, so the webhook is
+  # down for a moment at most during a rollout. The new resizer takes
+  # the Lease when the old one's expires, up to 30 seconds after the
+  # old pod stops, and a class change waits that long.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: git-csi-driver-controller
+  template:
+    metadata:
+      labels:
+        app: git-csi-driver-controller
+    spec:
+      serviceAccountName: git-csi-driver-controller
+      containers:
+        # The same binary as the node plugin, under its controller
+        # subcommand.
+        - name: driver
+          image: ghcr.io/liken-sh/git-csi-driver:latest
+          args:
+            - controller
+            - --endpoint=unix:///csi/csi.sock
+            - --metrics=:9200
+            - --webhook=:8080
+          # The metrics and the webhook are on the pod's own address. A
+          # forge outside the cluster reaches the webhook port through
+          # the Service above and an Ingress the person writes. 9200 is
+          # the port every process serves metrics on, in liken's shared
+          # Prometheus contract, milestone 65 of the liken repository.
+          ports:
+            - name: metrics
+              containerPort: 9200
+            - name: webhook
+              containerPort: 8080
+          # The controller mounts nothing and holds no store, so it
+          # needs no privilege at all.
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: socket
+              mountPath: /csi
+        # The external-resizer sidecar carries a claim's class
+        # change to ControllerModifyVolume and records the answer on the
+        # claim.
+        - name: resizer
+          image: registry.k8s.io/sig-storage/csi-resizer:v2.2.1
+          args:
+            - --csi-address=/csi/csi.sock
+            # VolumeAttributesClass keeps the class-change feature on;
+            # the sidecar turns it off by itself when the cluster serves
+            # no v1 VolumeAttributesClass. ReleaseLeaderElectionOnExit
+            # makes the sidecar catch SIGTERM and SIGINT, finish the
+            # write it holds, and release its Lease before it exits.
+            # Without the gate, the sidecar has no signal handler at
+            # all, and a rollout leaves the old Lease to expire on its
+            # own before the new resizer can take it.
+            - --feature-gates=VolumeAttributesClass=true,ReleaseLeaderElectionOnExit=true
+            # Two resizers that both act on one claim race on its
+            # status, so each one acts only while it holds the Lease.
+            # A leader tries to renew for the 10-second renew deadline,
+            # which starts one 5-second retry period after its last
+            # renew, so it gives up up to 15 seconds after that renew,
+            # and it still writes while it exits. A 15-second Lease,
+            # the sidecar's default, lets the next leader start at that
+            # same moment. The 30-second Lease leaves 15 seconds for a
+            # resizer that cannot renew, but still writes while it
+            # gives up, to finish before a new leader starts. A resizer
+            # that is killed outright, before it renews or catches a
+            # signal, holds the Lease for its full 30 seconds instead:
+            # ReleaseLeaderElectionOnExit only releases it early when
+            # the resizer catches SIGTERM.
+            - --leader-election
+            - --leader-election-lease-duration=30s
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: socket
+              mountPath: /csi
+      volumes:
+        # The socket lives in the pod alone, because the kubelet
+        # never calls the controller plugin.
+        - name: socket
+          emptyDir: {}

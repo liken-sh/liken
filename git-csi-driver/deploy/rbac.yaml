@@ -1,0 +1,41 @@
+# The driver's identity in the cluster. The kubelet and the registrar
+# reach the driver over a socket, not the API. Everything the driver
+# reads and writes in the API is for the person who has to see what a
+# volume is doing: Events, and the claim and class that arm it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: git-csi-driver
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: git-csi-driver
+rules:
+  # An Event on the pod is where a person reads why a mount was
+  # refused. The pod is in any namespace, so the rule is cluster-wide.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create]
+  # The kubelet passes the volumeHandle and never the object's name, so
+  # the driver lists the PersistentVolumes to find the claim, then
+  # watches that claim for the class that arms the volume.
+  - apiGroups: [""]
+    resources: [persistentvolumes, persistentvolumeclaims]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [volumeattributesclasses]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: git-csi-driver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: git-csi-driver
+subjects:
+  - kind: ServiceAccount
+    name: git-csi-driver
+    namespace: liken-system

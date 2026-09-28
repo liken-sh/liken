@@ -1,0 +1,304 @@
+---
+title: Mount a repository read-only
+weight: 20
+description: "Mount a git repository read-only, inline in a pod spec or through a claim, with pull on demand and webhooks. Use when a pod needs a checkout it never writes, including a checkout of a private repository."
+---
+
+A read-only volume has two forms. The inline form is a CSI volume in
+the pod spec. It needs no `PersistentVolume` and no claim, so any pod in
+any namespace can mount any repository the node can reach. The claim
+form, below, is for a workload that names its storage as a claim.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: reader
+spec:
+  containers:
+    - name: reader
+      image: debian:12-slim
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+          readOnly: true
+  volumes:
+    - name: data
+      csi:
+        driver: git.liken.sh
+        readOnly: true
+        volumeAttributes:
+          url: https://example.com/data/franchises.git
+          ref: main
+          pull: 5m
+```
+
+The mount is a plain directory with the files of the ref and no
+`.git`. Every volume of the same URL on a node shares one bare
+repository, so ten pods on one repository cost one fetch. The driver
+fetches every `pull`. When the ref moves, the driver replaces the files
+under the mount one by one, so a reader reads the old file or the new
+one and never a partial write.
+
+The [attributes reference](../../reference/attributes/) lists every
+attribute, its values, and its default.
+
+## A claim on a repository
+
+A workload that names its storage as a `PersistentVolumeClaim` cannot
+mount an inline volume. For that workload, the driver publishes a
+repository as a static `PersistentVolume` with the access mode
+`ReadOnlyMany`, and a claim binds it. The attributes are the ones the
+inline form takes.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: franchises
+spec:
+  capacity: {storage: 1Gi}
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: git.liken.sh
+    volumeHandle: franchises
+    readOnly: true
+    volumeAttributes:
+      url: https://tangled.org/guid.foo/fiction-franchises
+      ref: main
+      pull: 5m
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: franchises
+  namespace: default
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: ""
+  volumeName: franchises
+  resources: {requests: {storage: 1Gi}}
+```
+
+A pod mounts the claim with `readOnly: true` on its volume. The
+container runtime binds a volume into a pod read-write unless the pod
+asks for read-only, whatever the driver's own mount says. So the driver
+refuses a pod that does not ask, and writes `GitVolumeRefused` in the
+pod's events.
+
+```yaml
+volumes:
+  - name: franchises
+    persistentVolumeClaim:
+      claimName: franchises
+      readOnly: true
+```
+
+The driver publishes one tree to many pods on one node, each at its own
+mount, and keeps the tree until the last of them stops. A private
+repository names one `Secret` in both `nodeStageSecretRef` and
+`nodePublishSecretRef`, with the keys the inline form takes.
+[Private repositories](#private-repositories) says why.
+The driver ignores a `VolumeAttributesClass` on such a claim, because a
+read-only volume commits nothing and pushes nothing.
+
+## Pulling on demand
+
+`pull` says when a volume looks for a new commit. It takes one of
+three values.
+
+| Value | Meaning |
+|---|---|
+| `never` | No timer and no demand. The volume holds the commit it staged for its whole life. |
+| `on-demand` | No timer. The volume pulls only when something demands it. |
+| A duration such as `5m` | The volume pulls at least that often, and it pulls when something demands it. |
+
+A demand is an annotation on the `PersistentVolume`. The value is the
+time of the demand in RFC 3339, and the webhook writes the same form:
+
+```console
+kubectl annotate pv franchises git.liken.sh/pull-requested-at="$(date -u +%FT%TZ)" --overwrite
+```
+
+A node pulls for a demand only when its time is later than the start
+of the volume's last fetch that worked on that node, less one minute.
+The minute covers a writer whose clock runs behind the node's clock. A
+fetch that fails answers no demand: the node fetches again after
+`--demand-min-interval`. The wait doubles after each further failure,
+up to five minutes, and each wait is a random time between half of that
+and all of it, but never less than `--demand-min-interval`. The random
+part keeps the nodes that failed together from all fetching at the
+same moment when the remote comes back.
+
+The annotation stays on the `PersistentVolume` after the pull. A node
+that stages the volume later does not pull again for a demand stamped
+more than a minute before its own fetch started. For a demand stamped
+inside that minute, it pulls once more. The same value read again does
+nothing. A value that is not a time is logged and does nothing.
+
+The node that holds the volume pulls at once, and every volume of the
+same URL on that node updates with it. Twenty demands inside
+`--demand-min-interval`, which defaults to ten seconds, cost one pull
+at the end of the interval. A driver that restarts pulls once for every
+volume that is not `never`, because the driver loses a demand that
+arrives while it is down. A volume of a private repository pulls when
+the kubelet's next publish returns its credential.
+
+An inline volume has no `PersistentVolume`, so nothing can demand it.
+An inline volume with `pull: on-demand` is refused, and the pod's
+events say why. A writeable volume ignores a demand, because only the
+application changes a mounted writeable tree.
+
+## Webhooks
+
+A forge sends an HTTP request on every push, and the controller turns
+that request into a demand. You need four things: a `Secret`, an
+attribute, an `Ingress`, and the webhook on the forge.
+
+The `Secret` is in the claim's namespace and holds one key,
+`secret`, whose value is the string you type into the forge's webhook
+form:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: franchises-webhook
+  namespace: sites
+stringData:
+  secret: <the string you gave the forge>
+```
+
+The `PersistentVolume` names that `Secret` with `webhookSecret`, beside
+`url` and `ref`:
+
+```yaml
+spec:
+  csi:
+    driver: git.liken.sh
+    volumeAttributes:
+      url: https://code.example.com/data/franchises.git
+      ref: main
+      pull: on-demand
+      webhookSecret: franchises-webhook
+```
+
+The base includes a `Service` named `git-csi-driver-webhook` in the
+driver's namespace, on port 80. Write an `Ingress` in front of it, with
+TLS, and give the forge the URL
+`https://<your host>/webhook/<namespace>/<name>`, here
+`/webhook/sites/franchises-webhook`. On GitHub, GitLab, Gitea, and
+Forgejo, choose the push event and paste the same string into the
+secret field.
+
+On every push, the controller reads that one `Secret` and verifies the
+request against it. It then demands a pull on every read-only volume
+that names the `Secret`, is bound to a claim in that namespace, and
+follows the repository and ref the push names. A push that verifies
+against one namespace's `Secret` never reaches another namespace's
+volumes. The answer names how many volumes it marked, so `marked 0`
+after a push means the URL or the ref matched nothing.
+
+| Answer | Meaning |
+|---|---|
+| `202` | The request verified. The body reads `marked <count>`. |
+| `401` | The path names no `Secret`, the request has no signature the controller checks, or the signature is wrong. |
+| `400` | The body is not the JSON of a push, or it is over 1 MiB. |
+| `500` | The controller could not read the cluster. Try the push again. |
+
+The controller compares repositories by host and path, and removes the
+scheme, the user, the port, and a trailing `.git`. So a volume that
+clones over `ssh://` matches a forge that advertises `https://`. It
+compares the ref against `refs/heads/<ref>` and `refs/tags/<ref>`.
+
+A webhook that arrives while the controller restarts is lost, so the
+controller demands a pull on every read-only volume when it starts. A
+writeable volume never takes a demand, and an inline volume has no
+`PersistentVolume` to mark, so `webhookSecret` is refused on both.
+
+The controller writes one log line per request, with the `Secret`,
+the forge, the ref, and the count. The counters
+`git_csi_webhook_requests_total`, by result, and
+`git_csi_webhook_marked_total` are on the controller's metrics port.
+
+## When the remote is unreachable
+
+By default a volume whose fetch fails at start is refused, and the pod
+stays in `ContainerCreating` with the reason in its events. Set
+`offline: allowStale` to publish the node's last copy of the ref
+instead. The abnormal gauge and the log then report the fetch error
+until a fetch succeeds. A repository the node has never fetched is refused
+under both settings, because there is nothing to publish.
+
+## Private repositories
+
+Name a `Secret` in the pod's namespace with `nodePublishSecretRef`. The
+driver reads two kinds of credential from it:
+
+- `ssh-privatekey`, for an SSH URL, with an optional `known_hosts`. With
+  `known_hosts`, the driver checks the host key. Without it, the driver
+  accepts the first key it receives and refuses a later change.
+- `token`, for an HTTPS URL, with an optional `username`. The default
+  username is `git`.
+
+```yaml
+    - name: data
+      csi:
+        driver: git.liken.sh
+        readOnly: true
+        volumeAttributes:
+          url: git@example.com:data/private.git
+        nodePublishSecretRef:
+          name: data-deploy-key
+```
+
+The credential reaches the node's disk only for the length of one git
+invocation, and the token never appears on a command line.
+
+The driver keeps the credential in memory. The kubelet calls the
+driver's publish again for every mounted volume on each pod sync, about
+once a minute, and reads the `Secret` again for each call. A driver
+that restarts, for example in an upgrade, holds no credential until the
+next of those calls, and then fetches at once, with no restart of the
+pod. A rotated `Secret` reaches the driver the same way, and the
+driver fetches at once with it. A fetch that failed with a revoked key
+does not wait for its retry. Each volume
+fetches with its own credential alone, so two volumes of one
+repository each wait for their own publish.
+
+A claim's stage fetches with `nodeStageSecretRef`, and its publishes
+carry `nodePublishSecretRef`, so a claim names one `Secret` in both. A
+publish whose `Secret` differs from the one the volume holds is
+refused. A `PersistentVolume` with `nodeStageSecretRef` alone works
+until the driver restarts, and then the driver fetches nothing for it
+until every pod on the node that mounts it stops. The driver posts
+`GitVolumeNoPublishSecret` on the pods and the claim when it publishes
+such a volume. The `csi` block cannot change, so stop the pods that
+mount the claim, delete the claim and the `PersistentVolume`, create
+both again with both references, and start the pods. Do it before an
+upgrade of the driver, because the upgrade restarts the driver.
+
+## What the driver does not serve
+
+A checkout is one ref of one repository. A submodule's directory is
+empty, and a Git LFS pointer file is checked out as the pointer and not
+the object it names.
+
+## What the driver reports
+
+A refused mount, a stale publish, and a fetch that fails after one that
+worked each post an `Event` on the pod. `kubectl describe pod` shows
+them.
+A read-only claim posts each of those on every pod it is published to
+and on the claim, so `kubectl describe pvc` shows them too. The node
+plugin's gauge `git_csi_volume_abnormal`, labeled by the
+pod's namespace and the volume, is one after a stale publish and after
+a failed fetch, until the next fetch succeeds. The node plugin writes
+a log line when a volume's health changes. The line ends with when a
+demand last named the volume and when the volume last pulled, so one
+line says whether a demand arrived and whether the pull that followed
+worked. The counter `git_csi_demanded_pulls_total`, with the same
+labels, counts the pulls a demand started.

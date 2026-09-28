@@ -1,0 +1,14 @@
+/git-csi-driver
+
+# Hugo's build output. The workflow and a workstation both write the
+# site here, and the lock file guards a single hugo process against a
+# second one in the same source tree.
+/docs/dist/
+/docs/.hugo_build.lock
+/docs/public/
+
+# The coverage profile the gate measures, and the report the site
+# publishes. CI writes both on every run and reads them once; they
+# never belong to the tree.
+/coverage.out
+/coverage.html

@@ -1,0 +1,302 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+)
+
+// startServer is the fixture every service test uses: a server on a
+// socket in a temporary directory, and a client connected to it.
+func startServer(t *testing.T, logs io.Writer) *grpc.ClientConn {
+	t.Helper()
+	dir := t.TempDir()
+	return start(t, &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, logs)
+
+}
+
+// start serves the configuration on its socket and stops the server
+// when the test ends.
+func start(t *testing.T, cfg *config, logs io.Writer) *grpc.ClientConn {
+	t.Helper()
+	server, err := newServer(t.Context(), cfg, slog.New(slog.NewTextHandler(logs, nil)))
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	served := make(chan error, 1)
+	go func() { served <- server.serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-served; err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	})
+	client, err := grpc.NewClient(cfg.endpoint,
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { client.Close() })
+	return client
+}
+
+func TestTheServerAnswersOnTheSocket(t *testing.T) {
+	client := csi.NewIdentityClient(startServer(t, io.Discard))
+	info, err := client.GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{})
+	if err != nil {
+		t.Fatalf("GetPluginInfo: %v", err)
+	}
+	if info.GetName() != driverName {
+		t.Errorf("GetPluginInfo named %q, want %q", info.GetName(), driverName)
+	}
+}
+
+func TestTheServerRegistersTheServicesOfItsMode(t *testing.T) {
+	// The controller serves the Node service as well, because the
+	// resizer sidecar reads the node's capabilities from the controller's
+	// own socket and exits when that service is not there.
+	controlling := startController(t)
+	if _, err := csi.NewNodeClient(controlling).NodeGetCapabilities(
+		t.Context(), &csi.NodeGetCapabilitiesRequest{}); err != nil {
+		t.Errorf("the controller serves no Node service: %v", err)
+	}
+	if _, err := csi.NewControllerClient(controlling).ControllerGetCapabilities(
+		t.Context(), &csi.ControllerGetCapabilitiesRequest{}); err != nil {
+		t.Errorf("the controller serves no Controller service: %v", err)
+	}
+
+	answering := startServer(t, io.Discard)
+	if _, err := csi.NewNodeClient(answering).NodeGetCapabilities(
+		t.Context(), &csi.NodeGetCapabilitiesRequest{}); err != nil {
+		t.Errorf("the node plugin serves no Node service: %v", err)
+	}
+	_, err := csi.NewControllerClient(answering).ControllerGetCapabilities(
+		t.Context(), &csi.ControllerGetCapabilitiesRequest{})
+	if got := status.Code(err); got != codes.Unimplemented {
+		t.Errorf("the node plugin answered %v for a Controller call, want %v",
+			got, codes.Unimplemented)
+	}
+}
+
+func TestNewServerCreatesTheStore(t *testing.T) {
+	dir := t.TempDir()
+	store := filepath.Join(dir, "store", "deeper")
+	start(t, &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    store,
+	}, io.Discard)
+	if _, err := os.Stat(store); err != nil {
+		t.Errorf("the store was not created: %v", err)
+	}
+}
+
+func TestNewServerReplacesAStaleSocket(t *testing.T) {
+	dir := t.TempDir()
+	socket := filepath.Join(dir, "csi.sock")
+	if err := os.WriteFile(socket, nil, 0o600); err != nil {
+		t.Fatalf("writing the stale socket: %v", err)
+	}
+	client := csi.NewIdentityClient(start(t, &config{
+		endpoint: "unix://" + socket,
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, io.Discard))
+	if _, err := client.GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
+		t.Errorf("GetPluginInfo: %v", err)
+	}
+}
+
+func TestNewServerReportsAnEndpointItCannotServe(t *testing.T) {
+	dir := t.TempDir()
+	busy := filepath.Join(dir, "busy")
+	if err := os.MkdirAll(filepath.Join(busy, "occupant"), 0o755); err != nil {
+		t.Fatalf("making the occupied directory: %v", err)
+	}
+	for _, c := range []struct {
+		name     string
+		endpoint string
+	}{
+		{name: "another scheme", endpoint: "tcp://127.0.0.1:9000"},
+		{name: "no scheme", endpoint: filepath.Join(dir, "csi.sock")},
+		{name: "a directory that is not there", endpoint: "unix://" + filepath.Join(dir, "absent", "csi.sock")},
+		{name: "a socket that cannot be removed", endpoint: "unix://" + busy},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := newServer(t.Context(), &config{
+				endpoint: c.endpoint,
+				nodeID:   "node-1",
+				store:    filepath.Join(t.TempDir(), "store"),
+			}, slog.Default())
+			if err == nil {
+				t.Errorf("newServer(%q) answered no error", c.endpoint)
+			}
+		})
+	}
+}
+
+func TestNewServerReportsAStoreItCannotCreate(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	_, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(file, "store"),
+	}, slog.Default())
+	if err == nil {
+		t.Fatal("newServer answered no error for a store under a file")
+	}
+}
+
+func TestTheServerLogsEveryCall(t *testing.T) {
+	logs := &strings.Builder{}
+	connection := startServer(t, logs)
+
+	if _, err := csi.NewIdentityClient(connection).
+		GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
+		t.Fatalf("GetPluginInfo: %v", err)
+	}
+	if _, err := csi.NewNodeClient(connection).
+		NodeExpandVolume(t.Context(), &csi.NodeExpandVolumeRequest{}); err == nil {
+		t.Fatal("NodeExpandVolume answered no error")
+	}
+
+	for _, want := range []string{
+		"rpc=/csi.v1.Identity/GetPluginInfo code=OK",
+		"rpc=/csi.v1.Node/NodeExpandVolume code=Unimplemented",
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("the log is %q, want a line with %q", logs.String(), want)
+		}
+	}
+}
+
+func TestServeStopsWhenTheContextEnds(t *testing.T) {
+	dir := t.TempDir()
+	server, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := server.serve(ctx); err != nil {
+		t.Errorf("serve: %v", err)
+	}
+}
+
+func TestServeReportsASocketThatGoesAway(t *testing.T) {
+	dir := t.TempDir()
+	server, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	if err := server.listener.Close(); err != nil {
+		t.Fatalf("closing the socket: %v", err)
+	}
+	if err := server.serve(t.Context()); err == nil {
+		t.Error("serve answered no error after the socket closed")
+	}
+}
+
+func TestOperationNameTakesTheGRPCMethodsLastElement(t *testing.T) {
+	for _, c := range []struct{ full, want string }{
+		{"/csi.v1.Node/NodePublishVolume", "NodePublishVolume"},
+		{"NodePublishVolume", "NodePublishVolume"},
+	} {
+		if got := operationName(c.full); got != c.want {
+			t.Errorf("operationName(%q) = %q, want %q", c.full, got, c.want)
+		}
+	}
+}
+
+func TestTheServerRecordsEveryCallUnderItsOwnOperationName(t *testing.T) {
+	dir := t.TempDir()
+	server, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	go server.serve(ctx)
+	connection, err := grpc.NewClient("unix://"+filepath.Join(dir, "csi.sock"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { connection.Close() })
+
+	if _, err := csi.NewIdentityClient(connection).
+		GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
+		t.Fatalf("GetPluginInfo: %v", err)
+	}
+	if _, err := csi.NewNodeClient(connection).
+		NodeExpandVolume(t.Context(), &csi.NodeExpandVolumeRequest{}); err == nil {
+		t.Fatal("NodeExpandVolume answered no error")
+	}
+
+	if observations, _ := callCounters(t, server.readings, "GetPluginInfo"); observations != 1 {
+		t.Errorf("GetPluginInfo observed %d calls, want 1", observations)
+	}
+	if observations, errs := callCounters(t, server.readings, "NodeExpandVolume"); observations != 1 || errs != 1 {
+		t.Errorf("NodeExpandVolume observed %d calls and %v errors, want 1 and 1", observations, errs)
+	}
+}
+
+func TestServeReportsASocketThatFailsAfterTheStop(t *testing.T) {
+	dir := t.TempDir()
+	server, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	// The serve ends only when the stop lets it, so the run reads the
+	// context's end first and the failure after it.
+	released := make(chan struct{})
+	refused := errors.New("the socket went away")
+	server.serveOn = func(net.Listener) error {
+		<-released
+		return refused
+	}
+	server.stop = func() { close(released) }
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := server.serve(ctx); !errors.Is(err, refused) {
+		t.Errorf("serve answered %v, want %v", err, refused)
+	}
+}

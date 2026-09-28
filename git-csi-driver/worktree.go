@@ -1,0 +1,239 @@
+package main
+
+// worktree.go holds the tree a writeable volume's pod writes, the git
+// directory beside it, and the changes git finds in it.
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+)
+
+// alternatesFile names the bare repository whose objects this work tree
+// reads, so history is stored once per URL.
+const alternatesFile = "objects/info/alternates"
+
+// workTree is one volume's git directory and the checkout beside it.
+// The checkout holds no .git of its own, so the pod cannot commit or
+// push around the driver.
+type workTree struct {
+	repository *repository
+	directory  string
+	gitDir     string
+	tree       string
+
+	mu sync.Mutex
+}
+
+// workTree is the work tree of a volume, sharing the bare repository of
+// its URL.
+func (s *store) workTree(repo *repository, id string) *workTree {
+	work := s.tree(id)
+	work.repository = repo
+	return work
+}
+
+// tree is the work tree of a volume named by its directory alone,
+// which is all the sweep knows about a volume no claim reaches.
+func (s *store) tree(id string) *workTree {
+	directory := s.volumeDir(id)
+	return &workTree{
+		directory: directory,
+		gitDir:    filepath.Join(directory, "git"),
+		tree:      filepath.Join(directory, "tree"),
+	}
+}
+
+// alternate is the bare repository the work tree reads its
+// objects from, and the empty string where the file names none.
+func (w *workTree) alternate() string {
+	content, err := os.ReadFile(filepath.Join(w.gitDir, alternatesFile))
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(trimLine(string(content)))
+}
+
+// originURL is the remote the work tree follows, read from the
+// bare repository the alternates file names.
+func (w *workTree) originURL() string {
+	content, err := os.ReadFile(filepath.Join(w.alternate(), repositoryURLFile))
+	if err != nil {
+		return ""
+	}
+	return trimLine(string(content))
+}
+
+// exists reports whether create finished. HEAD is what create writes
+// last.
+func (w *workTree) exists() bool {
+	_, err := os.Stat(filepath.Join(w.gitDir, "HEAD"))
+	return err == nil
+}
+
+// create makes the git directory beside the tree, shares the bare
+// repository's objects through the alternates file, points HEAD at the
+// ref, and resets the tree to the commit. reset sets HEAD, the index,
+// and the tree in one call, so git status is meaningful from the first
+// stage.
+func (w *workTree) create(ctx context.Context, ref, commit string) error {
+	if err := os.MkdirAll(w.tree, 0o755); err != nil {
+		return err
+	}
+	if _, err := w.git(ctx, "init", "--quiet"); err != nil {
+		return err
+	}
+	alternates := filepath.Join(w.gitDir, alternatesFile)
+	if err := os.MkdirAll(filepath.Dir(alternates), 0o755); err != nil {
+		return err
+	}
+	objects := filepath.Join(w.repository.dir, "objects")
+	if err := os.WriteFile(alternates, []byte(objects+"\n"), 0o644); err != nil {
+		return err
+	}
+	if _, err := w.git(ctx, "symbolic-ref", "HEAD", "refs/heads/"+ref); err != nil {
+		return err
+	}
+	_, err := w.git(ctx, "reset", "--hard", "--quiet", commit)
+	return err
+}
+
+// head is the commit the tree stands on.
+func (w *workTree) head(ctx context.Context) (string, error) {
+	output, err := w.git(ctx, "rev-parse", "--verify", "--end-of-options", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return trimLine(output.stdout), nil
+}
+
+// change is one path git reports and the bytes it holds now.
+type change struct {
+	path string
+	size int64
+}
+
+// pending is what the pod wrote and the driver has not committed. Every
+// untracked file is named, so three files under a new directory count
+// as three paths and not one.
+func (w *workTree) pending(ctx context.Context) ([]change, error) {
+	output, err := w.git(ctx, "status", "--porcelain", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	return w.changes(output.stdout), nil
+}
+
+// changes reads git's -z report: two status letters, a space, the path,
+// and a second path after a rename or a copy.
+func (w *workTree) changes(report string) []change {
+	entries := strings.Split(report, "\x00")
+	found := []change{}
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
+			continue
+		}
+		if entry[0] == 'R' || entry[0] == 'C' {
+			i++
+		}
+		found = append(found, change{path: entry[3:], size: w.sizeOf(entry[3:])})
+	}
+	return found
+}
+
+// sizeOf is the size of a path git named, and zero for a path the pod
+// deleted.
+func (w *workTree) sizeOf(path string) int64 {
+	info, err := os.Lstat(filepath.Join(w.tree, filepath.FromSlash(path)))
+	if err != nil || !info.Mode().IsRegular() {
+		return 0
+	}
+	return info.Size()
+}
+
+// scratchTree is the directory, beside the tree the pod holds, where
+// a rebase runs. A rebase checks out upstream and replays the commits
+// on it, and in the pod's own tree that would rewrite the pod's files
+// twice.
+const scratchTree = "scratch"
+
+// scratch adds a detached work tree that shares the volume's
+// objects, and answers its directory with the function that removes
+// it.
+func (w *workTree) scratch(ctx context.Context) (string, func(), error) {
+	dir := filepath.Join(w.directory, scratchTree)
+	// A driver killed mid-rebase leaves its scratch tree behind,
+	// and git refuses a second work tree at the same path, so the
+	// old one goes first.
+	w.removeScratch(ctx, dir)
+	if _, err := w.git(ctx, "worktree", "add", "--detach", "--quiet",
+		"--end-of-options", dir, "HEAD"); err != nil {
+		return "", nil, err
+	}
+	return dir, func() { w.removeScratch(ctx, dir) }, nil
+}
+
+// removeScratch deletes the scratch tree and git's record of it.
+// A removal that finds nothing is the state it was asked for.
+func (w *workTree) removeScratch(ctx context.Context, dir string) {
+	_, _ = w.git(ctx, "worktree", "remove", "--force", "--end-of-options", dir)
+	_ = os.RemoveAll(dir)
+	_, _ = w.git(ctx, "worktree", "prune")
+}
+
+// take moves the mounted tree from one commit to the next in one
+// step. read-tree with two trees writes only the paths that differ
+// between them, so the pod's own files, which are the same in both,
+// are never touched. It refuses when a path the pod wrote since the
+// last commit differs between the two, which is a write that overlaps
+// another writer's, and the caller falls back to the side branch.
+func (w *workTree) take(ctx context.Context, old, new string) error {
+	if _, err := w.git(ctx, "read-tree", "-m", "-u", "--end-of-options", old, new); err != nil {
+		return err
+	}
+	_, err := w.git(ctx, "update-ref", "refs/heads/"+w.followedRef(ctx), new)
+	return err
+}
+
+// changedPaths are the paths that differ between two commits, which
+// are the paths take rewrote. A pair git cannot read names none.
+func (w *workTree) changedPaths(ctx context.Context, old, new string) []string {
+	output, _ := w.git(ctx, "diff-tree", "-r", "-z", "--name-only", "--end-of-options", old, new)
+	return splitZero(output.stdout)
+}
+
+// git runs git against the work tree with the git directory beside it,
+// so the pod never sees a .git. The lock keeps a stage and a status of
+// the same tree apart.
+func (w *workTree) git(ctx context.Context, args ...string) (gitOutput, error) {
+	return w.gitWith(ctx, nil, args...)
+}
+
+// gitWith is git with an environment of its own, which is how the
+// author, the committer, and a credential reach one invocation.
+func (w *workTree) gitWith(ctx context.Context, env []string, args ...string) (gitOutput, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return runGit(ctx, w.directory, env,
+		append([]string{"--git-dir=" + w.gitDir, "--work-tree=" + w.tree}, args...)...)
+}
+
+// followedRef is the ref the work tree follows, which create wrote into
+// HEAD, and the empty string where the directory is no work tree.
+func (w *workTree) followedRef(ctx context.Context) string {
+	output, _ := w.git(ctx, "symbolic-ref", "--quiet", "HEAD")
+	return strings.TrimPrefix(trimLine(output.stdout), "refs/heads/")
+}
+
+// refCommit is the commit the ref names, and the empty string
+// where the git directory holds no such ref.
+func (w *workTree) refCommit(ctx context.Context, ref string) string {
+	output, err := w.git(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", ref)
+	if err != nil {
+		return ""
+	}
+	return trimLine(output.stdout)
+}
