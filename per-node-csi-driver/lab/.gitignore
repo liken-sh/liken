@@ -1,0 +1,8 @@
+# What the lab downloads, mints, and boots. The identity holds private
+# keys, and the rest is large or regenerated.
+
+/channel/
+/identity/
+/guests/
+/deployment.cpio
+/install.cpio

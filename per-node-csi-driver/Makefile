@@ -1,0 +1,99 @@
+# The root Makefile names the checks a change must pass, and delegates
+# each one to the domain that owns it. `make test` runs every check CI
+# runs, in the same commands, so a change that passes here passes
+# there. The Go driver is the module at the root, so its checks are
+# here. The docs are their own domain with their own Makefile.
+#
+# The coverage floors are the one number each gate enforces: the Go
+# floor is in .testcoverage.yml. CI reads the same file, so a floor
+# moves in one place.
+
+.PHONY: test
+test: test-go test-docs
+
+# ci is the one target both a workstation and the CI workflow run: the
+# same gate under one name, so a person never wonders which target the
+# workflow files actually call.
+.PHONY: ci
+ci: test
+
+# The coverage gate measures on its own run, on a pinned toolchain.
+# Go 1.27 splits a basic block into one profile row per run of code
+# inside it, and repeats the whole block's statement count on every
+# row. Every reader sums those rows, `go tool cover` included, so a
+# block counts once more for each comment that interrupts it. Go 1.26
+# counts each block once, which is what .testcoverage.yml's threshold
+# was set against. Move this pin to the newest toolchain that counts
+# each block once.
+#
+# go-test-coverage is a pinned tool dependency (the `tool` directive
+# in go.mod), so the gate needs nothing installed beyond the Go
+# toolchain.
+COVERAGE_TOOLCHAIN := go1.26.7
+
+# A package with no test file writes no rows to the profile, so the
+# gate never counts it: its number is not low, it is missing. This
+# lists such packages, and test-go fails on the first one.
+UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
+
+.PHONY: test-go
+test-go:
+	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
+	go vet ./...
+	go test -race ./...
+	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
+	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+
+.PHONY: test-docs
+test-docs: manifest-check
+	$(MAKE) -C docs test
+# skills/ is generated from the guides and committed, so a checkout
+# carries it. The check regenerates it and fails when git reports a
+# change or an untracked file there, which means a guide changed and
+# nobody ran `make -C docs skills`.
+	$(MAKE) -C docs skills
+	test -z "$$(git status --porcelain -- skills)" || { git status --short -- skills; exit 1; }
+	$(MAKE) -C docs build
+
+# The monitoring component carries no code and no lab drill, so a
+# kustomize build is its whole proof: the base builds alone, the way a
+# cluster with no Prometheus applies it, and the base builds again with
+# the component added, the way a fleet repository with the
+# prometheus-operator would take it.
+.PHONY: manifest-check
+manifest-check:
+	kubectl kustomize deploy/ > /dev/null
+	tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+	ln -s "$$PWD/deploy" "$$tmp/deploy" && \
+	mkdir "$$tmp/consumer" && \
+	printf '%s\n' \
+		'apiVersion: kustomize.config.k8s.io/v1beta1' \
+		'kind: Kustomization' \
+		'resources:' \
+		'  - ../deploy' \
+		'components:' \
+		'  - ../deploy/monitoring' \
+		> "$$tmp/consumer/kustomization.yaml" && \
+	kubectl kustomize "$$tmp/consumer" > /dev/null
+
+# The coverage report is the profile the gate already measured, drawn
+# as one HTML page for the site to publish. `test` does not depend on
+# it: the gate decides whether a change passes, and the report only
+# shows a reader what the tests reached, so a report that fails to
+# render never fails a build.
+#
+# coverage is a tool of the docs module, the way Hugo is, so the
+# command runs from docs/ and names the paths above it.
+.PHONY: coverage-report
+coverage-report: coverage.out
+	cd docs && go tool coverage \
+		-title per-node-csi-driver \
+		-root .. \
+		-out ../coverage.html \
+		-label Go ../coverage.out
+
+# The report reads the profile test-go writes, so a tree with no
+# profile runs the tests first.
+coverage.out:
+	$(MAKE) test-go

@@ -1,0 +1,38 @@
+# The driver's identity in the cluster. The kubelet and the registrar
+# reach the driver over a socket, not the API. The driver reads the
+# PersistentVolumes to learn which copies a volume still names, and it
+# posts Events where a person reads why a mount was refused.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: per-node-csi-driver
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: per-node-csi-driver
+rules:
+  # The sweep watches every PersistentVolume. The kubelet never tells a
+  # node plugin that a volume was deleted, so the watch is how a
+  # deletion reaches the copies on the node.
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, list, watch]
+  # An Event on the pod is where a person reads why a mount was
+  # refused. The pod is in any namespace, so the rule is cluster-wide.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: per-node-csi-driver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: per-node-csi-driver
+subjects:
+  - kind: ServiceAccount
+    name: per-node-csi-driver
+    namespace: liken-system
