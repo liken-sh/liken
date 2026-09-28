@@ -1,0 +1,130 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. The pod is powerful on the machine it runs on, because a
+# Bluetooth stack has to be, and correspondingly narrow here: it
+# writes one ResourceSlice, reads the claims the kubelet asks it to
+# prepare, reads its own Node, keeps the three objects of the pairing
+# API, and reads and writes the Secrets that hold its adapter's bonds.
+#
+# One ServiceAccount serves the whole pod. A ServiceAccount is a
+# pod-level field, and the ServiceAccount admission controller mounts
+# the projected token into the init containers as well as the
+# containers, so bondfetch reads the Secrets through this identity and
+# there is no second one to give it. The two halves do not need the
+# same verbs, because bondfetch reads Secrets and never writes one.
+# Splitting the verbs would take a second pod, and both halves have
+# to hold the same adapter.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bluetooth-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bluetooth-operator
+rules:
+  # The device inventory (slices.go): this node's ResourceSlice under
+  # bluetooth.liken.sh. The verbs cover the collection, because RBAC
+  # cannot say "only the slice named for your node": resourceNames
+  # cannot be templated per pod. The program only ever writes its own,
+  # whose name it builds from NODE_NAME. No list and no watch: the
+  # name is deterministic, and reading anyone else's inventory is the
+  # scheduler's job.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, create, update, delete]
+  # The DRA plugin (dra.go): when the kubelet asks this driver to
+  # prepare a claim, the request names the claim and nothing more. The
+  # allocation is on the claim's status, so the driver reads it
+  # back. This is read-only across every namespace, because claims
+  # belong to workloads and the driver serves whichever namespace
+  # claims a controller. Still no list and no watch: prepare calls
+  # arrive with exact names.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get]
+  # This node, read once at startup for the UID that the slice's owner
+  # reference needs. The Node owns the slice, so a Node that leaves
+  # the cluster takes the slice with it. The garbage collector does
+  # that removal, so the operator runs no cleanup code at exit.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+  # The pairing API (crd.go). The operator owns all three objects: it
+  # creates an Adapter for the radio it holds and a Peripheral for each
+  # bond, it watches the PairingRequests a person creates, and it
+  # deletes a finished request when its TTL is up. patch is for the
+  # finalizer lists alone, which are edited as a merge patch so that a
+  # person's own fields on the object survive the write.
+  #
+  # This is a ClusterRole and not a Role. Adapters and Peripherals are
+  # cluster-scoped, and a PairingRequest may be created in any
+  # namespace, which is the grant the whole design exists to make
+  # possible: a person who may create requests in their own namespace
+  # needs no exec into liken-system.
+  - apiGroups: [bluetooth.liken.sh]
+    resources: [adapters, peripherals, pairingrequests]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # The status halves, which the operator writes through the status
+  # subresource so that a status write can never overwrite a spec a
+  # person edited in the same moment.
+  - apiGroups: [bluetooth.liken.sh]
+    resources: [adapters/status, peripherals/status, pairingrequests/status]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bluetooth-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bluetooth-operator
+subjects:
+  - kind: ServiceAccount
+    name: bluetooth-operator
+    namespace: liken-system
+---
+# The bonds: one Secret for each bond, holding that one device's link
+# keys and labelled with the adapter it belongs to. bondfetch lists
+# them by that label before bluetoothd starts, and the operator creates
+# each one at its pairing and updates it whenever the keys change. The
+# operator also watches them by that label, so each pass compares the
+# bonds on disk with the watch's copies instead of reading every Secret
+# (bondstore.go). So the verbs are get, list, watch, create, and
+# update.
+#
+# No delete. A bond's Secret is owned by that bond's Peripheral, so
+# deleting the Peripheral collects the Secret through ordinary garbage
+# collection, and the operator never removes one itself.
+#
+# A Role and not a ClusterRole, because these Secrets are in the
+# operator's own namespace alone and a namespaced grant is the
+# narrower of the two. A ClusterRole on secrets would reach every
+# other workload's credentials in every namespace.
+#
+# resourceNames cannot narrow it further. A Secret's name comes from a
+# device's address, and no name exists until the radio reports that
+# address.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bluetooth-operator
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bluetooth-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bluetooth-operator
+subjects:
+  - kind: ServiceAccount
+    name: bluetooth-operator
+    namespace: liken-system

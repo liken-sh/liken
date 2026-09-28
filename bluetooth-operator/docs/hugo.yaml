@@ -1,0 +1,67 @@
+# The site's configuration. The look is not configured here: the
+# brand theme, a git submodule at themes/brand, provides the page
+# shell, the nav, and the stylesheet that every liken site shares, so
+# this site reads as one place with the manual at liken.sh. The site
+# is named for the operator's DRA driver, bluetooth.liken.sh, because
+# that name is the one an operator of a cluster already knows.
+baseURL: https://bluetooth.liken.sh/
+
+# The generated reference pages put an id on each field's table row,
+# as a raw-HTML span, so a link can land on exactly one field (the
+# crdref generator emits them). Goldmark drops raw HTML unless this
+# is set, and everything this site renders is authored in this
+# repository.
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+title: bluetooth.liken.sh
+theme: brand
+
+# No taxonomies and no feeds: the site is a manual, not a blog. The
+# sitemap stays, because it is free and crawlers use it.
+disableKinds: [taxonomy, term, rss]
+
+params:
+  # The repository this site documents. The theme's nav points its
+  # repository entry here, and the sidebar heads the manual with the
+  # project's name, taken from the last path segment.
+  repository: https://github.com/liken-sh/bluetooth-operator
+
+  # CI renders the test coverage report and copies it into the built
+  # tree, so the site serves it at /coverage.html. The theme's footer
+  # links that page only when this parameter is set.
+  coverage: true
+
+# Every page renders twice, once as HTML for people and once as the
+# authored Markdown for agents and scripts. The two files land side
+# by side, so the Markdown twin of / is /index.md. The theme provides
+# the templates for the twin, but a theme cannot declare an output
+# format, so each consuming site declares this block itself
+# (themes/brand/README.md). Without it, the site builds, but only as
+# HTML.
+outputFormats:
+  markdown:
+    mediaType: text/markdown
+    baseName: index
+    isPlainText: true
+
+outputs:
+  home: [html, markdown]
+  section: [html, markdown]
+  page: [html, markdown]
+
+# The site serves the repository's own manifests as raw YAML under
+# /deploy/, so a reader reads the CRDs in place and a Kustomization
+# references the files without cloning the repository. The mount takes
+# the files straight from deploy/, so the served YAML is the same file
+# the repository holds, never a copy that can drift. Declaring any
+# mount replaces every default mount for this module, so content/ is
+# declared again beside it; the other defaults name directories this
+# site does not have.
+module:
+  mounts:
+    - source: content
+      target: content
+    - source: ../deploy
+      target: static/deploy

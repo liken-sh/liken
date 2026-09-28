@@ -1,0 +1,48 @@
+# The kustomize base for the Bluetooth operator.
+#
+# liken does not apply this base and does not name it. Take it through
+# your own GitOps with patches of your own, or read it and write your
+# own manifests.
+#
+# The base ships one DeviceClass, bluetooth-adapter, because the
+# claim template in operator.yaml names it and the operator's own
+# pod cannot start without it: it is wiring, not policy. The class
+# workloads claim through is the cluster owner's to create, because
+# it is cluster policy, and the install guide gives the YAML for
+# bluetooth-input, the one to start with. An owner who renames
+# bluetooth-adapter patches both the class and the template.
+#
+# Everything here except the CustomResourceDefinitions is namespaced.
+# The CRDs are cluster-scoped, and kustomize reads that from the
+# OpenAPI schema it was compiled with, so the namespace below leaves
+# them alone.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: liken-system
+
+# kustomize stamps the namespace below onto the DeviceClass too,
+# because resource.k8s.io/v1 is not in its compiled OpenAPI schema
+# and an unknown kind is treated as namespaced. The stamp is
+# harmless: the API server ignores a namespace on a cluster-scoped
+# object, and kubectl routes the request by the scope it reads from
+# discovery, not from the object.
+resources:
+  - deviceclasses.yaml
+  - crds.yaml
+  - rbac.yaml
+  - operator.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: bluetooth-operator
+      app.kubernetes.io/part-of: liken
+
+images:
+  - name: ghcr.io/liken-sh/bluetooth-operator
+    newTag: latest
+  - name: ghcr.io/liken-sh/bluetoothd
+    newTag: latest
+  - name: ghcr.io/liken-sh/bluetooth-bondfetch
+    newTag: latest

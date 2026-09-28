@@ -1,0 +1,81 @@
+# Plans
+
+This directory contains the operator's design documents. Each one is
+numbered in sequence and keeps its number for life.
+
+The form follows liken's own `plans/`. A document states a problem,
+the design that addresses it, and the alternatives that were
+considered and set aside. It separates measurements from source
+readings and names where each measurement ran.
+
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
+
+The pattern these documents follow is documented in liken's repository:
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
+and this operator's own instance,
+[milestone 58](https://github.com/liken-sh/liken/blob/main/plans/completed/58-the-bluetooth-operator.md).
+
+[`open-problems/`](open-problems/) contains the questions this
+operator still needs to answer. Those documents have no number because
+nobody has decided yet what work they become.
+
+[`rejected/`](rejected/) contains the designs that were set aside,
+superseded or removed. Each document stays as the record of what was
+considered and why.
+
+## The designs
+
+* [01, Bluetooth audio](rejected/01-bluetooth-audio.md). Superseded by
+  liken's milestone 60 and plan 05. Its source reading remains the
+  citation record.
+* [02, The two-container pod](completed/02-the-two-container-pod.md). Built, and
+  drilled on liken-1 on 2026-08-17.
+* [03, A Secret for each adapter](completed/03-a-secret-for-each-adapter.md).
+  Built, and drilled on liken-1 on 2026-08-17. Plan 04 amends its
+  Secret layout to one Secret per bond.
+* [04, An API for pairing](completed/04-an-api-for-pairing.md). Built, and
+  drilled on liken-1 on 2026-08-17. An Adapter and Pairing inventory
+  owned by the operator, and a PairingRequest a person opens and
+  approves with kubectl. Answers and replaces the open problem "Who
+  owns the pairing UX".
+* [05, The media bus](completed/05-the-media-bus.md). Built. The adapter's
+  media bus as an exclusive DRA device, the hostPath behind the bus
+  socket, and the mount-and-variable delivery. This operator's half
+  of liken's milestone 60.
+* [06, Peripherals and the input relay](completed/06-peripherals-and-the-input-relay.md).
+  Built. The Pairing becomes the Peripheral, the object for one
+  bonded device with its bond, its battery level, and a `Connected`
+  condition. A uinput relay per controller gives every claim a stable
+  node. Answers and replaces the open problems "BLE devices connect on
+  demand" and "Battery levels are not reported".
+
+* [07, Prometheus metrics](completed/07-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10. The
+  operator serves Prometheus metrics on port 9250 under liken's shared
+  contract: peripherals connected and claimed, battery level,
+  disconnects, adapter presence, and relayed input events.
+
+* [08, Watch the Adapters and the Peripherals](completed/08-watch-adapters-and-peripherals.md).
+  Built on 2026-09-27; the drill on liken-1 is still owed. The
+  operator watches both kinds through the loop that watches the
+  PairingRequests, so an edit or an unpair acts on the next pass
+  instead of at the backstop tick. Answers and replaces the open
+  problem "An Adapter or Peripheral edit waits for the backstop".
+
+* [09, The watches use client-go](completed/09-the-watches-use-client-go.md).
+  Built on 2026-09-27; the drill on liken-1 is still owed. The three
+  watches run on client-go's reflector with the dynamic client, and
+  the loop written by hand is gone. The reference port for the other
+  operators.
+
+## Open problems
+
+* [The restore set is tested on one BR/EDR device only](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
+  The adapter's own `identity` file does not travel, and no LE device
+  has been through a restore.
+* [The operator serves one adapter](open-problems/the-operator-serves-one-adapter.md).
+  The bond store and controller discovery are written for one adapter,
+  so a node with two adapters serves only the one the claim took.

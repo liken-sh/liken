@@ -1,0 +1,24 @@
+# The class this operator's own pod claims through. It ships with
+# the base because the claim template in operator.yaml names it
+# literally: it is wiring, not policy, and the operator cannot
+# start without it. The classes your workloads claim through, such
+# as an input class, are the cluster owner's vocabulary to create,
+# and the install guide gives the YAML.
+---
+# The adapter, as liken publishes it. The selector picks the btusb
+# kernel driver, which covers the plug-in dongles and the radios
+# built into a board. The claim does two jobs. It places the pod,
+# because only a machine with a radio publishes one, so no node
+# selector has to name that machine. And it arbitrates, because the
+# adapter allocates once, so the claim holder is the only Bluetooth
+# stack on that radio.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: bluetooth-adapter
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          device.attributes["liken.sh"].driver == "btusb"

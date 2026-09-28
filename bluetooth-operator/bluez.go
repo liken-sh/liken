@@ -1,0 +1,439 @@
+package main
+
+// Reading the paired set from bluetoothd.
+//
+// bluetoothd holds the fact that no other layer can read: which
+// controllers are paired, and which of them are connected right now.
+// It is not in sysfs and it is not on the Machine, and that is the
+// whole reason this operator exists. The API is BlueZ's D-Bus
+// interface, on a bus that runs inside this pod for these two
+// processes alone.
+//
+// Membership in the ResourceSlice is the paired set, not the
+// connected set. A paired controller that is switched off still
+// publishes, so a person can create a pod for it and the pod starts
+// when somebody turns the controller on. Connection state publishes
+// as an attribute and drives the taint (slices.go).
+//
+// The signals here say only that something changed. Every consumer
+// re-reads the whole managed-object tree, the same way liken's
+// hardware watcher re-walks sysfs after a uevent. A cache built from
+// signal payloads can fall out of step with the daemon; a full
+// re-read stays correct.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/godbus/dbus/v5"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
+)
+
+const (
+	bluezService     = "org.bluez"
+	deviceInterface  = "org.bluez.Device1"
+	adapterInterface = "org.bluez.Adapter1"
+)
+
+// ErrNoAdapter reports that bluetoothd published no adapter, so its
+// answer says nothing about which controllers are paired.
+//
+// It separates two states: no controller is paired, and there is
+// nothing to ask yet. bluetoothd publishes its object tree a moment
+// after it claims its bus name, and it removes every device object
+// when the adapter itself goes away, so an empty answer arrives in
+// both of those cases as well. Treating one as the other would retract
+// every published controller while a claim still held one, which is
+// the deletion that strands a consumer.
+var ErrNoAdapter = errors.New("bluetoothd published no adapter")
+
+// controller is one paired controller, as bluetoothd reports it. The
+// address is the map key that pairedControllers returns it under, in
+// the one normalized form this program keys on.
+//
+// The fields past Connected are the identity facts BlueZ carries
+// for a device: the class word from the inquiry response, the LE
+// appearance, and the profile UUIDs from the SDP browse that runs
+// after pairing. Each one keeps its zero value when bluetoothd
+// reports no such property, and the publisher reads zero as
+// "publish nothing".
+type controller struct {
+	Name        string
+	Connected   bool
+	Class       uint32
+	Appearance  uint16
+	Icon        string
+	Modalias    string
+	AddressType string
+	UUIDs       []string
+}
+
+// pairedControllers reads every paired device from bluetoothd, keyed
+// by the normalized MAC address.
+//
+// The call is GetManagedObjects on BlueZ's root object, which returns
+// the adapters, the devices below them, and every interface each one
+// has, in one round trip.
+func pairedControllers(conn *dbus.Conn) (map[string]controller, error) {
+	var objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
+	err := conn.Object(bluezService, "/").
+		Call("org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).
+		Store(&objects)
+	if err != nil {
+		return nil, fmt.Errorf("reading BlueZ's managed objects: %w", err)
+	}
+	return controllersFrom(objects)
+}
+
+// controllersFrom reads the paired set out of one managed-object
+// tree. It is separate from the call so that the rules below are
+// testable without a bus.
+//
+// A device object with Paired false is a controller that BlueZ
+// detected on the air and holds no link key for, so it is not this
+// machine's to offer. An answer with no adapter in it is ErrNoAdapter,
+// never an empty paired set.
+func controllersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (map[string]controller, error) {
+	adapters := 0
+	controllers := map[string]controller{}
+	for _, interfaces := range objects {
+		if _, ok := interfaces[adapterInterface]; ok {
+			adapters++
+		}
+		properties, ok := interfaces[deviceInterface]
+		if !ok {
+			continue
+		}
+		address, _ := properties["Address"].Value().(string)
+		mac := normalizeMAC(address)
+		if !validMAC(mac) {
+			continue
+		}
+		if paired, _ := properties["Paired"].Value().(bool); !paired {
+			continue
+		}
+		connected, _ := properties["Connected"].Value().(bool)
+		name, _ := properties["Alias"].Value().(string)
+		class, _ := properties["Class"].Value().(uint32)
+		appearance, _ := properties["Appearance"].Value().(uint16)
+		icon, _ := properties["Icon"].Value().(string)
+		modalias, _ := properties["Modalias"].Value().(string)
+		addressType, _ := properties["AddressType"].Value().(string)
+		uuids, _ := properties["UUIDs"].Value().([]string)
+		controllers[mac] = controller{
+			Name:        name,
+			Connected:   connected,
+			Class:       class,
+			Appearance:  appearance,
+			Icon:        icon,
+			Modalias:    modalias,
+			AddressType: addressType,
+			UUIDs:       uuids,
+		}
+	}
+	if adapters == 0 {
+		return nil, ErrNoAdapter
+	}
+	return controllers, nil
+}
+
+// adapterAddress reads the address of the adapter bluetoothd holds.
+//
+// The address names the Secret that holds this adapter's bonds, so
+// the operator has to read it before it can write one. It comes from
+// org.bluez.Adapter1 and not from the kernel's HCIGETDEVINFO ioctl
+// that bondfetch uses, because the operator already talks to
+// bluetoothd and bluetoothd answers with the adapter it registered,
+// which is the adapter whose tree these containers share. bondfetch
+// has no such source: it runs before bluetoothd, so the kernel is the
+// only place the address is.
+func adapterAddress(conn *dbus.Conn) (bonds.Address, error) {
+	var objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
+	err := conn.Object(bluezService, "/").
+		Call("org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).
+		Store(&objects)
+	if err != nil {
+		return bonds.Address{}, fmt.Errorf("reading BlueZ's managed objects: %w", err)
+	}
+	return adapterAddressFrom(objects)
+}
+
+// adapterAddressFrom picks the adapter out of one managed-object tree.
+// It is separate from the call for the same reason controllersFrom is:
+// the rules below are testable without a bus.
+//
+// An answer with no adapter is ErrNoAdapter, the same as the paired
+// set's read, because it arrives in the same two cases: bluetoothd has
+// not published its object tree yet, or the adapter has gone away.
+//
+// A pod claims one adapter, so a second one is not expected. This
+// takes the adapter at the lowest object path, so that two reads of
+// the same tree answer with the same adapter. A map's iteration order
+// alone would not give that.
+func adapterAddressFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (bonds.Address, error) {
+	chosen, address := "", ""
+	for path, interfaces := range objects {
+		properties, ok := interfaces[adapterInterface]
+		if !ok {
+			continue
+		}
+		if chosen != "" && string(path) >= chosen {
+			continue
+		}
+		chosen = string(path)
+		address, _ = properties["Address"].Value().(string)
+	}
+	if chosen == "" {
+		return bonds.Address{}, ErrNoAdapter
+	}
+	parsed, err := bonds.ParseAddress(address)
+	if err != nil {
+		return bonds.Address{}, fmt.Errorf("the adapter at %s reports no usable address: %w", chosen, err)
+	}
+	return parsed, nil
+}
+
+// watchBlueZ returns a channel that reports whenever the paired set,
+// a connection state, or the bonds on disk may have changed. Three
+// signals cover it: InterfacesAdded when bluetoothd creates a device
+// object, which is at discovery and not at pairing, InterfacesRemoved
+// for an unpairing, and PropertiesChanged on a device object for a
+// connect, a disconnect, or the Bonded property a completed pairing
+// sets. Each one starts a pass that re-reads the whole tree and keeps
+// the paired devices, so a signal with no pairing in it costs a read
+// and no more.
+//
+// The bond store reads the same three signals through the same
+// channel, and it needs each of them. Bonded is the property that says
+// the keys are stored, where Paired is deferred until service
+// discovery finishes and can lag by seconds. InterfacesAdded is not
+// redundant: when bluetoothd creates a device object and bonds it in
+// one iteration of its main loop, GDBus emits no property change for
+// an interface it has not yet published, and only InterfacesAdded
+// fires, carrying Bonded=true. Bonded never returns to false, so a
+// removal arrives as Paired going false or as InterfacesRemoved.
+//
+// The channel is buffered and a full channel drops the signal, for
+// the same reason the uevent channel does: the reader re-reads the
+// whole tree, so one wake answers a burst.
+func watchBlueZ(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
+	matches := [][]dbus.MatchOption{
+		{
+			dbus.WithMatchSender(bluezService),
+			dbus.WithMatchInterface("org.freedesktop.DBus.ObjectManager"),
+		},
+		{
+			dbus.WithMatchSender(bluezService),
+			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+			dbus.WithMatchMember("PropertiesChanged"),
+			dbus.WithMatchArg(0, deviceInterface),
+		},
+	}
+	for _, match := range matches {
+		if err := conn.AddMatchSignal(match...); err != nil {
+			return nil, fmt.Errorf("subscribing to BlueZ's signals: %w", err)
+		}
+	}
+
+	signals := make(chan *dbus.Signal, 64)
+	conn.Signal(signals)
+	return relayBlueZSignals(ctx, signals, func() { conn.RemoveSignal(signals) }), nil
+}
+
+// relayBlueZSignals is watchBlueZ's loop, over a signal channel that
+// is already subscribed. It is separate from the subscription so that
+// a test can drive it without a bus.
+//
+// release unregisters the channel from the connection. The loop calls
+// it on the way out, whichever way it leaves, because a connection
+// that keeps delivering to a channel nobody reads holds the channel
+// and the goroutine godbus spawns for it forever.
+func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release func()) <-chan struct{} {
+	changed := make(chan struct{}, 1)
+	go func() {
+		defer close(changed)
+		defer release()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-signals:
+				if !ok {
+					return
+				}
+				select {
+				case changed <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	return changed
+}
+
+// waitForBus connects to the pod's D-Bus system bus, and retries
+// until the socket is there or the timeout passes.
+//
+// The bus is not this container's to start. dbus-daemon runs in the
+// bluetoothd container, and the two containers share the socket's
+// directory as one emptyDir, so this operator can reach
+// dbus.SystemBus() before that container has bound the socket. An exit
+// would work, because the kubelet restarts the container, but it
+// restarts with a backoff that reaches five minutes, and an ordinary
+// pod start must not cost that.
+//
+// The wait is bounded for the same reason waitForBlueZ is bounded: a
+// bus that never arrives is a failure to report.
+func waitForBus(ctx context.Context, timeout time.Duration) (*dbus.Conn, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		// godbus caches the connection it returns and caches nothing
+		// when it fails, so calling this again after a failure opens a
+		// new connection.
+		conn, err := dbus.SystemBus()
+		if err == nil {
+			return conn, nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("no bus within %s: %w", timeout, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(busRetryDelay):
+		}
+	}
+}
+
+// waitForBlueZ blocks until bluetoothd owns its bus name, or until
+// the timeout passes. The operator and bluetoothd start in the same
+// pod, so the operator can reach the bus before the daemon has
+// claimed its name.
+//
+// The wait is bounded on purpose. A bluetoothd that never claims the
+// name is a failure to report, and the operator does not wait in that
+// state. The pod's restart is the retry, and the failure is visible in
+// kubectl instead of hidden in a log.
+func waitForBlueZ(ctx context.Context, conn *dbus.Conn, timeout time.Duration) error {
+	// The match goes on before the check, so a daemon that claims the
+	// name between the two still wakes this wait.
+	if err := matchBlueZName(conn); err != nil {
+		return err
+	}
+	names := make(chan *dbus.Signal, 8)
+	conn.Signal(names)
+	defer conn.RemoveSignal(names)
+
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		owned, err := blueZOwned(conn)
+		if err != nil {
+			return err
+		}
+		if owned {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("bluetoothd did not claim %s within %s", bluezService, timeout)
+		case <-names:
+		}
+	}
+}
+
+// watchBlueZExit returns a channel that carries one value when
+// bluetoothd leaves the bus.
+//
+// bluetoothd owns the HID sessions, and killing it disconnects every
+// controller at once, so an operator that kept publishing after the
+// daemon died would advertise controllers it can no longer deliver.
+// The operator ends instead, the container ends with it, and the
+// kubelet restarts the pair.
+//
+// The channel carries a value rather than closing, and the watcher
+// leaves it open when its context ends. A closed channel is always
+// ready to receive, so closing it on an ordinary shutdown would race
+// the shutdown's own branch and report the daemon's death when
+// nothing died.
+//
+// A closed signal channel counts as the daemon leaving. godbus closes
+// every registered signal channel when the connection to the bus is
+// lost, and a lost bus is a bus daemon or a bluetoothd that is no
+// longer there. Either way this operator can no longer read the
+// paired set.
+func watchBlueZExit(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
+	if err := matchBlueZName(conn); err != nil {
+		return nil, err
+	}
+	names := make(chan *dbus.Signal, 8)
+	conn.Signal(names)
+	return watchNameLoss(ctx, names, func() { conn.RemoveSignal(names) }), nil
+}
+
+// watchNameLoss is watchBlueZExit's loop, over a signal channel that
+// is already subscribed. It is separate from the subscription so that
+// a test can drive it without a bus, and release does the same job it
+// does in relayBlueZSignals.
+func watchNameLoss(ctx context.Context, names <-chan *dbus.Signal, release func()) <-chan struct{} {
+	gone := make(chan struct{}, 1)
+	go func() {
+		defer release()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case signal, ok := <-names:
+				if !ok {
+					gone <- struct{}{}
+					return
+				}
+				if signal.Name != "org.freedesktop.DBus.NameOwnerChanged" || len(signal.Body) != 3 {
+					continue
+				}
+				name, _ := signal.Body[0].(string)
+				owner, _ := signal.Body[2].(string)
+				if name == bluezService && owner == "" {
+					gone <- struct{}{}
+					return
+				}
+			}
+		}
+	}()
+	return gone
+}
+
+// matchBlueZName subscribes to the bus daemon's report that BlueZ's
+// name changed hands. Both the startup wait and the exit watch need
+// it, and each one asks for it, because a match rule that one
+// function adds as a side effect for another is a dependency that
+// nothing states.
+func matchBlueZName(conn *dbus.Conn) error {
+	err := conn.AddMatchSignal(
+		dbus.WithMatchSender("org.freedesktop.DBus"),
+		dbus.WithMatchInterface("org.freedesktop.DBus"),
+		dbus.WithMatchMember("NameOwnerChanged"),
+		dbus.WithMatchArg(0, bluezService),
+	)
+	if err != nil {
+		return fmt.Errorf("subscribing to bus name changes: %w", err)
+	}
+	return nil
+}
+
+// blueZOwned asks the bus daemon whether anything owns BlueZ's name.
+func blueZOwned(conn *dbus.Conn) (bool, error) {
+	var owned bool
+	err := conn.BusObject().
+		Call("org.freedesktop.DBus.NameHasOwner", 0, bluezService).
+		Store(&owned)
+	if err != nil {
+		return false, fmt.Errorf("asking the bus who owns %s: %w", bluezService, err)
+	}
+	return owned, nil
+}

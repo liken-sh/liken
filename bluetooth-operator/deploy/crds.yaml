@@ -1,0 +1,539 @@
+# The pairing API: three resources that let a person create, read, and
+# delete a bond with kubectl.
+#
+# One rule sets what is an object here and what is status. A spec is
+# desired state, a status is observed state, and a radio session is
+# never an object. So the Adapter and the Peripheral are the durable
+# inventory, the PairingRequest is the act of pairing, and everything
+# the radio reports goes in status.
+#
+# The operator creates and reconciles all three. A person creates a
+# PairingRequest, edits a Peripheral's spec to rename or trust a
+# controller, and deletes a Peripheral to unpair one.
+---
+# The radio. The operator creates this object for the adapter its pod
+# claimed, and names it for that adapter's address in the form a
+# Kubernetes name accepts: lowercase, with dashes in place of the
+# colons.
+#
+# It is cluster-scoped because hardware belongs to a machine and not to
+# a tenant, which is the same reason the ResourceSlice that publishes
+# these controllers is cluster-scoped.
+#
+# The Adapter is the root of the ownership tree. Peripherals belong to
+# it and each Peripheral owns its bond Secret, so retiring a dead radio
+# is one delete that collects every bond keyed to it. Nothing in that
+# tree names a machine, so a dongle carried to another machine keeps
+# its Adapter, its Peripherals, and their Secrets.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: adapters.bluetooth.liken.sh
+spec:
+  group: bluetooth.liken.sh
+  scope: Cluster
+  names:
+    kind: Adapter
+    listKind: AdapterList
+    plural: adapters
+    singular: adapter
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Alias
+          type: string
+          description: The name the radio broadcasts about itself.
+          jsonPath: .spec.alias
+        - name: Address
+          type: string
+          description: The adapter's MAC, uppercase with colons.
+          jsonPath: .status.address
+        - name: Node
+          type: string
+          description: The machine the radio is plugged into now.
+          jsonPath: .status.node
+        - name: Powered
+          type: boolean
+          description: Whether bluetoothd has the radio powered on.
+          jsonPath: .status.powered
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            One Bluetooth adapter, named for its own address. The object
+            follows the radio, so an adapter that moves to another
+            machine keeps its Peripherals and its stored bonds.
+          properties:
+            spec:
+              type: object
+              description: What the operator makes true about the radio.
+              properties:
+                alias:
+                  type: string
+                  maxLength: 248
+                  description: >-
+                    The name the radio broadcasts about itself, written
+                    into BlueZ's Adapter1.Alias. A discoverable window
+                    announces the adapter under this name. Leave it
+                    empty to keep the name bluetoothd chose.
+            status:
+              type: object
+              description: What the operator observes about the radio.
+              properties:
+                address:
+                  type: string
+                  description: >-
+                    The adapter's Bluetooth address, in the uppercase
+                    form the label on the hardware shows.
+                node:
+                  type: string
+                  description: >-
+                    The machine whose operator holds the radio now. The
+                    value changes when the adapter moves.
+                powered:
+                  type: boolean
+                  description: Whether bluetoothd has the radio powered on.
+                deletionRefused:
+                  type: string
+                  description: >-
+                    Why the operator kept its finalizer on an Adapter
+                    somebody deleted. Deleting an Adapter cascades to
+                    every Peripheral under it, so the operator refuses
+                    while the radio is present. Unplug the radio to let
+                    the deletion through. It is empty at every other
+                    time.
+---
+# One bonded device: this device holds a link key with this adapter,
+# and the object reports what the radio observes about it. The operator
+# creates the object when a pairing succeeds, and when it finds a bond
+# that bluetoothd already held.
+#
+# Deleting a Peripheral is the unpair API. The operator runs an ordered
+# teardown behind a finalizer: it disconnects the device, waits for the
+# claim that holds the controller to release it, retires the device
+# from the ResourceSlice, and removes the bond from bluetoothd. The
+# Secret is collected with the object.
+#
+# Nothing else deletes a Peripheral. A Peripheral whose bond
+# disappeared from bluetoothd keeps its object and reports the gap in
+# status.bond.held, because deletion means unpair and a person decides
+# that.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: peripherals.bluetooth.liken.sh
+spec:
+  group: bluetooth.liken.sh
+  scope: Cluster
+  names:
+    kind: Peripheral
+    listKind: PeripheralList
+    plural: peripherals
+    singular: peripheral
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Alias
+          type: string
+          description: The name a person gave the device.
+          jsonPath: .spec.alias
+        - name: Device
+          type: string
+          description: The name the device reports for itself.
+          jsonPath: .status.name
+        - name: Address
+          type: string
+          description: The device's MAC, uppercase with colons.
+          jsonPath: .status.address
+        - name: Battery
+          type: integer
+          description: The charge the device reports, if it reports one.
+          jsonPath: .status.battery.percentage
+        - name: Paired
+          type: boolean
+          description: Whether BlueZ reports this device as paired.
+          jsonPath: .status.bond.paired
+        - name: Connected
+          type: string
+          description: Whether BlueZ reports the device as connected now.
+          jsonPath: '.status.conditions[?(@.type=="Connected")].status'
+        - name: Node
+          type: string
+          description: The machine whose operator holds this bond now.
+          jsonPath: .status.node
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            One bonded Bluetooth device, named for its own address in
+            the same form the ResourceSlice uses. The object owns the
+            Secret that stores this bond's keys.
+          properties:
+            spec:
+              type: object
+              description: What the operator makes true about the device.
+              properties:
+                alias:
+                  type: string
+                  maxLength: 248
+                  description: >-
+                    The name for this device, written into BlueZ's
+                    Device1.Alias. bluetoothd stores the alias in the
+                    bond's own file, so the name is stored with the
+                    keys. Leave it empty to keep the name the device
+                    reports for itself.
+                trusted:
+                  type: boolean
+                  default: true
+                  description: >-
+                    Whether the device may connect with no agent,
+                    written into BlueZ's Device1.Trusted. With this off,
+                    BlueZ asks an agent to authorize each service on
+                    every connection, and no agent is registered
+                    outside a pairing window, so the device does not
+                    connect. A trusted controller connects when its
+                    own button is pressed. A trusted speaker is
+                    connected by the operator whenever it is powered
+                    on and in range.
+            status:
+              type: object
+              description: What the operator observes about the device.
+              properties:
+                address:
+                  type: string
+                  description: >-
+                    The device's Bluetooth address, in the uppercase
+                    form the label on the hardware shows.
+                name:
+                  type: string
+                  description: >-
+                    The name the device reports for itself. It is not
+                    spec.alias, so a person who renames a device still
+                    reads the name the hardware states.
+                icon:
+                  type: string
+                  description: >-
+                    The freedesktop icon name BlueZ derives for this
+                    device, such as input-gaming or audio-headset. It
+                    is empty when BlueZ states none.
+                adapter:
+                  type: string
+                  description: The address of the adapter this bond belongs to.
+                node:
+                  type: string
+                  description: >-
+                    The machine whose operator holds this bond now. The
+                    value changes when the adapter moves.
+                bond:
+                  type: object
+                  description: What the operator observes about the bond.
+                  properties:
+                    held:
+                      type: boolean
+                      description: >-
+                        Whether bluetoothd still has this bond. It is
+                        false when the daemon no longer has the keys.
+                        The operator reports this state but does not
+                        act on it.
+                    paired:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports this device as paired,
+                        from Device1.Paired, read on every pass the
+                        operator makes over the devices.
+                    bonded:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports a stored link key for
+                        this device, from Device1.Bonded. Paired alone
+                        does not state that the key is stored.
+                    trusted:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports this device as trusted,
+                        from Device1.Trusted. This is the property
+                        spec.trusted reconciles into.
+                    connected:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports this device as connected,
+                        from Device1.Connected. It is the same reading
+                        the Connected condition reports.
+                    secret:
+                      type: string
+                      description: >-
+                        The namespace and name of the Secret that stores
+                        this bond's keys. The Secret is owned by this
+                        object, so deleting the Peripheral collects it.
+                    pairedAt:
+                      type: string
+                      format: date-time
+                      description: >-
+                        When the operator first recorded this bond,
+                        which is the pairing for a bond it made and the
+                        adoption for one it discovered.
+                    request:
+                      type: string
+                      description: >-
+                        The namespace and name of the PairingRequest
+                        that produced this bond. It is empty for a bond
+                        the operator adopted. A finished request is
+                        collected after its TTL, and this field
+                        outlasts it.
+                battery:
+                  type: object
+                  description: >-
+                    The charge the device reports. The operator reads
+                    the kernel's power supply class first, and BlueZ's
+                    org.bluez.Battery1 interface for a device the
+                    kernel registers no power supply for. The block is
+                    absent when neither reports a level, which covers
+                    every device with no battery and every battery
+                    device that is not connected.
+                  properties:
+                    percentage:
+                      type: integer
+                      minimum: 0
+                      maximum: 100
+                      description: The charge left, from 0 to 100.
+                    source:
+                      type: string
+                      description: >-
+                        Where the level came from. It is the power
+                        supply's own name for a reading from the
+                        kernel, such as
+                        ps-controller-battery-7c:66:ef:22:e7:80, and
+                        BlueZ's own word for a reading from BlueZ,
+                        such as HID or a GATT service.
+                    charging:
+                      type: boolean
+                      description: >-
+                        Whether the device is charging now. It is
+                        absent when the source is BlueZ, which reports
+                        a level and no direction, and when the kernel
+                        reports the status Unknown.
+                conditions:
+                  type: array
+                  maxItems: 8
+                  description: >-
+                    Connected reports whether the device has a link
+                    now. Its reason is LinkUp when the link is up,
+                    Asleep for a Low Energy device that drops its link
+                    between presses and pages the radio again on the
+                    next one, NotConnected for a device that is
+                    switched off or out of range, and NotBonded when
+                    bluetoothd holds no object for the device, which
+                    means the bond was removed by another route.
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        description: The state this condition reports on.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: Whether the reported state is true, false, or unknown.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        description: >-
+                          One word for why the condition has this
+                          status.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          What a person can do about it, when the
+                          reason alone does not say. It is empty at
+                          every other time.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the status last changed, which is not
+                          when the operator last wrote the object. A
+                          reason that changes under the same status
+                          does not move it.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+---
+# The act of pairing, and the discovery that goes with it. A person
+# creates one of these, watches status.seen for the controller, and
+# approves by writing that address into spec.device.
+#
+# It is namespaced so that RBAC can grant "may create PairingRequests"
+# in one namespace without granting exec into the operator's pod. This
+# API exists to make that narrower grant possible. Approval is not a
+# separate privilege: a custom resource has only the status and
+# scale subresources, so whoever may update a request may approve one.
+#
+# An empty spec.device never pairs anything. Pairing whatever responds
+# first is the one behavior that can bond a stranger's device.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: pairingrequests.bluetooth.liken.sh
+spec:
+  group: bluetooth.liken.sh
+  scope: Namespaced
+  names:
+    kind: PairingRequest
+    listKind: PairingRequestList
+    plural: pairingrequests
+    singular: pairingrequest
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          description: Open while the window runs, then Paired or Expired.
+          jsonPath: .status.phase
+        - name: Device
+          type: string
+          description: The address a person approved.
+          jsonPath: .spec.device
+        - name: Peripheral
+          type: string
+          description: The Peripheral a successful window produced.
+          jsonPath: .status.peripheral
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            One pairing window on one adapter. The scan and the window
+            are one radio session, so an address in status.seen is one
+            the radio observed in this same session.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              description: What a person asks the operator to do.
+              required: [adapter]
+              properties:
+                adapter:
+                  type: string
+                  maxLength: 17
+                  pattern: '^([0-9a-f]{2}-){5}[0-9a-f]{2}$'
+                  description: >-
+                    The name of the Adapter to open the window on,
+                    which is that radio's address in lowercase with
+                    dashes. Only the operator holding that radio acts
+                    on the request.
+                windowSeconds:
+                  type: integer
+                  default: 180
+                  minimum: 15
+                  maximum: 900
+                  description: >-
+                    How long the radio stays discoverable, pairable,
+                    and scanning. The operator gives bluetoothd the
+                    same deadline, so the window closes on its own if
+                    the operator stops.
+                device:
+                  type: string
+                  maxLength: 17
+                  pattern: '^$|^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
+                  description: >-
+                    The address to pair with, which is the approval.
+                    Leave it empty to scan and report, and write an
+                    address from status.seen into it to pair that one
+                    device. An empty value never pairs anything.
+                ttlSecondsAfterFinished:
+                  type: integer
+                  default: 86400
+                  minimum: 0
+                  description: >-
+                    How long the request stays after it reaches Paired
+                    or Expired. The Peripheral records the request that
+                    produced it, so that record outlasts the deletion.
+            status:
+              type: object
+              description: What the operator observes during the window.
+              properties:
+                phase:
+                  type: string
+                  enum: [Open, Paired, Expired]
+                  description: >-
+                    Open while the window runs. Paired when the
+                    approved device bonded, and Expired when the window
+                    closed with no approval. Neither end state retries.
+                windowClosesAt:
+                  type: string
+                  format: date-time
+                  description: When the window closes if nobody approves a device.
+                seen:
+                  type: array
+                  maxItems: 16
+                  description: >-
+                    The devices the radio observed during this window
+                    for which the cluster has no bond. The list is
+                    capped at 16 entries, because it is written from
+                    radio observations, and a busy room would
+                    otherwise grow the object without limit.
+                  items:
+                    type: object
+                    required: [address]
+                    properties:
+                      address:
+                        type: string
+                        maxLength: 17
+                        description: >-
+                          The device's address. Write this into
+                          spec.device to approve the pairing.
+                      name:
+                        type: string
+                        maxLength: 64
+                        description: >-
+                          The name the device broadcasts, cut to the
+                          same 64 bytes a ResourceSlice attribute takes.
+                      firstSeen:
+                        type: string
+                        format: date-time
+                        description: When the radio first observed this device.
+                seenTruncated:
+                  type: boolean
+                  description: >-
+                    Whether the limit of 16 entries excluded a device
+                    from status.seen. True means the radio observed more
+                    eligible, unbonded devices than the list reports.
+                    False means every eligible, unbonded device fit in
+                    the list.
+                peripheral:
+                  type: string
+                  description: The name of the Peripheral this request produced.
+                finishedAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the request reached Paired or Expired, which
+                    is what ttlSecondsAfterFinished counts from.
+                message:
+                  type: string
+                  description: >-
+                    Why the request has not done what it was asked to
+                    do, such as a pairing bluetoothd refused. It is
+                    empty when there is nothing to report.

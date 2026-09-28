@@ -1,0 +1,9 @@
+# Both images build from this directory. Between them they need the
+# module files, the Go sources, and the BlueZ configuration under
+# bluetoothd/. Everything else is documentation or manifests.
+.git
+.github
+deploy
+plans
+README.md
+LICENSE
