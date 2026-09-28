@@ -52,7 +52,7 @@ const describedByBase = "https://kubernetes.default.svc/apis/" +
 	DisplayGroup + "/" + DisplayVersion + "/" + displaysPlural + "/"
 
 // The manual page the service-doc relation (RFC 8631) points at.
-const serviceDocument = "https://display.liken.sh/docs/reference/api/"
+const serviceDocument = "https://liken.sh/display/docs/reference/api/"
 
 // The time in the Content-Disposition file name (RFC 6266 section 4)
 // is RFC 3339 UTC with the colons replaced by hyphens, because a

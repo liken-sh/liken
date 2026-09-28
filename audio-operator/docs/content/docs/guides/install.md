@@ -22,7 +22,7 @@ You need:
   speakers on HDMI or DisplayPort, or something wired to the analog
   jack.
 * For Bluetooth speakers, the
-  [`bluetooth-operator`](https://bluetooth.liken.sh) on the same
+  [`bluetooth-operator`](https://liken.sh/bluetooth/) on the same
   machine. Its media bus puts the sound server on `bluetoothd`'s
   bus. The `bluetooth-operator` is optional, and a machine with a
   card and no radio installs nothing extra.
@@ -121,10 +121,10 @@ This site serves the repository's
 the install needs no clone. Four files are the rest of the install:
 
     kubectl apply -n liken-system \
-      -f https://audio.liken.sh/deploy/crds.yaml \
-      -f https://audio.liken.sh/deploy/deviceclasses.yaml \
-      -f https://audio.liken.sh/deploy/rbac.yaml \
-      -f https://audio.liken.sh/deploy/operator.yaml
+      -f https://liken.sh/audio/deploy/crds.yaml \
+      -f https://liken.sh/audio/deploy/deviceclasses.yaml \
+      -f https://liken.sh/audio/deploy/rbac.yaml \
+      -f https://liken.sh/audio/deploy/operator.yaml
 
 `crds.yaml` holds the `Sink` and `Source`
 `CustomResourceDefinitions`, the resources the operator creates for
@@ -147,10 +147,10 @@ takes a raw YAML URL as a resource:
     namespace: liken-system
     resources:
       - classes.yaml
-      - https://audio.liken.sh/deploy/crds.yaml
-      - https://audio.liken.sh/deploy/deviceclasses.yaml
-      - https://audio.liken.sh/deploy/rbac.yaml
-      - https://audio.liken.sh/deploy/operator.yaml
+      - https://liken.sh/audio/deploy/crds.yaml
+      - https://liken.sh/audio/deploy/deviceclasses.yaml
+      - https://liken.sh/audio/deploy/rbac.yaml
+      - https://liken.sh/audio/deploy/operator.yaml
 
 A clone works too: `kubectl apply -k deploy/` from the repository
 applies the same files through
@@ -325,8 +325,8 @@ Delete the manifests. Then delete the slice on each node that
 published one:
 
     kubectl delete -n liken-system \
-      -f https://audio.liken.sh/deploy/rbac.yaml \
-      -f https://audio.liken.sh/deploy/operator.yaml
+      -f https://liken.sh/audio/deploy/rbac.yaml \
+      -f https://liken.sh/audio/deploy/operator.yaml
     kubectl delete resourceslice <node>-audio.liken.sh
 
 This leaves the `DeviceClasses` in place: `sound-card` from the
@@ -335,7 +335,7 @@ other claim names them. Deleting `crds.yaml` deletes every `Sink`
 and `Source` with it, and the declarations they hold:
 
     kubectl delete deviceclass sound-card audio-sink audio-source
-    kubectl delete -f https://audio.liken.sh/deploy/crds.yaml
+    kubectl delete -f https://liken.sh/audio/deploy/crds.yaml
 
 The second step is yours because the operator never deletes its
 slice. A device that leaves the inventory while a claim still names

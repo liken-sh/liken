@@ -38,8 +38,8 @@ it behaves as it does now. `liken`'s own DRA driver publishes the raw
 adapter. This operator claims that adapter, and its pod runs
 bluetoothd, so the `liken` system image ships no BlueZ and no D-Bus.
 The sibling operators publish
-[monitor outputs](https://display.liken.sh) and
-[audio outputs](https://audio.liken.sh).
+[monitor outputs](https://liken.sh/display/) and
+[audio outputs](https://liken.sh/audio/).
 
 Start with [Install the operator](/docs/guides/install/), then
 [Pair a controller and give it to a pod](/docs/guides/pair-a-controller/).

@@ -29,7 +29,7 @@ GENERATED := \
 	$(REFERENCE)/routes.md
 
 SKILLS := go tool skills
-BASE := https://media.liken.sh
+BASE := https://liken.sh/media/
 
 .PHONY: build
 build: $(GENERATED)

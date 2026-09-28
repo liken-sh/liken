@@ -3,7 +3,7 @@ name: browser
 description: "Put the media browser on a Player's screen in place of the idle screen, and learn its keys, its screens, and how it starts playback. Use when a Player should show the namespace's catalog and start a Play from a remote."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/browser/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/browser/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Put the media browser on a screen
 
@@ -29,7 +29,7 @@ screen when nothing plays. Set it to this operator's name:
 `media-operator` resolves the name into `status.idle.controller`, and
 this operator compares against that resolved value, never the spec.
 The `Player` must be in the same namespace as the libraries it shows.
-[Hand the idle screen to another controller](https://media.liken.sh/docs/guides/handing-the-idle-screen-to-another-controller/)
+[Hand the idle screen to another controller](https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/)
 in the `media-operator` manual describes the delegation from its side.
 
 ## 2. What the operator runs
@@ -127,7 +127,7 @@ on that member.
 The answer to who is watching lasts until three hours pass with no
 press. The browser keeps it on the bus, retained, so a screen pod that
 restarts inside those hours draws the same room and asks nobody.
-[The library bus](https://library.liken.sh/docs/reference/bus/#who-is-watching) gives the
+[The library bus](https://liken.sh/library/docs/reference/bus/#who-is-watching) gives the
 message.
 
 A movie's page shows its art, its facts, its people, and the set or
@@ -159,7 +159,7 @@ Enter on a title resolves what to play from the browser's own copy of
 the catalog. It then publishes the list on the bus, as a play request
 on `liken/library/players/{namespace}/{player}/play`. The operator names
 the topic on the browser container as `LIBRARY_PLAY_TOPIC`, and
-[The library bus](https://library.liken.sh/docs/reference/bus/#the-play-request) gives every field
+[The library bus](https://liken.sh/library/docs/reference/bus/#the-play-request) gives every field
 of the request. The operator turns it into a `Play` for the `Player`,
 with each item's path as a claim reference, and `media-operator` runs
 it. The `Play` is named after the title, so `kubectl get plays` reads
@@ -171,4 +171,4 @@ on the page it left.
 Nothing scopes a `Player`'s screen to a subset of the namespace's
 libraries. A screen that should show fewer libraries needs a namespace
 of its own. See
-[The namespace is a boundary](https://library.liken.sh/docs/guides/libraries/#the-namespace-is-a-boundary).
+[The namespace is a boundary](https://liken.sh/library/docs/guides/libraries/#the-namespace-is-a-boundary).

@@ -3,7 +3,7 @@ name: handing-the-idle-screen-to-another-controller
 description: "Hand a Player's idle screen to another operator through spec.idle.controller, and follow the contract that operator uses to draw the screen and read presses. Use when something other than media-operator should draw the screen while nothing plays."
 ---
 
-This skill is the guide at https://media.liken.sh/docs/guides/handing-the-idle-screen-to-another-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Hand the idle screen to another controller
 
@@ -14,7 +14,7 @@ contract an operator follows to take a screen over.
 
 You need:
 
-* The operator and its bus, from the [install](https://media.liken.sh/docs/guides/install/).
+* The operator and its bus, from the [install](https://liken.sh/media/docs/guides/install/).
 * A `Player` with a display, so the operator holds a display claim
   for it.
 
@@ -39,7 +39,7 @@ Any other name is a delegate. The operator keeps the display claim,
 runs no client of its own, and writes what the
 delegate needs to the `Player` status. `spec.idle.image` has no effect
 under a delegate. `library.liken.sh/media-browser` is the
-[library operator](https://library.liken.sh)'s media browser, the one
+[library operator](https://liken.sh/library/)'s media browser, the one
 delegate that exists today.
 
 `kubectl get players` shows the resolved name in its `Idle` column.
@@ -80,7 +80,7 @@ operator resolves the two into one name.
   panel never goes dark on its own.
 * `bus` is the broker and every topic the client reads or writes. The
   section on presses below covers each one, and
-  [the media bus](https://media.liken.sh/docs/reference/bus/) gives the rules they follow.
+  [the media bus](https://liken.sh/media/docs/reference/bus/) gives the rules they follow.
 
 ## Build the pod
 
@@ -134,7 +134,7 @@ There are two ways to hold that contract:
   the reader. Every message on one comes back on the same connection,
   so a client reads back the retained state it owns.
 * Read the same topics yourself and hold the same gates. The
-  [bus reference](https://media.liken.sh/docs/reference/bus/) describes each topic.
+  [bus reference](https://liken.sh/media/docs/reference/bus/) describes each topic.
 
 Set these variables on your container. Each value comes from
 `status.idle`:
@@ -149,7 +149,7 @@ Set these variables on your container. Each value comes from
   and steps none.
 * `MEDIA_PLAYER_VOLUME_OWNER_TOPIC`, from `bus.volumeOwnerTopic`. It
   is present whenever `bus.volumeTopic` is. The topic holds the
-  retained [owner mark](https://media.liken.sh/docs/reference/players/#volumeowner): a
+  retained [owner mark](https://liken.sh/media/docs/reference/players/#volumeowner): a
   non-empty payload means equipment applies the unit's level, and an
   empty payload means no owner holds it. While the mark is non-empty, draw
   no level of your own and apply none to any audio the client plays.

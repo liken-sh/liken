@@ -3,15 +3,15 @@ name: layout
 description: "Put programs from several namespaces on one monitor, each in its own rectangle, with a Layout. Use when two or more pods must share one screen, or when a window should show for a while and then leave."
 ---
 
-This skill is the guide at https://display.liken.sh/docs/guides/layout/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/display/docs/guides/layout/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Put regions on a screen
 
 This guide puts two programs from two namespaces on one monitor, each
 in its own rectangle. A notice board is on the left seven tenths of a
 lobby screen, and a parking-lot camera is in the upper right. You need
-the operator [installed](https://display.liken.sh/docs/guides/install/) and the
-[claim guide](https://display.liken.sh/docs/guides/claim/) read, because each program gets to
+the operator [installed](https://liken.sh/display/docs/guides/install/) and the
+[claim guide](https://liken.sh/display/docs/guides/claim/) read, because each program gets to
 the screen the way that guide shows.
 
 A screen with no `Layout` shows every window fullscreen, with the

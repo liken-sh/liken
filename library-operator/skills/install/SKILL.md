@@ -3,7 +3,7 @@ name: install
 description: "Install library-operator on a liken cluster: create the storage, apply the manifests, declare a Catalog, and confirm it runs. Use when a cluster has no library-operator yet, when running a development build, or when removing the operator."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Install the operator
 
@@ -14,7 +14,7 @@ runs, a namespace has its catalog, and a `Library` can be declared.
 You need:
 
 * A `liken` cluster.
-* The [`media-operator`](https://media.liken.sh), installed first, in
+* The [`media-operator`](https://liken.sh/media/), installed first, in
   `liken-system`. It owns the players, the plays, and the remotes, and
   its bus at `bus.liken-system.svc:1883` is where every catalog
   reports. A `Library` in a cluster with no bus reports `Offline` and
@@ -63,7 +63,7 @@ A `ReadWriteOnce` claim works only when every pod that mounts it is
 on the same node, which nothing in the schema enforces.
 
 A franchises library needs a second claim for the art its scan
-downloads. [Franchises](https://library.liken.sh/docs/guides/franchises/) covers it.
+downloads. [Franchises](https://liken.sh/library/docs/guides/franchises/) covers it.
 
 ### The catalog claims
 
@@ -96,7 +96,7 @@ node-local class such as `local-path` fits both.
 ## 2. Apply the manifests
 
 The install is the kustomize base in the repository's
-[`deploy/`](https://library.liken.sh/deploy/kustomization.yaml) directory. Take it into a
+[`deploy/`](https://liken.sh/library/deploy/kustomization.yaml) directory. Take it into a
 kustomization of your own and pin `<tag>` to a release, so the install
 is the same every time it is applied:
 
@@ -116,7 +116,7 @@ The base creates the three `CustomResourceDefinitions`, a
 `ServiceAccount`, a `ClusterRole` with its binding, a `Role` with its
 binding, one `Deployment`, and one `Service`. The `Deployment` runs one
 unprivileged replica with every capability dropped. The `Service` is
-the address every `Library`'s [webhook](https://library.liken.sh/docs/guides/webhooks/) is
+the address every `Library`'s [webhook](https://liken.sh/library/docs/guides/webhooks/) is
 reached at.
 
 Only one copy of the operator acts at a time. Each copy competes for
@@ -139,11 +139,11 @@ for the one an earlier release stood for each `Library`. That `ConfigMap` holds 
 `Person` list every screen reads.
 
 This site serves the same files as raw YAML, so a clone is never
-needed: [`libraries-crd.yaml`](https://library.liken.sh/deploy/libraries-crd.yaml),
-[`catalogs-crd.yaml`](https://library.liken.sh/deploy/catalogs-crd.yaml),
-[`metadataproviders-crd.yaml`](https://library.liken.sh/deploy/metadataproviders-crd.yaml),
-[`rbac.yaml`](https://library.liken.sh/deploy/rbac.yaml), and
-[`operator.yaml`](https://library.liken.sh/deploy/operator.yaml).
+needed: [`libraries-crd.yaml`](https://liken.sh/library/deploy/libraries-crd.yaml),
+[`catalogs-crd.yaml`](https://liken.sh/library/deploy/catalogs-crd.yaml),
+[`metadataproviders-crd.yaml`](https://liken.sh/library/deploy/metadataproviders-crd.yaml),
+[`rbac.yaml`](https://liken.sh/library/deploy/rbac.yaml), and
+[`operator.yaml`](https://liken.sh/library/deploy/operator.yaml).
 
 ## 3. Declare a Catalog
 
@@ -163,8 +163,8 @@ exactly one `Catalog` in the namespace before the first `Library`. A
       storage: {}
 
 An empty `storage` provisions a `1Gi` claim on the default class.
-[Catalog](https://library.liken.sh/docs/reference/catalogs/) describes every field, and
-[The catalog](https://library.liken.sh/docs/guides/catalog/) describes what the pod it creates
+[Catalog](https://liken.sh/library/docs/reference/catalogs/) describes every field, and
+[The catalog](https://liken.sh/library/docs/guides/catalog/) describes what the pod it creates
 does.
 
 ## 4. Confirm it runs
@@ -178,9 +178,9 @@ The operator's log reports its first pass and the bus it reports over:
 
 A missing `LIBRARY_BUS_ADDRESS` or `OPERATOR_NAMESPACE` is an error at
 startup, printed to the log, and the pod exits. The served
-[`operator.yaml`](https://library.liken.sh/deploy/operator.yaml) sets both.
+[`operator.yaml`](https://liken.sh/library/deploy/operator.yaml) sets both.
 
-Now [declare a library](https://library.liken.sh/docs/guides/libraries/). Once it is `Ready`,
+Now [declare a library](https://liken.sh/library/docs/guides/libraries/). Once it is `Ready`,
 the listing shows its counts and its phase:
 
     $ kubectl -n media get libraries

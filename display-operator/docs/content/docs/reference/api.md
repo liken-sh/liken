@@ -232,7 +232,7 @@ Every response has these headers:
 | `Date` | the time of the response | RFC 9110 section 6.6.1 |
 | `Vary` | `Accept` | RFC 9110 section 12.5.5 |
 | `Link` | `</v1/display/openapi.json>; rel="service-desc"` | RFC 8288, RFC 8631 |
-| `Link` | `<https://display.liken.sh/docs/reference/api/>; rel="service-doc"` | RFC 8288, RFC 8631 |
+| `Link` | `<https://liken.sh/display/docs/reference/api/>; rel="service-doc"` | RFC 8288, RFC 8631 |
 | `Link` | on a route about one `Display`: `<https://kubernetes.default.svc/apis/display.liken.sh/v1alpha1/displays/{name}>; rel="describedby"` | RFC 8288 section 3.1 |
 
 `Vary: Accept` is also on the extension routes, where `Accept` only

@@ -213,7 +213,7 @@ allocation, so guard every attribute in the bullets above:
 ## The pairing identity
 
 `monitor.liken.sh/id` pairs a monitor's speakers with that monitor's
-screen, which the [display operator](https://display.liken.sh)
+screen, which the [display operator](https://liken.sh/display/)
 publishes from the same monitor's EDID. Both drivers build the value
 the same way, byte for byte, because the scheduler compares them
 under a `matchAttribute` constraint. The value is the lowercase PNP

@@ -49,8 +49,8 @@ the optional layer above the operating system. A cluster that never
 installs it runs unchanged. `liken` itself publishes the graphics
 card; this operator claims that card and publishes its outputs, one
 device for each connector. Its siblings publish
-[Bluetooth controllers](https://bluetooth.liken.sh) and
-[audio outputs](https://audio.liken.sh). A monitor's speakers pair
+[Bluetooth controllers](https://liken.sh/bluetooth/) and
+[audio outputs](https://liken.sh/audio/). A monitor's speakers pair
 with its screen through `monitor.liken.sh/id`, the identity both
 drivers read from the same monitor.
 

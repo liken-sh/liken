@@ -24,7 +24,7 @@ policy, and a `PersistentVolumeClaim` binds the two. A read-only
 volume needs no class, and in its inline form it needs only the `csi`
 block in a pod spec.
 
-The manual is at [git.liken.sh](https://git.liken.sh/). The design is
+The manual is at [git.liken.sh](https://liken.sh/git/). The design is
 [`plans/00-design.md`](plans/00-design.md), and
 [`plans/README.md`](plans/README.md) indexes the plans that build it.
 

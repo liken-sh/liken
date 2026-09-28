@@ -4,7 +4,7 @@
 HUGO := go tool hugo
 
 SKILLS := go tool skills
-BASE := https://git.liken.sh
+BASE := https://liken.sh/git/
 
 .PHONY: build
 build:

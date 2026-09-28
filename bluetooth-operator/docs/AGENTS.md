@@ -2,7 +2,7 @@
 
 @../../brand/voice.md
 
-This directory is the source of https://bluetooth.liken.sh/. Write all
+This directory is the source of https://liken.sh/bluetooth/. Write all
 site prose in Simplified Technical English (ASD-STE100): short sentences,
 active voice, one instruction per sentence. The voice rules in that file
 add what the standard does not state. Read them before you write a page,

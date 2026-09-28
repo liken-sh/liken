@@ -3,7 +3,7 @@ name: franchises
 description: "Declare a Library of kind franchises from a git checkout on a claim, and write a franchise file. Use when a namespace should show the films and series of one story in story order with their own calendar."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/franchises/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/franchises/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Franchises
 
@@ -12,7 +12,7 @@ with its own calendar. People write its files in a git repository. A
 `Library` of kind `franchises` reads a checkout of that repository and
 resolves each member against the other libraries in the namespace. This
 guide puts a checkout on a claim and declares the `Library`.
-[Franchise files](https://library.liken.sh/docs/reference/franchises/) describes the file
+[Franchise files](https://liken.sh/library/docs/reference/franchises/) describes the file
 format.
 
 ## 1. The checkout
@@ -21,7 +21,7 @@ The public repository at
 [`tangled.org/guid.foo/fiction-franchises`](https://tangled.org/guid.foo/fiction-franchises)
 holds the first files, one directory per franchise. How a checkout
 reaches a claim is your choice. Any volume with one directory per
-franchise works. The [git CSI driver](https://git.liken.sh) is one
+franchise works. The [git CSI driver](https://liken.sh/git/) is one
 way, and it keeps the checkout current:
 
     apiVersion: v1
@@ -57,7 +57,7 @@ Every `Job` of the library mounts the storage claim with `readOnly: true`
 on the pod's volume, which is what the driver requires of a
 `ReadOnlyMany` volume. A screen does not mount the storage claim. It reads
 the art claim.
-[Read-only volumes](https://git.liken.sh/docs/guides/read-only/) in
+[Read-only volumes](https://liken.sh/git/docs/guides/read-only/) in
 the driver's manual covers `offline: allowStale` and private
 repositories.
 
@@ -114,7 +114,7 @@ library's next scan.
 
 Put the schema line at the top of the file, so an editor validates it:
 
-    # yaml-language-server: $schema=https://library.liken.sh/franchise.schema.json
+    # yaml-language-server: $schema=https://liken.sh/library/franchise.schema.json
 
     name: Example Saga
 

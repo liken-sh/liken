@@ -12,7 +12,7 @@ receiver's power, input, and volume.
 You need:
 
 * A `liken` cluster with the
-  [`media-operator`](https://media.liken.sh) installed. The operator
+  [`media-operator`](https://liken.sh/media/) installed. The operator
   reads a session's level from the media bus that `media-operator`
   runs.
 * A receiver that supports the Denon and Marantz control protocol on
@@ -27,13 +27,13 @@ This site serves the repository's
 the install needs no clone:
 
     kubectl apply -n liken-system \
-      -f https://equipment.liken.sh/deploy/receivers-crd.yaml \
-      -f https://equipment.liken.sh/deploy/cecbuses-crd.yaml \
-      -f https://equipment.liken.sh/deploy/televisions-crd.yaml \
-      -f https://equipment.liken.sh/deploy/deviceclasses.yaml \
-      -f https://equipment.liken.sh/deploy/rbac.yaml \
-      -f https://equipment.liken.sh/deploy/operator.yaml \
-      -f https://equipment.liken.sh/deploy/cec.yaml
+      -f https://liken.sh/equipment/deploy/receivers-crd.yaml \
+      -f https://liken.sh/equipment/deploy/cecbuses-crd.yaml \
+      -f https://liken.sh/equipment/deploy/televisions-crd.yaml \
+      -f https://liken.sh/equipment/deploy/deviceclasses.yaml \
+      -f https://liken.sh/equipment/deploy/rbac.yaml \
+      -f https://liken.sh/equipment/deploy/operator.yaml \
+      -f https://liken.sh/equipment/deploy/cec.yaml
 
 `cec.yaml` runs the CEC node workload, the `equipment-operator-cec`
 `DaemonSet`. Its pod claims a USB CEC adapter through the
@@ -200,7 +200,7 @@ spec:
 ```
 
 The input name is the receiver's own spelling. The monitor id is the
-one the [`display-operator`](https://display.liken.sh) publishes for
+one the [`display-operator`](https://liken.sh/display/) publishes for
 that cable. The volume block is in the receiver's own scale. `max` is
 the loudest level a press may set the room to, and a Denon requires
 it, because the limit a Denon reports moves with the volume. `step`
@@ -226,7 +226,7 @@ session reads the level
 from the `Player` volume topic for that whole period. The room remote
 therefore changes the receiver's level while a film plays and while
 the screen is idle. The topic and payload belong to `media-operator`.
-Its [players page](https://media.liken.sh/docs/reference/players/)
+Its [players page](https://liken.sh/media/docs/reference/players/)
 defines them. This operator's reads and writes on that topic are
 described on [the receiver on the bus](/docs/reference/bus/). When a
 `Play` starts, the session powers the receiver on and selects the input

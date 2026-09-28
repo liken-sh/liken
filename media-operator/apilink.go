@@ -40,7 +40,7 @@ const (
 // URL, because the manual is not served here.
 const (
 	serviceDescTarget = "/v1/media/openapi.json"
-	serviceDocTarget  = "https://media.liken.sh/docs/reference/api/"
+	serviceDocTarget  = "https://liken.sh/media/docs/reference/api/"
 )
 
 // linkField renders one field value: the target in angle brackets,

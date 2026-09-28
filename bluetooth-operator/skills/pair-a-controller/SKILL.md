@@ -3,14 +3,14 @@ name: pair-a-controller
 description: "Pair a Bluetooth game controller or remote with kubectl, from the pairing window to a claim a pod holds. Use when a new controller must join a cluster, when approving a device the radio reports, or when unpairing one."
 ---
 
-This skill is the guide at https://bluetooth.liken.sh/docs/guides/pair-a-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/bluetooth/docs/guides/pair-a-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Pair a controller and give it to a pod
 
 This guide pairs a game controller with `kubectl` and hands it to one
 pod. The example is a DualSense and a game in a namespace named
 `arcade`, on a [`liken`](https://liken.sh/docs/) cluster with
-[the operator installed](https://bluetooth.liken.sh/docs/guides/install/). Every step is a Kubernetes
+[the operator installed](https://liken.sh/bluetooth/docs/guides/install/). Every step is a Kubernetes
 API call, so RBAC controls who may do each one, and nobody needs a
 shell on a node or in a pod.
 
@@ -115,7 +115,7 @@ reboot.
 If the [Dynamic Resource Allocation
 (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 objects are new to you, read
-[How the pieces fit](https://bluetooth.liken.sh/docs/guides/#how-the-pieces-fit) first. Then
+[How the pieces fit](https://liken.sh/bluetooth/docs/guides/#how-the-pieces-fit) first. Then
 create a
 [`ResourceClaim`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-claim-v1/)
 that selects the controller by its address:
@@ -144,7 +144,7 @@ that selects the controller by its address:
 The toleration sets how long the radio may go silent before the
 eviction controller ends the pod. Tolerate
 `bluetooth.liken.sh/disconnected` and nothing else.
-[Devices](https://bluetooth.liken.sh/docs/reference/devices/#the-taints) explains why the other
+[Devices](https://liken.sh/bluetooth/docs/reference/devices/#the-taints) explains why the other
 taint must stay untolerated. Leave out the selector to claim any
 paired controller.
 

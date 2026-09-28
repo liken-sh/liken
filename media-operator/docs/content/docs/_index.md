@@ -13,9 +13,9 @@ describes each resource, its fields, and its topics on the
 The operator declares players, plays, remotes, and keymaps as
 Kubernetes resources, and it reconciles them into pods that claim
 the hardware operators' devices:
-[displays](https://display.liken.sh),
-[audio outputs](https://audio.liken.sh), and
-[Bluetooth controllers](https://bluetooth.liken.sh). At run time,
+[displays](https://liken.sh/display/),
+[audio outputs](https://liken.sh/audio/), and
+[Bluetooth controllers](https://liken.sh/bluetooth/). At run time,
 every message between the operator and its pods goes over one MQTT
 broker, and the reference documents that bus as the contract your
 own programs can join.

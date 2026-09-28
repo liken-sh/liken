@@ -38,7 +38,7 @@ Any other name is a delegate. The operator keeps the display claim,
 runs no client of its own, and writes what the
 delegate needs to the `Player` status. `spec.idle.image` has no effect
 under a delegate. `library.liken.sh/media-browser` is the
-[library operator](https://library.liken.sh)'s media browser, the one
+[library operator](https://liken.sh/library/)'s media browser, the one
 delegate that exists today.
 
 `kubectl get players` shows the resolved name in its `Idle` column.

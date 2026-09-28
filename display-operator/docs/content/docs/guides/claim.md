@@ -351,7 +351,7 @@ screens runs two containers, each naming its own request in the
 claim.
 
 **A screen and its speakers.** A monitor's HDMI speakers belong to
-the [audio operator](https://audio.liken.sh). Both operators publish
+the [audio operator](https://liken.sh/audio/). Both operators publish
 `monitor.liken.sh/id`, the same identity read from the same monitor.
 So one claim can request a screen from this driver and the matching
 audio output from that one. A `matchAttribute` constraint on

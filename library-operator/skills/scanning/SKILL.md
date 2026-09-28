@@ -3,7 +3,7 @@ name: scanning
 description: "How a scan walks a library's root into the catalog: what it reads, when it runs, how mark and sweep removes what is gone, and what deleting a Library does. Use when titles are missing from the wall, when a scan seems stuck, or before deleting a Library."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/scanning/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/scanning/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Scanning
 
@@ -130,7 +130,7 @@ reads this directory after the titles. It is the one dot-named
 directory the walk enters. An entry whose `contributor.yaml` holds
 only `mergedInto` is one that a merge of two entries removed. The walk
 records the merge and no person for it. The
-[enrichment guide](https://library.liken.sh/docs/guides/enrichment/#people) describes the
+[enrichment guide](https://liken.sh/library/docs/guides/enrichment/#people) describes the
 merge.
 
 ## When a scan runs
@@ -149,8 +149,8 @@ walk `Job` when one of these asks for it and no other `Job` of the
   movies` writes the current time there. A walk that starts at or
   after the time answers the request, so asking again is a matter of
   setting a later time. It is the same map the
-  [enrichment guide](https://library.liken.sh/docs/guides/enrichment/) uses for facts.
-* A [webhook](https://library.liken.sh/docs/guides/webhooks/). The walk reads only the folders
+  [enrichment guide](https://liken.sh/library/docs/guides/enrichment/) uses for facts.
+* A [webhook](https://liken.sh/library/docs/guides/webhooks/). The walk reads only the folders
   the webhooks named, and a webhook that named no folder asks for a
   full walk.
 
@@ -166,7 +166,7 @@ the arrival fact, identity, the `.nfo` facts, the art, the trailers,
 the marks, the people, trickplay, and the trailer files. All of them
 start together, and each phase works on a title as soon as the walk and
 the phases before it have written that title's rows. The
-[enrichment guide](https://library.liken.sh/docs/guides/enrichment/#3-what-the-phases-do)
+[enrichment guide](https://liken.sh/library/docs/guides/enrichment/#3-what-the-phases-do)
 describes the phases. The `scan` container runs a person's own image
 when the kind's settings block names one, and it always mounts the
 library volume read-only.

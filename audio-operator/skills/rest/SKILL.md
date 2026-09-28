@@ -3,7 +3,7 @@ name: rest
 description: "Set endpoint volume, mute an output, close a microphone, or set a sound card control with kubectl, with no claim and no interruption to a playing pod. Use when a speaker needs a different default level or when another operator needs volume control."
 ---
 
-This skill is the guide at https://audio.liken.sh/docs/guides/rest/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/audio/docs/guides/rest/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 <a id="set-what-an-endpoint-rests-at"></a>
 
@@ -13,12 +13,12 @@ This guide shows how to change an endpoint's volume, mute an output,
 close a microphone, and set a sound card's controls with `kubectl`.
 These changes do not need a claim. They do not interrupt a pod that
 is playing or recording. You need the operator
-[installed](https://audio.liken.sh/docs/guides/install/) on your
+[installed](https://liken.sh/audio/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster.
 
 Every output and input the operator publishes has its own resource:
-a [`Sink`](https://audio.liken.sh/docs/reference/sinks/) for playback and a
-[`Source`](https://audio.liken.sh/docs/reference/sources/) for capture. The operator writes
+a [`Sink`](https://liken.sh/audio/docs/reference/sinks/) for playback and a
+[`Source`](https://liken.sh/audio/docs/reference/sources/) for capture. The operator writes
 hardware facts and the latest readings to `status`. You write desired
 settings to `spec`, and the operator reapplies each declared setting
 when the hardware differs from it. A pod can still claim the speaker

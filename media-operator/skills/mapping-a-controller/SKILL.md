@@ -3,7 +3,7 @@ name: mapping-a-controller
 description: "Declare a Remote, find the codes a controller emits with discovery, and write a Keymap row for each button the base mapping gets wrong. Use when adding a paired controller to a Player, or when a controller's button does the wrong thing or nothing."
 ---
 
-This skill is the guide at https://media.liken.sh/docs/guides/mapping-a-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/mapping-a-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Map a new controller
 
@@ -18,8 +18,8 @@ label says.
 You need:
 
 * The operator and its bus, from the
-  [install](https://media.liken.sh/docs/guides/install/).
-* The [`bluetooth-operator`](https://bluetooth.liken.sh), with the
+  [install](https://liken.sh/media/docs/guides/install/).
+* The [`bluetooth-operator`](https://liken.sh/bluetooth/), with the
   controller paired to a machine. An infrared or CEC remote has no
   device to claim, because no hardware operator publishes one.
 * `kubectl` access to the namespace.

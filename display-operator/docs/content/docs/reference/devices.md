@@ -217,7 +217,7 @@ Guard it with `has()`, like every other monitor attribute.
 ## The pairing identity
 
 `monitor.liken.sh/id` pairs a screen with that screen's speakers,
-which the [audio operator](https://audio.liken.sh) publishes from
+which the [audio operator](https://liken.sh/audio/) publishes from
 the same monitor's HDMI ELD. Both drivers build the value the same
 way, byte for byte, because the scheduler compares them under a
 `matchAttribute` constraint. The value is the lowercase PNP id, the

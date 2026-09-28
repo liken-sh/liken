@@ -7,9 +7,9 @@ title: media.liken.sh
 `media-operator` is a Kubernetes operator for
 the routing and control of media playback in a cluster. It runs on a
 [`liken`](https://liken.sh/docs/) cluster above the hardware
-operators: the [`display-operator`](https://display.liken.sh),
-[`audio-operator`](https://audio.liken.sh), and
-[`bluetooth-operator`](https://bluetooth.liken.sh) publish each
+operators: the [`display-operator`](https://liken.sh/display/),
+[`audio-operator`](https://liken.sh/audio/), and
+[`bluetooth-operator`](https://liken.sh/bluetooth/) publish each
 display, speaker, and controller as a claimable device, and this
 operator declares what those devices form together.
 

@@ -47,7 +47,7 @@ var franchiseArtExtensions = map[string]string{
 // franchiseArtUserAgent names this fetch to the host it reads from. Wikimedia
 // refuses a request that carries a generic client name, and answers one
 // that says who is asking and where to read about it.
-const franchiseArtUserAgent = "liken-library-operator (+https://library.liken.sh/)"
+const franchiseArtUserAgent = "liken-library-operator (+https://liken.sh/library/)"
 
 // franchiseArtSuffixes are the extensions the fetch reads back when it looks
 // for a file it or the owner already wrote.

@@ -25,6 +25,6 @@ owns a person's files. `identity` is a login at an outside identity
 provider, identified by an OIDC issuer and subject. Nothing reads
 either field yet.
 
-The manual is at [people.liken.sh](https://people.liken.sh/).
+The manual is at [people.liken.sh](https://liken.sh/people/).
 `plans/00-design.md` is the design, and `plans/README.md` indexes the
 plans. `make test` runs every check CI runs.

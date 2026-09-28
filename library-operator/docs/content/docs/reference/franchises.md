@@ -33,9 +33,9 @@ sets the period, as it does for the other kinds.
 
 How the checkout arrives on the claim is the cluster owner's choice, and
 any volume that holds one directory per franchise serves. The
-[git CSI driver](https://git.liken.sh/) serves a repository as a read-only
+[git CSI driver](https://liken.sh/git/) serves a repository as a read-only
 claim that follows its ref, and
-[its read-only guide](https://git.liken.sh/docs/guides/read-only/) shows
+[its read-only guide](https://liken.sh/git/docs/guides/read-only/) shows
 the `PersistentVolume` and claim.
 
 The first files live at
@@ -44,12 +44,12 @@ A fork is a second `Library` over another checkout, and two libraries that
 both define one franchise are two rows on the screen.
 
 The file validates against
-[`franchise.schema.json`](https://library.liken.sh/franchise.schema.json). Put this line at
+[`franchise.schema.json`](https://liken.sh/library/franchise.schema.json). Put this line at
 the top of the file, and an editor with YAML support checks it as
 you type:
 
 ```yaml
-# yaml-language-server: $schema=https://library.liken.sh/franchise.schema.json
+# yaml-language-server: $schema=https://liken.sh/library/franchise.schema.json
 ```
 
 ## The parts

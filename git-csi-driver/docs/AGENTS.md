@@ -2,7 +2,7 @@
 
 @../../brand/voice.md
 
-This directory is the source of https://git.liken.sh/, the git CSI
+This directory is the source of https://liken.sh/git/, the git CSI
 driver's manual. Hugo builds it with the shared brand theme, `brand/`
 at the top of the repository.
 

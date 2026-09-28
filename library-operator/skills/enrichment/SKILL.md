@@ -3,7 +3,7 @@ name: enrichment
 description: "Enrich a library with titles, plots, ratings, art, and people from metadata providers, written as .nfo files and art files beside the media. Use when declaring a MetadataProvider, naming sources on a Library, or handing metadata to Jellyfin."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/enrichment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/enrichment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Enrich a library
 
@@ -100,7 +100,7 @@ pod stores it.
 files the provider reads.
 
 `spec.facts` narrows what one account serves.
-[MetadataProvider](https://library.liken.sh/docs/reference/metadataproviders/) describes every
+[MetadataProvider](https://liken.sh/library/docs/reference/metadataproviders/) describes every
 field.
 
 ## 2. Name the sources on the Library
@@ -151,7 +151,7 @@ Enrichment runs as phases of the `Library`'s `Job`, one container for
 each phase. The operator runs one `Job` of a `Library` at a time. A walk
 `Job` runs the walk and every phase the `Library`'s sources serve. A
 `Job` that fills gaps runs no walk and only the phases whose gaps the
-last report counted. The [scanning guide](https://library.liken.sh/docs/guides/scanning/#when-a-scan-runs)
+last report counted. The [scanning guide](https://liken.sh/library/docs/guides/scanning/#when-a-scan-runs)
 says when each one starts.
 
 The phases are `probe`, which reads each video's streams, `arrival`,
@@ -544,7 +544,7 @@ in bash it completes the library names.
 
 The same map takes one key that is not a fact: `scan` asks for a full
 walk of the library, and `kubectl liken library rescan movies` writes
-it. The [scanning guide](https://library.liken.sh/docs/guides/scanning/) describes what it does.
+it. The [scanning guide](https://liken.sh/library/docs/guides/scanning/) describes what it does.
 
 ## 4. The Jellyfin handover
 

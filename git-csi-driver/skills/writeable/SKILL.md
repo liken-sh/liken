@@ -3,7 +3,7 @@ name: writeable
 description: "Give an application a git repository as a writeable volume that the driver commits and pushes. Use when an application writes files that must go into git, when upstream moves, when several writers share one repository, or to restore a volume."
 ---
 
-This skill is the guide at https://git.liken.sh/docs/guides/writeable/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/git/docs/guides/writeable/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 A writeable volume is a `PersistentVolume` that names a repository, a
 `PersistentVolumeClaim` that binds it, and a `VolumeAttributesClass`
@@ -100,7 +100,7 @@ static volume only when both name the same class. So a claim that names
 a class before it binds needs the same `volumeAttributesClassName` on
 the `PersistentVolume`. A bound claim takes a class change without that.
 
-The [class reference](https://git.liken.sh/docs/reference/classes/) lists every parameter,
+The [class reference](https://liken.sh/git/docs/reference/classes/) lists every parameter,
 its values, and its default.
 
 ## The credential
@@ -200,7 +200,7 @@ is back on the ref and the driver deletes the side branch.
 One repository can hold the configuration of many applications, each
 with its own writeable volume and its own directory mounted with
 `subPath`. [Give many applications one
-repository](https://git.liken.sh/docs/guides/one-repository-many-apps/) gives the manifests and the
+repository](https://liken.sh/git/docs/guides/one-repository-many-apps/) gives the manifests and the
 rules.
 
 ## Restore

@@ -3,22 +3,22 @@ name: screenshot
 description: "Capture a Display with the kubectl liken display capture command, or take a screenshot, a clip, or a live stream over HTTP with kubectl and curl. Use when someone asks what a screen shows, or to record it."
 ---
 
-This skill is the guide at https://display.liken.sh/docs/guides/screenshot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/display/docs/guides/screenshot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Take a picture of a screen
 
 This guide shows you how to capture what a monitor shows: one frame
 as PNG or JPEG, a clip as MP4, a live MJPEG stream, or a rectangle
 of any of those. You need the operator
-[installed](https://display.liken.sh/docs/guides/install/) on your
+[installed](https://liken.sh/display/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster and a connected
-[`Display`](https://display.liken.sh/docs/reference/displays/).
+[`Display`](https://liken.sh/display/docs/reference/displays/).
 
 `display-api` serves the captures from a `Deployment` in
 `liken-system`. The capture container in the `display-operator` pod
 on each node reads frames from the compositor. The API stores no
 capture. It creates each capture after you ask for it and streams the
-result while it encodes it. The [API reference](https://display.liken.sh/docs/reference/api/)
+result while it encodes it. The [API reference](https://liken.sh/display/docs/reference/api/)
 has the full contract. This guide is the short path through it.
 
 ## The `kubectl liken display capture` command

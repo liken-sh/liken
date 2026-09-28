@@ -4,7 +4,7 @@
 # this site reads as one place with the manual at liken.sh. The site
 # is named for the operator's DRA driver, bluetooth.liken.sh, because
 # that name is the one an operator of a cluster already knows.
-baseURL: https://bluetooth.liken.sh/
+baseURL: https://liken.sh/bluetooth/
 
 # The generated reference pages put an id on each field's table row,
 # as a raw-HTML span, so a link can land on exactly one field (the

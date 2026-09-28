@@ -26,7 +26,7 @@ so the two operators' trees stay disjoint on the same broker. This page
 writes topics without the base.
 
 The rules that shape the tree are `media-operator`'s, and
-[The media bus](https://media.liken.sh/docs/reference/bus/) states
+[The media bus](https://liken.sh/media/docs/reference/bus/) states
 them: state is retained and events are not, the topic names the object
 and the payload does not, and a writer that leaves retained state
 behind names an `availability` topic as its MQTT Last Will. This tree
@@ -149,7 +149,7 @@ the catalog and no API credential, and the operator holds the
 credential and no catalog, so the browser resolves the list of files
 and publishes it here, and the operator joins each path to the
 `Library`'s claim and creates the
-[`Play`](https://media.liken.sh/docs/reference/plays/). The request is
+[`Play`](https://liken.sh/media/docs/reference/plays/). The request is
 an event and is not retained: a broker that held the last one would
 replay it to the operator on every reconnect.
 

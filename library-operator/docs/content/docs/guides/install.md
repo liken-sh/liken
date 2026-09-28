@@ -13,7 +13,7 @@ runs, a namespace has its catalog, and a `Library` can be declared.
 You need:
 
 * A `liken` cluster.
-* The [`media-operator`](https://media.liken.sh), installed first, in
+* The [`media-operator`](https://liken.sh/media/), installed first, in
   `liken-system`. It owns the players, the plays, and the remotes, and
   its bus at `bus.liken-system.svc:1883` is where every catalog
   reports. A `Library` in a cluster with no bus reports `Offline` and

@@ -4,9 +4,9 @@ The routing and control of media playback in a cluster, expressed
 as Kubernetes resources. It runs on a
 [`liken`](https://github.com/liken-sh/liken) cluster above the
 hardware operators: the
-[`display-operator`](https://display.liken.sh),
-[`audio-operator`](https://audio.liken.sh), and
-[`bluetooth-operator`](https://bluetooth.liken.sh) publish each
+[`display-operator`](https://liken.sh/display/),
+[`audio-operator`](https://liken.sh/audio/), and
+[`bluetooth-operator`](https://liken.sh/bluetooth/) publish each
 display, speaker, and controller as a claimable device, and this
 operator declares what those devices form together.
 
@@ -36,7 +36,7 @@ arrives by URI: `https://` streams, `nfs://` mounts an export, and
 library management is a separate concern, and this project does
 none of it.
 
-The manual is at [media.liken.sh](https://media.liken.sh/): the
+The manual is at [media.liken.sh](https://liken.sh/media/): the
 install guide, the reference for each resource, and the message bus
 every pod and any of your own programs share.
 [`plans/00-design.md`](plans/00-design.md) is the design: the

@@ -19,7 +19,7 @@ GENERATED := \
 	$(OPENAPI)
 
 SKILLS := go tool skills
-BASE := https://display.liken.sh
+BASE := https://liken.sh/display/
 
 # A generated file whose command failed is removed, so a failed build
 # never leaves a half-written page in the tree for the next build to

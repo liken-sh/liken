@@ -3,7 +3,7 @@ name: install
 description: "Install equipment-operator on a liken cluster, declare a Receiver, and put it under a Player. Use when an AV receiver must report its power, input, and volume to the cluster."
 ---
 
-This skill is the guide at https://equipment.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/equipment/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 This guide installs `equipment-operator` on a
 [`liken`](https://liken.sh/docs/) cluster and declares a `Receiver`.
@@ -13,7 +13,7 @@ receiver's power, input, and volume.
 You need:
 
 * A `liken` cluster with the
-  [`media-operator`](https://media.liken.sh) installed. The operator
+  [`media-operator`](https://liken.sh/media/) installed. The operator
   reads a session's level from the media bus that `media-operator`
   runs.
 * A receiver that supports the Denon and Marantz control protocol on
@@ -24,17 +24,17 @@ You need:
 ## Apply the manifests
 
 This site serves the repository's
-[`deploy/`](https://equipment.liken.sh/deploy/kustomization.yaml) directory as raw YAML, so
+[`deploy/`](https://liken.sh/equipment/deploy/kustomization.yaml) directory as raw YAML, so
 the install needs no clone:
 
     kubectl apply -n liken-system \
-      -f https://equipment.liken.sh/deploy/receivers-crd.yaml \
-      -f https://equipment.liken.sh/deploy/cecbuses-crd.yaml \
-      -f https://equipment.liken.sh/deploy/televisions-crd.yaml \
-      -f https://equipment.liken.sh/deploy/deviceclasses.yaml \
-      -f https://equipment.liken.sh/deploy/rbac.yaml \
-      -f https://equipment.liken.sh/deploy/operator.yaml \
-      -f https://equipment.liken.sh/deploy/cec.yaml
+      -f https://liken.sh/equipment/deploy/receivers-crd.yaml \
+      -f https://liken.sh/equipment/deploy/cecbuses-crd.yaml \
+      -f https://liken.sh/equipment/deploy/televisions-crd.yaml \
+      -f https://liken.sh/equipment/deploy/deviceclasses.yaml \
+      -f https://liken.sh/equipment/deploy/rbac.yaml \
+      -f https://liken.sh/equipment/deploy/operator.yaml \
+      -f https://liken.sh/equipment/deploy/cec.yaml
 
 `cec.yaml` runs the CEC node workload, the `equipment-operator-cec`
 `DaemonSet`. Its pod claims a USB CEC adapter through the
@@ -42,9 +42,9 @@ the install needs no clone:
 stays `Pending`, and the `DaemonSet` never reports all its pods
 ready. A node labeled `equipment.liken.sh/cec: none` gets no pod, as
 [Keep the pods off nodes with no CEC adapter](#keep-the-pods-off-nodes-with-no-cec-adapter)
-describes. The [`CECBus`](https://equipment.liken.sh/docs/reference/cecbuses/)
+describes. The [`CECBus`](https://liken.sh/equipment/docs/reference/cecbuses/)
 reference describes what the pod reports, and the
-[`Television`](https://equipment.liken.sh/docs/reference/televisions/) reference describes the
+[`Television`](https://liken.sh/equipment/docs/reference/televisions/) reference describes the
 TV that a `CECBus` in `Control` finds.
 
 For GitOps, point a `Kustomization` at the base and pin `<ref>` to a
@@ -201,7 +201,7 @@ spec:
 ```
 
 The input name is the receiver's own spelling. The monitor id is the
-one the [`display-operator`](https://display.liken.sh) publishes for
+one the [`display-operator`](https://liken.sh/display/) publishes for
 that cable. The volume block is in the receiver's own scale. `max` is
 the loudest level a press may set the room to, and a Denon requires
 it, because the limit a Denon reports moves with the volume. `step`
@@ -227,9 +227,9 @@ session reads the level
 from the `Player` volume topic for that whole period. The room remote
 therefore changes the receiver's level while a film plays and while
 the screen is idle. The topic and payload belong to `media-operator`.
-Its [players page](https://media.liken.sh/docs/reference/players/)
+Its [players page](https://liken.sh/media/docs/reference/players/)
 defines them. This operator's reads and writes on that topic are
-described on [the receiver on the bus](https://equipment.liken.sh/docs/reference/bus/). When a
+described on [the receiver on the bus](https://liken.sh/equipment/docs/reference/bus/). When a
 `Play` starts, the session powers the receiver on and selects the input
 once. It sends each command only when the receiver reports another
 value. Waking the screen also triggers those commands through

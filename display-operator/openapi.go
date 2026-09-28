@@ -51,7 +51,7 @@ func openAPIDocument(server string) map[string]any {
 			"title":       "display-api",
 			"version":     version,
 			"summary":     "The screen of every Display in this cluster, as one frame, a clip, or a stream.",
-			"description": "The path names the Display. The extension or Accept header selects the format. The query can select a region and time range with W3C Media Fragments 1.0 syntax. The API stores no capture. The manual is at https://display.liken.sh/docs/reference/api/.",
+			"description": "The path names the Display. The extension or Accept header selects the format. The query can select a region and time range with W3C Media Fragments 1.0 syntax. The API stores no capture. The manual is at https://liken.sh/display/docs/reference/api/.",
 		},
 		"servers": []any{map[string]any{
 			"url":         server,

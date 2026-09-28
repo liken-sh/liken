@@ -8,7 +8,7 @@ title: library.liken.sh
 Kubernetes resources, and puts a media browser for them on every
 screen. It runs on a
 [`liken`](https://liken.sh/docs/) cluster above
-[`media-operator`](https://media.liken.sh), which owns the players,
+[`media-operator`](https://liken.sh/media/), which owns the players,
 the plays, and the remotes. This operator owns what there is to play.
 
 A `Library` is one root directory of media on a volume: a directory of
@@ -40,7 +40,7 @@ The operator is optional. A cluster that never installs it runs
 unchanged, and a `Player` whose idle controller never names it draws
 `media-operator`'s own idle screen. It publishes no devices. The
 screen it draws claims the display through the `Player`'s standing
-claim, which the [display operator](https://display.liken.sh) serves.
+claim, which the [display operator](https://liken.sh/display/) serves.
 
 * [The repository](https://github.com/liken-sh/library-operator)
 * [The `liken` manual](https://liken.sh/docs/)

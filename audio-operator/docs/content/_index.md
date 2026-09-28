@@ -26,7 +26,7 @@ configuration on the host, no privileged pod.
 Sound you can run this way:
 
 * a video's sound on the same monitor that shows its picture, paired
-  with the [display operator](https://display.liken.sh),
+  with the [display operator](https://liken.sh/display/),
 * music from a player pod to the amplifier on the analog jack,
 * an announcement to the speakers of a named monitor,
 * music to a paired Bluetooth speaker, claimed by its MAC address
@@ -50,12 +50,12 @@ the optional layer above the operating system. A cluster that never
 installs it runs unchanged. `liken` itself publishes the sound card;
 this operator claims that card and publishes its outputs, one device
 for each playback PCM device, under `audio.liken.sh`. Its siblings
-publish [monitor outputs](https://display.liken.sh) and
-[Bluetooth controllers](https://bluetooth.liken.sh). A monitor's
+publish [monitor outputs](https://liken.sh/display/) and
+[Bluetooth controllers](https://liken.sh/bluetooth/). A monitor's
 speakers pair with its screen through `monitor.liken.sh/id`, the
 identity both drivers read from the same monitor.
 
-The [Bluetooth operator](https://bluetooth.liken.sh) publishes one
+The [Bluetooth operator](https://liken.sh/bluetooth/) publishes one
 more thing this operator claims: the media bus of each radio. With
 that bus in its claim, this pod runs the sound server for Bluetooth
 audio as well, and each paired speaker publishes as an

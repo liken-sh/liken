@@ -32,7 +32,7 @@ import (
 // carries: the OpenAPI document, and the manual's page for the API.
 const (
 	serviceDescription = apiPrefix + "/openapi.json"
-	serviceDocument    = apiHost + "/docs/reference/api/"
+	serviceDocument    = "https://liken.sh/audio/docs/reference/api/"
 )
 
 // linkHeader builds the whole Link field value for one answer. The

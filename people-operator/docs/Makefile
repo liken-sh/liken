@@ -12,7 +12,7 @@ REFERENCE := content/docs/reference
 GENERATED := $(REFERENCE)/people.md
 
 SKILLS := go tool skills
-BASE := https://people.liken.sh
+BASE := https://liken.sh/people/
 
 .PHONY: build
 build: $(GENERATED)

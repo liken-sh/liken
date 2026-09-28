@@ -102,9 +102,9 @@ without a clone. Apply the three files into `liken-system`, the
 namespace a `liken` cluster already has:
 
     kubectl apply -n liken-system \
-      -f https://bluetooth.liken.sh/deploy/crds.yaml \
-      -f https://bluetooth.liken.sh/deploy/rbac.yaml \
-      -f https://bluetooth.liken.sh/deploy/operator.yaml
+      -f https://liken.sh/bluetooth/deploy/crds.yaml \
+      -f https://liken.sh/bluetooth/deploy/rbac.yaml \
+      -f https://liken.sh/bluetooth/deploy/operator.yaml
 
 Or point your own GitOps at the same files with a `Kustomization`:
 
@@ -112,9 +112,9 @@ Or point your own GitOps at the same files with a `Kustomization`:
     kind: Kustomization
     namespace: liken-system
     resources:
-      - https://bluetooth.liken.sh/deploy/crds.yaml
-      - https://bluetooth.liken.sh/deploy/rbac.yaml
-      - https://bluetooth.liken.sh/deploy/operator.yaml
+      - https://liken.sh/bluetooth/deploy/crds.yaml
+      - https://liken.sh/bluetooth/deploy/rbac.yaml
+      - https://liken.sh/bluetooth/deploy/operator.yaml
 
 The site serves the manifests of the current `main`, and the images
 in `operator.yaml` name `:latest`. To pin a release instead,

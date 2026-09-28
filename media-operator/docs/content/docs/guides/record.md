@@ -130,8 +130,8 @@ redirect includes no credentials. You must follow the 307 with your
 own credentials. `display-api` then checks `displays/screen` for your
 subject. To use the plain screen and audio routes, you also need a
 grant on the `Display` and on each `Sink`. The
-[display](https://display.liken.sh/docs/guides/screenshot/) and
-[audio](https://audio.liken.sh/docs/guides/listen/) guides show
+[display](https://liken.sh/display/docs/guides/screenshot/) and
+[audio](https://liken.sh/audio/docs/guides/listen/) guides show
 those grants.
 
 `players/media` on a `Player` is in effect a grant on that

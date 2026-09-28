@@ -213,7 +213,7 @@ Every response has these headers:
 | `Content-Type` | the media type of the body | RFC 9110 |
 | `Vary` | `Accept`, on every response, extension routes included | RFC 9110 section 12.5.5 |
 | `Link` | `</v1/media/openapi.json>; rel="service-desc"` | RFC 8631 |
-| `Link` | `<https://media.liken.sh/docs/reference/api/>; rel="service-doc"` | RFC 8631 |
+| `Link` | `<https://liken.sh/media/docs/reference/api/>; rel="service-doc"` | RFC 8631 |
 | `Link` | on a `Player` route: `<https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/{ns}/players/{name}>; rel="describedby"` | RFC 8288 |
 
 RFC 9110 section 12.5.5 gives `Vary` a second purpose: it tells a
@@ -451,7 +451,7 @@ Link: <https://audio-api.liken-system.svc/v1/audio/sinks/hdmi-0-pch/audio.opus?t
 Link: <https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/media/players/studio>;
       rel="describedby"
 Link: </v1/media/openapi.json>; rel="service-desc"
-Link: <https://media.liken.sh/docs/reference/api/>; rel="service-doc"
+Link: <https://liken.sh/media/docs/reference/api/>; rel="service-doc"
 ```
 
 The `Link` headers are wrapped here for reading. Each is one header

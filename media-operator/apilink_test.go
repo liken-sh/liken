@@ -82,7 +82,7 @@ func TestServiceLinksRideOnEveryResponse(t *testing.T) {
 
 	mustMatchAll(t, header.Values("Link"), []string{
 		`</v1/media/openapi.json>; rel="service-desc"`,
-		`<https://media.liken.sh/docs/reference/api/>; rel="service-doc"`,
+		`<https://liken.sh/media/docs/reference/api/>; rel="service-doc"`,
 	})
 }
 

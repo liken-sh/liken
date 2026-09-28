@@ -18,7 +18,7 @@ GENERATED := \
 	$(REFERENCE)/pairingrequests.md
 
 SKILLS := go tool skills
-BASE := https://bluetooth.liken.sh
+BASE := https://liken.sh/bluetooth/
 
 .PHONY: build
 build: $(GENERATED)

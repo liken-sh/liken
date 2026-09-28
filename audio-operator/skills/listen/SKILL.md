@@ -3,23 +3,23 @@ name: listen
 description: "Tap a Sink or a Source with the kubectl liken audio capture command, or over HTTP with kubectl and curl, and save the sound as WAV, FLAC, or Opus. Use to hear what a speaker plays or what a microphone records."
 ---
 
-This skill is the guide at https://audio.liken.sh/docs/guides/listen/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/audio/docs/guides/listen/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Listen to what a speaker plays
 
 This guide shows you how to tap an endpoint for a fixed span and
 save it as a file: what a speaker plays, or what a microphone hears,
 as WAV, FLAC, or Ogg Opus. You need the operator
-[installed](https://audio.liken.sh/docs/guides/install/) on your
+[installed](https://liken.sh/audio/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster and a connected
-[`Sink`](https://audio.liken.sh/docs/reference/sinks/) or
-[`Source`](https://audio.liken.sh/docs/reference/sources/).
+[`Sink`](https://liken.sh/audio/docs/reference/sinks/) or
+[`Source`](https://liken.sh/audio/docs/reference/sources/).
 
 `audio-api` serves the taps. It is a `Deployment` in `liken-system`
 that finds the endpoint's node and forwards the stream. The
 `capture` container in the `audio-operator` pod on that node reads
 the sound from PipeWire. Nothing is stored on either side. The
-[API reference](https://audio.liken.sh/docs/reference/api/) has the full contract. This
+[API reference](https://liken.sh/audio/docs/reference/api/) has the full contract. This
 guide is the short path through it.
 
 ## The `kubectl liken audio capture` command
@@ -145,7 +145,7 @@ certificate authority. That authority's certificate is in the
 
 A port-forward is a single TCP connection through the API server. A
 short tap works through one, and the API reference's own
-[recipe](https://audio.liken.sh/docs/reference/api/#examples) does that. For a long tap,
+[recipe](https://liken.sh/audio/docs/reference/api/#examples) does that. For a long tap,
 read from a pod on the cluster network, which is what the rest of
 this guide does.
 

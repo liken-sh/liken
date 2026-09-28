@@ -30,7 +30,7 @@ contracts any DRA driver gets.
 
 ## The manual
 
-**[display.liken.sh](https://display.liken.sh)** is the manual, and
+**[display.liken.sh](https://liken.sh/display/)** is the manual, and
 it serves the deployment manifests as raw YAML, so an install starts
 and ends there:
 
@@ -46,10 +46,10 @@ card, after you create the device classes (the install guide gives
 their YAML):
 
     kubectl apply -n liken-system \
-      -f https://display.liken.sh/deploy/deviceclasses.yaml \
-      -f https://display.liken.sh/deploy/rbac.yaml \
-      -f https://display.liken.sh/deploy/operator.yaml \
-      -f https://display.liken.sh/deploy/api.yaml
+      -f https://liken.sh/display/deploy/deviceclasses.yaml \
+      -f https://liken.sh/display/deploy/rbac.yaml \
+      -f https://liken.sh/display/deploy/operator.yaml \
+      -f https://liken.sh/display/deploy/api.yaml
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
 with the RBAC, the `DaemonSet` whose pod claims the card on its own

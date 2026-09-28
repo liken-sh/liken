@@ -288,7 +288,7 @@ repository runs it as `go tool skills`, pinned as a tool dependency
 of its docs module the way `crdref` is:
 
 ```sh
-go tool skills -base https://media.liken.sh content/docs/guides ../skills
+go tool skills -base https://liken.sh/media/ content/docs/guides ../skills
 ```
 
 Every guide's front matter needs a `description`, written as a

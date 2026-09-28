@@ -16,8 +16,8 @@ remote drives it.
 You need:
 
 * The operator and its bus, from the [install](/docs/guides/install/).
-* The [`display-operator`](https://display.liken.sh) and the
-  [`audio-operator`](https://audio.liken.sh) installed, with the
+* The [`display-operator`](https://liken.sh/display/) and the
+  [`audio-operator`](https://liken.sh/audio/) installed, with the
   consumer classes your cluster names for a screen, a render node,
   and an output. Each operator's install guide gives the YAML for
   its class, and the class names below are examples.
@@ -85,8 +85,8 @@ the attributes each hardware operator publishes. Guard an attribute
 that comes from the monitor with `has()`, because it is absent on an
 empty connector, and a selector that reads a missing attribute fails
 the whole allocation. The display operator's
-[claim guide](https://display.liken.sh/docs/guides/claim/) and the
-audio operator's [claim guide](https://audio.liken.sh/docs/guides/claim/)
+[claim guide](https://liken.sh/display/docs/guides/claim/) and the
+audio operator's [claim guide](https://liken.sh/audio/docs/guides/claim/)
 list the attributes and the selectors that survive a re-cabling.
 
 `render` is required for video. `mpv` decodes and draws through the

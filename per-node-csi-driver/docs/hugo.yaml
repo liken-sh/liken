@@ -7,7 +7,7 @@
 # repository. It provides the page shell, the top nav, the mark,
 # and the stylesheet that every liken site uses, so this site reads
 # as part of the same family as liken.sh.
-baseURL: https://per-node.liken.sh/
+baseURL: https://liken.sh/per-node/
 title: per-node CSI driver
 # Hugo looks for a theme by name under themesDir, and the repository
 # root holds brand/, so the site and the theme it builds with are

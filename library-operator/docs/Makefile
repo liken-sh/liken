@@ -12,7 +12,7 @@ REFERENCE := content/docs/reference
 GENERATED := $(REFERENCE)/libraries.md $(REFERENCE)/catalogs.md $(REFERENCE)/metadataproviders.md
 
 SKILLS := go tool skills
-BASE := https://library.liken.sh
+BASE := https://liken.sh/library/
 
 .PHONY: build
 build: $(GENERATED)

@@ -48,13 +48,13 @@ The name of a hardware operator's device class is also the hostname
 of its manual. Each manual gives the install steps and the claims
 for its devices:
 
-* [bluetooth.liken.sh](https://bluetooth.liken.sh) publishes paired
+* [bluetooth.liken.sh](https://liken.sh/bluetooth/) publishes paired
   Bluetooth controllers. The source is
   [liken-sh/bluetooth-operator](https://github.com/liken-sh/bluetooth-operator).
-* [display.liken.sh](https://display.liken.sh) publishes monitor
+* [display.liken.sh](https://liken.sh/display/) publishes monitor
   outputs. The source is
   [liken-sh/display-operator](https://github.com/liken-sh/display-operator).
-* [audio.liken.sh](https://audio.liken.sh) publishes audio outputs.
+* [audio.liken.sh](https://liken.sh/audio/) publishes audio outputs.
   The source is
   [liken-sh/audio-operator](https://github.com/liken-sh/audio-operator).
 
@@ -69,7 +69,7 @@ controller drives it are all declared as Kubernetes resources. It publishes no d
 out of what the hardware operators publish, with the same CEL
 selectors a hand-written `ResourceClaim` would use, and it claims
 them only for the pods it runs. Its manual is
-[media.liken.sh](https://media.liken.sh): the resources, the install,
+[media.liken.sh](https://liken.sh/media/): the resources, the install,
 and the MQTT message bus its pods and your own programs share. The
 source is
 [liken-sh/media-operator](https://github.com/liken-sh/media-operator).
@@ -81,6 +81,6 @@ browser that replaces the idle screen on a `Player` the media operator
 owns. It publishes no devices, and it claims the display only through
 the `Player`'s own claim. The media
 operator never reads the library operator's resources. Its manual is
-[library.liken.sh](https://library.liken.sh): the resources, the
+[library.liken.sh](https://liken.sh/library/): the resources, the
 install, the scanners, and the browser. The source is
 [liken-sh/library-operator](https://github.com/liken-sh/library-operator).

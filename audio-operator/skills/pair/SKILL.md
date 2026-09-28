@@ -3,14 +3,14 @@ name: pair
 description: "Play a video on one monitor with its sound on that monitor's own speakers, in one claim and one pod. Use when a workload needs a screen and its sound together on one HDMI or DisplayPort monitor."
 ---
 
-This skill is the guide at https://audio.liken.sh/docs/guides/pair/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/audio/docs/guides/pair/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Pair sound with its screen
 
 This guide plays a video on one monitor with its sound on that same
 monitor's speakers: one claim, one pod, one screen. You need this
-operator and the [display operator](https://display.liken.sh)
-[installed](https://audio.liken.sh/docs/guides/install/) on your
+operator and the [display operator](https://liken.sh/display/)
+[installed](https://liken.sh/audio/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster, and a monitor with
 speakers on HDMI or DisplayPort.
 
@@ -64,7 +64,7 @@ to one monitor, whichever connector it is on.
 
 `matchAttribute` takes the attribute's full name. Only a CEL
 selector splits the name on its domain, as
-[Play sound to an output](https://audio.liken.sh/docs/guides/claim/) shows.
+[Play sound to an output](https://liken.sh/audio/docs/guides/claim/) shows.
 
 As written, the claim takes any monitor that offers both a screen
 and speakers. To name one monitor, add a CEL selector to the
@@ -138,7 +138,7 @@ The pairing identity names a monitor's model. It does not identify
 one unit of that model. The ELD has no serial number, so two
 monitors of one model publish one value, and the constraint is
 satisfied by either pairing.
-[Devices](https://audio.liken.sh/docs/reference/devices/#the-pairing-identity) gives the
+[Devices](https://liken.sh/audio/docs/reference/devices/#the-pairing-identity) gives the
 derivation. On a machine with two identical monitors, the screen and
 the speakers the scheduler picks can come from different units, and
 no selector can prevent that. A `serial` selector on the `screen`

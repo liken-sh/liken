@@ -53,7 +53,7 @@ func TestEveryResponseCarriesTheServiceLinks(t *testing.T) {
 
 	links := recorder.Header().Values("Link")
 	mustContain(t, links, `</v1/media/openapi.json>; rel="service-desc"`)
-	mustContain(t, links, `<https://media.liken.sh/docs/reference/api/>; rel="service-doc"`)
+	mustContain(t, links, `<https://liken.sh/media/docs/reference/api/>; rel="service-doc"`)
 	mustContain(t, links,
 		`<https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/media/players/studio>; rel="describedby"`)
 }

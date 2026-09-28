@@ -16,9 +16,9 @@ gives the payload shapes for its own topics.
 
 Three operators meet on the broker. The media operator, its playback
 pods, each `Remote`'s pod, and each idle pod connect to it. The
-[library operator](https://library.liken.sh/) runs its own tree on
+[library operator](https://liken.sh/library/) runs its own tree on
 the same broker. The
-[equipment operator](https://equipment.liken.sh/) writes into the
+[equipment operator](https://liken.sh/equipment/) writes into the
 media operator's `players` tree. Your program can connect too. A
 phone app, a Home Assistant instance, and a library application all
 join the same way, with a plain MQTT client and no Kubernetes
@@ -101,12 +101,12 @@ topics, and the resource pages give the payloads.
 | Tree | Owner | What it carries | Page |
 |---|---|---|---|
 | `liken/media` | the media operator | runs, units, and controllers: the table below | this page |
-| `liken/library` | the library operator | library reports, catalog availability, and play requests | [The library bus](https://library.liken.sh/docs/reference/bus/) |
+| `liken/library` | the library operator | library reports, catalog availability, and play requests | [The library bus](https://liken.sh/library/docs/reference/bus/) |
 
 The equipment operator publishes no tree of its own. Its receiver
 session writes into the media tree's `players` branch, on the volume
 topic and the owner mark beside it, and
-[its reference](https://equipment.liken.sh/docs/reference/receivers/)
+[its reference](https://liken.sh/equipment/docs/reference/receivers/)
 describes that session.
 
 ## The media tree

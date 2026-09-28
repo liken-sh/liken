@@ -2,7 +2,7 @@
 
 @../../brand/voice.md
 
-This directory is the source of https://audio.liken.sh/, the audio
+This directory is the source of https://liken.sh/audio/, the audio
 operator's manual. Hugo builds it with the shared brand theme, `brand/`
 at the top of the repository.
 

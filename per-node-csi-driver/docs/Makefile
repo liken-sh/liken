@@ -4,7 +4,7 @@
 HUGO := go tool hugo
 
 SKILLS := go tool skills
-BASE := https://per-node.liken.sh
+BASE := https://liken.sh/per-node/
 
 .PHONY: build
 build:

@@ -9,9 +9,9 @@ toc: true
 The operator writes two topics on the media bus, and both belong to
 the `media-operator`'s `players` tree. This page states what the
 operator writes there and when. The
-[media players page](https://media.liken.sh/docs/reference/players/)
+[media players page](https://liken.sh/media/docs/reference/players/)
 gives the whole tree, and the
-[media bus page](https://media.liken.sh/docs/reference/bus/) gives
+[media bus page](https://liken.sh/media/docs/reference/bus/) gives
 the rules every topic follows.
 
 The `media-operator` writes the volume topic into

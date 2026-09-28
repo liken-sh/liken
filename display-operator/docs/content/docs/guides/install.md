@@ -121,11 +121,11 @@ are the rest of the install, and `api.yaml` is the one that runs
 once per cluster rather than once per node:
 
     kubectl apply -n liken-system \
-      -f https://display.liken.sh/deploy/displays.yaml \
-      -f https://display.liken.sh/deploy/deviceclasses.yaml \
-      -f https://display.liken.sh/deploy/rbac.yaml \
-      -f https://display.liken.sh/deploy/operator.yaml \
-      -f https://display.liken.sh/deploy/api.yaml
+      -f https://liken.sh/display/deploy/displays.yaml \
+      -f https://liken.sh/display/deploy/deviceclasses.yaml \
+      -f https://liken.sh/display/deploy/rbac.yaml \
+      -f https://liken.sh/display/deploy/operator.yaml \
+      -f https://liken.sh/display/deploy/api.yaml
 
 `api.yaml` holds the `display-api` `Deployment`, its `Service`, and
 its RBAC. It answers the routes the [API reference](/docs/reference/api/)
@@ -150,11 +150,11 @@ same URLs. `kustomize` takes a raw YAML URL as a resource:
     namespace: liken-system
     resources:
       - classes.yaml
-      - https://display.liken.sh/deploy/displays.yaml
-      - https://display.liken.sh/deploy/deviceclasses.yaml
-      - https://display.liken.sh/deploy/rbac.yaml
-      - https://display.liken.sh/deploy/operator.yaml
-      - https://display.liken.sh/deploy/api.yaml
+      - https://liken.sh/display/deploy/displays.yaml
+      - https://liken.sh/display/deploy/deviceclasses.yaml
+      - https://liken.sh/display/deploy/rbac.yaml
+      - https://liken.sh/display/deploy/operator.yaml
+      - https://liken.sh/display/deploy/api.yaml
 
 A clone works too: `kubectl apply -k deploy/` from the repository
 applies the same base through
@@ -295,9 +295,9 @@ Delete the manifests. Then delete the slice on each node that
 published one:
 
     kubectl delete -n liken-system \
-      -f https://display.liken.sh/deploy/api.yaml \
-      -f https://display.liken.sh/deploy/rbac.yaml \
-      -f https://display.liken.sh/deploy/operator.yaml
+      -f https://liken.sh/display/deploy/api.yaml \
+      -f https://liken.sh/display/deploy/rbac.yaml \
+      -f https://liken.sh/display/deploy/operator.yaml
     kubectl delete resourceslice <node>-display.liken.sh
 
 The API's own `Secret`s and `ConfigMap` outlive the `Deployment`.

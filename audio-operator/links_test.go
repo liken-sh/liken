@@ -20,7 +20,7 @@ func TestTheServiceLinksAreOnEveryRouteTheTableHolds(t *testing.T) {
 		if !strings.Contains(header, `</v1/audio/openapi.json>; rel="service-desc"`) {
 			t.Errorf("%s carries no service-desc: %s", path, header)
 		}
-		if !strings.Contains(header, `<https://audio.liken.sh/docs/reference/api/>; rel="service-doc"`) {
+		if !strings.Contains(header, `<https://liken.sh/audio/docs/reference/api/>; rel="service-doc"`) {
 			t.Errorf("%s carries no service-doc: %s", path, header)
 		}
 	}

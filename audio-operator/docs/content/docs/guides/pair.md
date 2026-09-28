@@ -8,7 +8,7 @@ description: "Play a video on one monitor with its sound on that monitor's own s
 
 This guide plays a video on one monitor with its sound on that same
 monitor's speakers: one claim, one pod, one screen. You need this
-operator and the [display operator](https://display.liken.sh)
+operator and the [display operator](https://liken.sh/display/)
 [installed](/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster, and a monitor with
 speakers on HDMI or DisplayPort.

@@ -45,8 +45,9 @@ const audioAspect = "audio"
 // apiResources are the two plurals, spelled as the CRDs name them.
 var apiResources = []string{"sinks", "sources"}
 
-// apiHost is the site that serves this operator's manual, and the
-// host that names this domain's own problem types.
+// apiHost is the host that names this domain's own problem types. A
+// client matches a problem type as an identifier, so the host stays the
+// driver's name wherever the manual is served.
 const apiHost = "https://" + DriverName
 
 // representation is one form the audio aspect takes.

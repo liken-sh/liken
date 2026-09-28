@@ -5,7 +5,7 @@
 # repository. It provides the page shell, the top nav, the mark,
 # and the stylesheet that every liken site uses, so this site reads
 # as part of the same family as liken.sh.
-baseURL: https://people.liken.sh/
+baseURL: https://liken.sh/people/
 
 # The generated reference page puts an id on each field's table row,
 # as a raw-HTML span, so a link can land on exactly one field (the

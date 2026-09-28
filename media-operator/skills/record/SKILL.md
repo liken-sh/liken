@@ -3,7 +3,7 @@ name: record
 description: "Capture a Player's screen and sound as one MP4 or MKV with the kubectl liken media capture command, or over HTTP with kubectl and curl. Use to record what a media unit is playing right now."
 ---
 
-This skill is the guide at https://media.liken.sh/docs/guides/record/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/record/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Record what a player is playing
 
@@ -11,16 +11,16 @@ This guide shows you how to record a `Player`: the screen and the
 sound of one unit, muxed into one MP4 or MKV file. It also shows the
 plain screen and audio routes, which redirect to the operator that
 owns the hardware. You need the operator
-[installed](https://media.liken.sh/docs/guides/install/) on your
+[installed](https://liken.sh/media/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster and a
-[`Player`](https://media.liken.sh/docs/reference/players/) that has a screen.
+[`Player`](https://liken.sh/media/docs/reference/players/) that has a screen.
 
 `media-api` serves the routes for a `Player`. It is one `Deployment`
 per cluster, in `liken-system`, next to the operator. Its screen
 routes redirect to `display-api` and its audio routes redirect to
 `audio-api`, because those operators own the hardware. Its media
 routes combine the two into one muxed stream, which no other API
-does. The [API reference](https://media.liken.sh/docs/reference/api/) has the full
+does. The [API reference](https://liken.sh/media/docs/reference/api/) has the full
 contract. This guide is the short path through it.
 
 ## The `kubectl liken media capture` command
@@ -131,8 +131,8 @@ redirect includes no credentials. You must follow the 307 with your
 own credentials. `display-api` then checks `displays/screen` for your
 subject. To use the plain screen and audio routes, you also need a
 grant on the `Display` and on each `Sink`. The
-[display](https://display.liken.sh/docs/guides/screenshot/) and
-[audio](https://audio.liken.sh/docs/guides/listen/) guides show
+[display](https://liken.sh/display/docs/guides/screenshot/) and
+[audio](https://liken.sh/audio/docs/guides/listen/) guides show
 those grants.
 
 `players/media` on a `Player` is in effect a grant on that

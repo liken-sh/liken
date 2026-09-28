@@ -2,7 +2,7 @@
 
 @../../brand/voice.md
 
-This directory is the source of https://per-node.liken.sh/, the per-node
+This directory is the source of https://liken.sh/per-node/, the per-node
 CSI driver's manual. Hugo builds it with the shared brand theme, `brand/`
 at the top of the repository.
 

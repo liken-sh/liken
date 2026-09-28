@@ -22,7 +22,7 @@ The operator publishes one more device beside the paired
 controllers: the media bus, the claimable permission to connect a
 sound server to this radio. The audio operator claims it to serve
 Bluetooth speakers.
-[The media bus](https://bluetooth.liken.sh/docs/reference/devices/#the-media-bus)
+[The media bus](https://liken.sh/bluetooth/docs/reference/devices/#the-media-bus)
 in the manual has the attributes and the delivery.
 
 ## What it needs from `liken`
@@ -59,7 +59,7 @@ privilege the pod takes.
 
 ## The manual
 
-The manual publishes at **<https://bluetooth.liken.sh>**. It includes:
+The manual publishes at **<https://liken.sh/bluetooth/>**. It includes:
 
 * [Install the operator](docs/content/docs/guides/install.md)
 * [Pair a controller and give it to a pod](docs/content/docs/guides/pair-a-controller.md)

@@ -3,7 +3,7 @@ name: catalog
 description: "The Catalog resource: the SQLite database Corrosion replicates, one cluster per namespace, and how pods, Jobs, and screens read and write it. Use when declaring a Catalog, when rows do not land, or when reading the catalog by hand."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/catalog/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/catalog/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # The catalog
 
@@ -40,7 +40,7 @@ gossips every row to every peer. `spec.storage.size` sets the size of
 new catalog claims for the durable replicas, each `Library`'s `Jobs`,
 and screens. `spec.storage.claimName` names an existing claim for the
 durable replicas in place of the one the operator provisions.
-[Catalog](https://library.liken.sh/docs/reference/catalogs/) describes every field.
+[Catalog](https://liken.sh/library/docs/reference/catalogs/) describes every field.
 
 The listing shows the storage size, requested replica count, and
 readiness:
@@ -124,7 +124,7 @@ one `Job` at a time is the only guard.
 A `Job` whose pod cannot start holds that rule for the `Library` until
 the `Job`'s deadline of two hours. The `Library`'s phase is `Blocked`
 while it waits, and [A Job that does not start or that
-fails](https://library.liken.sh/docs/guides/scanning/#a-job-that-does-not-start-or-that-fails)
+fails](https://liken.sh/library/docs/guides/scanning/#a-job-that-does-not-start-or-that-fails)
 says what to do.
 
 A claim's access mode cannot change after it is created, and the

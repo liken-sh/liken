@@ -28,7 +28,7 @@ screen when nothing plays. Set it to this operator's name:
 `media-operator` resolves the name into `status.idle.controller`, and
 this operator compares against that resolved value, never the spec.
 The `Player` must be in the same namespace as the libraries it shows.
-[Hand the idle screen to another controller](https://media.liken.sh/docs/guides/handing-the-idle-screen-to-another-controller/)
+[Hand the idle screen to another controller](https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/)
 in the `media-operator` manual describes the delegation from its side.
 
 ## 2. What the operator runs

@@ -28,7 +28,7 @@ SSH, no configuration on the host, and no privileged pod.
 
 A paired Bluetooth speaker is one more such output, on a machine
 that also runs the
-[`bluetooth-operator`](https://bluetooth.liken.sh). That operator
+[`bluetooth-operator`](https://liken.sh/bluetooth/). That operator
 publishes each radio's media bus as a device, this pod's claim
 allocates it, and WirePlumber registers the A2DP endpoint with
 `bluetoothd` over it. Each paired speaker then publishes as an
@@ -55,7 +55,7 @@ two operators.
 
 ## The manual
 
-**[audio.liken.sh](https://audio.liken.sh)** is the manual, and it
+**[audio.liken.sh](https://liken.sh/audio/)** is the manual, and it
 serves the deployment manifests as raw YAML, so an install starts
 and ends there:
 
@@ -76,10 +76,10 @@ The short version, on a cluster whose machine publishes its sound
 card:
 
     kubectl apply -n liken-system \
-      -f https://audio.liken.sh/deploy/crds.yaml \
-      -f https://audio.liken.sh/deploy/deviceclasses.yaml \
-      -f https://audio.liken.sh/deploy/rbac.yaml \
-      -f https://audio.liken.sh/deploy/operator.yaml
+      -f https://liken.sh/audio/deploy/crds.yaml \
+      -f https://liken.sh/audio/deploy/deviceclasses.yaml \
+      -f https://liken.sh/audio/deploy/rbac.yaml \
+      -f https://liken.sh/audio/deploy/operator.yaml
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
 with the two CRDs, the RBAC, the `DaemonSet` whose pod claims every

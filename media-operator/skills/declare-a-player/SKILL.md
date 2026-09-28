@@ -3,7 +3,7 @@ name: declare-a-player
 description: "Declare a Player for the screen and speakers a machine is connected to, take it from created to a Screen condition of Present, and prove it plays. Use when a machine is connected to a television or a monitor and should play media on it, or when a Player's idle pod stays Pending."
 ---
 
-This skill is the guide at https://media.liken.sh/docs/guides/declare-a-player/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/declare-a-player/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Declare a Player
 
@@ -16,14 +16,14 @@ remote drives it.
 
 You need:
 
-* The operator and its bus, from the [install](https://media.liken.sh/docs/guides/install/).
-* The [`display-operator`](https://display.liken.sh) and the
-  [`audio-operator`](https://audio.liken.sh) installed, with the
+* The operator and its bus, from the [install](https://liken.sh/media/docs/guides/install/).
+* The [`display-operator`](https://liken.sh/display/) and the
+  [`audio-operator`](https://liken.sh/audio/) installed, with the
   consumer classes your cluster names for a screen, a render node,
   and an output. Each operator's install guide gives the YAML for
   its class, and the class names below are examples.
 * A `Remote` for each controller the unit owns, from
-  [Map a new controller](https://media.liken.sh/docs/guides/mapping-a-controller/). A
+  [Map a new controller](https://liken.sh/media/docs/guides/mapping-a-controller/). A
   `Player` with no controllers is fine; add them later.
 * `kubectl` access to the namespace.
 
@@ -86,14 +86,14 @@ the attributes each hardware operator publishes. Guard an attribute
 that comes from the monitor with `has()`, because it is absent on an
 empty connector, and a selector that reads a missing attribute fails
 the whole allocation. The display operator's
-[claim guide](https://display.liken.sh/docs/guides/claim/) and the
-audio operator's [claim guide](https://audio.liken.sh/docs/guides/claim/)
+[claim guide](https://liken.sh/display/docs/guides/claim/) and the
+audio operator's [claim guide](https://liken.sh/audio/docs/guides/claim/)
 list the attributes and the selectors that survive a re-cabling.
 
 `render` is required for video. `mpv` decodes and draws through the
 GPU, and a `Player` with a display and no render node plays nothing.
 Omit `display` and `render` together for a unit that plays sound
-alone. [Players](https://media.liken.sh/docs/reference/players/) describes every field.
+alone. [Players](https://liken.sh/media/docs/reference/players/) describes every field.
 
 ## 3. Read the status
 
@@ -147,7 +147,7 @@ the player, 144Mi and 10m for the display, and 16Mi and 10m for the
 command sidecar. The idle pod keeps running under a film, so a machine
 must hold both pods at once: about 688Mi and 105m. Free memory on the
 machine, lower the requests as the
-[install guide](https://media.liken.sh/docs/guides/install/#container-resources) shows, or
+[install guide](https://liken.sh/media/docs/guides/install/#container-resources) shows, or
 connect the screen to a machine with more.
 
     kubectl describe pod den-idle
@@ -179,7 +179,7 @@ a button on the remote to confirm it drives the unit. Delete the
 A `Play` that stays `Starting` has a pod that did not schedule, and
 its events name the device that did not allocate. A `uri` scheme the
 operator does not know fails the `Play` before any pod exists.
-[Plays](https://media.liken.sh/docs/reference/plays/) describes the item forms.
+[Plays](https://liken.sh/media/docs/reference/plays/) describes the item forms.
 
 ## Choose what the screen does when idle
 
@@ -189,7 +189,7 @@ The operator's own idle screen is the default. Three fields on
 
 * `controller` hands the screen to another operator, such as the
   library operator's browser.
-  [Hand the idle screen to another controller](https://media.liken.sh/docs/guides/handing-the-idle-screen-to-another-controller/)
+  [Hand the idle screen to another controller](https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/)
   covers both sides.
 * `fadeAfterSeconds` fades the idle screen to black after that much
   quiet. `offAfterSeconds` darkens the panel itself after that much
@@ -199,5 +199,5 @@ The operator's own idle screen is the default. Three fields on
   The panel cannot say whose input it would darken.
 
 Set the defaults once for every unit in the cluster's
-[`MediaPreferences`](https://media.liken.sh/docs/reference/mediapreferences/), and set a
+[`MediaPreferences`](https://liken.sh/media/docs/reference/mediapreferences/), and set a
 field on a `Player` only where that unit differs.

@@ -3,7 +3,7 @@ name: install
 description: "Install bluetooth-operator on a liken cluster and verify that it claims the radio. Use when a cluster has no Bluetooth devices yet, when running a development build, or when removing the operator."
 ---
 
-This skill is the guide at https://bluetooth.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/bluetooth/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 <a id="install-the-operator"></a>
 
@@ -37,13 +37,13 @@ is cluster-scoped policy, the same convention a `StorageClass`
 follows: the cluster owner names and curates the classes workloads
 may ask for. The classes split by owner. If the DRA objects are new
 to you, read
-[How the pieces fit](https://bluetooth.liken.sh/docs/guides/#how-the-pieces-fit) first.
+[How the pieces fit](https://liken.sh/bluetooth/docs/guides/#how-the-pieces-fit) first.
 
 * `bluetooth-adapter` is wiring, and the base ships it, served at
-  [`deviceclasses.yaml`](https://bluetooth.liken.sh/deploy/deviceclasses.yaml). The
+  [`deviceclasses.yaml`](https://liken.sh/bluetooth/deploy/deviceclasses.yaml). The
   operator's own pod claims the raw radio through it, and its
   selector picks the `btusb` adapter that `liken` publishes. The
-  claim template in [`operator.yaml`](https://bluetooth.liken.sh/deploy/operator.yaml) names
+  claim template in [`operator.yaml`](https://liken.sh/bluetooth/deploy/operator.yaml) names
   it literally, so the operator cannot start without it. Do not
   delete it.
 * The class your workloads claim through is yours to create,
@@ -66,7 +66,7 @@ to you, read
                   device.attributes["bluetooth.liken.sh"].input
 
 The guard on the `input` attribute also keeps the adapter's [media
-bus](https://bluetooth.liken.sh/docs/reference/devices/#the-media-bus) out of this class. The
+bus](https://liken.sh/bluetooth/docs/reference/devices/#the-media-bus) out of this class. The
 bus is the audio operator's to claim, through a class of its own that
 names the shared `sound.liken.sh/supportsSound` attribute.
 
@@ -98,14 +98,14 @@ workload's manifest, create a specific class.
 ## Apply the manifests
 
 This site serves the repository's manifests as raw YAML under
-[/deploy/](https://bluetooth.liken.sh/deploy/kustomization.yaml), so you can install from here
+[/deploy/](https://liken.sh/bluetooth/deploy/kustomization.yaml), so you can install from here
 without a clone. Apply the three files into `liken-system`, the
 namespace a `liken` cluster already has:
 
     kubectl apply -n liken-system \
-      -f https://bluetooth.liken.sh/deploy/crds.yaml \
-      -f https://bluetooth.liken.sh/deploy/rbac.yaml \
-      -f https://bluetooth.liken.sh/deploy/operator.yaml
+      -f https://liken.sh/bluetooth/deploy/crds.yaml \
+      -f https://liken.sh/bluetooth/deploy/rbac.yaml \
+      -f https://liken.sh/bluetooth/deploy/operator.yaml
 
 Or point your own GitOps at the same files with a `Kustomization`:
 
@@ -113,9 +113,9 @@ Or point your own GitOps at the same files with a `Kustomization`:
     kind: Kustomization
     namespace: liken-system
     resources:
-      - https://bluetooth.liken.sh/deploy/crds.yaml
-      - https://bluetooth.liken.sh/deploy/rbac.yaml
-      - https://bluetooth.liken.sh/deploy/operator.yaml
+      - https://liken.sh/bluetooth/deploy/crds.yaml
+      - https://liken.sh/bluetooth/deploy/rbac.yaml
+      - https://liken.sh/bluetooth/deploy/operator.yaml
 
 The site serves the manifests of the current `main`, and the images
 in `operator.yaml` name `:latest`. To pin a release instead,
@@ -271,7 +271,7 @@ the radio the operator holds:
 The operator creates an `Adapter` object for the radio its pod
 claimed, named for the radio's address. The `ResourceSlice` of paired
 controllers appears when the first controller is paired:
-[Pair a controller and give it to a pod](https://bluetooth.liken.sh/docs/guides/pair-a-controller/) is
+[Pair a controller and give it to a pod](https://liken.sh/bluetooth/docs/guides/pair-a-controller/) is
 the next step.
 
 <a id="look-inside-the-stack"></a>
@@ -318,13 +318,13 @@ container takes `hostNetwork` and five capabilities (`NET_ADMIN`,
 `NET_RAW`, `NET_BIND_SERVICE`, `SETUID`, `SETGID`), because it is the
 Bluetooth stack. The `operator` and `bondfetch` containers drop every
 capability. The comments in
-[`deploy/operator.yaml`](https://bluetooth.liken.sh/deploy/operator.yaml) state the kernel or
+[`deploy/operator.yaml`](https://liken.sh/bluetooth/deploy/operator.yaml) state the kernel or
 daemon check behind each grant.
 
 The pod mounts four host paths: the two kubelet plugin directories
 every DRA driver takes, `/var/run/cdi`, and
 `/var/run/bluetooth.liken.sh/dbus`, which holds the D-Bus socket a
-claim on the [media bus](https://bluetooth.liken.sh/docs/reference/devices/#the-media-bus)
+claim on the [media bus](https://liken.sh/bluetooth/docs/reference/devices/#the-media-bus)
 delivers. The bus directory is a host path so that a prepared claim
 names the same socket across a restart of this pod.
 

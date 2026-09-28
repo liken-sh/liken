@@ -12,7 +12,7 @@ REFERENCE := content/docs/reference
 GENERATED := $(REFERENCE)/receivers.md $(REFERENCE)/cecbuses.md $(REFERENCE)/televisions.md
 
 SKILLS := go tool skills
-BASE := https://equipment.liken.sh
+BASE := https://liken.sh/equipment/
 
 .PHONY: build
 build: $(GENERATED)

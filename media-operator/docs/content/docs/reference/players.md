@@ -307,7 +307,7 @@ pod. The pod that handles a `volume` or `mute` press writes the next
 state back. That pod is the playback pod's command sidecar during a
 film and the idle screen client between films, and each computes the
 next state from the last message the topic delivered. The
-[equipment operator](https://equipment.liken.sh/docs/reference/receivers/)'s
+[equipment operator](https://liken.sh/equipment/docs/reference/receivers/)'s
 receiver session writes the receiver's true level here whenever its
 mark on `volume/owner` is non-empty: the position it adopts when the
 session starts, and the position the receiver reports after a press

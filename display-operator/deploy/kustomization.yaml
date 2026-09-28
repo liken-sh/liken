@@ -9,7 +9,7 @@
 # them and the operator's own pod cannot start without them: they
 # are wiring, not policy. The class workloads claim through is the
 # cluster owner's to create, because it is cluster policy, and the
-# install guide at https://display.liken.sh/docs/guides/install/
+# install guide at https://liken.sh/display/docs/guides/install/
 # gives the YAML for display-output, the one to start with. An owner
 # who renames a wiring class patches both the class and the template.
 #

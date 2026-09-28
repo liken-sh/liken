@@ -16,9 +16,9 @@ You need:
 
 * A `liken` cluster.
 * The hardware operators for the devices your players will select:
-  the [`display-operator`](https://display.liken.sh) for a screen,
-  the [`audio-operator`](https://audio.liken.sh) for sound, and the
-  [`bluetooth-operator`](https://bluetooth.liken.sh) for controllers
+  the [`display-operator`](https://liken.sh/display/) for a screen,
+  the [`audio-operator`](https://liken.sh/audio/) for sound, and the
+  [`bluetooth-operator`](https://liken.sh/bluetooth/) for controllers
   and Bluetooth speakers. Install the ones your equipment has; a
   `Player` can only select what an installed operator publishes.
 * `kubectl` with cluster-admin access, because the install creates
@@ -31,9 +31,9 @@ claims no devices for itself. The classes a `Player` names are the
 cluster owner's vocabulary, the same classes a hand-written
 `ResourceClaim` would use. Each hardware operator's manual gives the
 YAML for its class:
-[displays](https://display.liken.sh/docs/guides/install/),
-[audio outputs](https://audio.liken.sh/docs/guides/install/), and
-[Bluetooth devices](https://bluetooth.liken.sh/docs/guides/install/).
+[displays](https://liken.sh/display/docs/guides/install/),
+[audio outputs](https://liken.sh/audio/docs/guides/install/), and
+[Bluetooth devices](https://liken.sh/bluetooth/docs/guides/install/).
 
 ## Apply the manifests
 
@@ -42,14 +42,14 @@ This site serves the repository's
 the install needs no clone:
 
     kubectl apply -n liken-system \
-      -f https://media.liken.sh/deploy/players-crd.yaml \
-      -f https://media.liken.sh/deploy/plays-crd.yaml \
-      -f https://media.liken.sh/deploy/remotes-crd.yaml \
-      -f https://media.liken.sh/deploy/keymaps-crd.yaml \
-      -f https://media.liken.sh/deploy/mediapreferences-crd.yaml \
-      -f https://media.liken.sh/deploy/rbac.yaml \
-      -f https://media.liken.sh/deploy/operator.yaml \
-      -f https://media.liken.sh/deploy/bus.yaml
+      -f https://liken.sh/media/deploy/players-crd.yaml \
+      -f https://liken.sh/media/deploy/plays-crd.yaml \
+      -f https://liken.sh/media/deploy/remotes-crd.yaml \
+      -f https://liken.sh/media/deploy/keymaps-crd.yaml \
+      -f https://liken.sh/media/deploy/mediapreferences-crd.yaml \
+      -f https://liken.sh/media/deploy/rbac.yaml \
+      -f https://liken.sh/media/deploy/operator.yaml \
+      -f https://liken.sh/media/deploy/bus.yaml
 
 The `-n` flag places the `ServiceAccount`, the two `Deployments`,
 and the `Service` in `liken-system`, the namespace every `liken`
@@ -63,14 +63,14 @@ takes a raw YAML URL as a resource:
     kind: Kustomization
     namespace: liken-system
     resources:
-      - https://media.liken.sh/deploy/players-crd.yaml
-      - https://media.liken.sh/deploy/plays-crd.yaml
-      - https://media.liken.sh/deploy/remotes-crd.yaml
-      - https://media.liken.sh/deploy/keymaps-crd.yaml
-      - https://media.liken.sh/deploy/mediapreferences-crd.yaml
-      - https://media.liken.sh/deploy/rbac.yaml
-      - https://media.liken.sh/deploy/operator.yaml
-      - https://media.liken.sh/deploy/bus.yaml
+      - https://liken.sh/media/deploy/players-crd.yaml
+      - https://liken.sh/media/deploy/plays-crd.yaml
+      - https://liken.sh/media/deploy/remotes-crd.yaml
+      - https://liken.sh/media/deploy/keymaps-crd.yaml
+      - https://liken.sh/media/deploy/mediapreferences-crd.yaml
+      - https://liken.sh/media/deploy/rbac.yaml
+      - https://liken.sh/media/deploy/operator.yaml
+      - https://liken.sh/media/deploy/bus.yaml
 
 A clone works too: `kubectl apply -k deploy/` from the repository
 applies the same files through
@@ -226,9 +226,9 @@ Deleting a `Play` stops its run. Deleting a `Player` or a
 itself:
 
     kubectl delete -n liken-system \
-      -f https://media.liken.sh/deploy/rbac.yaml \
-      -f https://media.liken.sh/deploy/operator.yaml \
-      -f https://media.liken.sh/deploy/bus.yaml
+      -f https://liken.sh/media/deploy/rbac.yaml \
+      -f https://liken.sh/media/deploy/operator.yaml \
+      -f https://liken.sh/media/deploy/bus.yaml
 
 **Deleting a CRD deletes every resource of that kind.** Delete the
 five `*-crd.yaml` files only when every player, play, remote,

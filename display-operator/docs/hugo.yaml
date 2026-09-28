@@ -4,7 +4,7 @@
 # only has to say what is particular to this site. The site's name is
 # the driver's DRA name, display.liken.sh, so the address a claim
 # names is also the address the manual answers on.
-baseURL: https://display.liken.sh/
+baseURL: https://liken.sh/display/
 
 # The generated reference page marks each field's table row with an
 # id, a raw-HTML span the crdref generator emits, so a link can land

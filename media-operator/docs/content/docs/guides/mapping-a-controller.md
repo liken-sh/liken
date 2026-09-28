@@ -18,7 +18,7 @@ You need:
 
 * The operator and its bus, from the
   [install](/docs/guides/install/).
-* The [`bluetooth-operator`](https://bluetooth.liken.sh), with the
+* The [`bluetooth-operator`](https://liken.sh/bluetooth/), with the
   controller paired to a machine. An infrared or CEC remote has no
   device to claim, because no hardware operator publishes one.
 * `kubectl` access to the namespace.

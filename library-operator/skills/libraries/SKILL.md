@@ -3,7 +3,7 @@ name: libraries
 description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace determines. Use when adding a movies, series, or music root to a namespace, or when a title will not play."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/libraries/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/libraries/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Declare a library
 
@@ -33,18 +33,18 @@ blocks must not. An empty block is a complete one. The kinds are
 `movies`, `series`, and `franchises`. A series library holds one
 folder per series with a season folder inside. A franchises library
 is the one kind whose files are written by people, and
-[Franchises](https://library.liken.sh/docs/guides/franchises/) covers it.
+[Franchises](https://liken.sh/library/docs/guides/franchises/) covers it.
 
 `root` defaults to `/` and must be absolute. One volume can therefore
 hold several libraries at different roots. The kind and the storage
 are immutable. A different volume, root, or kind is a different
 `Library`.
 
-[Library](https://library.liken.sh/docs/reference/libraries/) describes every field. The ones
+[Library](https://liken.sh/library/docs/reference/libraries/) describes every field. The ones
 you are likely to set:
 
 * `spec.sources` names the `MetadataProviders` to ask, in order.
-  [Enrichment](https://library.liken.sh/docs/guides/enrichment/) covers them.
+  [Enrichment](https://liken.sh/library/docs/guides/enrichment/) covers them.
 * `spec.ignore` lists path components the scanner skips, such as a
   recycle bin or a staging directory.
 * `spec.scan.schedule` is the cron expression the full walk runs on,
@@ -83,7 +83,7 @@ means the pod of a `Job` has stayed `Pending` for five minutes, and no
 other `Job` of the `Library` starts until that `Job` ends. `Failed`
 means the last walk failed and wrote no rows, or a `Job` failed and no
 later `Job` succeeded. [A Job that does not start or that
-fails](https://library.liken.sh/docs/guides/scanning/#a-job-that-does-not-start-or-that-fails)
+fails](https://liken.sh/library/docs/guides/scanning/#a-job-that-does-not-start-or-that-fails)
 says what to do for both. `Offline` means the
 namespace's reporter has left the bus. `Departing` means a deleted
 `Library` is still removing its rows from the catalog.
@@ -112,7 +112,7 @@ is a walk of the folders webhooks named, `enrich` is the phases of a
 `Library`. A phase that failed names its failure in the `enrich` run,
 and the `Job` still succeeds, so the next `Job` tries that phase's
 titles again. `status.webhook` is the address that rescans one folder;
-[Webhooks](https://library.liken.sh/docs/guides/webhooks/) gives it to Radarr, Sonarr, and
+[Webhooks](https://liken.sh/library/docs/guides/webhooks/) gives it to Radarr, Sonarr, and
 Jellyfin.
 
 ## The namespace is a boundary

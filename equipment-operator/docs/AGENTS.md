@@ -2,7 +2,7 @@
 
 # Authoring this docs domain
 
-This directory is the source of https://equipment.liken.sh/,
+This directory is the source of https://liken.sh/equipment/,
 equipment-operator's manual. Hugo builds it with the shared brand theme, `brand/`
 at the top of the repository.
 

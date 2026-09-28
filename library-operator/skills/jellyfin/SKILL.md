@@ -3,7 +3,7 @@ name: jellyfin
 description: "Keep playback progress the same in both directions between the progress store and a Jellyfin server through spec.jellyfin on the Catalog. Use when a cluster runs Jellyfin beside the operator, or when a backfill of progress is needed."
 ---
 
-This skill is the guide at https://library.liken.sh/docs/guides/jellyfin/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/jellyfin/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Keep progress with Jellyfin
 
@@ -43,7 +43,7 @@ Then name the server's address and that `Secret` on the `Catalog`.
 The operator creates one pod and one `Service`, both named after the
 `Catalog` with the suffix `-jellyfin`, beside the progress store. The
 key reaches the pod through a `secretKeyRef`, so the operator never
-reads it. The [Catalog](https://library.liken.sh/docs/reference/catalogs/) reference describes
+reads it. The [Catalog](https://liken.sh/library/docs/reference/catalogs/) reference describes
 every field.
 
 ## 2. Set up the Webhook plugin
@@ -87,7 +87,7 @@ of the work, and at or under five minutes. The rule takes whichever of
 the two leaves less time. So a short episode is watched near its end,
 and a long film is watched with up to five minutes left.
 
-Where the file's [marks](https://library.liken.sh/docs/guides/enrichment/#intro-and-credits-marks)
+Where the file's [marks](https://liken.sh/library/docs/guides/enrichment/#intro-and-credits-marks)
 place the credits in the second half of the work, the work counts as
 watched from the start of those credits instead, whatever time is left.
 The role reads the credits marks the way the player's up-next card
