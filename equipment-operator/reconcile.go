@@ -36,9 +36,12 @@ import (
 // failures that no event follows: a list the API server refused, a
 // Television's status.session write it refused, a declared setting
 // whose send failed, and a setting the receiver took and still reports
-// at another value, which the send budget allows a few more sends. Each
-// tick costs one list of the Receivers and sends nothing to a receiver
-// that already matches its spec.
+// at another value, which the send budget allows a few more sends. A
+// tick reads the Receivers from the watch's store, so on a settled
+// cluster it sends the API server no read of them, and it sends nothing
+// to a receiver that already matches its spec. The pass lists the
+// Receivers from the API server only while the store has nothing to
+// give (objectcache.go).
 const backstopInterval = 30 * time.Second
 
 // How long a burst of lines is collected before one status write.

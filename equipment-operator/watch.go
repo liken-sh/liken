@@ -28,8 +28,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -93,7 +95,12 @@ func (c *Client) watcher() (dynamic.Interface, error) {
 //
 // fieldSelector, when it is not empty, narrows the list and the watch
 // to the objects it selects.
-func watchCollection(ctx context.Context, client *Client, resource schema.GroupVersionResource, fieldSelector string, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
+//
+// absent, when it is not nil, names the refusals that mean the
+// collection is not there to watch, such as the 404 of a kind whose
+// definition another operator installs. The list then answers an
+// empty collection, and the watch is a quiet stream (quietWatch).
+func watchCollection(ctx context.Context, client *Client, resource schema.GroupVersionResource, fieldSelector string, absent func(error) bool, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
 	watcher, err := client.watcher()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "watching %s: %v\n", resource.Resource, err)
@@ -105,18 +112,35 @@ func watchCollection(ctx context.Context, client *Client, resource schema.GroupV
 	source := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			options.FieldSelector = fieldSelector
-			return collection.List(ctx, options)
+			list, err := collection.List(ctx, options)
+			if absent != nil && err != nil && absent(err) {
+				return &unstructured.UnstructuredList{}, nil
+			}
+			return list, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			options.FieldSelector = fieldSelector
+			stream, err := collection.Watch(ctx, options)
+			// The reflector's first read is a streaming list, and its
+			// refusal makes the reflector fall back to the list above,
+			// which answers the empty collection. A later watch of the
+			// absent collection is the quiet stream. Neither counts as an
+			// open, so the watch that finds the definition when it
+			// arrives counts as no restart.
+			if err != nil && absent != nil && absent(err) {
+				if options.SendInitialEvents == nil {
+					return quietWatch(ctx, optionalRecheck), nil
+				}
+				return nil, err
+			}
 			opens.Lock()
 			again := opened
-			opened = true
+			opened = opened || err == nil
 			opens.Unlock()
 			if again && restarted != nil {
 				restarted()
 			}
-			return collection.Watch(ctx, options)
+			return stream, err
 		},
 	}
 	if held != nil {
@@ -145,6 +169,47 @@ func watchCollection(ctx context.Context, client *Client, resource schema.GroupV
 	defer held.release()
 	informer.RunWithContext(ctx)
 	group.Wait()
+}
+
+// optionalRecheck is how long the watch of an absent collection waits
+// before it asks the API server again. It is a variable so a test
+// waits milliseconds instead.
+//
+// An operator that installs the definition can arrive at any time, and
+// nothing this operator watches reports that. So the watch of an
+// absent collection is a quiet stream that ends after this wait with a
+// 410 Gone, and the reflector reads the collection again, which finds
+// it once it exists. The 410 makes that read a list, which answers a
+// resourceVersion to watch from. A stream that closed with no event
+// would make the reflector watch from the empty version of the empty
+// list, and a watch from no version reports no object deleted before
+// it opened. Without the quiet stream, the reflector would back off,
+// list again, and log a failure about every 30 seconds for as long as
+// the definition is missing.
+var optionalRecheck = 5 * time.Minute
+
+// quietWatch is the quiet stream. It sends no event until the recheck
+// is due, and then a 410 Gone. It ends when the context ends. The
+// caller reads the wait, so the stream's goroutine reads no shared
+// setting.
+func quietWatch(ctx context.Context, recheck time.Duration) watch.Interface {
+	stream := watch.NewRaceFreeFake()
+	go func() {
+		timer := time.NewTimer(recheck)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			stream.Stop()
+		case <-timer.C:
+			// The reflector stops the stream once it reads the error.
+			// A stream it stopped already takes no event.
+			stream.Error(&metav1.Status{
+				Status: metav1.StatusFailure, Code: http.StatusGone, Reason: metav1.StatusReasonExpired,
+				Message: "the collection was absent; read it again",
+			})
+		}
+	}()
+	return stream
 }
 
 // dropManagedFields removes metadata.managedFields from each object
@@ -271,7 +336,7 @@ func watchReceivers(ctx context.Context, client *Client, wake, specWake chan<- s
 			poke(specWake)
 		}
 	}
-	watchCollection(ctx, client, receiverResource, "", handler, synced, readings.watchRestarted, held)
+	watchCollection(ctx, client, receiverResource, "", nil, handler, synced, readings.watchRestarted, held)
 }
 
 // bothHandlers sends each change to two handlers, in order.

@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // A Television is cluster-scoped, like a Receiver and a CECBus.
@@ -60,9 +62,10 @@ func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
 // watchTelevisions wakes a loop on every change to a Television, its
 // status included, because each workload acts on status the other
 // writes. restarted is called for each watch opened again after the
-// first.
+// first. A cluster without the Television definition has no
+// Television, and the watch holds none until the definition arrives.
 func watchTelevisions(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, televisionResource, "", wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, televisionResource, "", apierrors.IsNotFound, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyTelevision sends one apply body under one field manager. force

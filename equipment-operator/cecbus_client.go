@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // A CECBus is cluster-scoped, like a Receiver.
@@ -54,7 +56,7 @@ func readCECBuses(c *Client, held *watchStore) (*CECBusList, error) {
 // workloads write, and a node workload reads the Deployment's. restarted
 // is called for each watch opened again after the first.
 func watchCECBuses(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, cecBusResource, "", wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, cecBusResource, "", nil, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyCECBus sends one apply body under one field manager. force
@@ -195,10 +197,12 @@ func readDisplay(c *Client, held *watchStore, name string) (*Display, error) {
 // watchDisplays wakes a loop when a Display appears, goes, or moves to
 // another node or physical address, which is all a Television reads of
 // it. display-operator writes other status fields of a Display, and
-// those writes wake nothing.
+// those writes wake nothing. A cluster without display-operator has no
+// Display definition, and the watch holds no Display until the
+// definition arrives.
 func watchDisplays(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
 	displays := markHandler[Display, displayPlace]{what: "the Displays", wake: wake, mark: displayMark}
-	watchCollection(ctx, client, displayResource, "", displays.handler(), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, displayResource, "", apierrors.IsNotFound, displays.handler(), func() { poke(wake) }, restarted, held)
 }
 
 // nodeDisplays answers the node workload's Display watch on one
@@ -206,10 +210,23 @@ func watchDisplays(ctx context.Context, client *Client, wake chan<- struct{}, re
 // status.node is that machine. The adapter reads the Display on its own
 // machine, and the Display CRD declares status.node a selectable
 // field, so the API server sends no other machine's Display writes.
+//
+// An API server whose Display definition declares no such field
+// refuses the selector, and the watch then holds no Display. The pass
+// reads the Display its adapter speaks for from the API server when
+// the store does not hold it (readDisplay), so the node workload still
+// runs.
 func nodeDisplays(machine string) func(context.Context, *Client, chan<- struct{}, func(), *watchStore) {
 	return func(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-		watchCollection(ctx, client, displayResource, displayNodeSelector(machine), wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+		watchCollection(ctx, client, displayResource, displayNodeSelector(machine), displaysUnselectable, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 	}
+}
+
+// displaysUnselectable says the node workload's Display watch has no
+// collection to watch: the Display definition is missing, or it
+// declares no status.node field to select by.
+func displaysUnselectable(err error) bool {
+	return apierrors.IsNotFound(err) || apierrors.IsBadRequest(err)
 }
 
 // displayNodeSelector is the field selector that takes the Displays
@@ -236,7 +253,7 @@ func displayMark(display Display) displayPlace {
 // status write wakes nothing.
 func watchReceiverSpecs(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
 	receivers := markHandler[Receiver, specMark]{what: "the Receivers", wake: wake, mark: receiverSpecMark}
-	watchCollection(ctx, client, receiverResource, "", receivers.handler(), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, receiverResource, "", nil, receivers.handler(), func() { poke(wake) }, restarted, held)
 }
 
 // specMark is an object's metadata.generation, which the API server

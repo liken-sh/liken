@@ -24,9 +24,8 @@ import (
 // staleAfter after its reportedAt, and the pod of a node workload that
 // dies writes nothing that wakes the loop, so only a clock finds the
 // stale entry. The same tick tries again a status write the API server
-// refused, and opens the watch of a Television or Display definition
-// installed after the operator started. Every object a pass reads has
-// a watch, so no change to one waits for the tick.
+// refused. Every object a pass reads has a watch, so no change to one
+// waits for the tick.
 var cecBusClock = 30 * time.Second
 
 // cecBusRetry is how long the loop waits before it lists again after
@@ -116,44 +115,25 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 		return
 	}
 	// run returns only after every watch stops, so nothing it started
-	// outlives it.
+	// outlives it. Each watch opens before the first pass reads its
+	// kind, so a change made during the pass wakes the next one. The
+	// Television and Display watches hold an empty store on a cluster
+	// without their definitions, and find the definition when it
+	// arrives (watchCollection).
 	var watching sync.WaitGroup
 	defer watching.Wait()
 	watching.Go(func() { watchCECBuses(ctx, c.client, c.wake, readings.cecBusWatchRestarted, c.buses) })
-	follows := []*follow{
-		{watch: watchTelevisions, restarted: readings.televisionWatchRestarted, held: c.televisions, list: func() (string, error) {
-			listed, err := ListTelevisions(c.client)
-			if err != nil {
-				return "", err
-			}
-			return listed.Metadata.ResourceVersion, nil
-		}},
-		{watch: watchDisplays, restarted: readings.displayWatchRestarted, held: c.displays, list: func() (string, error) {
-			listed, err := ListDisplays(c.client)
-			if err != nil {
-				return "", err
-			}
-			return listed.Metadata.ResourceVersion, nil
-		}},
-	}
+	watching.Go(func() { watchTelevisions(ctx, c.client, c.wake, readings.televisionWatchRestarted, c.televisions) })
+	watching.Go(func() { watchDisplays(ctx, c.client, c.wake, readings.displayWatchRestarted, c.displays) })
 	// In the Deployment, the Receiver loop's watch also feeds this loop
 	// (watchReceivers), so the process holds each Receiver once. A loop
 	// that runs alone watches the Receivers' specs itself.
 	if !c.sharedReceivers {
-		follows = append(follows, &follow{watch: watchReceiverSpecs, restarted: readings.watchRestarted, held: c.receivers, list: func() (string, error) {
-			listed, err := ListReceivers(c.client)
-			if err != nil {
-				return "", err
-			}
-			return listed.Metadata.ResourceVersion, nil
-		}})
+		watching.Go(func() { watchReceiverSpecs(ctx, c.client, c.wake, readings.watchRestarted, c.receivers) })
 	}
 	ticker := time.NewTicker(cecBusClock)
 	defer ticker.Stop()
 	for {
-		// Each watch opens before the pass reads its kind, so a change
-		// made during the pass wakes the next one.
-		c.startFollows(ctx, &watching, follows)
 		if err := c.pass(); err != nil {
 			fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)
 		}
@@ -163,36 +143,5 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 		case <-c.wake:
 		case <-ticker.C:
 		}
-	}
-}
-
-// follow is one watch the loop opens once its kind lists a version: at
-// once on a cluster with the definition, and at a later pass for a
-// definition installed after the operator started. The watch waits
-// for the list, because a reflector on a kind with no definition
-// retries its own list and logs each failure, for as long as the
-// definition is missing.
-type follow struct {
-	watch     func(context.Context, *Client, chan<- struct{}, func(), *watchStore)
-	restarted func()
-	held      *watchStore
-	list      func() (string, error)
-	running   bool
-}
-
-// startFollows opens each watch that is not open and whose kind lists
-// a version now. A list that fails, or a kind with no definition,
-// leaves the watch closed until the next pass.
-func (c *cecBusController) startFollows(ctx context.Context, watching *sync.WaitGroup, follows []*follow) {
-	for _, one := range follows {
-		if one.running {
-			continue
-		}
-		version, err := one.list()
-		if err != nil || version == "" {
-			continue
-		}
-		one.running = true
-		watching.Go(func() { one.watch(ctx, c.client, c.wake, one.restarted, one.held) })
 	}
 }

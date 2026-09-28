@@ -956,11 +956,13 @@ and reads again. No timer re-reads a state.
   TV before and after their commands, as before. The follower's
   answers and the commands a person causes are unchanged.
 * **The API.** The watches of `CECBus`es, `Television`s, and
-  `Display`s are the subscriptions, and each pass lists them. The
-  node workload now watches `Display`s, because the adapter announces
-  a `Display`'s physical address, and its role gains `list` and
-  `watch` on them. A watch for a definition installed after the pod
-  starts begins at the first pass that lists it. The backstop pass
+  `Display`s are the subscriptions, and each pass reads them from the
+  watches' stores. The node workload now watches `Display`s, because
+  the adapter announces a `Display`'s physical address, and its role
+  gains `list` and `watch` on them. The watch of a kind whose
+  definition is missing holds no object and asks the API server
+  again every five minutes, so it finds a definition installed after
+  the pod starts within five minutes. The backstop pass
   every 30 seconds is gone. A join that failed is tried at its retry
   time, and a list or a write the API server refused is tried again
   after 10 seconds.

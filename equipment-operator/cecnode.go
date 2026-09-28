@@ -329,28 +329,27 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	// A change of a Television's spec.power or status.session wakes the
 	// loop, because the pass is where the adapter acts on it. A change of
 	// a Display's physical address wakes it too, because the adapter
-	// announces that address. A cluster without a definition lists no
-	// version and gets no watch yet; watchLater starts it once a pass
-	// lists a version.
-	watches := []*lateWatch{
-		{path: televisionsPath, watch: watchTelevisions, held: n.televisions, list: func() (string, error) {
-			listed, err := ListTelevisions(n.client)
-			if err != nil {
-				return "", err
-			}
-			return listed.Metadata.ResourceVersion, nil
-		}},
-		{path: displaysPath, optional: true, watch: nodeDisplays(n.machine), held: n.displays, list: func() (string, error) {
-			listed, err := ListDisplaysOn(n.client, n.machine)
-			if err != nil {
-				return "", err
-			}
-			return listed.Metadata.ResourceVersion, nil
-		}},
-	}
-	if err := n.watchLater(ctx, started, watches, true); err != nil {
+	// announces that address. Each watch holds an empty store on a
+	// cluster without its definition, and finds the definition when it
+	// arrives (watchCollection).
+	//
+	// The node workload lists the Televisions once before it watches
+	// them, so an API server that refuses the list, such as for a
+	// missing grant, ends the node workload at its start, as the
+	// CECBus list does. A cluster without the definition answers not
+	// found, which ListTelevisions reads as no Television.
+	err = retryThrottled(ctx, func() error {
+		_, err := ListTelevisions(n.client)
 		return err
+	})
+	if ctx.Err() != nil {
+		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("listing %s: %w", televisionsPath, err)
+	}
+	started.Go(func() { watchTelevisions(ctx, n.client, n.wake, nil, n.televisions) })
+	started.Go(func() { nodeDisplays(n.machine)(ctx, n.client, n.wake, nil, n.displays) })
 	heartbeat := time.NewTicker(cecReportInterval)
 	defer heartbeat.Stop()
 	var retry <-chan time.Time
@@ -361,7 +360,6 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 		}
 		n.report(force)
 		force = false
-		_ = n.watchLater(ctx, started, watches, false)
 		retry = nil
 		if wait, due := n.retryIn(); due {
 			retry = time.After(wait)
@@ -398,53 +396,6 @@ func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <
 			n.report(true)
 		}
 	}
-}
-
-// lateWatch is one watch the loop starts once its collection lists a
-// version: at once for a cluster with the definition, and at a later
-// pass for a definition installed after the node workload started.
-type lateWatch struct {
-	path string
-	// optional says a refused first list does not end the node workload.
-	// The Display list selects by status.node, and an API server whose
-	// Display definition declares no such selectable field refuses it.
-	// The pass then reads the named Display from the API server.
-	optional bool
-	watch    func(context.Context, *Client, chan<- struct{}, func(), *watchStore)
-	held     *watchStore
-	list     func() (string, error)
-	running  bool
-}
-
-// watchLater starts each watch that is not running and whose collection
-// now lists a version. first says the loop is starting, when a list the
-// API server refuses ends the node workload, as the first CECBus list
-// does. A later list that fails is tried again at the next pass.
-func (n *cecNode) watchLater(ctx context.Context, started *sync.WaitGroup, watches []*lateWatch, first bool) error {
-	for _, watch := range watches {
-		if watch.running {
-			continue
-		}
-		var version string
-		err := retryThrottled(ctx, func() error {
-			var err error
-			version, err = watch.list()
-			return err
-		})
-		if ctx.Err() != nil {
-			return nil
-		}
-		if err != nil && first && !watch.optional {
-			return fmt.Errorf("listing %s: %w", watch.path, err)
-		}
-		if err != nil || version == "" {
-			continue
-		}
-		watch.running = true
-		start, held := watch.watch, watch.held
-		started.Go(func() { start(ctx, n.client, n.wake, nil, held) })
-	}
-	return nil
 }
 
 // cecAPIRetry is how long the loop waits before it runs a pass again
