@@ -49,12 +49,7 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 	}
 	create, prune := discoverTelevisions(buses, televisions.Items)
 	for _, bus := range create {
-		if err := CreateDiscoveredTelevision(c.client, bus); err != nil {
-			fmt.Fprintf(os.Stderr, "creating Television %s: %v\n", discoveredTelevisionName(bus), err)
-			continue
-		}
-		fmt.Fprintf(c.log, "CECBus %s reports a TV at %s named %q, and no Television names the bus; created Television %s\n",
-			bus, tvOf(byName[bus]).PhysicalAddress, tvOf(byName[bus]).OSDName, discoveredTelevisionName(bus))
+		c.createDiscoveredTelevision(bus, byName[bus])
 	}
 	for _, name := range prune {
 		if err := DeleteTelevision(c.client, name); err != nil {
@@ -80,6 +75,24 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 			fmt.Fprintf(os.Stderr, "writing the status of Television %s: %v\n", television.Metadata.Name, err)
 		}
 	}
+}
+
+// createDiscoveredTelevision creates the Television discovery makes for
+// a bus's TV, and logs the creation. A create that lands on a name
+// another writer just took is the API server's conflict, not an error:
+// CreateDiscoveredTelevision reports it as no creation, so this logs
+// nothing for an object it did not make.
+func (c *cecBusController) createDiscoveredTelevision(bus string, found *CECBus) {
+	created, err := CreateDiscoveredTelevision(c.client, bus)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "creating Television %s: %v\n", discoveredTelevisionName(bus), err)
+		return
+	}
+	if !created {
+		return
+	}
+	fmt.Fprintf(c.log, "CECBus %s reports a TV at %s named %q, and no Television names the bus; created Television %s\n",
+		bus, tvOf(found).PhysicalAddress, tvOf(found).OSDName, discoveredTelevisionName(bus))
 }
 
 // replacedBy says which Television took over the bus of a discovered

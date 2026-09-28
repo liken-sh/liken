@@ -59,7 +59,11 @@ func TestDiscoveryCreatesAndLeavesAnExistingName(t *testing.T) {
 	passes(t, api, 3)
 
 	mustDeepEqual(t, api.created, []string{"den"})
-	mustSucceed(t, CreateDiscoveredTelevision(api.client, "den"))
+	created, err := CreateDiscoveredTelevision(api.client, "den")
+	mustSucceed(t, err)
+	if created {
+		t.Error("the name already existed, so this call created nothing")
+	}
 	mustDeepEqual(t, api.created, []string{"den"})
 }
 
@@ -373,4 +377,43 @@ func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
 	mustDeepEqual(t, deleted.lines(), []string{
 		"deleted the discovered Television den: Television lounge names CECBus den",
 	})
+}
+
+// createDiscoveredTelevision logs a creation only when its create
+// reached the API server as a 201. A 409 means a name another writer
+// already took, which this call did not create, so it gets no line.
+func TestCreateDiscoveredTelevisionLogsOnlyWhatItCreated(t *testing.T) {
+	cases := []struct {
+		name      string
+		preexists bool
+		want      []string
+	}{
+		{
+			"a create that lands",
+			false,
+			[]string{`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`},
+		},
+		{
+			"a create that finds the name already taken",
+			true,
+			[]string{""},
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			api := startCECAPI(t)
+			if one.preexists {
+				api.putTelevision(Television{Metadata: ObjectMeta{Name: "den"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+			}
+			bus := scannedBus("den", tvDevice)
+			bus.Status.Devices, _ = deriveCECBus(&bus, time.Now())
+			controller := newCECBusController(api.client)
+			log := &logBuffer{}
+			controller.log = log
+
+			controller.createDiscoveredTelevision("den", &bus)
+
+			mustDeepEqual(t, log.lines(), one.want)
+		})
+	}
 }

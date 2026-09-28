@@ -249,24 +249,26 @@ func ApplyTelevisionSession(c *Client, name string, session *TelevisionSession) 
 // and nothing else, so it asks no power of the TV, and it carries the
 // discovered label. It is a create and not an apply: an object that
 // already has the name is left as it is, and the API server's conflict
-// for it is no error.
-func CreateDiscoveredTelevision(c *Client, bus string) error {
+// for it is no error. It answers whether this call is the one that
+// created the Television, so a caller that logs a creation logs one
+// only when it happened.
+func CreateDiscoveredTelevision(c *Client, bus string) (bool, error) {
 	name := discoveredTelevisionName(bus)
 	object := Television{Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: bus}}}
 	object.APIVersion, object.Kind, object.Metadata = televisionApply(name)
 	object.Metadata.Labels = map[string]string{discoveredLabel: discoveredCECLabelValue}
 	encoded, err := json.Marshal(object)
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, err = written[Television](c.versions.televisions, name, func() (*Television, error) {
 		answer := &Television{}
 		return answer, c.RequestJSON(http.MethodPost, televisionsPath, encoded, answer)
 	})
 	if err == ErrConflict {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 // DeleteTelevision removes one Television. A name that is already
