@@ -233,62 +233,73 @@ func TestAChangeToAPlayWakesThePass(t *testing.T) {
 	mustMatch(t, wokeWithin(wake), true)
 }
 
-// A playback pod wakes the pass when it goes away or turns Failed, and
-// on nothing else. The idle and reader pods wake nothing: the pass
-// reads them from the view on its next tick.
-func TestAPodWakesThePassOnlyWhenAPlaybackPodEnds(t *testing.T) {
+// Any of this operator's pods wakes the pass when it goes away, and a
+// playback pod also when its status changes. Nothing else about a pod
+// wakes it.
+func TestAPodWakesThePassWhenItEndsOrAPlaybackPodMoves(t *testing.T) {
+	restarted := labeledPod("movie-playback", playbackLabelValue, podRunning)
+	restarted.Status.ContainerStatuses = []ContainerStatus{{Name: displayContainer, RestartCount: 3}}
+	ending := labeledPod("movie-playback", playbackLabelValue, podRunning)
+	ending.Metadata.Labels[endingLabelKey] = endingLabelValue
+
 	cases := []struct {
 		name   string
-		change func(handler cache.ResourceEventHandler, pod *unstructured.Unstructured)
-		pod    *Pod
+		before *Pod
+		after  *Pod
 		want   bool
 	}{
-		{name: "a playback pod that runs", pod: labeledPod("movie-playback", playbackLabelValue, podRunning),
-			change: updated, want: false},
-		{name: "a playback pod that failed", pod: labeledPod("movie-playback", playbackLabelValue, podFailed),
-			change: updated, want: true},
-		{name: "a playback pod that went away", pod: labeledPod("movie-playback", playbackLabelValue, podRunning),
-			change: deleted, want: true},
-		{name: "a failed playback pod the watch had not seen", pod: labeledPod("movie-playback", playbackLabelValue, podFailed),
-			change: added, want: true},
-		{name: "a new playback pod", pod: labeledPod("movie-playback", playbackLabelValue, podPending),
-			change: added, want: false},
-		{name: "an idle pod that failed", pod: labeledPod("theater-idle", idleLabelValue, podFailed),
-			change: updated, want: false},
-		{name: "an idle pod that went away", pod: labeledPod("theater-idle", idleLabelValue, podRunning),
-			change: deleted, want: false},
-		{name: "a reader pod that went away", pod: labeledPod("sofa-remote", remoteLabelValue, podRunning),
-			change: deleted, want: false},
+		{name: "a playback pod starts running", before: labeledPod("movie-playback", playbackLabelValue, podPending),
+			after: labeledPod("movie-playback", playbackLabelValue, podRunning), want: true},
+		{name: "a playback pod succeeds", before: labeledPod("movie-playback", playbackLabelValue, podRunning),
+			after: labeledPod("movie-playback", playbackLabelValue, podSucceeded), want: true},
+		{name: "a playback pod fails", before: labeledPod("movie-playback", playbackLabelValue, podRunning),
+			after: labeledPod("movie-playback", playbackLabelValue, podFailed), want: true},
+		{name: "a playback pod's display restarts", before: labeledPod("movie-playback", playbackLabelValue, podRunning),
+			after: restarted, want: true},
+		{name: "this operator labels the ending", before: labeledPod("movie-playback", playbackLabelValue, podRunning),
+			after: ending, want: false},
+		{name: "a failed playback pod the watch had not seen",
+			after: labeledPod("movie-playback", playbackLabelValue, podFailed), want: true},
+		{name: "a finished playback pod the watch had not seen",
+			after: labeledPod("movie-playback", playbackLabelValue, podSucceeded), want: true},
+		{name: "this operator creates a playback pod",
+			after: labeledPod("movie-playback", playbackLabelValue, podPending), want: false},
+		{name: "an idle pod fails", before: labeledPod("theater-idle", idleLabelValue, podRunning),
+			after: labeledPod("theater-idle", idleLabelValue, podFailed), want: false},
+		{name: "this operator creates a reader pod",
+			after: labeledPod("sofa-remote", remoteLabelValue, podPending), want: false},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			wake := make(chan struct{}, 1)
 
-			each.change(wakeOnPlaybackEnd(wake), asObject(t, each.pod))
+			handChange(t, podRule.handler(wake), each.before, each.after)
 
 			mustMatch(t, len(wake) == 1, each.want)
 		})
 	}
 }
 
-func added(handler cache.ResourceEventHandler, pod *unstructured.Unstructured) {
-	handler.OnAdd(pod, false)
-}
+// Every pod the watch selects is this operator's, so the removal of
+// any of them wakes the pass.
+func TestAPodRemovalWakesThePass(t *testing.T) {
+	for _, component := range []string{playbackLabelValue, idleLabelValue, remoteLabelValue} {
+		t.Run(component, func(t *testing.T) {
+			wake := make(chan struct{}, 1)
 
-func updated(handler cache.ResourceEventHandler, pod *unstructured.Unstructured) {
-	handler.OnUpdate(pod, pod)
-}
+			podRule.handler(wake).OnDelete(asObject(t, labeledPod("gone", component, podRunning)))
 
-func deleted(handler cache.ResourceEventHandler, pod *unstructured.Unstructured) {
-	handler.OnDelete(pod)
+			mustMatch(t, len(wake), 1)
+		})
+	}
 }
 
 // A removal whose tombstone holds no copy of the pod wakes the pass,
-// because nothing says whose pod it was.
+// because every pod the watch selects is this operator's.
 func TestAPodRemovedWithNoCopyWakesThePass(t *testing.T) {
 	wake := make(chan struct{}, 1)
 
-	wakeOnPlaybackEnd(wake).OnDelete(cache.DeletedFinalStateUnknown{Key: "house/movie-playback"})
+	podRule.handler(wake).OnDelete(cache.DeletedFinalStateUnknown{Key: "house/movie-playback"})
 
 	mustMatch(t, len(wake), 1)
 }
@@ -303,9 +314,11 @@ func TestThePodsWatchSelectsTheOperatorsOwnPods(t *testing.T) {
 	synced := make(chan struct{})
 
 	runWatch(t, server, collectionWatch{resource: podResource, labels: ownPodsSelector,
-		handler: wakeOnPlaybackEnd(wake), synced: func(cache.Store) { close(synced) }})
+		handler: podRule.handler(wake), synced: func(cache.Store) { close(synced) }})
 	mustMatch(t, closedWithin(synced, watchTimeout), true)
-	mustMatch(t, wokeWithin(wake), false)
+	// The first read holds a running playback pod, which wakes the pass
+	// once.
+	mustMatch(t, wokeWithin(wake), true)
 	pods.send(t, "MODIFIED", labeledPod("movie-playback", playbackLabelValue, podFailed))
 
 	mustMatch(t, wokeWithin(wake), true)

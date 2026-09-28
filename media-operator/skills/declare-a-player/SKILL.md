@@ -142,10 +142,10 @@ has a different cause: the machine that has the screen has too little
 memory or cpu left for the pod's requests. Every pod of a `Player`
 must run on that machine, so the scheduler cannot place it on another
 one. At the defaults, the idle pod requests 96Mi of memory and 5m of
-cpu. A playback pod requests 588Mi and 100m in all: 432Mi and 80m for
-the player, 144Mi and 10m for the display, and 12Mi and 10m for the
+cpu. A playback pod requests 592Mi and 100m in all: 432Mi and 80m for
+the player, 144Mi and 10m for the display, and 16Mi and 10m for the
 command sidecar. The idle pod keeps running under a film, so a machine
-must hold both pods at once: about 684Mi and 105m. Free memory on the
+must hold both pods at once: about 688Mi and 105m. Free memory on the
 machine, lower the requests as the
 [install guide](https://media.liken.sh/docs/guides/install/#container-resources) shows, or
 connect the screen to a machine with more.

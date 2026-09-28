@@ -11,7 +11,7 @@
 #
 # The requests are near the steady use of a 1920x1080 screen, measured on
 # a home cluster, so a playback pod and an idle pod together request
-# about 684Mi and schedule on a 1GB machine. The memory limits are above
+# about 688Mi and schedule on a 1GB machine. The memory limits are above
 # the highest use measured on a 3840x2160 screen, with about half again
 # as headroom, so a film on that screen is not killed at these values.
 # containerresources.go gives the measurement behind each value.
@@ -24,7 +24,7 @@ display:
   requests: {cpu: 10m, memory: 144Mi}
   limits: {memory: 640Mi}
 command:
-  requests: {cpu: 10m, memory: 12Mi}
+  requests: {cpu: 10m, memory: 16Mi}
   limits: {memory: 32Mi}
 
 # The idle pod, which draws the idle screen while nothing plays.

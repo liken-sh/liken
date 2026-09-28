@@ -7,11 +7,14 @@ package main
 import (
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // A client built with a credentials directory reads the token from disk
@@ -112,5 +115,39 @@ func TestInClusterClientRefusesAConfigItCannotBuild(t *testing.T) {
 			_, err := InClusterClient()
 			mustFail(t, err)
 		})
+	}
+}
+
+// A request whose body stops part way ends at apiRequestTimeout with an
+// error, so a stalled API server cannot hold a pass.
+func TestTheInClusterClientBoundsAWholeRequest(t *testing.T) {
+	timeoutWas := apiRequestTimeout
+	apiRequestTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { apiRequestTimeout = timeoutWas })
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"metadata":`)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(func() {
+		server.CloseClientConnections()
+		server.Close()
+	})
+	address, err := url.Parse(server.URL)
+	mustSucceed(t, err)
+	t.Setenv("KUBERNETES_SERVICE_HOST", address.Hostname())
+	t.Setenv("KUBERNETES_SERVICE_PORT", address.Port())
+	dir := useServiceAccountDir(t, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+	mustSucceed(t, os.WriteFile(filepath.Join(dir, "token"), []byte("token"), 0o600))
+	client, err := InClusterClient()
+	mustSucceed(t, err)
+	began := time.Now()
+
+	_, err = GetPlay(client, "house", "movie")
+
+	mustFail(t, err)
+	if took := time.Since(began); took > watchTimeout {
+		t.Errorf("the request ended after %s", took)
 	}
 }

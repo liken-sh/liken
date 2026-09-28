@@ -10,14 +10,14 @@ package main
 //     this operator's own status writes on Plays, Players, and
 //     Remotes: the pass after a write is how a Finished Play retires
 //     at once and a new phase reaches the Player.
-//   - A playback pod that goes away or turns Failed wakes the pass, so
-//     an eviction or a crash reaches the reconcile at once. Every other
-//     change to a pod does not, because a routine update to a running
-//     pod needs no pass.
-//   - The claims, the Displays, the ResourceSlices, the Receivers, and
-//     the standing idle and reader pods wake nothing. The pass reads
-//     them on the backstop tick, and the watch only makes that read
-//     free. operate.go names what the tick covers.
+//   - A pod of this operator's that goes away wakes the pass, so the
+//     pass that follows an eviction, a lost node, or its own delete
+//     creates what it owes. A playback pod also wakes it when its
+//     status changes, because the Play's status is derived from it.
+//   - A claim, a ResourceSlice, a Display, or a Receiver wakes the pass
+//     when a change reaches a field the pass reads, and not when this
+//     operator writes it. changewake.go holds each rule, the pods'
+//     rule too.
 //
 // A watch is scoped the way the pass reads: the pods by the component
 // label this operator stamps on each pod it creates, and every other
@@ -97,13 +97,15 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 		{kindKeymap, collectionWatch{resource: keymapResource, handler: wakes}, &view.keymaps},
 		{kindMediaPreferences, collectionWatch{resource: preferencesResource, handler: wakes}, &view.preferences},
 		{kindPeripheral, collectionWatch{resource: peripheralResource, handler: wakes}, &view.peripherals},
-		{kindPod, collectionWatch{resource: podResource, labels: ownPodsSelector, handler: wakeOnPlaybackEnd(wake)}, &view.pods},
-		{kindResourceClaim, collectionWatch{resource: claimResource}, &view.claims},
-		{kindResourceSlice, collectionWatch{resource: sliceResource}, &view.slices},
+		{kindPod, collectionWatch{resource: podResource, labels: ownPodsSelector, handler: podRule.handler(wake)}, &view.pods},
+		{kindResourceClaim, collectionWatch{resource: claimResource, handler: claimRule.handler(wake)}, &view.claims},
+		{kindResourceSlice, collectionWatch{resource: sliceResource, handler: sliceRule.handler(wake)}, &view.slices},
 		// The display-operator and the equipment-operator define these
 		// two, and a cluster can run the media operator with neither.
-		{kindDisplay, collectionWatch{resource: displayResource, optional: true}, &view.displays},
-		{kindReceiver, collectionWatch{resource: receiverResource, optional: true}, &view.receivers},
+		{kindDisplay, collectionWatch{resource: displayResource, optional: true,
+			handler: displayRule.handler(wake)}, &view.displays},
+		{kindReceiver, collectionWatch{resource: receiverResource, optional: true,
+			handler: receiverRule.handler(wake)}, &view.receivers},
 	}
 	type read struct {
 		kind  string
@@ -152,42 +154,5 @@ func wakeOnChange(wake chan<- struct{}) cache.ResourceEventHandler {
 		AddFunc:    func(any) { poke(wake) },
 		UpdateFunc: func(any, any) { poke(wake) },
 		DeleteFunc: func(any) { poke(wake) },
-	}
-}
-
-// wakeOnPlaybackEnd wakes the pass when a playback pod goes away or
-// turns Failed, and on nothing else. An added pod that is already
-// Failed wakes it too: after a gap in the watch, the informer reports a
-// pod it did not hold as an addition, whatever happened to it in the
-// gap.
-//
-// A removal whose tombstone holds no copy of the pod wakes the pass,
-// because nothing says whose pod it was, and one extra pass costs less
-// than a crash the reconcile never reads.
-func wakeOnPlaybackEnd(wake chan<- struct{}) cache.ResourceEventHandler {
-	ended := func(object any) {
-		pod, err := convert[Pod](object)
-		if err != nil {
-			reportUnconverted("the pods", err)
-			return
-		}
-		if pod.Metadata.Labels[playbackLabelKey] == playbackLabelValue && pod.Status.Phase == podFailed {
-			poke(wake)
-		}
-	}
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc:    ended,
-		UpdateFunc: func(_, object any) { ended(object) },
-		DeleteFunc: func(object any) {
-			pod, err := convert[Pod](object)
-			if err != nil {
-				reportUnconverted("the pods", err)
-				poke(wake)
-				return
-			}
-			if pod.Metadata.Labels[playbackLabelKey] == playbackLabelValue {
-				poke(wake)
-			}
-		},
 	}
 }

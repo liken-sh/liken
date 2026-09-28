@@ -14,19 +14,7 @@ package main
 // every pass in that window reads the old remote set off the terminating
 // pod, sends another delete, and meets the 409.
 
-import (
-	"errors"
-	"time"
-)
-
-// claimReleaseWait is how long a replacement waits before it reads a
-// deleting claim again. A claim that the old pod held finishes its
-// delete only after the pod is gone, so the pass that finds the pod gone
-// can still find the claim on its way out. The claim's removal wakes no
-// pass, because the claims watch only keeps the view current, so the
-// replacement asks for its own wake. It reads the claim from the API
-// server, because it acts on the read.
-const claimReleaseWait = time.Second
+import "errors"
 
 // replace deletes the run's pod, and its claim when the claim itself
 // diverged, and creates the new pod at the film's place when the name is
@@ -64,7 +52,10 @@ func (o *operator) finishReplacement(play *Play, claim *ResourceClaim, resolved 
 	case err != nil:
 		return nil, err
 	case held.Metadata.deleting():
-		o.requeueAfter(claimReleaseWait)
+		// A claim that the old pod held finishes its delete only after the
+		// pod is gone, so the pass that finds the pod gone can still find
+		// the claim on its way out. The claim's removal wakes the pass
+		// (changewake.go), and that pass creates the pod.
 		return nil, nil
 	}
 	pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)

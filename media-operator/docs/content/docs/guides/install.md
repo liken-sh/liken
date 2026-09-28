@@ -132,7 +132,7 @@ again as headroom.
 |---|---|---|---|---|
 | `player` | playback | 80m | 432Mi | 1Gi |
 | `display` | playback | 10m | 144Mi | 640Mi |
-| `command` | playback | 10m | 12Mi | 32Mi |
+| `command` | playback | 10m | 16Mi | 32Mi |
 | `idle` | idle | 5m | 96Mi | 256Mi |
 | `reader` | a `Remote`'s pod | 1m | 4Mi | 16Mi |
 

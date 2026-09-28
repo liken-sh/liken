@@ -213,7 +213,7 @@ func playerName(play *Play) string {
 // The unchanged case matters because every status write bumps the
 // resourceVersion, and this operator watches its own collection. A
 // write per pass would wake the watch that wakes the pass, and the
-// ten-second backstop would become a write every ten seconds for
+// ten-second tick would become a write every ten seconds for
 // every settled Play in the cluster.
 func writePlayStatus(c *Client, play *Play, desired PlayStatus) error {
 	_, _, err := writePlayStatusFrom(c, play, desired)

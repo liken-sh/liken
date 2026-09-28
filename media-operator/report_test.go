@@ -64,7 +64,7 @@ func TestFoldStoresTheReportAndWakesTheLoop(t *testing.T) {
 
 // A position that only advances updates the desk but wakes nothing, so a
 // one-second bus cadence does not become a one-second write. The bare
-// position rides the operator's backstop tick instead.
+// position waits for the operator's tick instead.
 func TestFoldOnAPositionAdvanceStoresButDoesNotWake(t *testing.T) {
 	desk, wake := reportDesk(t)
 	desk.fold("house", "movie", runningReport())

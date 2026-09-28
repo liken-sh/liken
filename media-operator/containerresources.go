@@ -79,11 +79,13 @@ func defaultResourceSettings() resourceSettings {
 		displayContainer: {CPU: "10m", Memory: "144Mi", MemoryLimit: "640Mi"},
 		// The command sidecar reads mpv's socket and the bus. It measured
 		// 11Mi and 9m at the 90th percentile, and 13Mi at most, on
-		// either screen. It runs the pod build, which leaves out
-		// client-go's typed clientset and leader election, and whose
-		// anonymous memory at start matches the measured build's
-		// within 1MB.
-		commandContainer: {CPU: "10m", Memory: "12Mi", MemoryLimit: "32Mi"},
+		// either screen. It runs the pod build, which links client-go's
+		// reflector for the api's watches, and which starts about 4MB
+		// larger than the measured build: 0.5MB of it heap, the rest
+		// the pages of a larger binary. The request is the p90 with
+		// that growth and some room, and the limit is twice the
+		// request.
+		commandContainer: {CPU: "10m", Memory: "16Mi", MemoryLimit: "32Mi"},
 		// The idle client draws the idle screen while nothing plays. It
 		// measured 95Mi and 1m on a 3840x1600 test screen, over one
 		// minute of samples. The cpu request is rounded up from that one

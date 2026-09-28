@@ -39,6 +39,14 @@ These plans are designed. Each keeps its number and moves to
 
 ## Completed
 
+* [39, Every watch wakes the pass](completed/39-every-watch-wakes-the-pass.md).
+  Built on 2026-09-27. The claims, the `ResourceSlice`s, the
+  `Display`s, the `Receiver`s, and the operator's pods wake the pass
+  when a change reaches a field it reads, and not on this
+  operator's own writes, so the 10-second tick is a clock and nothing
+  else. The operator's API client bounds each request at 30 seconds,
+  and the command sidecar's memory request is 16Mi. The drill on
+  `liken-1` is owed.
 * [38, The watches use client-go](completed/38-the-watches-use-client-go.md).
   Built on 2026-09-27. Every Kubernetes watch in the operator and in
   the api role runs on client-go's reflector, and the hand-written loop
@@ -69,7 +77,7 @@ These plans are designed. Each keeps its number and moves to
   request, a memory request, and a memory limit, and no container states
   a cpu limit. The requests are near the steady use of a 1920x1080
   screen, measured on a home cluster, so a playback pod and the idle pod
-  together request about 684Mi and schedule on a 1GB machine. The
+  together request about 688Mi and schedule on a 1GB machine. The
   limits are above the highest use measured on a 3840x2160 screen, with
   headroom. The values come from a `ConfigMap` that the base generates
   from `deploy/container-resources.yaml`, so a cluster owner changes one

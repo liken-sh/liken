@@ -45,7 +45,7 @@ a late status, so no container states one. This covers the three
 
 **Requests for the common screen, limits for the large one.** The
 requests are near the steady use of a 1920x1080 screen, so a playback
-pod and the idle pod together request about 684Mi and schedule on a
+pod and the idle pod together request about 688Mi and schedule on a
 1GB machine. The memory limits are above the highest use measured on a
 3840x2160 screen, with about half again as headroom, so a film on that
 screen is not killed at the defaults. A machine with a large screen
@@ -56,9 +56,16 @@ its pods ahead of pods that stay within theirs.
 |---|---|---|---|---|
 | `player` | playback | 80m | 432Mi | 1Gi |
 | `display` | playback | 10m | 144Mi | 640Mi |
-| `command` | playback | 10m | 12Mi | 32Mi |
+| `command` | playback | 10m | 16Mi | 32Mi |
 | `idle` | idle | 5m | 96Mi | 256Mi |
 | `reader` | a `Remote`'s pod | 1m | 4Mi | 16Mi |
+
+This plan built the `command` request at 12Mi, and the two pods'
+requests at about 684Mi.
+[Plan 39](39-every-watch-wakes-the-pass.md) raised the `command`
+request to 16Mi, because the pod build grew when the api's watches
+moved to client-go in plan 38, and the table and the total above show
+the values since then.
 
 The shipped `Deployments` keep the requests and memory limits they
 stated: 10m, 32Mi, and 64Mi for the operator, 10m, 32Mi, and 256Mi for

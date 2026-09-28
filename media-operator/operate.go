@@ -1,13 +1,13 @@
 package main
 
 // The operator's loop has the shape liken's own operators use:
-// level-triggered, woken by a watch, with a ticker as the backstop,
-// and a reconcile before the first event ever arrives.
+// level-triggered, woken by a watch, with a ticker as a clock, and a
+// reconcile before the first event ever arrives.
 //
 // A pass reads the whole collection instead of acting on the object
 // an event carried. The event is only a wake. Every pass derives
 // every status from what the cluster holds right now, so a lost
-// event costs at most one backstop tick, a reordered burst collapses
+// event costs at most one tick, a reordered burst collapses
 // into one pass, and a restarted operator starts correct with no
 // replay. The pass reads the cluster from the watches' memory
 // (clusterview.go), so a pass that has nothing to change sends the
@@ -69,31 +69,23 @@ const (
 	metricsAddressVariable = "MEDIA_METRICS_ADDRESS"
 )
 
-// backstopInterval is how often the loop reconciles with nothing to
-// prompt it. The tick is a clock and a backstop.
+// tickInterval is how often the loop reconciles with nothing to prompt
+// it. The tick is a clock. It ends three waits that no event ends: a
+// playing position that only advanced reaches the Play's status, a
+// Finished Play goes when its window passes, and the first level or
+// focus mark of a new broker session goes out when catchUpGrace ends.
+// Each of them is a moment, and nothing in the cluster announces a
+// moment.
 //
-// As a clock, it ends three waits that no event ends: a playing
-// position that only advanced reaches the Play's status, a Finished
-// Play goes when its window passes, and the first level or focus mark
-// of a new broker session goes out when catchUpGrace ends. Each of
-// them is a moment, and nothing in the cluster announces a moment.
-//
-// As a backstop, it covers the objects whose change wakes no pass:
-// each Display the panel and the Screen condition read, the Receivers,
-// the ResourceSlices that name a unit's monitor, the ResourceClaims and
-// their allocations, and the standing idle and remote pods. The
-// watches keep each of them current in memory (clusterwatch.go), and
-// the tick is when a pass reads them. A monitor that goes dark, a
-// receiver that changes input, or a claim that the scheduler allocates
-// reaches the status on the next tick. The watches on Plays, Players,
-// Remotes, Keymaps, MediaPreferences, Peripherals, and playback pods
-// wake the pass at once, so the tick adds no delay for them.
+// Every change the pass reads wakes it at once: the watches wake it
+// (clusterwatch.go), and so do the bus desks. The tick covers no
+// change the pass would otherwise miss.
 //
 // A pass reads every collection from memory, so a tick on a settled
 // cluster sends the API server no request. It writes only what
 // changed, and it reads an object from the API server only for a run
 // or a standing pod it is about to act on.
-const backstopInterval = 10 * time.Second
+const tickInterval = 10 * time.Second
 
 // positionWriteInterval bounds how often a bare position advance reaches
 // a Play's status. The command sidecar publishes a live position to the
@@ -104,9 +96,9 @@ const backstopInterval = 10 * time.Second
 // position that advanced alone waits this interval, and the bus carries
 // the live value in between.
 //
-// The backstop tick is what drives a bare position write, because a
-// position advance wakes nothing on its own. So this interval sits below
-// backstopInterval on purpose: a write stamps a moment after the tick
+// The tick is what drives a bare position write, because a position
+// advance wakes nothing on its own. So this interval sits below
+// tickInterval on purpose: a write stamps a moment after the tick
 // that made it, so an interval equal to the tick would miss the next tick
 // by that moment and write every second tick, at twice the period. Two
 // seconds of headroom absorbs that skew, so a steadily playing film
@@ -304,7 +296,7 @@ type operator struct {
 
 	// wake is the loop's own wake channel. The operator schedules one wake at
 	// a backoff deadline, so a run waiting out its backoff resumes when the
-	// wait ends rather than on the next backstop tick.
+	// wait ends rather than on the next tick.
 	wake chan<- struct{}
 
 	// busReconnected is set on the bus goroutine when a session reaches a
@@ -491,7 +483,7 @@ func operate() {
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
 		len(plays), len(remotes), busAddress)
 
-	ticker := time.NewTicker(backstopInterval)
+	ticker := time.NewTicker(tickInterval)
 	for {
 		media.pass()
 		select {
@@ -850,8 +842,8 @@ func (o *operator) caughtUp() bool {
 // so a retry after a failed status write deletes nothing twice.
 //
 // The deletion follows the pass cadence, so a Play goes at most one
-// backstopInterval, ten seconds, after its window ends. Nothing else
-// wakes the pass when the window ends.
+// tickInterval, ten seconds, after its window ends. Nothing else wakes
+// the pass when the window ends.
 func (o *operator) retire(play *Play) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	now := time.Now()
@@ -1183,7 +1175,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 // topics this pass still owns. The memo decides whether the payload
 // reaches the broker at all: a payload the broker already holds is churn a
 // new subscriber does not need, because it reads the current value off the
-// retained topic. That skip is what keeps the backstop tick off the bus
+// retained topic. That skip is what keeps the tick off the bus
 // while a unit sits idle, and it is also what makes the pass silent behind
 // an ending the bus reader already answered.
 //
@@ -1851,7 +1843,7 @@ const backoffNoteThreshold = 2
 
 // mayResume reports whether a run may recreate its dead pod now, and
 // advances the backoff when it may. On a yes it schedules one wake at the
-// deadline, so the loop resumes when the wait ends rather than on a backstop
+// deadline, so the loop resumes when the wait ends rather than on a
 // tick. On a no a wake from the last yes is already pending, so the caller
 // waits for it.
 func (o *operator) mayResume(key string) bool {

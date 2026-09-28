@@ -65,7 +65,7 @@ func splitRunKey(key string) (namespace, name string) {
 // looking at the screen for: the pass it wakes is what turns the idle
 // screen back on. A position that only advances updates the desk and
 // wakes nothing: the reconcile pass reads the current position off the
-// desk on its next backstop tick, so a steadily playing film writes its
+// desk on its next tick, so a steadily playing film writes its
 // resource on that interval and not on every report. This is the
 // throttle that keeps a one-second bus cadence from becoming a
 // one-second write to etcd.

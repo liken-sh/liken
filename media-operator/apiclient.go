@@ -52,6 +52,14 @@ func NewClient(base string, httpClient *http.Client, credentials string) *Client
 	return &Client{base: base, http: httpClient, credentials: credentials}
 }
 
+// apiRequestTimeout bounds one request of the Client from the dial to
+// the last byte of the body. Every request the Client sends is one
+// read or one write, and none streams: the watches run on client-go's
+// own client (watch.go). A pass that waits on a request waits at most
+// this long, and the next wake or tick tries it again. It is a
+// variable so a test holds it short.
+var apiRequestTimeout = 30 * time.Second
+
 func InClusterClient() (*Client, error) {
 	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 	if host == "" || port == "" {
@@ -71,13 +79,13 @@ func InClusterClient() (*Client, error) {
 	}
 
 	return NewClient("https://"+host+":"+port, &http.Client{
+		Timeout: apiRequestTimeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 			// Each timeout bounds the same failure: a server that
-			// stops answering without sending anything. The client
-			// sets no deadline on a whole request. The watches run on
-			// client-go's own client, so no request this client sends
-			// is a stream.
+			// stops answering without sending anything.
+			// apiRequestTimeout bounds the whole request as well, so
+			// a body that stops part way cannot hold a pass.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,

@@ -36,7 +36,7 @@ import (
 // the command sidecar publishes the current position to the bus once
 // a second. The Play resource updates less often: the operator wakes its reconcile
 // loop only on a pause or an item change, and a bare position advance
-// waits for the backstop tick. So the bus is the live plane and the
+// waits for the operator's tick. So the bus is the live plane and the
 // resource is the throttled one, and a consumer that wants a smooth
 // position reads the bus.
 var reportInterval = 1 * time.Second
