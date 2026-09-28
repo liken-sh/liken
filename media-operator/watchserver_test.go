@@ -5,6 +5,7 @@ package main
 // server, and the wait for an outcome another goroutine reaches.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -37,14 +38,23 @@ func initialEventsEnd(apiVersion, kind, version string) string {
 		apiVersion, kind, version)
 }
 
-// testWatcher points a dynamic client at a test server. The server
-// cuts every connection before it closes, because a watch the test has
-// not stopped yet holds its stream open, and Close waits for every
-// request to finish.
+// testWatcher points a dynamic client at a test server. A watch the
+// test has not stopped yet holds its stream open, and Close waits for
+// every request to finish. A test's cleanups can close the server
+// before they stop the watch, and the reflector then opens a new
+// watch after the server cut the old connections. So the cleanup ends
+// the context of every request, a request that arrives later included,
+// before it cuts the connections and closes the server.
 func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	closing, closed := context.WithCancel(context.Background())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer context.AfterFunc(closing, cancel)()
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	}))
 	t.Cleanup(func() {
+		closed()
 		server.CloseClientConnections()
 		server.Close()
 	})

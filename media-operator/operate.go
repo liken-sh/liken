@@ -218,6 +218,11 @@ type operator struct {
 	// from. Only the pass goroutine touches it.
 	receiverSessions map[string]receiverSession
 
+	// heldScreens holds the last screen each unit resolved, and when it
+	// stopped resolving. screengap.go says why. Only the pass goroutine
+	// touches it.
+	heldScreens map[string]heldScreen
+
 	// specReleased names each Receiver whose spec holds no
 	// session of this operator's: one it read with no spec.session, or
 	// one whose spec.session it released this run. Only the pass
@@ -298,6 +303,10 @@ type operator struct {
 	// a backoff deadline, so a run waiting out its backoff resumes when the
 	// wait ends rather than on the next tick.
 	wake chan<- struct{}
+
+	// now is the clock the screen gap reads. It is a field so a test
+	// moves the clock past the bound without a wait.
+	now func() time.Time
 
 	// busReconnected is set on the bus goroutine when a session reaches a
 	// CONNACK, and read on the pass goroutine. A fresh broker session
@@ -394,6 +403,7 @@ func operate() {
 		panelOverrides:   map[string]panelOverride{},
 		panelFaults:      map[string]string{},
 		receiverSessions: map[string]receiverSession{},
+		heldScreens:      map[string]heldScreen{},
 		specReleased:     map[string]bool{},
 		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]string{},
@@ -403,6 +413,7 @@ func operate() {
 		recreateBackoff:  map[string]backoffState{},
 		replacements:     map[string]string{},
 		wake:             wake,
+		now:              time.Now,
 		metrics:          metrics,
 		log:              os.Stdout,
 	}
@@ -1183,6 +1194,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// A unit that is gone, or whose screen no longer matches an input,
 	// releases the equipment it held.
 	o.retainSessions(matched)
+	o.retainHeldScreens(live)
 	// The volume desk shrinks the same way. The retained level itself
 	// stays on the broker, so a Player recreated under the same name
 	// keeps the level the room was left at.

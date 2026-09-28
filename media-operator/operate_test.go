@@ -438,6 +438,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		panelOverrides:   map[string]panelOverride{},
 		panelFaults:      map[string]string{},
 		receiverSessions: map[string]receiverSession{},
+		heldScreens:      map[string]heldScreen{},
 		specReleased:     map[string]bool{},
 		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]string{},
@@ -447,6 +448,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		recreateBackoff:  map[string]backoffState{},
 		replacements:     map[string]string{},
 		wake:             wake,
+		now:              time.Now,
 	}
 	media.reports.readPodsFrom(media.view)
 	return media

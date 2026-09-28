@@ -3,9 +3,9 @@ package main
 // These tests run the operator's watches through client-go's real
 // reflector, against a scripted API server. The reflector's own loop is
 // upstream's to test; what these prove is which changes wake the pass,
-// that every collection reaches the view before the first pass, that
-// an optional collection a cluster lacks reads as empty, and that a
-// settled pass reads nothing from the API server.
+// that every collection reaches the view before the first pass, and
+// that a settled pass reads nothing from the API server.
+// optionalwatch_test.go covers a collection a cluster lacks.
 
 import (
 	"context"
@@ -34,6 +34,10 @@ type servedCollection struct {
 	items      []json.RawMessage
 	status     int
 	live       chan string
+	// missed holds the lines of changes made while no watch was open.
+	// The next watch from a version sends them first, and a watch with
+	// no version drops them, the way the API server does.
+	missed []string
 }
 
 // collectionServer answers client-go's reads and watches of each
@@ -134,6 +138,18 @@ func (s *collectionServer) handler() http.Handler {
 		}
 		if query.Get("sendInitialEvents") == "true" {
 			_, _ = w.Write([]byte(initialEventsEnd(collection.apiVersion, collection.kind, "100") + "\n"))
+		}
+		// A watch from a version sends every change made after that
+		// version. A watch with no version, and a streaming list, start at
+		// the present, so they send none of the missed changes.
+		s.mu.Lock()
+		missed := collection.missed
+		collection.missed = nil
+		s.mu.Unlock()
+		if query.Get("resourceVersion") != "" && query.Get("sendInitialEvents") != "true" {
+			for _, line := range missed {
+				_, _ = w.Write([]byte(line + "\n"))
+			}
 		}
 		w.(http.Flusher).Flush()
 		for {
@@ -450,28 +466,6 @@ func TestASettledPassSendsTheAPIServerNothing(t *testing.T) {
 	media.pass()
 
 	mustMatchAll(t, cluster.requests, nil)
-}
-
-// A collection that a cluster has not installed reads as empty, so the
-// operator starts on a cluster with no equipment-operator or
-// display-operator. When the resource arrives, the watch finds it.
-func TestAnAbsentOptionalCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
-	recheckWas := optionalRecheck
-	optionalRecheck = 50 * time.Millisecond
-	t.Cleanup(func() { optionalRecheck = recheckWas })
-	server := servedCluster(t, newFakeCluster())
-	server.collections[collectionPathOf(receiverResource)].status = http.StatusNotFound
-
-	view := watchedView(t, server, make(chan struct{}, 1))
-	receivers, err := view.Receivers()
-	mustSucceed(t, err)
-	mustMatch(t, len(receivers), 0)
-
-	server.serve(t, receiverResource, "Receiver", houseReceiver())
-	until(t, "the view never held the Receiver that arrived", func() bool {
-		receivers, err := view.Receivers()
-		return err == nil && len(receivers) == 1
-	})
 }
 
 // A collection the operator cannot read ends the wait with an error

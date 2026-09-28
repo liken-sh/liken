@@ -255,8 +255,10 @@ func (o *operator) awake(player *Player, receiver *Receiver) bool {
 
 // matchReceiver resolves the unit's screen and finds the input it is
 // wired to. Both reads come from the caches this pass already holds.
+// The screen holds through a short gap in the claim's allocation, and
+// screengap.go says why.
 func (o *operator) matchReceiver(player *Player) (*Receiver, string, bool) {
-	found, resolved := o.screenLookup().screenFor(player)
+	found, resolved := o.matchedScreen(player)
 	if !resolved {
 		return nil, "", false
 	}

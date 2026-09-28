@@ -208,8 +208,9 @@ wake with `requeueAfter`, and its bound is unchanged.
 pass read an absent resource as one with no objects, from the API
 server's 404. A watch of an absent resource marks it `optional`: its
 list answers an empty collection on a 404, so the informer reads it at
-once, and its watch answers a quiet stream that closes after five
-minutes, so the reflector asks again. Nothing the operator watches
+once, and its watch answers a quiet stream that ends after five
+minutes with a `410 Gone`, so the reflector lists again and watches
+from the version that list returns. Nothing the operator watches
 reports that a resource was installed, so the five minutes is the one
 clock in the watch code, and its comment says so. Without it the
 reflector would back off and log a failure every 30 seconds for as long

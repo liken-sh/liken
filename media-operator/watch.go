@@ -28,6 +28,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -92,6 +93,9 @@ func watchCollection(ctx context.Context, client dynamic.Interface, w collection
 	if w.namespace != "" {
 		collection = client.Resource(w.resource).Namespace(w.namespace)
 	}
+	// The wait is read once, before the reflector starts, so the
+	// reflector's goroutines read no shared setting.
+	recheck := optionalRecheck
 	scope := func(options *metav1.ListOptions) {
 		options.LabelSelector = w.labels
 		options.FieldSelector = w.fields
@@ -112,10 +116,16 @@ func watchCollection(ctx context.Context, client dynamic.Interface, w collection
 		},
 		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			scope(&options)
-			stream, err := collection.Watch(ctx, options)
-			if w.optional && apierrors.IsNotFound(err) && options.SendInitialEvents == nil {
-				return optionalWatch(ctx), nil
+			// The API server answers every list with a version, so a watch
+			// from no version follows the empty list above, which stands in
+			// for an absent resource. That watch is the quiet stream, and
+			// it asks the API server nothing. A streaming list states
+			// SendInitialEvents, and its refusal makes the reflector fall
+			// back to the list.
+			if w.optional && options.ResourceVersion == "" && options.SendInitialEvents == nil {
+				return optionalWatch(ctx, recheck), nil
 			}
+			stream, err := collection.Watch(ctx, options)
 			if err != nil {
 				return nil, err
 			}
@@ -158,27 +168,43 @@ func watchCollection(ctx context.Context, client dynamic.Interface, w collection
 //
 // An operator that defines the resource can be installed at any time,
 // and nothing this program watches reports that. So the watch of an
-// absent resource is a quiet stream that closes after this wait, and
-// the reflector opens the next watch, which finds the resource once it
-// exists. The list before it answers an empty collection, so the pass
-// reads an absent resource as a resource with no objects, which is
-// what the API server's 404 means. Without
-// the quiet stream the reflector would back off and log a failure
-// every 30 seconds for as long as the resource is absent.
+// absent resource is a quiet stream that ends after this wait with a
+// 410 Gone, and the reflector reads the collection again, which finds
+// the resource once it exists. The list answers an empty collection
+// while the resource is absent, so the pass reads an absent resource
+// as a resource with no objects, which is what the API server's 404
+// means.
+//
+// The quiet stream is the only way this program finds a resource that
+// arrives, and the 410 is what makes the reflector read again. A stream that closed
+// with no event would make it watch from the empty version of the empty
+// list, and a watch from no version starts at the present: the API
+// server does not send it a deletion made before it opened, so an
+// object deleted while no watch was open would stay in the view.
+// Without the quiet stream, the reflector would back off and log a
+// failure every 30 seconds for as long as the resource is absent.
 var optionalRecheck = 5 * time.Minute
 
-// optionalWatch is the quiet stream. It sends no event, and closes when
-// the context ends or the recheck is due.
-func optionalWatch(ctx context.Context) watch.Interface {
-	stream := watch.NewFake()
+// optionalWatch is the quiet stream. It sends no event until the
+// recheck is due, and then a 410 Gone. It ends when the context ends.
+// The caller reads the wait, so the stream's goroutine reads no shared
+// setting.
+func optionalWatch(ctx context.Context, recheck time.Duration) watch.Interface {
+	stream := watch.NewRaceFreeFake()
 	go func() {
-		timer := time.NewTimer(optionalRecheck)
+		timer := time.NewTimer(recheck)
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
+			stream.Stop()
 		case <-timer.C:
+			// The reflector stops the stream once it reads the error. A
+			// stream it stopped already takes no event.
+			stream.Error(&metav1.Status{
+				Status: metav1.StatusFailure, Code: http.StatusGone, Reason: metav1.StatusReasonExpired,
+				Message: "the resource was absent; read the collection again",
+			})
 		}
-		stream.Stop()
 	}()
 	return stream
 }
