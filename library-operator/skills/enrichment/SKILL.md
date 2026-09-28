@@ -83,7 +83,10 @@ starts, when you edit the provider, and then once an hour. A provider
 that gives no usable answer, refuses its key, or has no `Secret` or key
 is checked every five minutes until it is `Reachable`. The operator reads the
 `Secret` only for that call, so a key you fix or a `Secret` you create
-shows as `Reachable` within five minutes. A `secretKeyRef` passes the
+shows as `Reachable` within five minutes. An OMDb key that has spent
+its calls for the day shows as `LimitReached`, not `Refused`, and is
+checked once an hour, so the check does not spend calls the key does
+not have. A `secretKeyRef` passes the
 key to a phase container of the `Library`'s `Job`, so no long-running
 pod stores it.
 

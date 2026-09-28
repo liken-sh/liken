@@ -82,8 +82,13 @@ empty while the provider is not `Ready`.
 
 The operator checks each provider with one call to the provider, and
 reports the answer in the
-`Ready` condition: `Reachable`, `NoSecret`, `Refused`, `Unreachable`, or
-`Unavailable`. `Unreachable` is a check that got no answer at all and
+`Ready` condition: `Reachable`, `NoSecret`, `Refused`, `LimitReached`,
+`Unreachable`, or `Unavailable`. `LimitReached` is a key the provider
+answered with its request limit. OMDb answers a key it does not accept
+and a key that has spent its calls for the day with the same
+`401`, and names which one in its answer, so the check reads the answer.
+A `Refused` or `LimitReached` message carries the provider's own words.
+`Unreachable` is a check that got no answer at all and
 carries the error as its message. `Unavailable` is a check the provider
 answered with a status that says nothing about the account, and its
 message names that status code. The key reaches each phase container
@@ -93,8 +98,10 @@ catalog.
 
 The check calls a provider when the operator starts and when the
 provider's `metadata.generation` changes. Otherwise it calls a provider
-whose last answer was `Reachable` once an hour, and every other
-provider every five minutes. The operator reads the `Secret` only for
+whose last answer was `Reachable` or `LimitReached` once an hour, and
+every other provider every five minutes. Every call before the limit
+resets counts against it, and OMDb does not publish when it resets, so
+a key past its limit is asked once an hour. The operator reads the `Secret` only for
 a check call, because the `Job` takes the key through its
 `secretKeyRef`. An edit of the `Secret` alone therefore shows at the
 next call: within five minutes for a `Refused` or `NoSecret` provider,
@@ -240,7 +247,7 @@ What the operator's own check found, written only by the library operator.
 | <span id="status--facts"></span>`facts` | []string | no | The facts this provider serves now: what the operator can request from this provider, narrowed by spec.facts. The list is empty while the Ready condition is not True, because an unreachable provider serves nothing. |
 | <span id="status--lastrefusal"></span>`lastRefusal` | string | no | When the provider last refused the key. The time remains after the key works again, so a person can see that it once failed. |
 | <span id="status--imdb"></span>`imdb` | [object](#statusimdb) | no | What the check of an imdb block read from IMDb. A failed check leaves the entries of the last check that read the files, because the last version IMDb published is still a fact. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, LimitReached, Unreachable, or Unavailable. LimitReached is a key the provider answered with its request limit, as OMDb does when a key has spent its calls for the day. The key is good, and the check asks again in an hour. Refused and LimitReached carry the provider's own words in the message. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb. |
 
 ### status.imdb
 
@@ -264,7 +271,7 @@ One entry for each dataset file the served facts read, with the headers IMDb ret
 
 ### status.conditions[]
 
-Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb.
+Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, LimitReached, Unreachable, or Unavailable. LimitReached is a key the provider answered with its request limit, as OMDb does when a key has spent its calls for the day. The key is good, and the check asks again in an hour. Refused and LimitReached carry the provider's own words in the message. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -139,6 +140,18 @@ func (c *omdbClient) call(ctx context.Context, query url.Values, into any) error
 		c.limited = true
 	}
 	return err
+}
+
+// Whether the body of a 401 says the key has spent its calls for the day.
+// OMDb answers a key it does not accept and a key past its limit with the
+// same 401, and names which one in the Error field: "Invalid API key!" or
+// "Request limit reached!". A body that is not OMDb's JSON is a refusal.
+func omdbLimitAnswer(body []byte) bool {
+	var answer omdbTitle
+	if json.Unmarshal(body, &answer) != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(answer.Error), omdbLimitPhrase)
 }
 
 // Whether this key has no calls left today. The container that reads true

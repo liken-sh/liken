@@ -7,11 +7,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -22,6 +26,11 @@ import (
 type providerReach struct {
 	path      string
 	authorize func(*http.Request, string)
+	// Whether the body of a 401 says the key has spent the calls its
+	// allowance gives, for a provider that answers a spent key and a bad key
+	// with the same status. It is nil for a provider whose 401 means only a
+	// bad key.
+	limitReached func(body []byte) bool
 }
 
 // The call every PeerTube instance answers with no account. It is the
@@ -123,7 +132,7 @@ func (o *operator) checkProviders(ctx context.Context, providers []MetadataProvi
 // call the provider returns one, and so does a Secret the API server would
 // not serve.
 func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider, now time.Time) error {
-	verdict, err := o.reachProvider(ctx, provider, now)
+	verdict, at, err := o.reachProvider(ctx, provider, now)
 	if verdict.reason == "" {
 		return err
 	}
@@ -133,7 +142,7 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 	_, err = settleStatus(ctx, o.client, o.versions.providers,
 		metadataProviderPath(provider.Metadata.Namespace, provider.Metadata.Name), provider,
 		func(held *MetadataProvider) bool {
-			desired := deriveProviderStatus(held, verdict, now)
+			desired := deriveProviderStatus(held, verdict, at)
 			if same, err := sameStatus(held.Status, desired); err == nil && same {
 				return false
 			}
@@ -142,15 +151,16 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 		})
 	// A provider deleted during the pass has no status left to write.
 	if errors.Is(err, ErrNotFound) {
+		o.forgetProviderCall(provider)
 		return nil
 	}
-	// A NoSecret verdict made no call to the provider, so a write that
-	// failed forgets it, and the next pass reads the Secret and writes the
-	// verdict again. The Jobs of every Library that names this provider
-	// wait for a verdict. A verdict from a call keeps its note, so a
-	// failing write does not spend the provider's allowance on every pass.
-	if err != nil && verdict.reason == reasonNoSecret {
-		o.forgetProviderCall(provider)
+	// A write that failed leaves the note unwritten, and the next pass
+	// writes the noted verdict again with no call. The Jobs of every Library
+	// that names this provider wait for a verdict, so the verdict must reach
+	// the API server, and a call on every pass would spend the provider's
+	// allowance while the writes fail.
+	if err == nil {
+		o.noteProviderWritten(provider)
 	}
 	return err
 }
@@ -186,9 +196,11 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 
 // What each answer means. 200 is the account working, 401 is the provider
 // refusing the key, no HTTP answer at all is Unreachable, and every other
-// status is Unavailable. A provider that is down says nothing about the
-// account, and the check still writes a verdict, because every Job of a
-// Library that names this provider waits for one.
+// status is Unavailable. A 401 whose body says the key has spent its calls
+// is LimitReached, for a provider that answers both with 401. A provider
+// that is down says nothing about the account, and the check still writes
+// a verdict, because every Job of a Library that names this provider waits
+// for one.
 //
 // The pass decides from the MetadataProvider alone whether a call is due,
 // and reads the Secret only for a call that goes out. The operator needs
@@ -196,28 +208,35 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 // a secretKeyRef that the kubelet resolves. A key edited only in its
 // Secret is therefore read at the next call that is due: within five
 // minutes when the last verdict was Refused or NoSecret, and within the
-// hour when it was Reachable.
-func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider, now time.Time) (providerVerdict, error) {
+// hour when it was Reachable or LimitReached.
+//
+// The time it answers is when the verdict was earned. A pass that is not due
+// answers the noted verdict of a call whose write failed, with that call's
+// time, and an empty verdict otherwise.
+func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider, now time.Time) (providerVerdict, time.Time, error) {
 	block := provider.block()
 	if block == "" {
 		return providerVerdict{reason: reasonNoSecret,
-			message: "the provider names no block"}, nil
+			message: "the provider names no block"}, now, nil
 	}
 	if !o.providerCallDue(provider, now) {
-		return providerVerdict{}, nil
+		if last, _ := o.providerCallNote(provider); !last.written {
+			return last.verdict, last.at, nil
+		}
+		return providerVerdict{}, now, nil
 	}
 	// A provider that takes no key skips the Secret, because TVmaze serves its
 	// free tier to anyone. A Secret the API server would not serve notes no
 	// call, so the next pass reads it again.
 	key, verdict, err := o.providerKey(ctx, provider)
 	if err != nil {
-		return verdict, err
+		return verdict, now, err
 	}
 	if verdict.reason == "" {
 		verdict = o.callProvider(ctx, provider, key)
 	}
-	o.noteProviderCall(provider, now, verdict.reason)
-	return verdict, nil
+	o.noteProviderCall(provider, now, verdict)
+	return verdict, now, nil
 }
 
 // The one call to the provider and the verdict its answer earns.
@@ -226,7 +245,7 @@ func (o *operator) callProvider(ctx context.Context, provider *MetadataProvider,
 	if blockOf(block).datasets {
 		return o.checkDatasets(ctx, provider)
 	}
-	status, err := o.askProvider(ctx, provider, key)
+	status, body, err := o.askProvider(ctx, provider, key)
 	if err != nil {
 		return providerVerdict{reason: reasonUnreachable, message: err.Error()}
 	}
@@ -235,8 +254,14 @@ func (o *operator) callProvider(ctx context.Context, provider *MetadataProvider,
 		return providerVerdict{reason: reasonReachable,
 			message: "the provider answered the check call"}
 	case http.StatusUnauthorized:
+		if limited := blockOf(block).reach.limitReached; limited != nil && limited(body) {
+			return providerVerdict{reason: reasonLimitReached,
+				message: withProviderWords("the key of "+block+
+					" has spent the calls its allowance gives, and the provider serves it again when the allowance resets",
+					body, key)}
+		}
 		return providerVerdict{reason: reasonRefused,
-			message: "the provider refused the key of " + block}
+			message: withProviderWords("the provider refused the key of "+block, body, key)}
 	}
 	return providerVerdict{reason: reasonUnavailable,
 		message: fmt.Sprintf("the provider answered %d", status)}
@@ -268,8 +293,9 @@ func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) 
 
 // The request carries a timeout of its own, so a provider that stops
 // answering costs the pass its check and no more. The key travels in the form
-// its shape names.
-func (o *operator) askProvider(ctx context.Context, provider *MetadataProvider, key string) (int, error) {
+// its shape names. The answer is the status and the start of the body,
+// because a 401's body is where a provider says why it refused.
+func (o *operator) askProvider(ctx context.Context, provider *MetadataProvider, key string) (int, []byte, error) {
 	asking, done := context.WithTimeout(ctx, providerCheckTimeout)
 	defer done()
 
@@ -277,7 +303,7 @@ func (o *operator) askProvider(ctx context.Context, provider *MetadataProvider, 
 	request, err := http.NewRequestWithContext(asking, http.MethodGet,
 		o.providerBase(provider)+reach.path, nil)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	request.Header.Set("Accept", jsonContentType)
 	if reach.authorize != nil {
@@ -286,10 +312,48 @@ func (o *operator) askProvider(ctx context.Context, provider *MetadataProvider, 
 
 	response, err := o.providerClient.Do(request)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	drain(response.Body)
-	return response.StatusCode, nil
+	defer drain(response.Body)
+	body, _ := io.ReadAll(io.LimitReader(response.Body, providerBodyLimit))
+	return response.StatusCode, body, nil
+}
+
+// How much of a check answer's body the Ready message carries. A refusal
+// is a short sentence or a small JSON object, and a condition message is
+// not the place for a whole page. The check reads more than it keeps, so
+// a key that crosses the cut is taken out whole before the cut.
+const (
+	providerWordsLimit = 512
+	providerBodyLimit  = 4 << 10
+)
+
+// A message with the provider's own words after it, so a person reads why
+// the provider refused from kubectl get alone. A provider that echoes the
+// request can echo the key, as sent, as it travels in a query, or as a JSON
+// string holds it with or without its slashes escaped, and the status is readable by more people than the
+// Secret, so the key never reaches the message. An HTML page is a proxy's
+// or a web server's answer, not the provider's words, and it would fill the
+// message with markup, so the message leaves it out.
+func withProviderWords(message string, body []byte, key string) string {
+	words := string(body)
+	if key != "" {
+		quoted, _ := json.Marshal(key)
+		escaped := strings.Trim(string(quoted), `"`)
+		words = strings.NewReplacer(key, "<key>", url.QueryEscape(key), "<key>", escaped, "<key>",
+			strings.ReplaceAll(escaped, "/", `\/`), "<key>").Replace(words)
+	}
+	words = strings.TrimSpace(words)
+	if strings.HasPrefix(words, "<") {
+		return message
+	}
+	if len(words) > providerWordsLimit {
+		words = words[:providerWordsLimit]
+	}
+	if words == "" {
+		return message
+	}
+	return message + ": " + words
 }
 
 // The address the check calls for one provider: the endpoint the block

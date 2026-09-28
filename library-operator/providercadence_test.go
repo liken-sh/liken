@@ -205,3 +205,85 @@ func TestANoSecretVerdictTheWriteLostIsWrittenOnTheNextPass(t *testing.T) {
 		t.Errorf("the reason after the second pass is %q, want %s", got, reasonNoSecret)
 	}
 }
+
+// A verdict from a call keeps its note when the status write fails, so a
+// failing write does not spend the provider's allowance on every pass. The
+// note holds the verdict, and the next pass writes it with no call. Without
+// that, a first Reachable verdict the API server never stored holds every
+// Job of a Library that names the provider for the hour.
+func TestAVerdictTheWriteLostIsWrittenWithNoSecondCall(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		reason string
+	}{
+		{name: "a provider that answers", status: http.StatusOK, reason: reasonReachable},
+		{name: "a provider that refuses the key", status: http.StatusUnauthorized, reason: reasonRefused},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			seedProvider(cluster, "tmdb", "house", factIdentity)
+			cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
+			var calls atomic.Int32
+			operator := providerOperator(t, cluster, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(test.status)
+			}))
+			status := "PUT " + metadataProviderPath("house", "tmdb") + "/status"
+
+			cluster.mutex.Lock()
+			cluster.broken[status] = http.StatusInternalServerError
+			cluster.mutex.Unlock()
+			operator.checkProviders(t.Context(), []MetadataProvider{*cluster.heldProvider("tmdb")}, testNow)
+			operator.checkProviders(t.Context(), []MetadataProvider{*cluster.heldProvider("tmdb")},
+				testNow.Add(10*time.Second))
+			cluster.mutex.Lock()
+			delete(cluster.broken, status)
+			cluster.mutex.Unlock()
+			operator.checkProviders(t.Context(), []MetadataProvider{*cluster.heldProvider("tmdb")},
+				testNow.Add(20*time.Second))
+
+			ready := conditionNamed(cluster.heldProvider("tmdb").Status.Conditions, conditionReady)
+			if ready.Reason != test.reason {
+				t.Errorf("the reason after the write works again is %q, want %s", ready.Reason, test.reason)
+			}
+			if !ready.LastTransitionTime.Equal(testNow) {
+				t.Errorf("the verdict is dated %v, want the time of its call %v",
+					ready.LastTransitionTime, testNow)
+			}
+			if refused := cluster.heldProvider("tmdb").Status.LastRefusal; test.reason == reasonRefused &&
+				!refused.Equal(testNow) {
+				t.Errorf("lastRefusal is %v, want the time of the call %v", refused, testNow)
+			}
+			if got := calls.Load(); got != 1 {
+				t.Errorf("the provider was called %d times, want once", got)
+			}
+		})
+	}
+}
+
+// A provider deleted and created again under the same name starts again at
+// generation 1 with a new uid. Its status is empty, so every Job of a
+// Library that names it waits for a verdict, and the first pass that sees
+// it calls the provider.
+func TestAProviderCreatedAgainIsCalledAtOnce(t *testing.T) {
+	cluster := newFakeCluster()
+	var calls atomic.Int32
+	operator := providerOperator(t, cluster, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+	}))
+	provider := providerOfBlock("tvmaze", providerBlockTVmaze)
+	provider.Metadata.Generation = 1
+	provider.Metadata.UID = "first"
+	cluster.providers["tvmaze"] = provider
+
+	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+	again := *provider
+	again.Metadata.UID = "second"
+	operator.checkProviders(t.Context(), []MetadataProvider{again}, testNow.Add(10*time.Second))
+
+	if got := calls.Load(); got != 2 {
+		t.Errorf("the provider was called %d times, want once for each uid", got)
+	}
+}

@@ -317,6 +317,22 @@ A pass a report wakes reads nothing either, and sends only the writes it
 makes. With a keyed `MetadataProvider`, each pass also sends one `GET` of
 its `Secret`.
 
+## The `Secret` read only for a check, 2026-09-28
+
+The `GET` of each keyed provider's `Secret` on every pass is gone. The
+operator reads the `Secret` only when the provider's check call is due,
+so a settled pass with a keyed `MetadataProvider` also sends no
+request. A `Reachable` verdict is kept for an hour, and every other
+verdict for five minutes, so a repaired key shows within five minutes.
+An OMDb key that has spent its calls for the day reads as
+`LimitReached` and is kept for the hour, because OMDb answers it with
+the same `401` as a key it does not accept. A verdict whose status
+write fails is written from the operator's note on the next pass, with
+no second call. A `Secret` deleted after a `Reachable` verdict still
+shows only at the next hourly call:
+[A deleted `Secret` keeps a provider
+`Ready`](../open-problems/a-deleted-secret-keeps-a-provider-ready.md).
+
 ## The drill that is owed
 
 On `liken-1`, after the main session rolls the build:

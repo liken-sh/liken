@@ -137,12 +137,16 @@ type MetadataProviderStatus struct {
 // Unavailable is the answer where the provider answered a status other than
 // 200 or 401. That status says nothing about the account, so the verdict
 // records that the provider is down and keeps the status code in its message.
+// LimitReached is a 401 whose body says the key has spent the calls its
+// allowance gives. The key is good, and the provider serves it again when
+// the allowance resets, so the verdict is not a refusal.
 const (
-	reasonReachable   = "Reachable"
-	reasonNoSecret    = "NoSecret"
-	reasonRefused     = "Refused"
-	reasonUnreachable = "Unreachable"
-	reasonUnavailable = "Unavailable"
+	reasonReachable    = "Reachable"
+	reasonNoSecret     = "NoSecret"
+	reasonRefused      = "Refused"
+	reasonLimitReached = "LimitReached"
+	reasonUnreachable  = "Unreachable"
+	reasonUnavailable  = "Unavailable"
 )
 
 // A provider serves a fact when the table's row for its block holds that fact

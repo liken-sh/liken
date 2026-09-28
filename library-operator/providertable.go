@@ -125,10 +125,11 @@ var providerBlocks = []providerBlock{
 			factRatingRottenTomatoes,
 			factRatingMetacritic,
 		},
-		pace:  100 * time.Millisecond,
-		reach: providerReach{path: omdbCheckPath, authorize: authorizeParameter(omdbAPIKeyParameter)},
-		base:  omdbAPIBase,
-		key:   true,
+		pace: 100 * time.Millisecond,
+		reach: providerReach{path: omdbCheckPath, authorize: authorizeParameter(omdbAPIKeyParameter),
+			limitReached: omdbLimitAnswer},
+		base: omdbAPIBase,
+		key:  true,
 		account: func(spec *MetadataProviderSpec) *providerAccount {
 			if spec.OMDb == nil {
 				return nil

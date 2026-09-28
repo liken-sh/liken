@@ -477,6 +477,11 @@ that took a hearing-impaired flag for Hindi.
   `Library`](open-problems/a-cleanup-run-outlives-its-library.md). The
   cleanup `Job` leaves its own `runs` row, so the reporter publishes a
   deleted library's report again on each catalog change.
+* [A deleted `Secret` keeps a provider
+  `Ready`](open-problems/a-deleted-secret-keeps-a-provider-ready.md).
+  The operator reads a provider's `Secret` only at its hourly check, so
+  `Job`s created in that hour wait on a `secretKeyRef` that cannot
+  resolve.
 
 ## Rejected
 

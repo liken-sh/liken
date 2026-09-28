@@ -74,8 +74,13 @@ empty while the provider is not `Ready`.
 
 The operator checks each provider with one call to the provider, and
 reports the answer in the
-`Ready` condition: `Reachable`, `NoSecret`, `Refused`, `Unreachable`, or
-`Unavailable`. `Unreachable` is a check that got no answer at all and
+`Ready` condition: `Reachable`, `NoSecret`, `Refused`, `LimitReached`,
+`Unreachable`, or `Unavailable`. `LimitReached` is a key the provider
+answered with its request limit. OMDb answers a key it does not accept
+and a key that has spent its calls for the day with the same
+`401`, and names which one in its answer, so the check reads the answer.
+A `Refused` or `LimitReached` message carries the provider's own words.
+`Unreachable` is a check that got no answer at all and
 carries the error as its message. `Unavailable` is a check the provider
 answered with a status that says nothing about the account, and its
 message names that status code. The key reaches each phase container
@@ -85,8 +90,10 @@ catalog.
 
 The check calls a provider when the operator starts and when the
 provider's `metadata.generation` changes. Otherwise it calls a provider
-whose last answer was `Reachable` once an hour, and every other
-provider every five minutes. The operator reads the `Secret` only for
+whose last answer was `Reachable` or `LimitReached` once an hour, and
+every other provider every five minutes. Every call before the limit
+resets counts against it, and OMDb does not publish when it resets, so
+a key past its limit is asked once an hour. The operator reads the `Secret` only for
 a check call, because the `Job` takes the key through its
 `secretKeyRef`. An edit of the `Secret` alone therefore shows at the
 next call: within five minutes for a `Refused` or `NoSecret` provider,
