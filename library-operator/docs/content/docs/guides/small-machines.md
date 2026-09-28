@@ -15,9 +15,13 @@ change them.
 
 A screen pod is two containers. The catalog agent holds the namespace's
 catalog and requests `64Mi` of memory with a `512Mi` limit. The limit is
-wide because the agent's first sync holds the whole catalog in memory as
-it applies it. The agent settles far below that limit once the sync
-completes. The browser has no limit of its own.
+wide for the agent's first sync, when its peers send changes faster than
+it applies them and it holds the ones that wait. The agent's
+configuration holds that queue to 1,000 changesets, about 100 MB, and
+the image limits how much freed memory glibc keeps. A first sync of a
+synthetic catalog of 600,000 rows peaked at 338 MiB with both limits,
+and at 1,029 MiB with neither. The agent settles below its peak once
+the sync completes. The browser has no limit of its own.
 
 Measured on a one-gigabyte box, after the screen's catalog synced,
 the browser rested at 216 MiB, most of it the page-size backdrops in
@@ -89,15 +93,18 @@ image while it writes it.
 The agent of a `Job` has a higher limit than the agent of a screen.
 The catalog claim of a `Job` is on the node, so the first `Job` of a
 `Library` on each node syncs the whole namespace onto an empty claim.
-One such first sync peaked at 384 MiB, and on a larger catalog the
-agent needed more than `512Mi`. After the sync the agent used about
-190 MiB. The request stays at `64Mi`, because the scheduler places
+Without the queue limit above, a first sync on a larger catalog
+exceeded `1Gi`, and the `Job` failed when the kernel killed its agent.
+The request stays at `64Mi`, because the scheduler places
 the pod by its request. A `Job` tolerates no taint, so it does not run
 on a screen machine that carries the `media.liken.sh/player` taint.
 
-Every pod that runs an agent has a sixty-second termination grace
-period, twice the default, because a busy agent flushes its database
-as it stops.
+Every pod that runs an agent, except a screen pod, has a termination
+grace period of 90 seconds, three times the default. An agent at rest exits about five
+seconds after `SIGTERM`. An agent that applies a backlog of buffered
+changes, most often on a restart in the middle of a first sync, keeps
+applying for up to 60 seconds before it exits, and the 90 seconds
+cover that wait and the pod's other containers.
 
 The peak memory of a whole `Job` on a one-gigabyte machine is not
 measured yet.

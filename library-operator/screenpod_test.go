@@ -104,10 +104,10 @@ func TestScreenPodStandsAndStopsQuickly(t *testing.T) {
 		t.Errorf("terminationGracePeriodSeconds = %d, want 15",
 			*pod.Spec.TerminationGracePeriodSeconds)
 	}
-	// The scanner pod keeps its minute, because a change to the screen's
-	// grace must never reach the pods that flush a database on the way out.
-	if scannerGracePeriod != 60 {
-		t.Errorf("scannerGracePeriod = %d, want 60", scannerGracePeriod)
+	// The pods that run a catalog agent keep their own period, because a
+	// change to the screen's grace must never reach them.
+	if scannerGracePeriod != 90 {
+		t.Errorf("scannerGracePeriod = %d, want 90", scannerGracePeriod)
 	}
 	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
 		t.Error("automountServiceAccountToken is not false; the browser holds no credential")

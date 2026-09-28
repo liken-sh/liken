@@ -23,6 +23,17 @@ COPY schema/ /etc/corrosion/schema/
 COPY progress.toml /etc/corrosion/progress.toml
 COPY progress-schema/ /etc/corrosion/progress-schema/
 
+# SQLite allocates its memory through glibc's malloc, and the agent runs
+# SQLite from many threads. By default glibc gives each thread its own
+# arena, up to eight per core, and a thread does not reuse memory that
+# was freed in another thread's arena, so an agent that applies a large
+# sync keeps memory it no longer uses. Two arenas lower that. In a first
+# sync of a synthetic catalog of 600,000 rows, with the queue bound that
+# config.toml sets, the agent's peak fell from 537Mi to 338Mi, and it
+# stayed at the peak after the sync in both runs. The agent's own Rust
+# allocations use jemalloc, which this variable does not change.
+ENV MALLOC_ARENA_MAX=2
+
 # The entrypoint is the fork image's bare binary, so `corrosion cluster
 # members` and the other commands still run from this image with their
 # own arguments. The default command is the catalog agent, and a

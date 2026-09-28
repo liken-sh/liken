@@ -147,4 +147,4 @@ at rest was not recorded, because the agent never restarts after its
 first sync. That first sync ran more than ten minutes on the lab's
 small box, at about one core and 205 MiB, and the restart that returns
 the memory is the [open problem on ingest
-memory](../open-problems/ingest-memory-and-restart.md).
+memory](68-a-first-sync-inside-its-memory-limit.md).

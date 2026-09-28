@@ -80,10 +80,42 @@ const (
 	catalogMetricsPortName = "corro-metrics"
 )
 
+// AgentExitWait is how long, in seconds, a Corrosion agent waits for its
+// own tasks after SIGTERM before it exits without them. The value is
+// fixed in Corrosion's spawn crate, and no setting changes it.
+const agentExitWait = 60
+
 // ScannerGracePeriod is how long the kubelet waits between the SIGTERM
-// and the kill. A busy catalog agent flushes its database on the way
-// out, so a pod asks for a minute rather than the default 30 seconds.
-const scannerGracePeriod = 60
+// and the kill on every pod that runs a catalog or progress agent,
+// except a screen pod, which has screenGracePeriod. The Jellyfin pods
+// use it too. The agent is a native sidecar, so it receives its SIGTERM
+// only after the pod's other containers exit, inside the same period.
+//
+// An agent at rest exits about 5 s after its SIGTERM, most of it spent
+// telling its peers that it leaves: a catalog pod on the testbed was
+// gone 6.2 s after kubectl delete. Over eight days on a home cluster,
+// 799 agents of library Jobs had a median of 5 s and a 95th percentile
+// of 10 s.
+//
+// The slow exits are agents that apply buffered changes, most often on
+// a restart in the middle of a first sync. Corrosion checks for SIGTERM
+// only between batches of that work. A batch is one version, or, after
+// the agent applies a changed schema at start, every fully buffered
+// version on the claim. The agent waits for the batch up to
+// agentExitWait and then exits without it. One agent needed 36 s for
+// one version behind a slow commit. One applied a list for the whole
+// 60 s, until its own wait or a grace period of 60 s ended it, and a
+// drill of that case exited after 61.3 s.
+//
+// 90 s covers the agent's own wait, which includes the 5 s it takes to
+// leave, the other containers' exit, and a margin for the one version
+// that is still being applied when the wait ends. A kill during a sync
+// loses no committed row, because SQLite rolls back an unfinished
+// transaction and the next start syncs the rest, but it discards the
+// work of the transaction it interrupts. The period is a ceiling: a pod
+// whose containers exit on SIGTERM ends before it, so the Jellyfin
+// pods, which run no agent, share it at no cost.
+const scannerGracePeriod = 90
 
 // The room each container asks for. The requests are what the
 // scheduler places the pod by, and they are small because both
@@ -92,21 +124,25 @@ const scannerGracePeriod = 60
 // where a CPU limit only throttles a walk that is already bounded by
 // the volume it reads.
 //
-// The catalog agent's ceiling is the wide one. Its first sync holds
-// the whole catalog in memory as it applies it, which measured up to
-// 380 MB, and it settles far below that once the sync completes.
+// The catalog agent's ceiling is the wide one. A first sync onto an
+// empty claim receives changesets from its peers faster than SQLite
+// applies them, and the agent holds the ones that wait in a queue.
+// corrosion/config.toml bounds that queue at 1,000 changesets, about
+// 100 MB, and corrosion/Dockerfile lowers the memory glibc keeps after
+// SQLite frees it. With both bounds, a first sync of a synthetic
+// catalog of 600,000 rows peaked at 338Mi.
 //
 // The agent of a Library's Job has a higher ceiling than the other
 // agents. The catalog claim of a Job is per node, so every node that
 // first runs a Job of a Library syncs the whole namespace onto an empty
-// claim once. On a house cluster that first sync killed the agent at
-// 512Mi two or three times per walk. Each restart continued from the
-// state.db on the claim, and the walk completed, but only because of
-// the claim. On the testbed the same sync peaked at 384Mi, and after
-// the sync the agent used about 190Mi. The request stays the same,
-// because the request is what the scheduler places the pod by. A
-// Library's Job tolerates no taint, so it does not run on a small
-// screen node that carries the playerTaintKey taint.
+// claim once. With Corrosion's default queue of 20,000 changesets,
+// that first sync on a home cluster filled the queue and exceeded 1Gi.
+// A restart continues from the state.db on the claim, but a phase that
+// is reading from the agent's API when the agent is killed fails, and
+// so does the Job. The request
+// stays the same, because the request is what the scheduler places the
+// pod by. A Library's Job tolerates no taint, so it does not run on a
+// small screen node that carries the playerTaintKey taint.
 const (
 	scannerCPURequest    = "10m"
 	scannerMemoryRequest = "32Mi"

@@ -7,7 +7,7 @@ agent syncs a delta and the media browser draws the wall at once. The
 `StorageClass`. If the screen cannot keep its claim on its node, the
 operator creates a new claim. This changes what plans 06 and 15 built, and it answers
 the screen half of the [ingest memory
-problem](../open-problems/ingest-memory-and-restart.md).
+problem](68-a-first-sync-inside-its-memory-limit.md).
 
 ## The problem
 

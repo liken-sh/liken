@@ -124,6 +124,20 @@ Plan 32 covers a separate part of the system from the enrichment work.
 
 ## Completed
 
+* [69, An agent's exit inside its grace
+  period](completed/69-an-agents-exit-inside-its-grace-period.md).
+  Built on 2026-09-27. Every pod that runs an agent, except a screen
+  pod, waits 90 s before the kill, which covers Corrosion's own wait of
+  60 s. An agent at rest
+  exits in about 5 s. The slow exit is a Corrosion loop that ignores
+  `SIGTERM` between buffered versions, and its fix in the fork is owed.
+* [68, A first sync inside its memory
+  limit](completed/68-a-first-sync-inside-its-memory-limit.md). Built
+  on 2026-09-27 and measured on a workstation. The agent's apply queue
+  holds at most 1,000 changesets, and its image runs glibc with two
+  arenas, so a synthetic first sync peaked at 338 MiB where it peaked
+  at 1,029 MiB. The first sync on a home cluster that confirms it is
+  owed.
 * [63, Showing the viewers' place in a
   franchise](completed/63-where-the-room-is-in-a-franchise.md). Built
   on 2026-09-14 and released in 2026.09.15-001. A column of circles
@@ -431,11 +445,6 @@ that took a hearing-impaired flag for Hindi.
   shows](open-problems/which-libraries-a-screen-shows.md). The resource
   that binds screens to libraries is undesigned; every screen shows
   every library until it exists.
-* [Ingest memory and the restart that returns
-  it](open-problems/ingest-memory-and-restart.md). A first full sync
-  peaks at up to 380 MB; a restart returns the agent to 74 MB.
-* [Slow agent shutdown](open-problems/slow-agent-shutdown.md). A busy
-  agent can exceed the default grace period.
 * [Clients that cannot run an
   agent](open-problems/clients-that-cannot-run-an-agent.md). Phones and
   laptops have no path to the catalog.

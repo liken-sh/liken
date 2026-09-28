@@ -22,7 +22,7 @@ namespace's one cluster, not any single `Library`.
 The catalog also has no durable home yet. Each agent holds the catalog in
 an `emptyDir`, so a restart rebuilds it: an agent with peers up re-syncs
 the whole catalog over gossip, which is the memory peak the
-[`ingest-memory-and-restart`](../open-problems/ingest-memory-and-restart.md)
+[ingest memory](68-a-first-sync-inside-its-memory-limit.md)
 problem records, and an agent with no peers up rebuilds from the volume.
 Neither is work the design should repeat on every restart.
 

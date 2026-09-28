@@ -294,7 +294,7 @@ accepts that mode and publishes the volume as it does for
 It also makes three open problems smaller, and it does not close
 them. [A fresh agent's first version arrives
 late](../open-problems/a-fresh-agents-first-version-arrives-late.md) and
-[slow agent shutdown](../open-problems/slow-agent-shutdown.md) happen
+[slow agent shutdown](69-an-agents-exit-inside-its-grace-period.md) happen
 less often, because a `Library` starts fewer agents. [Copies never give
 space back](../open-problems/copies-never-give-space-back.md) affects three
 fewer copies for each `Library`.
