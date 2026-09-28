@@ -19,11 +19,13 @@ package main
 //
 // bluetooth_watch_restarts_total is not here. Milestone 65 defines a
 // watch restart as the API server closing a Kubernetes watch that the
-// operator reopens. The watch on the PairingRequests (watch.go) is the
-// one such watch this operator holds, and this registry does not count
-// its restarts. The operator's other wakes are D-Bus signals and
-// kernel uevents, and a lost signal channel ends the process rather
-// than reopening, so the pod's own restart is the fact for those.
+// operator reopens. The operator holds four such watches: the
+// PairingRequests (requestwatch.go), the Adapters and the Peripherals
+// (editwatch.go), and the bond Secrets (bondstore.go). This registry
+// does not count their restarts. The operator's other wakes are D-Bus
+// signals and kernel uevents, and a lost signal channel ends the
+// process rather than reopening, so the pod's own restart is the fact
+// for those.
 
 import (
 	"context"

@@ -234,11 +234,24 @@ idle RSS of its watches before and after, and records them in a plan. Until a
 repository moves, its hand-written loop must still pass every scenario
 above.
 
+**The shared module.** Step 4 of plan 69 moves each operator's copy
+of the client, the watch, and the cache into the Go module
+`kubernetes/` at the top of the repository, one operator at a time.
+`bluetooth-operator` is on it. `audio-operator`, `display-operator`,
+`equipment-operator`, `media-operator`, and `library-operator` still
+carry their own `apiclient.go`, `watch.go`, and `objectcache.go`, and
+`liken` keeps its own client and informer in `liken/kubernetes/`,
+until the step moves them.
+
 ## Watch a collection with client-go
 
-The reference port is `bluetooth-operator`: `watch.go` runs one watch,
-`requestwatch.go` and `editwatch.go` hold the handlers, and
-`watch_test.go` runs them through the real reflector.
+`kubernetes/informer` holds the skeleton below: `Start` runs one watch
+of a `Source`, with the `Handler`, `Synced`, and `Reopened` of its
+`Options`, and `Convert` and `Report` decode and log each object.
+`bluetooth-operator` is the reference for the handlers:
+`requestwatch.go` and `editwatch.go` hold them, and `watch_test.go`
+runs them through the real reflector. An operator that still carries
+its own `watch.go` builds the same skeleton by hand.
 
 - **Imports.** Allowed: `k8s.io/client-go/tools/cache`,
   `k8s.io/client-go/dynamic`, `k8s.io/client-go/rest`, and
@@ -293,55 +306,61 @@ The reference port is `bluetooth-operator`: `watch.go` runs one watch,
 
 A pass reads the objects a watch holds from the informer's store, not
 from the API server. A settled pass then sends the API server no read
-of a watched kind. Every operator reads the same way, with the same
-types and functions in its `objectcache.go`, so a reader who knows one
-knows all four.
+of a watched kind. `kubernetes/informer` holds the reads and
+`kubernetes/memo` holds the memo. An operator that is not on the
+shared module yet has the same types and functions, unexported, in its
+own files, most of them in `objectcache.go`: `storeView`, `heldObjects`, `readOne`,
+`currentList`, `settleStatus`, and `versionMemo`.
 
-- **The rule.** Read one object with `readOne` and a list with
-  `currentList`. A list comes from a store only when the store holds
-  the whole first read (`storeView.ready`). Before that, and when no
-  watch runs, list from the API server. `readOne` reads an object the
-  store does not hold from the API server. A copy that does not convert is
-  read from the API server too, so a list leaves out no object.
+- **The rule.** Read one object with `informer.ReadOne` and a list with
+  `informer.CurrentList`. A store answers only when it is ready
+  (`informer.View.Ready`): it holds the whole first read, and the API
+  server accepted the last watch. Before that, and while the API server
+  refuses the watch or no watch runs, read and list from the API
+  server. `ReadOne` reads an object the store does not hold from the
+  API server. A copy that does not convert is read from the API server
+  too, so a list leaves out no object.
 - **The memo.** A store's copy can be older than the operator's own
   last write, because the watch delivers the write a moment later, and
   later still while the watch is down. A pass that acts on that copy
   acts again on a change it already made: it opens a pairing window
   again, sends a receiver a setting again, or skips a status write
-  that the older copy hides. So `versionMemo` records the
+  that the older copy hides. So `memo.Versions` records the
   `resourceVersion` of each object's newest copy that the operator
   wrote or read. A store's copy at another version is read from the
   API server once, and then the store answers again. Compare versions
   only for equality. Send every request whose answer the memo notes
-  through `versionMemo.send`, which holds one request for an object at
-  a time, so two goroutines that write one object note their answers
-  in the order the API server gave them. A failed request notes that
-  the operator holds no current copy, because a write whose answer was
-  lost may have landed. A store that holds the whole
-  collection (`storeView.whole`) also lists each object the operator
-  created that the store does not hold yet, so a pass does not create
-  it twice. Do not set `whole` on a store with a selector: an object
-  the operator wrote can be outside the selection.
+  through `memo.Versions.Send`, which holds one request for an object
+  at a time, so two goroutines that write one object note their
+  answers in the order the API server gave them. A failed request notes
+  that the operator holds no current copy, because a write whose answer
+  was lost may have landed. A store that holds the whole collection
+  (`informer.View.Whole`) also lists each object the operator created
+  that the store does not hold yet, so a pass does not create it twice.
+  Do not set `Whole` on a store with a selector: an object the operator
+  wrote can be outside the selection.
 - **A 409.** A write from a copy that another writer changed gets
-  `409 Conflict`. `settleStatus` then reads the object from the API
-  server, composes the status again from the fresh copy, and writes
-  once more if the fresh copy still needs it. A `404` means the object
-  is gone, and the caller handles it as absent. A server-side apply
-  states no `resourceVersion` and gets no `409`, so an operator that
-  writes only by apply needs no retry, and still notes each answer.
+  `409 Conflict`. `informer.SettleStatus` then reads the object from
+  the API server, composes the status again from the fresh copy, and
+  writes once more if the fresh copy still needs it. A `404` means the
+  object is gone, and the caller handles it as absent. A server-side
+  apply states no `resourceVersion` and gets no `409`, so an operator
+  that writes only by apply needs no retry, and still notes each
+  answer.
 - **When a direct GET stays.** Read from the API server, and say why
   at the call, when no watch holds the kind (a `ResourceClaim` a pass
   reads by name, a `ResourceSlice`), when the read must see another
   writer's write at once (the owner `Adapter` of a new `Peripheral`,
   whose UID the store can hold from an object deleted since), and for
   a read once at start, before the watch opens.
-- **The reference files.** `bluetooth-operator/objectcache.go` and
-  `objectcache_test.go` (the memo across three kinds and a store that
-  follows its selector), `display-operator/objectcache.go` (two
-  goroutines that write one kind), `audio-operator/objectcache.go`
-  (stores scoped by field selector), and
-  `equipment-operator/objectcache.go` (writes by server-side apply,
-  whole stores, and the creates they must not repeat). The test
-  `TestAPassDoesNotActOnACopyOlderThanItsOwnWrite` in each repository
-  fails without the memo, and `versionmemo_test.go` tests the memo
-  itself.
+- **The reference files.** `kubernetes/informer/cache.go` and
+  `cache_test.go` (the reads, a list that meets a create, and the
+  status write after a `409`), `kubernetes/memo/memo_test.go` (the
+  memo itself), `bluetooth-operator/objectcache_test.go` (the memo
+  across three kinds and a store that follows its selector),
+  `display-operator/objectcache.go` (two goroutines that write one
+  kind), `audio-operator/objectcache.go` (stores scoped by field
+  selector), and `equipment-operator/objectcache.go` (writes by
+  server-side apply, whole stores, and the creates they must not
+  repeat). The test `TestAPassDoesNotActOnACopyOlderThanItsOwnWrite`
+  in each operator fails without the memo.
