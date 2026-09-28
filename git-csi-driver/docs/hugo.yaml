@@ -19,7 +19,7 @@ theme: brand
 # sidebar heads the manual with the project's name, taken from the
 # last segment of this URL.
 params:
-  repository: https://github.com/liken-sh/git-csi-driver
+  repository: https://github.com/liken-sh/liken/tree/main/git-csi-driver
   # The site serves the test coverage report at /coverage.html. This
   # parameter puts the footer link to it on every page.
   coverage: true

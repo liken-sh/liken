@@ -19,7 +19,7 @@ theme: brand
 # sidebar heads the manual with the project's name, taken from the
 # last segment of this URL.
 params:
-  repository: https://github.com/liken-sh/audio-operator
+  repository: https://github.com/liken-sh/liken/tree/main/audio-operator
   # The site publishes the test coverage report at /coverage.html.
   # This parameter puts the footer link to it on every page.
   coverage: true

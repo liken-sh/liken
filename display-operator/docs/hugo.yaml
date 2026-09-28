@@ -24,7 +24,7 @@ theme: brand
 # The theme reads this for the nav's repository entry and for the
 # project name in the sidebar's "manual" heading.
 params:
-  repository: https://github.com/liken-sh/display-operator
+  repository: https://github.com/liken-sh/liken/tree/main/display-operator
   # The site serves the test coverage report at /coverage.html. This
   # parameter puts the footer link to it on every page.
   coverage: true
