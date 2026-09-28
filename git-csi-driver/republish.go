@@ -137,28 +137,41 @@ func checkSecret(held *volume, holder *credentials) error {
 // volume holds a credential from the stage, or waits for one after a
 // restart, the PersistentVolume names no publish Secret, and the volume
 // says so.
-func (n *node) takeSecret(ctx context.Context, held *volume, holder *credentials) {
+//
+// It reports whether the call changed anything, which is what decides
+// whether a repeated publish is worth a line in the log.
+func (n *node) takeSecret(ctx context.Context, held *volume, holder *credentials) bool {
 	if holder == nil {
-		if held.needsCredential() {
-			n.noPublishSecret(ctx, held)
-		}
-		return
+		return held.needsCredential() && n.noPublishSecret(ctx, held)
 	}
 	if held.credential().same(holder) {
-		return
+		return false
 	}
-	if held.takeCredential(holder) {
-		n.logger.InfoContext(ctx, "the credential returned", "volume", held.id)
-		n.noteHealth(ctx, held)
-		n.credentialReturned(held)
+	if !held.takeCredential(holder) {
+		n.logger.InfoContext(ctx, "the credential changed", "volume", held.id)
+		return true
+	}
+	n.logger.InfoContext(ctx, "the credential returned", "volume", held.id)
+	n.noteHealth(ctx, held)
+	n.credentialReturned(held)
+	return true
+}
+
+// republished takes the credential of a repeated publish. A repeat that
+// changes nothing is marked quiet, so the call's log line is left out:
+// the kubelet repeats the call for every volume on each pod sync, and a
+// line for each would bury the calls that did something.
+func (n *node) republished(ctx context.Context, held *volume, holder *credentials) {
+	if !n.takeSecret(ctx, held, holder) {
+		quietCall(ctx)
 	}
 }
 
 // noPublishSecret posts the Event and writes the log line once for the
-// volume.
-func (n *node) noPublishSecret(ctx context.Context, held *volume) {
+// volume, and reports whether it did.
+func (n *node) noPublishSecret(ctx context.Context, held *volume) bool {
 	if !held.reportNoPublishSecret() {
-		return
+		return false
 	}
 	n.logger.WarnContext(ctx, "no publish Secret", "volume", held.id, "reason", noPublishSecret)
 	n.tell(ctx, held, corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
@@ -166,6 +179,7 @@ func (n *node) noPublishSecret(ctx context.Context, held *volume) {
 		n.events.postClaim(ctx, held.claimNow(), corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
 	}
 	n.noteHealth(ctx, held)
+	return true
 }
 
 // credentialReturned starts the work the missing credential held back,

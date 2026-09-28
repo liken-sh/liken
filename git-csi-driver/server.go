@@ -168,7 +168,8 @@ func (s *server) serve(ctx context.Context) error {
 
 // logCalls writes one line per RPC with its name and its status code.
 // The kubelet's calls are the driver's whole input, and a person who
-// reads the log has to see them.
+// reads the log has to see them. A call that answers success and that
+// its handler marked with quietCall writes no line.
 func logCalls(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -176,11 +177,33 @@ func logCalls(logger *slog.Logger) grpc.UnaryServerInterceptor {
 		call *grpc.UnaryServerInfo,
 		handle grpc.UnaryHandler,
 	) (any, error) {
-		answer, err := handle(ctx, request)
+		note := &callNote{}
+		answer, err := handle(context.WithValue(ctx, callNoteKey{}, note), request)
+		if err == nil && note.quiet {
+			return answer, err
+		}
 		logger.InfoContext(ctx, "call",
 			"rpc", call.FullMethod,
 			"code", status.Code(err).String())
 		return answer, err
+	}
+}
+
+// callNote is what a handler tells logCalls about its call. The
+// handler returns before logCalls reads the note, on the same
+// goroutine, so the flag needs no lock.
+type callNote struct {
+	quiet bool
+}
+
+type callNoteKey struct{}
+
+// quietCall marks the call as one that changed nothing, so logCalls
+// writes no line for it. A call outside logCalls, as in a test that
+// calls the handler directly, carries no note, and the mark is dropped.
+func quietCall(ctx context.Context) {
+	if note, found := ctx.Value(callNoteKey{}).(*callNote); found {
+		note.quiet = true
 	}
 }
 

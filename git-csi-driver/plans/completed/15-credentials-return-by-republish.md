@@ -148,9 +148,12 @@ and no mount. A volume with no `nodePublishSecretRef` costs the kubelet
 no `Secret` read.
 
 The driver's interceptor writes one log line at the info level for
-every call it answers. Each republish adds that line, and the kubelet
-may ask for the node's capabilities around a publish, which adds more.
-The drill counts the lines.
+every call it answers, except a repeated publish that changed nothing.
+The handler marks that call quiet, and the interceptor leaves its line
+out. A repeated publish that replaces the credential, or returns one a
+restart lost, logs that and its call line, and every error is logged.
+The kubelet may ask for the node's capabilities around a publish, and
+those calls keep their lines. The drill counts the lines.
 
 ## Measurements
 
@@ -190,6 +193,14 @@ a cluster.
 - `TestAPrivateRepositoryFetchesAgainAtTheRepublishAfterARestart`: the
   same over SSH to an sshd of the test's own, where the fetch fails
   without the key.
+- `TestARepeatPublishLogsOnlyWhatItChanged`: for each kind, a
+  repeated publish with the same `Secret`, or with no publish `Secret`
+  on a volume that already said so, writes no log line, and a rotated
+  `Secret` writes its change and the call line.
+  `TestARepeatPublishThatReturnsACredentialIsLogged` checks the line a
+  republish writes when it returns a credential after a restart.
+  `TestTheCallLogKeepsEveryErrorAndEveryUnmarkedCall` checks that a
+  quiet call that fails is still logged.
 - `TestAResumedVolumeWithNoPublishSecretSaysWhatItNeeds`: after a
   failed fetch, three republishes with no `Secret` post one Event, the
   report names

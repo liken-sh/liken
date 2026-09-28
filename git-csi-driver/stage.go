@@ -317,7 +317,7 @@ func (n *node) publishStaged(
 			return status.Errorf(codes.FailedPrecondition,
 				"volume_id: %s is published at %s", id, published.target)
 		}
-		n.takeSecret(ctx, published, holder)
+		n.republished(ctx, published, holder)
 		return nil
 	}
 

@@ -92,7 +92,7 @@ func (n *node) publishReadOnly(
 	}
 	target := request.GetTargetPath()
 	if staged.boundAt(target) {
-		n.takeSecret(ctx, staged, holder)
+		n.republished(ctx, staged, holder)
 		return nil
 	}
 	if err := checkSecret(staged, holder); err != nil {

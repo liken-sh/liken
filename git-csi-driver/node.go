@@ -144,7 +144,9 @@ func (n *node) NodeGetCapabilities(
 // sync, because the CSIDriver sets requiresRepublish. A repeated call
 // for a published target mounts nothing and fetches nothing. It takes
 // the credential the call carries and answers success, so its cost is
-// the parse of the call.
+// the parse of the call. A repeated call that changes nothing writes no
+// log line. A call that fails, changes the credential, or reports a
+// missing publish Secret is logged.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -185,7 +187,7 @@ func (n *node) NodePublishVolume(
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"volume_id: %s is published at %s", id, published.target)
 		}
-		n.takeSecret(ctx, published, holder)
+		n.republished(ctx, published, holder)
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 

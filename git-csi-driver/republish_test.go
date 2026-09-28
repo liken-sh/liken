@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -188,6 +192,130 @@ func TestAFirstPublishRefusesASecretThatDiffersFromTheStage(t *testing.T) {
 			})
 		}
 	}
+}
+
+// loggedPublish sends the publish through the interceptor that writes
+// the call log, and answers the lines it wrote.
+func loggedPublish(t *testing.T, answering *node, request *csi.NodePublishVolumeRequest) string {
+	t.Helper()
+	logs := &logbook{}
+	logging := logCalls(slog.New(slog.NewTextHandler(logs, nil)))
+	_, err := logging(t.Context(), request,
+		&grpc.UnaryServerInfo{FullMethod: "/csi.v1.Node/NodePublishVolume"},
+		func(ctx context.Context, request any) (any, error) {
+			return answering.NodePublishVolume(ctx, request.(*csi.NodePublishVolumeRequest))
+		})
+	if err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	return logs.String()
+}
+
+func TestARepeatPublishLogsOnlyWhatItChanged(t *testing.T) {
+	for _, kind := range []volumeKind{inlineVolume, readOnlyClaim, writeableVolume} {
+		for _, c := range []struct {
+			name    string
+			publish map[string]string
+			repeat  map[string]string
+			logged  []string
+		}{
+			{name: "the same Secret", publish: secretA, repeat: secretA, logged: nil},
+			// A PersistentVolume with a stage Secret alone said so at its
+			// first publish, and says nothing on every sync after it.
+			{name: "no publish Secret", publish: nil, repeat: nil, logged: nil},
+			{name: "a rotated Secret", publish: secretA, repeat: secretB,
+				logged: []string{`msg="the credential changed"`, "NodePublishVolume"}},
+		} {
+			t.Run(kindNames[kind]+", "+c.name, func(t *testing.T) {
+				logs := &logbook{}
+				answering, _ := testNode(t, logs)
+				source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+				request, _ := publishedOnce(t, answering, kind, fileURL(source), secretA, c.publish)
+				before := len(logs.String())
+
+				request.Secrets = c.repeat
+				calls := loggedPublish(t, answering, request)
+				written := logs.String()[before:] + calls
+				if c.logged == nil && written != "" {
+					t.Errorf("a repeated publish that changed nothing logged %q, want nothing", written)
+				}
+				for _, line := range c.logged {
+					if !strings.Contains(written, line) {
+						t.Errorf("the log is %q, want %q in it", written, line)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestARepeatPublishThatReturnsACredentialIsLogged(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
+	request.Secrets = secretA
+	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	logs := &logbook{}
+	again, _ := testNode(t, logs)
+	again.store = answering.store
+	again.mounted = func(string) bool { return true }
+	again.resume(t.Context())
+	before := len(logs.String())
+
+	calls := loggedPublish(t, again, request)
+	written := logs.String()[before:] + calls
+	for _, line := range []string{`msg="the credential returned"`, "NodePublishVolume"} {
+		if !strings.Contains(written, line) {
+			t.Errorf("the log is %q, want %q in it", written, line)
+		}
+	}
+}
+
+func TestAFirstPublishIsLogged(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
+	if got := loggedPublish(t, answering, request); !strings.Contains(got, "NodePublishVolume") {
+		t.Errorf("a first publish logged %q, want its call line", got)
+	}
+}
+
+func TestTheCallLogKeepsEveryErrorAndEveryUnmarkedCall(t *testing.T) {
+	refused := status.Error(codes.InvalidArgument, "refused")
+	for _, c := range []struct {
+		name   string
+		quiet  bool
+		answer error
+		lines  int
+	}{
+		{name: "a quiet call that worked", quiet: true, answer: nil, lines: 0},
+		{name: "a quiet call that failed", quiet: true, answer: refused, lines: 1},
+		{name: "a call that worked", quiet: false, answer: nil, lines: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			logs := &logbook{}
+			logging := logCalls(slog.New(slog.NewTextHandler(logs, nil)))
+			_, err := logging(t.Context(), nil, &grpc.UnaryServerInfo{FullMethod: "/csi.v1.Node/NodePublishVolume"},
+				func(ctx context.Context, _ any) (any, error) {
+					if c.quiet {
+						quietCall(ctx)
+					}
+					return nil, c.answer
+				})
+			if !errors.Is(err, c.answer) {
+				t.Errorf("the interceptor answered %v, want %v", err, c.answer)
+			}
+			if got := strings.Count(logs.String(), "\n"); got != c.lines {
+				t.Errorf("the interceptor wrote %d lines, want %d: %q", got, c.lines, logs)
+			}
+		})
+	}
+}
+
+func TestAQuietMarkOutsideTheCallLogIsDropped(t *testing.T) {
+	quietCall(t.Context())
 }
 
 // restartedQuiet is a second driver on the same store whose mount
