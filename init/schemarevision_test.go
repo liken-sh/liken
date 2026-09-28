@@ -636,7 +636,7 @@ var schemaPins = map[string]struct {
 	revision    int
 	fingerprint string
 }{
-	"machines-crd.yaml": {5, "2353cd6a6f8ea707ba0cf343dfb91b0c93be207513ed0e01f15738d4d0d78d14"},
+	"machines-crd.yaml": {6, "d776fb40ccbd908ffc8d9ba1bbffe02d7c06c0291ec0d59907b9a8095c35b5a4"},
 	"clusters-crd.yaml": {1, "77ee2b082f87649aae5534d385567e10fd62f9b9d19b789c9da2ac453b826c14"},
 }
 

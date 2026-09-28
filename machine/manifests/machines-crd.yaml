@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "5"
+    liken.sh/schema-revision: "6"
 spec:
   group: liken.sh
   names:
@@ -728,10 +728,20 @@ spec:
                     them while the machine runs. This includes the
                     removal of a label that this spec no longer
                     declares, which the kubelet does not do. The
-                    system never changes a label applied outside this
-                    spec.
-                  # Three admission rules prevent a label edit that
-                  # would stop the machine from booting. Registration
+                    system never changes a label whose key this spec
+                    does not declare. When this spec declares a key
+                    that the node already has, the system sets the
+                    declared value, and removes the label when the
+                    spec no longer declares the key. A key cannot
+                    start with liken.sh/, because the operating
+                    system sets its own labels there. A key in a
+                    subdomain of liken.sh is allowed. For example,
+                    when equipment-operator is installed,
+                    equipment.liken.sh/cec: none keeps its DaemonSet
+                    from placing a pod on this machine.
+                  # Two admission rules prevent a label edit that
+                  # would stop the machine from booting, and one keeps
+                  # the operating system's own labels. Registration
                   # labels pass through the kubelet. Under the
                   # NodeRestriction admission plugin, which k3s
                   # enables, a kubelet that gets a kubernetes.io or
@@ -742,13 +752,20 @@ spec:
                   # itself: the well-known identity labels (hostname,
                   # arch, os, the topology pair, instance-type) and
                   # anything in the kubelet.kubernetes.io and
-                  # node.kubernetes.io namespaces. Admission refuses
-                  # the liken.sh namespace because the operating
-                  # system owns it: the static configuration sets
-                  # liken.sh/machine, and a spec that sets a liken.sh
-                  # label, or the node-role label that the demotion
-                  # cleanup reads, conflicts with the operating
-                  # system.
+                  # node.kubernetes.io namespaces. That rule also
+                  # refuses the node-role label that the demotion
+                  # cleanup reads.
+                  #
+                  # Admission refuses the liken.sh/ prefix because the
+                  # operating system owns it: the static configuration
+                  # sets liken.sh/machine, and a spec that sets a
+                  # liken.sh/ label conflicts with the operating
+                  # system. The rule stops at liken.sh/ itself. Each
+                  # operator owns a subdomain, such as
+                  # equipment.liken.sh, and its DaemonSet stays off a
+                  # node labeled <group>/<hardware>: none. The Machine
+                  # is the record of the machine, so it declares that
+                  # label.
                   x-kubernetes-validations:
                     - rule: >-
                         self.all(key, key.size() <= 317 && key.matches('^([a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$'))
@@ -769,10 +786,12 @@ spec:
                         kubelet.kubernetes.io and node.kubernetes.io
                         namespaces
                     - rule: >-
-                        self.all(key, !key.matches('^([^/]*[.])?liken[.]sh/'))
+                        self.all(key, !key.matches('^liken[.]sh/'))
                       message: >-
-                        the liken.sh namespace belongs to the operating
-                        system, which sets its own labels
+                        a label key cannot start with liken.sh/,
+                        because the operating system sets its own
+                        labels there. A key in a subdomain, such as
+                        equipment.liken.sh/cec, is allowed
                   additionalProperties:
                     type: string
                     maxLength: 63

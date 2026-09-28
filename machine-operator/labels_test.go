@@ -171,3 +171,39 @@ func TestCarryOutNodeLabelsReportsAFailedPatch(t *testing.T) {
 		t.Errorf("a failed patch should report ApplyFailed: %+v", condition)
 	}
 }
+
+// An operator's DaemonSet stays off a node labeled
+// <group>/<hardware>: none, in the operator's own subdomain of
+// liken.sh. The operator applies and removes that label the same way
+// as any other key. A label that kubectl set before the Machine
+// declared it becomes the operator's to remove, because the
+// ownership annotation records the key once the spec declares it.
+func TestNodeLabelsAnOperatorsNoneLabel(t *testing.T) {
+	const key = "equipment.liken.sh/cec"
+	cases := []struct {
+		name             string
+		desired          map[string]string
+		node             *nodeObject
+		wantLabel        any
+		wantLabelInPatch bool
+		wantOwned        any
+	}{
+		{"applied", map[string]string{key: "none"}, nodeWearing(nil, nil), "none", true, key},
+		{"adopted from kubectl", map[string]string{key: "none"},
+			nodeWearing(map[string]string{key: "none"}, nil), nil, false, key},
+		{"removed", nil,
+			nodeWearing(map[string]string{key: "none"}, map[string]string{ownedLabelsAnnotation: key}), nil, true, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			labels, annotations := decodeLabelPatch(t, decideNodeLabels(tc.desired, tc.node).patch)
+			value, present := labels[key]
+			if present != tc.wantLabelInPatch || value != tc.wantLabel {
+				t.Errorf("label in patch: %v (present %v), want %v (present %v)", value, present, tc.wantLabel, tc.wantLabelInPatch)
+			}
+			if owned, present := annotations[ownedLabelsAnnotation]; !present || owned != tc.wantOwned {
+				t.Errorf("ownership annotation: %v (present %v), want %v", owned, present, tc.wantOwned)
+			}
+		})
+	}
+}
