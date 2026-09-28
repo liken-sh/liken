@@ -122,8 +122,13 @@ jobs:
           retention-days: 7
 
   # The layer cache is on ghcr, as a :buildcache tag beside each image.
-  # Every build reads it. A build that will publish also writes it, so
-  # the publish job's build of the same image finds every layer there.
+  # Every build reads it. Every push to main and every run that
+  # publishes also writes it, so the next build finds each layer that did
+  # not change, and the publish job's build of the same image finds every
+  # layer there. A push to another branch only reads it, so a topic
+  # branch cannot replace main's cache. The write ignores an error: a
+  # cache that cannot be written makes the next build slower, and it
+  # never fails this one.
   images:
     name: ${{ matrix.image }}
     runs-on: ubuntu-26.04
@@ -177,7 +182,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - if: ${{ inputs.publish != 'none' }}
+      - if: ${{ inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -200,7 +205,7 @@ jobs:
           push: false
           tags: ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-          cache-to: ${{ inputs.publish != 'none' && format('type=registry,ref=ghcr.io/liken-sh/{0}:buildcache,mode=max', matrix.image) || '' }}
+          cache-to: ${{ (inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && format('type=registry,ref=ghcr.io/liken-sh/{0}:buildcache,mode=max,ignore-error=true', matrix.image) || '' }}
 
       - name: smoke check
         if: ${{ matrix.smoke != '' && matrix.load }}
