@@ -293,11 +293,14 @@ milestone number because their implementation scope is not settled.
   A kernel lockup becomes a panic, and init resets the chipset's
   watchdog from boot to reboot, so a machine that hangs below the
   kernel resets itself and the next boot reports it.
-* **69.** [`liken` builds every component it ships](69-liken-builds-every-component-it-ships.md).
-  Each vendored domain declares a component that builds from source
-  in pinned, signed stagex images. A component builds only when its
-  pin changes, and each build goes to `releases.liken.sh/components/`
-  once, with its source, its recipe, and a signed attestation.
+* **69.** [One repository builds every component](69-one-repository-builds-every-component.md).
+  The operators, the drivers, `brand`, and `.agents` move into this
+  repository, and every component declares a `package.toml` in one
+  dependency graph. A pinned component builds from source in pinned,
+  signed stagex images when its revision is new. A tracked component
+  takes the repository's one CalVer tag when its files or a
+  dependency changed, and clusters follow its manifests as an OCI
+  artifact.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
