@@ -886,6 +886,36 @@ how any vendored domain gets its bytes.
    repository's workflows only after its settings grant this
    repository write access. The first real publish comes after the
    dry run is correct and every package grants access.
+
+   Built 2026-09-28. `ci/` is a Go program that reads every
+   `package.toml` and writes `.github/workflows/ci.yaml` and one
+   reusable workflow for each component,
+   `component-<name>.yaml`. A component's call `needs:` the
+   components in its `[depends]`, so the run page draws the graph,
+   and each component's jobs sit in its own box. The `graph` job
+   fails when the committed workflows differ from what `ci` writes,
+   and when a `go.mod`, a Cargo workspace, a `FROM` line, or a build
+   context uses a component that `[depends]` omits. `package.toml`
+   gained three tables that this plan did not show: `[docs]`, which
+   gives the manual's prefix in the one site, `[[jobs]]`, which names
+   each check and the setup it needs, and `[[outputs.images]]`, which
+   gives each image's Dockerfile, target, platforms, build contexts,
+   aliases, and smoke check. The loader refuses a key it does not
+   know, so a misspelled `version` fails instead of reading as a
+   tracked component.
+
+   The release record is the GitHub release for the tag. The deploy
+   artifact goes out with this step, not with step 3: its
+   `kustomization.yaml` names the component's images at the
+   artifact's own version, so a cluster pins only the
+   `OCIRepository`'s tag. The path diff leaves out `docs/`, `plans/`,
+   `AGENTS.md`, and `README.md` at a component's top. The OS takes
+   `brand` into its channel index pages, so a change to `brand`
+   releases the OS.
+
+   A real publish needs the repository variable `PUBLISH`. The write
+   check starts a blob upload on each package and cancels it, so it
+   leaves nothing behind.
 3. **The deploy artifacts and the fleets.** Push each component's
    `deploy/` as an OCI artifact. The `liken` side is finished and
    published before any fleet moves. Move liken-1 to
@@ -1079,10 +1109,6 @@ the release numbers do not.
   `*.liken.sh` over HTTPS with a wildcard certificate. Linode DNS
   has no redirect feature, and a Linode community answer says that
   Object Storage does not serve redirects.
-- **Absent `version` means tracked.** A tracked component has no
-  `version` field. A misspelled field then also reads as tracked.
-  An explicit field, such as `track = "tag"`, would make the choice
-  visible.
 - **Attestations on ghcr.** The `push-to-registry` report above
   applies to images. The first image attestation checks it.
 - **Does stagex's Go match the Go version that each k3s release
