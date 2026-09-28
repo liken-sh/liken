@@ -30,6 +30,13 @@ spec:
         # of status and a person's writes of spec never overwrite each
         # other.
         status: {}
+      # A reader on one machine, such as the CEC workload of
+      # equipment-operator, lists and watches the Displays whose
+      # status.node is that machine. Without the selectable field, a
+      # watch takes every Display in the cluster, and a status write on
+      # one machine wakes the reader on every machine.
+      selectableFields:
+        - jsonPath: .status.node
       additionalPrinterColumns:
         - name: Node
           type: string

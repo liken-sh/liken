@@ -435,23 +435,23 @@ func createDisplay(c *Client, name string) (*Display, error) {
 	return created, nil
 }
 
-// The status write goes to the status subresource, so a spec a
-// person edited between the read and the write is not overwritten.
-func writeDisplayStatus(c *Client, display *Display, status DisplayStatus) (*Display, error) {
-	written := *display
-	written.APIVersion = DisplayAPIVersion
-	written.Kind = "Display"
-	written.Status = status
-	body, err := json.Marshal(&written)
+// replaceStatus writes one object's status to the status
+// subresource, so a spec a person edited between the read and the
+// write is not overwritten. The caller states the object's apiVersion
+// and kind. The API server's copy replaces the caller's, because a
+// write produces a new resourceVersion, and the next write must state
+// it.
+func replaceStatus[T any](c *Client, path string, object *T) error {
+	body, err := json.Marshal(object)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	updated := &Display{}
-	path := DisplaysPath + "/" + display.Metadata.Name + "/status"
-	if err := c.RequestJSON(http.MethodPut, path, body, updated); err != nil {
-		return nil, err
+	stored := new(T)
+	if err := c.RequestJSON(http.MethodPut, path+"/status", body, stored); err != nil {
+		return err
 	}
-	return updated, nil
+	*object = *stored
+	return nil
 }
 
 // The watch wakes the passes for an edit to a Display, and the pass

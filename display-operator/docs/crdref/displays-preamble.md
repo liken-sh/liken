@@ -8,6 +8,13 @@ write the resting fields of `spec`, and a machine writer, such as a
 media layer that darkens idle screens, sets and lifts
 `spec.override`.
 
+The API server selects Displays by `status.node`, so a list or a
+watch can take the monitors of one machine:
+
+```sh
+kubectl get displays --field-selector status.node=node-1
+```
+
 ```yaml
 apiVersion: display.liken.sh/v1alpha1
 kind: Display

@@ -994,10 +994,5 @@ func (d *displayControl) publish(display *Display, status DisplayStatus) error {
 	if reflect.DeepEqual(display.Status, status) {
 		return nil
 	}
-	updated, err := d.displays.writeStatus(display, status)
-	if err != nil {
-		return err
-	}
-	*display = *updated
-	return nil
+	return d.displays.writeStatus(display, status)
 }

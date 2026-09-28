@@ -261,6 +261,29 @@ delivered the write yet. The stripped binary grew from 20,213,920 to
 20,250,784 bytes, and the linked package count stayed at 472. The pass
 model does not change.
 
+### One shape for the store reads, and the selectable node field
+
+The organization chose one way to read from a store for every
+operator: `audio-operator`, `bluetooth-operator`, `display-operator`,
+and `equipment-operator` hold the same types and functions in
+`objectcache.go`. `storeView` is a store and whether it holds its
+first read. `versionMemo` is the memo, and its `send` runs one request
+for an object at a time and notes the version it answers, or the empty
+version after a failure, so the order of the notes is the order of the
+API server's answers. `heldObjects`
+is a store with its memo, and `readOne`, `readFresh`, `currentList`,
+and `settleStatus` read and write through them. `displayStore` keeps
+its methods, which call these functions. `replaceStatus` writes a
+`Display`'s status.
+
+The `Display` CRD now declares `status.node` as a selectable field,
+so a reader on one machine lists and watches the `Display`s of that
+machine only. `equipment-operator`'s CEC workload uses it. The
+operator's own `Display` watch still takes every `Display`. A monitor
+that moves to this node has a `Display` that names another node until
+this node's pass writes it, and scoping this watch needs its own look
+at that case.
+
 ## Measurements
 
 The binaries were built with `CGO_ENABLED=0 go build -trimpath
