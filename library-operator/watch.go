@@ -18,7 +18,10 @@ package main
 // Each informer holds the collection it watches, and a pass reads the
 // collection from that copy instead of listing it from the API server.
 // The informer writes a change into its copy before it calls the
-// handler, so the pass that a change wakes reads that change.
+// handler, so the pass that a change wakes reads that change. The
+// Libraries, the Catalogs, and the MetadataProviders are read through
+// objectcache.go, because the operator writes them and the copy can be
+// older than its own write.
 //
 // The operator imports only three parts of client-go for the watches:
 // the reflector and informer in tools/cache, the dynamic client that
@@ -81,6 +84,12 @@ type watches struct {
 	plays             *collection[Play]
 	people            *collection[Person]
 
+	// The client and the memos objectcache.go reads the Libraries, the
+	// Catalogs, and the MetadataProviders with. The memos are the
+	// operator's own, because the operator's writes note them.
+	client   *Client
+	versions objectVersions
+
 	group sync.WaitGroup
 }
 
@@ -109,8 +118,11 @@ type informer interface {
 //     change wakes the pass when any field this operator reads changed.
 //     A field outside the operator's structs, such as a status field that
 //     only media-operator reads, wakes nothing.
-func startWatches(ctx context.Context, client dynamic.Interface, wake chan<- struct{}, m *metrics) *watches {
+func startWatches(ctx context.Context, client dynamic.Interface, wake chan<- struct{}, m *metrics,
+	reader *Client, versions objectVersions) *watches {
 	w := &watches{
+		client:   reader,
+		versions: versions,
 		libraries: newCollection(client, wake, m, "libraries", kindLibrary, libraryResource, "",
 			edited(func(library *Library) *ObjectMeta { return &library.Metadata })),
 		catalogs: newCollection(client, wake, m, "catalogs", kindCatalog, catalogResource, "",
@@ -170,13 +182,25 @@ func (w *watches) settle(ctx context.Context) error {
 	return nil
 }
 
-func (w *watches) readLibraries() (*LibraryList, error) {
-	items, err := w.libraries.items()
+// A read of the Libraries or the Catalogs that fails ends the pass, the
+// way a failed list of them always has.
+func (w *watches) readLibraries(ctx context.Context) (*LibraryList, error) {
+	if !w.libraries.view().ready() {
+		items, err := w.libraries.items()
+		return &LibraryList{Items: items}, err
+	}
+	items, err := currentList[Library](ctx, w.client,
+		heldObjects{view: w.libraries.view(), versions: w.versions.libraries}, keyPath(libraryPath))
 	return &LibraryList{Items: items}, err
 }
 
-func (w *watches) readCatalogs() (*CatalogList, error) {
-	items, err := w.catalogs.items()
+func (w *watches) readCatalogs(ctx context.Context) (*CatalogList, error) {
+	if !w.catalogs.view().ready() {
+		items, err := w.catalogs.items()
+		return &CatalogList{Items: items}, err
+	}
+	items, err := currentList[NamespaceCatalog](ctx, w.client,
+		heldObjects{view: w.catalogs.view(), versions: w.versions.catalogs}, keyPath(catalogPath))
 	return &CatalogList{Items: items}, err
 }
 
@@ -195,9 +219,14 @@ func (w *watches) readMediaPreferences() (*MediaPreferencesList, error) {
 	return &MediaPreferencesList{Items: items}, err
 }
 
-func (w *watches) readMetadataProviders() (*MetadataProviderList, error) {
-	items, err := w.metadataProviders.items()
-	return &MetadataProviderList{Items: items}, err
+func (w *watches) readMetadataProviders(ctx context.Context) (*MetadataProviderList, error) {
+	if !w.metadataProviders.view().ready() {
+		items, err := w.metadataProviders.items()
+		return &MetadataProviderList{Items: items}, err
+	}
+	items := currentOrStored[MetadataProvider](ctx, w.client,
+		heldObjects{view: w.metadataProviders.view(), versions: w.versions.providers}, keyPath(metadataProviderPath))
+	return &MetadataProviderList{Items: items}, nil
 }
 
 func (w *watches) readPlays() (*PlayList, error) {
@@ -320,6 +349,11 @@ func (c *collection[T]) settledOrEnded(ctx context.Context) error {
 		return c.failure
 	}
 	return nil
+}
+
+// view is the informer's store, for objectcache.go.
+func (c *collection[T]) view() storeView {
+	return storeView{store: c.store, synced: c.informer.HasSynced}
 }
 
 // items answers every object the informer holds, in namespace and name

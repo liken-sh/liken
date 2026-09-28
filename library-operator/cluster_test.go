@@ -242,9 +242,24 @@ func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
 		answer(w, f.secrets[name])
 	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/libraries/"):
 		f.patchLibrary(w, r, name)
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/catalogs/"):
+		answer(w, f.catalogs[name])
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/libraries/"):
+		answer(w, f.libraries[name])
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/metadataproviders/"):
+		answer(w, f.providers[name])
 	case strings.Contains(r.URL.Path, "/catalogs/") && strings.HasSuffix(r.URL.Path, "/status"):
+		// A status write from an older copy states an older
+		// resourceVersion, and the API server refuses it, as it does a
+		// patch.
 		var written NamespaceCatalog
 		_ = json.NewDecoder(r.Body).Decode(&written)
+		held := f.catalogs[written.Metadata.Name]
+		if held != nil && held.Metadata.ResourceVersion != written.Metadata.ResourceVersion {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		written.Metadata.ResourceVersion = nextVersion(written.Metadata.ResourceVersion)
 		f.catalogs[written.Metadata.Name] = &written
 		_ = json.NewEncoder(w).Encode(written)
 	case strings.HasSuffix(r.URL.Path, "/status"):

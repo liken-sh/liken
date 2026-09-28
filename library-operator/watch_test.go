@@ -47,7 +47,8 @@ func watchedCluster(t *testing.T, cluster *fakeCluster, m *metrics) (*watches, c
 	}
 	wake := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
-	watched := startWatches(ctx, client, wake, m)
+	watched := startWatches(ctx, client, wake, m,
+		NewClient(server.URL, server.Client(), ""), newObjectVersions())
 	t.Cleanup(func() {
 		cancel()
 		watched.wait()
@@ -99,11 +100,11 @@ func TestEachWatchAnswersThePassWithItsCollection(t *testing.T) {
 		want string
 	}{
 		{name: "libraries", want: "movies /movies", read: func() (string, error) {
-			list, err := watched.readLibraries()
+			list, err := watched.readLibraries(t.Context())
 			return joined(list.Items, func(l Library) string { return l.Metadata.Name + " " + l.Spec.Storage.Root }), err
 		}},
 		{name: "catalogs", want: "house", read: func() (string, error) {
-			list, err := watched.readCatalogs()
+			list, err := watched.readCatalogs(t.Context())
 			return joined(list.Items, func(c NamespaceCatalog) string { return c.Metadata.Name }), err
 		}},
 		{name: "member pods", want: member.Metadata.Name + " 10.42.0.9", read: func() (string, error) {
@@ -124,7 +125,7 @@ func TestEachWatchAnswersThePassWithItsCollection(t *testing.T) {
 			return householdZone(list), err
 		}},
 		{name: "metadata providers", want: "house/tmdb", read: func() (string, error) {
-			list, err := watched.readMetadataProviders()
+			list, err := watched.readMetadataProviders(t.Context())
 			return joined(list.Items, func(p MetadataProvider) string { return p.Metadata.Namespace + "/" + p.Metadata.Name }), err
 		}},
 		{name: "plays", want: "den-b2k9x", read: func() (string, error) {
@@ -243,7 +244,7 @@ func TestAWatchOnACollectionNobodyServesSettlesAndAnswersItsFailure(t *testing.T
 	if err == nil || len(players.Items) != 0 {
 		t.Errorf("players = %+v, %v; want none and the failure", players.Items, err)
 	}
-	if _, err := watched.readLibraries(); err != nil {
+	if _, err := watched.readLibraries(t.Context()); err != nil {
 		t.Errorf("the libraries = %v, want them read", err)
 	}
 }
@@ -441,7 +442,8 @@ func TestSettleWaitsOnlyForTheCollectionsTheOperatorNeeds(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
-			watched := startWatches(ctx, client, make(chan struct{}, 1), nil)
+			watched := startWatches(ctx, client, make(chan struct{}, 1), nil,
+				NewClient(server.URL, server.Client(), ""), newObjectVersions())
 			t.Cleanup(func() {
 				cancel()
 				watched.wait()

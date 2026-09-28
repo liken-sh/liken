@@ -321,21 +321,32 @@ func podFailureMessage(pod *Pod) string {
 // the Library carries. Without the compare, the backstop tick would be
 // one write per library every ten seconds, and every watcher of the
 // Libraries would receive each one.
-func writeLibraryStatus(ctx context.Context, c *Client, library *Library, desired LibraryStatus) error {
+//
+// The copy the compare reads is current: objectcache.go reads the
+// Library from the API server where the store's copy is older than this
+// operator's own write. The memo notes the version this write produced.
+func writeLibraryStatus(ctx context.Context, c *Client, versions *versionMemo, library *Library, desired LibraryStatus) error {
 	same, err := sameStatus(library.Status, desired)
 	if err != nil || same {
 		return err
 	}
 
 	library.Status = desired
-	_, err = PutLibraryStatus(ctx, c, library)
+	key := storeKey(library.Metadata.Namespace, library.Metadata.Name)
+	err = versions.send(key, func() (string, error) {
+		written, err := PutLibraryStatus(ctx, c, library)
+		if err != nil {
+			return "", err
+		}
+		library.Metadata.ResourceVersion = written.Metadata.ResourceVersion
+		return written.Metadata.ResourceVersion, nil
+	})
 	if errors.Is(err, ErrConflict) {
-		// Something wrote this Library after the watch delivered the
-		// copy this pass read: a person's edit, or this operator's own
-		// write of the pass before, which the watch had not delivered
-		// yet. The next pass reads the fresh copy and derives the status
-		// again. An edit to the spec wakes that pass, and the backstop
-		// tick runs it after any other write.
+		// Another writer changed this Library after the copy this pass
+		// read, such as a person's edit. The memo now holds no version,
+		// so the next pass reads the Library from the API server and
+		// derives the status again. An edit to the spec wakes that pass,
+		// and the backstop tick runs it after any other write.
 		return nil
 	}
 	return err

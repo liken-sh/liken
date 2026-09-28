@@ -289,15 +289,25 @@ func catalogMembers(namespace string, pods []Pod) []string {
 
 // WriteCatalogStatus writes only a status that differs from the one the
 // Catalog carries, the rule writeLibraryStatus also follows, so a pass that
-// finds nothing changed writes nothing. A conflict means another write got
-// there first, which the next pass reads.
+// finds nothing changed writes nothing. The memo notes the version the write
+// produced, so the next pass reads the Catalog from the API server until the
+// store holds this write. A conflict means another write got there first,
+// and the memo then sends the next pass to the API server for the Catalog.
 func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCatalog, desired CatalogStatus) error {
 	same, err := sameCatalogStatus(catalog.Status, desired)
 	if err != nil || same {
 		return err
 	}
 	catalog.Status = desired
-	_, err = PutCatalogStatus(ctx, o.client, catalog)
+	key := storeKey(catalog.Metadata.Namespace, catalog.Metadata.Name)
+	err = o.versions.catalogs.send(key, func() (string, error) {
+		written, err := PutCatalogStatus(ctx, o.client, catalog)
+		if err != nil {
+			return "", err
+		}
+		catalog.Metadata.ResourceVersion = written.Metadata.ResourceVersion
+		return written.Metadata.ResourceVersion, nil
+	})
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

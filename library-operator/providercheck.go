@@ -133,10 +133,18 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 		return err
 	}
 	provider.Status = desired
-	_, err = PutMetadataProviderStatus(ctx, o.client, provider)
+	key := storeKey(provider.Metadata.Namespace, provider.Metadata.Name)
+	err = o.versions.providers.send(key, func() (string, error) {
+		written, err := PutMetadataProviderStatus(ctx, o.client, provider)
+		if err != nil {
+			return "", err
+		}
+		return written.Metadata.ResourceVersion, nil
+	})
 	if errors.Is(err, ErrConflict) {
-		// Something wrote the provider after the watch delivered the copy
-		// this pass read. The next pass reads it again.
+		// Another writer changed the provider after the copy this pass
+		// read. The memo holds no version now, so the next pass reads the
+		// provider from the API server.
 		return nil
 	}
 	return err

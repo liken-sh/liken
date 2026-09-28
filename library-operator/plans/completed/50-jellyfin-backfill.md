@@ -139,3 +139,17 @@ On a home cluster, with `status.jellyfin` absent:
    a few against Jellyfin's continue-watching row.
 4. Open the browser and see a film Jellyfin held resume at Jellyfin's
    position.
+
+## A Catalog with no server, 2026-09-27
+
+A `Catalog` with no `spec.jellyfin` deletes the backfill `Job` it stood
+before. The pass sent that `DELETE` on every pass, whether or not the `Job`
+existed, and the API server answered `404` to each one: six requests a
+minute on the backstop tick alone. The pass now reads the `Jobs` it already
+listed, and sends the `DELETE` only when they hold the backfill `Job`.
+`TestASettledPassDeletesNoBackfillJobThatIsNotThere` holds this.
+
+The pass also read `status.jellyfin` from a store copy that could be older
+than its own `Finished` write, and could create the `Job` a second time after
+the finished one was deleted. Plan 70 says how the pass reads the `Catalog`
+now.

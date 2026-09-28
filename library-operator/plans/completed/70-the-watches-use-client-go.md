@@ -191,6 +191,58 @@ sum of both plans.
 
 Plan 71 says why the pods and `Jobs` run a separate build.
 
+## Reads after the operator's own write, 2026-09-27
+
+The pass read every watched collection from its informer's store, and a
+store's copy can be older than the operator's own last write. The watch
+delivers a write a moment after the API server answers it, and later while
+the watch is down. Two decisions read such a copy:
+
+- `writeLibraryStatus`, `writeCatalogStatus`, and `checkProvider` compare
+  the status they derive with the copy's status. An older copy can equal
+  the derived status while the API server holds the write after it, so the
+  pass skips the write and the wrong status stays until the next write.
+- `standJellyfinBackfill` reads `status.jellyfin` on the `Catalog`. After the
+  finished backfill `Job` is deleted, a copy from before the `Finished`
+  write makes the pass create the `Job` again. Plan 50 says a second run is
+  safe, so the cost is one more run against the Jellyfin server.
+
+The Libraries, the Catalogs, and the MetadataProviders are now read the way
+bluetooth-, display-, audio-, and equipment-operator read their stores.
+`versionmemo.go` holds the memo, and every write of the three kinds notes
+the `resourceVersion` the API server answered. `objectcache.go` reads an
+object from the API server when the store's copy has another version.
+`TestAPassDoesNotActOnACopyOlderThanItsOwnWrite` creates the backfill `Job`
+a second time without the memo, and creates none with it. The Plays and the
+people are written only by a patch that states the copy's
+`resourceVersion`, so an older copy of one gets a `409` and the next pass
+tries again. Their stores have no memo.
+
+Two parts differ from the other operators. The operator creates none of the
+three kinds, so a list reads no object that the store does not hold yet. A
+`409` on a status write is not retried in the same pass. The memo sends the
+next pass to the API server for the object, and the backstop tick runs that
+pass within ten seconds. A fresh read of one `MetadataProvider` that
+fails leaves the pass with the store's copies of every provider, because
+the pass reads a failed read of the providers as no provider, and every
+`Library` would then report its sources as missing. Before a store holds
+its first read, the pass answers the informer's last error, as it does for
+the other five kinds, so a cluster that serves no `MetadataProvider` costs
+no request on each pass.
+
+A settled pass reads no `Catalog` from the API server
+(`TestASettledPassReadsNoCatalogFromTheAPIServer`). A pass that follows the
+operator's own write sends one `GET` for each object it wrote, until the
+watch delivers the write.
+
+The same review found one more request in every settled pass. A `Catalog`
+with no `spec.jellyfin` sent a `DELETE` for its backfill `Job` on each pass,
+and the API server answered `404`. On `liken-1` that was six requests a
+minute. The pass now sends the `DELETE` only when the `Jobs` it listed hold
+the backfill `Job`. In the fake API server, the third pass over one
+`Library` and one `Catalog` sent 22 requests before and 21 after. Eight of
+those are the lists the test harness sends in place of the stores.
+
 ## The drill that is owed
 
 On `liken-1`, after the main session rolls the build:

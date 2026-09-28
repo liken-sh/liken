@@ -199,6 +199,10 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		scanPathsVariable:        "",
 		jobNameVariable:          "",
 		libraryPhasesVariable:    phasesMountPath,
+		// The Go runtime collects garbage before the heap reaches this
+		// soft limit, which sits under the container's limit, so the
+		// kernel does not kill a walk for garbage the collector frees.
+		goMemoryLimitVariable: "96MiB",
 	}
 	got := containerEnvironment(pod.Spec.Containers[0])
 	for name, value := range want {
@@ -403,7 +407,7 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 		cpuRequest  string
 		memoryLimit string
 	}{
-		{container: scannerContainer, cpuRequest: "10m", memoryLimit: "64Mi"},
+		{container: scannerContainer, cpuRequest: "10m", memoryLimit: "128Mi"},
 		{container: catalogContainer, cpuRequest: "10m", memoryLimit: "1Gi"},
 	}
 	pod := testScanPod(studioMovies())

@@ -123,3 +123,31 @@ a movies title folder is one read at a shallow depth.
 The first walk after an upgrade is slower than the numbers above, because
 it writes every file row the catalog has never held. The movies library's
 first walk took 18.7 seconds and its later walks took a third of that.
+
+## The memory of the scan container, 2026-09-27
+
+A drill on `liken-1` found the walk's `scan` container at `53Mi` against its
+`64Mi` limit. What it holds grows with the longest series on the volume, not
+with the number of folders. Each of the eight workers holds the rows of one
+whole title folder, which for a series is every episode, file, and stream
+under it. The collector holds one write batch and the last folder it took.
+The Go runtime also lets the heap grow to about twice what is live before it
+collects.
+
+Synthetic series trees were walked in a container against the local
+Corrosion cluster, and the anonymous memory was sampled from the cgroup:
+
+| tree | limit and `GOMEMLIMIT` | peak |
+| --- | --- | --- |
+| 1,000 series of 100 episodes | none | `23Mi` |
+| 24 series of 1,500 episodes | none | `78Mi` |
+| 24 series of 1,500 episodes | `64Mi`, none | killed by the kernel |
+| 24 series of 1,500 episodes | `64Mi`, `48MiB` | `40Mi` |
+| 24 series of 1,500 episodes | `128Mi`, `96MiB` | `77Mi` |
+| 12 series of 3,000 episodes | `128Mi`, `96MiB` | `87Mi` |
+
+The `scan` container of a walk now has a limit of `128Mi` and sets
+`GOMEMLIMIT` to `96MiB`. The request stays at `32Mi`. The page cache of the
+files the walk reads filled the rest of the limit in every run, and the
+kernel reclaimed it with no kill, so a usage near the limit does not mean a
+walk that is about to fail.

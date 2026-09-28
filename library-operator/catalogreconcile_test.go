@@ -406,6 +406,9 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	if got := cluster.countRequests(http.MethodPut, "catalogs"); got != 2 {
 		t.Errorf("status writes = %d, want two", got)
 	}
+	if got := cluster.heldCatalog("house").Status.StorageSize; got != "9Gi" {
+		t.Errorf("the held storage size = %q, want the 9Gi the second write sent", got)
+	}
 }
 
 // A write another writer got to first is not a failure, and a write the

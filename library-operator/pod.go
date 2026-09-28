@@ -148,12 +148,48 @@ const (
 	scannerMemoryRequest = "32Mi"
 	scannerMemoryLimit   = "64Mi"
 
+	walkMemoryLimit   = "128Mi"
+	walkGoMemoryLimit = "96MiB"
+
 	catalogCPURequest    = "10m"
 	catalogMemoryRequest = "64Mi"
 	catalogMemoryLimit   = "512Mi"
 
 	libraryJobAgentMemoryLimit = "1Gi"
 )
+
+// The scan container of a walk has a limit of its own, because what it
+// holds grows with the longest series on the volume. The walk reads eight
+// title folders at once (walkWorkers), and a worker holds the rows of its
+// whole folder: for a series, every episode, file, and stream under it.
+// The collector then holds one write batch and the last folder it took.
+// So eight long series in flight at once set the peak, and the number of
+// folders on the volume does not.
+//
+// The Go runtime also lets its heap grow to about twice what is live
+// before it collects, so garbage was about half of the long series' peak
+// below. GOMEMLIMIT makes the collector work harder as the heap nears the
+// soft limit. The soft limit counts the Go runtime's own memory, and sits
+// 32Mi under the container's limit for what it does not count: the
+// amount the heap passes the soft limit by before a collection ends, and
+// the kernel memory the container is charged for, such as the directory
+// and inode caches of the walk.
+//
+// A walk of synthetic series trees in a container measured the
+// anonymous memory, which the kernel cannot reclaim:
+//
+//   - A thousand series of 100 episodes each peaked at 23Mi.
+//   - Two dozen series of 1,500 episodes each peaked at 78Mi with no
+//     soft limit, and the kernel killed the walk at a limit of 64Mi. With
+//     a soft limit of 48MiB the same walk peaked at 40Mi.
+//   - At these settings, the same two dozen series peaked at 77Mi, and a
+//     dozen series of 3,000 episodes each peaked at 87Mi.
+//
+// The page cache of the files the walk reads counts toward the container's
+// usage as well, and filled the rest of the limit in each run. The kernel
+// reclaims that cache before it kills a container, so a usage that shows
+// near the limit is not a walk about to fail.
+const goMemoryLimitVariable = "GOMEMLIMIT"
 
 // The pod shape of a worker with one container: the container, the
 // catalog agent beside it on the Library's catalog claim, and no
@@ -245,11 +281,12 @@ func scannerSidecar(library *Library, paths []string, image string) Container {
 			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
 				FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
 			}},
+			{Name: goMemoryLimitVariable, Value: walkGoMemoryLimit},
 		},
 		VolumeMounts: scannerMounts(library),
 		Resources: ResourceRequirements{
 			Requests: map[string]string{"cpu": scannerCPURequest, "memory": scannerMemoryRequest},
-			Limits:   map[string]string{"memory": scannerMemoryLimit},
+			Limits:   map[string]string{"memory": walkMemoryLimit},
 		},
 		SecurityContext: unprivileged(),
 	}

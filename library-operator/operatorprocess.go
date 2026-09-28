@@ -177,7 +177,7 @@ func (o *operator) run(stopped context.Context, report io.Writer, watching dynam
 	// The watches stop before the Lease is released too. They write
 	// nothing, and a copy that no longer leads reads nothing from them.
 	watchContext, stopWatches := context.WithCancel(context.Background())
-	watched := startWatches(watchContext, watching, o.wake, o.metrics)
+	watched := startWatches(watchContext, watching, o.wake, o.metrics, o.client, o.versions)
 	defer held.stepDown(func() bool {
 		stopWatches()
 		watched.wait()
@@ -199,7 +199,7 @@ func (o *operator) run(stopped context.Context, report io.Writer, watching dynam
 		return err
 	}
 	o.watched = watched
-	libraries, err := watched.readLibraries()
+	libraries, err := watched.readLibraries(startup)
 	if err != nil {
 		return fmt.Errorf("reading the libraries: %w", err)
 	}

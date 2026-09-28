@@ -75,8 +75,10 @@ func jellyfinBackfillRole(catalog *NamespaceCatalog, image, busAddress, topicBas
 
 // what the Catalog's status says about its Jellyfin server after this pass,
 // and the one Job that gets it there. A Catalog that names no server reports
-// nothing and loses the Job it stood before. Otherwise the pass reads the Job
-// it already listed: a Job that succeeded finishes the backfill against this
+// nothing and loses the Job it stood before. The pass deletes that Job only
+// when the Jobs it listed hold it, because a delete of an absent Job is one
+// request answered 404 on every pass. Otherwise the pass reads the Job it
+// already listed: a Job that succeeded finishes the backfill against this
 // server, a Job that gave up past its backoff is deleted so the next pass
 // creates it again, and a Job that is neither is still running. With no Job
 // standing and no finish against this server, the pass creates the Job once
@@ -86,15 +88,18 @@ func (o *operator) standJellyfinBackfill(ctx context.Context, catalog *Namespace
 	jobs []Job, progressPods []*Pod, now time.Time) *CatalogJellyfinStatus {
 	namespace, name := catalog.Metadata.Namespace, catalog.Metadata.Name
 	key := libraryKey(namespace, name)
+	held := jellyfinBackfillJobOf(jobs, namespace, name)
 	if catalog.Spec.Jellyfin == nil {
 		delete(o.backfillStands, key)
+		if held == nil {
+			return nil
+		}
 		if err := o.retireJellyfinBackfill(ctx, namespace, name); err != nil {
 			fmt.Fprintf(os.Stderr, "retiring the jellyfin backfill in %s: %v\n", namespace, err)
 		}
 		return nil
 	}
 	server := catalog.Spec.Jellyfin.URL
-	held := jellyfinBackfillJobOf(jobs, namespace, name)
 	if held == nil && backfilledFrom(catalog.Status.Jellyfin, server) {
 		delete(o.backfillStands, key)
 		return catalog.Status.Jellyfin

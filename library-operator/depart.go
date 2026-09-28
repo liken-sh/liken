@@ -55,7 +55,7 @@ func (o *operator) depart(ctx context.Context, library *Library, choice catalogC
 	if stage.clear {
 		return o.releaseLibrary(ctx, library, stage.why)
 	}
-	return writeLibraryStatus(ctx, o.client, library,
+	return writeLibraryStatus(ctx, o.client, o.versions.libraries, library,
 		departingStatus(library, stage, time.Now().UTC()))
 }
 
@@ -161,9 +161,11 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 	}
 	o.clearLibraryTopics(namespace, name)
 
-	_, err := PatchLibraryFinalizers(ctx, o.client, namespace, name,
-		library.Metadata.ResourceVersion,
-		library.Metadata.without(libraryFinalizer, formerLibraryFinalizer))
+	err := o.versions.libraries.send(storeKey(namespace, name), func() (string, error) {
+		return PatchLibraryFinalizers(ctx, o.client, namespace, name,
+			library.Metadata.ResourceVersion,
+			library.Metadata.without(libraryFinalizer, formerLibraryFinalizer))
+	})
 	if errors.Is(err, ErrNotFound) {
 		// An object that is already gone is the state this release
 		// was for.

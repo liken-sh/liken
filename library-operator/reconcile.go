@@ -85,7 +85,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		}
 	}
 
-	return writeLibraryStatus(ctx, o.client, library, deriveLibraryStatus(library, libraryObservation{
+	return writeLibraryStatus(ctx, o.client, o.versions.libraries, library, deriveLibraryStatus(library, libraryObservation{
 		bound:             bound,
 		choice:            choice,
 		report:            report,
@@ -116,8 +116,14 @@ func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
 	if !slices.Contains(finalizers, libraryFinalizer) {
 		finalizers = append(finalizers, libraryFinalizer)
 	}
-	version, err := PatchLibraryFinalizers(ctx, o.client, library.Metadata.Namespace,
-		library.Metadata.Name, library.Metadata.ResourceVersion, finalizers)
+	var version string
+	err := o.versions.libraries.send(storeKey(library.Metadata.Namespace, library.Metadata.Name),
+		func() (string, error) {
+			var err error
+			version, err = PatchLibraryFinalizers(ctx, o.client, library.Metadata.Namespace,
+				library.Metadata.Name, library.Metadata.ResourceVersion, finalizers)
+			return version, err
+		})
 	if errors.Is(err, ErrConflict) {
 		// A write after the copy this pass read is in the copy the
 		// next pass reads, and that pass patches again.

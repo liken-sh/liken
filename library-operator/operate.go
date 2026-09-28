@@ -170,6 +170,13 @@ type operator struct {
 	// instead of listing them from the API server.
 	watched collections
 
+	// The resourceVersion of each Library, Catalog, and MetadataProvider
+	// the operator last wrote or read from the API server. Every write to
+	// the three kinds notes its answer here, and objectcache.go reads an
+	// object from the API server where the store's copy has another
+	// version (versionmemo.go says why).
+	versions objectVersions
+
 	// The claims, volumes, and pods the pass in flight listed, which
 	// passreads.go holds the rule for. It is nil between passes, so a caller
 	// outside a pass reads each object by name.
@@ -198,6 +205,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffm
 	wake := make(chan struct{}, 1)
 	library := &operator{
 		client:         client,
+		versions:       newObjectVersions(),
 		scannerImage:   scannerImage,
 		corrosionImage: corrosionImage,
 		browserImage:   browserImage,
@@ -259,14 +267,14 @@ func (o *operator) pass() {
 	// is read again on the next pass.
 	clear(o.perNodeClasses)
 
-	libraries, err := o.watched.readLibraries()
+	libraries, err := o.watched.readLibraries(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the libraries: %v\n", err)
 		return
 	}
 	// The Catalog decides whether a Library proceeds, so the pass reads
 	// the collection before it reconciles a Library, not after.
-	catalogs, err := o.watched.readCatalogs()
+	catalogs, err := o.watched.readCatalogs(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the catalogs: %v\n", err)
 		return
@@ -319,7 +327,7 @@ func (o *operator) pass() {
 	// providercadence.go says their verdict can have changed. A
 	// cluster that has not applied the CRD serves no such collection, and its
 	// libraries are still scanned and still reported.
-	providers, err := o.watched.readMetadataProviders()
+	providers, err := o.watched.readMetadataProviders(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the metadata providers: %v\n", err)
 		providers = &MetadataProviderList{}
@@ -530,13 +538,17 @@ func (o *operator) logRun(namespace, name string, run libraryRun) {
 // operator watches. watch.go answers it from the informers, so a pass
 // sends no list for any of them. A collection that has not been read
 // answers the error of its last read.
+//
+// The three kinds the operator writes take the pass's context, because
+// objectcache.go reads one of them from the API server where the
+// store's copy is older than the operator's own write.
 type collections interface {
-	readLibraries() (*LibraryList, error)
-	readCatalogs() (*CatalogList, error)
+	readLibraries(ctx context.Context) (*LibraryList, error)
+	readCatalogs(ctx context.Context) (*CatalogList, error)
 	readMemberPods() (*PodList, error)
 	readPlayers() (*PlayerList, error)
 	readMediaPreferences() (*MediaPreferencesList, error)
-	readMetadataProviders() (*MetadataProviderList, error)
+	readMetadataProviders(ctx context.Context) (*MetadataProviderList, error)
 	readPlays() (*PlayList, error)
 	readPeople() (*PersonList, error)
 }

@@ -76,7 +76,7 @@ requests:
 | Container | Memory request | Memory limit | CPU request |
 |---|---|---|---|
 | the catalog agent | `64Mi` | `1Gi` | `10m` |
-| `scan`, in a walk | `32Mi` | `64Mi` | `10m` |
+| `scan`, in a walk | `32Mi` | `128Mi` | `10m` |
 | `probe` | `32Mi` | `256Mi` | `10m` |
 | `art` | `32Mi` | `256Mi` | `10m` |
 | `trickplay`, when enabled | `32Mi` | `512Mi` | `500m` |
@@ -88,7 +88,11 @@ containers beside the agent, so the pod requests about `448Mi`. A `Job`
 that fills gaps runs only the phases with work, and requests less. The
 probe and trickplay limits are wide because `ffmpeg` and `ffprobe` hold
 a decoded stream, and the art limit because the art container holds an
-image while it writes it.
+image while it writes it. The `scan` limit is wide because the walk reads
+eight title folders at once and holds each whole, so eight long series
+set its peak. A walk of a dozen synthetic series of 3,000 episodes each
+peaked at `87Mi`. The `scan` container sets `GOMEMLIMIT` to `96MiB`, so
+the Go runtime collects its garbage before the kernel's limit.
 
 The agent of a `Job` has a higher limit than the agent of a screen.
 The catalog claim of a `Job` is on the node, so the first `Job` of a

@@ -22,19 +22,23 @@ type listReads struct {
 }
 
 func readList[L any](c *Client, path string) (*L, error) {
+	return readListWith[L](context.Background(), c, path)
+}
+
+func readListWith[L any](ctx context.Context, c *Client, path string) (*L, error) {
 	list := new(L)
-	if err := c.RequestJSON(context.Background(), http.MethodGet, path, nil, list); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, path, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil
 }
 
-func (r listReads) readLibraries() (*LibraryList, error) {
-	return readList[LibraryList](r.client, librariesPath)
+func (r listReads) readLibraries(ctx context.Context) (*LibraryList, error) {
+	return readListWith[LibraryList](ctx, r.client, librariesPath)
 }
 
-func (r listReads) readCatalogs() (*CatalogList, error) {
-	return readList[CatalogList](r.client, catalogsPath)
+func (r listReads) readCatalogs(ctx context.Context) (*CatalogList, error) {
+	return readListWith[CatalogList](ctx, r.client, catalogsPath)
 }
 
 func (r listReads) readMemberPods() (*PodList, error) {
@@ -49,8 +53,8 @@ func (r listReads) readMediaPreferences() (*MediaPreferencesList, error) {
 	return readList[MediaPreferencesList](r.client, mediaPreferencesPath)
 }
 
-func (r listReads) readMetadataProviders() (*MetadataProviderList, error) {
-	return readList[MetadataProviderList](r.client, metadataProvidersPath)
+func (r listReads) readMetadataProviders(ctx context.Context) (*MetadataProviderList, error) {
+	return readListWith[MetadataProviderList](ctx, r.client, metadataProvidersPath)
 }
 
 func (r listReads) readPlays() (*PlayList, error) {
