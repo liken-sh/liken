@@ -13,7 +13,8 @@
 # adapter the claim matches one device and the pod runs. On a node
 # with none the claim matches zero devices and the pod stays Pending,
 # which is how a DaemonSet runs a pod only where an adapter is. Nobody
-# writes down which machine has the adapter.
+# writes down which machine has the adapter. A node labeled
+# equipment.liken.sh/cec: none gets no pod at all (the affinity below).
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
@@ -59,6 +60,22 @@ spec:
         app: equipment-operator-cec
     spec:
       serviceAccountName: equipment-operator-cec
+      # A node labeled equipment.liken.sh/cec: none gets no pod. The
+      # claim alone leaves a pod on a node with no CEC adapter Pending
+      # for good, so a person marks such a node with that one label.
+      # NotIn also matches a node with no such label, so with no
+      # label the DaemonSet makes a pod on every node, and the claim
+      # decides where it can start. A patch that sets its own node
+      # affinity replaces this list of terms, because the list is
+      # atomic.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: equipment.liken.sh/cec
+                    operator: NotIn
+                    values: ["none"]
       # A machine that drives a screen carries a NoSchedule taint, such
       # as media.liken.sh/player, and a TV is connected to exactly such
       # a machine. The pod tolerates every taint, as liken's other

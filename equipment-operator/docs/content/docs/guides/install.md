@@ -39,7 +39,9 @@ the install needs no clone:
 `DaemonSet`. Its pod claims a USB CEC adapter through the
 `cec-adapter` `DeviceClass`, so on a node with no adapter the pod
 stays `Pending`, and the `DaemonSet` never reports all its pods
-ready. The [`CECBus`](/docs/reference/cecbuses/)
+ready. A node labeled `equipment.liken.sh/cec: none` gets no pod, as
+[Keep the pods off nodes with no CEC adapter](#keep-the-pods-off-nodes-with-no-cec-adapter)
+describes. The [`CECBus`](/docs/reference/cecbuses/)
 reference describes what the pod reports, and the
 [`Television`](/docs/reference/televisions/) reference describes the
 TV that a `CECBus` in `Control` finds.
@@ -52,6 +54,54 @@ release tag:
     namespace: liken-system
     resources:
       - https://github.com/liken-sh/equipment-operator//deploy?ref=<ref>
+
+## Keep the pods off nodes with no CEC adapter
+
+The `DaemonSet` makes a pod on every node. On a node with no
+CEC adapter, the claim matches no device, and the pod stays `Pending`. To make no
+pod on such a node, label the node `equipment.liken.sh/cec: none`.
+
+The `DaemonSet` in the base carries this node affinity, so no patch is
+needed:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: equipment.liken.sh/cec
+              operator: NotIn
+              values: ["none"]
+```
+
+`NotIn` matches a node whose label has a different value, and also a
+node that has no such label. The Kubernetes page on
+[set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
+gives this rule. So with no label the `DaemonSet` makes a pod on every
+node, and a node labeled `none` gets no pod. When a label changes, the
+[`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
+controller deletes the pod from a node that no longer matches, and
+adds one to a node that matches again.
+
+Label the node with `kubectl`:
+
+    kubectl label node node-1 equipment.liken.sh/cec=none
+
+On `liken`, the label stays on the node across reboots, and `liken`
+leaves it in place, because `liken` removes only the labels that a
+`Machine` declared. The label goes with the Node object: a machine
+that is demoted or installed again registers a new Node, and you
+label it again. A `Machine` cannot declare this label: its
+`spec.nodeLabels` refuses every key in `liken.sh` and its subdomains.
+
+To run the pod on that node again, remove the label:
+
+    kubectl label node node-1 equipment.liken.sh/cec-
+
+A patch of your own that sets a node affinity on this `DaemonSet`
+replaces the list of terms in the base, and the `none` term with it.
+Copy the `none` requirement into each term of your patch.
 
 ## Turn network discovery off
 

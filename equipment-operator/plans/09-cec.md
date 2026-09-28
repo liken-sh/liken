@@ -121,7 +121,9 @@ its claim and the RBAC for `CECBus`, `Television`, and `Receiver`.
 Each attachment kind gets its own workload, because a device claim is
 not optional. A pod with a claim is placed only on a node where the
 claim can be allocated. That rule places the CEC pod on exactly the
-nodes that have an adapter, with no node label. A single
+nodes that have an adapter, with no node label. The `DaemonSet` still
+makes a pod on every other node, and that pod stays `Pending`, unless
+a person labels the node `equipment.liken.sh/cec: none`. A single
 "local equipment" pod would need a claim for every kind it could
 manage, and it would be placed only on nodes that have all of them.
 Serial or IR equipment would be a third workload,
