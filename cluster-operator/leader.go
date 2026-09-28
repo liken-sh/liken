@@ -37,10 +37,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	coordination "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
@@ -131,7 +133,8 @@ type leadership struct {
 
 // newLeadership builds the election. The identity is the pod's name and
 // a random suffix, so a restarted container is a new candidate and
-// waits for the Lease its earlier process held.
+// waits for the Lease its earlier process held to expire
+// (renewalClock.Get).
 func newLeadership(config *rest.Config, pod string, timing leaseTiming,
 	setUnelected func(bool), exit func(int), report func(string)) (*leadership, error) {
 	leases, err := coordinationv1.NewForConfig(config)
@@ -158,6 +161,7 @@ func newLeadership(config *rest.Config, pod string, timing leaseTiming,
 			LockConfig: resourcelock.ResourceLockConfig{Identity: l.identity},
 		},
 		duration: timing.duration,
+		pod:      pod + "_",
 		answered: l.leaseAnswered,
 		leading:  l.leads,
 	}
@@ -207,13 +211,18 @@ func newLeadership(config *rest.Config, pod string, timing leaseTiming,
 // renewalClock is the Lease lock with one addition: it records when
 // this process last sent a write of the Lease that the API server
 // accepted with this process as the holder. The time is taken before
-// the request is sent, so it is never later than the renewTime a
-// waiting copy measures from.
+// the request is sent, so it is never later than the time a waiting
+// copy first reads the renewal and measures the duration from.
 type renewalClock struct {
 	resourcelock.Interface
 
 	mu      sync.Mutex
 	renewed time.Time
+
+	// pod is the prefix that every identity of this pod starts with.
+	// The pod's name is a DNS subdomain, which has no underscore, so
+	// the prefix names this pod and no other.
+	pod string
 
 	// duration, answered, and leading serve the refusal check in
 	// unelected.go.
@@ -238,10 +247,50 @@ func (r *renewalClock) Update(ctx context.Context, record resourcelock.LeaderEle
 	return err
 }
 
+// Get reads the Lease, and shows client-go a Lease with no holder when
+// an earlier process of this pod held it and its last renewal is one
+// Lease duration old.
+//
+// client-go does not compare renewTime with its own clock, because the
+// holder can run on another node with another clock. It measures the
+// duration from the time it first read the current record. A process
+// that restarts, or that starts after the API server comes back, first
+// reads its earlier process's Lease late, and waits a whole duration
+// from that read. When the only API server reboots, the leader cannot
+// renew, exits, and restarts, and the fleet then has no acting copy
+// for a whole Lease duration after the API server returns. A rolling
+// update in that time moves the wait to the new pod, which cannot
+// clear a Lease that names another process.
+//
+// An earlier process of this pod is not a paused leader that can
+// resume. The kubelet starts a container's process again only after
+// the one before it ended, so that process sends no more writes. It
+// wrote renewTime from the clock of this node, so the comparison with
+// this process's clock is sound.
+//
+// The Lease that client-go then updates keeps the resourceVersion of
+// this read, so the take is a conditional write, and a conflict with
+// any other writer ends it.
 func (r *renewalClock) Get(ctx context.Context) (*resourcelock.LeaderElectionRecord, []byte, error) {
 	record, raw, err := r.Interface.Get(ctx)
 	r.classifyRead(record, err)
+	if err == nil && r.abandonedByThisPod(record.HolderIdentity, record.RenewTime.Time,
+		record.LeaseDurationSeconds, time.Now()) {
+		free := *record
+		free.HolderIdentity = ""
+		return &free, raw, nil
+	}
 	return record, raw, err
+}
+
+// abandonedByThisPod answers whether holder is an earlier process of
+// this pod, whose last renewal at renewed is at least the Lease's
+// duration old at now.
+func (r *renewalClock) abandonedByThisPod(holder string, renewed time.Time, seconds int, now time.Time) bool {
+	if holder == r.Identity() || !strings.HasPrefix(holder, r.pod) {
+		return false
+	}
+	return !now.Before(renewed.Add(time.Duration(seconds) * time.Second))
 }
 
 func (r *renewalClock) mark(sent time.Time, record resourcelock.LeaderElectionRecord, err error) {
@@ -344,9 +393,13 @@ func (l *leadership) end() {
 }
 
 // clearIfHeld writes the Lease with no holder when it still names this
-// process. It reads the Lease again after a conflict, because the write
-// it lost to can be this process's own late renewal. A Lease that names
-// another process, or no process, is left alone.
+// process, or an earlier process of this pod whose Lease has expired
+// (renewalClock.Get says why that one is safe to clear). A stop can
+// arrive before the elector's next read takes such a Lease, and without
+// this clear a copy in another pod waits out the whole duration. It
+// reads the Lease again after a conflict, because the write it lost to
+// can be this process's own late renewal. A Lease that names another
+// process, or no process, is left alone.
 func (l *leadership) clearIfHeld(ctx context.Context) {
 	leases := l.leases.Leases(leaseNamespace)
 	for range 3 {
@@ -357,7 +410,7 @@ func (l *leadership) clearIfHeld(ctx context.Context) {
 			}
 			return
 		}
-		if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != l.identity {
+		if !l.mayClear(lease) {
 			return
 		}
 		none, released, second := "", metav1.NewMicroTime(time.Now()), int32(1)
@@ -374,6 +427,23 @@ func (l *leadership) clearIfHeld(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// mayClear answers whether clearIfHeld may write the Lease with no
+// holder.
+func (l *leadership) mayClear(lease *coordination.Lease) bool {
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
+		return false
+	}
+	holder := *lease.Spec.HolderIdentity
+	if holder == l.identity {
+		return true
+	}
+	if lease.Spec.RenewTime == nil || lease.Spec.LeaseDurationSeconds == nil {
+		return false
+	}
+	return l.lock.abandonedByThisPod(holder, lease.Spec.RenewTime.Time,
+		int(*lease.Spec.LeaseDurationSeconds), time.Now())
 }
 
 // lead blocks until this process holds the Lease. It exits the process

@@ -42,6 +42,7 @@ require (
 require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/prometheus/client_golang v1.24.1
+	k8s.io/api v0.36.3
 )
 
 require (
@@ -120,7 +121,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
-	k8s.io/api v0.36.3 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect

@@ -132,6 +132,62 @@ grant exists does not close the window: the same authorizer answers
 it, so an authorizer that refused the `Lease` in error can refuse the
 review in the same way.
 
+## A Lease that names a process that has ended
+
+When the only API server of a fleet reboots, the leader cannot renew
+its `Lease`. It exits by 25 seconds after its last renewal, and the
+kubelet starts its container again. The new process has a new
+identity. client-go measures a `Lease`'s duration from the time a copy
+first reads the current record, not from `renewTime`, because the
+holder can run on another node with another clock. So each copy that
+reads the ended process's `Lease` waits a whole duration, 30 seconds,
+from that first read, and the fleet has no acting copy in that time.
+
+`renewalClock.Get` and `clearIfHeld` in
+[leader.go](../../cluster-operator/leader.go) close this case for the
+same pod. A process can take or clear a `Lease` that an earlier
+process of its own pod held, once the last renewal is one duration
+old. The kubelet starts a container's process again only after the
+one before it ended, and that process wrote `renewTime` from the same
+node's clock.
+
+Two cases stay open:
+
+* **Another pod.** A copy in another pod cannot tell an ended holder
+  from a paused one. On a test cluster with one server, the server's
+  reboot applied a new cluster operator manifest, and the rolling
+  update stopped the restarted process. The new pod waited 32 seconds
+  for the `Lease`, and the next machine's reboot turn started 34
+  seconds late. With the change above, the restarted process takes the
+  `Lease` or clears it before it stops, if the API server answers it
+  first. The wait stays when the stop comes before that answer. It
+  happens at most once for each reboot of the only server.
+* **The other operators.** `media-operator`, `library-operator`, and
+  `equipment-operator` each carry a copy of this election, with the
+  same scheme of one new identity for each process, and none has this
+  change. A copy must also keep the pod's name as its hostname, because
+  the identity starts with the hostname.
+
+### What would close it
+
+1. **Copy the change** to the three operators' `leader.go`. It needs
+   no design choice.
+2. **Read the holder's pod.** The identity starts with the pod's name.
+   A copy could read that pod, and treat a pod that does not exist as
+   ended. A pod that is terminating can still run its process, so only
+   a missing pod is proof, and the change needs a read of pods in the
+   cluster operator's RBAC. The gain is at most one `Lease` duration
+   for each reboot of the only server.
+
+The recommendation is option 1 now. Option 2 is not worth its RBAC
+for a fleet with more than one server, where the API server stays up.
+
+Not known: whether a fleet with three servers loses the `Lease` when
+the server that a copy's connection uses reboots. The in-cluster
+address reaches every server, but a request in flight to the server
+that stops fails, and a renewal deadline of 10 seconds allows only one
+retry.
+
 ## Related problem
 
 The separate `media-operator` repository records the same

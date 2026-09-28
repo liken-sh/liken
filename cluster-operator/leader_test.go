@@ -296,3 +296,74 @@ func TestAStepDownWhoseReleaseIsRefusedLeavesTheLeaseToExpire(t *testing.T) {
 		})
 	}
 }
+
+// A Lease that an earlier process of this pod held is free once its
+// last renewal is one Lease duration old. The kubelet runs one process
+// of a container at a time, so that process has exited, and its
+// renewal time comes from this node's clock. A Lease that another pod
+// holds, or that this pod's earlier process renewed within the
+// duration, waits out the duration from this process's first read of
+// it, as client-go measures it.
+func TestAnExpiredLeaseOfAnEarlierProcessOfThisPodIsTakenAtOnce(t *testing.T) {
+	cases := []struct {
+		name    string
+		holder  string
+		renewed time.Duration
+		taken   bool
+	}{
+		{name: "this pod, renewed long ago", holder: "liken-cluster-operator-a_0badc0de", renewed: 3 * testLeaseTiming.duration, taken: true},
+		{name: "this pod, renewed within the duration", holder: "liken-cluster-operator-a_0badc0de", renewed: 0, taken: false},
+		{name: "another pod, renewed long ago", holder: "liken-cluster-operator-b_0badc0de", renewed: 3 * testLeaseTiming.duration, taken: false},
+		{name: "a pod whose name starts with this pod's", holder: "liken-cluster-operator-a-2_0badc0de", renewed: 3 * testLeaseTiming.duration, taken: false},
+		// The first read finds the Lease current, and a later read finds
+		// it expired, before a whole duration from the first read.
+		{name: "this pod, expiring while this process waits", holder: "liken-cluster-operator-a_0badc0de", renewed: testLeaseTiming.duration / 2, taken: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			server := newLeaseServer()
+			server.holdAsRenewedAt(c.holder, time.Now().Add(-c.renewed))
+
+			restarted := newCandidate(t, server, "liken-cluster-operator-a")
+
+			if taken := awaitWithin(restarted, 3*testLeaseTiming.duration/4); taken != c.taken {
+				t.Errorf("took the Lease within three quarters of its duration = %v, want %v", taken, c.taken)
+			}
+		})
+	}
+}
+
+// A stop that arrives before the elector's next read still frees a
+// Lease that an earlier process of this pod left, so the copy that
+// waits in another pod takes it on its next retry. The same rule as
+// the take above decides which Lease the release may clear.
+func TestTheReleaseClearsAnExpiredLeaseOfAnEarlierProcessOfThisPod(t *testing.T) {
+	cases := []struct {
+		name    string
+		holder  string
+		renewed time.Duration
+		cleared bool
+	}{
+		{name: "this pod, renewed long ago", holder: "liken-cluster-operator-a_0badc0de", renewed: 3 * testLeaseTiming.duration, cleared: true},
+		{name: "this pod, renewed within the duration", holder: "liken-cluster-operator-a_0badc0de", renewed: 0, cleared: false},
+		{name: "another pod, renewed long ago", holder: "liken-cluster-operator-b_0badc0de", renewed: 3 * testLeaseTiming.duration, cleared: false},
+		{name: "a pod whose name starts with this pod's", holder: "liken-cluster-operator-a-2_0badc0de", renewed: 3 * testLeaseTiming.duration, cleared: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			server := newLeaseServer()
+			server.holdAsRenewedAt(c.holder, time.Now().Add(-c.renewed))
+			stopped, err := newLeadership(server.config(t), "liken-cluster-operator-a", testLeaseTiming,
+				nil, func(int) {}, func(string) {})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			stopped.clearIfHeld(context.Background())
+
+			if cleared := server.holder() == ""; cleared != c.cleared {
+				t.Errorf("holder after the release = %q, want cleared %v", server.holder(), c.cleared)
+			}
+		})
+	}
+}

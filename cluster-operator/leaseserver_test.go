@@ -61,9 +61,15 @@ func (s *leaseServer) store(object map[string]any) map[string]any {
 // holdAs writes the Lease as another process would, with a renewal
 // that is fresh now.
 func (s *leaseServer) holdAs(holder string) {
+	s.holdAsRenewedAt(holder, time.Now())
+}
+
+// holdAsRenewedAt writes the Lease as a process that last renewed it at
+// renewed, such as a process that has since exited.
+func (s *leaseServer) holdAsRenewedAt(holder string, renewed time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000Z07:00")
+	now := renewed.UTC().Format("2006-01-02T15:04:05.000000Z07:00")
 	s.store(map[string]any{
 		"apiVersion": "coordination.k8s.io/v1",
 		"kind":       "Lease",
