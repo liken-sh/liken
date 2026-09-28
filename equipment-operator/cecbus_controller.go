@@ -41,9 +41,8 @@ type cecBusController struct {
 	// log takes a line for each Television discovery creates or
 	// deletes.
 	log io.Writer
-	// The stores of the Display and Receiver watches, which each pass
-	// reads. This loop writes neither kind.
-	displays, receivers *watchStore
+	// The stores of the watches each pass reads (objectcache.go).
+	buses, televisions, displays, receivers *watchStore
 	// sharedReceivers says another watch feeds receivers and wakes this
 	// loop for a Receiver's spec, so run starts no Receiver watch.
 	sharedReceivers bool
@@ -52,20 +51,20 @@ type cecBusController struct {
 func newCECBusController(client *Client) *cecBusController {
 	return &cecBusController{
 		client: client, now: time.Now, wake: make(chan struct{}, 1), log: os.Stderr,
-		displays: &watchStore{}, receivers: &watchStore{},
+		buses: &watchStore{}, televisions: &watchStore{}, displays: &watchStore{}, receivers: &watchStore{},
 	}
 }
 
 // pass derives and writes every bus, and then every Television. A
 // write that fails is logged, and the next pass tries it again.
 //
-// The CECBuses come from the API server and not from the watch's
-// store, because the pass compares each bus's derived status with the
-// stored one. The store can hold the copy from before the pass's last
-// write until the write's own event arrives, and a pass that read it
-// would write the status again with a new lastTransitionTime.
+// The pass compares each bus's derived status with the stored one. The
+// store can hold the copy from before the pass's last write until the
+// write's own event arrives, and a pass that compared with it would
+// write the status again with a new lastTransitionTime, so the read
+// replaces such a copy with the API server's (objectcache.go).
 func (c *cecBusController) pass() error {
-	list, err := ListCECBuses(c.client)
+	list, err := readCECBuses(c.client, c.buses)
 	if err != nil {
 		return err
 	}
@@ -120,9 +119,9 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	// outlives it.
 	var watching sync.WaitGroup
 	defer watching.Wait()
-	watching.Go(func() { watchCECBuses(ctx, c.client, c.wake, readings.cecBusWatchRestarted, nil) })
+	watching.Go(func() { watchCECBuses(ctx, c.client, c.wake, readings.cecBusWatchRestarted, c.buses) })
 	follows := []*follow{
-		{watch: watchTelevisions, restarted: readings.televisionWatchRestarted, list: func() (string, error) {
+		{watch: watchTelevisions, restarted: readings.televisionWatchRestarted, held: c.televisions, list: func() (string, error) {
 			listed, err := ListTelevisions(c.client)
 			if err != nil {
 				return "", err

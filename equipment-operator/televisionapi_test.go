@@ -45,20 +45,31 @@ func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool
 		_, _ = w.Write([]byte(initializingBody))
 	case missing && strings.HasPrefix(path, televisionsPath):
 		w.WriteHeader(http.StatusNotFound)
-	case refusing && path == televisionsPath && r.URL.Query().Get("watch") != "true":
+	case refusing && r.Method == http.MethodGet && strings.HasPrefix(path, televisionsPath) && r.URL.Query().Get("watch") != "true":
 		w.WriteHeader(http.StatusInternalServerError)
+	case path == displaysPath && nodeOf(r) != "" && a.refusesDisplayNodeField():
+		w.WriteHeader(http.StatusBadRequest)
 	case path == displaysPath && r.URL.Query().Get("watch") == "true":
 		a.serveWatch(w, r)
 	case path == displaysPath:
+		node := nodeOf(r)
 		a.serveJSON(w, func() any {
 			list := DisplayList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
 			for _, name := range sortedKeys(a.displays) {
-				list.Items = append(list.Items, *a.displays[name])
+				if node == "" || a.displays[name].Status.Node == node {
+					list.Items = append(list.Items, *a.displays[name])
+				}
 			}
 			return list
 		})
 	case path == receiversPath && r.URL.Query().Get("watch") == "true":
 		a.serveWatch(w, r)
+	case r.Method == http.MethodPatch && strings.HasPrefix(path, receiversPath+"/") && strings.HasSuffix(path, "/status"):
+		a.applyReceiverStatus(w, r, strings.TrimSuffix(strings.TrimPrefix(path, receiversPath+"/"), "/status"))
+	case r.Method == http.MethodGet && strings.HasPrefix(path, receiversPath+"/"):
+		a.mutex.Lock()
+		a.serveStored(w, receiversPath, strings.TrimPrefix(path, receiversPath+"/"))
+		a.mutex.Unlock()
 	case path == receiversPath:
 		a.serveJSON(w, func() any {
 			list := ReceiverList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
@@ -87,6 +98,12 @@ func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool
 	return true
 }
 
+func (a *cecAPI) refusesDisplayNodeField() bool {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.noDisplayNodeField
+}
+
 // createTelevision answers a create the way the API server does: a
 // name that exists is a conflict, and a new object gets a uid and
 // generation 1.
@@ -102,7 +119,7 @@ func (a *cecAPI) createTelevision(w http.ResponseWriter, r *http.Request) {
 	a.store(body)
 	a.created = append(a.created, body.Metadata.Name)
 	a.changed()
-	_, _ = io.WriteString(w, "{}")
+	a.serveStored(w, televisionsPath, body.Metadata.Name)
 }
 
 // store keeps a new object with a new uid at generation 1. The caller
@@ -159,6 +176,9 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	defer a.mutex.Unlock()
 	television, held := a.televisions[name]
 	switch {
+	case r.Method == http.MethodGet && !status:
+		a.serveStored(w, televisionsPath, name)
+		return
 	case r.Method == http.MethodDelete:
 		delete(a.televisions, name)
 		a.deletedTelevisions = append(a.deletedTelevisions, name)
@@ -206,8 +226,29 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
 	}
 	a.changed()
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, "{}")
+	if r.Method == http.MethodDelete {
+		_, _ = io.WriteString(w, "{}")
+		return
+	}
+	a.serveStored(w, televisionsPath, name)
+}
+
+// applyReceiverStatus takes the operator's status apply on a Receiver,
+// and answers the Receiver as it stands.
+func (a *cecAPI) applyReceiverStatus(w http.ResponseWriter, r *http.Request, name string) {
+	var body receiverStatusApply
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	receiver, held := a.receivers[name]
+	if !held {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	receiver.Status.ReceiverStatus = body.Status
+	a.receivers[name] = receiver
+	a.changed()
+	a.serveStored(w, receiversPath, name)
 }
 
 // mergeConditions replaces each condition of the same type and keeps

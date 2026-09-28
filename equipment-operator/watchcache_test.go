@@ -21,13 +21,14 @@ func heldStore(t *testing.T, synced bool, objects ...*unstructured.Unstructured)
 		mustSucceed(t, store.Add(object))
 	}
 	held := &watchStore{}
-	held.hold(store, func() bool { return synced })
+	held.hold(store, func() bool { return synced }, false)
 	return held
 }
 
-// A store answers a pass only while its informer runs and has finished
-// its first read, and only when every object converts. Otherwise the
-// pass reads the API server.
+// A pass reads a store only while its informer runs and has finished
+// its first read, and lists from the API server otherwise. A copy in
+// the store that does not convert is read from the API server, so the
+// pass leaves out no object.
 func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
 	theater, lounge := asObject(t, receiverAt("uid-1", 1, "")), asObject(t, receiverAt("uid-2", 1, ""))
 	lounge.SetName("lounge")
@@ -39,25 +40,36 @@ func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
 	cases := []struct {
 		name  string
 		held  *watchStore
-		ok    bool
+		lists int
+		gets  int
 		names []string
 	}{
-		{"no watch", nil, false, nil},
-		{"a watch that has not finished its first read", heldStore(t, false, theater), false, nil},
-		{"a watch that stopped", released, false, nil},
-		{"a watch that has read", heldStore(t, true, theater, lounge), true, []string{"lounge", "theater"}},
-		{"an object that does not convert", heldStore(t, true, theater, mistyped), false, nil},
+		{"no watch", nil, 1, 0, []string{"attic", "lounge", "theater"}},
+		{"a watch that has not finished its first read", heldStore(t, false, theater), 1, 0, []string{"attic", "lounge", "theater"}},
+		{"a watch that stopped", released, 1, 0, []string{"attic", "lounge", "theater"}},
+		{"a watch that has read", heldStore(t, true, theater, lounge), 0, 0, []string{"lounge", "theater"}},
+		{"an object that does not convert", heldStore(t, true, theater, mistyped), 0, 1, []string{"attic", "theater"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			items, ok := cachedList[Receiver](c.held, "the Receivers")
+			api := startCECAPI(t)
+			for _, name := range []string{"attic", "lounge", "theater"} {
+				receiver := receiverAt("uid-"+name, 1, "")
+				receiver.Metadata.Name = name
+				api.putReceiver(receiver)
+			}
+			lists, gets := api.readCountOf(receiversPath), api.readsUnder(receiversPath)-api.readCountOf(receiversPath)
 
-			mustMatch(t, ok, c.ok)
+			list, err := readReceivers(api.client, c.held)
+
+			mustSucceed(t, err)
 			var names []string
-			for _, item := range items {
+			for _, item := range list.Items {
 				names = append(names, item.Metadata.Name)
 			}
 			mustDeepEqual(t, names, c.names)
+			mustMatch(t, api.readCountOf(receiversPath)-lists, c.lists)
+			mustMatch(t, api.readsUnder(receiversPath)-api.readCountOf(receiversPath)-gets, c.gets)
 		})
 	}
 }
@@ -110,6 +122,14 @@ func (a *cecAPI) readCount() int {
 	return total
 }
 
+// readCountOf answers how many reads of one path, a list or one
+// object, the fake has answered.
+func (a *cecAPI) readCountOf(path string) int {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.reads[path]
+}
+
 // readsUnder answers how many reads of one collection, the list or
 // one of its objects, the fake has answered.
 func (a *cecAPI) readsUnder(collection string) int {
@@ -130,7 +150,7 @@ func awaitStores(t *testing.T, stores ...*watchStore) {
 	deadline := time.After(testTimeout)
 	for _, held := range stores {
 		for {
-			if _, ok := held.current(); ok {
+			if held.view().ready() {
 				break
 			}
 			select {
@@ -154,19 +174,49 @@ func startWatches(t *testing.T, client *Client, watches map[*watchStore]watchFun
 	}
 }
 
+// delivered waits until a store holds the copy of each object the
+// memo noted, which is when the watch has delivered every write. With
+// no watch there is nothing to wait for.
+func delivered(t *testing.T, held *watchStore, versions *versionMemo) {
+	t.Helper()
+	if held.view().store == nil {
+		return
+	}
+	deadline := time.After(testTimeout)
+	for {
+		versions.mu.Lock()
+		waiting := false
+		for key, version := range versions.seen {
+			copied, stored, _ := held.view().store.GetByKey(key)
+			if version != "" && (!stored || copied.(*unstructured.Unstructured).GetResourceVersion() != version) {
+				waiting = true
+			}
+		}
+		versions.mu.Unlock()
+		if !waiting {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("a watch did not deliver the pass's writes")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 // The Deployment's CECBus pass reads the CECBuses, the Televisions, the
-// Displays, and the Receivers. It writes the first two kinds, so it
-// lists them from the API server on every pass. It writes neither of
-// the other two, so once their watches have read, it reads their
-// stores.
-func TestTheCECBusPassReadsTheStoresOfWhatItDoesNotWrite(t *testing.T) {
+// Displays, and the Receivers. With no watch it lists each kind. Once
+// the watches have read, it reads their stores, and a settled pass, one
+// that runs after the watches delivered the last pass's writes, sends
+// the API server no request.
+func TestTheCECBusPassReadsTheStores(t *testing.T) {
 	cases := []struct {
 		name    string
 		watched bool
 		reads   map[string]int
 	}{
 		{"no watch", false, map[string]int{cecBusesPath: 1, televisionsPath: 1, displaysPath: 1, receiversPath: 1}},
-		{"the watches have read", true, map[string]int{cecBusesPath: 1, televisionsPath: 1, displaysPath: 0, receiversPath: 0}},
+		{"the watches have read", true, map[string]int{cecBusesPath: 0, televisionsPath: 0, displaysPath: 0, receiversPath: 0}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -178,19 +228,25 @@ func TestTheCECBusPassReadsTheStoresOfWhatItDoesNotWrite(t *testing.T) {
 			controller := newCECBusController(api.client)
 			if c.watched {
 				startWatches(t, api.client, map[*watchStore]watchFunc{
+					controller.buses: watchCECBuses, controller.televisions: watchTelevisions,
 					controller.displays: watchDisplays, controller.receivers: watchReceiverSpecs,
 				})
 			}
+			mustSucceed(t, controller.pass())
+			delivered(t, controller.buses, api.client.versions.cecBuses)
+			delivered(t, controller.televisions, api.client.versions.televisions)
 			before := map[string]int{}
 			for path := range c.reads {
 				before[path] = api.readsUnder(path)
 			}
+			writes := api.derivedWrites
 
 			mustSucceed(t, controller.pass())
 
 			for path, want := range c.reads {
 				mustMatch(t, api.readsUnder(path)-before[path], want)
 			}
+			mustMatch(t, api.derivedWrites, writes)
 			television, _ := api.television("lounge")
 			mustDeepEqual(t, television.Status.Displays, []TelevisionDisplay{
 				{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0", Via: &EquipmentRef{Kind: "Receiver", Name: "den"}},
@@ -199,14 +255,12 @@ func TestTheCECBusPassReadsTheStoresOfWhatItDoesNotWrite(t *testing.T) {
 	}
 }
 
-// The node workload in Control reads the Display its adapter speaks
-// for from the Display watch's store: a change that wakes a pass sends
-// no read of a Display to the API server.
-func TestTheNodePassReadsTheDisplayFromTheStore(t *testing.T) {
-	api := startCECAPI(t)
+// runNode runs the node workload for node-1 until the test ends, and
+// answers it once its entry reports the scan and its watches hold
+// their first reads.
+func runNode(t *testing.T, api *cecAPI) *cecNode {
+	t.Helper()
 	_, device := usbAdapter(cecRoom())
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 	node, err := newCECNode(api.client, "node-1", device)
 	mustSucceed(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -220,16 +274,61 @@ func TestTheNodePassReadsTheDisplayFromTheStore(t *testing.T) {
 		<-stopped
 	})
 	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	awaitStores(t, node.displays)
-	before, passes := api.readsUnder(displaysPath), api.readsUnder(cecBusesPath)
+	awaitStores(t, node.buses, node.displays)
+	return node
+}
 
-	for range 3 {
-		api.nudge()
-		time.Sleep(watchQuiet / 3)
+// The node workload in Control reads the CECBuses, the Televisions, and
+// the Display its adapter speaks for from the watches' stores. A pass
+// that a Display's move wakes announces the new address, and lists
+// nothing and reads no Display from the API server. A pass that runs
+// before the watch delivered the node's own entry write reads that
+// CECBus from the API server once, so those reads are not counted.
+func TestTheNodePassReadsFromTheStores(t *testing.T) {
+	api := startCECAPI(t)
+	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	runNode(t, api)
+	lists := func() []int {
+		return []int{api.readCountOf(cecBusesPath), api.readCountOf(televisionsPath), api.readsUnder(displaysPath)}
 	}
+	before := lists()
 
-	if api.readsUnder(cecBusesPath) == passes {
-		t.Fatal("no pass ran")
-	}
-	mustMatch(t, api.readsUnder(displaysPath)-before, 0)
+	api.moveDisplay("acm-0001-receiver", "2.0.0.0")
+
+	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.PhysicalAddress == "2.0.0.0" })
+	mustDeepEqual(t, lists(), before)
+}
+
+// The node workload watches the Displays of its own machine, by the
+// field selector on status.node, so its store holds no other machine's
+// Display.
+func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
+	api := startCECAPI(t)
+	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+	api.putDisplay("acm-0002-receiver", "node-2", "2.0.0.0")
+	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+
+	node := runNode(t, api)
+
+	view := node.displays.view()
+	mustDeepEqual(t, view.store.ListKeys(), []string{"acm-0001-receiver"})
+	mustMatch(t, view.whole, false)
+}
+
+// An API server whose Display definition declares no selectable field
+// on status.node refuses the node workload's Display list. The node
+// workload still starts, and reads the Display it speaks for from the
+// API server.
+func TestTheNodeStartsWhenTheDisplayListIsRefused(t *testing.T) {
+	api := startCECAPI(t)
+	api.noDisplayNodeField = true
+	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	_, device := usbAdapter(cecRoom())
+
+	startNode(t, api, "node-1", device)
+
+	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	mustMatch(t, entry.PhysicalAddress, "1.3.0.0")
 }

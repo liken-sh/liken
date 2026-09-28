@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 )
 
@@ -47,11 +46,13 @@ func ListTelevisions(c *Client) (*TelevisionList, error) {
 	return list, nil
 }
 
-// readTelevisions answers every Television from the watch's store, and
-// lists them from the API server while the store has nothing to give.
+// readTelevisions answers every Television from the watch's store,
+// and lists them from the API server while the store has nothing to
+// give (objectcache.go).
 func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
-	if items, ok := cachedList[Television](held, "the Televisions"); ok {
-		return &TelevisionList{Items: items}, nil
+	if view := held.view(); view.ready() {
+		items, err := currentList[Television](c, heldObjects{view: view, versions: c.versions.televisions}, televisionPath)
+		return &TelevisionList{Items: items}, err
 	}
 	return ListTelevisions(c)
 }
@@ -61,19 +62,22 @@ func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
 // writes. restarted is called for each watch opened again after the
 // first.
 func watchTelevisions(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, televisionResource, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, televisionResource, "", wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyTelevision sends one apply body under one field manager. force
 // settles a conflict in the manager's favour, because each field these
 // bodies state has one writer.
-func applyTelevision(c *Client, path, manager string, body any) error {
+func applyTelevision(c *Client, name, path, manager string, body any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	written := &Television{}
-	return c.requestJSON(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, written)
+	_, err = written[Television](c.versions.televisions, name, func() (*Television, error) {
+		answer := &Television{}
+		return answer, c.requestJSON(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, answer)
+	})
+	return err
 }
 
 // televisionApply is the identity every apply body carries.
@@ -101,7 +105,7 @@ func ApplyTelevisionDerived(c *Client, name string, derived televisionDerived) e
 		Status     status     `json:"status"`
 	}{Status: status{CEC: derived.cec, Power: derived.power, ActiveSource: derived.activeSource, ActiveDisplay: derived.activeDisplay, Displays: derived.displays, Conditions: []Condition{derived.reachable, derived.inCharge}}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(name)
-	return applyTelevision(c, televisionPath(name)+"/status", fieldManager, body)
+	return applyTelevision(c, name, televisionPath(name)+"/status", fieldManager, body)
 }
 
 // ApplyTelevisionPower writes what the node workload applied: the
@@ -125,7 +129,7 @@ func ApplyTelevisionPower(c *Client, television *Television, machine string, gen
 	}{Status: status{PowerGeneration: generation, Conditions: []Condition{condition}}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
-	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecFieldManager(machine), body)
+	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecFieldManager(machine), body)
 }
 
 // cecWakeFieldManager is the field manager of the node workload on one
@@ -153,7 +157,7 @@ func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt stri
 	}{Status: status{WokeAt: wokeAt, Conditions: []Condition{condition}}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
-	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecWakeFieldManager(machine), body)
+	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecWakeFieldManager(machine), body)
 }
 
 // cecStandbyFieldManager is the field manager of the node workload on
@@ -181,7 +185,7 @@ func ApplyTelevisionStandby(c *Client, television *Television, machine, standbyA
 	}{Status: status{StandbyAt: standbyAt, Conditions: []Condition{condition}}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
-	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecStandbyFieldManager(machine), body)
+	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecStandbyFieldManager(machine), body)
 }
 
 // cecPowerReadFieldManager is the field manager of the node workload on
@@ -209,7 +213,7 @@ func ApplyTelevisionPowerRead(c *Client, television *Television, machine, at, po
 	}{Status: status{PowerRead: TelevisionPowerRead{At: at, Power: power}}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
-	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecPowerReadFieldManager(machine), body)
+	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecPowerReadFieldManager(machine), body)
 }
 
 // sessionFieldManager is the Deployment's field manager for
@@ -237,7 +241,7 @@ func ApplyTelevisionSession(c *Client, name string, session *TelevisionSession) 
 		Status     status     `json:"status"`
 	}{Status: status{Session: session}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(name)
-	return applyTelevision(c, televisionPath(name)+"/status", sessionFieldManager, body)
+	return applyTelevision(c, name, televisionPath(name)+"/status", sessionFieldManager, body)
 }
 
 // CreateDiscoveredTelevision creates the Television the Deployment
@@ -255,7 +259,10 @@ func CreateDiscoveredTelevision(c *Client, bus string) error {
 	if err != nil {
 		return err
 	}
-	err = c.RequestJSON(http.MethodPost, televisionsPath, encoded, &Television{})
+	_, err = written[Television](c.versions.televisions, name, func() (*Television, error) {
+		answer := &Television{}
+		return answer, c.RequestJSON(http.MethodPost, televisionsPath, encoded, answer)
+	})
 	if err == ErrConflict {
 		return nil
 	}
@@ -265,17 +272,7 @@ func CreateDiscoveredTelevision(c *Client, bus string) error {
 // DeleteTelevision removes one Television. A name that is already
 // gone is not an error.
 func DeleteTelevision(c *Client, name string) error {
-	resp, err := c.send(context.Background(), http.MethodDelete, televisionPath(name), "", nil)
-	if err != nil {
-		return err
-	}
-	defer drain(resp.Body)
-	if resp.StatusCode == http.StatusNotFound {
-		return nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message := responseText(resp.Body)
-		return fmt.Errorf("deleting Television %s: %s: %s", name, resp.Status, message)
-	}
-	return nil
+	return c.versions.televisions.send(name, func() (string, error) {
+		return "", deleteObject(c, televisionPath(name), "Television "+name)
+	})
 }

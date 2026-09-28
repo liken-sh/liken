@@ -121,9 +121,12 @@ func TestTheAdapterAppliesThePowerAndConfirmsIt(t *testing.T) {
 		{"a TV already in the state", televisionTV(cec.PowerOn), TelevisionOn, cec.OpImageViewOn, 0,
 			"the TV already reported On, so the adapter on node-1 sent no command"},
 	}
+	// The subtests run side by side, so the timing is set once for
+	// all of them.
+	fastPower(t)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fastPower(t)
+			t.Parallel()
 			wire := roomWithTV(c.tv)
 
 			api := controlling(t, wire, lounge(c.power))

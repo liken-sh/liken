@@ -462,6 +462,7 @@ func TestASessionThatHasNotChangedIsLeftAlone(t *testing.T) {
 // The loop reconciles before any event arrives, answers a wake, and
 // stops every unit when its context ends.
 func TestTheLoopRunsUntilItsContextEndsAndStopsEveryUnit(t *testing.T) {
+	noDiscovery(t)
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -516,6 +517,7 @@ func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
 
 // serve runs the loop until its context ends.
 func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
+	noDiscovery(t)
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -782,6 +784,7 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			api := startFakeAPI(t)
 			fake := startFakeDenon(t)
 			receiver := testReceiver("theater", fake.address())

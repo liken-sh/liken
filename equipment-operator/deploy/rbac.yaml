@@ -142,8 +142,10 @@ rules:
     resources: [cecbuses/status]
     verbs: [get, patch]
   # In Control the adapter announces the physical address that
-  # display-operator publishes on the named Display. The watch wakes the
-  # pod when that address changes.
+  # display-operator publishes on the named Display. The watch takes the
+  # Displays whose status.node is the pod's machine, by field selector,
+  # and wakes the pod when one changes. A list or a watch by field
+  # selector needs list and watch on the whole resource.
   - apiGroups: [display.liken.sh]
     resources: [displays]
     verbs: [get, list, watch]

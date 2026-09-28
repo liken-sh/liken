@@ -93,6 +93,7 @@ func TestAnEnsureIsOneLine(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			h, held := one.start(t)
 
 			held.ensureInput()

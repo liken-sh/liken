@@ -97,6 +97,7 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			fake := startFakeDenon(t)
 			receiver := testReceiver("theater", fake.address())
 			one.declare(&receiver)
@@ -184,6 +185,7 @@ func TestAMessageOnTheReceiversTopicsIsOneLine(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			fake := startFakeDenon(t)
 			brokers := startFakeBrokerServer(t)
 			receiver := testReceiver("theater", fake.address())

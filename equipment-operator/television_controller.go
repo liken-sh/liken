@@ -19,15 +19,16 @@ import (
 // status derived from a partial read would remove facts that are still
 // true, and the next pass reads again.
 //
-// The Televisions come from the API server and not from the watch's
-// store, because this pass creates, deletes, and writes the status of
-// Televisions, and compares each status with the one stored. The store
-// can hold the copy from before the pass's last write until the
-// write's own event arrives, and a pass that read it would create a
-// Television again or write a status again. The Displays and the
-// Receivers come from the stores: this loop writes neither.
+// This pass creates, deletes, and writes the status of Televisions, and
+// compares each status with the one stored. The store can hold the copy
+// from before the pass's last write until the write's own event
+// arrives, and can lack a Television the pass created, so the read
+// replaces such a copy with the API server's and reads the created
+// Television, and a pass does not create a Television again or write a
+// status again (objectcache.go). This loop writes no Display and no
+// Receiver.
 func (c *cecBusController) passTelevisions(buses []CECBus) {
-	televisions, err := ListTelevisions(c.client)
+	televisions, err := readTelevisions(c.client, c.televisions)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions: %v\n", err)
 		return

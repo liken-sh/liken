@@ -134,6 +134,7 @@ func TestTheNodeLogsEachMessageAPersonNotices(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			log, wire := listeningOnDen(t)
 
 			mustDeepEqual(t, heardLines(t, log, wire, one.messages...), one.want)

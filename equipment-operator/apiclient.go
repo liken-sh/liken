@@ -64,6 +64,10 @@ type Client struct {
 	http        *http.Client
 	credentials string
 
+	// versions is the memo of each kind this process writes, which each
+	// write notes and each read from a store consults (objectcache.go).
+	versions objectVersions
+
 	// The dynamic client of the watches, which watcher builds once.
 	watchOnce   sync.Once
 	watchClient dynamic.Interface
@@ -74,7 +78,7 @@ type Client struct {
 // reads them from the pod's environment; a test hands in an
 // httptest server's base and no credentials.
 func NewClient(base string, httpClient *http.Client, credentials string) *Client {
-	return &Client{base: base, http: httpClient, credentials: credentials}
+	return &Client{base: base, http: httpClient, credentials: credentials, versions: newObjectVersions()}
 }
 
 func InClusterClient() (*Client, error) {
@@ -277,20 +281,27 @@ func ListReceivers(c *Client) (*ReceiverList, error) {
 }
 
 // readReceivers answers every Receiver from the watch's store, and
-// lists them from the API server while the store has nothing to give.
+// lists them from the API server while the store has nothing to give
+// (objectcache.go).
 func readReceivers(c *Client, held *watchStore) (*ReceiverList, error) {
-	if items, ok := cachedList[Receiver](held, "the Receivers"); ok {
-		return &ReceiverList{Items: items}, nil
+	if view := held.view(); view.ready() {
+		items, err := currentList[Receiver](c, heldObjects{view: view, versions: c.versions.receivers}, receiverPath)
+		return &ReceiverList{Items: items}, err
 	}
 	return ListReceivers(c)
 }
 
 func GetReceiver(c *Client, name string) (*Receiver, error) {
-	receiver := &Receiver{}
-	if err := c.RequestJSON(http.MethodGet, receiverPath(name), nil, receiver); err != nil {
+	return get[Receiver](c, receiverPath(name))
+}
+
+// get reads one object.
+func get[T any](c *Client, path string) (*T, error) {
+	out := new(T)
+	if err := c.RequestJSON(http.MethodGet, path, nil, out); err != nil {
 		return nil, err
 	}
-	return receiver, nil
+	return out, nil
 }
 
 // receiverStatusApply is the partial object an apply sends: the
@@ -324,12 +335,7 @@ func ApplyReceiverStatus(c *Client, name string, status ReceiverStatus) (*Receiv
 	if err != nil {
 		return nil, err
 	}
-	path := receiverPath(name) + "/status?fieldManager=" + fieldManager + "&force=true"
-	written := &Receiver{}
-	if err := c.requestJSON(http.MethodPatch, path, applyContentType, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
+	return applyReceiver(c, name, receiverPath(name)+"/status?fieldManager="+fieldManager+"&force=true", body)
 }
 
 // receiverPowerApply is the partial object an apply sends to own the
@@ -360,12 +366,16 @@ func ApplyReceiverPower(c *Client, name string, power equipment.Power) (*Receive
 	if err != nil {
 		return nil, err
 	}
-	path := receiverPath(name) + "?fieldManager=" + fieldManager + "&force=true"
-	written := &Receiver{}
-	if err := c.requestJSON(http.MethodPatch, path, applyContentType, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
+	return applyReceiver(c, name, receiverPath(name)+"?fieldManager="+fieldManager+"&force=true", body)
+}
+
+// applyReceiver sends one apply of a Receiver, and answers the copy the
+// API server stored, whose version the memo notes.
+func applyReceiver(c *Client, name, path string, body []byte) (*Receiver, error) {
+	return written[Receiver](c.versions.receivers, name, func() (*Receiver, error) {
+		answer := &Receiver{}
+		return answer, c.requestJSON(http.MethodPatch, path, applyContentType, body, answer)
+	})
 }
 
 // discoveredLabel marks a Receiver the discovery loop created for an
@@ -403,12 +413,7 @@ func ApplyDiscoveredReceiver(c *Client, name, uuid string) (*Receiver, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := receiverPath(name) + "?fieldManager=" + fieldManager + "&force=true"
-	written := &Receiver{}
-	if err := c.requestJSON(http.MethodPatch, path, applyContentType, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
+	return applyReceiver(c, name, receiverPath(name)+"?fieldManager="+fieldManager+"&force=true", body)
 }
 
 // DeleteReceiver removes one Receiver. A Receiver the operator did not
@@ -416,7 +421,15 @@ func ApplyDiscoveredReceiver(c *Client, name, uuid string) (*Receiver, error) {
 // carry its own marker label. A name that is already gone is not an
 // error, so a prune that races a deletion settles the same way.
 func DeleteReceiver(c *Client, name string) error {
-	resp, err := c.send(context.Background(), http.MethodDelete, receiverPath(name), "", nil)
+	return c.versions.receivers.send(name, func() (string, error) {
+		return "", deleteObject(c, receiverPath(name), "receiver "+name)
+	})
+}
+
+// deleteObject removes one object. A name that is already gone is not
+// an error. what names the object in the error.
+func deleteObject(c *Client, path, what string) error {
+	resp, err := c.send(context.Background(), http.MethodDelete, path, "", nil)
 	if err != nil {
 		return err
 	}
@@ -426,7 +439,7 @@ func DeleteReceiver(c *Client, name string) error {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message := responseText(resp.Body)
-		return fmt.Errorf("deleting receiver %s: %s: %s", name, resp.Status, message)
+		return fmt.Errorf("deleting %s: %s: %s", what, resp.Status, message)
 	}
 	return nil
 }
@@ -488,12 +501,7 @@ func applySettingsLeaf(c *Client, name, protocol string, leaf []string, value eq
 	if err != nil {
 		return nil, err
 	}
-	url := receiverPath(name) + "?fieldManager=" + fieldManager + "&force=true"
-	written := &Receiver{}
-	if err := c.requestJSON(http.MethodPatch, url, applyContentType, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
+	return applyReceiver(c, name, receiverPath(name)+"?fieldManager="+fieldManager+"&force=true", body)
 }
 
 // ApplyReceiverSettings writes one leaf of spec.denon.settings.

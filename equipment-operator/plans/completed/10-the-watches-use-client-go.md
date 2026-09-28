@@ -190,14 +190,87 @@ servers:
 | The node workload's pass, in `Control` with a display | 2 lists and 1 read of the `Display` | 2 lists |
 | `awaitPowerRead` | 1 list on each wake | a list only before its watch's first read is done |
 
-`TestTheCECBusPassReadsTheStoresOfWhatItDoesNotWrite` counts both
-columns for the `Deployment`. `TestTheNodePassReadsTheDisplayFromTheStore`
-counts the node workload's reads of the `Display` after the change.
+`TestTheCECBusPassReadsTheStores` counts the `Deployment`'s reads, and
+`TestTheNodePassReadsFromTheStores` the node workload's. The section
+"Every kind from the stores, with the memo" below takes the lists in
+the table's right column away.
 
 Each informer's store holds the whole collection, so the stores cost
-memory in proportion to the objects. The `Deployment` runs two
-informers on the `Receiver` objects, one for the `Receiver` loop and
-one for the `Television` pass, so it holds each `Receiver` twice.
+memory in proportion to the objects. The `Deployment`'s two loops
+share one informer on the `Receiver` objects and one on the
+`Television` objects, so the process holds each object once.
+
+### Every kind from the stores, with the memo
+
+The organization chose one way to read from a store for every
+operator, and this operator now follows it, with the same types and
+functions as `audio-operator`, `bluetooth-operator`, and
+`display-operator` in `objectcache.go`. A pass reads every kind from
+the stores, the kinds it writes included, and lists from the API
+server only while a store has nothing to give. The section above
+records why the kinds this operator writes were listed. The memo
+answers that reason instead:
+
+* `versionMemo` records the `resourceVersion` of each object's newest
+  copy that this process wrote or read. Every write goes through the
+  `Client`, so the memos are the `Client`'s (`objectVersions`), and
+  each apply, create, and delete notes its answer. A store's copy at
+  another version is read from the API server once.
+* Each store holds the whole collection, so a list also reads each
+  object the process created that the store does not hold yet, and
+  leaves out each object it deleted that the store still holds. A
+  pass does not create a `Television` or a `CECBus` a second time.
+* A copy in a store that does not convert is read from the API server,
+  so a list leaves out no object.
+* Every write is a server-side apply, a create, or a delete. An apply
+  states no `resourceVersion`, so a stale copy never makes the API
+  server refuse it, and the operator needs no retry from a fresh copy.
+
+`TestAPassDoesNotActOnACopyOlderThanItsOwnWrite` holds every store at
+a snapshot from before the pass's writes, and fails without the memo:
+the `CECBus` status is written again, and the discovered `Television`
+is created three times with three log lines.
+`TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite` covers the
+`Receiver` a new unit reads its settled state from.
+
+Requests to the API server for one settled pass, one that runs after
+the watches delivered the last pass's writes, counted in the tests'
+fake API servers:
+
+| Pass | Before | After |
+|---|---|---|
+| The `Receiver` pass | 1 list | 0 |
+| The `Deployment`'s `CECBus` and `Television` pass | 2 lists | 0 |
+| The node workload's pass | 2 lists | 0 |
+| Discovery, on each search | 1 list | 0 |
+| A `Television` session event | 1 list | 0 |
+
+A pass that runs before a watch delivers the process's own write reads
+that object once, with a `GET`.
+
+### The node workload watches the `Display`s of its machine
+
+`display-operator`'s `Display` CRD declares `status.node` as a
+selectable field. The node workload lists and watches the `Display`s
+by the field selector `status.node=<its machine>`, so it receives no
+other machine's `Display` writes. A `Display` that a bus names on
+another machine is read from the API server. The `ClusterRole`
+already grants `list` and `watch`, which a field-selected list needs.
+The `CECBus` watch stays whole: a `CECBus` names its machines in a
+list, which no field selector reaches.
+
+An API server whose `Display` CRD declares no selectable field refuses
+the selector. The node workload then starts with no `Display` watch,
+tries the list again at each pass, and reads the named `Display` from
+the API server on each pass until `display-operator`'s CRD with the
+field is installed. Install that CRD first to skip that cost.
+
+### No test searches the network
+
+`TestMain` replaces the search for devices with a function that
+panics, so a test that runs the loop without `noDiscovery(t)` or a
+stub of its own fails, and no test sends SSDP or mDNS queries on the
+local network. The tests of `serve` and of the loop stub it.
 
 ### The restart count
 
@@ -293,7 +366,11 @@ resumes from an old version gets a `410`.
 | A `Receiver` from a watch converts to the same struct that a list decodes | `TestAReceiverFromTheWatchIsTheReceiverAListGives` |
 | A store answers a pass only after its first read, while its watch runs, and when every object converts | `TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection` |
 | A `Display` is read from the store, or from the API server with no watch | `TestADisplayIsReadFromTheStore` |
-| A pass reads the `Display` and `Receiver` objects from the stores once the watches have read, and still lists the kinds it writes | `TestTheCECBusPassReadsTheStoresOfWhatItDoesNotWrite`, `TestTheNodePassReadsTheDisplayFromTheStore` |
+| A pass reads every kind from the stores once the watches have read, and a settled pass sends no request | `TestTheCECBusPassReadsTheStores`, `TestTheNodePassReadsFromTheStores` |
+| A pass does not act again on a copy older than its own write, and a read after its own write answers the write | `TestAPassDoesNotActOnACopyOlderThanItsOwnWrite`, `TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite` |
+| A refused read of a copy older than the operator's own write is an error | `TestARefusedReadOfACopyOlderThanItsOwnWriteIsAnError` |
+| The node workload's `Display` store holds its own machine's `Display`s | `TestTheNodeWatchesTheDisplaysOfItsMachine` |
+| The node workload starts when the API server refuses the `Display` selector | `TestTheNodeStartsWhenTheDisplayListIsRefused` |
 
 ## One operator holds the `Lease`
 

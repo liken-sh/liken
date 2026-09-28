@@ -18,13 +18,12 @@ import (
 // Only a failure of the adapter itself is returned; an API failure is
 // logged, and the next pass tries again.
 func (n *cecNode) pass(ctx context.Context) error {
-	// The CECBuses and the Televisions come from the API server and not
-	// from the watches' stores. The node workload creates and deletes
-	// CECBuses and writes status on both kinds, and it reads what it
-	// wrote: a store that has not yet received a write would make the
-	// pass create a CECBus again, or wait for a spec.power it already
-	// applied.
-	list, err := ListCECBuses(n.client)
+	// The node workload creates and deletes CECBuses and writes status on
+	// both kinds, and it reads what it wrote. A store that has not yet
+	// received a write would make the pass create a CECBus again, or wait
+	// for a spec.power it already applied, so the reads replace such a
+	// copy with the API server's (objectcache.go).
+	list, err := readCECBuses(n.client, n.buses)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)
 		n.retryLater()
@@ -68,7 +67,7 @@ func (n *cecNode) pass(ctx context.Context) error {
 // and cancels nothing, because the Television may still ask for what
 // runs.
 func (n *cecNode) passTelevisions(bus *CECBus) {
-	list, err := ListTelevisions(n.client)
+	list, err := readTelevisions(n.client, n.televisions)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions: %v\n", err)
 		n.retryLater()

@@ -244,24 +244,6 @@ func TestATelevisionDeletedDuringAnApplicationEndsIt(t *testing.T) {
 	}
 }
 
-// A Television list the API server refuses delays the change, and the
-// change is applied once the server answers again.
-func TestTheChangeArrivesAfterTheAPIServerRecovers(t *testing.T) {
-	fastPower(t)
-	wire := roomWithTV(televisionTV(cec.PowerStandby))
-	api := controlling(t, wire, lounge(""))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	api.refuseTelevisions(true)
-
-	api.putTelevision(lounge(TelevisionOn))
-	time.Sleep(4 * cecPowerWindow)
-	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 0)
-	api.refuseTelevisions(false)
-	api.nudge()
-
-	appliedAt(t, api, "lounge", 2)
-}
-
 // Of two Televisions on one bus, the node workload applies only the
 // one in charge. When that one is deleted, the other takes over, and
 // its spec.power is applied once, as a new object's is.

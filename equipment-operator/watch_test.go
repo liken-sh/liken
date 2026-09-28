@@ -164,10 +164,11 @@ func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 		{"the CECBuses", cecBusesPath, equipmentAPIVersion, "CECBus", watchCECBuses},
 		{"the Televisions", televisionsPath, equipmentAPIVersion, "Television", watchTelevisions},
 		{"the Displays", displaysPath, displayAPIVersion, "Display", watchDisplays},
-		{"every Display", displaysPath, displayAPIVersion, "Display", watchAllDisplays},
+		{"the Displays of one machine", displaysPath, displayAPIVersion, "Display", nodeDisplays("node-1")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			server := newWatchServer(c.path, c.apiVersion, c.kind, []string{"[]"})
 
 			wakes := runWatch(t, startWatchServer(t, server), c.watch, nil)
@@ -208,6 +209,7 @@ func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			changed := c.after
 			changed.Metadata.ResourceVersion = "150"
 			server := newWatchServer(receiversPath, equipmentAPIVersion, "Receiver",
@@ -241,6 +243,7 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			reads := []string{encodeAll(t, receiverAt("uid-1", 1, "")), encodeAll(t, c.after)}
 			server := newWatchServer(receiversPath, equipmentAPIVersion, "Receiver", reads, []string{}, []string{holdOpen})
 			wakes := runWatch(t, startWatchServer(t, server), watchReceiverSpecs, nil)
@@ -265,11 +268,12 @@ func TestAWatchThatEndsIsOpenedAgainAndCounted(t *testing.T) {
 	}{
 		{"CECBus", cecBusesPath, "CECBus", watchCECBuses},
 		{"Television", televisionsPath, "Television", watchTelevisions},
-		{"Display", displaysPath, "Display", watchAllDisplays},
+		{"Display", displaysPath, "Display", nodeDisplays("node-1")},
 		{"Receiver spec", receiversPath, "Receiver", watchReceiverSpecs},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			server := newWatchServer(c.path, equipmentAPIVersion, c.kind, []string{"[]"}, []string{}, []string{holdOpen})
 			restarts := make(chan struct{}, 64)
 

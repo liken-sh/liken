@@ -857,7 +857,10 @@ type controller struct {
 	now        func() time.Time
 	readings   *metrics
 	discovery  *discovery
-	units      map[string]*receiverUnit
+	// receivers holds the Receiver watch's store, which the pass and
+	// discovery read (objectcache.go).
+	receivers *watchStore
+	units     map[string]*receiverUnit
 	// sessions writes every Television's status.session for the units'
 	// sessions.
 	sessions *televisionSessions
@@ -882,10 +885,12 @@ func newController(client *Client, busAddress string, readings *metrics) *contro
 		units:      map[string]*receiverUnit{},
 		sessions:   newTelevisionSessions(client),
 		log:        os.Stderr,
+		receivers:  &watchStore{},
 	}
 	// Discovery wakes the same loop a watch event does, so a Receiver it
 	// creates or an address it finds reaches a reconcile pass at once.
 	c.discovery = newDiscovery(client, func() { poke(c.wake) })
+	c.discovery.receivers = c.receivers
 	return c
 }
 
@@ -906,13 +911,13 @@ func (c *controller) pass(ctx context.Context) error {
 }
 
 func (c *controller) doPass(ctx context.Context) error {
-	// The Receivers come from the API server and not from the watch's
-	// store. Each unit writes its Receiver's status, and a new unit
-	// takes what the old one settled from the stored status. The store
-	// can hold the copy from before the last write until the write's own
-	// event arrives, and a unit that read it would send a receiver a
-	// setting again.
-	list, err := ListReceivers(c.client)
+	// Each unit writes its Receiver's status, and a new unit takes what
+	// the old one settled from the stored status. The store can hold the
+	// copy from before the last write until the write's own event
+	// arrives, and a unit that read it would send a receiver a setting
+	// again, so the read replaces such a copy with the API server's
+	// (objectcache.go).
+	list, err := readReceivers(c.client, c.receivers)
 	if err != nil {
 		return err
 	}
@@ -1196,7 +1201,11 @@ func serve(ctx context.Context, client *Client, busAddress string, readings *met
 	var started sync.WaitGroup
 	buses := newCECBusController(client)
 	buses.sharedReceivers = true
-	started.Go(func() { watchReceivers(ctx, client, operator.wake, buses.wake, readings, buses.receivers) })
+	// The two loops share the Receiver and Television stores, so the
+	// process holds each object once.
+	buses.receivers = operator.receivers
+	operator.sessions.televisions = buses.televisions
+	started.Go(func() { watchReceivers(ctx, client, operator.wake, buses.wake, readings, operator.receivers) })
 	started.Go(func() { buses.run(ctx, readings) })
 	operator.run(ctx)
 	started.Wait()

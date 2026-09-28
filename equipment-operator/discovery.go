@@ -54,6 +54,8 @@ var (
 type discovery struct {
 	client *Client
 	wake   func()
+	// receivers holds the Receiver watch's store, which reconcile reads.
+	receivers *watchStore
 	// log takes a line for each Receiver discovery creates or deletes.
 	log io.Writer
 	// now stamps each search, so a delete states how long the amp was
@@ -211,11 +213,11 @@ func discoveredName(uuid string) string {
 // searches have missed discoveryMisses times in a row, or whose
 // identity a person's Receiver now claims.
 func (d *discovery) reconcile() error {
-	// The list goes to the API server and not to the Receiver watch's
-	// store. Discovery creates and deletes Receivers, and the next search
-	// reads its own writes: a store that has not yet received a create
-	// would make discovery create the same Receiver again.
-	list, err := ListReceivers(d.client)
+	// Discovery creates and deletes Receivers, and the next search reads
+	// its own writes. The read answers a Receiver it created that the
+	// store has not received yet, so discovery does not create it again
+	// (objectcache.go).
+	list, err := readReceivers(d.client, d.receivers)
 	if err != nil {
 		return err
 	}

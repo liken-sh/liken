@@ -11,8 +11,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // A CECBus is cluster-scoped, like a Receiver.
@@ -38,24 +38,38 @@ func ListCECBuses(c *Client) (*CECBusList, error) {
 	return list, nil
 }
 
+// readCECBuses answers every CECBus from the watch's store, and lists
+// them from the API server while the store has nothing to give
+// (objectcache.go).
+func readCECBuses(c *Client, held *watchStore) (*CECBusList, error) {
+	if view := held.view(); view.ready() {
+		items, err := currentList[CECBus](c, heldObjects{view: view, versions: c.versions.cecBuses}, cecBusPath)
+		return &CECBusList{Items: items}, err
+	}
+	return ListCECBuses(c)
+}
+
 // watchCECBuses wakes a loop on every change to a CECBus, its status
 // included: the Deployment derives its status from the entries the node
 // workloads write, and a node workload reads the Deployment's. restarted
 // is called for each watch opened again after the first.
 func watchCECBuses(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, cecBusResource, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, cecBusResource, "", wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyCECBus sends one apply body under one field manager. force
 // settles a conflict in the manager's favour, because each field these
 // bodies state has one writer.
-func applyCECBus(c *Client, path, manager string, body any) error {
+func applyCECBus(c *Client, name, path, manager string, body any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	written := &CECBus{}
-	return c.requestJSON(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, written)
+	_, err = written[CECBus](c.versions.cecBuses, name, func() (*CECBus, error) {
+		answer := &CECBus{}
+		return answer, c.requestJSON(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, answer)
+	})
+	return err
 }
 
 // cecBusApply is the identity every apply body carries.
@@ -81,7 +95,7 @@ func ApplyCECAdapterStatus(c *Client, bus, machine string, entry *CECAdapterStat
 	if entry != nil {
 		body.Status.Adapters = append(body.Status.Adapters, *entry)
 	}
-	return applyCECBus(c, cecBusPath(bus)+"/status", cecFieldManager(machine), body)
+	return applyCECBus(c, bus, cecBusPath(bus)+"/status", cecFieldManager(machine), body)
 }
 
 // ApplyCECBusDerived writes what the Deployment derives: the merged
@@ -98,7 +112,7 @@ func ApplyCECBusDerived(c *Client, bus string, devices []CECDevice, conditions [
 		Status     status     `json:"status"`
 	}{Status: status{Devices: devices, Conditions: conditions}}
 	body.APIVersion, body.Kind, body.Metadata = cecBusApply(bus)
-	return applyCECBus(c, cecBusPath(bus)+"/status", fieldManager, body)
+	return applyCECBus(c, bus, cecBusPath(bus)+"/status", fieldManager, body)
 }
 
 // discoveredCECLabelValue is the value of the discovered label on a
@@ -118,25 +132,15 @@ func ApplyDiscoveredCECBus(c *Client, name, machine string) error {
 	}{Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: machine}}}}
 	body.APIVersion, body.Kind, body.Metadata = cecBusApply(name)
 	body.Metadata.Labels = map[string]string{discoveredLabel: discoveredCECLabelValue}
-	return applyCECBus(c, cecBusPath(name), cecFieldManager(machine), body)
+	return applyCECBus(c, name, cecBusPath(name), cecFieldManager(machine), body)
 }
 
 // DeleteCECBus removes one CECBus. A name that is already gone is not
 // an error.
 func DeleteCECBus(c *Client, name string) error {
-	resp, err := c.send(context.Background(), http.MethodDelete, cecBusPath(name), "", nil)
-	if err != nil {
-		return err
-	}
-	defer drain(resp.Body)
-	if resp.StatusCode == http.StatusNotFound {
-		return nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message := responseText(resp.Body)
-		return fmt.Errorf("deleting CECBus %s: %s: %s", name, resp.Status, message)
-	}
-	return nil
+	return c.versions.cecBuses.send(name, func() (string, error) {
+		return "", deleteObject(c, cecBusPath(name), "CECBus "+name)
+	})
 }
 
 // Display is the part of display-operator's Display this operator
@@ -153,34 +157,39 @@ type Display struct {
 const displaysPath = "/apis/display.liken.sh/v1alpha1/displays"
 
 func GetDisplay(c *Client, name string) (*Display, error) {
-	display := &Display{}
-	if err := c.RequestJSON(http.MethodGet, displaysPath+"/"+name, nil, display); err != nil {
-		return nil, err
-	}
-	return display, nil
+	return get[Display](c, displayPath(name))
 }
 
+func displayPath(name string) string { return displaysPath + "/" + name }
+
 // readDisplays answers every Display from the watch's store, and lists
-// them from the API server while the store has nothing to give.
+// them from the API server while the store has nothing to give. This
+// operator writes no Display, so the read has no memo.
 func readDisplays(c *Client, held *watchStore) (*DisplayList, error) {
-	if items, ok := cachedList[Display](held, "the Displays"); ok {
-		return &DisplayList{Items: items}, nil
+	if view := held.view(); view.ready() {
+		items, err := currentList[Display](c, heldObjects{view: view}, displayPath)
+		return &DisplayList{Items: items}, err
 	}
 	return ListDisplays(c)
 }
 
-// readDisplay answers one Display from the watch's store, or
-// ErrNotFound when the store does not hold it, and reads it from the
-// API server while the store has nothing to give.
+// readDisplay answers one Display from the watch's store. A store that
+// holds every Display answers ErrNotFound for one it does not hold,
+// once it holds its first read. The Display is read from the API server
+// while the store has nothing to give, when its copy does not convert,
+// and when the store holds the Displays of one machine and not this
+// one, such as a Display that a bus names on another machine.
 func readDisplay(c *Client, held *watchStore, name string) (*Display, error) {
-	display, found, ok := cachedGet[Display](held, "the Displays", name)
-	switch {
-	case !ok:
-		return GetDisplay(c, name)
-	case !found:
-		return nil, ErrNotFound
+	view := held.view()
+	if display, ok := cachedCopy[Display](view, name); ok {
+		return display, nil
 	}
-	return &display, nil
+	if view.ready() && view.whole {
+		if _, stored, _ := view.store.GetByKey(name); !stored {
+			return nil, ErrNotFound
+		}
+	}
+	return GetDisplay(c, name)
 }
 
 // watchDisplays wakes a loop when a Display appears, goes, or moves to
@@ -189,13 +198,24 @@ func readDisplay(c *Client, held *watchStore, name string) (*Display, error) {
 // those writes wake nothing.
 func watchDisplays(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
 	displays := markHandler[Display, displayPlace]{what: "the Displays", wake: wake, mark: displayMark}
-	watchCollection(ctx, client, displayResource, displays.handler(), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, displayResource, "", displays.handler(), func() { poke(wake) }, restarted, held)
 }
 
-// watchAllDisplays wakes a loop on every change to a Display. The node
-// workload uses it, and wakes on each Display write.
-func watchAllDisplays(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, displayResource, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+// nodeDisplays answers the node workload's Display watch on one
+// machine, which wakes the loop on every change to a Display whose
+// status.node is that machine. The adapter reads the Display on its own
+// machine, and the Display CRD declares status.node a selectable
+// field, so the API server sends no other machine's Display writes.
+func nodeDisplays(machine string) func(context.Context, *Client, chan<- struct{}, func(), *watchStore) {
+	return func(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
+		watchCollection(ctx, client, displayResource, displayNodeSelector(machine), wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+	}
+}
+
+// displayNodeSelector is the field selector that takes the Displays
+// whose status.node is one machine.
+func displayNodeSelector(machine string) string {
+	return "status.node=" + machine
 }
 
 // displayPlace is the part of a Display that a Television reads, and
@@ -216,7 +236,7 @@ func displayMark(display Display) displayPlace {
 // status write wakes nothing.
 func watchReceiverSpecs(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
 	receivers := markHandler[Receiver, specMark]{what: "the Receivers", wake: wake, mark: receiverSpecMark}
-	watchCollection(ctx, client, receiverResource, receivers.handler(), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, receiverResource, "", receivers.handler(), func() { poke(wake) }, restarted, held)
 }
 
 // specMark is an object's metadata.generation, which the API server
@@ -242,8 +262,17 @@ type DisplayList struct {
 // has no Display definition, and the API server answers the list with
 // not found; that is a cluster with no Display, not a failure.
 func ListDisplays(c *Client) (*DisplayList, error) {
+	return listDisplays(c, displaysPath)
+}
+
+// ListDisplaysOn reads the Displays whose status.node is one machine.
+func ListDisplaysOn(c *Client, machine string) (*DisplayList, error) {
+	return listDisplays(c, displaysPath+"?fieldSelector="+url.QueryEscape(displayNodeSelector(machine)))
+}
+
+func listDisplays(c *Client, path string) (*DisplayList, error) {
 	list := &DisplayList{}
-	err := c.RequestJSON(http.MethodGet, displaysPath, nil, list)
+	err := c.RequestJSON(http.MethodGet, path, nil, list)
 	if err == ErrNotFound {
 		return &DisplayList{}, nil
 	}

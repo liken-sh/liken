@@ -113,6 +113,7 @@ func TestAFlipSendsNoSoundModeTheReceiverRunsInOtherWords(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
 			h.powerOn(t)
 			h.soundModes = map[string]string{"GAME": one.declared}

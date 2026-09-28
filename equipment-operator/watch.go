@@ -19,11 +19,11 @@ package main
 // the connection's configuration. The typed clientset and the informer
 // factories link a client for every built-in kind, and this operator
 // watches none of them. The operator's own Client (apiclient.go) still
-// sends every write, and every list of a kind the pass writes.
+// sends every write, and every read the stores cannot answer.
 //
 // A handler only wakes the loop, and reads an object only to decide
-// whether the change is one the pass must see. A pass reads the kinds
-// it does not write from the informers' stores (watchcache.go).
+// whether the change is one the pass must see. A pass reads each kind
+// from the informers' stores (objectcache.go).
 
 import (
 	"context"
@@ -88,8 +88,11 @@ func (c *Client) watcher() (dynamic.Interface, error) {
 //
 // held, when it is not nil, holds the informer's store while the
 // informer runs, so a pass reads the collection from it
-// (watchcache.go).
-func watchCollection(ctx context.Context, client *Client, resource schema.GroupVersionResource, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
+// (objectcache.go).
+//
+// fieldSelector, when it is not empty, narrows the list and the watch
+// to the objects it selects.
+func watchCollection(ctx context.Context, client *Client, resource schema.GroupVersionResource, fieldSelector string, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
 	watcher, err := client.watcher()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "watching %s: %v\n", resource.Resource, err)
@@ -100,9 +103,11 @@ func watchCollection(ctx context.Context, client *Client, resource schema.GroupV
 	opened := false
 	source := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fieldSelector
 			return collection.List(ctx, options)
 		},
 		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fieldSelector
 			opens.Lock()
 			again := opened
 			opened = true
@@ -132,7 +137,7 @@ func watchCollection(ctx context.Context, client *Client, resource schema.GroupV
 			}
 		})
 	}
-	held.hold(store, informer.HasSynced)
+	held.hold(store, informer.HasSynced, fieldSelector != "")
 	defer held.release()
 	informer.RunWithContext(ctx)
 	group.Wait()
@@ -262,7 +267,7 @@ func watchReceivers(ctx context.Context, client *Client, wake, specWake chan<- s
 			poke(specWake)
 		}
 	}
-	watchCollection(ctx, client, receiverResource, handler, synced, readings.watchRestarted, held)
+	watchCollection(ctx, client, receiverResource, "", handler, synced, readings.watchRestarted, held)
 }
 
 // bothHandlers sends each change to two handlers, in order.

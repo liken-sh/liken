@@ -32,6 +32,12 @@ var testLeaseTiming = leaseTiming{
 	retryPeriod:   200 * time.Millisecond,
 }
 
+// heldPastItsDuration is how long a test watches a waiting copy while
+// another copy holds the Lease. A holder that did not renew would lose
+// the Lease at its duration, and the waiting copy would take it on its
+// next retry, so the wait runs two retries past the duration.
+var heldPastItsDuration = testLeaseTiming.duration + 2*testLeaseTiming.retryPeriod
+
 // candidate is one operator process under test, with the exit code it
 // would have ended with, or -1.
 type candidate struct {
@@ -185,6 +191,7 @@ func TestAStepDownReleasesTheLeaseAfterALateRenewal(t *testing.T) {
 // the Lease's duration, so a replacement pod takes over soon after the
 // old one stops.
 func TestAWaitingCopyTakesAReleasedLeaseAtOnce(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	old := newCandidate(t, server, "equipment-operator-old")
 	started, finish := leading(t, old, func() error { return nil })
@@ -193,7 +200,7 @@ func TestAWaitingCopyTakesAReleasedLeaseAtOnce(t *testing.T) {
 	select {
 	case <-replacement.started:
 		t.Fatal("the new copy took a Lease the old copy holds")
-	case <-time.After(2 * testLeaseTiming.duration):
+	case <-time.After(heldPastItsDuration):
 	}
 
 	_, _ = finish()
@@ -208,6 +215,7 @@ func TestAWaitingCopyTakesAReleasedLeaseAtOnce(t *testing.T) {
 }
 
 func TestALeaderThatCannotRenewExits(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	leader := newCandidate(t, server, "equipment-operator-a")
 	if !awaitWithin(leader, 3*testLeaseTiming.duration) {
@@ -223,6 +231,7 @@ func TestALeaderThatCannotRenewExits(t *testing.T) {
 }
 
 func TestALeaderWhoseLeaseAnotherProcessTookExits(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	leader := newCandidate(t, server, "equipment-operator-a")
 	if !awaitWithin(leader, 3*testLeaseTiming.duration) {
@@ -259,6 +268,7 @@ func TestAStopWhileWaitingLeavesTheHolderAlone(t *testing.T) {
 // The leader renews from the version it wrote last, so a steady leader
 // sends updates and does not read the Lease before each one.
 func TestASteadyLeaderRenewsWithNoRead(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	leader := newCandidate(t, server, "equipment-operator-a")
 	if !awaitWithin(leader, 3*testLeaseTiming.duration) {
@@ -334,7 +344,7 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 		done <- err
 	}()
 
-	time.Sleep(2 * testLeaseTiming.duration)
+	time.Sleep(heldPastItsDuration)
 	api.mutex.Lock()
 	listsWhileWaiting := api.lists
 	api.mutex.Unlock()

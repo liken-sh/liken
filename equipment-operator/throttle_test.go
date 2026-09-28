@@ -166,6 +166,7 @@ func TestRetryThrottledPassesOtherErrorsThrough(t *testing.T) {
 func TestTheStartingListsWaitOutA429(t *testing.T) {
 	shorten(t, &retryAfterUnit, time.Millisecond)
 	t.Run("the Deployment", func(t *testing.T) {
+		noDiscovery(t)
 		api := &busyAPI{busy: 2, body: initializingBody}
 		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 		defer cancel()

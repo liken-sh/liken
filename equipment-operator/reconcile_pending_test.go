@@ -79,6 +79,7 @@ func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			fake := startFakeDenon(t)
 			_, operator := settledOperator(t, fake, settledReceiver(fake), one.reports, func(operator *controller) bool {
 				unit := operator.units["theater"]
@@ -161,6 +162,7 @@ func TestAnUnreportedFieldIsSentOnlyForABlockTheStatusDoesNotRecord(t *testing.T
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			fake := startFakeDenon(t)
 			receiver := unreportedReceiver(fake)
 			one.store(&receiver)
@@ -194,6 +196,7 @@ func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			fake := startFakeDenon(t)
 			receiver := unreportedReceiver(fake)
 			one.store(&receiver)

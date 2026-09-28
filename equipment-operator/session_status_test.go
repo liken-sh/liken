@@ -30,6 +30,7 @@ func TestASessionInTheStatusOrTheSpecSelectsItsInput(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			api := startFakeAPI(t)
 			fake := startFakeDenon(t)
 			api.setReceivers(testReceiver("theater", fake.address()))

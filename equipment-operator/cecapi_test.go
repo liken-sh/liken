@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -33,13 +34,19 @@ type cecAPI struct {
 	// of the node workloads.
 	deletedTelevisions []string
 	derivedWrites      int
-	powerWrites        int
-	wakeWrites         int
-	sessionWrites      int
-	version            int
-	watchers           []*fakeWatcher
-	deleted            []string
-	client             *Client
+	// noDisplayNodeField refuses a Display list or watch by status.node,
+	// the way an API server does whose Display definition declares no
+	// such selectable field.
+	noDisplayNodeField bool
+	// busWrites counts the Deployment's CECBus status writes.
+	busWrites     int
+	powerWrites   int
+	wakeWrites    int
+	sessionWrites int
+	version       int
+	watchers      []*fakeWatcher
+	deleted       []string
+	client        *Client
 	// refusing makes every list and every status write fail with a
 	// 500, the way an API server answers while it is unhealthy.
 	// refusingTelevisions does the same for the Television list alone.
@@ -74,6 +81,15 @@ type cecAPI struct {
 	// one object, by path, and watches counts the watches by path.
 	reads   map[string]int
 	watches map[string]int
+	// stamps holds each object's content, by its path, when its
+	// resourceVersion last moved, and that version. An object keeps its
+	// version while its content stays, as on a real API server.
+	stamps map[string]stamp
+}
+
+// stamp is one object's content and the version it took.
+type stamp struct {
+	content, version string
 }
 
 // refuse turns the refusals on or off.
@@ -97,9 +113,36 @@ func startCECAPI(t *testing.T) *cecAPI {
 // copy of each object it last sent, which is what the informer on the
 // far end holds.
 type fakeWatcher struct {
-	path   string
+	path string
+	// node is the machine a field selector on status.node names, or
+	// empty for a watch of the whole collection.
+	node   string
 	sent   map[string]map[string]any
 	events chan string
+}
+
+// nodeOf answers the machine a request's field selector on status.node
+// names, or empty.
+func nodeOf(r *http.Request) string {
+	node, _ := strings.CutPrefix(r.URL.Query().Get("fieldSelector"), "status.node=")
+	return node
+}
+
+// selectedIn answers the objects of one collection a watch or a list
+// selects: every object, or the objects whose status.node is node. The
+// caller holds the mutex.
+func (a *cecAPI) selectedIn(path, node string) map[string]map[string]any {
+	objects := a.collection(path)
+	if node == "" {
+		return objects
+	}
+	for name, object := range objects {
+		status, _ := object["status"].(map[string]any)
+		if status["node"] != node {
+			delete(objects, name)
+		}
+	}
+	return objects
 }
 
 // changed bumps the version and sends every watch the change in its
@@ -127,12 +170,18 @@ func (a *cecAPI) changedIn(path string) {
 // for each new object, a DELETED event for each object that is gone,
 // and a MODIFIED event for every other object, changed or not, so each
 // change wakes a loop that wakes on every event, the way an unrelated
-// edit of an object it holds does. A collection with no object gets a
-// bookmark, which wakes nothing. The caller holds the mutex.
+// edit of an object it holds does. The events go out oldest version
+// first, and a bookmark at the collection's version ends them, so the
+// reflector resumes from the newest version. The caller holds the
+// mutex.
 func (a *cecAPI) send(watcher *fakeWatcher) {
-	now := a.collection(watcher.path)
+	now := a.selectedIn(watcher.path, watcher.node)
 	var events []string
-	for _, name := range sortedKeys(now) {
+	names := sortedKeys(now)
+	slices.SortStableFunc(names, func(x, y string) int {
+		return versionOf(now[x]) - versionOf(now[y])
+	})
+	for _, name := range names {
 		kind := "MODIFIED"
 		if _, held := watcher.sent[name]; !held {
 			kind = "ADDED"
@@ -144,9 +193,7 @@ func (a *cecAPI) send(watcher *fakeWatcher) {
 			events = append(events, watchEvent("DELETED", watcher.sent[name]))
 		}
 	}
-	if len(events) == 0 {
-		events = append(events, a.bookmark(watcher.path, false))
-	}
+	events = append(events, a.bookmark(watcher.path, false))
 	watcher.sent = now
 	for _, event := range events {
 		select {
@@ -197,12 +244,47 @@ func (a *cecAPI) collection(path string) map[string]map[string]any {
 			meta = map[string]any{}
 		}
 		meta["name"] = name
-		meta["resourceVersion"] = fmt.Sprint(a.version)
+		delete(meta, "resourceVersion")
 		one["metadata"] = meta
 		one["apiVersion"], one["kind"] = kind[0], kind[1]
+		content, _ := json.Marshal(one)
+		key := path + "/" + name
+		if a.stamps == nil {
+			a.stamps = map[string]stamp{}
+		}
+		if a.stamps[key].content != string(content) {
+			a.stamps[key] = stamp{content: string(content), version: fmt.Sprint(a.version)}
+		}
+		meta["resourceVersion"] = a.stamps[key].version
 		fields[name] = one
 	}
 	return fields
+}
+
+// versionOf answers an object's resourceVersion as a number.
+func versionOf(object map[string]any) int {
+	meta, _ := object["metadata"].(map[string]any)
+	version, _ := meta["resourceVersion"].(string)
+	number, _ := strconv.Atoi(version)
+	return number
+}
+
+// stored answers one object as the API server returns it, with its
+// resourceVersion, or nil when the collection does not hold it. The
+// caller holds the mutex.
+func (a *cecAPI) stored(path, name string) map[string]any {
+	return a.collection(path)[name]
+}
+
+// serveStored answers a read of one object, or a write, with the
+// object as it stands. The caller holds the mutex.
+func (a *cecAPI) serveStored(w http.ResponseWriter, path, name string) {
+	object := a.stored(path, name)
+	if object == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(object)
 }
 
 func watchEvent(kind string, object map[string]any) string {
@@ -250,6 +332,10 @@ func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
 		a.serveWatch(w, r)
 	case path == cecBusesPath:
 		a.serveList(w)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, cecBusesPath+"/"):
+		a.mutex.Lock()
+		a.serveStored(w, cecBusesPath, strings.TrimPrefix(path, cecBusesPath+"/"))
+		a.mutex.Unlock()
 	case r.Method == http.MethodPatch && strings.HasSuffix(path, "/status"):
 		a.applyStatus(w, r, strings.TrimSuffix(strings.TrimPrefix(path, cecBusesPath+"/"), "/status"))
 	case r.Method == http.MethodPatch:
@@ -295,7 +381,7 @@ func (a *cecAPI) serveList(w http.ResponseWriter) {
 // the reflector read the collection again.
 func (a *cecAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	watcher := &fakeWatcher{path: r.URL.Path, events: make(chan string, 1024)}
+	watcher := &fakeWatcher{path: r.URL.Path, node: nodeOf(r), events: make(chan string, 1024)}
 	a.mutex.Lock()
 	if a.watches == nil {
 		a.watches = map[string]int{}
@@ -304,13 +390,13 @@ func (a *cecAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	var opening []string
 	switch {
 	case query.Get("sendInitialEvents") == "true":
-		watcher.sent = a.collection(watcher.path)
+		watcher.sent = a.selectedIn(watcher.path, watcher.node)
 		for _, name := range sortedKeys(watcher.sent) {
 			opening = append(opening, watchEvent("ADDED", watcher.sent[name]))
 		}
 		opening = append(opening, a.bookmark(watcher.path, true))
 	case query.Get("resourceVersion") == fmt.Sprint(a.version):
-		watcher.sent = a.collection(watcher.path)
+		watcher.sent = a.selectedIn(watcher.path, watcher.node)
 	default:
 		opening = append(opening, `{"type":"ERROR","object":{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Expired","code":410}}`)
 		watcher = nil
@@ -360,7 +446,7 @@ func (a *cecAPI) applySpec(w http.ResponseWriter, r *http.Request, name string) 
 	bus.Metadata.Labels = body.Metadata.Labels
 	bus.Spec = body.Spec
 	a.changed()
-	_ = json.NewEncoder(w).Encode(bus)
+	a.serveStored(w, cecBusesPath, name)
 }
 
 func (a *cecAPI) applyStatus(w http.ResponseWriter, r *http.Request, name string) {
@@ -382,11 +468,12 @@ func (a *cecAPI) applyStatus(w http.ResponseWriter, r *http.Request, name string
 		bus.Status.Adapters = slices.DeleteFunc(bus.Status.Adapters, func(entry CECAdapterStatus) bool { return entry.Machine == machine })
 		bus.Status.Adapters = append(bus.Status.Adapters, body.Status.Adapters...)
 	} else {
+		a.busWrites++
 		bus.Status.Devices = body.Status.Devices
 		bus.Status.Conditions = body.Status.Conditions
 	}
 	a.changed()
-	_ = json.NewEncoder(w).Encode(bus)
+	a.serveStored(w, cecBusesPath, name)
 }
 
 func (a *cecAPI) delete(w http.ResponseWriter, name string) {

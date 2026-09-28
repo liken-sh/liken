@@ -32,6 +32,7 @@ func TestAwaitWorkAnswersWhetherTheWorkStopped(t *testing.T) {
 // that is in flight has finished, because the Deployment releases its
 // Lease after the loop returns.
 func TestTheLoopWaitsForAWriteInFlightBeforeItReturns(t *testing.T) {
+	noDiscovery(t)
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)

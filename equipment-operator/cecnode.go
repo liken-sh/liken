@@ -104,9 +104,10 @@ func serveCEC(ctx context.Context, devices string) error {
 // cecNode is one adapter on one machine.
 type cecNode struct {
 	client *Client
-	// displays holds the Display watch's store, which each pass reads.
-	// The node workload writes no Display.
-	displays *watchStore
+	// The stores of the watches each pass reads (objectcache.go). The
+	// Display store holds the Displays of this machine; the node
+	// workload writes no Display.
+	buses, televisions, displays *watchStore
 
 	machine   string
 	device    *cec.Device
@@ -203,21 +204,23 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 		return nil, err
 	}
 	return &cecNode{
-		client:    client,
-		machine:   machine,
-		device:    device,
-		caps:      caps,
-		directory: cec.NewDirectory(),
-		now:       time.Now,
-		log:       os.Stderr,
-		wake:      make(chan struct{}, 1),
-		dirty:     make(chan struct{}, 1),
-		retryAsk:  make(chan struct{}, 1),
-		failed:    make(chan error, 1),
-		stopMode:  func() {},
-		displays:  &watchStore{},
-		source:    cec.InvalidPhysicalAddress,
-		sources:   make(chan struct{}, 1),
+		client:      client,
+		machine:     machine,
+		device:      device,
+		caps:        caps,
+		directory:   cec.NewDirectory(),
+		now:         time.Now,
+		log:         os.Stderr,
+		wake:        make(chan struct{}, 1),
+		dirty:       make(chan struct{}, 1),
+		retryAsk:    make(chan struct{}, 1),
+		failed:      make(chan error, 1),
+		stopMode:    func() {},
+		buses:       &watchStore{},
+		televisions: &watchStore{},
+		displays:    &watchStore{},
+		source:      cec.InvalidPhysicalAddress,
+		sources:     make(chan struct{}, 1),
 	}, nil
 }
 
@@ -303,9 +306,8 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 // which the handle takes before it claims an address, and the baseline
 // is the scan when the adapter joins; startMode states the rest. In the
 // API, the subscriptions are the watches of CECBuses, Televisions, and
-// Displays, and the baseline is each pass's read: a list of the
-// CECBuses and the Televisions, which the node workload writes, and
-// the Display watch's store (watchcache.go). client-go's
+// Displays, and the baseline is each pass's read of the watches' stores
+// (objectcache.go). client-go's
 // reflector runs each watch: it resumes a watch that drops from its
 // last version and reads again after a 410, and the watch wakes the
 // loop when its own first read is done (watch.go). No timer re-reads
@@ -323,7 +325,7 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("listing CECBuses: %w", err)
 	}
-	started.Go(func() { watchCECBuses(ctx, n.client, n.wake, nil, nil) })
+	started.Go(func() { watchCECBuses(ctx, n.client, n.wake, nil, n.buses) })
 	// A change of a Television's spec.power or status.session wakes the
 	// loop, because the pass is where the adapter acts on it. A change of
 	// a Display's physical address wakes it too, because the adapter
@@ -331,15 +333,15 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	// version and gets no watch yet; watchLater starts it once a pass
 	// lists a version.
 	watches := []*lateWatch{
-		{path: televisionsPath, watch: watchTelevisions, list: func() (string, error) {
+		{path: televisionsPath, watch: watchTelevisions, held: n.televisions, list: func() (string, error) {
 			listed, err := ListTelevisions(n.client)
 			if err != nil {
 				return "", err
 			}
 			return listed.Metadata.ResourceVersion, nil
 		}},
-		{path: displaysPath, watch: watchAllDisplays, held: n.displays, list: func() (string, error) {
-			listed, err := ListDisplays(n.client)
+		{path: displaysPath, optional: true, watch: nodeDisplays(n.machine), held: n.displays, list: func() (string, error) {
+			listed, err := ListDisplaysOn(n.client, n.machine)
 			if err != nil {
 				return "", err
 			}
@@ -402,11 +404,16 @@ func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <
 // version: at once for a cluster with the definition, and at a later
 // pass for a definition installed after the node workload started.
 type lateWatch struct {
-	path    string
-	watch   func(context.Context, *Client, chan<- struct{}, func(), *watchStore)
-	held    *watchStore
-	list    func() (string, error)
-	running bool
+	path string
+	// optional says a refused first list does not end the node workload.
+	// The Display list selects by status.node, and an API server whose
+	// Display definition declares no such selectable field refuses it.
+	// The pass then reads the named Display from the API server.
+	optional bool
+	watch    func(context.Context, *Client, chan<- struct{}, func(), *watchStore)
+	held     *watchStore
+	list     func() (string, error)
+	running  bool
 }
 
 // watchLater starts each watch that is not running and whose collection
@@ -427,7 +434,7 @@ func (n *cecNode) watchLater(ctx context.Context, started *sync.WaitGroup, watch
 		if ctx.Err() != nil {
 			return nil
 		}
-		if err != nil && first {
+		if err != nil && first && !watch.optional {
 			return fmt.Errorf("listing %s: %w", watch.path, err)
 		}
 		if err != nil || version == "" {

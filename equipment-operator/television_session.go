@@ -58,6 +58,8 @@ var (
 // pass, so a refusal delays a TV's session and never drops it.
 type televisionSessions struct {
 	client *Client
+	// televisions holds the Television watch's store, which list reads.
+	televisions *watchStore
 	// ctx bounds the waits for a 429, and stop ends it, so a stop never
 	// waits for an API server that is not ready.
 	ctx    context.Context
@@ -122,15 +124,16 @@ func (t *televisionSessions) retry() {
 	}
 }
 
-// list reads the Televisions from the API server, and waits out a 429.
-// It does not read the CECBus loop's store: a session event reads the
-// status.session it wrote on the event before, and the store can hold
-// the copy from before that write until the write's own event arrives.
+// list reads the Televisions, and waits out a 429. A session event
+// reads the status.session it wrote on the event before, and the store
+// can hold the copy from before that write until the write's own event
+// arrives, so the read replaces such a copy with the API server's
+// (objectcache.go).
 func (t *televisionSessions) list() (*TelevisionList, error) {
 	var list *TelevisionList
 	err := retryThrottled(t.ctx, func() error {
 		var err error
-		list, err = ListTelevisions(t.client)
+		list, err = readTelevisions(t.client, t.televisions)
 		return err
 	})
 	return list, err
