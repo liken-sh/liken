@@ -1,0 +1,1 @@
+(prot(monitor)type(LCD)model(Portable)cmds(01 02 03 07 0C E3 F3)vcp(02 04 05 08 10 12 14(01 05 08 0B) 16 18 1A 52 60(01 03 04 0F 10 11 12) 87 AC AE B2 B6 C0 C6 C8 CA(01 02) CC(01 02 03 04) D6(01 04 05) DF)mccs_ver(2.0))

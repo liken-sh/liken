@@ -1,0 +1,106 @@
+# display-operator
+
+A Kubernetes
+[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
+driver that publishes each monitor output of a graphics card as a
+claimable device on a [`liken`](https://github.com/liken-sh/liken)
+cluster. Its pod runs the Weston compositor in a container of its
+own, supervised by the kubelet. A pod that claims
+an output receives a Wayland socket of its own, and the window it
+draws goes on that screen.
+
+That makes a screen something you give a workload from a manifest.
+A kiosk browser runs on the lobby screen from a `Deployment`, a
+dashboard runs on a wall monitor, and a movie runs on the TV. The
+claim names the screen, by connector or by which monitor is plugged
+in. The scheduler finds the machine, and the container receives the
+socket. This needs no SSH, no configuration on the host, and no
+privileged pod.
+
+The operator is one of `liken`'s
+[hardware operators](https://liken.sh/docs/concepts/hardware-operators/):
+optional workloads, installed like any other manifest, that a cluster
+runs fine without. What it needs from `liken` is the card. `liken`'s
+own DRA driver publishes the raw hardware. This operator claims the
+card through an ordinary `liken.sh` claim, and it publishes the
+outputs at the grain a workload asks for: one device per connector
+under `display.liken.sh`. It uses no private interface into `liken`:
+the claim, the `ResourceSlices`, and the CDI files are the public
+contracts any DRA driver gets.
+
+## The manual
+
+**[display.liken.sh](https://display.liken.sh)** is the manual, and
+it serves the deployment manifests as raw YAML, so an install starts
+and ends there:
+
+* [Install the operator](docs/content/docs/guides/install.md)
+* [Put a window on a screen](docs/content/docs/guides/claim.md)
+* [Devices](docs/content/docs/reference/devices.md): the class, the
+  attributes, and what a claim delivers
+* [API](docs/content/docs/reference/api.md): the routes that answer
+  with what a screen shows
+
+The short version, on a cluster whose machine publishes its graphics
+card, after you create the device classes (the install guide gives
+their YAML):
+
+    kubectl apply -n liken-system \
+      -f https://display.liken.sh/deploy/deviceclasses.yaml \
+      -f https://display.liken.sh/deploy/rbac.yaml \
+      -f https://display.liken.sh/deploy/operator.yaml \
+      -f https://display.liken.sh/deploy/api.yaml
+
+[`deploy/`](deploy/) is the source of those files: a `kustomize` base
+with the RBAC, the `DaemonSet` whose pod claims the card on its own
+node, three `DeviceClasses`, `display-gpu`, `display-render`, and
+`display-i2c`, which that claim names and the operator cannot start
+without, and the `display-api` `Deployment`. The
+class your workloads claim through is cluster policy, yours to
+create; the install guide gives the YAML for `display-output`, the
+one to start with.
+
+## The design
+
+[`plans/`](plans/README.md) holds the design documents: why the image
+is a library closure on scratch, and how a monitor arrives on a dark
+connector without a restart. The pattern this operator is an instance
+of is documented in `liken`'s repository, in
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md).
+
+## The build
+
+    go build ./...
+    go test ./...
+    docker build --target vulkan -t vulkan .
+    docker build --target vaapi -t vaapi .
+    docker build --target ffmpeg -t ffmpeg .
+    docker build --target mpv -t mpv .
+    docker build --target weston -t weston .
+    docker build --target display-operator -t display-operator .
+    docker build --target display-capture -t display-capture .
+    docker build --target display-api -t display-api .
+
+One `Dockerfile` builds eight images. Seven are built on the one
+under them, and the API's is built on nothing.
+`ghcr.io/liken-sh/vulkan` is the Vulkan loader, the Intel and AMD
+drivers, and the client libraries a Wayland program opens, on nothing
+else. It is the base image for every Vulkan client liken ships.
+`ghcr.io/liken-sh/vaapi` is that image plus the VA-API loader and the
+Intel media driver, and `ghcr.io/liken-sh/ffmpeg` is that plus ffmpeg
+and ffprobe, for a program that decodes video on the node's GPU.
+`ghcr.io/liken-sh/mpv` is that plus mpv and every library and data
+file it opens by name, and the media operator's player builds on it.
+`ghcr.io/liken-sh/weston` is the vulkan image plus the compositor and
+every library it loads. `ghcr.io/liken-sh/display-operator` is that
+image plus the operator's static binary, and it is the image the
+`DaemonSet` runs. `ghcr.io/liken-sh/display-capture` is the ffmpeg
+image plus the same binary, and the pod's capture container runs it.
+`ghcr.io/liken-sh/display-api` is that binary on `scratch`, and the
+`display-api` `Deployment` runs it. The EDID
+fixtures in `testdata` are read off real monitors with
+`od -An -tx1 /sys/class/drm/<card>-<connector>/edid`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

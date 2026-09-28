@@ -1,0 +1,105 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. It writes one ResourceSlice, writes the status of every
+# Display it created, reads the claims on the screens it drives and
+# the pods that hold them, reads the Layouts a Display names, reads
+# its own Node, and reviews the token the API sends its capture
+# container.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: display-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: display-operator
+rules:
+  # The device inventory (slices.go): this node's ResourceSlice under
+  # display.liken.sh. The verbs cover the collection, because RBAC
+  # cannot say "only the slice named for your node": resourceNames
+  # cannot be templated per pod. The program only ever writes its own,
+  # whose name it builds from NODE_NAME. No list and no watch: the name
+  # is deterministic, and reading anyone else's inventory is the
+  # scheduler's job.
+  #
+  # No delete either. This operator never removes its slice. A monitor
+  # that leaves is a taint, and a device that left the inventory would
+  # strand the kubelet's prepare call for the next consumer, with no
+  # bound on the retry. The Node owns the slice, so a node that leaves
+  # the cluster takes it away. A person who uninstalls the operator
+  # for good deletes the slice by name with their own credentials.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, create, update]
+  # The DRA plugin (dra.go): when the kubelet asks this driver to
+  # prepare a claim, the request names the claim and nothing more. The
+  # allocation is on the claim's status, so the driver reads it
+  # back. This is read-only across every namespace, because claims
+  # belong to workloads and the driver serves whichever namespace
+  # claims a screen.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    # The list and the watch serve the pass that places surfaces, not
+    # the prepare call: a surface arrives on a claim's own socket, and
+    # the claim's status.reservedFor names the pods whose labels a
+    # region's selector reads.
+    verbs: [get, list, watch]
+  # The layouts a Display names (layouts.go). The get reads the one a
+  # Display states, the list serves a pass that reads several, and the
+  # watch turns an edited Layout into one wake. No write of any kind: a
+  # Layout is a declaration the cluster owner writes.
+  - apiGroups: [display.liken.sh]
+    resources: [layouts]
+    verbs: [get, list, watch]
+  # The pods that hold a claim on a screen. Their shared labels are
+  # what a region's selector matches, so a pod that gains or loses a
+  # label restacks the screen, and the watch is what makes that
+  # prompt. Read-only across every namespace, because a screen serves
+  # whichever namespace claims it. The get has a second use: the
+  # operator reads its own pod, whose status carries how often the
+  # kubelet started the compositor's container again.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  # The panels' own resources (displays.go, displaycontrol.go).
+  # The operator creates one Display for every monitor it probes and
+  # writes the whole of its status. The list and the watch are here
+  # because a spec a person or a machine writer edited is what the
+  # operator reconciles, and because a panel that left the node is
+  # found by listing the resources this node owns. No delete: a
+  # Display holds the captured state of a panel that may come back.
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
+    verbs: [get, list, watch, create, update]
+  - apiGroups: [display.liken.sh]
+    resources: [displays/status]
+    verbs: [get, update]
+  # This node, read once at startup for the UID that the slice's owner
+  # reference needs. The Node owns the slice, so a Node that leaves the
+  # cluster takes the slice with it, and the garbage collector cleans
+  # up after an operator that exits without running any code.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+  # The capture container checks the API's bearer token with a
+  # TokenReview for the audience display-capture, so the pod needs
+  # this one verb. It is written out here rather than taken from the
+  # built-in system:auth-delegator role, because that role also
+  # grants a SubjectAccessReview, which this pod never makes.
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: display-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: display-operator
+subjects:
+  - kind: ServiceAccount
+    name: display-operator
+    namespace: liken-system

@@ -1,0 +1,10 @@
+/display-operator
+/docs/dist/
+/docs/.hugo_build.lock
+
+# The coverage profile the gate measures, and the report the site
+# publishes from it. CI writes each one and reads it once; neither
+# belongs to the tree.
+/coverage.out
+/coverage.html
+/cli/dist/

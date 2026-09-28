@@ -1,0 +1,58 @@
+# The two classes this operator's own pod claims through. They ship
+# with the base because the claim template in operator.yaml names
+# them literally: they are wiring, not policy, and the operator
+# cannot start without them. The classes your workloads claim
+# through, such as an output class, are the cluster owner's
+# vocabulary to create, and the install guide gives the YAML.
+---
+# The graphics card's card node, as liken publishes it. The card
+# node allocates once, which is what makes the claim holder the only
+# program setting a mode on it. The selector reads the displayNode
+# attribute rather than a vendor and a product id, so it stays
+# correct across a fleet of different machines.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: display-gpu
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].displayNode)
+---
+# The graphics card's render node, as liken publishes it. The render
+# node is shareable, so the operator's hold takes nothing away from
+# the transcoders that use the same GPU. The selector reads the
+# renderNode attribute for the same fleet reason as the card node's.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: display-render
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].renderNode)
+---
+# The graphics card's monitor-control wires. liken publishes the
+# card's i2c buses as one exclusive companion device, apart from the
+# card node, because raw wire access has one writer and no
+# arbitration contract. This operator is that writer: it claims the
+# companion, probes each panel over DDC/CI, and re-publishes the
+# wires at the per-connector grain as its control devices. The
+# selector reads the subsystem and the class, so it stays correct
+# across a fleet of different cards.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: display-i2c
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].subsystem) &&
+          device.attributes["liken.sh"].subsystem == "i2c-dev" &&
+          device.attributes["liken.sh"].class == "display"

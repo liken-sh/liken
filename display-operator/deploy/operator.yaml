@@ -1,0 +1,427 @@
+# The operator itself: one pod per node, each taking the one graphics
+# card on its node, and the claim that gates it.
+---
+# The card's nodes and its monitor wires, in one claim. A template
+# rather than a plain claim, so each pod of the DaemonSet allocates the
+# card on its own node. A node with no graphics card offers no matching
+# device, so the claim parks that pod Pending, and it costs nothing.
+# Nobody writes down which machine has the screens.
+#
+# The card node allocates once, which is what makes this pod the only
+# program setting a mode on it. The render node is shareable, so
+# holding it takes nothing away from the transcoders that use the same
+# GPU.
+#
+# The three deviceClassName values below are literal. The base ships
+# display-gpu, display-render, and display-i2c in deviceclasses.yaml,
+# so the template can allocate as soon as the base applies. An owner
+# who names the classes differently patches this template to match.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: display-gpu
+spec:
+  spec:
+    devices:
+      requests:
+        - name: display
+          exactly:
+            deviceClassName: display-gpu
+        - name: render
+          exactly:
+            deviceClassName: display-render
+        # The card's i2c buses, the wires the DDC/CI probe and the
+        # claim parameters speak on. liken publishes them apart from
+        # the card, so the operator must ask for them apart.
+        - name: wires
+          exactly:
+            deviceClassName: display-i2c
+      # The wires must belong to the card this pod drives, not to a
+      # second GPU on the same machine. Both devices publish the PCI
+      # address liken read from sysfs.
+      constraints:
+        - requests: ["display", "wires"]
+          matchAttribute: liken.sh/address
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: display-operator
+  labels:
+    # liken's plugins commands select on this label, and the CLI selects
+    # on it to read the operator's version. Both take the image of the
+    # first container and pull its -cli image at the same tag, so the
+    # label goes on the workload that runs the display-operator image.
+    cli.liken.sh/plugin: display
+spec:
+  selector:
+    matchLabels:
+      app: display-operator
+  # The card node allocates to one claim, so the old pod on a node must
+  # release the card before the new pod takes it. maxSurge: 0 keeps the
+  # new pod from starting until the old pod on that node stops, so two
+  # pods never hold one card at once. maxUnavailable: 1 rolls the nodes
+  # one at a time.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: display-operator
+    spec:
+      serviceAccountName: display-operator
+      # The operator is the machine's hardware layer: every pod that
+      # claims a device it publishes depends on it, and it holds
+      # the GPU and the compositor that holds it. So it schedules ahead of
+      # ordinary pods onto a machine that is already full, preempting
+      # one if it must, and it is evicted last. It also runs whatever
+      # the machine is marked with, because liken taints a node while
+      # it starts, and the devices have to publish before anything
+      # can claim them.
+      priorityClassName: system-node-critical
+      # A node labeled display.liken.sh/display: none gets no pod. The
+      # claim alone leaves a pod on a node with no graphics card Pending
+      # for good, so a person marks such a node with that one label.
+      # NotIn also matches a node with no such label, so with no
+      # label the DaemonSet makes a pod on every node, and the claim
+      # decides where it can start. A patch that sets its own node
+      # affinity replaces this list of terms, because the list is
+      # atomic.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: display.liken.sh/display
+                    operator: NotIn
+                    values: ["none"]
+      tolerations:
+        - operator: Exists
+      # The kernel delivers uevents to the initial user namespace only.
+      # A pod in its own user namespace receives an empty stream, with
+      # no error to read, and no monitor plugged in after the pod
+      # started would ever appear. This is the default, and it is
+      # stated because the failure is silent.
+      hostUsers: true
+      # The compositor holds the screens for as long as it runs, so it
+      # must stop quickly on SIGTERM. While it is down, every monitor
+      # it drives is black.
+      terminationGracePeriodSeconds: 5
+      # One process namespace for the pod, so the operator
+      # container can find the compositor's process and signal it.
+      # SIGTERM is how a mode a claim states takes effect: weston
+      # parses weston.ini once at startup, so the operator rewrites
+      # the file and ends the compositor, and the kubelet starts it
+      # again on the new config. SIGKILL is how the operator ends a
+      # compositor that accepts on its socket and answers nothing: a
+      # stopped process takes no SIGTERM, and it never exits for the
+      # kubelet to restart.
+      shareProcessNamespace: true
+      # Four containers, ordered by the kubelet: the declare container
+      # writes weston.ini and exits, the weston container runs the
+      # compositor, the operator container serves DRA and the slice,
+      # and the capture container serves captures. The capture
+      # container takes frames from the compositor over the layout
+      # module's capture socket and encodes them on the card's render
+      # node. It comes from its own image,
+      # ghcr.io/liken-sh/display-capture, which carries ffmpeg. The
+      # kubelet restarts a dead compositor alone, the operator taints
+      # every output for as long as nothing answers on the socket, and
+      # no process in this pod supervises another.
+      initContainers:
+        # The connector enumeration and the config write run as an
+        # init step, because the compositor parses weston.ini once at
+        # startup, and the kubelet starts the container that reads the
+        # file only after this one exits. The step reads each monitor's
+        # Display with the pod's service account, so the compositor
+        # starts at the mode spec.mode states and a new pod sets each
+        # mode once.
+        - name: declare
+          image: ghcr.io/liken-sh/display-operator:latest
+          args: ["declare"]
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+            # The claim is named here because the card node this
+            # container enumerates arrives with the claim's delivery.
+            claims:
+              - name: gpu
+          volumeMounts:
+            - name: weston-config
+              mountPath: /etc/weston
+        # The compositor is a native sidecar: an init container whose
+        # restartPolicy is Always. The kubelet starts it before the
+        # operator container and stops it after, and the argument runs
+        # the image's binary in the mode that execs weston, so weston
+        # is this container's one process and its exit is what the
+        # kubelet acts on.
+        # Before the exec, the entrypoint waits only for the config
+        # file that the declare container writes, and it fails when
+        # the file does not arrive within 30 seconds. It does not wait
+        # for a monitor. The config states require-outputs=none, so
+        # weston starts on a card with no monitor, and a machine with
+        # no monitor shows this container Running with no restarts.
+        # The container has no startup probe, so the kubelet starts
+        # the operator container as soon as this one runs. The
+        # operator opens the card only while it holds a connection to
+        # weston's socket, so its reads come after weston's open of
+        # the card and cannot take DRM master from weston.
+        - name: weston
+          image: ghcr.io/liken-sh/display-operator:latest
+          args: ["weston"]
+          restartPolicy: Always
+          env:
+            # The weston debug scopes this container writes to its
+            # log, as a comma-separated list. drm-backend reports why
+            # each view goes to a display plane or to the renderer.
+            # The value is empty, because drm-backend writes about a
+            # hundred lines on each repaint, and a film repaints on
+            # every frame. The comment on westonLogScopesVariable in
+            # weston.go gives the cost and the reason the scope is not
+            # behind --debug. A change to the value starts new pods,
+            # and so a new compositor.
+            - name: WESTON_LOG_SCOPES
+              value: ""
+          securityContext:
+            # No privilege and no capability. libseat's noop backend
+            # opens the card node with a plain open(), and the kernel
+            # hands DRM master to the first process to open it with no
+            # capability check. So everything this pod does to the
+            # hardware, it does through its claim.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+            # The card node and the render node, claimed from liken.
+            # This is the placement: the scheduler puts the pod where
+            # the hardware is.
+            claims:
+              - name: gpu
+          volumeMounts:
+            # The config the declare container wrote, and the
+            # directory the compositor creates its socket in, which is
+            # the same hostPath a consumer's container mounts.
+            - name: weston-config
+              mountPath: /etc/weston
+            - name: socket
+              mountPath: /var/run/display.liken.sh
+      containers:
+        - name: operator
+          # The image holds the operator's binary, weston, and the
+          # libraries weston loads. It holds no shell, so kubectl exec
+          # can run only a binary the image contains, by name, such as
+          # wayland-info.
+          image: ghcr.io/liken-sh/display-operator:latest
+          env:
+            # A ResourceSlice names the node whose hardware it
+            # describes, and the downward API is where a pod reads
+            # that.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # The pod this operator runs in. The kubelet counts the
+            # restarts of the compositor's container on this pod's own
+            # status, and that count is the only one that includes a
+            # compositor that exited on its own.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # Milestone 65 gives every process this port. An owner who
+            # runs no Prometheus still gets the port: the base states
+            # it here so a scrape needs nothing from this manifest but
+            # the monitoring component beside it.
+            - name: METRICS_ADDR
+              value: ":9200"
+          ports:
+            - name: metrics
+              containerPort: 9200
+          securityContext:
+            # No privilege and no capability. This container reads
+            # sysfs, writes CDI files, and serves a socket to the
+            # kubelet, and none of that needs either. The card reads
+            # also depend on it: each read drops DRM master, and with
+            # CAP_SYS_ADMIN the kernel answers that drop with EINVAL
+            # on a file that was never master, so every read fails.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 30m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+            # The claim is named here too, because the card node is
+            # how this container learns which card's connectors it
+            # publishes.
+            claims:
+              - name: gpu
+          volumeMounts:
+            # The two mounts every DRA driver takes. The registry
+            # directory is where the kubelet discovers plugins, and the
+            # plugin's own directory holds the socket that serves the
+            # prepare calls. Both are writable, because serving a
+            # socket is the actuation.
+            - name: kubelet-plugin
+              mountPath: /var/lib/kubelet/plugins/display.liken.sh
+            - name: kubelet-plugins-registry
+              mountPath: /var/lib/kubelet/plugins_registry
+            # Where prepared claims become the mount and the variables
+            # that the container runtime applies. liken writes its own
+            # specs in this same directory, and the two drivers' file
+            # name prefixes keep them apart.
+            - name: cdi
+              mountPath: /var/run/cdi
+            # The compositor's runtime directory, on the host, because
+            # a consumer's container mounts the same path to reach the
+            # Wayland socket in it. The delivery is that socket, so it
+            # has to be somewhere both pods can name.
+            - name: socket
+              mountPath: /var/run/display.liken.sh
+            # The compositor's configuration directory, which
+            # this container writes when a claim states a mode: the
+            # record of what each claim asked for, and the weston.ini
+            # regenerated from it. The compositor reads the file at its
+            # next start, which the operator's SIGTERM brings on.
+            #
+            # The layout module's control socket is in this directory
+            # too. Only the three containers of this pod mount the
+            # volume, where the Wayland socket directory above is a
+            # hostPath every consumer mounts, so no consumer can reach
+            # the socket that places surfaces.
+            - name: weston-config
+              mountPath: /etc/weston
+        - name: capture
+          # This image is the ffmpeg image plus the same operator
+          # binary, because every capture is encoded by an ffmpeg
+          # process this container starts.
+          image: ghcr.io/liken-sh/display-capture:latest
+          args: ["capture"]
+          env:
+            # One listener serves the captures, the metrics, and the
+            # two probes, on 9201 rather than the 9200 every liken
+            # process takes, because the operator container in this
+            # pod already holds 9200.
+            - name: CAPTURE_ADDR
+              value: ":9201"
+          ports:
+            - name: capture
+              containerPort: 9201
+          securityContext:
+            # No privilege and no capability. The encoder reads frames
+            # from a socket and writes to the card's render node, and
+            # the claim delivers that node.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            # The pod's limits become 64 + 512 + 128 + 384 = 1088Mi,
+            # which is more than a machine with 1 GB of memory holds,
+            # so a 4K clip is scaled to 1080p and the drill on the
+            # hardware decides this number. On a cgroup v2 machine an
+            # ffmpeg that exceeds the limit kills the whole container,
+            # so one runaway encode ends every capture on the node and
+            # the kubelet restarts the container.
+            limits:
+              memory: 384Mi
+            # The encoder needs the render node and nothing else, so
+            # this container names the render request alone: DRM
+            # master and the i2c wires belong to the compositor and
+            # the operator.
+            claims:
+              - name: gpu
+                request: render
+          volumeMounts:
+            # The capture socket the layout module opens is in this
+            # directory, which is why the container that takes frames
+            # mounts the compositor's config volume.
+            - name: weston-config
+              mountPath: /etc/weston
+            - name: capture-tls
+              mountPath: /var/run/display-capture-tls
+              readOnly: true
+          # No readiness probe, because a late credential must not
+          # hold this system-node-critical pod NotReady and stall the
+          # DaemonSet's one-node-at-a-time roll. A restart of this
+          # container ends every running capture on the node and
+          # nothing else.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: capture
+              scheme: HTTPS
+            periodSeconds: 30
+            failureThreshold: 3
+      resourceClaims:
+        - name: gpu
+          resourceClaimTemplateName: display-gpu
+      volumes:
+        # DirectoryOrCreate on all four, because a node that has never
+        # run a DRA driver has none of these paths.
+        - name: kubelet-plugin
+          hostPath:
+            path: /var/lib/kubelet/plugins/display.liken.sh
+            type: DirectoryOrCreate
+        - name: kubelet-plugins-registry
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: DirectoryOrCreate
+        - name: cdi
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
+        - name: socket
+          hostPath:
+            path: /var/run/display.liken.sh
+            type: DirectoryOrCreate
+        # The compositor's configuration directory, shared by the
+        # declare container that writes it, the weston container that
+        # reads it, and the operator container that rewrites it for a
+        # claim that states a mode. The volume is the pod's own,
+        # because the file states the connectors this pod enumerated,
+        # and a volume that outlived the pod would hand the next
+        # compositor an old set.
+        # The mode record lives here too, so a mode a claim
+        # stated survives a restart of the compositor's container and
+        # dies with the pod. A machine that comes up with no consumer
+        # left runs every screen at the mode its monitor prefers.
+        - name: weston-config
+          emptyDir: {}
+        # The sidecar's serving leaf. The volume is optional because
+        # the pod starts before the API has minted it, and the kubelet
+        # would otherwise hold the pod out of the roll until the
+        # Secret exists. An optional volume also costs the DaemonSet's
+        # ServiceAccount no grant on the Secret, where a watch in the
+        # sidecar would.
+        - name: capture-tls
+          secret:
+            secretName: display-capture-server
+            optional: true

@@ -1,0 +1,535 @@
+package main
+
+// The Display resource: one object per monitor, cluster-scoped
+// because a panel is physical and belongs to no namespace, like a
+// Node. The operator writes the whole of status. The resting spec is
+// the cluster owner's declaration of how the panel rests, and
+// spec.override is a temporary layer a machine writer sets and later
+// lifts. These structs hold only the fields this operator reads and
+// writes; the CRD in deploy/displays.yaml is the full schema.
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
+)
+
+// The API group is the driver's own name, so one domain names
+// the driver, the attributes, and this resource.
+const (
+	DisplayGroup      = DriverName
+	DisplayVersion    = "v1alpha1"
+	DisplayAPIVersion = DisplayGroup + "/" + DisplayVersion
+	DisplaysPath      = "/apis/" + DisplayGroup + "/" + DisplayVersion + "/displays"
+)
+
+// The two conditions the operator publishes, and the reason a
+// panel that answers no DDC/CI carries.
+const (
+	ConnectedCondition  = "Connected"
+	ResponsiveCondition = "Responsive"
+	NoDDCReplyReason    = "NoDDCReply"
+)
+
+// The condition that reports the compositor behind this screen, and
+// its three reasons. Serving is a compositor that answered the probe.
+// Down is a socket that refuses the connect or ends under the probe.
+// Hung is a socket that accepts and answers nothing.
+const (
+	CompositorServingCondition = "CompositorServing"
+	CompositorServingReason    = "Serving"
+	CompositorDownReason       = "Down"
+	CompositorHungReason       = "Hung"
+)
+
+// The one value each override field takes. The block states
+// what the panel is held at, and its absence is what lifts it.
+const overrideOff = "Off"
+
+// Whether an override field states off. The CRD accepts the value in
+// two spellings, "off" and "Off", because an override can hold either
+// one, depending on the build of the writer that made it. Both hold
+// the panel the same way.
+func overrideStatesOff(value string) bool {
+	return strings.EqualFold(value, overrideOff)
+}
+
+type Display struct {
+	APIVersion string        `json:"apiVersion,omitempty"`
+	Kind       string        `json:"kind,omitempty"`
+	Metadata   DisplayMeta   `json:"metadata"`
+	Spec       DisplaySpec   `json:"spec"`
+	Status     DisplayStatus `json:"status,omitempty"`
+}
+
+type DisplayList struct {
+	Items []Display `json:"items"`
+}
+
+type DisplayMeta struct {
+	Name            string `json:"name"`
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+	// The API server's own identifier for this object. An Event names
+	// it, because kubectl describe searches for a resource's Events
+	// by uid and finds none written without it.
+	UID string `json:"uid,omitempty"`
+	// The API server counts every change to spec here, and never a
+	// change to status. A write the panel did not confirm is recorded
+	// against this number, so an edit to spec is what lets the
+	// operator try that write again.
+	Generation int64 `json:"generation,omitempty"`
+}
+
+// The settings the panel rests at. Every control field is a pointer
+// because the absence of a field is what says the operator invents
+// nothing, and zero is a value a panel takes. A name has no such
+// zero, so Layout is a plain string and an empty one is a screen that
+// names no Layout.
+type DisplaySpec struct {
+	Brightness  *int    `json:"brightness,omitempty"`
+	Contrast    *int    `json:"contrast,omitempty"`
+	Sharpness   *int    `json:"sharpness,omitempty"`
+	ColorPreset *string `json:"colorPreset,omitempty"`
+	Input       *string `json:"input,omitempty"`
+	AudioVolume *int    `json:"audioVolume,omitempty"`
+	AudioMute   *bool   `json:"audioMute,omitempty"`
+	// The mode the screen rests at, one string in the
+	// status.modes form. It is not an override: a temporary mode is
+	// what a claim's own mode parameter is. The operator applies it
+	// only while no claim holds the screen, because a mode lands
+	// through the compositor and a mode change restarts it.
+	Mode *string `json:"mode,omitempty"`
+	// The Layout this screen shows, by name. A screen that names
+	// none shows every surface over the whole screen with the newest
+	// on top, and a name that resolves to nothing shows the same and
+	// carries the LayoutResolved condition.
+	Layout   string           `json:"layout,omitempty"`
+	Override *DisplayOverride `json:"override,omitempty"`
+}
+
+// The temporary layer above the resting one, and the two states
+// it carries.
+type DisplayOverride struct {
+	Backlight string `json:"backlight,omitempty"`
+	Power     string `json:"power,omitempty"`
+}
+
+type DisplayStatus struct {
+	Node      string `json:"node,omitempty"`
+	Connector string `json:"connector,omitempty"`
+	// The monitor's own identity, the same three facts the
+	// slice publishes as attributes, so a person reading the resource
+	// knows which screen it is without crossing to the slice.
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Serial       string `json:"serial,omitempty"`
+	// The panel's physical size, as the monitor states it.
+	WidthMillimeters  int `json:"widthMillimeters,omitempty"`
+	HeightMillimeters int `json:"heightMillimeters,omitempty"`
+	// The CEC physical address of the port this machine's cable is
+	// in, from the EDID, and the last valid one while the connector
+	// serves none. The PhysicalAddressCurrent condition says which.
+	PhysicalAddress string `json:"physicalAddress,omitempty"`
+	// The mode the output runs, as the card and the compositor
+	// each report it, and every mode the card offers for this
+	// connector. Status has no attribute-length limit, so this list
+	// is whole where the slice's is cut to fit. The list is absent
+	// while the operator holds no connection to a compositor, because
+	// the card gate opens the card only while it holds one.
+	Mode         *DisplayMode               `json:"mode,omitempty"`
+	Modes        []string                   `json:"modes,omitempty"`
+	Capabilities map[string]panelCapability `json:"capabilities,omitempty"`
+	Observed     *DisplayValues             `json:"observed,omitempty"`
+	Captured     *DisplayValues             `json:"captured,omitempty"`
+	// Each write the device did not confirm, and the spec generation
+	// it was made for. The operator does not repeat that write until
+	// spec changes, and the record is in status so that a restarted
+	// operator does not repeat it either.
+	Unconfirmed []DisplayUnconfirmed `json:"unconfirmed,omitempty"`
+	// How many times the operator wrote each declared value in this
+	// spec generation, with the panel confirming each write. The count
+	// is what bounds the writes back to a panel that keeps changing a
+	// value by itself, and it is in status so that a restart does not
+	// reset it.
+	Written []DisplayWritten `json:"written,omitempty"`
+	// Every surface the compositor holds on this screen, in the order
+	// they arrived, and the layout they were drawn to.
+	Surfaces   []DisplaySurface   `json:"surfaces,omitempty"`
+	Layout     *DisplayLayout     `json:"layout,omitempty"`
+	Conditions []DisplayCondition `json:"conditions,omitempty"`
+}
+
+// One surface on this screen. The claim is the socket the surface
+// arrived on, as namespace/name, and it is empty for a surface that
+// holds no claim. The labels are the ones every holder of the claim
+// carries with the same value, which are the labels a region's
+// selector reads.
+//
+// The id lasts as long as the compositor that assigned it. A
+// compositor restart ends every surface and every id, and the clients
+// reconnect and are placed again.
+type DisplaySurface struct {
+	ID     string            `json:"id"`
+	Claim  string            `json:"claim,omitempty"`
+	Pods   []string          `json:"pods,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Size   *SurfaceSize      `json:"size,omitempty"`
+	Region string            `json:"region,omitempty"`
+}
+
+// The surface's current buffer size in pixels, as the compositor
+// reports it.
+type SurfaceSize struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// The layout this screen is drawn to. Name is the Layout in force, or
+// the word default for a screen that names none. The regions are in
+// stacking order, and each one names the surface on top of it.
+type DisplayLayout struct {
+	Name    string          `json:"name,omitempty"`
+	Regions []DisplayRegion `json:"regions,omitempty"`
+}
+
+type DisplayRegion struct {
+	Name    string `json:"name"`
+	Surface string `json:"surface,omitempty"`
+}
+
+// The mode this output runs, from the two parties that each
+// report one. Kernel is the mode the card's connector is synced to.
+// Weston is the mode the compositor serves canvases at, from its own
+// wl_output events.
+//
+// They are two facts, not one fact read twice. A client draws
+// at the mode weston serves, whatever the connector is synced to,
+// and a gap between the two values is the canvas defect the operator
+// heals. Weston is absent while this operator holds no connection to
+// a compositor, because an absent value is honest and a carried-over
+// one is a guess. Kernel is absent then too, because the card gate
+// opens the card only while the operator holds a connection to a
+// compositor.
+type DisplayMode struct {
+	Kernel string `json:"kernel,omitempty"`
+	Weston string `json:"weston,omitempty"`
+}
+
+// One value of each control, in the panel's own numbers for the
+// continuous controls and in the published names for the others. Both
+// observed and captured carry this shape, so a captured value reads
+// the same as the observed value it was taken from.
+type DisplayValues struct {
+	Brightness  *int    `json:"brightness,omitempty"`
+	Contrast    *int    `json:"contrast,omitempty"`
+	Sharpness   *int    `json:"sharpness,omitempty"`
+	ColorPreset *string `json:"colorPreset,omitempty"`
+	Input       *string `json:"input,omitempty"`
+	AudioVolume *int    `json:"audioVolume,omitempty"`
+	AudioMute   *bool   `json:"audioMute,omitempty"`
+	Power       *string `json:"power,omitempty"`
+}
+
+// The standard condition shape, held here for the reason the
+// slice structs are held here: this program writes these fields and no
+// others.
+type DisplayCondition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"lastTransitionTime"`
+}
+
+// The two states a condition takes here. Unknown is never
+// written: the operator either read the panel or it did not.
+const (
+	conditionTrue  = "True"
+	conditionFalse = "False"
+)
+
+// Whether the override holds the panel dark, and by which of
+// the two states. Power wins when a writer states both, because a
+// panel that is off is dark either way.
+func (s DisplaySpec) override() (string, bool) {
+	if s.Override == nil {
+		return "", false
+	}
+	if overrideStatesOff(s.Override.Power) {
+		return powerControl, true
+	}
+	if overrideStatesOff(s.Override.Backlight) {
+		return brightnessControl, true
+	}
+	return "", false
+}
+
+// The values the operator last saw, as the resource publishes
+// them. Nothing observed publishes nothing.
+func observedValues(observed map[byte]uint16) *DisplayValues {
+	if len(observed) == 0 {
+		return nil
+	}
+	values := &DisplayValues{}
+	for code, raw := range observed {
+		values.set(code, raw)
+	}
+	return values
+}
+
+// One control's value written into a values block, in the shape
+// that control publishes.
+func (v *DisplayValues) set(code byte, raw uint16) {
+	switch code {
+	case vcpBrightness:
+		v.Brightness = numberOf(raw)
+	case vcpContrast:
+		v.Contrast = numberOf(raw)
+	case vcpSharpness:
+		v.Sharpness = numberOf(raw)
+	case vcpAudioVolume:
+		v.AudioVolume = numberOf(raw)
+	case vcpColorPreset:
+		v.ColorPreset = nameOf(code, raw)
+	case vcpInput:
+		v.Input = nameOf(code, raw)
+	case vcpAudioMute:
+		muted := valueName(code, raw) == audioMuted
+		v.AudioMute = &muted
+	case vcpPowerMode:
+		v.Power = nameOf(code, raw)
+	}
+}
+
+// One control's value out of a values block, as the number the
+// wire carries. This is the direction a restore reads: the captured
+// value goes back to the panel it came from.
+func (v DisplayValues) raw(code byte) (uint16, bool) {
+	switch code {
+	case vcpBrightness:
+		return numberValue(v.Brightness)
+	case vcpContrast:
+		return numberValue(v.Contrast)
+	case vcpSharpness:
+		return numberValue(v.Sharpness)
+	case vcpAudioVolume:
+		return numberValue(v.AudioVolume)
+	case vcpColorPreset:
+		return nameValue(code, v.ColorPreset)
+	case vcpInput:
+		return nameValue(code, v.Input)
+	case vcpAudioMute:
+		return muteValue(v.AudioMute)
+	case vcpPowerMode:
+		return nameValue(code, v.Power)
+	}
+	return 0, false
+}
+
+// The same read against the resting declaration. The two blocks
+// hold the same controls apart from power, which no spec declares: a
+// resting power would fight the override that turns the panel off.
+func (s DisplaySpec) raw(code byte) (uint16, bool) {
+	values := DisplayValues{
+		Brightness: s.Brightness, Contrast: s.Contrast, Sharpness: s.Sharpness,
+		ColorPreset: s.ColorPreset, Input: s.Input, AudioVolume: s.AudioVolume,
+		AudioMute: s.AudioMute,
+	}
+	if code == vcpPowerMode {
+		return 0, false
+	}
+	return values.raw(code)
+}
+
+// Whether a values block states anything at all. A block that
+// states nothing is cleared rather than published empty.
+func (v *DisplayValues) empty() bool {
+	return v == nil || *v == DisplayValues{}
+}
+
+func numberOf(raw uint16) *int { value := int(raw); return &value }
+
+func nameOf(code byte, raw uint16) *string { name := valueName(code, raw); return &name }
+
+func numberValue(value *int) (uint16, bool) {
+	if value == nil || *value < 0 || *value > 0xffff {
+		return 0, false
+	}
+	return uint16(*value), true
+}
+
+func nameValue(code byte, name *string) (uint16, bool) {
+	if name == nil {
+		return 0, false
+	}
+	return valueRaw(code, *name)
+}
+
+func muteValue(muted *bool) (uint16, bool) {
+	if muted == nil {
+		return 0, false
+	}
+	name := audioUnmuted
+	if *muted {
+		name = audioMuted
+	}
+	return valueRaw(vcpAudioMute, name)
+}
+
+// The condition with this type replaced, and the timestamp kept
+// when nothing about it changed. A timestamp that moved on every pass
+// would make every pass a write.
+func setCondition(conditions []DisplayCondition, next DisplayCondition) []DisplayCondition {
+	for index, current := range conditions {
+		if current.Type != next.Type {
+			continue
+		}
+		if current.Status == next.Status && current.Reason == next.Reason && current.Message == next.Message {
+			return conditions
+		}
+		if current.Status == next.Status {
+			next.LastTransitionTime = current.LastTransitionTime
+		}
+		updated := make([]DisplayCondition, len(conditions))
+		copy(updated, conditions)
+		updated[index] = next
+		return updated
+	}
+	return append(conditions, next)
+}
+
+func getDisplay(c *Client, name string) (*Display, error) {
+	return get[Display](c, DisplaysPath+"/"+name)
+}
+
+func listDisplays(c *Client) ([]Display, error) {
+	list, err := get[DisplayList](c, DisplaysPath)
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// The create carries an empty spec. The operator states nothing
+// about how a panel should rest: the resource exists so a person or a
+// machine writer can, and an empty spec writes nothing to the wire.
+func createDisplay(c *Client, name string) (*Display, error) {
+	display := &Display{
+		APIVersion: DisplayAPIVersion,
+		Kind:       "Display",
+		Metadata:   DisplayMeta{Name: name},
+	}
+	body, err := json.Marshal(display)
+	if err != nil {
+		return nil, err
+	}
+	created := &Display{}
+	if err := c.RequestJSON(http.MethodPost, DisplaysPath, body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// replaceStatus writes one object's status to the status
+// subresource, so a spec a person edited between the read and the
+// write is not overwritten. The caller states the object's apiVersion
+// and kind. The API server's copy replaces the caller's, because a
+// write produces a new resourceVersion, and the next write must state
+// it.
+func replaceStatus[T any](c *Client, path string, object *T) error {
+	body, err := json.Marshal(object)
+	if err != nil {
+		return err
+	}
+	stored := new(T)
+	if err := c.RequestJSON(http.MethodPut, path+"/status", body, stored); err != nil {
+		return err
+	}
+	*object = *stored
+	return nil
+}
+
+// The watch wakes the passes for an edit to a Display, and the pass
+// that follows reads every Display this node serves from the watch's
+// store (objectcache.go).
+func watchDisplays(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
+	openDisplays(client, wake, readings).run(ctx)
+}
+
+// openDisplays builds the Display watch. It covers the whole cluster,
+// because a monitor carried to this node brings its Display with it,
+// under the name its EDID gives.
+//
+// A change wakes the passes when it is an edit:
+//
+//   - a new Display, and a Display the API server removed,
+//   - a change to the spec, which raises metadata.generation,
+//   - a deletion request, and a Display deleted and created again
+//     with the same name, which has a new UID,
+//   - a change to status.node, which is a monitor that a node's
+//     Display controller adopted. The placement pass reports a dark
+//     screen on each Display whose status.node names this node, so the
+//     adoption must wake it.
+//
+// Any other status write wakes nothing. Both passes on this node write
+// status, and a wake on each write would run both passes again only to
+// find nothing to change. No pass acts on the rest of a status that
+// another writer wrote: it is this node's own record, which the passes
+// read back from the store or the API server at their next wake. The
+// DDC poll's tick and the hardware's events wake the Display
+// controller on this node's own schedule.
+func openDisplays(client dynamic.Interface, wake func(), readings *metrics) openWatch {
+	edits := cache.ResourceEventHandlerFuncs{
+		AddFunc: func(any) { wake() },
+		UpdateFunc: func(before, after any) {
+			was, is := editOf(before), editOf(after)
+			if !was.read || !is.read || was != is {
+				wake()
+			}
+		},
+		DeleteFunc: func(any) { wake() },
+	}
+	return wakeWatch(client, kindDisplay, collectionWatch{resource: displayResource, handler: edits}, wake, readings)
+}
+
+// editMark is what an edit changes on an object: its UID, its
+// generation, which counts spec changes, and its deletion mark. The
+// informer hands an update both the copy it held and the new copy, so
+// the handler compares the two and keeps no copy of its own. After a
+// gap in the watch, an object deleted and created again with the same
+// name reaches the handler as an update, and its generation can equal
+// the old one's, so the UID is part of the mark.
+type editMark struct {
+	uid        string
+	generation int64
+	deleting   bool
+	node       string
+	// read is false for something that is not an object, and such a
+	// change counts as an edit, because nothing says what it changed.
+	read bool
+}
+
+// nodeOf answers the node a Display's status names.
+func nodeOf(item *unstructured.Unstructured) string {
+	node, _, _ := unstructured.NestedString(item.Object, "status", "node")
+	return node
+}
+
+func editOf(object any) editMark {
+	item, ok := object.(*unstructured.Unstructured)
+	if !ok {
+		return editMark{}
+	}
+	return editMark{
+		uid:        string(item.GetUID()),
+		generation: item.GetGeneration(),
+		deleting:   item.GetDeletionTimestamp() != nil,
+		node:       nodeOf(item),
+		read:       true,
+	}
+}

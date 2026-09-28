@@ -1,0 +1,359 @@
+---
+name: claim
+description: "Run one fullscreen program on one monitor from a Deployment through a ResourceClaim. Use when a pod needs a screen, a specific mode or refresh rate, the panel's brightness or power, or when a monitor moves or unplugs."
+---
+
+This skill is the guide at https://display.liken.sh/docs/guides/claim/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+
+# Put a window on a screen
+
+This guide runs one fullscreen program on one monitor, from a
+`Deployment`: a kiosk. It works the same for a dashboard or a video
+player. You need the operator
+[installed](https://display.liken.sh/docs/guides/install/) on your
+[`liken`](https://liken.sh/docs/) cluster.
+
+The claim names the screen. The scheduler places the pod, and the
+container receives a Wayland socket that the compositor opened for
+that claim. A window on that socket is a window on that screen.
+
+## 1. Pick the screen
+
+If the
+[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
+objects are new to you, read
+[How the pieces fit](https://display.liken.sh/docs/guides/#how-the-pieces-fit) first.
+
+List what a node offers:
+
+    kubectl get resourceslice <node>-display.liken.sh -o yaml
+
+Each device is one connector, with the attached monitor's facts as
+attributes. Write a selector against them in
+[Common Expression Language (CEL)](https://kubernetes.io/docs/reference/using-api/cel/).
+Three useful forms:
+
+    # by connector
+    device.attributes["display.liken.sh"].connector == "HDMI-A-1"
+
+    # by monitor, so the claim survives a re-cabling
+    has(device.attributes["display.liken.sh"].model) &&
+    device.attributes["display.liken.sh"].model == "LG HDR WQHD"
+
+    # any screen at least 1920 pixels wide
+    has(device.attributes["display.liken.sh"].widthPixels) &&
+    device.attributes["display.liken.sh"].widthPixels >= 1920
+
+Guard `model` and `widthPixels` with `has()`, as above. They come
+from the monitor and are absent on an empty connector, and a
+selector that reads a missing attribute fails the whole allocation.
+`connector` needs no guard, because every device publishes it.
+[Devices](https://display.liken.sh/docs/reference/devices/) lists every attribute.
+
+## 2. Write the claim
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-screen
+      namespace: house
+    spec:
+      devices:
+        requests:
+          - name: screen
+            exactly:
+              deviceClassName: display-output
+              selectors:
+                - cel:
+                    expression: |
+                      device.attributes["display.liken.sh"].connector == "HDMI-A-1"
+              tolerations:
+                - key: display.liken.sh/disconnected
+                  operator: Exists
+                  effect: NoExecute
+                  tolerationSeconds: 30
+
+Tolerate `display.liken.sh/disconnected`. Its effect is `NoExecute`,
+and `tolerationSeconds` says how long your pod may hold a tainted
+screen before the eviction controller ends it. A monitor that goes
+dark does not taint its connector, so this is not what carries you
+through an input change. Thirty seconds keeps the pod through a
+restart of the compositor's container, which is a restart of every
+screen on that machine. A claim on a
+connector with no monitor parks the pod `Pending`, visibly, and the
+pod starts on its own when a monitor is plugged in.
+
+## 3. Reference the claim from a `Deployment`
+
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: kitchen-kiosk
+      namespace: house
+    spec:
+      replicas: 1
+      strategy:
+        type: Recreate
+      selector:
+        matchLabels:
+          app: kitchen-kiosk
+      template:
+        metadata:
+          labels:
+            app: kitchen-kiosk
+        spec:
+          resourceClaims:
+            - name: screen
+              resourceClaimName: kitchen-screen
+          containers:
+            - name: browser
+              image: <your chromium image>
+              args:
+                - --kiosk
+                - https://grafana.example.com/
+              resources:
+                claims:
+                  - name: screen
+
+One line makes this work. `resources.claims` gives the container the
+claim. That is what places the pod, and it is what delivers the
+socket. The program needs no flag and no app-id. The compositor reads
+which screen a window belongs on from the socket it arrived on.
+
+The image is yours. Any Wayland client works; the operator delivers
+only the socket.
+
+`strategy: Recreate` matters. Pods that share one `ResourceClaim`
+share its screen, and the compositor refuses nothing. During a
+rolling update the old pod and the new pod would both hold a window
+on the screen, the newer one on top and the older one still drawing
+under it until it ends. `Recreate` ends the old pod first.
+
+## 4. What the container receives
+
+A mount and three environment variables. No device node: a Wayland
+client draws through the compositor, which holds the card.
+
+| What | Value |
+|---|---|
+| mount | `/var/run/display.liken.sh`, the compositor's runtime directory |
+| `XDG_RUNTIME_DIR` | `/var/run/display.liken.sh` |
+| `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket the compositor opened for this claim |
+| `DISPLAY_APP_ID` | the allocated output's name, such as `hdmi-a-1`; nothing reads it, and a later release stops delivering it |
+
+The socket identifies the claim. The compositor opened it for this
+claim and no other, so every window that arrives on it belongs to this
+claim. The [`Display`](https://display.liken.sh/docs/reference/displays/) reports the window
+under the claim's name in `status.surfaces`. Allocation keeps two
+workloads off one screen: the second pod cannot claim an output the
+first holds, so it remains pending until the first releases it. Use a
+[`Layout`](https://display.liken.sh/docs/guides/layout/) when two workloads must share one
+screen.
+
+## Ask for a mode
+
+A claim can state the resolution its screen runs. The operator
+writes it into the compositor's config, restarts the compositor,
+and delivers the screen only after the card reports the mode. The
+name is one of the values in the `modes` attribute, spelled as the
+kernel spells it, and it can include a refresh. `3840x1600@24` runs
+a 24 fps film without the 3:2 cadence a 60 Hz mode forces on it.
+The refresh is a whole number of hertz.
+
+A mode 3840 pixels wide or wider runs at an output scale of 2, and
+a narrower one at 1. The compositor states the scale to every
+client on the output. A client that lays out in logical pixels
+draws a 4K panel at the 1080p size and rasters at the panel's full
+resolution. A client that does not is scaled up so that it is
+readable. The rule reads the mode the output runs, whether the
+claim stated it or the monitor preferred it.
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-screen
+      namespace: house
+    spec:
+      devices:
+        requests:
+          - name: screen
+            exactly:
+              deviceClassName: display-output
+              selectors:
+                - cel:
+                    expression: |
+                      device.attributes["display.liken.sh"].connector == "HDMI-A-1"
+              tolerations:
+                - key: display.liken.sh/disconnected
+                  operator: Exists
+                  effect: NoExecute
+                  tolerationSeconds: 30
+        config:
+          - opaque:
+              driver: display.liken.sh
+              parameters:
+                mode: "1280x720"
+
+Do not state a mode casually. One compositor drives every output
+of the card, and it reads its config once at startup. So a mode on
+one connector restarts it and ends every Wayland client on every
+screen of that machine. The lab measured about 1.3 seconds of
+dark, plus whatever each client takes to come back.
+
+Run every display consumer under a controller. A bare `Pod` whose
+compositor restarted ends `Completed` and never starts again. A
+`Deployment` brings it back, and the `tolerationSeconds` above
+keeps the pod scheduled through the restart.
+
+A claim that asks for the mode the screen already runs delivers at
+once, with no restart. A claim that states no refresh matches
+whatever rate the screen runs under that name. Releasing the claim
+restarts nothing either. The screen keeps the mode until the next
+compositor start, and the slice's `currentMode` says what it runs,
+refresh included.
+
+## Set the panel's brightness and power
+
+A claim can state the panel's own brightness and power the way it
+states a mode, with two more parameters in the same opaque block.
+The parameters follow the claim's lifetime. For a setting the panel
+should hold with no claim attached, declare it on the panel's
+[`Display`](https://display.liken.sh/docs/reference/displays/) instead.
+
+    config:
+      - opaque:
+          driver: display.liken.sh
+          parameters:
+            brightness: 87
+            power: OnWhileClaimed
+
+`brightness` is a percentage from 0 to 100 of the panel's own
+maximum. `power: On` powers the panel on at prepare. `power:
+OnWhileClaimed` also powers it back down 30 seconds after the claim
+ends, so a movie pod that ends leaves a dark screen. A new claim that
+prepares on the same connector inside the 30 seconds cancels the
+power-down, so a `Deployment` rollout does not blink the screen. Use
+`On` for a workload whose screen must stay on when its pod stops for
+longer than that. The parameter also takes the lowercase `on` and
+`onWhileClaimed`, with the same meaning.
+
+The operator reads each control before it writes it, and a panel
+that already holds the value takes no write. So a prepare on a panel
+that is already on at the stated brightness changes nothing a person
+sees.
+
+Not every panel takes these. The operator asks each panel which
+controls it has and publishes the answers as the `controlsBrightness`
+and `controlsPower` attributes, so add the matching attribute to your
+selector:
+
+    selectors:
+      - cel:
+          expression: |
+            device.attributes["display.liken.sh"].connector == "HDMI-A-1" &&
+            has(device.attributes["display.liken.sh"].controlsBrightness)
+
+Without the selector, the scheduler can place the claim on a panel
+that refuses the protocol, and the prepare fails with the missing
+capability named. Some panels also ship with DDC/CI switched off in
+their on-screen menu. Turn it on there, and the attributes appear.
+
+Neither parameter restarts the compositor. A claim that states only
+these delivers without the dark second a mode costs.
+
+## Hold the panel's control channel
+
+The parameters above are set once, at prepare. A pod that speaks the
+panel's protocol itself while it runs claims the connector's control
+device instead, and receives the raw i2c node. Most pods never need
+it. Setting or temporarily overriding the panel goes through the
+[`Display`](https://display.liken.sh/docs/reference/displays/), and the operator writes the
+bus. One claim can take a screen and its control channel
+together, with a `matchAttribute` constraint tying the two requests
+to one monitor:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: movie-screen
+    spec:
+      devices:
+        requests:
+          - name: screen
+            exactly:
+              deviceClassName: display-output
+              selectors:
+                - cel:
+                    expression: |
+                      has(device.attributes["monitor.liken.sh"].id) &&
+                      device.attributes["monitor.liken.sh"].id == "boe-1080-display"
+          - name: control
+            exactly:
+              deviceClassName: display-control
+        constraints:
+          - requests: ["screen", "control"]
+            matchAttribute: monitor.liken.sh/id
+
+The `display-control` class is yours to create, like
+`display-output`;
+[Devices](https://display.liken.sh/docs/reference/devices/#the-control-device) gives its
+YAML. The container that names the `control` request receives
+`/dev/i2c-N` and `DISPLAY_CONTROL_BUS` holding that path. An init
+container that sets the brightness to 87 before the player starts,
+using the `ddcutil` in the operator image:
+
+    initContainers:
+      - name: brightness
+        image: ghcr.io/liken-sh/display-operator:latest
+        command: ["ddcutil"]
+        args: ["setvcp", "10", "87"]
+        resources:
+          claims:
+            - name: control
+
+`ddcutil` finds the bus itself from the one `/dev/i2c-*` node the
+claim delivered, so the command needs no bus number. A config block
+that states `mode`, `brightness`, or `power` must name the `screen`
+request when the claim also holds a control request. Those
+parameters act on outputs, and a control request takes none.
+
+Do not write to any i2c address other than `0x37`. The
+[reference](https://display.liken.sh/docs/reference/devices/#the-control-device) explains
+what is at `0x50` and why a write there follows the monitor to
+every machine it ever plugs into.
+
+## Unplugged monitors, moved monitors, and second screens
+
+**A monitor dark.** The device keeps its place in the slice and keeps
+publishing the monitor's identity, so your claim still allocates and
+your pod keeps running. Nothing is evicted. The client's Wayland
+connection never breaks, and its picture returns with the output.
+
+This covers every way a monitor goes dark: a cable reseated, an A/V
+receiver renegotiating its link on an input change, and a panel
+showing another source. A monitor that shows another input drops hot
+plug detect, and the kernel reports that exactly as it reports an
+unplugged cable, so the operator treats them the same and keeps the
+screen.
+
+A monitor somebody really unplugged therefore keeps its devices
+claimable, and your pod keeps drawing into nothing. Read the
+`Connected` condition on the `Display` to see what the wire says.
+
+**A monitor moved to another connector.** A claim that selects by
+`model` or by `serial` instead of by `connector` follows the
+monitor. The eviction controller ends the old pod on the dark
+connector, and its replacement allocates the output the monitor is
+on now.
+
+**Two screens from one pod.** One container drives one screen,
+because a container has one `WAYLAND_DISPLAY`. A pod that drives two
+screens runs two containers, each naming its own request in the
+claim.
+
+**A screen and its speakers.** A monitor's HDMI speakers belong to
+the [audio operator](https://audio.liken.sh). Both operators publish
+`monitor.liken.sh/id`, the same identity read from the same monitor.
+So one claim can request a screen from this driver and the matching
+audio output from that one. A `matchAttribute` constraint on
+`monitor.liken.sh/id` holds the two requests together.

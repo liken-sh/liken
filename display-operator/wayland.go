@@ -1,0 +1,686 @@
+package main
+
+// This file is the operator's own Wayland client: one standing,
+// listen-only connection to the compositor it launched. The registry
+// on that connection reports every output the compositor destroys or
+// creates, and the output events on it report the mode the
+// compositor serves. Both replace guesses the operator used to make
+// from the kernel's side of the card.
+//
+// The registry replaces a comparison of monitor identities. A
+// monitor that sleeps and wakes changes the kernel mode on its
+// connector and never changes its identity, and weston destroys and
+// re-creates the output for it, so a comparison of identities misses
+// the flap every sleeping monitor produces. The compositor is the
+// party that re-creates outputs, so it is the one source that cannot
+// miss one.
+//
+// The client writes the wire protocol itself, with the sizes and
+// opcodes below. It reads four interfaces, and a Wayland library is
+// a dependency this image does not otherwise carry.
+//
+// The connection dies with every compositor restart, the operator's
+// own restarts included, and a fresh connection treats the outputs
+// it finds as a baseline. That is the whole of the guard against a
+// restart reporting itself as a re-creation.
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net"
+	"sync"
+	"time"
+)
+
+// Every connection starts with wl_display as object 1, before
+// the client binds anything, so the first request needs no roundtrip.
+const displayObject uint32 = 1
+
+// The request opcodes. An opcode is the position of the request
+// in its interface's protocol definition, and the wire carries no
+// names, so these numbers are the contract.
+const (
+	displaySync        uint16 = 0
+	displayGetRegistry uint16 = 1
+	registryBind       uint16 = 0
+)
+
+// The event opcodes this client reads. Every other event is
+// skipped by the size its own header carries, so an interface's
+// remaining events cost nothing to ignore.
+const (
+	displayErrorEvent         uint16 = 0
+	displayDeleteIDEvent      uint16 = 1
+	registryGlobalEvent       uint16 = 0
+	registryGlobalRemoveEvent uint16 = 1
+	callbackDoneEvent         uint16 = 0
+	outputGeometryEvent       uint16 = 0
+	outputModeEvent           uint16 = 1
+	outputDoneEvent           uint16 = 2
+	outputNameEvent           uint16 = 4
+)
+
+// The arguments of the geometry event that come before the monitor's
+// make and model: the position, the physical size, and the subpixel
+// order. The client reads none of them and skips them by count, because
+// a Wayland argument list has no names in it.
+const outputGeometryLeader = 5
+
+// The one flag of the mode event this client reads: the mode
+// the output runs now. The other flag marks the monitor's preferred
+// mode, which is the panel's taste and not a fact about the screen.
+const outputModeCurrent = 0x1
+
+// The interface the watch binds, and the version whose name
+// event carries the connector's own name. Weston 14.0.2 advertises
+// version 4. A compositor that advertises less is bound at what it
+// offers and its outputs are tracked with no name, because the heal
+// decision reads no name; only the mode readback loses.
+const (
+	outputInterface = "wl_output"
+	outputVersion   = 4
+)
+
+// The version at which an output closes its batches with a done event.
+// The name is what keys an output to its connector, and the done event
+// is what makes a batch the output's answer, so an output bound below
+// this version states neither.
+const outputDoneVersion uint32 = 2
+
+// Libwayland's own connection buffer is 4096 bytes, so no
+// message a compositor sends is larger. The bound keeps a corrupt
+// header from allocating whatever its four bytes happen to state.
+const maxWaylandMessage = 4096
+
+// The first wait between two dials, and the longest that wait grows
+// to. The socket's arrival ends a wait early, so these bound only the
+// dials that no arrival starts: the dial into a socket that is bound
+// and not yet listening, and every dial while the runtime directory
+// has no watch.
+const (
+	compositorDialInterval = 250 * time.Millisecond
+	compositorDialLimit    = 4 * time.Second
+)
+
+var errShortMessage = errors.New("a Wayland message ended inside an argument")
+
+// The arguments of one message, read in order. Every read
+// after a failure answers a zero value, so a caller reads its whole
+// argument list and checks err once at the end.
+type waylandFields struct {
+	body []byte
+	err  error
+}
+
+func (f *waylandFields) uint() uint32 {
+	if f.err != nil {
+		return 0
+	}
+	if len(f.body) < 4 {
+		f.err = errShortMessage
+		return 0
+	}
+	value := binary.LittleEndian.Uint32(f.body)
+	f.body = f.body[4:]
+	return value
+}
+
+// skip reads past arguments a caller has no use for, by count. Every
+// argument before them has to be read first, because the wire states no
+// names and no offsets.
+func (f *waylandFields) skip(count int) {
+	for range count {
+		f.uint()
+	}
+}
+
+// A string argument is a length that counts the null
+// terminator, then the bytes, then padding that takes the whole
+// argument to a multiple of four.
+func (f *waylandFields) text() string {
+	length := f.uint()
+	if f.err != nil {
+		return ""
+	}
+	padded := (length + 3) &^ 3
+	if uint32(len(f.body)) < padded {
+		f.err = errShortMessage
+		return ""
+	}
+	text := f.body[:length]
+	f.body = f.body[padded:]
+	return string(bytes.TrimRight(text, "\x00"))
+}
+
+// The arguments of one request, written in order, in the same
+// encoding the fields above read.
+type waylandWords struct {
+	body []byte
+}
+
+func (w *waylandWords) putUint(value uint32) {
+	w.body = binary.LittleEndian.AppendUint32(w.body, value)
+}
+
+func (w *waylandWords) putText(value string) {
+	w.putUint(uint32(len(value)) + 1)
+	w.body = append(w.body, value...)
+	w.body = append(w.body, 0)
+	for len(w.body)%4 != 0 {
+		w.body = append(w.body, 0)
+	}
+}
+
+// One event: the object it came from, the opcode inside that
+// object's interface, and the arguments still to be read.
+type waylandEvent struct {
+	object uint32
+	opcode uint16
+	fields waylandFields
+}
+
+// The panel on a connector, as much of it as decides whether a re-
+// created output owes the canvas a restart: which monitor it is and
+// what mode it runs. The link history compares the monitor alone,
+// because a claim asks for a screen and not for a mode.
+type panelIdentity struct {
+	monitor string
+	mode    string
+}
+
+// What one output states about itself: the connector it drives, and the
+// panel on it. The panel is the compositor's own answer, the make and
+// the model it read out of the EDID and the mode it serves. At the
+// moment an output leaves, the kernel has already marked the connector
+// disconnected, and sysfs answers nothing about the monitor that was on
+// it.
+type outputIdentity struct {
+	connector string
+	panel     panelIdentity
+}
+
+// The connection. Object ids a client creates are its own to
+// allocate, counting up from wl_display's 1, and this client never
+// reuses one, so the compositor's delete_id events need no
+// bookkeeping.
+type waylandClient struct {
+	socket net.Conn
+	reader *bufio.Reader
+	lastID uint32
+}
+
+func newWaylandClient(socket net.Conn) *waylandClient {
+	return &waylandClient{socket: socket, reader: bufio.NewReader(socket), lastID: displayObject}
+}
+
+func (c *waylandClient) newID() uint32 {
+	c.lastID++
+	return c.lastID
+}
+
+// A message is the object id, then a word that carries the
+// whole message's size in its high half and the opcode in its low
+// half, then the arguments. The size counts the eight header bytes.
+//
+// The bytes are built apart from the write, because the capture
+// client sends the same bytes with a descriptor beside them.
+func waylandMessage(object uint32, opcode uint16, words waylandWords) []byte {
+	message := make([]byte, 0, 8+len(words.body))
+	message = binary.LittleEndian.AppendUint32(message, object)
+	message = binary.LittleEndian.AppendUint32(message, uint32(len(words.body)+8)<<16|uint32(opcode))
+	return append(message, words.body...)
+}
+
+func (c *waylandClient) request(object uint32, opcode uint16, words waylandWords) error {
+	_, err := c.socket.Write(waylandMessage(object, opcode, words))
+	return err
+}
+
+func (c *waylandClient) event() (waylandEvent, error) {
+	var header [8]byte
+	if _, err := io.ReadFull(c.reader, header[:]); err != nil {
+		return waylandEvent{}, err
+	}
+	object := binary.LittleEndian.Uint32(header[:4])
+	word := binary.LittleEndian.Uint32(header[4:])
+	size, opcode := word>>16, uint16(word)
+	if size < 8 || size > maxWaylandMessage {
+		return waylandEvent{}, fmt.Errorf("a Wayland message on object %d states a size of %d bytes", object, size)
+	}
+	body := make([]byte, size-8)
+	if _, err := io.ReadFull(c.reader, body); err != nil {
+		return waylandEvent{}, err
+	}
+	return waylandEvent{object: object, opcode: opcode, fields: waylandFields{body: body}}, nil
+}
+
+// The standing connection to the compositor, and what it reports. moved
+// is one report per output global that arrives or leaves. Its argument
+// is true when an output was re-created carrying a different panel or a
+// different mode than the one it replaced. A re-creation under the same
+// identity reports false: the canvases the surviving screens draw on
+// are the right size already, and a restart would end every client for
+// nothing.
+type outputWatch struct {
+	socketPath string
+	moved      func(recreated bool)
+	// The first wait between two dials and the longest one. They are
+	// fields so a test can make the fallback timer longer than the
+	// test, and prove that the socket's arrival starts the dial.
+	retry      time.Duration
+	retryLimit time.Duration
+	// Connected runs each time a connection to a compositor opens,
+	// after the watch reports that it serves. The operator wakes the
+	// passes that read the card with it, because a closed card gate
+	// cost them the fields that the card fills. It is nil until the
+	// operator wires it, and a nil hook wakes nothing.
+	connected func()
+
+	// The connector each live output global names, and the mode
+	// the compositor reports on each connector. Both belong to the
+	// standing connection, so both start empty on the connection that
+	// follows a restart.
+	mu      sync.Mutex
+	names   map[uint32]string
+	modes   map[string]string
+	session uint64
+	// Live is set while a connection to a compositor stands. The card
+	// gate reads it: weston opens the card before it listens on its
+	// socket, so a live connection means the compositor already holds
+	// the card, and an open by the operator cannot take DRM master.
+	live bool
+	// Changed closes when the answer changes, and a new channel takes
+	// its place. A mode switch waits on it for the compositor that
+	// follows the restart.
+	changed chan struct{}
+}
+
+func newOutputWatch(socketPath string, moved func(recreated bool)) *outputWatch {
+	return &outputWatch{
+		socketPath: socketPath,
+		moved:      moved,
+		retry:      compositorDialInterval,
+		retryLimit: compositorDialLimit,
+		names:      map[uint32]string{},
+		modes:      map[string]string{},
+		changed:    make(chan struct{}),
+	}
+}
+
+// Wake every reader that waits on the answer. The caller holds mu.
+func (w *outputWatch) announce() {
+	close(w.changed)
+	w.changed = make(chan struct{})
+}
+
+// What the compositor reports it serves: the mode on each
+// connector it names, and which connection reported it. The session
+// number is how a mode switch tells an answer from the compositor
+// that started after its restart from an answer the ended compositor
+// left behind.
+type servedOutputs struct {
+	session uint64
+	modes   map[string]string
+	// Changed closes when the answer moves on from this one. It is nil
+	// when the source raises no such event, and a reader then looks
+	// again on its fallback timer.
+	changed <-chan struct{}
+}
+
+func (w *outputWatch) served() servedOutputs {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return servedOutputs{session: w.session, modes: maps.Clone(w.modes), changed: w.changed}
+}
+
+func (w *outputWatch) name(global uint32, connector string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.names[global] = connector
+}
+
+// The mode one output serves, recorded when the done event
+// closes the batch that stated it. A batch that named no current
+// mode leaves the last answer standing, and a batch that arrives
+// before the output's name event is dropped, because a mode with no
+// connector answers no question the operator asks.
+func (w *outputWatch) serves(global uint32, mode string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	connector := w.names[global]
+	if connector == "" || mode == "" {
+		return
+	}
+	w.modes[connector] = mode
+	w.announce()
+}
+
+func (w *outputWatch) forget(global uint32) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.modes, w.names[global])
+	delete(w.names, global)
+	w.announce()
+}
+
+// A dead compositor serves nothing. Its answers empty the
+// moment the connection ends, not when the next one opens, so the
+// window between two compositors reports no mode instead of the
+// last answer of the one that died.
+//
+// The end of the connection also closes the card gate. A compositor
+// that has exited holds no DRM master, and an open by the operator in
+// that time would take master from the next compositor.
+func (w *outputWatch) closed() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.names, w.modes = map[uint32]string{}, map[string]string{}
+	w.live = false
+	w.announce()
+}
+
+// A new connection starts from nothing. Everything the ended
+// compositor reported about its outputs goes with it, because a dead
+// compositor serves no canvases at any mode.
+//
+// The connection opens the card gate, and the hook runs after the
+// lock is released, so a pass that it wakes finds the gate open.
+func (w *outputWatch) opened() {
+	w.mu.Lock()
+	w.names, w.modes = map[uint32]string{}, map[string]string{}
+	w.session++
+	w.live = true
+	w.announce()
+	w.mu.Unlock()
+	if w.connected != nil {
+		w.connected()
+	}
+}
+
+// Serving answers whether a connection to a compositor stands, which
+// is the card gate's condition to open the card.
+func (w *outputWatch) serving() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.live
+}
+
+// Weston states a mode as its size in pixels and its refresh
+// in millihertz. A claim, weston.ini, and the kernel all state a
+// mode as WIDTHxHEIGHT@REFRESH with the refresh in whole hertz, so
+// the event is rendered into that one vocabulary, rounded to the
+// nearest hertz the way the kernel rounds its own vrefresh.
+func westonMode(width, height, refreshMilliHertz uint32) string {
+	if width == 0 || height == 0 {
+		return ""
+	}
+	name := fmt.Sprintf("%dx%d", width, height)
+	if refreshMilliHertz == 0 {
+		return name
+	}
+	return fmt.Sprintf("%s@%d", name, westonRefresh(refreshMilliHertz))
+}
+
+// The compositor states a refresh in millihertz, and every other
+// party in this repository states it in whole hertz, rounded the way
+// the kernel rounds its own vrefresh.
+func westonRefresh(refreshMilliHertz uint32) uint32 {
+	return (refreshMilliHertz + 500) / 1000
+}
+
+// The loop. One session runs for as long as the compositor
+// lives, and the wait between sessions is the price of a compositor
+// that is restarting. A mode switch waits for the connection that
+// follows the restart, so the loop dials the moment the new socket
+// arrives (arrivals.go). Nothing here reports a failure, because a
+// session ends every time the operator restarts the compositor
+// itself, and a log line for every planned restart would say
+// nothing.
+func (w *outputWatch) run(ctx context.Context) {
+	watch := newArrivals(w.socketPath)
+	defer watch.close()
+	delay := w.retry
+	arrived := false
+	for {
+		watch.ready()
+		session := w.served().session
+		_ = w.connection(ctx)
+		w.closed()
+		served := w.served().session != session
+		delay = nextDialWait(served, arrived, delay, w.retry, w.retryLimit)
+		arrived = watch.wait(ctx, delay)
+		if ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// One connection, from the dial to the end of the compositor.
+// The sync marks the end of the first burst of globals. A fresh
+// compositor lays every canvas out right, so the outputs it
+// announces before the sync answers are the baseline and owe
+// nothing.
+func (w *outputWatch) connection(ctx context.Context) error {
+	socket, err := net.DialTimeout("unix", w.socketPath, socketDialTimeout)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = socket.Close() }()
+
+	// The read loop below blocks in the kernel, so the way the
+	// context ends this connection is by closing the socket under it.
+	ended := make(chan struct{})
+	defer close(ended)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = socket.Close()
+		case <-ended:
+		}
+	}()
+
+	w.opened()
+	client := newWaylandClient(socket)
+	registry := client.newID()
+	var words waylandWords
+	words.putUint(registry)
+	if err := client.request(displayObject, displayGetRegistry, words); err != nil {
+		return err
+	}
+	baseline := client.newID()
+	words = waylandWords{}
+	words.putUint(baseline)
+	if err := client.request(displayObject, displaySync, words); err != nil {
+		return err
+	}
+
+	// What this connection has seen. live turns on when the
+	// first burst ends, and the two marks are the halves of one
+	// re-creation by an output the compositor never named, cleared
+	// together when the report pairs them.
+	var live, removed, created bool
+	outputs := map[uint32]uint32{}
+	bound := map[uint32]uint32{}
+	// The current mode each output has stated since its last
+	// done event. The protocol makes a batch of output events atomic
+	// at the done event, so a mode is not the output's answer until
+	// the done event closes the batch it came in.
+	stating := map[uint32]string{}
+	// What each output has said about itself so far, built up from the
+	// geometry, name, and mode events of its own batches.
+	stated := map[uint32]outputIdentity{}
+	// The outputs bound since the baseline whose first batch has not
+	// closed yet. An output means nothing to the canvas until it has named
+	// its connector and its mode, so the report on a creation waits for
+	// its done event.
+	arriving := map[uint32]bool{}
+	// The two halves of a named re-creation, each keyed by the connector:
+	// what a connector's output left with, and what arrived on a connector
+	// before the output it replaces left. Weston defers a destruction
+	// across a pending flip, so the two halves arrive in either order.
+	departed := map[string]panelIdentity{}
+	arrived := map[string]panelIdentity{}
+	report := func() {
+		if removed && created {
+			removed, created = false, false
+			w.moved(true)
+			return
+		}
+		w.moved(false)
+	}
+	// The two halves of one re-creation, paired. The debt is the
+	// difference between them: a connector that comes back carrying the
+	// same panel at the same mode has nothing for a restart to correct.
+	relink := func(left, back panelIdentity) {
+		w.moved(left != back)
+	}
+
+	for {
+		event, err := client.event()
+		if err != nil {
+			return err
+		}
+		switch {
+		case event.object == displayObject && event.opcode == displayErrorEvent:
+			object := event.fields.uint()
+			code := event.fields.uint()
+			message := event.fields.text()
+			return fmt.Errorf("the compositor refused object %d with code %d: %s", object, code, message)
+		case event.object == displayObject && event.opcode == displayDeleteIDEvent:
+			// The compositor releases an id the client may
+			// reuse. This client counts up and reuses none.
+		case event.object == baseline && event.opcode == callbackDoneEvent:
+			live = true
+		case event.object == registry && event.opcode == registryGlobalEvent:
+			global := event.fields.uint()
+			name := event.fields.text()
+			version := event.fields.uint()
+			if err := event.fields.err; err != nil {
+				return err
+			}
+			if name != outputInterface {
+				continue
+			}
+			id := client.newID()
+			agreed := min(version, outputVersion)
+			words = waylandWords{}
+			words.putUint(global)
+			words.putText(outputInterface)
+			words.putUint(agreed)
+			words.putUint(id)
+			if err := client.request(registry, registryBind, words); err != nil {
+				return err
+			}
+			outputs[global], bound[id] = id, global
+			// An output that states no done event closes no batch, so it never
+			// names itself, and the only moment it has to report is this one.
+			// Every compositor this operator runs states one.
+			if live && agreed >= outputDoneVersion {
+				arriving[id] = true
+				continue
+			}
+			created = created || live
+			report()
+		case event.object == registry && event.opcode == registryGlobalRemoveEvent:
+			global := event.fields.uint()
+			if err := event.fields.err; err != nil {
+				return err
+			}
+			id, ours := outputs[global]
+			if !ours {
+				continue
+			}
+			delete(outputs, global)
+			delete(bound, id)
+			delete(stating, id)
+			delete(arriving, id)
+			left := stated[id]
+			delete(stated, id)
+			w.forget(global)
+			switch {
+			case !live:
+				w.moved(false)
+			case left.connector == "":
+				removed = true
+				report()
+			default:
+				if back, waiting := arrived[left.connector]; waiting {
+					delete(arrived, left.connector)
+					relink(left.panel, back)
+					continue
+				}
+				departed[left.connector] = left.panel
+				w.moved(false)
+			}
+		default:
+			global, ours := bound[event.object]
+			if !ours {
+				continue
+			}
+			switch event.opcode {
+			case outputGeometryEvent:
+				event.fields.skip(outputGeometryLeader)
+				vendor := event.fields.text()
+				model := event.fields.text()
+				if err := event.fields.err; err != nil {
+					return err
+				}
+				identity := stated[event.object]
+				identity.panel.monitor = vendor + " " + model
+				stated[event.object] = identity
+			case outputNameEvent:
+				connector := event.fields.text()
+				if err := event.fields.err; err != nil {
+					return err
+				}
+				w.name(global, connector)
+				identity := stated[event.object]
+				identity.connector = connector
+				stated[event.object] = identity
+			case outputModeEvent:
+				flags := event.fields.uint()
+				width := event.fields.uint()
+				height := event.fields.uint()
+				refresh := event.fields.uint()
+				if err := event.fields.err; err != nil {
+					return err
+				}
+				if flags&outputModeCurrent == 0 {
+					continue
+				}
+				stating[event.object] = westonMode(width, height, refresh)
+			case outputDoneEvent:
+				mode := stating[event.object]
+				w.serves(global, mode)
+				delete(stating, event.object)
+				identity := stated[event.object]
+				if mode != "" {
+					identity.panel.mode = mode
+					stated[event.object] = identity
+				}
+				if !arriving[event.object] {
+					continue
+				}
+				delete(arriving, event.object)
+				if identity.connector == "" {
+					created = true
+					report()
+					continue
+				}
+				if left, waiting := departed[identity.connector]; waiting {
+					delete(departed, identity.connector)
+					relink(left, identity.panel)
+					continue
+				}
+				arrived[identity.connector] = identity.panel
+				w.moved(false)
+			}
+		}
+	}
+}

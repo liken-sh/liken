@@ -1,0 +1,329 @@
+# Plans
+
+This directory holds the operator's design documents. Each one is
+numbered in sequence and keeps its number for life.
+
+The form follows liken's own `plans/`. A document states a problem,
+states the design that answers it, and states what was considered and
+set aside. It separates what was measured from what was only read, and
+it names where the measurement ran.
+
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
+
+The pattern these documents follow is documented in liken's repository:
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
+and this operator's own instance,
+[milestone 57](https://github.com/liken-sh/liken/blob/main/plans/completed/57-the-display-operator.md).
+
+The manual at [display.liken.sh](https://display.liken.sh) says how
+to deploy the operator and how to claim an output. These documents
+say why it is built the way it is.
+
+## Designs
+
+* [01, The compositor image](completed/01-the-compositor-image.md). Built. The
+  image is a library closure on scratch, and the pod runs one
+  container.
+* [02, An output for every connector](completed/02-an-output-for-every-connector.md).
+  Built, and drilled on liken-1 on 2026-08-17. Every connector gets an
+  `[output]` section at startup. A preload shim moves the compositor's
+  hotplug subscription to the kernel's own netlink group, so a monitor
+  that arrives on a dark connector routes without a restart. Answers
+  and replaces the open problem "Routing is narrower than inventory".
+* [03, The modes a monitor accepts](completed/03-the-modes-a-monitor-accepts.md).
+  Built, and adopted on liken-1 on 2026-08-19. Each connected output
+  publishes a `modes` attribute: the kernel's list, deduplicated, cut
+  to whole names under the API's 64-character limit.
+* [04, The kubelet supervises the compositor](completed/04-the-kubelet-supervises-the-compositor.md).
+  Built and drilled on liken-1 on 2026-08-19. Weston moves to a container of its own, the
+  kubelet restarts it alone, and the operator taints every output
+  while nothing answers on the compositor's socket. The prerequisite
+  for a claim that selects a mode.
+* [05, Choosing the mode](completed/05-choosing-the-mode.md). Built
+  and drilled on liken-1 on 2026-08-19. A claim's opaque config
+  states a resolution, and the operator rewrites the compositor's
+  config, restarts it, and delivers only after the readback reports
+  the mode.
+* [06, Matching the refresh](completed/06-matching-the-refresh.md).
+  Built, and drilled on liken-1 on 2026-08-19. The mode grows an
+  integer refresh, validated against the kernel's own mode list, so
+  a 24 fps film runs on a 24 Hz mode. Absorbs and replaces the open
+  problem "A mode list read too early goes stale": every prepare
+  that reached the card republishes the slice.
+* [07, Sharing the screen](completed/07-sharing-the-screen.md). Built,
+  and drilled on liken-1 through the media-operator's idle screen: the
+  draw device is a second device per connector,
+  `AllowMultipleAllocations`, delivering only the compositor socket, so
+  many clients draw on one output while the exclusive output device
+  still owns the mode. Panel power for a shared screen goes through the
+  control device its standing holder claims, with the one-writer rule
+  in the device reference; the media-operator's
+  [plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/completed/17-the-idle-screen-powers-the-panel.md)
+  is that holder, drilled 2026-08-24 with the backlight read at 0 over
+  DDC and restored on a press.
+* [08, A Display for every panel](completed/08-a-display-for-every-panel.md).
+  Built, and drilled on liken-1 on 2026-08-27 through releases
+  2026.08.27-002 and -003. One cluster-scoped `Display` per probed
+  monitor: `status` publishes the capability string's common core and
+  the last observed values, the resting `spec` is the cluster owner's,
+  and `spec.override` is the temporary layer the media-operator's
+  [plan 18](https://github.com/liken-sh/media-operator/blob/main/plans/completed/18-blanking-moves-to-the-display.md)
+  writes. The capture commits to `status` before the panel goes dark,
+  which answers the lost-brightness failure of the sidecar's process
+  memory: the drill deleted the operator mid-override and the captured
+  100 survived, and the media path relit a dark panel 5 seconds after
+  its idle pod died. -003 carries the rollout's three findings: `spec`
+  defaults to `{}` because server-side apply prunes an empty spec, the
+  probe's reply delay doubles across retries for the LG that answers
+  late, and a refusing panel is re-asked once per 60s window because
+  an input switch fires no event. The claim parameters, the power
+  record file, and the `-control` device retire only after plan 18
+  deploys everywhere that holds a control claim.
+* [09, The Display reports the screen](completed/09-the-display-reports-the-screen.md).
+  Built, and drilled on liken-1 on 2026-08-27 in releases 2026.08.27-006
+  and -007. `status` gains `currentMode`, the
+  kernel's whole mode list where the slice attribute is cut to the
+  API's value limit, the EDID identity, and the physical size.
+  `spec.mode` declares the mode the screen rests at: a claim's own
+  mode wins for its lifetime, and the unprepare that frees the screen
+  restores the declaration, waking the controller so the restore is
+  prompt. Drilled end to end: both panels derived their identity and
+  full lists, a declared 1280x720@60 landed in 5 seconds and the
+  1080 declaration returned in 15, and a film's claim held 720p for
+  its run with the resting mode read back under a second after the
+  delete. The same evening the panel refused to sync 720p it had
+  accepted that morning, which became the open problem
+  [a stuck mode prepare restarts the compositor without bound](open-problems/a-stuck-mode-prepare-restarts-the-compositor-without-bound.md).
+* [10, The compositor heals the canvas](completed/10-the-compositor-heals-the-canvas.md).
+  Built 2026-08-27, and drilled to a recovery by a rougher road.
+  kiosk-shell orphans a surface when its
+  output is destroyed and never re-sizes it, unfixed upstream through
+  16.0.0, so a flap left the lab's portable panel cropped to an
+  ultrawide canvas. The operator now restarts the compositor when an
+  output is re-created, the outputs have settled for 5 seconds, and
+  no claim holds a screen; the media layer's window watchdog carries
+  every idle client through. The drill forced a disconnect through
+  the kernel's debugfs connector force, and Weston segfaulted on the
+  flap, exit 139, the crash upstream documents unreleased guards
+  for, before the heal could act: the kubelet's supervision and the
+  media watchdog recovered every client with correct canvases and no
+  hands. So hard flaps are covered by crash-plus-supervision on this
+  Weston, and the heal is the designed path for the gentle
+  re-creations that mis-size surfaces without a crash, the case the
+  morning's cropped canvas proved exists; it is unit-proven and
+  waits for one to fire live. The kiosk-shell defect this worked
+  around left with kiosk-shell itself in plan 17.
+* [11, Darkening respects the attached input](completed/11-darkening-respects-the-attached-input.md).
+  Built, and drilled on liken-1 on 2026-08-27 in release
+  2026.08.27-007. A shared monitor dims every input at
+  once, so a darkening override now waits while the panel shows an
+  input other than this machine's own. The machine's input derives
+  from the EDID: an HDMI sink serves each port an EDID whose vendor
+  block names that port, proven on both lab panels, published as
+  `status.attachedInput`; `spec.attachedInput` overrides the
+  derivation for DisplayPort cables and panels that serve one address
+  everywhere. The first build compared against the last observed
+  input and dimmed the ultrawide over the other machine's picture,
+  because that panel answers the input query with an invalid reply
+  while it shows another source and a failed poll keeps the last
+  value; -007 reads the shown input fresh at decision time, and a
+  read that fails defers. Drilled eyes-on: the override stood
+  unactuated through a working session on the other input, and the
+  deferred blank landed capture-first within a poll window of the
+  switch back. Superseded by
+  [plan 13](completed/13-the-attached-input-retires.md) the same week: the
+  same panel also answers the query with the name of the port the
+  question arrived on, so the guard read a mirror, and the decision
+  moved to the media layer's per-`Player` idle policy.
+
+* [12, The compositor reports its outputs](completed/12-the-compositor-reports-its-outputs.md).
+  Built and drilled on liken-1 on 2026-08-27, in releases
+  2026.08.27-008 and -009. The operator holds one standing,
+  listen-only Wayland connection to its compositor. The registry's
+  own output events replace plan 10's comparison of monitor
+  identities, which was blind to the flap every sleeping monitor
+  produces: the same monitor sleeping and waking. The `wl_output`
+  mode events replace the kernel poll as the mode switch's readback,
+  and `status.mode` reports the mode's two values, `kernel` and
+  `weston`, whose gap is the canvas defect. The drill forced a
+  disconnect and return through the connector's sysfs `status` file,
+  and the heal fired on its designed path for the first time: the
+  deferral while the outputs settled, then the restart, with every
+  canvas correct and the compositor alive throughout. The same drill
+  caught the -008 defect that -009 fixes: the watch kept a dead
+  compositor's modes until the next connection opened, so a readback
+  failure named a fossil; the answers now empty the moment a
+  connection ends.
+* [13, The attached input retires](completed/13-the-attached-input-retires.md).
+  Built on 2026-08-27, in release 2026.08.27-010. Plan 11's guard asked the panel which input it shows, and the
+  bench proved the answer is a mirror: the shared monitor names the
+  port the question arrived on, always. The attached input is
+  removed entirely, a darkening override actuates whenever the
+  panel answers, and the decision the guard guessed at belongs in the
+  media layer's per-`Player` idle policy, where the screen's owner
+  states it once.
+
+* [14, Prometheus metrics](completed/14-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
+  Claimed output availability, control failures, and kernel/compositor
+  mode agreement, with alert rules that allow intentional darkness.
+* [15, The output states its scale](completed/15-the-output-states-its-scale.md). Built on 2026-09-07.
+  An output whose mode is 3840 wide or wider gets `scale=2` in its
+  section, so every client draws a 4K panel at the 1080p size.
+* [16, The Vulkan base image](completed/16-the-vulkan-base-image.md). Built on
+  2026-09-08. A third image, `ghcr.io/liken-sh/vulkan`, under the
+  compositor: the loader, the Intel and AMD drivers, and the client
+  libraries, on scratch. The media browser and the idle screen build
+  from it, and a node that draws holds LLVM once.
+* [20, The mpv image](completed/20-the-mpv-image.md). Built on
+  2026-09-11. mpv and every library and data file it opens by name,
+  on the ffmpeg image, so the media operator's player leaves its
+  distribution base.
+* [19, The VA-API and ffmpeg images](completed/19-the-vaapi-and-ffmpeg-images.md).
+  Built on 2026-09-11. Two more images on the Vulkan base:
+  `ghcr.io/liken-sh/vaapi`, the VA-API loader and the Intel media
+  driver, and `ghcr.io/liken-sh/ffmpeg` on it, for a program that
+  decodes on the node's GPU.
+* [17, A Layout for every screen](completed/17-a-layout-for-every-screen.md).
+  Built and drilled on liken-1 on 2026-09-10, in release
+  2026.09.10-001, and rolled to the house the same evening. The
+  compositor moves to ivi-shell under a controller module of the
+  operator's own, every claim gets its own Wayland socket so the
+  compositor holds each surface under the name of the claim that
+  delivered it, and a cluster-scoped `Layout` states regions with
+  fractional rectangles and label selectors. A `Display` names its
+  `Layout`, and one that names none shows every surface fullscreen,
+  newest on top, which is kiosk-shell's behavior: both panels came
+  back through that default with no `Layout` written, and the first
+  `Play` after the roll arrived on its own claim socket with its
+  labels in `status.surfaces`. The four-way drill on the lab's
+  portable panel, an Apollo Lake box, held the browser and three
+  films in four quadrants at 26 percent node CPU: 90 to 140
+  millicores for each hardware-decoded film, 2 for the browser, 99
+  for weston composing four surfaces through the GL renderer, and the
+  package at 70 C. One AV1 file decoded in software at 1338
+  millicores, so the drill used H.264 or HEVC on that box. The drill
+  found two defects, and both were fixed the same day: libwayland's
+  `flock` refused a claim's socket name reopened inside one
+  compositor lifetime, so the module owns the listening socket
+  through `wl_display_add_socket_fd`; and mpv answered a 1920 by 1080
+  configure with a 1920 by 800 buffer, which media-operator fixes
+  with `--keepaspect-window=no`. Whether the DRM backend keeps a
+  fullscreen surface on a scanout plane under ivi-shell is still not
+  measured.
+* [18, A surface leaves with a fade](completed/18-a-surface-leaves-with-a-fade.md).
+  Built and drilled on liken-1 on 2026-09-10, in release
+  2026.09.10-001, and rolled to the house the same evening. A
+  region's `transition` gains an `exit` half beside its `enter` half,
+  the module's `hide` carries a transition, and a surface that stops
+  matching a region fades out. The compositor fades a surface it
+  still holds, so the workload that wants a soft exit keeps drawing
+  while the fade runs instead of fading its own picture. A hide with
+  `fade 600`, read at 531 ms, was fully painted and at 69 percent of
+  its full brightness, and zero after. Under the `theater` `Layout`
+  on the lab's portable panel, a film labeled
+  `media.liken.sh/ending` by hand emptied the play region in 231 ms,
+  including the status write; with media-operator's own label, three
+  remote exits put the label on the pod within about 50 ms of the
+  ending, and the surface was gone at the 500 ms grace. The `theater`
+  `Layout` is named on that panel and on the house's `Display`s.
+
+* [21, The compositor handshake](completed/21-the-compositor-handshake.md).
+  Built on 2026-09-16. The liveness probe sends `wl_display.sync` and
+  reads the reply, so a frozen compositor reads as not serving within
+  the probe's 2 s bound, where a check that only connected read it as
+  serving for 124 s. A screen whose compositor serves nobody reports
+  no surfaces and no layout, and carries the `CompositorServing`
+  condition with the socket's own words as its message.
+  A freeze that holds for 10 s ends with `SIGKILL`, because nothing
+  else in the pod ends a process that does not exit, and the kubelet
+  starts the compositor again.
+* [22, The screen over HTTP](completed/22-the-screen-over-http.md).
+  Built on 2026-09-16, and drilled on liken-1 on 2026-09-16 and
+  2026-09-17. A `display-api` `Deployment` and a capture sidecar in
+  the operator's pod serve a `Display`'s screen over HTTPS: one frame
+  as PNG or JPEG, a clip as H.264 in fragmented MP4, or an MJPEG
+  stream, cut by W3C Media Fragments `t=` and `xywh=`, encoded on the
+  node's GPU, and stored nowhere. The layout module opens the one
+  capture socket the compositor's screenshot authority admits. The
+  display instance of the shape audio-operator's plan 09 and
+  media-operator's plan 34 share. On the lab's Apollo Lake box, whose
+  driver has no VA-API post-processing so the color conversion runs
+  on the CPU, a 1080p clip cost about one core at 15 fps and about
+  two at 30 fps, held 30.0 fps over 441 frames, and put no two
+  captures in flight over 1,334 frames.
+* [23, The CEC physical address](23-the-cec-physical-address.md).
+  Proposed. Each connected `Display` reports the HDMI-CEC physical
+  address that its EDID gives the machine's port, as
+  `status.physicalAddress` and a slice attribute, and keeps the last
+  valid address while a receiver in standby serves none.
+  equipment-operator's CEC adapter announces this address when it
+  speaks for the machine.
+* [24, The compositor holds DRM master](completed/24-the-compositor-holds-drm-master.md).
+  Built on 2026-09-27, and drilled on liken-1 on 2026-09-27. The operator opens the card only while its output watch
+  holds a connection to the compositor, and each open drops DRM master
+  before any other ioctl. A drop that succeeds means the compositor
+  holds no master, and the operator restarts it once with the reason
+  `masterless`. Answers and replaces the open problem "The compositor
+  can start without DRM master".
+* [25, A control claim needs no compositor](completed/25-a-control-claim-needs-no-compositor.md).
+  Built on 2026-09-27. A claim that holds only control devices
+  prepares while no compositor runs, and `compositorDown` leaves
+  control devices untainted, because DDC/CI needs no compositor.
+  Answers and replaces the open problem "A control claim waits for the
+  compositor".
+* [26, The watches use client-go](completed/26-the-watches-use-client-go.md).
+  Built on 2026-09-27. The seven Kubernetes watches of the operator and
+  display-api run on client-go's reflector with the dynamic client, and
+  the hand-written watch loop is gone. The stripped operator binary
+  grows from 15.4 MB to 20.2 MB.
+
+## Open problems
+
+[`open-problems/`](open-problems/) holds the questions this operator
+owes an answer to. Those documents have no number, because nobody has
+decided yet what work they become.
+
+* [The library closure includes loads that `ldd` cannot report](open-problems/loads-that-ldd-cannot-see.md).
+  Four kinds of load and four data paths were added by hand, and
+  nothing in the build reports the next one.
+* [LLVM is two thirds of the image](open-problems/llvm-is-two-thirds-of-the-image.md).
+  The image is already on scratch, and 68% of it is LLVM and the
+  libraries only LLVM needs, because Debian builds mesa with llvmpipe
+  and no liken machine runs llvmpipe. Plan 16 puts that LLVM in one
+  layer the compositor and the Vulkan clients share, and leaves the
+  problem itself open.
+* [The compositor drives one card](open-problems/the-compositor-drives-one-card.md).
+  One Weston binds one DRM device, so a node with two graphics cards
+  serves only the card the claim took.
+* [A stuck mode prepare restarts the compositor without bound](open-problems/a-stuck-mode-prepare-restarts-the-compositor-without-bound.md).
+  A claim stating a mode the panel will not sync loops the kubelet's
+  prepare retries through compositor restarts until the whole card
+  taints and the compositor enters restart backoff.
+* [The operator's restarts wait in the kubelet's crash backoff](open-problems/the-operators-restarts-wait-in-crash-backoff.md).
+  Each restart the operator orders is a container exit, so a second
+  restart within about 10 minutes waits 10 s before weston starts
+  again, and each later one waits twice as long, up to 5 minutes.
+  Two mode switches in a row on liken-1 each took about 30 s to show
+  a picture.
+* [Two monitors of one model share a Display](open-problems/two-monitors-of-one-model-share-a-display.md).
+  A `Display` name leaves out the serial, the node, and the connector,
+  so two monitors of one model are one `Display`, and on two nodes its
+  node and connector alternate every pass. The name cannot gain the
+  serial alone, because it is also the pairing identity that the ELD
+  must match.
+* [An external layout engine](open-problems/an-external-layout-engine.md).
+  Plan 17 decides every placement in one function. The seam where a
+  different engine would go is the `Service`, `EndpointSlice`, and
+  kube-proxy split, and it waits for a second engine to exist.
+* [A claim's listener outlives the claim](open-problems/a-claims-listener-outlives-the-claim.md).
+  libwayland removes no listening socket, so a closed claim's
+  descriptor stays open until the compositor restarts.
+* [A refused probe reads a dark panel every minute](open-problems/a-refused-probe-reads-a-dark-panel-every-minute.md).
+  A panel that refused its first probe is probed again every 60 s with
+  no power guard, so a panel that sleeps gets six DDC requests a
+  minute, and a DDC read wakes some panels. The poll has the same gap
+  for a dark panel that carries no power control.
