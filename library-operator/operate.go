@@ -59,9 +59,10 @@ const screenController = "library.liken.sh/media-browser"
 // A few reads are not from a store, because no watch can select them or
 // they run only when something falls due:
 //
-//   - The Secret each keyed MetadataProvider names, read on every pass,
-//     because the pass compares its resourceVersion to decide whether a
-//     check is due. A person names the Secret, and no label selects it.
+//   - The Secret each keyed MetadataProvider names, read only when a
+//     check of that provider is due (providercadence.go). A person names
+//     the Secret, and no label selects it, so no watch can select it
+//     without list and watch on every Secret in the cluster.
 //   - The events about a library Job's pod that has not started, while
 //     it has not started.
 //   - A StorageClass, read by name the first time a pass creates a claim

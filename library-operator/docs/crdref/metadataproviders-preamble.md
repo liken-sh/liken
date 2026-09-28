@@ -83,14 +83,16 @@ of a `Library`'s `Job` through a `secretKeyRef` that the kubelet
 resolves. It never passes through a status, a log, or the
 catalog.
 
-The check calls a provider when the operator starts, when the
-provider's `metadata.generation` changes, and when its `Secret` changes.
-Otherwise it calls a provider whose last answer was `Reachable` or
-`Refused` once an hour, and one whose last answer was `Unreachable` or
-`Unavailable` every five minutes. A refused key does not repair itself,
-so an edit of the `Secret` is what calls again at once. An account with
-a daily allowance, such as OMDb's thousand calls, spends at most
-twenty-four of them a day on the check.
+The check calls a provider when the operator starts and when the
+provider's `metadata.generation` changes. Otherwise it calls a provider
+whose last answer was `Reachable` once an hour, and every other
+provider every five minutes. The operator reads the `Secret` only for
+a check call, because the `Job` takes the key through its
+`secretKeyRef`. An edit of the `Secret` alone therefore shows at the
+next call: within five minutes for a `Refused` or `NoSecret` provider,
+and within the hour for a `Reachable` one. An account with a daily
+allowance, such as OMDb's thousand calls, spends at most twenty-four of
+them a day on the check while its key works.
 
 The `imdb` block has no API to call. IMDb publishes its datasets as
 files, so the check sends one `HEAD` request for each file that the

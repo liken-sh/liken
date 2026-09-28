@@ -79,11 +79,13 @@ The providers, and the facts each one serves:
   describes how the files are read and kept.
 
 The operator checks that each provider answers with one call: when it
-starts, when you edit the provider or its `Secret`, and then once an
-hour. A provider that gives no usable answer is checked every five
-minutes until it does. A refused key waits the hour, so edit its
-`Secret` to have it checked at once. A `secretKeyRef` passes the key to
-a phase container of the `Library`'s `Job`, so no long-running pod stores it.
+starts, when you edit the provider, and then once an hour. A provider
+that gives no usable answer, refuses its key, or has no `Secret` or key
+is checked every five minutes until it is `Reachable`. The operator reads the
+`Secret` only for that call, so a key you fix or a `Secret` you create
+shows as `Reachable` within five minutes. A `secretKeyRef` passes the
+key to a phase container of the `Library`'s `Job`, so no long-running
+pod stores it.
 
     $ kubectl -n media get metadataproviders
     NAME    PROVIDER   READY   REASON      UPDATED   AGE

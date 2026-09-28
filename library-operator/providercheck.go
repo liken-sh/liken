@@ -144,6 +144,14 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
+	// A NoSecret verdict made no call to the provider, so a write that
+	// failed forgets it, and the next pass reads the Secret and writes the
+	// verdict again. The Jobs of every Library that names this provider
+	// wait for a verdict. A verdict from a call keeps its note, so a
+	// failing write does not spend the provider's allowance on every pass.
+	if err != nil && verdict.reason == reasonNoSecret {
+		o.forgetProviderCall(provider)
+	}
 	return err
 }
 
@@ -182,26 +190,33 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 // account, and the check still writes a verdict, because every Job of a
 // Library that names this provider waits for one.
 //
-// The Secret is read on every pass, because the API server answers it at no
-// cost to the provider and its resourceVersion says whether the key changed.
-// The provider itself is called only when providerCallDue says so.
+// The pass decides from the MetadataProvider alone whether a call is due,
+// and reads the Secret only for a call that goes out. The operator needs
+// the key only for this call: the Jobs and the Jellyfin pod take it through
+// a secretKeyRef that the kubelet resolves. A key edited only in its
+// Secret is therefore read at the next call that is due: within five
+// minutes when the last verdict was Refused or NoSecret, and within the
+// hour when it was Reachable.
 func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider, now time.Time) (providerVerdict, error) {
 	block := provider.block()
 	if block == "" {
 		return providerVerdict{reason: reasonNoSecret,
 			message: "the provider names no block"}, nil
 	}
-	// A provider that takes no key skips the Secret, because TVmaze serves its
-	// free tier to anyone.
-	key, secretVersion, verdict, err := o.providerKey(ctx, provider)
-	if verdict.reason != "" || err != nil {
-		return verdict, err
-	}
-	if !o.providerCallDue(provider, secretVersion, now) {
+	if !o.providerCallDue(provider, now) {
 		return providerVerdict{}, nil
 	}
-	verdict = o.callProvider(ctx, provider, key)
-	o.noteProviderCall(provider, secretVersion, now, verdict.reason)
+	// A provider that takes no key skips the Secret, because TVmaze serves its
+	// free tier to anyone. A Secret the API server would not serve notes no
+	// call, so the next pass reads it again.
+	key, verdict, err := o.providerKey(ctx, provider)
+	if err != nil {
+		return verdict, err
+	}
+	if verdict.reason == "" {
+		verdict = o.callProvider(ctx, provider, key)
+	}
+	o.noteProviderCall(provider, now, verdict.reason)
 	return verdict, nil
 }
 
@@ -227,29 +242,28 @@ func (o *operator) callProvider(ctx context.Context, provider *MetadataProvider,
 		message: fmt.Sprintf("the provider answered %d", status)}
 }
 
-// The key of one provider, out of the Secret its block names, and the
-// Secret's resourceVersion, which changes with every edit of the key. An
-// empty key and an empty verdict together are a provider that needs none.
-func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) (string, string, providerVerdict, error) {
+// The key of one provider, out of the Secret its block names. An empty key
+// and an empty verdict together are a provider that needs none.
+func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) (string, providerVerdict, error) {
 	reference := provider.secretRef()
 	if reference == nil {
-		return "", "", providerVerdict{}, nil
+		return "", providerVerdict{}, nil
 	}
 	secret, err := GetSecret(ctx, o.client, provider.Metadata.Namespace, reference.Name)
 	if errors.Is(err, ErrNotFound) {
-		return "", "", providerVerdict{reason: reasonNoSecret,
+		return "", providerVerdict{reason: reasonNoSecret,
 			message: fmt.Sprintf("the Secret %s does not exist in namespace %s",
 				reference.Name, provider.Metadata.Namespace)}, nil
 	}
 	if err != nil {
-		return "", "", providerVerdict{}, err
+		return "", providerVerdict{}, err
 	}
 	key := string(secret.Data[reference.secretKey()])
 	if key == "" {
-		return "", "", providerVerdict{reason: reasonNoSecret,
+		return "", providerVerdict{reason: reasonNoSecret,
 			message: fmt.Sprintf("the Secret %s holds no %s", reference.Name, reference.secretKey())}, nil
 	}
-	return key, secret.Metadata.ResourceVersion, providerVerdict{}, nil
+	return key, providerVerdict{}, nil
 }
 
 // The request carries a timeout of its own, so a provider that stops
