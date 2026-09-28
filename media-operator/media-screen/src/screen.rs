@@ -123,10 +123,17 @@ fn request_bytes(request: Option<serde_json::Value>) -> Vec<u8> {
 /// One controller's mark and whether this bus session already delivered one.
 /// The first message of a session is the broker's retained catch-up, a
 /// restore and not a person, so it sets the gate and pulses nothing.
+///
+/// `cycle_asked` is set while this client's cycle request on the controller
+/// waits for its answer. On a controller that one unit lists, the operator
+/// answers with the same mark, and that repeat is the press's feedback.
+/// Every other repeat of the mark is a publisher that sent it again, and a
+/// person did nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Mark {
     player: String,
     caught_up: bool,
+    cycle_asked: bool,
 }
 
 /// Which window the armed deadline belongs to.
@@ -547,6 +554,9 @@ impl Screen {
         let mut power = false;
         if self.idle && press.down() && press.key == keys::CYCLE {
             publish = self.cycle(index);
+            if publish.is_some() {
+                self.marks[index].cycle_asked = true;
+            }
             line = Some(match &publish {
                 Some(cycle) => format!(
                     "{trigger}: cycle focus, published the cycle request to {}",
@@ -628,25 +638,35 @@ impl Screen {
     }
 
     /// Fold one mark off a controller's focus topic. It sets the gate every
-    /// time. A live message that names this `Player` is a person pointing the
-    /// controller here: it lifts the shade, restarts the quiet window, and
-    /// pulses the display with the controller's index. The session's first
-    /// message is the broker's retained catch-up, so it sets the gate and
-    /// does nothing else. A mark that names another `Player`, or a `Play`
-    /// name left from an older operator, gates closed and pulses nothing.
+    /// time. A live message that moves the mark to this `Player` is a person
+    /// pointing the controller here: it lifts the shade, restarts the quiet
+    /// window, and pulses the display with the controller's index. So does
+    /// the repeat that answers this client's own cycle request. The
+    /// session's first message is the broker's retained catch-up, so it sets
+    /// the gate and does nothing else. A mark that names another `Player`, or
+    /// a `Play` name left from an older operator, gates closed and pulses
+    /// nothing.
+    ///
+    /// Any other repeat of the mark this client already holds is a publisher
+    /// that sent the same mark again, such as an operator after a restart,
+    /// and not a person. It changes nothing, because a wake here would light
+    /// a sleeping screen in a dark room.
     ///
     /// A mark that does not name this `Player` only closes the gate here. The
     /// standing pod synthesises the repeat and stops it at the release, so a
     /// control held as the mark moves away needs nothing stopped here.
     fn on_focus(&mut self, index: usize, payload: &[u8], now: Instant) -> Vec<Effect> {
         let mark = String::from_utf8_lossy(payload).into_owned();
-        let live = self.marks[index].caught_up;
+        let held = &self.marks[index];
+        let live = held.caught_up;
+        let moved = held.player != mark || held.cycle_asked;
         let names_this_player = self.names_this_player(&mark);
         self.marks[index] = Mark {
             player: mark,
             caught_up: true,
+            cycle_asked: false,
         };
-        if !names_this_player || !live {
+        if !names_this_player || !live || !moved {
             return Vec::new();
         }
 

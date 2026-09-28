@@ -239,10 +239,12 @@ A settled pass still sends the API server no request
 `Play`'s or a `Player`'s copy older than the operator's own write sends
 one `GET` for that object, until the watch delivers the write.
 
-A recreate moves the unit to `Starting` or `Idle` when the old pod
-stops, and back to `Playing` when the new pod plays, seconds later.
-That is the true state: the screen does not play during the gap, so
-the unit does not hold `Playing` through it.
+A recreate moves the unit to `Starting` when the old pod stops, and to
+`Playing` when the new pod plays, seconds later. The screen does not
+play during the gap, so the unit does not hold `Playing` through it.
+The unit does not read `Idle` in the gap either, because the `Play`
+goes on. The section below says how the operator ignores the old
+pod's ending.
 
 | What | Test |
 |---|---|
@@ -265,8 +267,60 @@ These six tests each fail without their fix: `TestAnEndingDuringThePassIsNotPubl
 `TestAListAnswersACreateThatArrivesDuringTheList`. The drill below
 gains one step: delete a playing `Play`, and delete the playback pod of
 another, and read the unit's activity lines. A deleted `Play` must read
-one move to `Idle`. A recreated pod must read no `Playing` between its
-`Idle` or `Starting` and the new pod's first report.
+one move to `Idle`. A recreated pod must read `Starting`, then
+`Playing` at the new pod's first report, and nothing between them.
+
+## A recreate reads Starting, then Playing
+
+Added on 2026-09-28, after a `liken-1` drill of the development build.
+A remote edit on a `Player` recreated its playback pod, and the unit's
+activity on the bus read `Starting`, `Idle`, and then `Playing` for the
+same `Play`. The `Idle` came 121 ms after the `Starting`.
+
+The rule: a unit's activity never goes back to a state it left for the
+same `Play`. A recreate continues the `Play`, so it reads `Starting`
+and then `Playing`.
+
+The `Idle` was the old pod's ending. `replace` deletes the pod, and the
+kubelet sends its sidecar `SIGTERM`. The sidecar reports the `ended`
+mark on every `SIGTERM`, because it cannot tell a recreate from a
+`Play` that is over. The report desk marked the run ended,
+`answerEnding` published `Idle`, and the new pod's first report cleared
+the mark. The same report also put the ending label on the old pod, and
+the memo that labels each run once then kept the label off the new pod,
+so the new pod's own ending did not fade.
+
+The name does not tell the two pods apart, because the new pod reuses
+it. The UID does. The command sidecar now reads its pod's UID from the
+downward API (`MEDIA_POD_UID`, from `metadata.uid`) and stamps it on
+every report as `pod`. `replace` gives the report desk the old pod's
+UID before it sends the delete, and the desk drops every report from
+that pod: it marks nothing, wakes nothing, and answers no ending. A
+delete that fails takes the record back, because the pod still runs as
+the run's pod. A
+report with no UID comes from a sidecar that predates the field, and
+the desk takes it as the run's, so a pod that runs an older sidecar
+image after an upgrade still ends its run.
+
+Two endings still move a unit to `Idle` and back. When mpv exits
+non-zero, the sidecar reports the ending before the operator reads the
+failed pod, and the run is interrupted on the screen. When something
+other than this operator deletes the pod, such as an eviction, the
+operator did not replace the pod, and it takes the ending as the run's.
+In both cases the old pod's ending also uses up the run's ending label,
+so the new pod's own ending gets no label and its fade does not run.
+These cases stay open.
+
+| What | Test |
+|---|---|
+| A recreate reads `Starting`, then `Playing` | `TestARecreatePublishesStartingThenPlaying` |
+| The new pod's own ending labels the new pod | `TestARecreatedRunLabelsItsOwnEnding` |
+| A pod whose delete failed still ends its run | `TestAPodWhoseDeleteFailedStillEndsTheRun` |
+| Every report, the ending included, names its pod | `TestEveryReportNamesThePodThatSentIt` |
+| The command sidecar reads its UID from the downward API | `TestBuildPodRunsOneCommandSidecar` |
+
+The first two fail without the fix. The first reads `Starting`,
+`Idle`, `Starting`, `Playing`.
 
 ## The drill still owed
 

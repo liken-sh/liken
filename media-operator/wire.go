@@ -38,6 +38,14 @@ type playReport struct {
 	// reads this mark and reveals the idle screen in bus time. The mark says
 	// nothing about the Play's phase, which keeps deriving from the pod.
 	Ended bool `json:"ended,omitempty"`
+
+	// Pod is the UID of the playback pod whose sidecar sent the report. A
+	// recreate replaces the pod under the same name, and the old pod's
+	// sidecar reports the ending on its SIGTERM after the operator has
+	// already chosen the new pod. The UID is how the operator tells that
+	// report from one the run's current pod sent. The operator reads a
+	// report with no UID as the current pod's.
+	Pod string `json:"pod,omitempty"`
 }
 
 // Environment variable names the operator sets on the pods it creates.
@@ -48,6 +56,12 @@ const (
 	// status and availability topics it publishes.
 	playNamespaceVariable = "MEDIA_PLAY_NAMESPACE"
 	playNameVariable      = "MEDIA_PLAY_NAME"
+
+	// podUIDVariable carries the playback pod's own UID, which the
+	// kubelet fills from metadata.uid. The command sidecar stamps it on
+	// every report, so the operator can refuse the reports of a pod it has
+	// replaced.
+	podUIDVariable = "MEDIA_POD_UID"
 
 	// playerNameVariable carries a Player's metadata.name, the value every
 	// focus mark holds. In a playback pod it is the Play's own unit,

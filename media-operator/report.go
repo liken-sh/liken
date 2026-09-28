@@ -26,20 +26,31 @@ import (
 // the ending and then goes offline, and offline drops the latest report.
 // The mark has to outlive that drop: the pod lives on for seconds after
 // the film is over, and the Player is idle for every one of them.
+//
+// replaced holds the UID of the pod the operator last replaced for each
+// run. A recreate deletes the pod and creates a new one under the same
+// name, and the old pod's sidecar reports the ending on its SIGTERM. That
+// ending is the end of the old pod and not of the Play, which goes on in
+// the new pod. Without this record, the report would mark the run ended,
+// the unit would read Idle between the Starting of the delete and the
+// Playing of the new pod, and the ending label would go on the old pod
+// and never on the new one.
 type reports struct {
-	mutex  sync.Mutex
-	latest map[string]playReport
-	ended  map[string]bool
-	seen   map[string]bool
-	wake   chan<- struct{}
+	mutex    sync.Mutex
+	latest   map[string]playReport
+	ended    map[string]bool
+	seen     map[string]bool
+	replaced map[string]string
+	wake     chan<- struct{}
 }
 
 func newReports(wake chan<- struct{}) *reports {
 	return &reports{
-		latest: map[string]playReport{},
-		ended:  map[string]bool{},
-		seen:   map[string]bool{},
-		wake:   wake,
+		latest:   map[string]playReport{},
+		ended:    map[string]bool{},
+		seen:     map[string]bool{},
+		replaced: map[string]string{},
+		wake:     wake,
 	}
 }
 
@@ -78,9 +89,18 @@ func splitRunKey(key string) (namespace, name string) {
 // mark and not the previous report that decides that, because a sidecar
 // that goes offline drops the previous report while the mark stands, and a
 // run whose ending was already answered must not be answered again.
+//
+// A report from a pod the operator replaced says nothing about the run, so
+// the desk drops it and wakes nothing. A report with no pod UID names no
+// pod, and the desk takes it as the run's.
 func (r *reports) fold(namespace, name string, report playReport) (endingBegan bool) {
 	key := runKey(namespace, name)
 	r.mutex.Lock()
+	r.seen[key] = true
+	if report.Pod != "" && report.Pod == r.replaced[key] {
+		r.mutex.Unlock()
+		return false
+	}
 	previous, had := r.latest[key]
 	endingBegan = report.Ended && !r.ended[key]
 	r.latest[key] = report
@@ -92,6 +112,29 @@ func (r *reports) fold(namespace, name string, report playReport) (endingBegan b
 		poke(r.wake)
 	}
 	return endingBegan
+}
+
+// replacing records that the operator is about to delete the run's pod
+// with this UID to replace it. The pass calls it before it sends the
+// delete, because the delete is what makes the kubelet send the SIGTERM,
+// and the old pod's ending can reach the bus reader before the delete
+// request returns.
+func (r *reports) replacing(namespace, name, pod string) {
+	if pod == "" {
+		return
+	}
+	r.mutex.Lock()
+	r.replaced[runKey(namespace, name)] = pod
+	r.mutex.Unlock()
+}
+
+// keeping forgets the replaced pod of a run whose delete failed. That pod
+// still runs as the run's pod, so its reports must count again, and the
+// next pass that replaces it records it again.
+func (r *reports) keeping(namespace, name string) {
+	r.mutex.Lock()
+	delete(r.replaced, runKey(namespace, name))
+	r.mutex.Unlock()
 }
 
 // availability marks a Play online or offline. Either way the run is one
@@ -155,6 +198,11 @@ func (r *reports) retain(live map[string]bool) {
 			delete(r.ended, key)
 		}
 	}
+	for key := range r.replaced {
+		if !live[key] {
+			delete(r.replaced, key)
+		}
+	}
 }
 
 // stale returns the runs the desk has seen a bus message for that the
@@ -180,5 +228,6 @@ func (r *reports) forget(key string) {
 	delete(r.latest, key)
 	delete(r.ended, key)
 	delete(r.seen, key)
+	delete(r.replaced, key)
 	r.mutex.Unlock()
 }

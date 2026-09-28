@@ -156,3 +156,49 @@ func TestAnEndingDuringThePassReachesTheStatusAndTheGauge(t *testing.T) {
 	mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricIdle)), 1.0)
 	mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricPlaying)), 0.0)
 }
+
+// recreateWithTheOldPodsEnding plays a recreate out the way the kubelet
+// does. A remote edit on the Player reshapes the run's pod, so the pass
+// deletes it, and the old pod stands while its containers stop. Its
+// sidecar reports the ending on the pod's SIGTERM. Once the old pod is
+// gone, the pass creates the new pod under the same name, and the new
+// pod plays and reports.
+func recreateWithTheOldPodsEnding(t *testing.T) (*fakeCluster, *operator, *logBuffer) {
+	t.Helper()
+	cluster := remoteChangeCluster()
+	cluster.pods["movie-playback"].Metadata.UID = "old-pod"
+	cluster.podsLinger["movie-playback"] = true
+	media, _ := busOperator(t, cluster)
+	var log logBuffer
+	media.log = &log
+	status := playStatusTopic(defaultTopicBase, "house", "movie")
+	media.handleBusMessage(status, []byte(`{"item":1,"position":"0:36:01","pod":"old-pod"}`))
+
+	media.pass()
+	media.handleBusMessage(status, []byte(`{"item":1,"position":"0:36:01","ended":true,"pod":"old-pod"}`))
+	media.pass()
+
+	delete(cluster.pods, "movie-playback")
+	media.pass()
+	fresh := cluster.pods["movie-playback"]
+	fresh.Status.Phase = podRunning
+	media.handleBusMessage(status,
+		[]byte(`{"item":1,"position":"0:36:02","pod":"`+fresh.Metadata.UID+`"}`))
+	media.pass()
+	return cluster, media, &log
+}
+
+// A recreate continues the same Play, so its unit reads Starting while
+// the old pod stops and Playing once the new pod plays. The old pod's
+// ending is the end of that pod and not of the Play, so it must not move
+// the unit to Idle between the two.
+func TestARecreatePublishesStartingThenPlaying(t *testing.T) {
+	_, _, log := recreateWithTheOldPodsEnding(t)
+
+	mustMatchAll(t, activityLines(log), []string{
+		"player house/theater: activity Starting, was Playing, play movie, published to " +
+			playerStatusTopic(defaultTopicBase, "house", "theater"),
+		"player house/theater: activity Playing, was Starting, play movie, published to " +
+			playerStatusTopic(defaultTopicBase, "house", "theater"),
+	})
+}

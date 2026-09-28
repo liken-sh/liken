@@ -992,8 +992,21 @@ type ContainerClaim struct {
 }
 
 type EnvVar struct {
-	Name  string `json:"name"`
-	Value string `json:"value,omitempty"`
+	Name      string        `json:"name"`
+	Value     string        `json:"value,omitempty"`
+	ValueFrom *EnvVarSource `json:"valueFrom,omitempty"`
+}
+
+// EnvVarSource is the downward API's half of a variable: the kubelet
+// fills the value from the pod's own object when the container starts.
+// A pod learns its UID only this way, because the API server assigns the
+// UID after the operator sends the pod.
+type EnvVarSource struct {
+	FieldRef *ObjectFieldSelector `json:"fieldRef,omitempty"`
+}
+
+type ObjectFieldSelector struct {
+	FieldPath string `json:"fieldPath"`
 }
 
 type VolumeMount struct {

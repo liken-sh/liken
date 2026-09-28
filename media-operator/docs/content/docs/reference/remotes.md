@@ -233,3 +233,17 @@ reads the request and advances the mark to the next bound `Player`
 by name, wrapping the last back to the first. A controller bound to
 one unit wraps to the same `Player`, and the operator republishes the
 mark, which the idle screen answers with a pulse of its hexagon.
+
+The idle screen acts on a mark only when a person caused it. A live
+mark that moves to its `Player` wakes the screen and pulses the
+hexagon, and so does the repeat that answers the screen's own cycle
+request. Any other repeat of the mark the screen holds changes
+nothing, so a publisher that sends the same mark again does not wake
+a sleeping screen.
+
+The operator does not publish a mark again when it restarts. The
+broker keeps each retained mark across the operator's restart and
+delivers it on the new session. A restarted broker keeps no mark, so
+after each new session the operator waits two seconds for the
+broker's retained marks. It then publishes each mark it holds that
+the broker did not deliver.

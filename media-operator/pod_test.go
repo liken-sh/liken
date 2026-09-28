@@ -286,7 +286,7 @@ func TestBuildPodWithNoRemotesCarriesTheIPCVolume(t *testing.T) {
 // The command sidecar is the sidecar image in its command mode. It
 // holds no device claim, and it mounts the IPC socket alone, because it
 // drives mpv and opens no media of its own. It carries the play's
-// identity, the bus, and the base.
+// identity, its own pod's UID, the bus, and the base.
 func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	pod := testPod(t)
 
@@ -298,6 +298,9 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: "house"},
 			{Name: playNameVariable, Value: "movie"},
+			{Name: podUIDVariable, ValueFrom: &EnvVarSource{
+				FieldRef: &ObjectFieldSelector{FieldPath: "metadata.uid"},
+			}},
 			{Name: busAddressVariable, Value: testBusAddress},
 			{Name: topicBaseVariable, Value: testTopicBase},
 			{Name: presentationsVariable, Value: "[{}]"},

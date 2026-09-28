@@ -74,6 +74,7 @@ fn focused(wiring: &Wiring) -> Screen {
         *mark = Mark {
             player: PLAYER.into(),
             caught_up: true,
+            ..Mark::default()
         };
     }
     screen.desire = Some(crate::panel::ON);
@@ -1049,7 +1050,7 @@ fn a_unit_whose_operator_named_no_owner_topic_reads_no_mark() {
 fn a_live_mark_wakes_the_screen_and_pulses_the_controller_it_named() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
-    screen.marks[0].caught_up = true;
+    screen.marks[0].player = "cinema".into();
     screen.asleep = true;
 
     assert_eq!(
@@ -1086,15 +1087,48 @@ fn the_retained_catch_up_still_opens_the_gate() {
     );
 }
 
+// A publisher that sends the mark again, such as an operator after a
+// restart, changes nothing a person did. A wake here lights a dark room.
 #[test]
-fn a_mark_that_repeats_pulses_again() {
+fn a_mark_that_repeats_neither_wakes_nor_pulses() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
+    screen.asleep = true;
+
+    assert!(
+        screen
+            .deliver(SOFA_FOCUS, PLAYER.as_bytes(), false, now)
+            .is_empty()
+    );
+    assert!(screen.asleep);
+}
+
+// On a controller that one unit lists, the operator answers a cycle with
+// the same mark, and that repeat is the press's feedback.
+#[test]
+fn a_repeat_that_answers_this_clients_cycle_wakes_and_pulses() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now);
+    screen.asleep = true;
+    screen.deliver(SOFA_EVENTS, &key(keys::CYCLE, 1), false, now);
 
     assert_eq!(
         moments(screen.deliver(SOFA_FOCUS, PLAYER.as_bytes(), false, now)),
-        [Moment::Focus { remote: 0 }]
+        [Moment::Wake, Moment::Focus { remote: 0 }]
     );
+    assert!(
+        screen
+            .deliver(SOFA_FOCUS, PLAYER.as_bytes(), false, now)
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_mark_that_returns_after_another_player_held_it_pulses() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now);
+    screen.deliver(SOFA_FOCUS, b"cinema", false, now);
+
     assert_eq!(
         moments(screen.deliver(SOFA_FOCUS, PLAYER.as_bytes(), false, now)),
         [Moment::Focus { remote: 0 }]
@@ -1105,6 +1139,9 @@ fn a_mark_that_repeats_pulses_again() {
 fn the_pulse_carries_the_controllers_place_in_the_spec() {
     let now = Instant::now();
     let mut screen = idling(&two_remotes(), now);
+    for mark in &mut screen.marks {
+        mark.player = "cinema".into();
+    }
 
     assert_eq!(
         moments(screen.deliver(ARMCHAIR_FOCUS, PLAYER.as_bytes(), false, now)),
@@ -1150,12 +1187,16 @@ fn a_client_that_read_no_player_name_matches_no_mark() {
 fn a_bus_session_makes_the_next_mark_a_catch_up_again() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
+    screen.marks[0].player = "cinema".into();
     assert_eq!(
         moments(screen.deliver(SOFA_FOCUS, PLAYER.as_bytes(), false, now)),
         [Moment::Focus { remote: 0 }]
     );
 
     screen.connected();
+    // A mark that moved while the client was away would pulse on a live
+    // delivery, so only the catch-up keeps this one quiet.
+    screen.marks[0].player = "cinema".into();
 
     assert!(
         screen
@@ -1250,6 +1291,7 @@ fn a_controller_with_no_focus_topic_publishes_no_cycle() {
     screen.marks[0] = Mark {
         player: PLAYER.into(),
         caught_up: true,
+        ..Mark::default()
     };
 
     assert!(

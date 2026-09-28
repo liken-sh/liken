@@ -135,6 +135,11 @@ type commander struct {
 	// press path already takes.
 	holds map[string]int
 
+	// podUID is this pod's own UID, stamped on every report. The operator
+	// refuses the reports of a pod it has replaced, and the UID is how it
+	// tells that pod from the new one under the same name.
+	podUID string
+
 	reportMutex sync.Mutex
 	lastReport  playReport
 	haveReport  bool
@@ -225,6 +230,7 @@ func runCommand() {
 
 	cmd := &commander{
 		statusTopic:       playStatusTopic(base, namespace, name),
+		podUID:            os.Getenv(podUIDVariable),
 		metrics:           metrics,
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		commandsTopic:     playCommandsTopic(base, namespace, name),
@@ -659,6 +665,9 @@ func (c *commander) send(report playReport) error {
 	if c.ended {
 		report.Ended = true
 	}
+	// The held report carries the UID too, so the ending that endRun
+	// builds from it names this pod.
+	report.Pod = c.podUID
 	payload, err := json.Marshal(report)
 	if err == nil {
 		c.lastReport = report

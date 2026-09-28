@@ -152,7 +152,7 @@ kind it folds into a status or a decision:
 |---|---|
 | `plays/+/+/status` | folds each report into the `Play`'s status |
 | `plays/+/+/availability` | gates a retained report on a live sidecar |
-| `remotes/+/+/focus` | reads its own marks back after a restart |
+| `remotes/+/+/focus` | reads its own marks back after a restart, and publishes again only a mark a restarted broker lost |
 | `remotes/+/+/focus/cycle` | advances the mark to the next bound `Player` |
 | `remotes/+/+/availability` | gates the declared codes on a live pod |
 | `remotes/+/+/codes` | subtracts the key table and reports `status.unbound` |

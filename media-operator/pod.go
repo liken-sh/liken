@@ -270,6 +270,11 @@ func commandSidecar(
 	env := []EnvVar{
 		{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
 		{Name: playNameVariable, Value: play.Metadata.Name},
+		// The kubelet fills the pod's own UID, which the sidecar stamps on
+		// every report. wire.go says why the operator reads it.
+		{Name: podUIDVariable, ValueFrom: &EnvVarSource{
+			FieldRef: &ObjectFieldSelector{FieldPath: "metadata.uid"},
+		}},
 		{Name: busAddressVariable, Value: busAddress},
 		{Name: topicBaseVariable, Value: topicBase},
 		{Name: presentationsVariable, Value: blocks},

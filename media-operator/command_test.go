@@ -358,6 +358,26 @@ func TestEveryReportAfterTheEndingCarriesTheMark(t *testing.T) {
 	mustMatch(t, endedReport(t, later.payload), playReport{Item: 1, Position: "0:20:01", Ended: true})
 }
 
+// Every report names the pod that sent it, the ending included, so the
+// operator can refuse the ending of a pod it has already replaced.
+func TestEveryReportNamesThePodThatSentIt(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	c := &commander{
+		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+		podUID:      "pod-one",
+		bus:         bus,
+	}
+
+	mustSucceed(t, c.send(playReport{Item: 1, Position: "0:20:00"}))
+	running := waitForPublish(t, brokers[0].pubs)
+	c.endRun()
+	ending := waitForPublish(t, brokers[0].pubs)
+
+	mustMatch(t, reportOf(t, running.payload), playReport{Item: 1, Position: "0:20:00", Pod: "pod-one"})
+	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true, Pod: "pod-one"})
+}
+
 // A run that never reported publishes no ending, the rule the reporter
 // follows: mpv never named an item, so there are no numbers to carry and
 // the pod's own death is what ends such a run.

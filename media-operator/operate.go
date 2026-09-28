@@ -70,12 +70,11 @@ const (
 )
 
 // tickInterval is how often the loop reconciles with nothing to prompt
-// it. The tick is a clock. It ends three waits that no event ends: a
-// playing position that only advanced reaches the Play's status, a
-// Finished Play goes when its window passes, and the first level or
-// focus mark of a new broker session goes out when catchUpGrace ends.
-// Each of them is a moment, and nothing in the cluster announces a
-// moment.
+// it. The tick is a clock. It ends two waits that no event ends: a
+// playing position that only advanced reaches the Play's status, and a
+// Finished Play goes when its window passes. Each of them is a moment,
+// and nothing in the cluster announces a moment. The end of catchUpGrace
+// is a moment too, and reestablishRetained schedules its own wake for it.
 //
 // Every change the pass reads wakes it at once: the watches wake it
 // (clusterwatch.go), and so do the bus desks. The tick covers no
@@ -408,13 +407,18 @@ func operate() {
 	}
 
 	// onConnect marks that a fresh broker session began, so the next pass
-	// re-establishes the retained state the operator owns. The broker holds
-	// none of it on a new session, whether the operator or the broker
-	// restarted, so without this the keymaps and focus marks would stay
-	// missing until a person edited one.
+	// re-establishes the retained state the operator owns. A broker that
+	// restarted holds none of it, so without this the keymaps and focus
+	// marks would stay missing until a person edited one. The two desks
+	// forget what the last session delivered, so the pass can tell a
+	// value the broker still holds from one it lost.
 	onConnect := func(bus *Bus) {
-		media.volumes.newSession()
+		// The mark goes first, so a pass that runs between these lines
+		// reads the catch-up as not over and publishes no mark from the
+		// record the two desks are about to clear.
 		media.busReconnected.Store(true)
+		media.volumes.newSession()
+		media.focus.newSession()
 		poke(wake)
 	}
 	// The bus handler is the only path the control plane takes a report or
@@ -793,14 +797,17 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	}
 }
 
-// reestablishRetained rewrites everything the operator publishes retained
-// after a fresh broker session, because the broker holds none of it. It
+// reestablishRetained rewrites what the operator publishes retained after
+// a fresh broker session, because a restarted broker holds none of it. It
 // clears the record of published keymaps and Player statuses, so
 // reconcileKeymaps and reconcilePlayers write every one of them again this
-// pass, and it republishes each focus mark, so a controller keeps the
-// Player it drives across a broker or operator restart. The command sidecar and
-// the standing remote pod re-establish their own retained topics from
-// their own connect, so those need no help here.
+// pass. The focus marks are not written here. A reader acts on a live
+// mark, so reconcileFocus publishes after the catch-up only the marks the
+// broker did not deliver back, and a controller keeps the Player it drives
+// across a broker restart with no mark sent again after an operator
+// restart. The command sidecar and the standing remote pod re-establish
+// their own retained topics from their own connect, so those need no help
+// here.
 func (o *operator) reestablishRetained() {
 	o.keysPublished = map[string]string{}
 	o.playerStatuses.reset()
@@ -809,9 +816,12 @@ func (o *operator) reestablishRetained() {
 	// waits out catchUpGrace and then seeds only the units nothing
 	// answered for.
 	o.catchUpEnds = time.Now().Add(catchUpGrace)
-	for key, player := range o.focus.snapshot() {
-		o.publishFocus(key, player, "the broker session is new")
-	}
+	// The focus marks wait out the same grace, and reconcileFocus then
+	// publishes only the marks the broker did not deliver back. This wake
+	// runs that pass when the grace ends, not on the next tick, so a
+	// controller whose mark a restarted broker lost drives its unit again
+	// within the grace.
+	o.requeueAfter(catchUpGrace)
 }
 
 // caughtUp answers whether the current broker session's retained
@@ -1700,7 +1710,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		if !o.mayResume(key) {
 			return running, false, nil
 		}
-		pod, err := o.replace(play, claim, resolved, prefs, remotes, false, "the pod failed"+podMessage(running))
+		pod, err := o.replace(play, running, claim, resolved, prefs, remotes, false, "the pod failed"+podMessage(running))
 		return pod, false, err
 	}
 
@@ -1715,7 +1725,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if claimChanged {
 		changed = "its devices"
 	}
-	pod, err := o.replace(play, claim, resolved, prefs, remotes, claimChanged,
+	pod, err := o.replace(play, running, claim, resolved, prefs, remotes, claimChanged,
 		"a spec edit changed "+changed+" on player "+player.Metadata.Name)
 	return pod, false, err
 }

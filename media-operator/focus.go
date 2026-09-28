@@ -29,34 +29,70 @@ import (
 // focusDesk holds the current mark per controller and the pending cycle
 // requests. One mutex guards both, because the bus handler writes them on
 // its goroutine and the reconcile loop reads and clears them on its own.
+//
+// delivered names the controllers whose mark the current broker session
+// holds: the session delivered the mark, or the operator published it on
+// this session. A mark the desk holds and the session did not deliver is
+// one a restarted broker lost, and it is the only mark the operator
+// publishes again after a reconnect. A mark that the broker still holds
+// is not published again, because each reader gets a republish as a live
+// mark, and the idle screen wakes on a live mark that names its Player.
 type focusDesk struct {
-	mutex  sync.Mutex
-	marks  map[string]string
-	cycles map[string]bool
-	wake   chan<- struct{}
+	mutex     sync.Mutex
+	marks     map[string]string
+	delivered map[string]bool
+	cycles    map[string]bool
+	wake      chan<- struct{}
 }
 
 func newFocusDesk(wake chan<- struct{}) *focusDesk {
 	return &focusDesk{
-		marks:  map[string]string{},
-		cycles: map[string]bool{},
-		wake:   wake,
+		marks:     map[string]string{},
+		delivered: map[string]bool{},
+		cycles:    map[string]bool{},
+		wake:      wake,
 	}
 }
 
-// setMark stores the owning Player for one controller. An empty player
-// deletes the key, the shape a cleared retained mark arrives in. A value
-// that changes wakes the loop, because a Player's bus status and a Remote's
-// status both derive from the mark, and the pass that writes them must run
-// again. The operator reads its own retained writes back, and those repeat
-// the stored value, so they wake nothing.
+// newSession forgets which marks the last broker session held. The bus
+// calls it at each connect, before the session delivers anything.
+func (f *focusDesk) newSession() {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.delivered = map[string]bool{}
+}
+
+// undelivered copies the marks the desk holds that the current session
+// has not delivered.
+func (f *focusDesk) undelivered() map[string]string {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	marks := map[string]string{}
+	for key, player := range f.marks {
+		if !f.delivered[key] {
+			marks[key] = player
+		}
+	}
+	return marks
+}
+
+// setMark stores the owning Player for one controller, whether the mark
+// arrived on the bus or the operator just published it. Either way the
+// current session holds it. An empty player deletes the key, the shape a
+// cleared retained mark arrives in. A value that changes wakes the loop,
+// because a Player's bus status and a Remote's status both derive from the
+// mark, and the pass that writes them must run again. The operator reads
+// its own retained writes back, and those repeat the stored value, so they
+// wake nothing.
 func (f *focusDesk) setMark(key, player string) {
 	f.mutex.Lock()
 	was := f.marks[key]
 	if player == "" {
 		delete(f.marks, key)
+		delete(f.delivered, key)
 	} else {
 		f.marks[key] = player
+		f.delivered[key] = true
 	}
 	f.mutex.Unlock()
 	if was != player {
@@ -71,9 +107,8 @@ func (f *focusDesk) markFor(key string) string {
 	return f.marks[key]
 }
 
-// snapshot copies the current marks, so the operator republishes them
-// after a fresh broker session without holding the desk lock while it
-// writes the bus.
+// snapshot copies the current marks, so the pass reads them without
+// holding the desk lock while it writes the bus.
 func (f *focusDesk) snapshot() map[string]string {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
@@ -166,6 +201,19 @@ func (o *operator) reconcileFocus(players []Player) {
 			logLine(o.log, "remote %s: asked to cycle focus, focus stays on player %s, the one player that lists the remote", key, next)
 		}
 		o.publishFocus(key, next, "the remote asked to cycle focus")
+	}
+
+	// A restarted broker holds no retained mark, so a mark the desk holds
+	// that the new session did not deliver goes out again, once the
+	// catch-up has had time to deliver what the broker does hold. A mark
+	// that no longer names a Player in the set is left to the recovery
+	// below, which publishes the mark that replaces it.
+	if o.caughtUp() {
+		for key, player := range o.focus.undelivered() {
+			if slices.Contains(sets[key], player) {
+				o.publishFocus(key, player, "the broker session is new and the broker holds no mark")
+			}
+		}
 	}
 
 	// Recovery moves a mark that is empty or names a Player outside the

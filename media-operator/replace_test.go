@@ -138,3 +138,18 @@ func TestAReplacementWaitsForTheOldClaim(t *testing.T) {
 	})
 	mustMatch(t, len(cluster.claims["movie-devices"].Spec.Devices.Config) > 0, true)
 }
+
+// A delete the API server refused leaves the pod running as the run's
+// pod, so its reports still count and its ending still ends the run.
+func TestAPodWhoseDeleteFailedStillEndsTheRun(t *testing.T) {
+	cluster := remoteChangeCluster()
+	cluster.pods["movie-playback"].Metadata.UID = "old-pod"
+	cluster.podDeleteFails = true
+	media, _ := loggingOperator(t, cluster)
+
+	media.pass()
+	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
+		[]byte(`{"item":1,"position":"1:58:03","ended":true,"pod":"old-pod"}`))
+
+	mustMatch(t, media.reports.endedFor("house", "movie"), true)
+}

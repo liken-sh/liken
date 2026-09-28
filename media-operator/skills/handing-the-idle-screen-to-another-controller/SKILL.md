@@ -181,6 +181,12 @@ nothing, and only while the screen is awake. A press on a sleeping
 screen wakes it and does nothing else. A held control arrives again as
 value 2, and a release, value 0, acts on nothing.
 
+A live focus mark that moves to this `Player` wakes the screen. A
+repeat of the mark the client already holds wakes nothing, because
+the operator can publish the same mark again with no person behind it.
+The one repeat that acts is the answer to the client's own cycle
+request, on a controller that only this `Player` lists.
+
 The client brings its own shade down. The operator's client does it on
 back. A client with levels does it when back has no level left to
 return to.

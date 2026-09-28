@@ -20,9 +20,15 @@ import "errors"
 // diverged, and creates the new pod at the film's place when the name is
 // already free. Otherwise the pass that finds the name free creates it,
 // and replace returns no pod.
-func (o *operator) replace(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason string) (*Pod, error) {
+//
+// The report desk learns the old pod's UID before the delete goes out, so
+// the ending its sidecar reports on the SIGTERM is not read as the Play's.
+// report.go says what that ending would do.
+func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason string) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	o.reports.replacing(namespace, name, running.Metadata.UID)
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
+		o.reports.keeping(namespace, name)
 		return nil, err
 	}
 	if claimChanged {

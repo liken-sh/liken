@@ -65,6 +65,10 @@ type fakeCluster struct {
 	// again on the next pass.
 	podPatchFails bool
 
+	// podDeleteFails is a pod delete the API server refuses, so the pod
+	// stands and runs on.
+	podDeleteFails bool
+
 	// applyFails is a Display the API server refuses to write,
 	// the failure a pass answers by leaving the panel where it stands
 	// and trying again.
@@ -222,6 +226,11 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
+			// The API server gives each pod its own UID, so a pod recreated
+			// under a name the old pod held is a different object.
+			if pod.Metadata.UID == "" {
+				pod.Metadata.UID = "pod-uid-" + strconv.Itoa(len(f.requests))
+			}
 			f.pods[pod.Metadata.Name] = pod
 			_ = json.NewEncoder(w).Encode(pod)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/pods/"):
@@ -229,6 +238,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/plays/"):
 			delete(f.plays, name)
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/pods/") && f.podDeleteFails:
+			w.WriteHeader(http.StatusInternalServerError)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/pods/"):
 			if pod, standing := f.pods[name]; standing && f.podsLinger[name] {
 				pod.Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
@@ -1714,12 +1725,11 @@ func TestAnEmptyAvailabilityDoesNotMarkARunSeen(t *testing.T) {
 	}
 }
 
-// A fresh broker session holds none of the operator's retained state,
-// so a reconnect clears the record of published key tables, which
-// makes the next pass write them again, and republishes each focus
-// mark, so a controller keeps the Player it drives across a broker
-// restart.
-func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
+// A fresh broker session may hold none of the operator's retained state,
+// so a reconnect clears the record of published key tables, which makes
+// the next pass write them again. The focus marks are not written here;
+// reconcileFocus restores only the marks the session did not deliver.
+func TestAReconnectRewritesTheKeyTablesAndNoMark(t *testing.T) {
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	broker := brokers[0]
@@ -1739,11 +1749,7 @@ func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
 	if len(media.keysPublished) != 0 {
 		t.Errorf("keysPublished still holds %v, want it cleared for a rewrite", media.keysPublished)
 	}
-	published := waitForPublish(t, broker.pubs)
-	if published.topic != remoteFocusTopic(defaultTopicBase, "den", "sofa") ||
-		string(published.payload) != "theater" || !published.retained {
-		t.Errorf("focus republish = %+v, want the retained theater mark", published)
-	}
+	mustPublishNothing(t, broker)
 }
 
 // keysOperator wires an operator with a bus to a fake broker, so a

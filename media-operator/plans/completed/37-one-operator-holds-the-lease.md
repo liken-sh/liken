@@ -217,3 +217,62 @@ to two replicas, confirm one copy logs `holding lease` and the other
 `waiting for lease`, delete the holder's pod, and time the takeover.
 Then roll a new image and time the gap in the reconcile, and read the
 working set of the operator on the full build.
+
+## A restart wakes no screen
+
+Added on 2026-09-28, after a `liken-1` drill of a rollout. A screen
+slept with its shade down and its panel dark. 0.2 s after the new
+leader took the `Lease`, the shade came up. With `RollingUpdate` and
+leader election, every rollout did this, so every release lit the
+rooms' screens at night.
+
+The cause was the focus marks. On each new broker session,
+`reestablishRetained` published every mark the operator held. The
+broker keeps retained marks across the operator's restart, so the
+marks were already there, and each reader got the same mark again as
+a live message. `media-screen` read any live mark that named its
+`Player` as a person pointing a controller at the screen, and lifted
+the shade.
+
+The fix is on both sides:
+
+* **The operator publishes only a mark the broker lost.** The focus
+  desk records which marks the current session holds, the way the
+  volume desk records the levels. `onConnect` clears the record, the
+  broker's retained marks and the operator's own publishes fill it,
+  and after `catchUpGrace` `reconcileFocus` publishes each mark the
+  session did not deliver. After an operator restart the broker
+  delivers every mark, so the operator publishes none. After a broker
+  restart, which keeps no retained state (`persistence false`), the
+  operator publishes each mark it holds, and each screen's new session
+  reads that mark as its catch-up. `reestablishRetained` schedules a
+  wake at the end of the grace, so this publish does not wait for the
+  tick.
+* **`media-screen` acts only on a mark that changed.** A live mark
+  wakes the screen and pulses the hexagon only when it moves to this
+  `Player`, or when it answers this client's own cycle request. On a
+  controller that one unit lists, the operator answers a cycle with
+  the same mark, and that repeat is the press's feedback, so the
+  client records the cycle it asked for. Every other repeat changes
+  nothing.
+
+The operator side alone fixes the restart. The client side is there
+because a screen cannot tell a person from a publisher that sends the
+same mark again. For example, a broker session that delivers its
+retained marks after the grace makes the operator publish a mark the
+broker still holds, and the screen's own session did not restart.
+
+| What | Test |
+|---|---|
+| A new session publishes no mark the broker delivered back | `TestANewSessionDoesNotRepublishAMarkTheBrokerHolds` |
+| A new session publishes, once, after the catch-up, a mark the broker lost | `TestANewSessionRestoresAMarkTheBrokerLost` |
+| A reconnect writes the key tables again and no mark | `TestAReconnectRewritesTheKeyTablesAndNoMark` |
+| A repeat of the held mark neither wakes nor pulses | `a_mark_that_repeats_neither_wakes_nor_pulses` |
+| The repeat that answers the client's cycle wakes and pulses once | `a_repeat_that_answers_this_clients_cycle_wakes_and_pulses` |
+| A mark that comes back after another `Player` held it pulses | `a_mark_that_returns_after_another_player_held_it_pulses` |
+
+The drill for this change: put a screen to sleep, roll the operator,
+and confirm that the bus carries no focus mark from the new leader and
+that the shade stays down. Then delete the broker's pod, and confirm
+that the operator publishes each mark once, about two seconds after
+it connects, and that no screen wakes.

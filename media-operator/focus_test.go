@@ -343,3 +343,44 @@ func TestSetMarkWakesTheLoopOnAChange(t *testing.T) {
 	default:
 	}
 }
+
+// A new broker session whose catch-up delivered no mark for a controller
+// is a broker that lost it, so the operator publishes the mark it holds
+// once the catch-up is over, and a controller keeps the Player it drives.
+func TestANewSessionRestoresAMarkTheBrokerLost(t *testing.T) {
+	o, broker := focusBrokerOperator(t)
+	o.focus.setMark(controllerKey("house", "sofa"), "theater")
+	players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
+
+	o.focus.newSession()
+	o.reestablishRetained()
+	o.reconcileFocus(players)
+	mustPublishNothing(t, broker)
+	o.catchUpEnds = time.Now()
+	o.reconcileFocus(players)
+	o.reconcileFocus(players)
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, string(published.payload), "theater")
+	mustMatch(t, published.retained, true)
+	mustPublishNothing(t, broker)
+}
+
+// A mark the broker delivers back on the new session is still on the
+// broker, so the operator publishes nothing. A republish reaches every
+// screen as a live mark, and a screen reads a live mark as a person
+// pointing a controller at it, so a restart would light a dark room.
+func TestANewSessionDoesNotRepublishAMarkTheBrokerHolds(t *testing.T) {
+	o, broker := focusBrokerOperator(t)
+	o.focus.setMark(controllerKey("house", "sofa"), "theater")
+	players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
+
+	o.focus.newSession()
+	o.reestablishRetained()
+	o.handleBusMessage(remoteFocusTopic(defaultTopicBase, "house", "sofa"), []byte("theater"))
+	o.catchUpEnds = time.Now()
+	o.reconcileFocus(players)
+
+	mustPublishNothing(t, broker)
+}

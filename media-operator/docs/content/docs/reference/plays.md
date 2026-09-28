@@ -242,7 +242,8 @@ running `Play`'s place back from the broker.
       "position": "0:41:22",
       "duration": "1:58:03",
       "audioLanguage": "eng",
-      "subtitleLanguage": "eng"
+      "subtitleLanguage": "eng",
+      "pod": "5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90"
     }
 
 `item` counts from 1 in spec order. `duration` is empty until the
@@ -254,6 +255,13 @@ three-letter ISO 639-2 codes, whatever form the preference used. The
 the same run. The pod takes seconds to terminate, so the operator
 reads this mark and returns the unit to idle at once instead of
 waiting out the pod.
+
+`pod` is the UID of the playback pod that sent the report. When the
+operator recreates a pod, for example after an edit to the `Player`'s
+remotes, the new pod has the same name, and the old pod reports the
+`ended` field when it stops. The operator ignores every report from a
+pod it replaced, so the unit reads `Starting` and then `Playing`, and
+never `Idle`, while the `Play` moves to the new pod.
 
 The operator folds each report into the `Play`'s Kubernetes status,
 so a program that only needs the current position can read either
