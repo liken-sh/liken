@@ -279,6 +279,37 @@ func TestIdentityMatchesNormalizesTheSpellings(t *testing.T) {
 	mustMatch(t, client.identityMatches("anything"), true)
 }
 
+// countingTransport answers every request with an error and counts
+// them, so a test proves a client sent nothing.
+type countingTransport struct {
+	mutex    sync.Mutex
+	requests []string
+}
+
+func (c *countingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.requests = append(c.requests, request.URL.String())
+	return nil, fmt.Errorf("the test answers no request")
+}
+
+// A client with no address sends no request and reports unreachable.
+// Go dials an empty host as the local machine, so a request would reach
+// whatever answers on port 443 of the operator's own node.
+func TestAClientWithNoAddressSendsNothing(t *testing.T) {
+	client := NewClient("", nil)
+	transport := &countingTransport{}
+	client.http.Transport = transport
+
+	for range pollFailures {
+		mustMatch(t, client.poll(context.Background()), false)
+	}
+	mustMatch(t, client.send(context.Background(), "setPlayerCmd:vol:10") != nil, true)
+
+	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+	mustMatch(t, transport.requests, []string(nil))
+}
+
 func TestAFailedPollReportsUnreachable(t *testing.T) {
 	amp := startFakeAmp(t)
 	amp.mutex.Lock()

@@ -265,7 +265,7 @@ spec:
                       type: string
                       minLength: 1
                       maxLength: 253
-                      description: "The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional because discovery resolves the UUID to an address on its own; with neither, the receiver is unreachable."
+                      description: "The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional while network discovery is on, because discovery resolves the UUID to an address on its own. With the operator's EQUIPMENT_NETWORK_DISCOVERY set to off, nothing resolves the UUID, so a WiiM receiver needs this field. With no address from either, the receiver is unreachable."
                     settings:
                       type: object
                       description: "The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times at one declared value; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the device does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the device unchanged. An empty block sends nothing."
@@ -452,7 +452,7 @@ spec:
               properties:
                 address:
                   type: string
-                  description: "The address the operator reached the receiver on: a WiiM's is the address discovery found, and a Denon's is the declared address resolved. Empty until the operator builds the driver."
+                  description: "The address the operator reached the receiver on: a WiiM's is its declared address, or the address discovery found when it declares none, and a Denon's is the declared address resolved. Empty until the operator builds the driver."
                 driver:
                   type: string
                   description: "The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver."

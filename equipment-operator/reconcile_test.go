@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"testing"
@@ -47,6 +48,8 @@ type fakeAPI struct {
 	settingsGate chan struct{}
 	// lists counts the lists of the Receivers.
 	lists int
+	// applied names the Receiver of each apply on the main resource.
+	applied []string
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
@@ -143,6 +146,9 @@ func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	var applied receiverPowerApply
 	_ = json.Unmarshal(body, &applied)
+	a.mutex.Lock()
+	a.applied = append(a.applied, path.Base(r.URL.Path))
+	a.mutex.Unlock()
 	if applied.Spec.Denon != nil {
 		a.mutex.Lock()
 		a.settingsSet = append(a.settingsSet, body)
@@ -165,6 +171,14 @@ func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Spec: applied.Spec})
+}
+
+// appliedReceivers names the Receiver of each apply on the main
+// resource, in order.
+func (a *fakeAPI) appliedReceivers() []string {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return append([]string(nil), a.applied...)
 }
 
 func (a *fakeAPI) setReceivers(items ...Receiver) {
@@ -512,7 +526,7 @@ func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
 	api := startFakeAPI(t)
 	api.breakTheList()
 
-	mustFail(t, serve(t.Context(), api.client, "127.0.0.1:1", testMetrics(t)))
+	mustFail(t, serve(t.Context(), api.client, settings{busAddress: "127.0.0.1:1"}, testMetrics(t)))
 }
 
 // serve runs the loop until its context ends.
@@ -526,7 +540,7 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		mustSucceed(t, serve(ctx, api.client, "127.0.0.1:1", testMetrics(t)))
+		mustSucceed(t, serve(ctx, api.client, settings{busAddress: "127.0.0.1:1"}, testMetrics(t)))
 	}()
 
 	api.waitForStatus(t, connected)

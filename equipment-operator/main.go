@@ -4,7 +4,10 @@
 // room's level while that session stands.
 package main
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 // version is the release this binary was built from. The Dockerfile
 // sets it with -ldflags "-X main.version=...", and a build with no
@@ -32,6 +35,14 @@ const (
 	// since this operator runs on the cluster network. An empty value
 	// turns the listener off.
 	metricsAddressVariable = "EQUIPMENT_METRICS_ADDRESS"
+
+	// EQUIPMENT_NETWORK_DISCOVERY is on or off, and unset reads as on.
+	// Network discovery searches the LAN for WiiM amps and creates a
+	// Receiver for each one that no Receiver names, and the operator then
+	// drives that amp. A cluster that shares its LAN with amps it must not
+	// drive, such as a test cluster beside a home's own equipment, turns
+	// it off.
+	networkDiscoveryVariable = "EQUIPMENT_NETWORK_DISCOVERY"
 )
 
 // settings is the whole of the operator's configuration.
@@ -40,18 +51,32 @@ type settings struct {
 	pod            string
 	busAddress     string
 	metricsAddress string
+	// networkDiscoveryOff is true when the Deployment turned network
+	// discovery off. The zero value is on, the default.
+	networkDiscoveryOff bool
 }
 
 // readSettings takes the configuration from the environment alone.
 // An unset variable reads as empty, and the caller decides what an
-// empty value means, so a missing setting never stops the read.
-func readSettings() settings {
-	return settings{
+// empty value means, so a missing setting never stops the read. The
+// one value it refuses is a network discovery value other than on or
+// off: a misspelled off would leave discovery on, and the operator
+// would drive the amps the cluster owner meant to leave alone.
+func readSettings() (settings, error) {
+	config := settings{
 		namespace:      os.Getenv(podNamespaceVariable),
 		pod:            os.Getenv(podNameVariable),
 		busAddress:     os.Getenv(busAddressVariable),
 		metricsAddress: os.Getenv(metricsAddressVariable),
 	}
+	switch value := os.Getenv(networkDiscoveryVariable); value {
+	case "", "on":
+	case "off":
+		config.networkDiscoveryOff = true
+	default:
+		return settings{}, fmt.Errorf("%s is %q; it takes on or off", networkDiscoveryVariable, value)
+	}
+	return config, nil
 }
 
 // The image holds two builds of this program, so the two halves stay

@@ -75,6 +75,16 @@ spec:
             # base runs the same either way.
             - name: EQUIPMENT_METRICS_ADDRESS
               value: :9260
+            # Network discovery searches the LAN for WiiM amps with mDNS
+            # and SSDP, and creates a Receiver for each amp that no
+            # Receiver names, so the operator drives every amp it finds.
+            # A cluster that shares its LAN with amps it must not drive
+            # sets "off" with a patch; the install guide shows the patch.
+            # The quotes keep a YAML 1.1 reader, such as kubectl, from
+            # reading on and off as booleans. The operator takes only on
+            # and off, and stops at start on any other value.
+            - name: EQUIPMENT_NETWORK_DISCOVERY
+              value: "on"
           ports:
             - name: metrics
               containerPort: 9260

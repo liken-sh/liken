@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -372,9 +373,18 @@ func (c *Client) notify(event equipment.Event) {
 	}
 }
 
+// errNoAddress is the error of a call from a client that has no
+// address: the spec declares none, and discovery found none or is off.
+var errNoAddress = errors.New("the amp has no address: spec.wiim.address is empty and network discovery found none")
+
 // call performs one GET and answers the body. A non-2xx answer carries
-// the server's own text in the error.
+// the server's own text in the error. A client with no address sends
+// nothing, because Go dials an empty host as the local machine, and the
+// request would reach whatever answers on port 443 of the node.
 func (c *Client) call(ctx context.Context, command string) ([]byte, error) {
+	if strings.TrimSpace(c.address) == "" {
+		return nil, errNoAddress
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, commandURL(c.address, command), nil)
 	if err != nil {
 		return nil, err

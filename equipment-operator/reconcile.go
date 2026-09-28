@@ -857,6 +857,10 @@ type controller struct {
 	now        func() time.Time
 	readings   *metrics
 	discovery  *discovery
+	// networkDiscoveryOff keeps discovery from running at all, so the
+	// operator sends no search onto the LAN and creates no Receiver
+	// (main.go).
+	networkDiscoveryOff bool
 	// receivers holds the Receiver watch's store, which the pass and
 	// discovery read (objectcache.go).
 	receivers *watchStore
@@ -1025,11 +1029,6 @@ func protocolAddress(spec *ReceiverSpec) string {
 	return ""
 }
 
-// resolvedAddress is the address a Receiver's protocol block declares,
-// or the one discovery found for its identity when it declares none. A
-// discovered address that moves is a different wiring too, so the unit
-// is replaced and redialled.
-
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
@@ -1092,7 +1091,7 @@ func (c *controller) run(ctx context.Context) {
 	// run returns (work.go).
 	var working sync.WaitGroup
 	ctx = withWork(ctx, &working)
-	goWork(ctx, func() { c.discovery.run(ctx) })
+	c.startDiscovery(ctx)
 	ticker := time.NewTicker(backstopInterval)
 	defer ticker.Stop()
 	for {
@@ -1108,6 +1107,19 @@ func (c *controller) run(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// startDiscovery starts the search for amps, or with discovery off,
+// writes the one line that says so. With discovery off, a WiiM
+// Receiver gets no address from a search, so it reaches its amp only
+// through spec.wiim.address. The discovered Receivers already in the
+// cluster stay, because only a search is evidence that deletes one.
+func (c *controller) startDiscovery(ctx context.Context) {
+	if c.networkDiscoveryOff {
+		fmt.Fprintf(c.log, "%s is off: the operator sends no mDNS or SSDP search and creates no Receiver, and a WiiM Receiver reaches its amp only at spec.wiim.address\n", networkDiscoveryVariable)
+		return
+	}
+	goWork(ctx, func() { c.discovery.run(ctx) })
 }
 
 // stopAll closes every unit at operator shutdown.
@@ -1145,7 +1157,11 @@ func drainPokes(wake <-chan struct{}) {
 // the kubelet restarts the pod with backoff and the failure shows in
 // kubectl instead of hiding in a retry loop.
 func operate() {
-	config := readSettings()
+	config, err := readSettings()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if config.busAddress == "" {
 		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the broker\n", busAddressVariable)
 		os.Exit(1)
@@ -1180,13 +1196,13 @@ func operateAsLeader(ctx context.Context, client *Client, config settings) error
 	if _, err := readings.Serve(ctx, config.metricsAddress); err != nil {
 		return fmt.Errorf("metrics listener: %w", err)
 	}
-	return serve(ctx, client, config.busAddress, readings)
+	return serve(ctx, client, config, readings)
 }
 
 // serve proves the collection can be read, starts the watch, and runs
 // the loop until ctx ends. It answers errStillWriting when a goroutine
 // that can write did not stop in time (work.go).
-func serve(ctx context.Context, client *Client, busAddress string, readings *metrics) error {
+func serve(ctx context.Context, client *Client, config settings, readings *metrics) error {
 	err := retryThrottled(ctx, func() error {
 		_, err := ListReceivers(client)
 		return err
@@ -1197,7 +1213,8 @@ func serve(ctx context.Context, client *Client, busAddress string, readings *met
 
 	// serve returns only after the goroutines it started stop, so none
 	// of them reads the API after it.
-	operator := newController(client, busAddress, readings)
+	operator := newController(client, config.busAddress, readings)
+	operator.networkDiscoveryOff = config.networkDiscoveryOff
 	var started sync.WaitGroup
 	buses := newCECBusController(client)
 	buses.sharedReceivers = true

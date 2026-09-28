@@ -222,10 +222,11 @@ type DenonProtocol struct {
 // The WiiM control protocol. The LinkPlay UUID is the device's identity
 // and the only key the operator trusts: a declared address is a hint,
 // and the driver reads the device's own uuid and compares it before it
-// drives anything. The address is optional because a later discovery
-// path resolves the UUID to a current address; with no address and no
-// discovery yet, the driver can reach nothing and reports the receiver
-// unreachable.
+// drives anything. The address is optional because network discovery
+// resolves the UUID to a current address. With no address and no
+// discovered address, which is always the case while network discovery
+// is off (main.go), the driver can reach nothing and reports the
+// receiver unreachable.
 type WiimProtocol struct {
 	UUID     string        `json:"uuid"`
 	Address  string        `json:"address,omitempty"`

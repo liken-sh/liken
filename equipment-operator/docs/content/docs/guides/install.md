@@ -53,6 +53,62 @@ release tag:
     resources:
       - https://github.com/liken-sh/equipment-operator//deploy?ref=<ref>
 
+## Turn network discovery off
+
+By default, the operator searches the LAN for WiiM amps with mDNS and
+SSDP. Each search takes 4 seconds, and the next one starts 30 seconds
+after it ends. It creates a `Receiver` for each amp that no
+`Receiver` names, and then it reads and drives that amp. Turn the
+search off when the cluster shares its LAN with amps that it must not
+drive, for example a test cluster on the same network as a home's own
+equipment. The `EQUIPMENT_NETWORK_DISCOVERY` variable on the
+`Deployment` takes `on` or `off`. Set it to `off` with a patch in your
+`Kustomization`:
+
+```yaml
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: equipment-operator
+      spec:
+        template:
+          spec:
+            containers:
+              - name: operator
+                env:
+                  - name: EQUIPMENT_NETWORK_DISCOVERY
+                    value: "off"
+```
+
+Keep the quotes. A YAML 1.1 reader, such as `kubectl`, reads a bare
+`off` as the boolean false. Any value other than `on` or `off` stops
+the operator at start with an error that names the value, so a wrong
+value never leaves the search on.
+
+With the search off, the operator writes one line to its log at start
+that says so. It sends no mDNS or SSDP search and creates no
+`Receiver`. A `Receiver` that you declare works as before. A WiiM
+`Receiver` must state `spec.wiim.address`, because nothing else finds
+the amp's address. A WiiM `Receiver` with no address sends nothing and
+reports the amp unreachable.
+
+The operator does not delete the `Receiver` objects that the search
+created before you turned it off, because only a search deletes one.
+So a discovered `Receiver` also stays when you declare a `Receiver` for
+the same amp, and the two objects then name one amp. Each discovered
+`Receiver` has the `equipment.liken.sh/discovered` label. List them,
+and delete the ones you do not want:
+
+    kubectl get receivers -l equipment.liken.sh/discovered
+
+The setting covers the network search only. The CEC node workload
+still creates a `CECBus` in `Listen` for an adapter that no `CECBus`
+names, and a `Listen` adapter sends nothing on the HDMI wire. A
+`Television` is created only for a `CECBus` that a person sets to
+`Control`.
+
 ## Declare the receiver
 
 A `Receiver` names the protocol, the address, and the wiring. The
