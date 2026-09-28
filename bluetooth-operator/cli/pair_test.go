@@ -11,8 +11,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 // fakeDynamic builds a dynamic client registered with this operator's
@@ -279,4 +281,43 @@ func TestPairFlowCancelClosesTheWindow(t *testing.T) {
 		list, err := client.Resource(pairingRequestGVR).Namespace(namespace).List(context.Background(), metav1.ListOptions{})
 		return err == nil && len(list.Items) == 0
 	})
+}
+
+// The flow watches only its own request, from the version its create
+// returned. A watch with no resourceVersion first sends every request
+// in the namespace as it is now, which costs as much as a list, and a
+// watch from the create's version sends only the changes after it.
+func TestPairFlowWatchesItsRequestFromTheCreate(t *testing.T) {
+	const namespace = "liken-system"
+	client := fakeDynamic()
+	client.PrependReactor("create", "pairingrequests", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		created := action.(k8stesting.CreateAction).GetObject().(*unstructured.Unstructured)
+		created.SetResourceVersion("41")
+		return false, nil, nil
+	})
+	var restrictions k8stesting.WatchRestrictions
+	client.PrependWatchReactor("pairingrequests", func(action k8stesting.Action) (bool, watch.Interface, error) {
+		restrictions = action.(k8stesting.WatchAction).GetWatchRestrictions()
+		return false, nil, nil
+	})
+	watching := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := pairFlow(ctx, client,
+			pairOptions{Namespace: namespace, Adapter: "04-4a-69-66-92-27"},
+			make(chan string), &syncBuffer{}, watching)
+		done <- err
+	}()
+	<-watching
+	cancel()
+	<-done
+
+	if restrictions.ResourceVersion != "41" {
+		t.Errorf("the watch opened from version %q, want the create's 41", restrictions.ResourceVersion)
+	}
+	if name, ok := restrictions.Fields.RequiresExactMatch("metadata.name"); !ok || !strings.HasPrefix(name, "pair-") {
+		t.Errorf("the watch selected %q, want the request's own name", restrictions.Fields)
+	}
 }

@@ -19,6 +19,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/dynamic"
@@ -127,7 +128,14 @@ func pairFlow(ctx context.Context, client dynamic.Interface, opts pairOptions, s
 	}
 	name := created.GetName()
 
-	watcher, err := requests.Watch(ctx, metav1.ListOptions{})
+	// The watch selects this request alone and starts at the version
+	// the create returned, so the API server sends only the changes
+	// made after the create. With no version, the watch would first
+	// send every request in the namespace as it is now.
+	watcher, err := requests.Watch(ctx, metav1.ListOptions{
+		FieldSelector:   fields.OneTermEqualSelector("metadata.name", name).String(),
+		ResourceVersion: created.GetResourceVersion(),
+	})
 	if err != nil {
 		return "", err
 	}
