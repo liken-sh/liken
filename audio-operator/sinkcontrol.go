@@ -39,8 +39,13 @@ import (
 type endpointControl struct {
 	client  *Client
 	machine string
-	claims  *preparedClaims
-	now     func() time.Time
+
+	// cache is the two watches' stores, which the pass reads in place
+	// of the API server (endpointcache.go).
+	cache endpointCache
+
+	claims *preparedClaims
+	now    func() time.Time
 
 	// openCard opens one card's control device. A card that does not
 	// open costs its endpoints their capabilities and their controls,
@@ -88,10 +93,11 @@ type endpointControl struct {
 
 // newEndpointControl builds the controller. Every seam takes its real
 // implementation here and a stand-in only in a test.
-func newEndpointControl(client *Client, machine string, claims *preparedClaims,
+func newEndpointControl(client *Client, cached endpointCache, machine string, claims *preparedClaims,
 	feed *graphFeed, readings *metrics) *endpointControl {
 	return &endpointControl{
 		client:      client,
+		cache:       cached,
 		machine:     machine,
 		claims:      claims,
 		now:         time.Now,
@@ -326,7 +332,7 @@ func (e *endpointControl) reconcile(ctx context.Context, reading endpoint) error
 }
 
 func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) error {
-	sink, err := getSink(e.client, reading.facts.Name)
+	sink, err := e.readSink(reading.facts.Name)
 	if errors.Is(err, ErrNotFound) {
 		sink, err = createSink(e.client, reading.facts.Name)
 	}
@@ -335,17 +341,23 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 	}
 	actuated := e.actuate(ctx, sink.Spec.declaration(), reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
-	status := reading.facts.status(sink.Status, e.now())
 	e.recordEndpoint(reading)
-	if sameStatus(sink.Status, status) {
-		return actuated
+	now := e.now()
+	want := func(published EndpointStatus) (EndpointStatus, bool) {
+		return reading.facts.status(published, now), true
 	}
-	_, err = writeSinkStatus(e.client, sink, status)
+	err = e.settleSinkStatus(sink, want)
+	if errors.Is(err, ErrNotFound) {
+		// The store held a copy of a resource somebody deleted since.
+		if sink, err = createSink(e.client, reading.facts.Name); err == nil {
+			err = e.settleSinkStatus(sink, want)
+		}
+	}
 	return errors.Join(actuated, err)
 }
 
 func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint) error {
-	source, err := getSource(e.client, reading.facts.Name)
+	source, err := e.readSource(reading.facts.Name)
 	if errors.Is(err, ErrNotFound) {
 		source, err = createSource(e.client, reading.facts.Name)
 	}
@@ -354,12 +366,18 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 	}
 	actuated := e.actuate(ctx, source.Spec.declaration(), reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
-	status := reading.facts.status(source.Status, e.now())
 	e.recordEndpoint(reading)
-	if sameStatus(source.Status, status) {
-		return actuated
+	now := e.now()
+	want := func(published EndpointStatus) (EndpointStatus, bool) {
+		return reading.facts.status(published, now), true
 	}
-	_, err = writeSourceStatus(e.client, source, status)
+	err = e.settleSourceStatus(source, want)
+	if errors.Is(err, ErrNotFound) {
+		// The store held a copy of a resource somebody deleted since.
+		if source, err = createSource(e.client, reading.facts.Name); err == nil {
+			err = e.settleSourceStatus(source, want)
+		}
+	}
 	return errors.Join(actuated, err)
 }
 

@@ -274,7 +274,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	}
 	harnessLines := &loggedLines{}
 	server.log = harnessLines.add
-	server.pods.replace([]pod{samplePod("node-1")})
+	server.pods.put(samplePod("node-1"))
 
 	harness := &apiHarness{
 		cluster:   cluster,

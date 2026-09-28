@@ -100,8 +100,8 @@ func TestPassCreatesAResourceForEveryEndpoint(t *testing.T) {
 }
 
 // A pass that finds the published status already correct writes
-// nothing, so a machine at rest costs the API server one read for
-// each endpoint and no write.
+// nothing. With no stores, a machine at rest costs the API server one
+// read for each endpoint and no write.
 func TestPassWritesTheStatusOnce(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
@@ -381,7 +381,7 @@ func TestTheCardStaysOpenForTheLengthOfAPass(t *testing.T) {
 	if _, err := os.Stat(sndDir + "/controlC0"); err != nil {
 		t.Skip("this machine has no card 0 to read")
 	}
-	control := newEndpointControl(nil, "liken-1", nil, nil, nil)
+	control := newEndpointControl(nil, endpointCache{}, "liken-1", nil, nil, nil)
 	endpoints := []alsaEndpoint{{Card: 0, PCM: 0, DeviceName: "the local card"}}
 
 	cards := control.openCards(endpoints)

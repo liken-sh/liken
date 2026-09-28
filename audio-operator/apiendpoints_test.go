@@ -446,7 +446,7 @@ func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
 func TestAContainerThatClosedBeforeAnsweringIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 
 	silent, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -505,7 +505,7 @@ func TestAContainerThatRefusedTheConnectionIsUnavailable(t *testing.T) {
 func TestTheMachineAndThePipeWireNodeAreNotInterchangeable(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusOK {
@@ -545,7 +545,7 @@ func TestAnEndpointWithAPipeWireNodeAndNoMachineIsAway(t *testing.T) {
 func TestTheInfoRouteTakesTheSameTwoNames(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen", nil)
 	if answer.StatusCode != http.StatusOK {
@@ -567,7 +567,7 @@ func TestTheInfoRouteTakesTheSameTwoNames(t *testing.T) {
 func TestATapOutlivesTheHeaderBound(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 	harness.server.relay.headers = 40 * time.Millisecond
 
 	// The container answers its headers at once and then delivers a
@@ -607,7 +607,7 @@ func TestATapOutlivesTheHeaderBound(t *testing.T) {
 func TestHeadersThatArriveLateAreAGatewayTimeout(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 	harness.server.relay.headers = 40 * time.Millisecond
 
 	// The container takes longer than the bound to answer at all.
@@ -636,7 +636,7 @@ func TestHeadersThatArriveLateAreAGatewayTimeout(t *testing.T) {
 func TestTheBoundAllowsForTheSpansOwnBegin(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 	harness.server.relay.headers = 10 * time.Millisecond
 
 	harness.container.streams(func(w http.ResponseWriter) {
@@ -665,7 +665,7 @@ func TestTheBoundAllowsForTheSpansOwnBegin(t *testing.T) {
 func TestAContainerThatCutTheBodyShortCutsThePublicOneToo(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 
 	// The container writes a 200 and some bytes, then ends its handler
 	// the way a tap whose pipeline died does.
@@ -699,7 +699,7 @@ func TestAContainerThatCutTheBodyShortCutsThePublicOneToo(t *testing.T) {
 func TestABodyTheContainerFinishedArrivesComplete(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 
 	harness.container.streams(func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "audio/wav")
@@ -739,7 +739,7 @@ func TestThePublicLegLogsEveryRequestWhateverBecameOfIt(t *testing.T) {
 func TestTheRelayedHeadersReachTheCallerBeforeTheFirstBodyByte(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.pods.put(samplePod(drillMachine))
 
 	const silent = 600 * time.Millisecond
 	harness.container.streams(func(w http.ResponseWriter) {

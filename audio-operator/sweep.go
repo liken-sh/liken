@@ -31,7 +31,14 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 		return nil
 	}
 	var failures []error
-	sinks, err := listSinks(e.client, e.machine)
+	// Only the machine that status.node names writes the absence. The
+	// retry after a conflict reads the resource again, and a Bluetooth
+	// speaker's Sink can name another machine by then.
+	now := e.now()
+	absent := func(published EndpointStatus) (EndpointStatus, bool) {
+		return absentStatus(published, now), published.Node == e.machine
+	}
+	sinks, err := e.readSinks()
 	if err != nil {
 		failures = append(failures, err)
 	}
@@ -39,16 +46,12 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 		if sink.Status.Node != e.machine || present[sink.Metadata.Name] {
 			continue
 		}
-		status := absentStatus(sink.Status, e.now())
 		e.readings.endpoint(sink.Metadata.Name, false, false, false)
-		if sameStatus(sink.Status, status) {
-			continue
-		}
-		if _, err := writeSinkStatus(e.client, &sink, status); err != nil {
+		if err := e.settleSinkStatus(&sink, absent); err != nil && !errors.Is(err, ErrNotFound) {
 			failures = append(failures, err)
 		}
 	}
-	sources, err := listSources(e.client, e.machine)
+	sources, err := e.readSources()
 	if err != nil {
 		failures = append(failures, err)
 	}
@@ -56,12 +59,8 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 		if source.Status.Node != e.machine || present[source.Metadata.Name] {
 			continue
 		}
-		status := absentStatus(source.Status, e.now())
 		e.readings.endpoint(source.Metadata.Name, false, false, false)
-		if sameStatus(source.Status, status) {
-			continue
-		}
-		if _, err := writeSourceStatus(e.client, &source, status); err != nil {
+		if err := e.settleSourceStatus(&source, absent); err != nil && !errors.Is(err, ErrNotFound) {
 			failures = append(failures, err)
 		}
 	}

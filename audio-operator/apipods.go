@@ -15,10 +15,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"sync"
 	"time"
+
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 // operatorSelector is the label the DaemonSet's pods carry.
@@ -85,132 +87,124 @@ func (p pod) capture() capturePod {
 	return found
 }
 
-// podIndex is the memory the informer fills: one pod per node.
+// podIndex is the memory the pod watch fills: every pod the watch
+// holds, by name. A node can hold two pods while the DaemonSet
+// replaces one, so the index keeps both and chooses when it answers.
 type podIndex struct {
 	mu     sync.RWMutex
-	byNode map[string]capturePod
+	byName map[string]capturePod
 }
 
 func newPodIndex() *podIndex {
-	return &podIndex{byNode: map[string]capturePod{}}
+	return &podIndex{byName: map[string]capturePod{}}
 }
 
 // on answers which pod runs on one node.
 func (index *podIndex) on(node string) (capturePod, bool) {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	found, held := index.byNode[node]
+	var found capturePod
+	held := false
+	for _, candidate := range index.byName {
+		if candidate.Node != node {
+			continue
+		}
+		if !held || supersedes(candidate, found) {
+			found, held = candidate, true
+		}
+	}
 	return found, held
 }
 
-// replace takes a whole list, which is what the informer's first read
-// and every list after an expired version deliver.
-func (index *podIndex) replace(pods []pod) {
-	next := map[string]capturePod{}
-	for _, held := range pods {
-		if held.Spec.NodeName == "" {
-			continue
-		}
-		incoming := held.capture()
-		if current, found := next[incoming.Node]; !found || supersedes(incoming, current) {
-			next[incoming.Node] = incoming
-		}
-	}
-	index.mu.Lock()
-	index.byNode = next
-	index.mu.Unlock()
-}
-
-// apply takes one watch event.
-func (index *podIndex) apply(kind string, held pod) {
-	if held.Spec.NodeName == "" {
-		return
-	}
+// put takes a pod that the watch added or changed. A pod with no node
+// yet has no tap to answer, so the index does not hold it.
+func (index *podIndex) put(held pod) {
 	index.mu.Lock()
 	defer index.mu.Unlock()
-	if kind == "DELETED" {
-		// A DaemonSet can start a node's new pod before the old pod's
-		// final DELETED event arrives. That event names the old pod,
-		// and removing the node on it would drop the new pod until
-		// the new pod next changes, which may be never.
-		if current, found := index.byNode[held.Spec.NodeName]; found && current.Name == held.Metadata.Name {
-			delete(index.byNode, held.Spec.NodeName)
-		}
+	if held.Spec.NodeName == "" {
+		delete(index.byName, held.Metadata.Name)
 		return
 	}
-	incoming := held.capture()
-	if current, found := index.byNode[incoming.Node]; !found || supersedes(incoming, current) {
-		index.byNode[incoming.Node] = incoming
-	}
+	index.byName[held.Metadata.Name] = held.capture()
 }
 
-// supersedes answers whether incoming takes the place of the pod the
-// index holds for the same node. An update to the held pod always
-// does. While a DaemonSet replaces a pod, the old pod and its
-// replacement are both on the node, and the old pod's late updates can
-// arrive after the replacement's last one. So another pod takes the
-// place only when it is not leaving and the held pod is leaving or
-// older.
+// forget removes the pod with one name. A late delete of a node's old
+// pod names that pod, so the new pod on the same node stays.
+func (index *podIndex) forget(name string) {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+	delete(index.byName, name)
+}
+
+// supersedes answers whether one pod on a node takes the place of
+// another. While a DaemonSet replaces a pod, the old pod and its
+// replacement are both on the node. A pod that is not leaving takes
+// the place of one that is, and of two pods in the same state, the
+// newer one answers.
 func supersedes(incoming, current capturePod) bool {
 	switch {
-	case incoming.Name == current.Name:
-		return true
-	case incoming.Leaving:
-		return false
-	case current.Leaving:
-		return true
-	default:
+	case incoming.Leaving != current.Leaving:
+		return current.Leaving
+	case !incoming.Created.Equal(current.Created):
 		return incoming.Created.After(current.Created)
+	default:
+		// Two pods created in the same second: the name orders them,
+		// so the answer does not change with the map's order.
+		return incoming.Name > current.Name
 	}
 }
 
-// watchPods lists the operator's pods once and follows the changes
-// for the life of the process. The watch is the one in apiwatch.go: a
-// watch the API server ends opens again from the last event's version,
-// and only a version the server no longer keeps lists the pods again.
-func watchPods(ctx context.Context, client *Client, namespace string,
-	index *podIndex, complain func(error)) {
-	go podWatch(client, namespace, index, complain).run(ctx)
+// watchPods follows the operator's pods into the index until the
+// context ends.
+func watchPods(ctx context.Context, client dynamic.Interface, namespace string, index *podIndex) {
+	collectionWatch{
+		collection:    client.Resource(podResource).Namespace(namespace),
+		labelSelector: operatorSelector,
+		handler:       podHandler{index}.handler(),
+	}.start(ctx)
 }
 
-// podWatch builds the watch with the production waits.
-func podWatch(client *Client, namespace string, index *podIndex, complain func(error)) *objectWatch {
-	return &objectWatch{
-		client:     client,
-		kind:       "Pod",
-		collection: "/api/v1/namespaces/" + namespace + "/pods",
-		selector:   operatorSelector,
-		labels:     true,
-		keep:       podKeeper{index},
-		complain:   complain,
-		retry:      objectWatchRetry,
-		retryLimit: objectWatchRetryLimit,
-		shortLife:  objectWatchShortLife,
+// podHandler reads the watch's objects as pods into the index.
+type podHandler struct{ index *podIndex }
+
+func (h podHandler) handler() cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    h.put,
+		UpdateFunc: func(_, after any) { h.put(after) },
+		DeleteFunc: h.removed,
 	}
 }
 
-// podKeeper reads the watch's objects as pods into the index.
-type podKeeper struct{ index *podIndex }
+// put holds a pod the watch added or changed. A pod that does not
+// convert is logged, and the index keeps what it held for that name.
+func (h podHandler) put(object any) {
+	held, err := convert[pod](object)
+	if err != nil {
+		reportUnconverted("the operator's pods", err)
+		return
+	}
+	h.index.put(held)
+}
 
-func (k podKeeper) replace(items json.RawMessage) error {
-	var pods []pod
-	// A list with no pods can leave the items out.
-	if len(items) > 0 {
-		if err := json.Unmarshal(items, &pods); err != nil {
-			return err
+// removed forgets a pod the watch removed. A tombstone that holds no
+// copy still carries the pod's key, namespace/name, and the name is
+// all the index needs.
+func (h podHandler) removed(object any) {
+	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok && tombstone.Obj == nil {
+		_, name, err := cache.SplitMetaNamespaceKey(tombstone.Key)
+		if err != nil {
+			reportUnconverted("the operator's pods", err)
+			return
 		}
+		h.index.forget(name)
+		return
 	}
-	k.index.replace(pods)
-	return nil
-}
-
-func (k podKeeper) apply(kind string, object json.RawMessage) error {
-	var held pod
-	if err := json.Unmarshal(object, &held); err != nil {
-		return err
+	item, err := unwrap(object)
+	if err != nil {
+		reportUnconverted("the operator's pods", err)
+		return
 	}
-	k.index.apply(kind, held)
-	return nil
+	h.index.forget(item.GetName())
 }
 
 // podNamespace is where the API looks for the operator's pods, which

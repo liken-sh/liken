@@ -25,9 +25,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 // The settings this Deployment reads from its environment: where the
@@ -116,13 +121,14 @@ func serveAPI() {
 	if err := server.anchors.load(client); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
 	}
-	server.followCertificateObjects(ctx, func(err error) {
+	watcher, err := inClusterWatcher()
+	if err != nil {
+		fatal("in-cluster config for the watches: %v", err)
+	}
+	server.followCertificateObjects(ctx, watcher, func(err error) {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	})
-
-	watchPods(ctx, client, namespace, server.pods, func(err error) {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-	})
+	watchPods(ctx, watcher, namespace, server.pods)
 
 	if address := os.Getenv("METRICS_ADDRESS"); address != "" {
 		metrics, err := net.Listen("tcp", address)
@@ -206,23 +212,77 @@ func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 // a delete of the Secret runs the capture leaf check, which mints the
 // leaf again when the Secret is gone, is expiring, or holds a leaf
 // another CA signed, and writes nothing when the Secret is in order.
+// The check reads the Secret from the API server, not the watch's
+// copy, because the check writes the Secret. The watch delivers that
+// write a moment later, and a check that read the older copy in
+// between would mint a second leaf.
 //
 // The second is the ConfigMap that holds the cluster's client
 // certificate authority, so a rotation of that authority takes effect
-// with no restart.
-func (s *apiServer) followCertificateObjects(ctx context.Context, complain func(error)) {
-	followObject(ctx, s.client, "Secret", secretsPath(s.certs.namespace), captureTLSSecret,
-		func() {
+// with no restart. The API never writes it, so the copy the watch
+// delivers is the one the pool takes, and a change costs no read.
+func (s *apiServer) followCertificateObjects(ctx context.Context, watcher dynamic.Interface, complain func(error)) {
+	followObject(ctx, watcher.Resource(secretResource).Namespace(s.certs.namespace), captureTLSSecret,
+		func(*unstructured.Unstructured) {
 			if err := s.certs.keepCaptureLeaf(); err != nil {
 				complain(fmt.Errorf("keeping the capture container's leaf: %w", err))
 			}
-		}, complain)
-	followObject(ctx, s.client, "ConfigMap", configMapsPath(clientCANamespace), clientCAConfigMap,
-		func() {
-			if err := s.anchors.load(s.client); err != nil {
+		})
+	followObject(ctx, watcher.Resource(configMapResource).Namespace(clientCANamespace), clientCAConfigMap,
+		func(held *unstructured.Unstructured) {
+			var published *configMap
+			if held != nil {
+				converted, err := convert[configMap](held)
+				if err != nil {
+					complain(fmt.Errorf("reading the cluster's client authority: %w", err))
+					return
+				}
+				published = &converted
+			}
+			if err := s.anchors.adopt(published); err != nil {
 				complain(fmt.Errorf("reading the cluster's client authority: %w", err))
 			}
-		}, complain)
+		})
+}
+
+// followObject runs changed with the newest copy of one named object on
+// every change to it, and with nil when the object is deleted. When the
+// watch's first read holds no such object, changed runs once with nil,
+// because an object that does not exist arrives as no event. The list
+// and the watch both carry the field selector metadata.name, which is
+// what lets the Role grant them on that one name.
+//
+// The informer calls the handler on one goroutine and the synced check
+// on another. The lock runs one changed at a time, in the order of the
+// events.
+func followObject(ctx context.Context, collection dynamic.ResourceInterface, name string,
+	changed func(held *unstructured.Unstructured)) {
+	var one sync.Mutex
+	seen := false
+	serial := func(object any) {
+		one.Lock()
+		defer one.Unlock()
+		seen = true
+		held, _ := object.(*unstructured.Unstructured)
+		changed(held)
+	}
+	collectionWatch{
+		collection:    collection,
+		fieldSelector: "metadata.name=" + name,
+		handler: cache.ResourceEventHandlerFuncs{
+			AddFunc:    serial,
+			UpdateFunc: func(_, after any) { serial(after) },
+			DeleteFunc: func(any) { serial(nil) },
+		},
+		synced: func() {
+			one.Lock()
+			defer one.Unlock()
+			if !seen {
+				seen = true
+				changed(nil)
+			}
+		},
+	}.start(ctx)
 }
 
 // servedLeaf is the certificate the public listener serves, swapped in

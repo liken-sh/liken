@@ -228,6 +228,16 @@ func operate() {
 	// hold one object between them, the way they hold the inventory.
 	claims := &preparedClaims{}
 
+	// The watch on the two collections starts before the first pass,
+	// so that a change it carries wakes the loop from the moment it
+	// runs. Its stores are what the pass reads this machine's Sinks and
+	// Sources from.
+	watcher, err := inClusterWatcher()
+	if err != nil {
+		fatal("in-cluster config for the watches: %v", err)
+	}
+	resources := watchEndpoints(ctx, watcher, nodeName, wake, readings)
+
 	operator := &reconciler{
 		client:   client,
 		nodeName: nodeName,
@@ -240,7 +250,7 @@ func operate() {
 		// reads it, so the two hold one object between them.
 		endpoints: &endpointInventory{},
 		cards:     watchCards(ctx, wake),
-		control:   newEndpointControl(client, nodeName, claims, feed, readings),
+		control:   newEndpointControl(client, resources, nodeName, claims, feed, readings),
 	}
 
 	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {
@@ -283,11 +293,6 @@ func operate() {
 			fatal("the DRA plugin is not serving: %v", err)
 		}
 	}()
-
-	// The watch on the two collections starts before the first pass,
-	// so that a change it carries wakes the loop from the moment it
-	// runs.
-	watchEndpoints(ctx, client, nodeName, wake, readings)
 
 	settled := settle(ctx, wakes(ctx, bluez, operator.cards.Events(), pokes),
 		settleWindow, settleLimit)

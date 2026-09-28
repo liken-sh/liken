@@ -57,13 +57,26 @@ func (a *clientAnchors) held() *x509.CertPool {
 	return a.pool
 }
 
-// load reads the ConfigMap and replaces the pool with what it holds.
-// The key carries one PEM block when no rotation is in progress and
-// more than one during a rotation, and a pool takes all of them.
+// load reads the ConfigMap from the API server and replaces the pool
+// with what it holds. The API calls it once at the start, before the
+// listener opens and before the watch has read the ConfigMap. After
+// that, the watch hands each change to adopt.
 func (a *clientAnchors) load(client *Client) error {
 	held, err := get[configMap](client, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
 	if err != nil {
 		return fmt.Errorf("reading the ConfigMap %s: %w", clientCAConfigMap, err)
+	}
+	return a.adopt(held)
+}
+
+// adopt replaces the pool with what one copy of the ConfigMap holds.
+// The key carries one PEM block when no rotation is in progress and
+// more than one during a rotation, and a pool takes all of them. A nil
+// copy is a ConfigMap that does not exist, and the pool keeps what it
+// held.
+func (a *clientAnchors) adopt(held *configMap) error {
+	if held == nil {
+		return fmt.Errorf("the ConfigMap %s does not exist", clientCAConfigMap)
 	}
 	anchors := held.Data[clientCAKey]
 	if anchors == "" {

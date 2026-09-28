@@ -1,16 +1,18 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/tools/cache"
 )
 
 func TestTheIndexAnswersWhichPodIsOnANode(t *testing.T) {
 	index := newPodIndex()
-	index.replace([]pod{samplePod("node-1"), samplePod("node-2")})
+	index.put(samplePod("node-1"))
+	index.put(samplePod("node-2"))
 
 	held, found := index.on("node-1")
 	if !found {
@@ -28,7 +30,7 @@ func TestAPodWhoseCaptureContainerIsNotRunningIsNotReady(t *testing.T) {
 	held := samplePod("node-1")
 	held.Status.ContainerStatuses[0].Ready = false
 	index := newPodIndex()
-	index.replace([]pod{held})
+	index.put(held)
 
 	found, _ := index.on("node-1")
 	if found.Ready {
@@ -40,7 +42,7 @@ func TestAPodWithNoAddressIsNotReady(t *testing.T) {
 	held := samplePod("node-1")
 	held.Status.PodIP = ""
 	index := newPodIndex()
-	index.replace([]pod{held})
+	index.put(held)
 
 	found, _ := index.on("node-1")
 	if found.Ready {
@@ -52,7 +54,7 @@ func TestAPodWithAnotherContainerReadyIsStillNotReady(t *testing.T) {
 	held := samplePod("node-1")
 	held.Status.ContainerStatuses[0].Name = "operator"
 	index := newPodIndex()
-	index.replace([]pod{held})
+	index.put(held)
 
 	found, _ := index.on("node-1")
 	if found.Ready {
@@ -63,45 +65,27 @@ func TestAPodWithAnotherContainerReadyIsStillNotReady(t *testing.T) {
 func TestAPodThatIsNotScheduledIsNotHeld(t *testing.T) {
 	held := samplePod("")
 	index := newPodIndex()
-	index.replace([]pod{held})
+	index.put(held)
 	if _, found := index.on(""); found {
 		t.Error("a pod with no node was held")
-	}
-	index.apply("ADDED", held)
-	if _, found := index.on(""); found {
-		t.Error("an event for a pod with no node was applied")
 	}
 }
 
 func TestAnEventReplacesOrRemovesOnePod(t *testing.T) {
 	index := newPodIndex()
-	index.replace([]pod{samplePod("node-1")})
+	index.put(samplePod("node-1"))
 
 	changed := samplePod("node-1")
 	changed.Status.PodIP = "10.42.0.9"
-	index.apply("MODIFIED", changed)
+	index.put(changed)
 	held, _ := index.on("node-1")
 	if held.IP != "10.42.0.9" {
 		t.Errorf("the pod's address is %q", held.IP)
 	}
 
-	index.apply("DELETED", changed)
+	index.forget(changed.Metadata.Name)
 	if _, found := index.on("node-1"); found {
 		t.Error("a deleted pod is still held")
-	}
-}
-
-func TestAListReplacesEveryPodTheIndexHeld(t *testing.T) {
-	index := newPodIndex()
-	index.replace([]pod{samplePod("node-1"), samplePod("node-2")})
-	// A node whose pod is gone by the time the list arrives leaves the
-	// index with it.
-	index.replace([]pod{samplePod("node-2")})
-	if _, found := index.on("node-1"); found {
-		t.Error("a pod the list does not hold is still held")
-	}
-	if _, found := index.on("node-2"); !found {
-		t.Error("a pod the list holds was dropped")
 	}
 }
 
@@ -116,50 +100,110 @@ func TestTheNamespaceComesFromTheDownwardAPI(t *testing.T) {
 	}
 }
 
-// podEvent is one watch event for the operator's pod on a node, at a
-// resource version.
-func podEvent(kind, node, version string) string {
-	held := samplePod(node)
-	body, _ := json.Marshal(map[string]any{
-		"type": kind,
-		"object": map[string]any{
-			"metadata": map[string]string{"name": held.Metadata.Name, "resourceVersion": version},
-			"spec":     held.Spec,
-			"status":   held.Status,
-		},
-	})
-	return string(body)
+// podEvent is one watch event for a pod.
+func podEvent(t *testing.T, kind string, held pod, version string) string {
+	t.Helper()
+	object := podObject(t, held)
+	object.SetResourceVersion(version)
+	return encode(t, map[string]any{"type": kind, "object": object.Object})
 }
 
-// A pod watch that the API server ends opens again from the version of
-// the last event, and does not list the pods again. The index keeps
-// what the events put in it.
-func TestThePodWatchResumesFromTheLastEvent(t *testing.T) {
-	fake := newOneObject(t)
+// podObject is a pod as the API server sends it, with its kind.
+func podObject(t *testing.T, held pod) *unstructured.Unstructured {
+	t.Helper()
+	object := asObject(t, held)
+	object.SetAPIVersion("v1")
+	object.SetKind("Pod")
+	object.SetNamespace("liken-system")
+	return object
+}
+
+// podRead is one read of the pods, as a JSON array.
+func podRead(t *testing.T, pods ...pod) string {
+	t.Helper()
+	items := []any{}
+	for _, held := range pods {
+		items = append(items, podObject(t, held).Object)
+	}
+	return encode(t, items)
+}
+
+// Through the reflector: the watch selects the operator's pods by
+// label, and a pod the watch adds, changes, and deletes moves the
+// index with it.
+func TestThePodWatchFollowsThePodsIntoTheIndex(t *testing.T) {
+	moved := samplePod("node-1")
+	moved.Status.PodIP = "10.42.0.9"
+	pods := newWatchServer("/api/v1/namespaces/liken-system/pods", "v1", "Pod",
+		[]string{podRead(t, samplePod("node-1"))},
+		[]string{pause, podEvent(t, "MODIFIED", moved, "2"), podEvent(t, "ADDED", samplePod("node-2"), "3"),
+			pause, podEvent(t, "DELETED", moved, "4"), holdOpen})
 	index := newPodIndex()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	watch := podWatch(NewClient(fake.server.URL, fake.server.Client(), ""), "liken-system", index, func(error) {})
-	watch.retry, watch.retryLimit = time.Millisecond, 10*time.Millisecond
-	go watch.run(ctx)
+	watchPods(watchContext(t), testWatcher(t, serveCollections(t, nil, pods)), "liken-system", index)
+	pods.awaitWatches(t, 1)
 
-	listed := next(t, fake.listed, "list")
-	next(t, fake.watched, "watch")
-	fake.events <- podEvent("ADDED", "node-1", "11")
-	fake.events <- endWatch
-	reopened := next(t, fake.watched, "second watch")
+	holds(t, index, "node-1", "10.42.0.7")
+	pods.release()
+	holds(t, index, "node-2", "10.42.0.7")
+	holds(t, index, "node-1", "10.42.0.9")
+	pods.release()
+	holds(t, index, "node-1", "")
 
-	if !strings.Contains(listed, "labelSelector=app%3Daudio-operator") {
-		t.Errorf("the list %q does not select the operator's pods", listed)
+	for _, query := range pods.requests() {
+		if !strings.Contains(query, "labelSelector=app%3Daudio-operator") {
+			t.Errorf("the request %q does not select the operator's pods", query)
+		}
 	}
-	if !strings.Contains(reopened, "resourceVersion=11") {
-		t.Errorf("the second watch %q does not resume from the last event", reopened)
+}
+
+// holds waits until the index holds the pod at address for node, or
+// holds no pod for node when address is empty.
+func holds(t *testing.T, index *podIndex, node, address string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		held, found := index.on(node)
+		if (address == "" && !found) || (found && held.IP == address) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if len(fake.listed) != 0 {
-		t.Error("a watch that ended cleanly was followed by a list")
+	held, found := index.on(node)
+	t.Fatalf("the index holds %+v, %v for %s, want the address %q", held, found, node, address)
+}
+
+// A pod deleted while the watch was down arrives as a tombstone, which
+// can hold no copy of the pod. Its key still names the pod.
+func TestAPodRemovedWhileTheWatchWasDownIsForgotten(t *testing.T) {
+	held := samplePod("node-1")
+	for _, c := range []struct {
+		name    string
+		removed any
+	}{
+		{"a tombstone with a copy", cache.DeletedFinalStateUnknown{Key: "liken-system/" + held.Metadata.Name, Obj: asObject(t, held)}},
+		{"a tombstone with no copy", cache.DeletedFinalStateUnknown{Key: "liken-system/" + held.Metadata.Name}},
+		{"a removed pod", asObject(t, held)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			index := newPodIndex()
+			index.put(held)
+			podHandler{index}.handler().OnDelete(c.removed)
+			if _, found := index.on("node-1"); found {
+				t.Error("the removed pod is still held")
+			}
+		})
 	}
-	if held, found := index.on("node-1"); !found || held.IP != "10.42.0.7" {
-		t.Errorf("the index holds %+v, %v for node-1", held, found)
+}
+
+// A pod that does not convert leaves the index as it was.
+func TestAPodThatDoesNotConvertLeavesTheIndexAsItWas(t *testing.T) {
+	index := newPodIndex()
+	index.put(samplePod("node-1"))
+	mistyped := asObject(t, samplePod("node-1"))
+	mistyped.Object["status"] = map[string]any{"podIP": 7}
+	podHandler{index}.handler().OnUpdate(asObject(t, samplePod("node-1")), mistyped)
+	if held, _ := index.on("node-1"); held.IP != "10.42.0.7" {
+		t.Errorf("the index holds %+v", held)
 	}
 }
 
@@ -184,8 +228,8 @@ func TestADeleteRemovesOnlyThePodItNames(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			index := newPodIndex()
-			index.apply("ADDED", replacement)
-			index.apply("DELETED", c.deleted)
+			index.put(replacement)
+			index.forget(c.deleted.Metadata.Name)
 			if _, found := index.on("node-1"); found != c.held {
 				t.Errorf("the index holds a pod for node-1: %v, want %v", found, c.held)
 			}
@@ -239,8 +283,8 @@ func TestAnEventForAnotherPodOnTheNodeReplacesOnlyWithTheNewerPod(t *testing.T) 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			index := newPodIndex()
-			index.apply("ADDED", c.held)
-			index.apply("MODIFIED", c.event)
+			index.put(c.held)
+			index.put(c.event)
 			if held, _ := index.on("node-1"); held.Name != c.want {
 				t.Errorf("the index holds %q, want %q", held.Name, c.want)
 			}
@@ -251,18 +295,41 @@ func TestAnEventForAnotherPodOnTheNodeReplacesOnlyWithTheNewerPod(t *testing.T) 
 // A list taken while a DaemonSet replaces a pod holds both, in any
 // order, and the index keeps the running one.
 func TestAListWithTwoPodsOnANodeHoldsTheRunningOne(t *testing.T) {
-	index := newPodIndex()
-	index.replace([]pod{operatorPod("new", 5, ""), operatorPod("old", 1, "deleting")})
-	if held, _ := index.on("node-1"); held.Name != "new" {
-		t.Errorf("the index holds %q, want new", held.Name)
+	running, leaving := operatorPod("new", 5, ""), operatorPod("old", 1, "deleting")
+	for _, order := range [][]pod{{running, leaving}, {leaving, running}} {
+		index := newPodIndex()
+		for _, held := range order {
+			index.put(held)
+		}
+		if held, _ := index.on("node-1"); held.Name != "new" {
+			t.Errorf("after %s then %s, the index holds %q, want new",
+				order[0].Metadata.Name, order[1].Metadata.Name, held.Name)
+		}
 	}
+}
+
+// Through the reflector: a pod that is gone when the watch reads the
+// pods again, after a 410, leaves the index.
+func TestAPodGoneFromANewReadLeavesTheIndex(t *testing.T) {
+	expired := `{"type":"ERROR","object":{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Expired","code":410,"message":"too old resource version"}}`
+	pods := newWatchServer("/api/v1/namespaces/liken-system/pods", "v1", "Pod",
+		[]string{podRead(t, samplePod("node-1"), samplePod("node-2")), podRead(t, samplePod("node-2"))},
+		[]string{pause, expired})
+	index := newPodIndex()
+	watchPods(watchContext(t), testWatcher(t, serveCollections(t, nil, pods)), "liken-system", index)
+	pods.awaitWatches(t, 1)
+	holds(t, index, "node-1", "10.42.0.7")
+
+	pods.release()
+	holds(t, index, "node-1", "")
+	holds(t, index, "node-2", "10.42.0.7")
 }
 
 // A pod that is leaving answers no tap, even when it is the only pod
 // the index holds for its node.
 func TestAPodThatIsLeavingIsNotReady(t *testing.T) {
 	index := newPodIndex()
-	index.apply("MODIFIED", operatorPod("old", 1, "deleting"))
+	index.put(operatorPod("old", 1, "deleting"))
 	if held, _ := index.on("node-1"); held.Ready {
 		t.Error("a pod being deleted was read as ready")
 	}

@@ -105,6 +105,15 @@ Nothing is planned right now.
   The encoder is the only process status a delivered body still
   depends on. Closes the open problem "The capture stream tests flake
   in CI", and the three skipped tests are enabled again.
+* [11, The watches use client-go](completed/11-the-watches-use-client-go.md).
+  Built on 2026-09-27. The five Kubernetes watches, the operator's
+  `Sink`s and `Source`s and `audio-api`'s capture `Secret`, client
+  authority `ConfigMap`, and pods, run on client-go's reflector, and
+  the loop written by hand is gone. A status write no longer wakes a
+  pass, and the pass reads its `Sink`s and `Source`s from the watches'
+  stores, so a settled pass sends the API server no read. The binary grows from 15.4 MB to 20.3 MB stripped, and the idle
+  RSS from about 18 MB to 24 MB, measured on a k3s API server in
+  Docker. The drill on liken-1 is still owed.
 
 ## Open problems
 

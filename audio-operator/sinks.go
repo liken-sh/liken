@@ -16,12 +16,9 @@ package main
 // are the manual.
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 )
 
@@ -354,44 +351,4 @@ func send[T any](c *Client, method, path string, object *T) (*T, error) {
 		return nil, err
 	}
 	return stored, nil
-}
-
-// watchEndpoints turns a change to one of this machine's resources
-// into one wake, on both collections. Nothing of the event is read but
-// its arrival: the pass that follows reads every endpoint again, the
-// way every other wake in this operator works.
-//
-// Each watch selects the resources whose status.node is this machine.
-// A watch on the whole collection would wake every machine's operator
-// for a status write to any Sink in the cluster, and each wake is a
-// pass that reads this machine's resources again. A resource enters
-// the selection with the status write that names this machine, and the
-// API server sends that entry as an event, so a spec a person wrote
-// before it is read on the pass that follows.
-//
-// Each watch lists first and then watches from the list's version, and
-// a list wakes the loop, so a change made while no watch was open is
-// read on the pass that follows.
-func watchEndpoints(ctx context.Context, c *Client, machine string, wake func(), readings *metrics) {
-	for _, collection := range []struct{ path, kind string }{
-		{SinksPath, SinkKind},
-		{SourcesPath, SourceKind},
-	} {
-		kind := collection.kind
-		watch := &objectWatch{
-			client:     c,
-			kind:       kind,
-			collection: collection.path,
-			selector:   machineSelector(machine),
-			changed:    wake,
-			complain: func(err error) {
-				fmt.Fprintf(os.Stderr, "%v\n", err)
-			},
-			restarted:  func() { readings.watchRestarted(kind) },
-			retry:      objectWatchRetry,
-			retryLimit: objectWatchRetryLimit,
-			shortLife:  objectWatchShortLife,
-		}
-		go watch.run(ctx)
-	}
 }

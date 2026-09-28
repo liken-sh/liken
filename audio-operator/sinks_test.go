@@ -2,16 +2,15 @@ package main
 
 // These tests cover the two resources' own client: the create that
 // carries an empty spec, the status write that goes to the
-// subresource, and the watch that turns a spec somebody edited into
-// one wake. They run against a small API server that holds the Sinks
-// and the Sources this operator writes.
+// subresource, and the list of one machine's resources. They run
+// against a small API server that holds the Sinks and the Sources this
+// operator writes. endpointwatch_test.go covers the watch.
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
-	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -22,26 +21,22 @@ import (
 // kind. It records every request, because a pass that writes nothing
 // is one of the outcomes these tests assert.
 type endpointAPI struct {
-	// The handler answers on the API server's own goroutines, and the
-	// watch holds two of them open at once, so every read and write of
-	// what the fixture holds takes the lock.
+	// The handler answers on the API server's own goroutines, so every
+	// read and write of what the fixture holds takes the lock.
 	mutex    sync.Mutex
 	sinks    map[string]*Sink
 	sources  map[string]*Source
 	requests []string
-	// selected records each list and watch of a collection with its
-	// field selector, as "LIST <path> <selector>".
-	selected []string
-	// watches is what the watch handler holds open, so a test can
-	// close a connection and see the operator open another.
-	watches chan struct{}
+	// version is the last resourceVersion the fixture stored. A PUT
+	// that carries another version than the stored one is answered
+	// 409, the way the API server answers a write from an older copy.
+	version int
 }
 
 func newEndpointAPI() *endpointAPI {
 	return &endpointAPI{
 		sinks:   map[string]*Sink{},
 		sources: map[string]*Source{},
-		watches: make(chan struct{}, 8),
 	}
 }
 
@@ -49,20 +44,7 @@ func (a *endpointAPI) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.mutex.Lock()
 		a.requests = append(a.requests, r.Method+" "+r.URL.Path)
-		if r.Method == http.MethodGet && (r.URL.Path == SinksPath || r.URL.Path == SourcesPath) {
-			verb := "LIST"
-			if r.URL.Query().Get("watch") == "true" {
-				verb = "WATCH"
-			}
-			a.selected = append(a.selected,
-				verb+" "+r.URL.Path+" "+r.URL.Query().Get("fieldSelector"))
-		}
 		a.mutex.Unlock()
-		if r.URL.Query().Get("watch") == "true" {
-			a.watches <- struct{}{}
-			<-r.Context().Done()
-			return
-		}
 		if strings.HasPrefix(r.URL.Path, SourcesPath) {
 			a.serveSources(t, w, r)
 			return
@@ -94,7 +76,12 @@ func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Re
 	case r.Method == http.MethodPost, r.Method == http.MethodPut:
 		stored := &Sink{}
 		_ = json.NewDecoder(r.Body).Decode(stored)
-		stored.Metadata.ResourceVersion = "1"
+		if held, found := a.sinks[stored.Metadata.Name]; r.Method == http.MethodPut && found &&
+			held.Metadata.ResourceVersion != stored.Metadata.ResourceVersion {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		stored.Metadata.ResourceVersion = a.nextVersion()
 		a.sinks[stored.Metadata.Name] = stored
 		_ = json.NewEncoder(w).Encode(stored)
 	default:
@@ -125,12 +112,24 @@ func (a *endpointAPI) serveSources(t *testing.T, w http.ResponseWriter, r *http.
 	case r.Method == http.MethodPost, r.Method == http.MethodPut:
 		stored := &Source{}
 		_ = json.NewDecoder(r.Body).Decode(stored)
-		stored.Metadata.ResourceVersion = "1"
+		if held, found := a.sources[stored.Metadata.Name]; r.Method == http.MethodPut && found &&
+			held.Metadata.ResourceVersion != stored.Metadata.ResourceVersion {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		stored.Metadata.ResourceVersion = a.nextVersion()
 		a.sources[stored.Metadata.Name] = stored
 		_ = json.NewEncoder(w).Encode(stored)
 	default:
 		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 	}
+}
+
+// nextVersion answers a new resourceVersion. The caller holds the
+// lock.
+func (a *endpointAPI) nextVersion() string {
+	a.version++
+	return strconv.Itoa(a.version)
 }
 
 // selects answers whether a list's field selector takes a resource,
@@ -221,40 +220,6 @@ func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].Metadata.Name != testSourceName {
 		t.Errorf("sources = %+v", sources)
-	}
-}
-
-// The watch is on both collections, because a Role can grant one
-// without the other and an operator that watched one alone would
-// answer a declaration on a microphone only at the backstop tick.
-//
-// The list and the watch select the resources whose status.node is
-// this machine. An unselected watch wakes every machine's operator for
-// a write to any Sink in the cluster, and each wake is a pass that
-// reads this machine's resources again.
-func TestWatchSelectsThisMachinesResourcesInBothCollections(t *testing.T) {
-	api := newEndpointAPI()
-	client := testClient(t, api.handler(t))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	watchEndpoints(ctx, client, "liken-1", func() {}, nil)
-
-	for range 2 {
-		next(t, api.watches, "watch on both collections")
-	}
-	api.mutex.Lock()
-	requests := slices.Clone(api.selected)
-	api.mutex.Unlock()
-	for _, want := range []string{
-		"LIST " + SinksPath + " status.node=liken-1",
-		"WATCH " + SinksPath + " status.node=liken-1",
-		"LIST " + SourcesPath + " status.node=liken-1",
-		"WATCH " + SourcesPath + " status.node=liken-1",
-	} {
-		if !slices.Contains(requests, want) {
-			t.Errorf("the collection requests are %v, want %q among them", requests, want)
-		}
 	}
 }
 
