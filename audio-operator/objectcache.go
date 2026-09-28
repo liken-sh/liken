@@ -263,13 +263,17 @@ func currentList[T any, P interface {
 	*T
 	metaObject
 }](c *Client, held heldObjects, path func(key string) string) ([]T, error) {
-	keys := held.view.store.ListKeys()
+	// The informer can take a created object between the two reads, so
+	// the memo's keys are read first. In the other order, the store's
+	// keys miss the object, the memo skips it because the store now
+	// holds it, and the list leaves it out, so a pass creates it again.
+	// In this order the key is in one read or in both.
+	var keys []string
 	if held.view.whole {
-		keys = append(keys, held.versions.unheld(held.view.store)...)
+		keys = held.versions.unheld(held.view.store)
 	}
+	keys = append(keys, held.view.store.ListKeys()...)
 	slices.Sort(keys)
-	// The store can take a key between the two reads, so a key can
-	// appear twice.
 	keys = slices.Compact(keys)
 	current := make([]T, 0, len(keys))
 	for _, key := range keys {

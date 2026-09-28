@@ -396,3 +396,47 @@ func TestTheSweepReadsACopyThatDoesNotConvertFromTheAPIServer(t *testing.T) {
 		t.Errorf("the Sink reports Connected %q, want the absence reported", connected)
 	}
 }
+
+// arrivingStore is a store whose informer takes one object just after
+// the first read of its keys, the way the watch event of a create
+// lands while a pass lists.
+type arrivingStore struct {
+	cache.Store
+	arriving *unstructured.Unstructured
+}
+
+func (s *arrivingStore) ListKeys() []string {
+	keys := s.Store.ListKeys()
+	if s.arriving != nil {
+		_ = s.Store.Add(s.arriving)
+		s.arriving = nil
+	}
+	return keys
+}
+
+// A list from a whole store answers a Sink the operator created, even
+// when the watch event of the create reaches the store during the
+// list. A pass reads the list to decide whether a Sink already exists,
+// and a list that left it out would make the pass create the Sink
+// again.
+func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	created := asObject(t, Sink{Metadata: EndpointMeta{Name: testAnalogName, ResourceVersion: "5"}})
+	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: created}
+	versions := newVersionMemo()
+	versions.note(testAnalogName, "5")
+	view := storeView{store: store, synced: func() bool { return true }, whole: true}
+
+	list, err := currentList[Sink](control.client, heldObjects{view: view, versions: versions}, sinkPath)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Errorf("the list holds %d Sinks, want 1", len(list))
+	}
+	if got := reads(api); got != 0 {
+		t.Errorf("the list sent %d reads, want none: %v", got, api.requests)
+	}
+}
