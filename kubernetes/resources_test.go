@@ -59,7 +59,7 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 		path = r.URL.Path
 	}))
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1"}}
-	if err := PublishStatus(client, m, &machine.MachineStatus{Phase: api.PhaseReady}); err != nil {
+	if _, err := PublishStatus(client, m, &machine.MachineStatus{Phase: api.PhaseReady}); err != nil {
 		t.Fatal(err)
 	}
 	if want := MachinesPath + "/node-1/status"; path != want {
@@ -73,7 +73,7 @@ func TestPublishClusterStatusWritesTheStatusSubresource(t *testing.T) {
 		path = r.URL.Path
 	}))
 	clusterDoc := &cluster.Cluster{Metadata: api.ObjectMeta{Name: "lab"}}
-	if err := PublishClusterStatus(client, clusterDoc); err != nil {
+	if _, err := PublishClusterStatus(client, clusterDoc); err != nil {
 		t.Fatal(err)
 	}
 	if want := ClustersPath + "/lab/status"; path != want {
@@ -105,5 +105,30 @@ func TestPatchJSONCarriesTheServersRefusal(t *testing.T) {
 	}))
 	if err := client.PatchJSON("/api/v1/nodes/node-1", []byte(`{}`)); err == nil {
 		t.Error("a refused patch is an error")
+	}
+}
+
+// A status write answers the resourceVersion the API server gave it,
+// and an answer with no body answers no version.
+func TestPublishStatusAnswersTheWrittenVersion(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+		want   string
+	}{
+		{"an answer with the object", `{"metadata":{"name":"node-1","resourceVersion":"42"}}`, "42"},
+		{"an answer with no body", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(c.answer))
+			}))
+			m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1"}}
+			version, err := PublishStatus(client, m, &machine.MachineStatus{})
+			if err != nil || version != c.want {
+				t.Errorf("PublishStatus = %q, %v; want %q", version, err, c.want)
+			}
+		})
 	}
 }

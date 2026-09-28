@@ -54,7 +54,7 @@ func TestOwnPodIsStaleReadsCurrentWhenTheListFails(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	if ownPodIsStale(client, "node-1", "2026.08.12-002") {
+	if ownPodIsStale(&reader{client: client}, "node-1", "2026.08.12-002") {
 		t.Error("a failed list must never manufacture a fault; it reads as current")
 	}
 }

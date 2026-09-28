@@ -54,7 +54,17 @@ override:
   # real HTTP test server. What stays untested is the in-cluster
   # bootstrapping that only a pod's mounted credentials can satisfy.
   - path: ^kubernetes$
-    threshold: 91
+    threshold: 92
+  # The watches: the copies and the wake handlers, run through
+  # client-go's real reflector against a scripted API server. What
+  # stays untested is the in-cluster configuration and a scattering of
+  # store errors that client-go's own store never returns.
+  - path: ^kubernetes/informer$
+    threshold: 83
+  # The fake API server the operators' tests share. Its tests hold it
+  # to the answers those tests rely on.
+  - path: ^kubernetes/fakeapi$
+    threshold: 92
   # The metrics package: the registry, the collectors for the
   # contract's first two layers, and the listener. The tests scrape
   # every series through a real handler. What stays untested is the
@@ -63,15 +73,16 @@ override:
   - path: ^metrics$
     threshold: 92
   # The machine operator: its decisions (drift, staging validation,
-  # the convergence truth table, the drain) are pure and tested. The
-  # reconcile pass that strings the decisions together, against the
-  # real facts files and the live API, is exercised by the QEMU
-  # harness, not unit tests.
+  # the convergence truth table, the drain) are pure and tested, and a
+  # whole reconcile pass runs against a fake API server. What stays
+  # untested is main, and the parts of a pass that need the real facts
+  # files and a real kernel, which the QEMU harness exercises.
   - path: ^machine-operator$
-    threshold: 79
+    threshold: 86
   # The cluster operator: the sweep and rollout decisions are pure
-  # and tested, and the acting halves run against a miniature API
-  # server. What stays untested is main's loop.
+  # and tested, and the acting halves, the sweep loop, and the leader
+  # election run against miniature API servers. What stays untested is
+  # main's setup, which needs a pod's in-cluster credentials.
   - path: ^cluster-operator$
     threshold: 87
   # Init: the boot machinery itself (mounting, DHCP, the reboot

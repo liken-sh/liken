@@ -141,13 +141,14 @@ func awaitsApproval(m *machine.Machine) bool {
 // is the whole pass here: with no list of machines there is no
 // verdict to reach, so this is the failure that the layer 2 error
 // counter counts (metrics.go).
-func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available string, probe *engineProbe, cm *clusterMetrics, now time.Time) error {
-	machines, err := kubernetes.ListMachines(c)
+func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available string, probe *engineProbe, cm *clusterMetrics, now time.Time) error {
+	c := reads.client
+	machines, err := reads.machines()
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
 		return err
 	}
-	renewals, err := kubernetes.ListHeartbeats(c)
+	renewals, err := reads.heartbeats()
 	if err != nil {
 		fmt.Printf("listing heartbeats for the fleet sweep: %v\n", err)
 		return err
@@ -164,15 +165,15 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	// against the fleet's target so a leader can go first while the
 	// applied template lags, because only a leader's boot can advance
 	// it.
-	appliedVersion := daemonSetVersion(c, machineOperatorDaemonSet)
+	appliedVersion := daemonSetVersion(reads, machineOperatorDaemonSet)
 	r := decideRollout(machines, renewals, clusterDoc, appliedVersion, now)
-	carryOutRollout(c, machines, r, now)
+	carryOutRollout(reads, machines, r, now)
 
 	// The OS's own pods, the operator's pods and the log relay pods,
 	// are also fleet state. An upgraded machine keeps pods from
 	// before its upgrade until the steward refreshes them (see
 	// steward.go).
-	stewardOSPods(c, machines)
+	stewardOSPods(reads, machines)
 
 	// A retracted feature leaves its workloads behind. k3s only
 	// deletes an addon when it sees the addon's manifest disappear
@@ -181,7 +182,7 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	// always the janitor's, in a deliberate order (janitorFlux). That
 	// teardown can also decline, when liken did not plant the Flux it
 	// found, and it reports the refusal on the Cluster.
-	janitorFeatureWorkloads(c, clusterDoc)
+	janitorFeatureWorkloads(reads, clusterDoc)
 	fluxTeardown := janitorFlux(c, clusterDoc)
 
 	// The flux feature's deploy key is fleet state too: minted once,
@@ -198,8 +199,8 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 		ensureFluxEngine(c, clusterDoc, seed, probe, now)
 	}
 
-	markLost(c, machines, s.lost, now)
-	publishClusterStatus(c, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
+	markLost(reads, machines, s.lost, now)
+	publishClusterStatus(reads, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
 
 	// The fleet's metrics come from the verdict that the write above
 	// carries, so the graph and the Cluster's status report one
@@ -210,7 +211,7 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 
 // markLost writes the Lost verdict onto each machine that the sweep
 // found silent.
-func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, now time.Time) {
+func markLost(reads *fleetReader, machines []machine.Machine, lost []string, now time.Time) {
 	for _, m := range machines {
 		if !slices.Contains(lost, m.Metadata.Name) {
 			continue
@@ -235,7 +236,7 @@ func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, n
 		// its own status first. That is the exact outcome this write
 		// exists to allow, so the sweep skips this machine. The sweep
 		// never retries a write onto another machine's status.
-		if err := kubernetes.PublishStatus(c, &m, &status); errors.Is(err, kubernetes.ErrConflict) {
+		if err := reads.publishStatus(&m, &status); errors.Is(err, kubernetes.ErrConflict) {
 			continue
 		} else if err != nil {
 			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)
@@ -257,7 +258,7 @@ func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, n
 // Cluster's status, so deriving every field is its job. The function
 // writes the status only when something actually changed, so a
 // settled fleet causes no write.
-func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) {
+func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) {
 	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
 	r.progressing.ObservedGeneration = clusterDoc.Metadata.Generation
@@ -301,7 +302,7 @@ func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s f
 		updated.Status.Flux = flux
 		updated.Status.ObservedGeneration = clusterDoc.Metadata.Generation
 		updated.Status.Conditions = conditions
-		if err := kubernetes.PublishClusterStatus(c, &updated); err != nil {
+		if err := reads.publishClusterStatus(&updated); err != nil {
 			fmt.Printf("publishing cluster status: %v\n", err)
 		}
 	}

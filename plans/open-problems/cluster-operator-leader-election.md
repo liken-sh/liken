@@ -1,92 +1,93 @@
 # Coordinate cluster-operator instances
 
-Open problem. The cluster operator is deployed as one replica, but the
-code has no leader election. More than one instance can issue rollout
-grants and update fleet state. The replica setting does not show that
-concurrent decisions from two instances are safe.
+Open problem. The cluster operator elects one acting copy with a
+`coordination.k8s.io` `Lease`
+([milestone 71](../completed/71-the-operators-watch-through-client-go.md)).
+The election does not fence a paused former leader, and a stale
+reboot grant from that leader can exceed the disruption budget. This
+document records that remaining concern and the options for it.
 
-## How two instances can run at once
+## What milestone 71 answered
 
-The `Deployment` uses `replicas: 1` and `strategy: Recreate`. This
-setting orders ordinary template replacements. It does not stop a second
-process from running.
+`cluster-operator/leader.go` runs client-go's leader election on the
+`liken-cluster-operator` `Lease` in `liken-system`. Only the copy that
+holds it watches the fleet and writes. The `Deployment` rolls a new
+pod in beside the old one, and `replicas: 2` is safe once every node
+runs a release with the election.
 
-A partitioned node can continue running an old pod while Kubernetes
-creates a replacement elsewhere. A partition does not always cause a
-replacement: that depends on the observed failure and on controller
-behavior. An operator or automation can also patch `replicas` to `2`,
-which deliberately creates two instances. `Recreate` does not prevent
-either case.
+The milestone answers these concerns of this problem:
 
-## What the instances write
+* **Two instances.** A rolling update, a partitioned node, and a
+  person who scales the `Deployment` can each run a second copy. Only
+  the holder of the `Lease` acts.
+* **Stop new work when leadership is lost.** A write guard on the
+  operator's client refuses every write once the last renewal is one
+  renewal deadline old, 10 seconds, and the elector exits the process
+  by 25 seconds after the last renewal.
+* **Bound requests.** The client abandons each request after 15
+  seconds, so every write the guard allowed ends before a new leader
+  can take the `Lease`, 30 seconds after the last renewal.
+* **Stale writes.** The Lost verdict, the `Cluster`'s status, and a
+  grant taken back each carry the `resourceVersion` of the object they
+  change, so a stale copy conflicts or states what still holds. The
+  milestone's plan has the table for every write the sweep makes.
+* **A copy under an older release's RBAC.** A copy that the API
+  server refuses on the `Lease` acts without an election, as the
+  releases before the election did, until the `Lease` answers. Two
+  copies can overlap for one retry period in that mode.
+* **Partial grant sequences.** `carryOutRollout` writes the grants of
+  one decision one `Machine` at a time. A crash between two writes
+  leaves a subset of a decision that was inside the budget, and the
+  next leader counts each written grant as a slot in flight.
 
-The cluster operator updates `Cluster` and `Machine` status, issues
-`RebootApproved` grants, and evicts stale system pods. `init` on leaders
-writes the OS `AddOn` manifests, and `k3s` applies them. The cluster
-operator's reconcile loop does not write them.
+## What stays open
 
-A comment in [main.go](../../cluster-operator/main.go) says that overlap
-is safe, because both instances derive their decisions from cluster
-state and use optimistic concurrency. Optimistic concurrency protects
-each resource update from a conflicting version. It does not make two
-instances read the same fleet snapshot, and it does not hold a budget
-across different resources.
+`decideRollout` computes a fleet-wide decision, and `carryOutRollout`
+in [rollout.go](../../cluster-operator/rollout.go) writes each grant
+with the `resourceVersion` of that one `Machine`. A leader that pauses
+between the write guard's check and the send, or with a grant in
+flight, can land the grant after a new leader decided from a view of
+the fleet without it. The new leader can grant another machine in the
+same window, and the two grants together can exceed the budget, or put
+two leaders down at once. Per-object version checks do not make the
+budget a transaction.
 
-`decideRollout` computes a fleet-wide decision, then `carryOutRollout`
-in [rollout.go](../../cluster-operator/rollout.go) writes grants one
-`Machine` at a time. The open concern is conflicting decisions from
-different snapshots. A partial write followed by a crash also needs
-safe recovery, though a partial write alone does not show that the
-budget was exceeded.
-This review did not reproduce a violation with two instances.
+## Options
 
-## Proposed safeguard
+The fence is not built. The options go to a design decision.
 
-Use a named `coordination.k8s.io` `Lease` to elect the active instance.
-Only that instance would run mutating reconciliation. Acquisition,
-renewal, and stopping work after renewal failure should use a tested
-leader-election protocol.
+1. **A grant ledger in the `Cluster`'s status.** The sweep writes the
+   set of machines that hold or receive a turn into the `Cluster`'s
+   status first, with the `resourceVersion` of the `Cluster` it read,
+   and writes the `Machine` grants only after that write succeeds. The
+   next leader counts every machine in the ledger as a slot in flight.
+   Two leaders cannot both commit a decision from the same `Cluster`
+   version, so the budget becomes one conditional write. It adds a
+   status field and changes only the cluster operator.
+2. **A fencing token in each grant.** The grant names the `Lease`'s
+   holder and its transition count, and the machine operator checks
+   the current `Lease` before it drains. A stale grant is ignored. It
+   changes the grant's shape and both operators, and a machine operator
+   from an older release ignores the token.
+3. **Narrow the window only.** One grant for each sweep, with a direct
+   read of every `Machine` just before it. This needs no API change,
+   and it is still not a fence.
 
-The machine heartbeat code already uses `Lease` objects, but heartbeat
-renewal is not an election algorithm. The election needs ownership
-checks, expiry handling, and safe handoff. A contender should acquire an
-expired lease through a conditional update, without a person
-transferring it.
-
-A `Lease` does not block writes to other API resources. A paused former
-leader can resume after another instance has acquired the lease.
-Requests already in flight can complete after local cancellation. The
-implementation must bound requests and stop new work when leadership is
-lost. It must also show how stale writes and partial grant sequences
-stay safe. Per-object version checks help, but they do not make the
-rollout budget a transaction.
-
-## Remedy scope
-
-The fix is implementation reliability work, plus a concurrency design
-that needs verification. The intended design already has one active
-fleet coordinator. Leader election can be added without a change to the
-`Cluster` API, the disruption budget, or the normal single-replica
-deployment. The work is more than a heartbeat: the handoff and the
-write-safety protocol need review and failure tests.
-
-Support for multiple standby replicas as an HA feature is a separate
-operational decision. Takeover time would include lease expiry, retry,
-and scheduling delays, so one lease duration does not bound the downtime.
+The recommendation is option 1, the grant ledger: it is a true
+compare-and-swap on one object, and the machine operator does not
+change.
 
 ## Related problem
 
-The separate `media-operator` repository records the same single-instance
-concern in `plans/open-problems/two-operators-can-run-at-once.md`.
-Both operators need coordination in code; a replica count does not give
-it. Compare their election and write-safety requirements before they
-share an implementation.
+The separate `media-operator` repository records the same
+single-instance concern in
+`plans/open-problems/two-operators-can-run-at-once.md`, and elects its
+leader with the same design and the same release fix.
 
 ## Verification needed
 
-Run two instances against the same API and vary their snapshots, response
-delays, and write order. Pause the active instance beyond lease expiry,
-allow a replacement to acquire leadership, then resume the old instance.
-Verify that grants stay within budget and leader disruption constraints.
-Also test crashes between grant writes and leadership loss while a
-request is in flight.
+Run two copies against the same API server. Pause the active copy
+beyond the `Lease`'s duration, let the other copy take the lead, then
+resume the old one. Check that its writes are refused and that it
+exits, and that grants stay within the budget and the one-leader floor
+while a grant is in flight during the pause.

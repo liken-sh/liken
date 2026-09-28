@@ -59,7 +59,7 @@ type ResourceSlice struct {
 
 // ResourceSliceMeta carries the one piece of metadata that
 // api.ObjectMeta does not: an owner reference. Owning a slice does
-// necessary work; it is not decoration. See EnsureResourceSlice.
+// necessary work; it is not decoration. See WriteResourceSlice.
 type ResourceSliceMeta struct {
 	Name            string           `json:"name"`
 	ResourceVersion string           `json:"resourceVersion,omitempty"`
@@ -130,12 +130,44 @@ type DeviceAttribute struct {
 }
 
 // EnsureResourceSlice makes one node's published slice match its
-// actual inventory. It creates the slice when the node first has
-// devices, replaces the slice when the inventory changed, deletes
-// the slice when the last device is gone, and changes nothing when
-// nothing moved. This is the same read-compare-write pattern as
-// every other liken reconcile, so a steady machine costs one GET
-// request per pass.
+// actual inventory: it reads the slice (GetResourceSlice) and then
+// writes what differs (WriteResourceSlice). A caller that already
+// holds a copy of the slice, from a watch, calls WriteResourceSlice
+// with that copy and sends no read.
+func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
+	current, err := GetResourceSlice(c, nodeName)
+	if err != nil {
+		return err
+	}
+	return WriteResourceSlice(c, nodeName, current, owner, devices)
+}
+
+// ResourceSliceName is the name of one node's slice. Each node gets
+// one predictable name, with the driver name added as a suffix. This
+// keeps other DRA drivers on the same node from colliding with ours.
+// Slices are cluster-scoped, and nothing stops a deployment from
+// adding a GPU vendor's driver.
+func ResourceSliceName(nodeName string) string {
+	return nodeName + "-" + DriverName
+}
+
+// GetResourceSlice reads one node's slice. An absent slice returns
+// nil, nil, because a node with no devices has none.
+func GetResourceSlice(c *Client, nodeName string) (*ResourceSlice, error) {
+	current, err := get[ResourceSlice](c, ResourceSlicesPath+"/"+ResourceSliceName(nodeName))
+	if err == ErrNotFound {
+		return nil, nil
+	}
+	return current, err
+}
+
+// WriteResourceSlice makes one node's published slice match its
+// actual inventory, given the slice as it is now (nil when it does
+// not exist). It creates the slice when the node first has devices,
+// replaces the slice when the inventory changed, deletes the slice
+// when the last device is gone, and changes nothing when nothing
+// moved. This is the same compare-then-write pattern as every other
+// liken reconcile, so a steady machine sends no request here.
 //
 // The Node owns the slice. Neither the Machine nor the operator pod
 // owns it. The inventory is a claim about what is ready to use on
@@ -145,22 +177,19 @@ type DeviceAttribute struct {
 // garbage collection also cleans up after this operator crashes or
 // exits abruptly, when no code runs to delete anything.
 //
-// The write carries the resourceVersion from the read. If a
-// conflicting writer changed the object in the meantime, this update
-// returns ErrConflict instead of overwriting that change. The next
-// pass reads the object again and tries again. This is the ordinary
-// optimistic-concurrency loop, and at a ten-second cadence, it needs
-// no retry logic of its own.
-func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
-	// Each node gets one predictable name, with the driver name added
-	// as a suffix. This keeps other DRA drivers on the same node from
-	// colliding with ours. Slices are cluster-scoped, and nothing
-	// stops a deployment from adding a GPU vendor's driver.
-	name := nodeName + "-" + DriverName
+// The write carries the resourceVersion of the copy it compared. If a
+// conflicting writer changed the object in the meantime, or the copy
+// from a watch is behind this operator's own last write, this update
+// returns ErrConflict instead of overwriting that change. A create
+// from a copy that says the slice is absent returns ErrConflict too,
+// when the slice exists. The next pass compares against a newer copy
+// and tries again. This is the ordinary optimistic-concurrency loop,
+// and at a ten-second cadence, it needs no retry logic of its own.
+func WriteResourceSlice(c *Client, nodeName string, current *ResourceSlice, owner OwnerReference, devices []SliceDevice) error {
+	name := ResourceSliceName(nodeName)
 	path := ResourceSlicesPath + "/" + name
 
-	current, err := get[ResourceSlice](c, path)
-	if err == ErrNotFound {
+	if current == nil {
 		if len(devices) == 0 {
 			return nil
 		}
@@ -184,9 +213,6 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 		}
 		return c.RequestJSON(http.MethodPost, ResourceSlicesPath, body, nil)
 	}
-	if err != nil {
-		return err
-	}
 
 	if len(devices) == 0 {
 		return c.RequestJSON(http.MethodDelete, path, nil, nil)
@@ -195,15 +221,16 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 		return nil
 	}
 
-	current.Spec.NodeName = nodeName
-	current.Spec.Driver = DriverName
-	current.Spec.Pool = ResourcePool{
+	updated := *current
+	updated.Spec.NodeName = nodeName
+	updated.Spec.Driver = DriverName
+	updated.Spec.Pool = ResourcePool{
 		Name:               nodeName,
 		Generation:         current.Spec.Pool.Generation + 1,
 		ResourceSliceCount: 1,
 	}
-	current.Spec.Devices = devices
-	body, err := json.Marshal(current)
+	updated.Spec.Devices = devices
+	body, err := json.Marshal(&updated)
 	if err != nil {
 		return err
 	}

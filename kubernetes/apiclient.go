@@ -1,7 +1,8 @@
 // Package kubernetes lets liken's controllers communicate with the
 // Kubernetes API. It provides a client built from first principles,
-// the watch machinery, access to liken's own resources, the
-// heartbeat-lease protocol, and pod eviction.
+// access to liken's own resources, the heartbeat-lease protocol, and
+// pod eviction. The watches are in the informer package below this
+// one.
 //
 // Two programs use this package. The machine operator is a
 // privileged DaemonSet that manages the machine it runs on. The
@@ -10,12 +11,12 @@
 //
 // All code in this package communicates with the API using only
 // net/http and encoding/json. It does not use client-go,
-// controller-runtime, or code generation. Production controllers use
-// those libraries for good reasons: they cache informers, manage
-// work queues, and generate typed clients. But those libraries also
-// hide a fact. The Kubernetes API is only HTTPS that serves JSON. A
-// watch is only a long HTTP response that keeps sending data.
-// Anything kubectl can do, curl can also do.
+// controller-runtime, or code generation. Those libraries hide a
+// fact that this package shows: the Kubernetes API is only HTTPS that
+// serves JSON, and anything kubectl can do, curl can also do. The one
+// part of client-go that liken uses is its reflector, which keeps a
+// watch open and recovers it when the stream drops (the informer
+// package says why).
 package kubernetes
 
 // A Kubernetes API client, built from first principles.
@@ -76,6 +77,20 @@ type Client struct {
 	// token. It is a parameter, not the constant above, so tests can
 	// point the client at a directory they control.
 	credentials string
+
+	// writeGuard, when it is set, runs before every request that is
+	// not a GET, and an error from it refuses the request before it is
+	// sent. GuardWrites says why.
+	writeGuard func() error
+}
+
+// GuardWrites makes every write this client sends ask guard first. The
+// cluster operator uses it to stop writing the moment its leader
+// election Lease is overdue for a renewal (cluster-operator/leader.go).
+// A check in one place covers every write a pass makes: the status
+// writes, the grants, the evictions, and the deletes.
+func (c *Client) GuardWrites(guard func() error) {
+	c.writeGuard = guard
 }
 
 // NewClient builds a client from its three parts directly.
@@ -142,23 +157,17 @@ func InClusterClientAt(base string) (*Client, error) {
 			// endpoint that no longer answers (by default, a SYN
 			// packet sent to a dead address retransmits into silence
 			// for minutes). The keep-alive setting makes the kernel
-			// probe connections that are established but idle. This
-			// finds and closes a watch stream connection when its
-			// server dies partway through the watch: a watch response
-			// never ends on its own by design, so a probe is the only
-			// way to tell a quiet server from a dead one.
+			// probe connections that are established but idle, so a
+			// pooled connection to a server that died is found and
+			// closed before a request is written onto it.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,
 			}).DialContext,
-			// Watches are long-lived responses that deliver data a
-			// little at a time, and the server ends them on its own
-			// schedule. A timeout on the whole request would cut off
-			// every watch mid-stream, so only the response headers
-			// get a deadline: ten seconds. This is generous for a
-			// healthy server, and short enough that a request written
-			// onto a silently dead connection fails while the
-			// heartbeat still has plenty of time left.
+			// The response headers get a deadline of ten seconds.
+			// This is generous for a healthy server, and short enough
+			// that a request written onto a silently dead connection
+			// fails while the heartbeat still has plenty of time left.
 			ResponseHeaderTimeout: 10 * time.Second,
 			// A pooled connection that has sat idle is the connection
 			// most likely to be silently dead. The server may have
@@ -176,12 +185,29 @@ func InClusterClientAt(base string) (*Client, error) {
 			// activity open.
 			IdleConnTimeout: 30 * time.Second,
 		},
+		// The whole request, body included, gets a deadline of
+		// fifteen seconds. This client sends no watch, because the
+		// informer package's client runs every watch, so no request
+		// here is meant to stay open. The bound matters most to the
+		// cluster operator: a write that its leader election allowed
+		// is abandoned by this client before a new leader can take
+		// the Lease (cluster-operator/leader.go gives the numbers).
+		Timeout: requestTimeout,
 	}, serviceAccountDir), nil
 }
+
+// requestTimeout bounds one request of an in-cluster client, from the
+// dial to the last byte of the answer.
+const requestTimeout = 15 * time.Second
 
 // Do sends one request, authenticated when the client has a
 // credentials directory.
 func (c *Client) Do(method, path, contentType string, body []byte) (*http.Response, error) {
+	if c.writeGuard != nil && method != http.MethodGet {
+		if err := c.writeGuard(); err != nil {
+			return nil, fmt.Errorf("%s %s not sent: %w", method, path, err)
+		}
+	}
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -247,10 +273,6 @@ const maxDrain = 4 << 20
 // which is tens of kilobytes that no caller here reads. A 404 and a
 // 409 each answer with a Status object. None of those bodies ends on
 // its own.
-//
-// A watch is the one body that cannot be drained, because a watch
-// response never ends (see watch.go). Its reader closes the body
-// outright and accepts the lost connection.
 func drain(body io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
 	_ = body.Close()

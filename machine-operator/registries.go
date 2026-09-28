@@ -140,10 +140,10 @@ type registriesInputs struct {
 // different source: the Secret, rather than a CRD. Only a cluster
 // member carries credentials at all. A machine with no cluster
 // document has no operator-authored documents of any kind.
-func convergeRegistryCredentials(c *kubernetes.Client, store machine.ManifestStore, m *machine.Machine, facts *machine.MachineStatus, t turn) convergence {
+func convergeRegistryCredentials(r *reader, store machine.ManifestStore, m *machine.Machine, facts *machine.MachineStatus, t turn) convergence {
 	rejection, _ := store.LoadRejection()
 	in := registriesInputs{}
-	if secret, fetchErr := kubernetes.GetRegistryCredentialsSecret(c); fetchErr != nil {
+	if secret, fetchErr := r.registryCredentials(); fetchErr != nil {
 		in.fetchErr = fetchErr
 	} else {
 		in.desired, in.parseErr = desiredRegistryCredentials(secret)

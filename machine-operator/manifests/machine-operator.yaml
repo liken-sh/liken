@@ -60,33 +60,36 @@ rules:
   - apiGroups: [liken.sh]
     resources: [machines/status]
     verbs: [update]
-  # The Cluster: seed it from the image's manifest and read it
-  # back on every pass, for document convergence. No list or watch:
-  # the boot manifest names the one cluster this machine belongs to.
+  # The Cluster: seed it from the image's manifest, and watch it for
+  # document convergence. The boot manifest names the one cluster this
+  # machine belongs to, and the watch selects it by that name. The
+  # role cannot name it, because every cluster runs this same
+  # manifest, so list and watch cover the collection, which holds one
+  # Cluster.
   - apiGroups: [liken.sh]
     resources: [clusters]
-    verbs: [get, create]
-  # Nodes: get to see role labels and cordon state, delete for
-  # demotion cleanup (demotion.go; deleting the stale Node is what
-  # triggers k3s's etcd member removal), and patch for the drain's
-  # cordon and uncordon (drain.go) and for the spec's node labels
-  # (labels.go). This uses patch rather than update, deliberately:
-  # the operator touches only the fields it owns (the unschedulable
-  # flag, the labels the spec declares, and its own annotations) and
-  # never rewrites a whole Node.
+    verbs: [get, list, watch, create]
+  # Nodes: watch its own Node, by name, to see role labels and cordon
+  # state, delete for demotion cleanup (demotion.go; deleting the stale
+  # Node is what triggers k3s's etcd member removal), and patch for the
+  # drain's cordon and uncordon (drain.go) and for the spec's node
+  # labels (labels.go). This uses patch rather than update,
+  # deliberately: the operator touches only the fields it owns (the
+  # unschedulable flag, the labels the spec declares, and its own
+  # annotations) and never rewrites a whole Node.
   - apiGroups: [""]
     resources: [nodes]
-    verbs: [get, delete, patch]
+    verbs: [get, list, watch, delete, patch]
   # The device inventory (dra.go): this node's ResourceSlice, the
   # DRA record of driven devices that workloads can claim. Like the
   # machines rule, the verbs cover the collection, because RBAC
   # cannot say "only the slice named for your node". The program
-  # only ever writes its own. No list or watch: the slice's name is
-  # deterministic, and reading anyone else's inventory is the
-  # scheduler's job, not this operator's.
+  # only ever writes its own, and it watches only its own, by the
+  # slice's name, which is deterministic. Reading anyone else's
+  # inventory is the scheduler's job, not this operator's.
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
-    verbs: [get, create, update, delete]
+    verbs: [get, list, watch, create, update, delete]
   # The DRA plugin (draplugin.go): when the kubelet asks this
   # driver to prepare a claim, the request names the claim and
   # nothing more. The allocation lives on the claim's status, so the
@@ -99,14 +102,15 @@ rules:
     verbs: [get]
   # The drain (drain.go): list to see what still runs on this
   # machine's node, and create on the eviction subresource to ask
-  # each pod to leave. This uses eviction through the subresource,
+  # each pod to leave. The watch is of this node's own operator pod
+  # (staleness.go). This uses eviction through the subresource,
   # rather than pod delete, deliberately: the API server refuses an
   # eviction when it would violate the workload's
   # PodDisruptionBudget, and that refusal is the entire difference
   # between draining a node and killing it.
   - apiGroups: [""]
     resources: [pods]
-    verbs: [list]
+    verbs: [list, watch]
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
@@ -179,11 +183,11 @@ subjects:
 # secrets.go). This uses a namespaced Role, like the leases' Role,
 # because the operator has no reason to touch any other Secret
 # anywhere. resourceNames is what makes "one named Secret"
-# enforceable, and get-only access (no list, no watch) means even a
-# compromised operator could not enumerate what else the namespace
-# holds. Reading the one name on each pass is the right way for a
-# level-triggered loop to consume it anyway. A Secret edit takes
-# effect within one reconcile pass.
+# enforceable. RBAC allows a list or a watch against resourceNames
+# only when the request selects that one name with a field selector,
+# so even a compromised operator could not enumerate what else the
+# namespace holds. The operator watches the one name, and a Secret
+# edit wakes a reconcile pass at once.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -193,7 +197,7 @@ rules:
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [registry-credentials]
-    verbs: [get]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

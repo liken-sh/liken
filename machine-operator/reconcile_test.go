@@ -59,7 +59,7 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	fake := &nodeAPI{}
 	client := testClient(t, fake.handler())
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1"}}
-	if err := kubernetes.PublishStatus(client, m, &machine.MachineStatus{Phase: api.PhaseReady}); err != nil {
+	if _, err := kubernetes.PublishStatus(client, m, &machine.MachineStatus{Phase: api.PhaseReady}); err != nil {
 		t.Fatal(err)
 	}
 	if want := "/apis/liken.sh/v1alpha1/machines/node-1/status"; fake.publishedPath != want {
@@ -124,7 +124,7 @@ func TestPublishOwnStatusSkipsAnUnchangedStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
-	if err := publishOwnStatus(client, m, status, before); err != nil {
+	if err := publishOwnStatus(&reader{client: client}, m, status, before); err != nil {
 		t.Fatal(err)
 	}
 	if fake.puts != 0 {
@@ -146,7 +146,7 @@ func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 	status := &machine.MachineStatus{Phase: api.PhaseReady, Conditions: []api.Condition{
 		{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"},
 	}}
-	if err := publishOwnStatus(client, m, status, nil); err != nil {
+	if err := publishOwnStatus(&reader{client: client}, m, status, nil); err != nil {
 		t.Fatal(err)
 	}
 	if fake.published.Metadata.ResourceVersion != "9" {
@@ -170,7 +170,7 @@ func TestPublishOwnStatusHonorsAReclaimedGrant(t *testing.T) {
 
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
 	status := &machine.MachineStatus{Conditions: []api.Condition{grantCondition(testNow)}}
-	if err := publishOwnStatus(client, m, status, nil); err != nil {
+	if err := publishOwnStatus(&reader{client: client}, m, status, nil); err != nil {
 		t.Fatal(err)
 	}
 	if c := api.FindCondition(fake.published.Status.Conditions, machine.RebootApprovedCondition); c != nil {
@@ -186,7 +186,7 @@ func TestPublishOwnStatusRetriesOnlyOnce(t *testing.T) {
 	client := testClient(t, fake.handler())
 
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
-	err := publishOwnStatus(client, m, &machine.MachineStatus{}, nil)
+	err := publishOwnStatus(&reader{client: client}, m, &machine.MachineStatus{}, nil)
 	if !errors.Is(err, kubernetes.ErrConflict) {
 		t.Errorf("the second conflict comes back to the caller: %v", err)
 	}

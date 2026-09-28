@@ -70,8 +70,8 @@ func decidePodStale(pods []kubernetes.Pod, runningVersion string) bool {
 // feeds must never manufacture a fault where none exists, so an API
 // error here can only ever hide a real fault behind ApplyFailed's
 // ordinary reporting, never behind a false AwaitingPodRefresh.
-func ownPodIsStale(c *kubernetes.Client, nodeName, runningVersion string) bool {
-	pods, err := kubernetes.List[kubernetes.Pod](c, ownPodPath(nodeName))
+func ownPodIsStale(r *reader, nodeName, runningVersion string) bool {
+	pods, err := r.operatorPods(nodeName)
 	if err != nil {
 		return false
 	}

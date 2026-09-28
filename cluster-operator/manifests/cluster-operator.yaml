@@ -9,13 +9,12 @@
 # output, so the scheduler may place it on any liken node, and
 # Kubernetes itself replaces it when its node dies.
 #
-# This deployment deliberately has no leader election.
-# kube-controller-manager and kube-scheduler elect leaders because
-# they run *below* the scheduler: static pods on every control-plane
-# node, with hot standbys and a lease as their only way to agree on
-# one active copy. This program runs above the scheduler, so "run
-# exactly one somewhere" is the scheduler's own job. The replica
-# count and the Recreate strategy below provide the whole election.
+# Only one copy of the program acts at a time. Each copy competes for
+# the liken-cluster-operator Lease in liken-system, and only the copy
+# that holds it watches the fleet and writes (cluster-operator/leader.go).
+# A replica count cannot give that guarantee: a rolling update, a
+# partitioned node, and a person who scales the Deployment each run a
+# second copy.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -38,34 +37,35 @@ metadata:
   name: liken-cluster-operator
 rules:
   # The fleet: watch every Machine, which is the sweep's wake
-  # signal, and write statuses for the two condition-and-phase
-  # verdicts that this program owns: the Lost phase and the
-  # RebootApproved grant.
+  # signal and the copy it reads, and write statuses for the two
+  # condition-and-phase verdicts that this program owns: the Lost
+  # phase and the RebootApproved grant.
   - apiGroups: [liken.sh]
     resources: [machines]
     verbs: [get, list, watch]
   - apiGroups: [liken.sh]
     resources: [machines/status]
     verbs: [update]
-  # The Cluster: list is how the operator finds the one Cluster it
-  # serves, because it takes no configuration. get is every pass's
-  # fresh read. Its status is this program's alone to write. This
-  # role has no create permission, because the machine operators
-  # seed the object from the image's manifest.
+  # The Cluster: the watch keeps the copy every sweep reads, and the
+  # copy is how the operator finds the one Cluster it serves, because
+  # it takes no configuration. get and list are the reads a sweep
+  # sends while the copy cannot answer. Its status is this program's
+  # alone to write. This role has no create permission, because the
+  # machine operators seed the object from the image's manifest.
   - apiGroups: [liken.sh]
     resources: [clusters]
-    verbs: [get, list]
+    verbs: [get, list, watch]
   - apiGroups: [liken.sh]
     resources: [clusters/status]
     verbs: [update]
-  # The pod steward (steward.go): list the OS DaemonSets' pods and
+  # The pod steward (steward.go): watch the OS DaemonSets' pods and
   # evict the stale ones after an upgrade. This role uses eviction
   # instead of delete for the same reason the drain does: the API
   # server refuses an eviction that would violate a
   # PodDisruptionBudget.
   - apiGroups: [""]
     resources: [pods]
-    verbs: [list]
+    verbs: [list, watch]
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
@@ -81,7 +81,7 @@ rules:
   # manifests carry one.
   - apiGroups: [apps]
     resources: [daemonsets]
-    verbs: [get, list, delete]
+    verbs: [get, list, watch, delete]
   # The flux janitor (janitor.go): the teardown rights for a
   # retracted flux feature. These are standing, unlike the planter's
   # grant, which the feature's own manifests deliver: the janitor's
@@ -145,11 +145,13 @@ subjects:
     name: liken-cluster-operator
     namespace: liken-system
 ---
-# The heartbeats, read-only: this program judges the fleet's
-# liveness by listing the machines' leases, and it never writes one.
-# The machine operators hold the matching write-only-your-own role.
-# Between the two roles, no lease in liken-system has more writers
-# than the one machine whose heartbeat it records.
+# The Leases in liken-system. This program judges the fleet's
+# liveness by watching the machines' heartbeat leases, and it never
+# writes one. The machine operators hold the matching role that writes
+# a machine's own heartbeat. The one Lease this program writes is its
+# own leader election Lease, by name. create cannot be limited to a
+# name, because RBAC checks a create before the object has one, so the
+# role grants create on leases and update on the one name.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -158,7 +160,11 @@ metadata:
 rules:
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
-    verbs: [get, list]
+    verbs: [get, list, watch, create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [liken-cluster-operator]
+    verbs: [update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -193,16 +199,25 @@ metadata:
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
 spec:
-  # One replica, and Recreate instead of a rolling update: together
-  # they provide the at-most-one guarantee that the fleet's writers
-  # assume. A rolling update would briefly run two copies on every
-  # release. A brief overlap would be harmless, because two sweeps
-  # compute the same verdicts and optimistic concurrency puts the
-  # writes in order, but there is no reason to schedule an overlap
-  # on purpose.
+  # A rolling update starts the new pod beside the old one. The new
+  # pod waits for the leader election Lease, and the old pod releases
+  # it on SIGTERM after its last sweep, so the new pod takes over
+  # within about eleven seconds. maxUnavailable 0 keeps the old pod
+  # until the new one runs, and maxSurge 1 allows the one extra pod.
+  #
+  # One replica is enough. Two replicas are safe once every node runs
+  # a release with the election, because the Lease lets only one of
+  # them act, and the second one takes over in 30 to 41 seconds when
+  # the first one's node dies, without waiting for the scheduler. The
+  # image tag resolves on each node to the build that node's OS
+  # carries, so while a node still runs a release from before the
+  # election, a pod there acts with no Lease at all.
   replicas: 1
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: liken-cluster-operator
@@ -216,6 +231,12 @@ spec:
         liken.sh/os-version: "LIKEN_VERSION"
     spec:
       serviceAccountName: liken-cluster-operator
+      # A shutdown finishes the sweep in flight, whose requests each
+      # stop after 15 seconds, and then releases the Lease, which
+      # takes up to 16 seconds more. The default of 30 seconds could
+      # end the process before the release, and the next copy would
+      # then wait out the Lease's whole duration.
+      terminationGracePeriodSeconds: 60
       # This is the priority class for control-plane workloads that
       # are cluster-wide rather than node-local. The machine operator
       # uses system-node-critical, because a node needs its own copy.

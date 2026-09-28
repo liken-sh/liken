@@ -144,8 +144,9 @@ func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 		// stops reporting, and removes them when it recovers. Naming
 		// the resourceVersion this pass read turns that race into a
 		// 409 conflict, so the API server refuses the write instead
-		// of dropping the controller's taint. The next pass reads the
-		// Node again and patches again against the new version.
+		// of dropping the controller's taint. The watch of the Node
+		// delivers the write that won and wakes the next pass, which
+		// patches again against the new version.
 		//
 		// The labels patch needs no such precondition, because a
 		// merge patch on a map touches only the keys it names, and a
@@ -161,8 +162,8 @@ func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 // carryOutNodeTaints applies the step's patch. It downgrades the
 // condition when the API server refuses the patch. A refusal here is
 // often the resourceVersion conflict, and the recovery is the same as
-// for any other failure: the next pass reads the Node again, builds
-// the step again, and patches again.
+// for any other failure: the next pass reads the Node's copy again,
+// builds the step again, and patches again.
 func carryOutNodeTaints(c *kubernetes.Client, name string, step taintStep) api.Condition {
 	if step.patch == nil {
 		return step.condition

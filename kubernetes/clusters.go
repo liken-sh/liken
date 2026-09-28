@@ -8,7 +8,6 @@ package kubernetes
 
 import (
 	"encoding/json"
-	"net/http"
 
 	"github.com/liken-sh/liken/cluster"
 )
@@ -32,12 +31,11 @@ func ListClusters(c *Client) ([]cluster.Cluster, error) {
 // applying the stale copy. The caller then reads the object again on
 // its next pass and tries again. This pattern is optimistic
 // concurrency, the same contract that PublishStatus uses for
-// Machines.
-func PublishClusterStatus(c *Client, clusterDoc *cluster.Cluster) error {
+// Machines, and it answers the written resourceVersion the same way.
+func PublishClusterStatus(c *Client, clusterDoc *cluster.Cluster) (string, error) {
 	body, err := json.Marshal(clusterDoc)
 	if err != nil {
-		return err
+		return "", err
 	}
-	path := ClustersPath + "/" + clusterDoc.Metadata.Name + "/status"
-	return c.RequestJSON(http.MethodPut, path, body, nil)
+	return putStatus(c, ClustersPath+"/"+clusterDoc.Metadata.Name+"/status", body)
 }

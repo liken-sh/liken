@@ -48,6 +48,7 @@ TEXTS = texts/GPL-2.0.txt \
         texts/Apache-2.0.txt \
         texts/MPL-2.0.txt \
         texts/MIT.txt \
+        texts/ISC.txt \
         texts/BSD-2-Clause.txt \
         texts/BSD-3-Clause.txt \
         ../microcode/dist/$(MICROCODE_VERSION)/Intel-microcode.txt \

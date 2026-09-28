@@ -233,11 +233,25 @@ Under the MIT license:
 
 * github.com/beorn7/perks: copyright 2013 Blake Mizerany
 * github.com/cespare/xxhash/v2: copyright 2016 Caleb Spare
+* github.com/emicklei/go-restful/v3: copyright 2012, 2013 Ernest
+  Micklei
+* github.com/fxamacker/cbor/v2: copyright 2019-present Faye Amacker
+* github.com/josharian/intern: copyright 2019 Josh Bleecher Snyder
 * github.com/josharian/native: copyright 2020 Josh Bleecher Snyder
+* github.com/json-iterator/go: copyright 2016 json-iterator
+* github.com/mailru/easyjson: copyright 2016 Mail.Ru Group
 * github.com/mdlayher/packet: copyright 2022 Matt Layher
 * github.com/mdlayher/socket: copyright 2021 Matt Layher
+* github.com/x448/float16: copyright 2019 Montgomery Edwards⁴⁴⁸ and
+  Faye Amacker
+* go.yaml.in/yaml/v3, gopkg.in/yaml.v3: copyright 2006–2011 Kirill
+  Simonov (MIT); copyright 2011–2016 Canonical Ltd. (Apache 2.0)
 * sigs.k8s.io/yaml: copyright 2014 Sam Ghods; portions copyright
   2012 The Go Authors (BSD-3)
+
+Under the ISC license:
+
+* github.com/davecgh/go-spew: copyright 2012–2016 Dave Collins
 
 Under the BSD 2-Clause license:
 
@@ -251,17 +265,31 @@ Under the BSD 3-Clause license:
   Authors, 2016 The filepathx Authors), Apache 2.0 (copyright
   2016–2017 The New York Times Company), and MIT (copyright 2015
   Klaus Post)
+* github.com/google/uuid: copyright 2009, 2014 Google Inc.
 * github.com/munnerz/goautoneg: copyright 2011 Open Knowledge
   Foundation Ltd.
 * github.com/pierrec/lz4/v4: copyright 2015 Pierre Curto
+* github.com/pmezard/go-difflib: copyright 2013 Patrick Mezard
 * github.com/u-root/uio: copyright 2012–2021 u-root Authors
-* golang.org/x/crypto, golang.org/x/net, golang.org/x/sync,
-  golang.org/x/sys, golang.org/x/text: copyright 2009 The Go
+* golang.org/x/crypto, golang.org/x/net, golang.org/x/oauth2,
+  golang.org/x/sync, golang.org/x/sys, golang.org/x/term,
+  golang.org/x/text, golang.org/x/time: copyright 2009 The Go
   Authors
 * google.golang.org/protobuf: copyright 2018 The Go Authors
+* gopkg.in/evanphx/json-patch.v4: copyright 2014 Evan Phoenix
+* gopkg.in/inf.v0: copyright 2012 Péter Surányi; portions copyright
+  2009 The Go Authors
+* sigs.k8s.io/json: copyright 2009 The Go Authors
 
 Under the Apache License 2.0:
 
+* github.com/go-logr/logr: copyright The logr Authors
+* github.com/go-openapi/jsonpointer,
+  github.com/go-openapi/jsonreference: copyright 2013 sigu-399
+* github.com/go-openapi/swag: copyright 2015 go-swagger maintainers
+* github.com/google/gnostic-models: copyright Google LLC
+* github.com/modern-go/concurrent, github.com/modern-go/reflect2:
+  copyright the modern-go authors
 * github.com/prometheus/client_golang,
   github.com/prometheus/client_model, github.com/prometheus/common,
   github.com/prometheus/procfs: copyright 2012–2015 The Prometheus
@@ -271,8 +299,14 @@ Under the Apache License 2.0:
 * go.yaml.in/yaml/v2: copyright 2011–2016 Canonical Ltd.
 * google.golang.org/genproto: copyright Google LLC
 * google.golang.org/grpc: copyright 2014 gRPC authors
-* k8s.io/kubelet: copyright The Kubernetes Authors
+* k8s.io/api, k8s.io/apimachinery, k8s.io/client-go, k8s.io/klog/v2,
+  k8s.io/kubelet, k8s.io/utils, sigs.k8s.io/structured-merge-diff/v6:
+  copyright The Kubernetes Authors
+* k8s.io/kube-openapi: copyright The Kubernetes Authors; portions
+  copyright 2015 go-swagger maintainers
+* sigs.k8s.io/randfill: copyright 2014 The gofuzz Authors, 2025 The
+  Kubernetes Authors
 
-The appendix reproduces the MIT, BSD, and Apache license texts that
-these modules are offered under, once each. The copyright lines
+The appendix reproduces the MIT, ISC, BSD, and Apache license texts
+that these modules are offered under, once each. The copyright lines
 above complete each text for its holder.

@@ -42,7 +42,6 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
@@ -71,9 +70,9 @@ var stewardedDaemonSets = []string{
 	"machine-logs",
 }
 
-func daemonSetPath(name string) string {
-	return "/apis/apps/v1/namespaces/liken-system/daemonsets/" + name
-}
+// daemonSetsPath is the collection of DaemonSets in liken-system: the
+// OS's own and the ones the features seed.
+const daemonSetsPath = "/apis/apps/v1/namespaces/liken-system/daemonsets"
 
 func daemonSetPodsPath(name string) string {
 	return "/api/v1/namespaces/liken-system/pods?labelSelector=app%3D" + name
@@ -110,9 +109,9 @@ func decideRefresh(dsVersion string, machines []machine.Machine, pods []kubernet
 
 // stewardOSPods carries out the steward's work, run once per sweep,
 // over every stewarded DaemonSet in turn.
-func stewardOSPods(c *kubernetes.Client, machines []machine.Machine) {
+func stewardOSPods(r *fleetReader, machines []machine.Machine) {
 	for _, name := range stewardedDaemonSets {
-		stewardDaemonSet(c, machines, name)
+		stewardDaemonSet(r, machines, name)
 	}
 }
 
@@ -123,13 +122,9 @@ func stewardOSPods(c *kubernetes.Client, machines []machine.Machine) {
 // running version against. The rollout gate reads this same function
 // for the machine-operator DaemonSet, on the same terms
 // (fleet.go, rollout.go).
-func daemonSetVersion(c *kubernetes.Client, name string) string {
-	var ds struct {
-		Metadata struct {
-			Annotations map[string]string `json:"annotations"`
-		} `json:"metadata"`
-	}
-	if err := c.RequestJSON(http.MethodGet, daemonSetPath(name), nil, &ds); err != nil {
+func daemonSetVersion(r *fleetReader, name string) string {
+	ds, err := r.daemonSet(name)
+	if err != nil {
 		return ""
 	}
 	return ds.Metadata.Annotations[osVersionAnnotation]
@@ -143,18 +138,18 @@ func daemonSetVersion(c *kubernetes.Client, name string) string {
 // emptyDir resume cursors. So each OS upgrade re-sends the tail of
 // that machine's log streams once, and the envelopes' seq field
 // removes any duplicates.
-func stewardDaemonSet(c *kubernetes.Client, machines []machine.Machine, name string) {
-	dsVersion := daemonSetVersion(c, name)
+func stewardDaemonSet(r *fleetReader, machines []machine.Machine, name string) {
+	dsVersion := daemonSetVersion(r, name)
 	if dsVersion == "" {
 		return // no DaemonSet, or nothing applied yet, to steward toward
 	}
-	pods, err := kubernetes.List[kubernetes.Pod](c, daemonSetPodsPath(name))
+	pods, err := r.daemonSetPods(name)
 	if err != nil {
 		fmt.Printf("listing %s pods for the steward: %v\n", name, err)
 		return
 	}
 	for _, p := range decideRefresh(dsVersion, machines, pods) {
-		if err := kubernetes.EvictPod(c, p); err != nil {
+		if err := kubernetes.EvictPod(r.client, p); err != nil {
 			fmt.Printf("refreshing pod %s: %v\n", p.Metadata.Name, err)
 		} else {
 			fmt.Printf("pod %s on %s predates release %s; evicted for the DaemonSet to recreate\n",

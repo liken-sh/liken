@@ -21,7 +21,11 @@ import (
 // `kubectl create secret docker-registry` produces. The URL carries
 // a namespace segment because Secrets live inside a namespace,
 // unlike liken's own cluster-scoped CRDs.
-const RegistryCredentialsSecretPath = "/api/v1/namespaces/liken-system/secrets/registry-credentials"
+const RegistryCredentialsSecretPath = "/api/v1/namespaces/liken-system/secrets/" + RegistryCredentialsSecret
+
+// RegistryCredentialsSecret is the Secret's name, which the machine
+// operator's watch selects by.
+const RegistryCredentialsSecret = "registry-credentials"
 
 // Secret holds the part of a Kubernetes Secret that liken reads: its
 // type, which says what the data means, and the data itself. The API

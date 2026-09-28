@@ -20,7 +20,7 @@ to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 71.
+milestone is 72.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
 questions. Each document explains the evidence, possible remedies, and
@@ -241,6 +241,15 @@ milestone number because their implementation scope is not settled.
   as a CEC device and an input device, and never publishes the serial
   line. A hand drill proved the kernel path on a Pulse-Eight adapter;
   the drills in the plan run with the release.
+* **71.** [The operators watch through client-go, and the cluster operator elects a leader](completed/71-the-operators-watch-through-client-go.md).
+  Built 2026-09-27. Both operators watch through client-go's
+  reflector, and each pass reads the watches' copies: a settled
+  machine sends one request every ten seconds in place of eight, and a
+  settled sweep one in place of ten. The cluster operator elects one
+  acting copy on a `Lease`, guards every write with it, and rolls a
+  new pod in beside the old one. A fence for the reboot grants of a
+  paused former leader stays open. A copy under an older release's
+  RBAC acts without an election until the `Lease` answers.
 
 ## Rejected
 
@@ -319,11 +328,13 @@ patch. A design question needs agreement on behavior before implementation.
 * [Pin CI executable inputs](open-problems/ci-executables-need-immutable-pins.md).
   Verify the certificate tool against reviewed bytes and pin actions by
   commit. This does not require a new release-signing design.
-* [Coordinate cluster-operator instances](open-problems/cluster-operator-leader-election.md).
-  Add leader election and safe handling of renewal failures and pending
-  writes. A `Lease` alone does not fence a paused former leader.
 
 ### Design decisions and policy questions
+
+* [Coordinate cluster-operator instances](open-problems/cluster-operator-leader-election.md).
+  Leader election is built. A paused former leader can still write a
+  reboot grant from a stale view of the fleet, and the fence for the
+  budget needs a design decision.
 
 * [Keep a newer manifest readable after a rollback](open-problems/rollback-drops-a-manifest-with-newer-fields.md).
   A strict parse makes an older init drop a proven manifest that uses

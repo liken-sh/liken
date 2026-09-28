@@ -2,11 +2,13 @@ package kubernetes
 
 // This file reads and reports on Machines: the operations both
 // operators share. The machine operator reads and writes its own
-// Machine. The cluster operator reads every Machine. Watching
-// Machines is implemented in watch.go.
+// Machine. The cluster operator reads every Machine. The watches are
+// in the informer package.
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/liken-sh/liken/machine"
@@ -31,13 +33,33 @@ func ListMachines(c *Client) ([]machine.Machine, error) {
 // object again on its next pass and tries again. This pattern is
 // optimistic concurrency, and every Kubernetes controller uses it to
 // handle contention.
-func PublishStatus(c *Client, m *machine.Machine, status *machine.MachineStatus) error {
+//
+// It answers the resourceVersion the API server gave the write. A
+// caller that reads a watch's copy records it, so the copy does not
+// answer until the watch delivers the write (informer.Wrote).
+func PublishStatus(c *Client, m *machine.Machine, status *machine.MachineStatus) (string, error) {
 	updated := *m
 	updated.Status = *status
 	body, err := json.Marshal(&updated)
 	if err != nil {
-		return err
+		return "", err
 	}
-	path := MachinesPath + "/" + m.Metadata.Name + "/status"
-	return c.RequestJSON(http.MethodPut, path, body, nil)
+	return putStatus(c, MachinesPath+"/"+m.Metadata.Name+"/status", body)
+}
+
+// putStatus writes a status subresource and answers the
+// resourceVersion of the object the API server stored. An answer with
+// no body carries no version, and the write still succeeded, so the
+// version is empty.
+func putStatus(c *Client, path string, body []byte) (string, error) {
+	var written struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+	}
+	err := c.RequestJSON(http.MethodPut, path, body, &written)
+	if errors.Is(err, io.EOF) {
+		return "", nil
+	}
+	return written.Metadata.ResourceVersion, err
 }

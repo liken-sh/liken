@@ -57,7 +57,7 @@ var featureWorkloadKinds = []struct {
 	kind     string
 	listPath string
 }{
-	{"daemonset", "/apis/apps/v1/namespaces/liken-system/daemonsets"},
+	{"daemonset", daemonSetsPath},
 }
 
 // featureWorkload holds the small amount of information the janitor
@@ -91,9 +91,9 @@ func decideRetractions(features map[string]*cluster.FeatureConfig, workloads []f
 // sweep: it lists each swept kind, selects which workloads to
 // retract, and deletes them. Deletion is by name with background
 // propagation, so the workload's pods are deleted along with it.
-func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) {
+func janitorFeatureWorkloads(r *fleetReader, clusterDoc *cluster.Cluster) {
 	for _, k := range featureWorkloadKinds {
-		workloads, err := kubernetes.List[featureWorkload](c, k.listPath)
+		workloads, err := r.workloads(k.listPath)
 		if err != nil {
 			fmt.Printf("listing %ss for the feature janitor: %v\n", k.kind, err)
 			continue
@@ -102,7 +102,7 @@ func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) 
 			name := w.Metadata.Name
 			slug := w.Metadata.Annotations[featureAnnotation]
 			path := k.listPath + "/" + name + "?propagationPolicy=Background"
-			if err := c.RequestJSON(http.MethodDelete, path, nil, nil); err != nil {
+			if err := r.client.RequestJSON(http.MethodDelete, path, nil, nil); err != nil {
 				fmt.Printf("deleting %s %s for the retracted %s feature: %v\n", k.kind, name, slug, err)
 			} else {
 				fmt.Printf("the cluster no longer declares the %s feature; deleted %s %s\n", slug, k.kind, name)

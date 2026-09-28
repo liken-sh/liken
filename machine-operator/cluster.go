@@ -48,7 +48,6 @@ import (
 
 	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -237,11 +236,14 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 // This is also where the retraction barrier reaches the live cluster.
 // A precondition is a statement about objects that no document
 // describes, such as the HelmCharts that still exist, so the
-// reduction needs the API client that this function holds. It reads
-// nothing unless the edit stops a feature, which keeps the ordinary
-// pass to its one read of the Cluster.
-func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *cluster.Cluster) {
-	liveCluster, err := kubernetes.GetCluster(c, clusterName)
+// reduction needs the API client that the reader holds. It reads
+// nothing unless the edit stops a feature, so an ordinary pass reads
+// only the Cluster's copy. The HelmCharts and the LoadBalancer
+// Services have no watch: they are read only while a retraction
+// waits, and a watch of every Service in the cluster would cost this
+// pod far more than those reads.
+func convergeClusterDocument(r *reader, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *cluster.Cluster) {
+	liveCluster, err := r.cluster(clusterName)
 	if err != nil {
 		return convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
 			fmt.Sprintf("reading cluster %s: %v", clusterName, err))}, nil
@@ -249,7 +251,7 @@ func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, 
 	rejection, _ := store.LoadRejection()
 	bootDoc, bootHash := bootClusterDocument(cluster.BootClusterManifestPath)
 	reduced, held := reduceRetraction(bootDoc, liveCluster, func(p cluster.Precondition) (bool, string, error) {
-		return evaluatePrecondition(c, p)
+		return evaluatePrecondition(r.client, p)
 	})
 	return decideClusterConvergence(reduced, held, m, facts, rejection,
 		bootDoc, bootHash, readStagedHash(store), t), liveCluster

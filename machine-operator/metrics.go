@@ -45,7 +45,7 @@ import (
 // way that bind fails.
 func serveMetrics(address string, f *fetcher) (*metrics.Operator, *machineMetrics) {
 	o := metrics.NewOperator(component, machine.Version,
-		[]string{machineKind}, []string{machineKind})
+		[]string{machineKind}, watchKinds)
 	layer := newMachineMetrics(o, f)
 	if addr, err := o.Serve(address); err != nil {
 		fmt.Fprintf(os.Stderr, "the metrics listener is not serving: %v\n", err)

@@ -44,9 +44,9 @@ const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/lease
 // HeartbeatRenewAfter sets how old the heartbeat must be before the
 // machine's own operator renews it. The value is just under the
 // ten-second reconcile ticker, so every ticker pass renews the
-// lease, and the event-driven passes in between only need to read
-// it. HeartbeatStaleAfter sets how long a machine may then stay
-// silent before the cluster operator marks it Lost. A single missed
+// lease, and the event-driven passes in between send nothing.
+// HeartbeatStaleAfter sets how long a machine may then stay silent
+// before the cluster operator marks it Lost. A single missed
 // renewal may only mean a busy moment. Several missed renewals mean
 // the machine is down.
 //
@@ -68,7 +68,9 @@ const (
 // compare instants that are close together in time.
 const microTime = "2006-01-02T15:04:05.000000Z07:00"
 
-type lease struct {
+// Lease is the part of a coordination.k8s.io Lease that the heartbeat
+// writes and the cluster operator reads.
+type Lease struct {
 	APIVersion string         `json:"apiVersion"`
 	Kind       string         `json:"kind"`
 	Metadata   api.ObjectMeta `json:"metadata"`
@@ -81,8 +83,8 @@ type lease struct {
 }
 
 // newLease creates a new claim, held by holder as of the given time.
-func newLease(name, holder string, duration time.Duration, now time.Time) *lease {
-	l := &lease{APIVersion: "coordination.k8s.io/v1", Kind: "Lease"}
+func newLease(name, holder string, duration time.Duration, now time.Time) *Lease {
+	l := &Lease{APIVersion: "coordination.k8s.io/v1", Kind: "Lease"}
 	l.Metadata.Name = name
 	l.Spec.HolderIdentity = holder
 	l.Spec.LeaseDurationSeconds = int(duration.Seconds())
@@ -91,60 +93,129 @@ func newLease(name, holder string, duration time.Duration, now time.Time) *lease
 	return l
 }
 
-// RenewHeartbeat keeps a machine's own lease current. It creates the
-// lease if the lease does not exist. It renews the lease once the
-// lease has aged past HeartbeatRenewAfter. Otherwise, it leaves the
-// lease alone, so most passes cost one read and no write. There is no
-// election here. Each machine is the only writer of its own lease,
-// the same way a kubelet is the only writer of its own node lease.
-// Because of this, every failure mode only means "try again on the
-// next pass."
-func RenewHeartbeat(c *Client, name string, now time.Time) {
-	path := heartbeatDir + "/" + name
-	l := &lease{}
-	err := c.RequestJSON(http.MethodGet, path, nil, l)
-	if errors.Is(err, ErrNotFound) {
-		// A lease is a struct of strings and ints. Marshaling it cannot fail.
-		body, _ := json.Marshal(newLease(name, name, HeartbeatStaleAfter, now))
-		if err := c.RequestJSON(http.MethodPost, heartbeatDir, body, nil); err != nil && !errors.Is(err, ErrConflict) {
-			fmt.Printf("creating the heartbeat lease: %v\n", err)
-		}
+// Heartbeat keeps a machine's own lease current. Each machine is the
+// only writer of its own lease, the same way a kubelet is the only
+// writer of its own node lease, so there is no election here, and every
+// failure only means "try again on the next pass."
+//
+// A Heartbeat holds the lease as this process last wrote it. The
+// resourceVersion in that copy is what a renewal needs, so a steady
+// renewal is one update and no read. The machine's operator creates one
+// Heartbeat for the life of the process, the same way it keeps one
+// release fetcher.
+type Heartbeat struct {
+	name string
+	held *Lease
+}
+
+// NewHeartbeat returns the heartbeat of the named machine. It holds no
+// lease until its first renewal reads one.
+func NewHeartbeat(name string) *Heartbeat {
+	return &Heartbeat{name: name}
+}
+
+// Renew renews the lease once it has aged past HeartbeatRenewAfter,
+// and creates it when it does not exist. A pass that finds the held
+// copy fresh sends nothing, so the event-driven passes between two
+// ticker passes cost no request.
+//
+// The first renewal reads the lease, because the process has no copy
+// yet. After that, the renewal writes from the copy it holds. The
+// update carries the copy's resourceVersion, so a lease that something
+// else wrote since then makes the API server answer 409 Conflict, and
+// a lease that somebody deleted answers 404. Either answer drops the
+// copy, and the same call reads the lease again and renews from what
+// it read.
+func (h *Heartbeat) Renew(c *Client, now time.Time) {
+	path := heartbeatDir + "/" + h.name
+	if h.held == nil && !h.read(c, now) {
 		return
+	}
+	if renewed, err := time.Parse(microTime, h.held.Spec.RenewTime); err == nil && now.Sub(renewed) < HeartbeatRenewAfter {
+		return
+	}
+	err := h.write(c, path, now)
+	if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
+		h.held = nil
+		if !h.read(c, now) {
+			return
+		}
+		err = h.write(c, path, now)
 	}
 	if err != nil {
-		fmt.Printf("reading the heartbeat lease: %v\n", err)
-		return
-	}
-	if renewed, err := time.Parse(microTime, l.Spec.RenewTime); err == nil && now.Sub(renewed) < HeartbeatRenewAfter {
-		return
-	}
-	l.Spec.HolderIdentity = name
-	l.Spec.LeaseDurationSeconds = int(HeartbeatStaleAfter.Seconds())
-	l.Spec.RenewTime = now.UTC().Format(microTime)
-	// A lease is a struct of strings and ints. Marshaling it cannot fail.
-	body, _ := json.Marshal(l)
-	if err := c.RequestJSON(http.MethodPut, path, body, nil); err != nil {
+		h.held = nil
 		fmt.Printf("renewing the heartbeat lease: %v\n", err)
 	}
 }
 
+// read reads the lease into the held copy, or creates the lease when
+// it does not exist. It answers false when the caller has nothing left
+// to do: the read failed, or the create already renewed the lease.
+func (h *Heartbeat) read(c *Client, now time.Time) bool {
+	l := &Lease{}
+	err := c.RequestJSON(http.MethodGet, heartbeatDir+"/"+h.name, nil, l)
+	if errors.Is(err, ErrNotFound) {
+		// A lease is a struct of strings and ints. Marshaling it cannot fail.
+		body, _ := json.Marshal(newLease(h.name, h.name, HeartbeatStaleAfter, now))
+		created := &Lease{}
+		if err := c.RequestJSON(http.MethodPost, heartbeatDir, body, created); err != nil {
+			if !errors.Is(err, ErrConflict) {
+				fmt.Printf("creating the heartbeat lease: %v\n", err)
+			}
+			return false
+		}
+		h.held = created
+		return false
+	}
+	if err != nil {
+		fmt.Printf("reading the heartbeat lease: %v\n", err)
+		return false
+	}
+	h.held = l
+	return true
+}
+
+// write sends the renewal from the held copy, and keeps the lease the
+// API server answers with, which carries the new resourceVersion.
+func (h *Heartbeat) write(c *Client, path string, now time.Time) error {
+	renewal := *h.held
+	renewal.Spec.HolderIdentity = h.name
+	renewal.Spec.LeaseDurationSeconds = int(HeartbeatStaleAfter.Seconds())
+	renewal.Spec.RenewTime = now.UTC().Format(microTime)
+	// A lease is a struct of strings and ints. Marshaling it cannot fail.
+	body, _ := json.Marshal(&renewal)
+	written := &Lease{}
+	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+		return err
+	}
+	h.held = written
+	return nil
+}
+
 // ListHeartbeats reads every machine's last renewal for the cluster
 // operator's sweep. One cheap list request yields the fleet's
-// liveness, mapped from each machine's name to the moment of its
-// last renewal. A lease that is not some machine's heartbeat causes
-// no harm in this map: the sweep looks up renewals by machine name
-// and never iterates over the map, so a stray key can never be read
-// as a machine.
+// liveness. Renewals says what the answer holds.
 func ListHeartbeats(c *Client) (map[string]time.Time, error) {
-	leases, err := List[lease](c, heartbeatDir)
+	leases, err := List[Lease](c, heartbeatDir)
 	if err != nil {
 		return nil, err
 	}
+	return Renewals(leases), nil
+}
+
+// Renewals maps each lease's name to the moment of its last renewal.
+// A lease that is not some machine's heartbeat, such as the cluster
+// operator's own leader election Lease, causes no harm in this map:
+// the sweep looks up renewals by machine name and never iterates over
+// the map, so a stray key can never be read as a machine. A lease
+// whose renewal does not parse carries no liveness claim, and it is
+// left out.
+func Renewals(leases []Lease) map[string]time.Time {
 	renewals := map[string]time.Time{}
 	for _, l := range leases {
 		if renewed, err := time.Parse(microTime, l.Spec.RenewTime); err == nil {
 			renewals[l.Metadata.Name] = renewed
 		}
 	}
-	return renewals, nil
+	return renewals
 }

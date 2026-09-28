@@ -22,6 +22,12 @@ import (
 // point it at a tempdir instead of the machine's real /run.
 var factsTree = machine.FactsTree{Dir: machine.FactsDir}
 
+// sysctlRoot is the kernel's tuning interface the pass writes. It is a
+// package variable for the same reason as factsTree: a test of a whole
+// pass points it at a tempdir, so the test never writes the host's
+// kernel parameters.
+var sysctlRoot = machine.SysctlDir
+
 // carryOutConvergence performs one convergence decision's side
 // effects against one document's store, and returns the condition
 // to publish. An I/O failure downgrades the condition to
@@ -132,8 +138,9 @@ func (d *disruptions) gate(c *kubernetes.Client, node *nodeObject, nodeErr error
 // it is a fault in the operator, and it means nobody outside this
 // pod can see what the pass observed. That is what the layer 2
 // error counter counts (metrics.go).
-func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *fetcher, mm *machineMetrics) error {
+func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb *kubernetes.Heartbeat, mm *machineMetrics) error {
 	now := time.Now()
+	c := r.client
 
 	// This records what the object held before this pass touched
 	// anything. It must be captured now, because it cannot be
@@ -175,7 +182,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// without a reboot. status.sysctls reports the two together, so an
 	// operator sees every parameter liken sets and its actual value in
 	// one place.
-	sysctls, defaultsErr, specErr := applySysctls(machine.SysctlDir, machine.OSSysctls, m.Spec.Sysctls)
+	sysctls, defaultsErr, specErr := applySysctls(sysctlRoot, machine.OSSysctls, m.Spec.Sysctls)
 	status.Sysctls = sysctls
 	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
@@ -186,7 +193,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// leader's boot rewrites the AddOn manifests that produce a fresh
 	// template. hostEntriesCondition reads this verdict below to judge
 	// a missing mount as that ordinary lag instead of a fault.
-	podStale := ownPodIsStale(c, m.Metadata.Name, status.Version.Liken)
+	podStale := ownPodIsStale(r, m.Metadata.Name, status.Version.Liken)
 
 	// Host entries reconcile live too, under the same write-on-
 	// divergence rule (hosts.go). The hostname is the Machine's own
@@ -291,7 +298,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// without being a problem, because during a demotion the Node is
 	// deleted and not yet re-registered. A pass where the read fails
 	// simply skips all three, and the next pass settles them.
-	node, nodeErr := getNode(c, m.Metadata.Name)
+	node, nodeErr := r.node(m.Metadata.Name)
 
 	// The device inventory converges on the same cadence as
 	// everything else: one sysfs walk per pass, published as this
@@ -309,7 +316,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	serio := serioInEffect(m.Spec.Serio, facts)
 	setDeclaredSerio(serio)
 	if nodeErr == nil {
-		publishDeviceInventory(c, node, facts, serio, mm)
+		publishDeviceInventory(r, node, facts, serio, mm)
 	}
 
 	// The claims the kubelet already prepared get the same treatment,
@@ -360,7 +367,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	if clusterName != "" {
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
 		var cconv convergence
-		cconv, liveCluster = convergeClusterDocument(c, clusterStore, clusterName, m, facts, t)
+		cconv, liveCluster = convergeClusterDocument(r, clusterStore, clusterName, m, facts, t)
 		cconv = disr.gate(c, node, nodeErr, t, now, cconv)
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(cconv, clusterStore, "cluster document", now), now)
@@ -383,7 +390,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 
 		credentialsStore := machine.RegistryCredentialsStore(machine.MachineStateDir)
 		rconv := disr.gate(c, node, nodeErr, t, now,
-			convergeRegistryCredentials(c, credentialsStore, m, facts, t))
+			convergeRegistryCredentials(r, credentialsStore, m, facts, t))
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(rconv, credentialsStore, "registry credentials", now), now)
 		if rconv.pending != nil {
@@ -501,14 +508,14 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// sweeper stops writing Lost verdicts onto the very object the
 	// status write below is about to update. Writing status first
 	// would invite that collision on every boot.
-	kubernetes.RenewHeartbeat(c, m.Metadata.Name, now)
+	hb.Renew(c, now)
 
 	// The metrics read the very status this pass is about to
 	// publish, so a graph and a `kubectl get machine -o yaml` always
 	// answer from the same observation (metrics.go).
 	mm.observeStatus(status)
 
-	err = publishOwnStatus(c, m, status, before)
+	err = publishOwnStatus(r, m, status, before)
 	if err != nil {
 		fmt.Printf("publishing status: %v\n", err)
 	}
@@ -549,17 +556,20 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 // changing faster than this pass can read it, and the write that
 // won the race is already queued on the watch, so the pass it
 // triggers will publish moments from now.
-func publishOwnStatus(c *kubernetes.Client, m *machine.Machine, status *machine.MachineStatus, before []byte) error {
+func publishOwnStatus(r *reader, m *machine.Machine, status *machine.MachineStatus, before []byte) error {
 	after, err := json.Marshal(status)
 	if err == nil && bytes.Equal(before, after) {
 		return nil
 	}
 
-	err = kubernetes.PublishStatus(c, m, status)
+	err = r.publishStatus(m, status)
 	if !errors.Is(err, kubernetes.ErrConflict) {
 		return err
 	}
-	fresh, gerr := kubernetes.GetMachine(c, m.Metadata.Name)
+	// This read goes to the API server, not to the watch's copy. It
+	// follows a write that lost to another writer, and the copy can
+	// still lag behind the write that won.
+	fresh, gerr := kubernetes.GetMachine(r.client, m.Metadata.Name)
 	if gerr != nil {
 		return err
 	}
@@ -567,5 +577,5 @@ func publishOwnStatus(c *kubernetes.Client, m *machine.Machine, status *machine.
 	if grant := api.FindCondition(fresh.Status.Conditions, machine.RebootApprovedCondition); grant != nil {
 		status.Conditions = append(status.Conditions, *grant)
 	}
-	return kubernetes.PublishStatus(c, fresh, status)
+	return r.publishStatus(fresh, status)
 }

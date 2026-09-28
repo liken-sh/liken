@@ -36,7 +36,7 @@ const machineKind = "Machine"
 // whether or not anybody watches it.
 func serveMetrics(address string) (*metrics.Operator, *clusterMetrics) {
 	o := metrics.NewOperator(component, machine.Version,
-		[]string{clusterKind}, []string{machineKind})
+		[]string{clusterKind}, watchKinds)
 	layer := newClusterMetrics(o)
 	if addr, err := o.Serve(address); err != nil {
 		fmt.Fprintf(os.Stderr, "the metrics listener is not serving: %v\n", err)
@@ -78,6 +78,27 @@ func newClusterMetrics(o *metrics.Operator) *clusterMetrics {
 		m.machines.WithLabelValues(string(phase)).Set(0)
 	}
 	return m
+}
+
+// newUnelectedGauge registers liken_cluster_operator_unelected, which
+// is 1 while this copy acts without an election because the API server
+// refuses its Lease (unelected.go), and 0 otherwise. The mode is meant
+// to last only through a release skew, so a graph that stays at 1 says
+// the RBAC for the election never arrived. It answers the setter the
+// election calls.
+func newUnelectedGauge(o *metrics.Operator) func(bool) {
+	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: metrics.Prefix + "cluster_operator_unelected",
+		Help: "1 while this copy acts without a leader election, because the API server refuses its Lease.",
+	})
+	o.Registry().MustRegister(gauge)
+	return func(unelected bool) {
+		if unelected {
+			gauge.Set(1)
+		} else {
+			gauge.Set(0)
+		}
+	}
 }
 
 // fleetPhases is the phase vocabulary a machine can hold. The api

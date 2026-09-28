@@ -7,6 +7,7 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -295,5 +296,40 @@ func TestListCarriesTheServersRefusal(t *testing.T) {
 	}
 	if _, err := ListHeartbeats(client); err == nil {
 		t.Error("and so is a refused heartbeat sweep")
+	}
+}
+
+// A guarded client asks the guard before every write, and a refusal
+// keeps the write from being sent. Reads are never guarded, so a pass
+// can still observe while its writes wait.
+func TestAGuardRefusesWritesAndNotReads(t *testing.T) {
+	var sent []string
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Method)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	client.GuardWrites(func() error { return errors.New("the lease is overdue") })
+
+	cases := []struct {
+		method  string
+		refused bool
+	}{
+		{http.MethodGet, false},
+		{http.MethodPut, true},
+		{http.MethodPost, true},
+		{http.MethodPatch, true},
+		{http.MethodDelete, true},
+	}
+	for _, c := range cases {
+		t.Run(c.method, func(t *testing.T) {
+			sent = nil
+			err := client.RequestJSON(c.method, MachinesPath+"/node-1", nil, nil)
+			if c.refused && (err == nil || !strings.Contains(err.Error(), "the lease is overdue") || len(sent) != 0) {
+				t.Errorf("err = %v, sent %q; want a refusal that names the guard's reason and no request", err, sent)
+			}
+			if !c.refused && (err != nil || len(sent) != 1) {
+				t.Errorf("err = %v, sent %q; want the read sent", err, sent)
+			}
+		})
 	}
 }

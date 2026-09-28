@@ -40,6 +40,7 @@ import (
 
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -170,29 +171,29 @@ func main() {
 	// The core of every operator is a level-triggered loop. Three
 	// things wake it, and every pass reconciles from the current state
 	// as it is, never from the event that woke it, so missing one wake
-	// can never matter. The Kubernetes watch wakes the loop when this
-	// machine's own object changes, so a conductor's grant or a
-	// person's edit is acted on at once. The facts watch wakes the loop
-	// when init publishes a change under /run/liken/facts, so a fresh
-	// fact like a time sync reaches status without waiting on a timer.
-	// The ticker wakes the loop on a fixed cadence. It renews the
-	// heartbeat lease, and it catches the changes that neither watch
-	// reports (the ticker's own comment below names them).
+	// can never matter. The Kubernetes watches wake the loop when an
+	// object this machine acts on changes, so a conductor's grant or a
+	// person's edit is acted on at once (watches.go names each watch
+	// and what wakes it). The facts watch wakes the loop when init
+	// publishes a change under /run/liken/facts, so a fresh fact like
+	// a time sync reaches status without waiting on a timer. The
+	// ticker wakes the loop on a fixed cadence. It renews the heartbeat
+	// lease, and it catches the changes that no watch reports (the
+	// ticker's own comment below names them).
 	//
-	// The watch covers exactly one object: this machine's own. The
-	// fieldSelector asks the server to filter, so no other machine's
-	// write ever reaches this pod. The rest of the fleet is the
-	// cluster operator's concern. Nothing in this program's job
-	// depends on any Machine but its own, and a five-hundred-machine
-	// fleet should not cost every machine five hundred wakeups. The
-	// channel is buffered, so a burst of writes to this object (the
+	// The wake channel has one slot, so a burst of changes (the
 	// conductor's grant, the sweeper's verdict, this operator's own
-	// publishes echoing back) queues up instead of stalling the watch
-	// stream. The loop below drains and combines whatever built up
-	// while a pass was running.
-	events := make(chan *machine.Machine, 32)
-	go kubernetes.WatchMachines(client, "metadata.name="+name, current.Metadata.ResourceVersion, events,
-		func() { operatorMetrics.WatchRestarted(machineKind) })
+	// publishes echoing back) makes one wake, and one pass over the
+	// newest state answers the whole burst. That is what
+	// level-triggered means, and it is the same merging an informer's
+	// work queue does.
+	watcher, err := informer.InCluster(localAPIEndpoint(clusterDoc, name))
+	if err != nil {
+		fatal("in-cluster config for the watches: %v", err)
+	}
+	wakes := make(chan struct{}, 1)
+	objects := watchThisMachine(context.Background(), watcher, client, name, clusterName,
+		informer.Signal(wakes), operatorMetrics.WatchRestarted)
 
 	// The facts watch turns init's writes into wakes. inotify does not
 	// recurse, so the watch reconciles its set with the tree before
@@ -206,6 +207,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "watching the facts tree: %v\n", err)
 	}
 
+	// The heartbeat outlives every pass, because it holds the lease it
+	// last wrote, and a renewal from that copy needs no read
+	// (kubernetes/heartbeat.go).
+	heartbeat := kubernetes.NewHeartbeat(name)
+
 	// The ticker is a clock first: it sets the pace for the
 	// heartbeat, so it runs at the kubelet's own lease cadence of ten
 	// seconds (the kubernetes package explains the numbers). The
@@ -214,17 +220,14 @@ func main() {
 	// operator is doing its job, and a goroutine would keep
 	// confirming a reconcile loop that had gotten stuck.
 	//
-	// The same pass is also the backstop for the state that no event
-	// announces. A sysctl or an /etc/hosts entry that another process
-	// changes sends no event, so the pass writes each one back within
-	// ten seconds. The DRA inventory comes from a walk of sysfs on
-	// each pass. The only watch the operator holds covers its own
-	// Machine, so it reads every other object with plain requests on
-	// each pass: for example the Node, the Cluster, the registry
-	// credentials Secret, the OS pods on its node, the node's
-	// ResourceSlice, and the HelmCharts and LoadBalancer Services that
-	// a retracted feature leaves behind. A release download that
-	// finishes between passes reaches status on the next one.
+	// The same pass is also the backstop for the state on the machine
+	// that no event announces. A sysctl or an /etc/hosts entry that
+	// another process changes sends no event, so the pass writes each
+	// one back within ten seconds. The DRA inventory comes from a walk
+	// of sysfs on each pass. A release download that finishes between
+	// passes reaches status on the next one. The API objects the pass
+	// judges come from the watches' copies, so a ticker pass on a
+	// settled machine sends one request: the heartbeat's renewal.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
 		// Sync before the read closes the window between a new subtree
@@ -235,23 +238,20 @@ func main() {
 				fmt.Fprintf(os.Stderr, "syncing the facts watch: %v\n", err)
 			}
 		}
+		// Each pass starts from the newest copy of this machine's
+		// object. Status writes change resourceVersion, and
+		// reconciling against a stale copy would make every status
+		// update a conflict. A read that fails keeps the copy the last
+		// pass had; the publish conflict retry handles a stale one.
+		if fresh, err := objects.machine(name); err == nil {
+			current = fresh
+		}
 		started := time.Now()
-		err := reconcile(client, current, clusterName, f, machineLayer)
+		err := reconcile(objects, current, clusterName, f, heartbeat, machineLayer)
 		operatorMetrics.ObserveReconcile(machineKind, time.Since(started), err)
 		select {
-		case m := <-events:
-			// A busy object queues events faster than passes run, so
-			// this takes everything that arrived while the last pass
-			// worked. One pass over the newest state answers a whole
-			// burst. That is what level-triggered means, and it is
-			// the same combining an informer's work queue does.
-			// Skipping intermediate copies also keeps this pass from
-			// publishing against a version that is already stale.
-			current = drainEvents(events, m)
+		case <-wakes:
 		case <-factsWake(factsWatch):
-			// A fact changed on disk. The next pass rereads the tree;
-			// the current object is reused as is, because the publish
-			// conflict retry already handles a stale working copy.
 		case <-ticker.C:
 			// A watch that failed to start earlier gets another try
 			// here, once the tree's root is likely to exist.
@@ -259,12 +259,6 @@ func main() {
 				if w, werr := machine.WatchFactsTree(context.Background(), machine.FactsDir); werr == nil {
 					factsWatch = w
 				}
-			}
-			// This rereads the object on timer passes too. Status
-			// writes change resourceVersion, and reconciling against
-			// a stale copy would make every status update a conflict.
-			if refreshed, err := kubernetes.GetMachine(client, name); err == nil {
-				current = refreshed
 			}
 		}
 	}
@@ -279,22 +273,6 @@ func factsWake(w *machine.TreeWatch) <-chan struct{} {
 		return nil
 	}
 	return w.Wake
-}
-
-// drainEvents empties whatever the watch queued while the last pass
-// ran, and returns the newest copy of this machine's object. Every
-// event on the channel is this machine's own, because the watch's
-// fieldSelector ensures that, so draining only keeps the newest
-// one. The single pass that follows answers every drained event.
-func drainEvents(events <-chan *machine.Machine, newest *machine.Machine) *machine.Machine {
-	for {
-		select {
-		case m := <-events:
-			newest = m
-		default:
-			return newest
-		}
-	}
 }
 
 func fatal(format string, args ...any) {

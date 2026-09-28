@@ -50,6 +50,7 @@ metrics of their own domain:
 | cluster-operator | `liken_machines{phase}` | gauge | fleet by phase |
 | cluster-operator | `liken_disruption_approvals_pending` | gauge | approvals outstanding |
 | cluster-operator | `liken_machines_behind_target` | gauge | nodes not yet on the target release |
+| cluster-operator | `liken_cluster_operator_unelected` | gauge | 1 while a copy acts without a leader election, because the API server refuses its `Lease` |
 
 ## The monitoring component
 

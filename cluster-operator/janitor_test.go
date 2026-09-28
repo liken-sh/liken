@@ -89,7 +89,7 @@ func TestJanitorDeletesRetractedWorkloadsThroughTheAPI(t *testing.T) {
 		}
 	})
 	clusterDoc := &cluster.Cluster{}
-	janitorFeatureWorkloads(testClient(t, handler), clusterDoc)
+	janitorFeatureWorkloads(&fleetReader{client: testClient(t, handler)}, clusterDoc)
 	want := "/apis/apps/v1/namespaces/liken-system/daemonsets/liken-iscsid"
 	if len(deletes) != 1 || deletes[0] != want {
 		t.Fatalf("expected exactly [%s] deleted, got %v", want, deletes)

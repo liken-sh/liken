@@ -76,7 +76,7 @@ const maxSliceDevices = 128
 // condition. Inventory is a report about hardware, and a failure to
 // write it is a problem in the operator's own machinery, not a fact
 // about the machine.
-func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machine.MachineStatus, serio []machine.SerioAttachment, mm *machineMetrics) {
+func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineStatus, serio []machine.SerioAttachment, mm *machineMetrics) {
 	devices := inventoryDevices(
 		hardware.DiscoverDevices(draSysfsRoot, draNaming()),
 		func(d hardware.Device) hardware.Delivery {
@@ -99,7 +99,11 @@ func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machi
 		Name:       node.Metadata.Name,
 		UID:        node.Metadata.UID,
 	}
-	if err := kubernetes.EnsureResourceSlice(c, node.Metadata.Name, owner, devices); err != nil {
+	current, err := r.resourceSlice(node.Metadata.Name)
+	if err == nil {
+		err = kubernetes.WriteResourceSlice(r.client, node.Metadata.Name, current, owner, devices)
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "device inventory: %v\n", err)
 	}
 }
@@ -288,7 +292,7 @@ func inventoryDevices(discovered []hardware.Device,
 	}
 	// The list is sorted, so the same hardware always publishes the
 	// same slice. This lets the change detection in
-	// EnsureResourceSlice see actual inventory changes, and nothing
+	// WriteResourceSlice see actual inventory changes, and nothing
 	// caused only by the order of the walk.
 	slices.SortFunc(out, func(a, b kubernetes.SliceDevice) int {
 		return strings.Compare(a.Name, b.Name)

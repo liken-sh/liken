@@ -56,7 +56,6 @@ import (
 
 	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
-	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -279,7 +278,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 // the Lost write is: each write touches only the one condition type
 // that this writer owns. When a 409 happens because of a crossing
 // write, this function simply waits for the next sweep.
-func carryOutRollout(c *kubernetes.Client, machines []machine.Machine, r rollout, now time.Time) {
+func carryOutRollout(reads *fleetReader, machines []machine.Machine, r rollout, now time.Time) {
 	for i := range machines {
 		m := &machines[i]
 		name := m.Metadata.Name
@@ -291,14 +290,14 @@ func carryOutRollout(c *kubernetes.Client, machines []machine.Machine, r rollout
 				ObservedGeneration: m.Metadata.Generation,
 				Message:            "the cluster's disruption budget allows this machine to take its reboot turn now",
 			}, now)
-			if err := kubernetes.PublishStatus(c, m, &status); err != nil {
+			if err := reads.publishStatus(m, &status); err != nil {
 				fmt.Printf("granting %s its reboot turn: %v\n", name, err)
 			} else {
 				fmt.Printf("granted %s its reboot turn\n", name)
 			}
 		case slices.Contains(r.revoke, name):
 			status.Conditions = api.RemoveCondition(slices.Clone(m.Status.Conditions), machine.RebootApprovedCondition)
-			if err := kubernetes.PublishStatus(c, m, &status); err != nil {
+			if err := reads.publishStatus(m, &status); err != nil {
 				fmt.Printf("reclaiming %s's reboot turn: %v\n", name, err)
 			}
 		}

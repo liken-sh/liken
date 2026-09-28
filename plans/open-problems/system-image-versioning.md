@@ -32,11 +32,14 @@ With `image: liken.sh/<name>:<version>` and `imagePullPolicy: Never`,
 a node cannot start a pod whose named image is absent. The earlier
 review found these paths:
 
-- The `cluster-operator` `Deployment` uses `Recreate` and node selection
-  without an OS-version constraint. After an upgraded leader applies the
-  new template, its replacement pod can be scheduled on an older node
-  and fail with `ErrImageNeverPull`. With no conductor running, other
-  machines receive no new upgrade turns.
+- The `cluster-operator` `Deployment` uses node selection without an
+  OS-version constraint. After an upgraded leader applies the new
+  template, its replacement pod can be scheduled on an older node and
+  fail with `ErrImageNeverPull`. The rolling update keeps the old pod
+  while the new one fails, so the old pod keeps the leader election
+  `Lease` and conducts the rollout. When the old pod's node drains for
+  its own turn, no copy runs, and other machines receive no new upgrade
+  turns.
 - [init/imports.go](../../init/imports.go) discards the container store
   after an import boot that the operator never proved. The rebuilt store
   may contain only the current release's images. An older machine-operator
