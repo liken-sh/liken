@@ -160,6 +160,13 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 // pass that sent the request again after the wait gets the object. A
 // server that answers 429 for longer is overloaded, and the caller's
 // own retry, which waits longer, handles it.
+//
+// The wait does not end when the caller's work is cancelled, because
+// the client takes no context. The limit bounds it instead: a request
+// holds its caller for at most ten seconds of waits, plus the request
+// timeout of each send. A caller that holds a lock across the request,
+// such as memo.Versions.Send, holds it that long too, and a shutdown
+// that waits on the caller waits that long.
 const maxThrottleWait = 10
 
 // send sends one request once.

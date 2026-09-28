@@ -125,6 +125,8 @@ func mistyped(t *testing.T, name string) *unstructured.Unstructured {
 // otherwise, so the caller reads the API server.
 func TestAStoreAnswersACopyItHolds(t *testing.T) {
 	view := storeOf(t, newThing("a", "5", 1), mistyped(t, "b"))
+	notReady := view
+	notReady.Synced = func() bool { return false }
 	cases := []struct {
 		name   string
 		view   View
@@ -132,6 +134,7 @@ func TestAStoreAnswersACopyItHolds(t *testing.T) {
 		wantOK bool
 	}{
 		{"no store", View{}, "a", false},
+		{"a store that is not ready", notReady, "a", false},
 		{"a copy", view, "a", true},
 		{"a copy that does not convert", view, "b", false},
 		{"no copy", view, "c", false},
@@ -162,19 +165,21 @@ func TestAListFromTheStoreIsInKeyOrder(t *testing.T) {
 }
 
 // A read answers the store's copy while it is current, and reads the
-// API server when the store holds no copy or a copy older than the
-// operator's own last write.
+// API server when the store holds no copy, a copy older than the
+// operator's own last write, or a copy that no watch keeps current.
 func TestAReadGoesToTheAPIServerOnlyWhenTheStoreCannotAnswer(t *testing.T) {
 	cases := []struct {
 		name        string
 		stored      []any
+		watching    bool
 		noted       string
 		wantReads   int
 		wantVersion string
 	}{
-		{"a current copy", []any{newThing("a", "5", 1)}, "5", 0, "5"},
-		{"a copy older than a write", []any{newThing("a", "5", 1)}, "", 1, "101"},
-		{"no copy", nil, "", 1, "101"},
+		{"a current copy", []any{newThing("a", "5", 1)}, true, "5", 0, "5"},
+		{"a copy older than a write", []any{newThing("a", "5", 1)}, true, "", 1, "101"},
+		{"no copy", nil, true, "", 1, "101"},
+		{"a copy whose watch the API server refuses", []any{newThing("a", "5", 1)}, false, "5", 1, "101"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -183,7 +188,10 @@ func TestAReadGoesToTheAPIServerOnlyWhenTheStoreCannotAnswer(t *testing.T) {
 			versions := memo.New()
 			versions.Note("a", c.noted)
 
-			got, err := ReadOne[thing](testClient(t, api), Held{View: storeOf(t, c.stored...), Versions: versions}, "a", thingPath("a"))
+			view := storeOf(t, c.stored...)
+			view.Synced = func() bool { return c.watching }
+
+			got, err := ReadOne[thing](testClient(t, api), Held{View: view, Versions: versions}, "a", thingPath("a"))
 
 			if err != nil || got.Metadata.ResourceVersion != c.wantVersion {
 				t.Fatalf("ReadOne = %+v, %v; want version %s", got, err, c.wantVersion)

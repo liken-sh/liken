@@ -222,6 +222,32 @@ func TestA429IsSentAgainAfterTheWaitItAsksFor(t *testing.T) {
 	}
 }
 
+// A write that meets a 429 is sent again with its whole body, and with
+// its content type.
+func TestAWriteAfterA429SendsItsWholeBodyAgain(t *testing.T) {
+	var bodies, types []string
+	refused := false
+	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		read, _ := io.ReadAll(r.Body)
+		bodies, types = append(bodies, string(read)), append(types, r.Header.Get("Content-Type"))
+		if !refused {
+			refused = true
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	body := `{"metadata":{"name":"studio","resourceVersion":"7"},"status":{"phase":"Ready"}}`
+
+	if err := client.Request(http.MethodPut, "/things/studio/status", "application/json", []byte(body), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(bodies) != 2 || bodies[0] != body || bodies[1] != body || types[1] != "application/json" {
+		t.Errorf("the server received %q with types %q, want the whole body twice", bodies, types)
+	}
+}
+
 // Get answers the object, and nothing with an error.
 func TestGetAnswersTheObjectOrNothing(t *testing.T) {
 	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

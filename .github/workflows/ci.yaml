@@ -337,6 +337,12 @@ jobs:
           path: audio-operator
 
       - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check }}
+        with:
+          name: coverage-kubernetes-go
+          path: kubernetes
+
+      - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
         with:
           name: coverage-bluetooth-operator-go

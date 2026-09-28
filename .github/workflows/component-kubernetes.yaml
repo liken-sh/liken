@@ -40,3 +40,12 @@ jobs:
           cache-dependency-path: kubernetes/go.sum
 
       - run: make test
+
+      # The site renders the coverage report from these files.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-kubernetes-go
+          path: |
+            kubernetes/coverage.out
+          if-no-files-found: error
+          retention-days: 7

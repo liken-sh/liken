@@ -136,7 +136,7 @@ func TestACopyWithARefusedWatchDoesNotAnswer(t *testing.T) {
 	c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{})
 	eventually(t, "the copy holds the list", c.controller.HasSynced)
 
-	if c.Synced() || c.View().Ready() {
+	if _, held := Cached[thing](c.View(), "a"); c.Synced() || c.View().Ready() || held {
 		t.Error("the copy answers while the API server refuses its watch")
 	}
 	server.refusing(false)

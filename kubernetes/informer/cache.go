@@ -4,11 +4,14 @@ package informer
 // from the API server, so a settled pass sends the API server no read
 // of a watched kind.
 //
-// An object that a store does not hold is read from the API server:
-// an object that does not exist yet, or any object while the watch has
-// not finished its first read. A list comes from a store only after the
-// store holds the whole first read, because a store that holds part of
-// it would leave objects out of the pass.
+// A store answers only while it is ready: it holds the whole first
+// read, and the API server accepted the last watch, so a watch keeps
+// the store current. A store that holds part of the first read would
+// leave objects out of a list, and a store whose watch the API server
+// refuses holds no change made since its last list. While a store is
+// not ready, every read goes to the API server. An object that a ready
+// store does not hold is read from the API server too, because it can
+// be an object the operator created a moment ago.
 //
 // A store's copy can be older than the operator's own last write. The
 // memo package records the version of each copy the API server
@@ -84,11 +87,12 @@ func Key(meta Meta) string {
 	return meta.GetNamespace() + "/" + meta.GetName()
 }
 
-// Cached answers the store's copy of one object, by its key. A copy
-// that does not convert is reported and not answered, so the caller
-// reads the object from the API server.
+// Cached answers the store's copy of one object, by its key, while the
+// store is ready. A copy that does not convert is reported and not
+// answered. The caller reads the API server when Cached answers
+// nothing.
 func Cached[T any](view View, key string) (*T, bool) {
-	if view.Store == nil {
+	if !view.Ready() {
 		return nil, false
 	}
 	object, held, err := view.Store.GetByKey(key)
@@ -128,8 +132,8 @@ func objectKey(object any) string {
 	return key
 }
 
-// ReadOne answers one object: the store's copy when it holds a current
-// one, and the API server's copy when it does not.
+// ReadOne answers one object: the store's copy when the store is ready
+// and holds a current copy, and the API server's copy otherwise.
 func ReadOne[T any, P Object[T]](c *apiclient.Client, held Held, key, path string) (*T, error) {
 	if copied, ok := Cached[T](held.View, key); ok && held.Versions.Current(key, P(copied).GetObjectMeta().GetResourceVersion()) {
 		return copied, nil

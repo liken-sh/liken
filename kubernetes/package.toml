@@ -10,3 +10,5 @@ license = "MIT"
 name = "go"
 toolchain = "go"
 run = "make test"
+timeout = 15
+coverage = ["coverage.out"]
