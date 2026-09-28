@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"slices"
@@ -75,9 +76,13 @@ type displayControl struct {
 	// pass records them in status. The restore writes no status of
 	// its own, so this is how its result reaches the pass.
 	abandoned map[string][]abandonedRestore
-	// The last poll failure reported for each connector, so a
-	// panel that stays quiet prints one line and not one a minute.
+	// The fault each connector's last poll printed, until a poll
+	// reads it cleanly, so a panel that stays quiet prints one line
+	// and not one each window.
 	pollFaults map[string]string
+	// Where that line goes: stderr on the machine, and a buffer in
+	// the tests that count the lines.
+	faults io.Writer
 	// How often the loop looks, and it is the poll's window: a
 	// window that comes due needs a pass to act on it. A field for the
 	// reason the clock is one.
@@ -133,6 +138,7 @@ func newDisplayControl(client *Client, node string, controls *panelControls, out
 		restoring:  map[string]bool{},
 		abandoned:  map[string][]abandonedRestore{},
 		pollFaults: map[string]string{},
+		faults:     os.Stderr,
 	}
 }
 
@@ -489,8 +495,8 @@ func (d *displayControl) poll(output Output, facts panelFacts) {
 	if !lit(facts) || !d.controls.pollDue(output.Connector) {
 		return
 	}
-	err := d.controls.pollControls(output.Connector)
-	d.reportPoll(output.Connector, err)
+	quiet, err := d.controls.pollControls(output.Connector)
+	d.reportPoll(output, quiet, err)
 }
 
 // Whether the last power value the operator read says the
@@ -501,23 +507,31 @@ func lit(facts panelFacts) bool {
 	return !known || power == powerModeOn
 }
 
-// A poll that failed says the panel went quiet between the
-// probe and this read. It fails no pass and moves no condition:
-// Responsive reports what the probe found, and the next window reads
-// again. The message prints once, because a panel that stays quiet
-// would otherwise print one line a minute for as long as it lasts.
-func (d *displayControl) reportPoll(connector string, err error) {
+// A poll that failed says the panel, or some of its controls, went
+// quiet between the probe and this read. It fails no pass and moves no
+// condition: Responsive reports what the probe found, and the next
+// window reads again. The message prints once for each fault, and a
+// clean read ends it. A fault is the monitor and the controls that
+// failed, or the error's text when the bus did not open. The text of a
+// read's error does not decide it: a sleeping panel can answer each
+// read with different noise, and a line per new text is a line per
+// window for as long as it sleeps.
+func (d *displayControl) reportPoll(output Output, quiet []string, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err == nil {
-		delete(d.pollFaults, connector)
+		delete(d.pollFaults, output.Connector)
 		return
 	}
-	if d.pollFaults[connector] == err.Error() {
+	fault := monitorID(output.Monitor) + " " + strings.Join(quiet, ",")
+	if len(quiet) == 0 {
+		fault += err.Error()
+	}
+	if d.pollFaults[output.Connector] == fault {
 		return
 	}
-	d.pollFaults[connector] = err.Error()
-	fmt.Fprintf(os.Stderr, "reading what %s holds: %v\n", connector, err)
+	d.pollFaults[output.Connector] = fault
+	fmt.Fprintf(d.faults, "reading what %s holds: %v\n", output.Connector, err)
 }
 
 // The capture commits before the wire write. A status write that
@@ -939,14 +953,15 @@ func (d *displayControl) servedMode(connector string) string {
 }
 
 // The panel's answer to the protocol itself. The message names
-// the panel's own menu, because a panel that answers nothing is often
-// a panel whose menu turns DDC/CI off.
+// the two causes a person can check: a panel in standby does not
+// answer DDC/CI until it wakes, and some panels have a menu setting that
+// turns DDC/CI off.
 func (d *displayControl) responsive(facts panelFacts) DisplayCondition {
 	if facts.Responsive {
 		return d.condition(ResponsiveCondition, true, "AnswersDDC", "the panel answers DDC/CI")
 	}
 	return d.condition(ResponsiveCondition, false, NoDDCReplyReason,
-		"the panel answers no DDC/CI; some panels turn DDC/CI off in their own menu")
+		"the panel answers no DDC/CI; a panel in standby does not answer it, and some panels turn DDC/CI off in their own menu")
 }
 
 // The panel is gone from this node, and the resource stays with

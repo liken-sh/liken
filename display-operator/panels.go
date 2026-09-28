@@ -61,8 +61,9 @@ func (c *panelControls) factsFor(output Output) panelFacts {
 }
 
 // How long the operator leaves a panel alone between reads of what
-// it holds. A person at the panel's buttons is found within about
-// ten seconds, and a burst of passes inside one window costs one
+// it holds. The window opens at the first pass after it comes due, and
+// the loop ticks at the same period, so a poll runs every 10 to 20 s.
+// A person at the panel's buttons is found within that time, and a burst of passes inside one window costs one
 // read. The refusal's window above stays at the slower backstop,
 // because a probe of a silent panel spends the whole retry ladder
 // on every code and gains nothing from running sooner.
@@ -90,18 +91,21 @@ func (c *panelControls) pollDue(connector string) bool {
 // with each answer recorded the way an actuation's readback is. A code
 // that fails to answer is reported and leaves its last value standing,
 // because one control that went quiet says nothing about the others.
-func (c *panelControls) pollControls(connector string) error {
+// The names of the controls that failed come back beside the error,
+// so the caller can tell one quiet control from a quiet panel.
+func (c *panelControls) pollControls(connector string) ([]string, error) {
 	facts, known := c.cached(connector)
 	if !known {
-		return nil
+		return nil, nil
 	}
 	bus, err := c.busFor(connector)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer bus.Close()
 
 	ddc := c.client(bus)
+	var quiet []string
 	var failures []error
 	for _, control := range coreControls {
 		if _, carried := facts.Capabilities[control.Name]; !carried {
@@ -109,12 +113,13 @@ func (c *panelControls) pollControls(connector string) error {
 		}
 		current, _, err := ddc.GetVCP(control.Code)
 		if err != nil {
+			quiet = append(quiet, control.Name)
 			failures = append(failures, fmt.Errorf("reading the %s of %s: %w", control.Name, connector, err))
 			continue
 		}
 		c.observe(connector, control.Code, current)
 	}
-	return errors.Join(failures...)
+	return quiet, errors.Join(failures...)
 }
 
 // The cached facts of one connector, without the probe that

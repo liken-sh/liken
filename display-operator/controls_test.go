@@ -280,6 +280,11 @@ type fakeMonitor struct {
 	// How many writes a silent panel takes before it answers
 	// again.
 	wakesAfter int
+	// A garbled panel answers every request with bytes that are
+	// not a DDC/CI reply, and noise is the first of those bytes,
+	// which moves on every answer.
+	garbled bool
+	noise   byte
 	// The shared record of what reached the panel and what
 	// reached the API server, so a test reads the two in the order
 	// they happened.
@@ -342,6 +347,7 @@ func (m *fakeMonitor) answers() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.silent = false
+	m.garbled = false
 }
 
 // The panel stops answering, which a monitor does when it goes
@@ -350,6 +356,23 @@ func (m *fakeMonitor) silence() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.silent = true
+}
+
+// The panel goes to sleep the way a panel on a home cluster did:
+// it answers every request, but with bytes that differ from one
+// answer to the next and form no DDC/CI reply.
+func (m *fakeMonitor) garbles() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.garbled = true
+}
+
+// One control stops answering while the rest still do. The panel
+// answers a read of it the way it answers a control it never had.
+func (m *fakeMonitor) drops(code byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.values, code)
 }
 
 // A person turns one control at the panel's own buttons. No
@@ -382,6 +405,14 @@ func (m *fakeMonitor) Write(request []byte) error {
 			m.wakesAfter--
 			m.silent = m.wakesAfter > 0
 		}
+		return nil
+	}
+	if m.garbled {
+		m.noise++
+		if m.noise == ddcReplySource {
+			m.noise++
+		}
+		m.pending = append([]byte{m.noise}, bytes.Repeat([]byte{0x2a}, getReplyLength-1)...)
 		return nil
 	}
 	code := request[3]

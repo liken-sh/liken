@@ -15,15 +15,49 @@ that refused the probe has no power value, so nothing holds the probe
 back. A panel reaches this state when it was dark at first sight: the
 operator started while the panel slept, or the monitor arrived on its
 connector while asleep. A panel that answered once is not probed again
-while the same monitor stays on the connector, so a panel that answered
-and then went to sleep is not affected.
+while the same monitor stays on the connector. The poll still reads it,
+as the next two paragraphs describe.
 
 A second read has the same gap. The poll reads a panel only while
 its last power value reads on, and `lit` counts a panel with no power
 value as lit. A panel that answers DDC/CI and carries no power
 control has no power value, so the poll reads its core controls every
-10 s while it is dark. The operator has no DDC way to tell that such a
+10 to 20 s while it is dark. The operator has no DDC way to tell that such a
 panel is dark.
+
+A third read has the same gap. A panel that answered the probe with
+its power on, and then went to standby at its own button or its own
+timer, keeps the power value on. A read that fails leaves the last
+value standing, so `lit` reads on, and the poll reads every carried
+control every 10 to 20 s for as long as the panel sleeps. The same stale
+value stays in `status.observed` and on `display_panel_power`, which
+both report on for a panel in standby.
+
+## What a home cluster showed
+
+One panel on a home cluster carries seven core controls, power among
+them. In standby it answers each DDC/CI read with bytes that are not a
+DDC/CI reply, and the first byte differs from read to read. Its log
+over one week shows:
+
+- The poll read it for five days in a row while it slept: seven reads
+  every 10 to 20 s, about 5,600 polls and 39,000 failed reads a day.
+  Each poll printed its seven failures, because the log kept one
+  message per error text and no two texts matched. The log now prints
+  one message until a poll reads the panel cleanly or a different set
+  of controls fails.
+- The reads did not wake it. The failures ran without a break until
+  a person turned the panel on.
+- Each time the panel came on, the card raised two `drm change`
+  uevents about 300 ms apart, and the sound card reported an ELD
+  change. The panel going to standby raised no uevent: the failed
+  reads just started.
+- A restart of the operator while the panel slept found it silent, so
+  the new process recorded a refusal. That is the case this file
+  opens with. The panel came on at 13:11:53, and the uevents did not
+  start a probe, because the refusal's 60 s window had not passed. The
+  window came due on a timed pass, and the probe found the panel at
+  13:12:16, 23 s after the uevents.
 
 ## The cost
 
@@ -32,7 +66,7 @@ and the first core control's request three times, with the reply wait
 doubling from 40 ms on each attempt. That is six requests and under a
 second of bus time per panel, once a minute, for as long as the panel
 stays dark. The poll of a panel with no power control is one request
-per core control it carries, every 10 s, for as long as it answers.
+per core control it carries, every 10 to 20 s, for as long as it answers.
 Nothing measured the power or the bus cost on a real panel.
 
 ## The risk
@@ -44,7 +78,8 @@ gets the poll six times a minute. If one of those requests wakes it, the
 panel lights with no workload asking for it, and a screen the media
 layer darkened comes back. A panel that does not wake may still leave
 its deepest standby to answer on the bus. Neither effect was observed
-on the lab panels, and neither was tested for.
+on the lab panels, and neither was tested for. The panel on the home
+cluster did not wake from a week of reads, which is one panel.
 
 ## Options
 
@@ -68,6 +103,15 @@ as they stand. A further option is to stop the poll for a panel with
 no power value while the kernel reports its connector's DPMS state as
 off, which covers a panel the compositor put to sleep and not one a
 person turned off at its button.
+
+For a panel that stopped answering after it answered, the options are
+the same two ideas. The poll can stop after a poll in which no carried
+control answered, and start again on a uevent, on a claim's prepare, or
+on a new generation of the `Display`'s spec. Or it can drop to the
+refusal's 60 s window and grow from there. The home cluster's panel
+raises a uevent when it comes on, which is what the first idea needs.
+A panel that raises none would stay unread until one of the other
+events.
 
 Options 2 and 5 together remove every probe with no cause. Option 4 is
 the smallest change.

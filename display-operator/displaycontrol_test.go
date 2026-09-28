@@ -7,6 +7,7 @@ package main
 // commits before the panel goes dark.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"maps"
@@ -661,7 +662,9 @@ func TestTheRestingSpecIsJudgedAgainstTheCapabilityList(t *testing.T) {
 
 // The lab's other panel refuses the protocol outright, and the
 // resource reports it rather than publishing an empty control list
-// with nothing to explain it.
+// with nothing to explain it. The message names standby, because a
+// sleeping panel answers nothing too, and a person who reads only
+// about the menu looks in the wrong place.
 func TestAPanelThatAnswersNothingIsNotResponsive(t *testing.T) {
 	fixture := newDisplayFixture(t, deafMonitor())
 
@@ -674,6 +677,9 @@ func TestAPanelThatAnswersNothingIsNotResponsive(t *testing.T) {
 	if responsive.Status != conditionFalse || responsive.Reason != NoDDCReplyReason {
 		t.Errorf("Responsive = %q/%q, want %q/%q",
 			responsive.Status, responsive.Reason, conditionFalse, NoDDCReplyReason)
+	}
+	if !strings.Contains(responsive.Message, "standby") {
+		t.Errorf("Responsive message = %q, want it to name standby", responsive.Message)
 	}
 	if got := condition(display, ConnectedCondition).Status; got != conditionTrue {
 		t.Errorf("Connected = %q, want %q: the panel is on the wire", got, conditionTrue)
@@ -820,6 +826,73 @@ func TestAPollThatFailsLeavesThePanelResponsive(t *testing.T) {
 	}
 	if observed := display.Status.Observed; observed == nil || *observed.Brightness != 50 {
 		t.Errorf("observed = %+v, want the values the probe read", observed)
+	}
+}
+
+// A sleeping panel can answer each read with different noise, so
+// no two failures read the same. The log still says once that the
+// panel went quiet, and says so again only after it answered in
+// between.
+func TestANoisyPanelReportsOnceEachTimeItGoesQuiet(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	faults := fixture.countFaults()
+
+	fixture.panel.garbles()
+	fixture.pollTimes(3)
+	if got := faults.lines(); got != 1 {
+		t.Errorf("three polls of a noisy panel printed %d fault lines, want 1:\n%s", got, faults)
+	}
+
+	fixture.panel.answers()
+	fixture.pollTimes(1)
+	fixture.panel.garbles()
+	fixture.pollTimes(2)
+	if got := faults.lines(); got != 2 {
+		t.Errorf("a panel that answered and went quiet again printed %d fault lines, want 2:\n%s", got, faults)
+	}
+}
+
+// One control that stops answering is a different fault from the
+// whole panel going quiet, so the second prints its own line even
+// while the first still stands.
+func TestAPanelThatGoesQuietAfterOneControlDidReportsAgain(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	faults := fixture.countFaults()
+
+	fixture.panel.drops(vcpBrightness)
+	fixture.pollTimes(2)
+	fixture.panel.garbles()
+	fixture.pollTimes(2)
+	if got := faults.lines(); got != 2 {
+		t.Errorf("one control and then the whole panel going quiet printed %d fault lines, want 2:\n%s", got, faults)
+	}
+}
+
+// What the pass prints about a quiet panel, counted by line. The
+// first pass probes the panel, so the count starts from a panel that
+// answered.
+type faultLog struct{ bytes.Buffer }
+
+func (f *faultLog) lines() int { return strings.Count(f.String(), "reading what HDMI-A-1 holds") }
+
+func (f *displayFixture) countFaults() *faultLog {
+	f.t.Helper()
+	faults := &faultLog{}
+	f.control.faults = faults
+	if err := f.pass(); err != nil {
+		f.t.Fatal(err)
+	}
+	return faults
+}
+
+// Passes one poll window apart, each one due to read the panel.
+func (f *displayFixture) pollTimes(times int) {
+	f.t.Helper()
+	for range times {
+		f.advance(pollInterval)
+		if err := f.pass(); err != nil {
+			f.t.Fatal(err)
+		}
 	}
 }
 
