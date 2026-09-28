@@ -6,10 +6,10 @@ package main
 //
 // A pass reads the whole collection instead of acting on the object an
 // event carried. The event is only a wake. Every pass derives every
-// status from what the API server and the report desk hold right now,
-// so a lost event costs at most one backstop tick, a burst of events
-// collapses into one pass, and a restarted operator starts correct
-// with no replay.
+// status from what the watches, the API server, and the report desk
+// hold right now, so a lost event costs at most one backstop tick, a
+// burst of events collapses into one pass, and a restarted operator
+// starts correct with no replay.
 
 import (
 	"context"
@@ -18,10 +18,8 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -41,8 +39,9 @@ const (
 const screenController = "library.liken.sh/media-browser"
 
 // BackstopInterval is how often the loop reconciles with nothing to
-// prompt it. The watches and the bus wake the pass for every change to
-// the objects they carry, so the tick covers what they do not:
+// prompt it. The watches and the bus wake the pass for every change the
+// pass acts on (watch.go names the rules), so the tick covers what they
+// do not:
 //
 //   - The objects the pass reads with no watch on them: a Job's status, a
 //     claim that binds, a volume, a Service, an EndpointSlice, a provider's
@@ -54,6 +53,9 @@ const screenController = "library.liken.sh/media-browser"
 //     succeeded Job is deleted, the cadence of a provider check, and the
 //     graces on an unschedulable screen and a NotReady node. Without the
 //     tick, each waits for an unrelated wake.
+//   - A write that conflicted because the watch had not yet delivered an
+//     earlier write, and a conflict with an edit that wakes nothing, such
+//     as a new label on a Library. The next tick reads the fresh copy.
 //
 // A pass that finds nothing changed sends only reads, so the tick costs
 // one pass of reads every ten seconds and no writes.
@@ -136,8 +138,8 @@ type operator struct {
 	mediaTopicBase string
 
 	// Wake is the loop's own wake channel, and one channel serves the
-	// two watches and the bus handler, because a wake says nothing
-	// beyond "read the collection again".
+	// watches, the bus handler, and the webhook server, because a wake
+	// says nothing beyond "read the collection again".
 	wake chan struct{}
 
 	// The recreate backoff of each departing Library's cleanup Job,
@@ -163,6 +165,10 @@ type operator struct {
 	// answer is one pass old at most and the operator watches no
 	// storageclasses.
 	perNodeClasses map[string]bool
+
+	// The eight collections the operator watches, which the pass reads
+	// instead of listing them from the API server.
+	watched collections
 
 	// The claims, volumes, and pods the pass in flight listed, which
 	// passreads.go holds the rule for. It is nil between passes, so a caller
@@ -235,185 +241,6 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffm
 	return library
 }
 
-// Operate reads the operator's environment and returns its failure
-// instead of exiting, so main is the only place that ends the process
-// and a test drives the whole setup. A missing setting fails here,
-// before the first pass, because a pod that cannot name the images it
-// creates has nothing to reconcile with.
-func operate() error {
-	busAddress := os.Getenv(busAddressVariable)
-	if busAddress == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the broker", busAddressVariable)
-	}
-	// The namespace the operator's own Service is in, which is
-	// what the address it reports on every Library names. The Deployment
-	// reads it off the pod with the downward API.
-	namespace := os.Getenv(operatorNamespaceVariable)
-	if namespace == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the operator's namespace", operatorNamespaceVariable)
-	}
-	// The topic base has a default, because a cluster that runs one
-	// bus needs no policy for it.
-	topicBase := os.Getenv(topicBaseVariable)
-	if topicBase == "" {
-		topicBase = defaultTopicBase
-	}
-	mediaTopicBase := mediaTopicBaseOf(os.Getenv(mediaTopicBaseVariable))
-	// The port the webhook endpoint answers on, with a default,
-	// because a cluster that takes the manifest as it ships needs no
-	// policy for it.
-	port := os.Getenv(webhookPortVariable)
-	if port == "" {
-		port = defaultWebhookPort
-	}
-
-	client, err := InClusterClient()
-	if err != nil {
-		return fmt.Errorf("in-cluster config: %w", err)
-	}
-
-	// The kubelet stops the pod with SIGTERM, and a person who runs
-	// the binary by hand stops it with SIGINT. Both end the context,
-	// and the process exits with a zero status.
-	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
-
-	// The stop signal is registered before the pod read, so a SIGTERM
-	// during start-up reaches the handler, and the read has the same
-	// timeout as a pass.
-	naming, endNaming := context.WithTimeout(context.Background(), passTimeout)
-	defer endNaming()
-	stamped, err := operatorImages(naming, client, namespace)
-	if err != nil {
-		return err
-	}
-
-	library := newOperator(client, stamped.scanner, stamped.corrosion, stamped.browser,
-		stamped.ffmpeg, busAddress, topicBase, namespace, ":"+port)
-	library.mediaTopicBase = mediaTopicBase
-
-	// The metrics listener's address, with no default: milestone 65
-	// says an empty address serves no metrics, so a cluster that wants
-	// none only has to leave the variable unset.
-	library.metricsAddress = os.Getenv(metricsAddressVariable)
-	if library.metricsAddress != "" {
-		library.metrics = newMetrics(stamped.version)
-	}
-	return library.run(stopped, os.Stdout)
-}
-
-// Run is the operator without the process around it, so a test drives
-// the whole loop against an API server it controls. It returns when
-// the context ends, which is the stop signal.
-func (o *operator) run(stopped context.Context, report io.Writer) error {
-	go o.bus.Run(stopped)
-
-	// The first lists do two jobs: they prove the operator can read
-	// the collections it reconciles, and their resourceVersions are
-	// where the watches start.
-	startup, endStartup := context.WithTimeout(context.Background(), passTimeout)
-	defer endStartup()
-
-	libraries, err := ListLibraries(startup, o.client)
-	if err != nil {
-		return fmt.Errorf("listing libraries: %w", err)
-	}
-	catalogs, err := ListCatalogs(startup, o.client)
-	if err != nil {
-		return fmt.Errorf("listing catalogs: %w", err)
-	}
-	pods, err := ListCatalogMemberPods(startup, o.client)
-	if err != nil {
-		return fmt.Errorf("listing catalog member pods: %w", err)
-	}
-	// A Player belongs to media-operator, and a cluster that runs none
-	// serves no such collection. That failure is reported and the operator
-	// carries on with the libraries, so a cluster with no screens still scans.
-	// The watch then resumes from an empty version, which the API server reads
-	// as the state it holds now.
-	players, err := ListPlayers(startup, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
-		players = &PlayerList{}
-	}
-	// The household defaults are read on the same terms as the Players,
-	// because the same operator owns both.
-	preferences, err := ListMediaPreferences(startup, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing media preferences: %v\n", err)
-		preferences = &MediaPreferencesList{}
-	}
-	// The providers are read on the same terms as the Players: a cluster that
-	// has not applied the CRD serves no such collection, and its libraries are
-	// still scanned and still reported.
-	providers, err := ListMetadataProviders(startup, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
-		providers = &MetadataProviderList{}
-	}
-	// The two collections of the progress half, read on the Players'
-	// terms: the list proves what the operator may read and gives each
-	// watch its resume point, and a collection a cluster does not serve
-	// costs a line and an empty version.
-	plays, err := ListPlays(startup, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
-		plays = &PlayList{}
-	}
-	people, err := ListPeople(startup, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing people: %v\n", err)
-		people = &PersonList{}
-	}
-	fmt.Fprintf(report, "library.liken.sh: operating %d libraries over %s\n",
-		len(libraries.Items), o.busAddress)
-
-	go watchLibraries(o.client, libraries.Metadata.ResourceVersion, o.wake, o.metrics)
-	go watchCatalogs(o.client, catalogs.Metadata.ResourceVersion, o.wake, o.metrics)
-	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake, o.metrics)
-	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake, o.metrics)
-	go watchMediaPreferences(o.client, preferences.Metadata.ResourceVersion, o.wake, o.metrics)
-	go watchMetadataProviders(o.client, providers.Metadata.ResourceVersion, o.wake, o.metrics)
-	go watchPlays(o.client, plays.Metadata.ResourceVersion, o.wake, o.metrics)
-	go watchPeople(o.client, people.Metadata.ResourceVersion, o.wake, o.metrics)
-
-	// The metrics listener runs for the life of the operator, on no
-	// address where the cluster names none. Unlike the webhook server, a
-	// failure here never ends the loop: milestone 65 says a failure in
-	// the listener must never block the work the process exists for, so
-	// this operator logs it and keeps scanning libraries nothing can see.
-	if o.metricsAddress != "" {
-		go func() {
-			if err := o.metrics.serve(stopped, o.metricsAddress); err != nil {
-				fmt.Fprintf(os.Stderr, "serving metrics on %s: %v\n", o.metricsAddress, err)
-			}
-		}()
-	}
-
-	// The webhook endpoint runs for the life of the operator. A
-	// failure to listen ends the loop, because an operator that reports
-	// an address nothing answers is worse than one that stops.
-	serving := make(chan error, 1)
-	go func() { serving <- o.serveWebhooks(stopped, o.webhookAddress) }()
-
-	ticker := time.NewTicker(backstopInterval)
-	defer ticker.Stop()
-	for {
-		o.pass()
-		select {
-		case <-stopped.Done():
-			return nil
-		case err := <-serving:
-			if err != nil {
-				return fmt.Errorf("serving webhooks on %s: %w", o.webhookAddress, err)
-			}
-			return nil
-		case <-o.wake:
-		case <-ticker.C:
-		}
-	}
-}
-
 // Pass reconciles every Library in the cluster against its namespace's
 // Catalog, then stands the catalog cluster of each namespace that holds
 // a Catalog. That is the namespace's work and not one Library's. A
@@ -432,33 +259,33 @@ func (o *operator) pass() {
 	// is read again on the next pass.
 	clear(o.perNodeClasses)
 
-	libraries, err := ListLibraries(ctx, o.client)
+	libraries, err := o.watched.readLibraries()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing libraries: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the libraries: %v\n", err)
 		return
 	}
 	// The Catalog decides whether a Library proceeds, so the pass reads
 	// the collection before it reconciles a Library, not after.
-	catalogs, err := ListCatalogs(ctx, o.client)
+	catalogs, err := o.watched.readCatalogs()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing catalogs: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the catalogs: %v\n", err)
 		return
 	}
 	// The Players are read after the Catalogs and reported the same
 	// way, except that a failure here is not the end of the pass: a cluster
 	// with no media-operator serves no Players, and its libraries are still
 	// scanned and still reported.
-	players, err := ListPlayers(ctx, o.client)
+	players, err := o.watched.readPlayers()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the players: %v\n", err)
 		players = &PlayerList{}
 	}
 	// The household zone is one setting per cluster, read once for the
-	// pass and stamped on every screen pod it stands. A list that fails
-	// reads as no zone, and the screens stay on UTC until the next pass.
-	preferences, err := ListMediaPreferences(ctx, o.client)
+	// pass and stamped on every screen pod it stands. A collection that
+	// has not been read reads as no zone, and the screens stay on UTC until the next pass.
+	preferences, err := o.watched.readMediaPreferences()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing media preferences: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the media preferences: %v\n", err)
 		preferences = &MediaPreferencesList{}
 	}
 	o.timeZone = householdZone(preferences)
@@ -476,9 +303,9 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing worker jobs: %v\n", err)
 		return
 	}
-	members, err := ListCatalogMemberPods(ctx, o.client)
+	members, err := o.watched.readMemberPods()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing catalog member pods: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the catalog member pods: %v\n", err)
 		return
 	}
 	reads, err := readPass(ctx, o.client)
@@ -492,9 +319,9 @@ func (o *operator) pass() {
 	// providercadence.go says their verdict can have changed. A
 	// cluster that has not applied the CRD serves no such collection, and its
 	// libraries are still scanned and still reported.
-	providers, err := ListMetadataProviders(ctx, o.client)
+	providers, err := o.watched.readMetadataProviders()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the metadata providers: %v\n", err)
 		providers = &MetadataProviderList{}
 	}
 	// The Plays and the people of the whole cluster, for the progress
@@ -502,14 +329,15 @@ func (o *operator) pass() {
 	// a cluster that runs no media-operator serves no Plays, and one
 	// that runs no people-operator serves no people, and its libraries
 	// are still scanned and still reported.
-	plays, err := ListPlays(ctx, o.client)
+	plays, err := o.watched.readPlays()
+	playsRead := err == nil
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the plays: %v\n", err)
 		plays = &PlayList{}
 	}
-	people, err := ListPeople(ctx, o.client)
+	people, err := o.watched.readPeople()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing people: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the people: %v\n", err)
 		people = &PersonList{}
 	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
@@ -601,8 +429,16 @@ func (o *operator) pass() {
 	o.createPlays(ctx, players.Items, libraries.Items, people.Items, stores)
 	// The progress half runs on the Plays this pass read, so a Play the
 	// call above created is held and published on the next pass, after
-	// the API server has minted its name.
-	o.reconcileProgress(ctx, plays.Items, people.Items, stores, now)
+	// the API server has minted its name. The Plays go before the people,
+	// because a Person is released against what the stores answered about
+	// the Plays. A read of the Plays that failed
+	// skips the Plays: read as empty, it would clear the retained marks
+	// of every Play that still exists, and a deleting Play waits on its
+	// recorded mark to lose its finalizer.
+	if playsRead {
+		o.reconcilePlays(ctx, plays.Items, stores)
+	}
+	o.reconcilePeople(ctx, people.Items, stores, now)
 
 	o.reconcileCatalogs(ctx, byNamespace, members.Items, jobs.Items, now)
 
@@ -687,5 +523,30 @@ func (o *operator) logRun(namespace, name string, run libraryRun) {
 			namespace, name, run.Job, run.Worker, run.Unidentified, run.Removed)
 	default:
 		o.logf("library %s/%s: the job %s finished its %s run", namespace, name, run.Job, run.Worker)
+	}
+}
+
+// collections is where the pass reads the eight collections the
+// operator watches. watch.go answers it from the informers, so a pass
+// sends no list for any of them. A collection that has not been read
+// answers the error of its last read.
+type collections interface {
+	readLibraries() (*LibraryList, error)
+	readCatalogs() (*CatalogList, error)
+	readMemberPods() (*PodList, error)
+	readPlayers() (*PlayerList, error)
+	readMediaPreferences() (*MediaPreferencesList, error)
+	readMetadataProviders() (*MetadataProviderList, error)
+	readPlays() (*PlayList, error)
+	readPeople() (*PersonList, error)
+}
+
+// Poke never blocks, and the wake channel buffers exactly one. A wake
+// already queued says everything a second one would say, because the
+// pass that answers it reads the whole collection.
+func poke(wake chan<- struct{}) {
+	select {
+	case wake <- struct{}{}:
+	default:
 	}
 }

@@ -27,7 +27,7 @@ type MetadataProvider struct {
 	Status     MetadataProviderStatus `json:"status"`
 }
 
-// The collection ListMetadataProviders answers, read once per pass.
+// Every MetadataProvider the watch holds, which the pass reads.
 type MetadataProviderList struct {
 	Metadata ListMeta           `json:"metadata"`
 	Items    []MetadataProvider `json:"items"`
@@ -193,8 +193,8 @@ type Secret struct {
 	Data     map[string][]byte `json:"data,omitempty"`
 }
 
-// The providers of every namespace, read with one request, and the two paths
-// one provider is written on and its Secret is read on.
+// The providers of every namespace, which the watch reads, and the two
+// paths one provider is written on and its Secret is read on.
 const metadataProvidersPath = "/apis/" + metadataProviderAPIVersion + "/metadataproviders"
 
 func metadataProviderPath(namespace, name string) string {
@@ -203,16 +203,6 @@ func metadataProviderPath(namespace, name string) string {
 
 func secretPath(namespace, name string) string {
 	return corePrefix + namespace + "/secrets/" + name
-}
-
-// A cluster that has not applied this CRD serves no such collection. The
-// caller reports that and carries on.
-func ListMetadataProviders(ctx context.Context, c *Client) (*MetadataProviderList, error) {
-	list := &MetadataProviderList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, metadataProvidersPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 // The status subresource is its own write path, so this request never touches

@@ -111,7 +111,7 @@ func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	if scanner.Image != testScannerImage {
 		t.Errorf("image = %q, want %q", scanner.Image, testScannerImage)
 	}
-	if strings.Join(scanner.Command, " ") != "/library-operator scan" {
+	if strings.Join(scanner.Command, " ") != "/library-operator-pod scan" {
 		t.Errorf("command = %v, want the scan role", scanner.Command)
 	}
 	if len(scanner.VolumeMounts) != 2 || scanner.VolumeMounts[1].Name != phasesVolumeName {
@@ -469,28 +469,6 @@ func containerEnvironment(container Container) map[string]string {
 		environment[variable.Name] = variable.Value
 	}
 	return environment
-}
-
-// one list answers every namespace, and the member label is what keeps
-// the answer to the pods that hold a catalog agent.
-func TestListCatalogMemberPodsSelectsEveryAgentPod(t *testing.T) {
-	client, recorded := recordingAPI(t, PodList{
-		Metadata: ListMeta{ResourceVersion: "88"},
-		Items:    []Pod{{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}},
-	})
-
-	list, err := ListCatalogMemberPods(t.Context(), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/api/v1/pods")
-	if got := recorded.query.Get("labelSelector"); got != "library.liken.sh/catalog=member" {
-		t.Errorf("labelSelector = %q, want the member selector", got)
-	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house-catalog" {
-		t.Errorf("items = %+v, want the one pod the server answered", list.Items)
-	}
 }
 
 func TestGetPodReadsOnePodByName(t *testing.T) {

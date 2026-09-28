@@ -2,9 +2,11 @@ package main
 
 // This is a Kubernetes client written straight against the HTTP API,
 // following liken's own (kubernetes/apiclient.go) and the media
-// operator's, for the same reason: the API is HTTPS that serves
-// JSON, and client-go would bring informers, work queues, and
-// generated types this program does not use.
+// operator's: the API is HTTPS that serves JSON, and the operator's
+// structs hold only the fields it reads. Every write, and every read
+// that the watches do not answer, goes through it. Only the watches and
+// the Lease use client-go (watch.go and leader.go), and the pod build
+// links no client-go.
 //
 // Every pod already holds what it needs to reach the API server.
 // Kubernetes injects two environment variables that name the
@@ -78,9 +80,9 @@ func InClusterClient() (*Client, error) {
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 			// Each timeout bounds the same failure: a server that
 			// stops answering without sending anything. There is no
-			// overall client timeout, because a watch is a request
-			// whose response never ends, and a whole-request deadline
-			// would cut every stream on schedule.
+			// overall client timeout, because every request carries
+			// the context of the pass that sends it, and the pass
+			// bounds it.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,
@@ -130,17 +132,12 @@ func (c *Client) RequestWithType(ctx context.Context, method, path, contentType 
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// Do sends one request and hands back the open response, which is
-// what a watch needs and what RequestJSON is built on.
+// do sends one request and hands back the open response, which is what
+// RequestWithType is built on. The body's content type is stated, so
+// one request path sends both a JSON write and a merge patch.
 //
 // The context is the caller's, so a pass that ends takes its requests
-// with it, and a watch runs for as long as its own context does.
-func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
-	return c.do(ctx, method, path, jsonContentType, body)
-}
-
-// Do is Do with the body's content type stated, so one request path
-// sends both a JSON write and a merge patch.
+// with it.
 func (c *Client) do(ctx context.Context, method, path, contentType string, body []byte) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
@@ -235,12 +232,10 @@ const (
 	endpointSlicePrefix = "/apis/" + endpointSliceAPIVersion + "/namespaces/"
 )
 
-// CatalogMemberQuery narrows a pod list or a pod watch to the
-// pods that hold a catalog agent, whatever kind of pod they are: the
-// catalog pod, a running Job's pod, and a screen pod. The equals sign
-// inside the selector is percent-encoded, so the server reads one
-// parameter and not two.
-const catalogMemberQuery = "labelSelector=" + memberLabelKey + "%3D" + memberLabelValue
+// catalogMemberSelector narrows the pod watch to the pods that hold a
+// catalog agent, whatever kind of pod they are: the catalog pod, a
+// running Job's pod, and a screen pod.
+const catalogMemberSelector = memberLabelKey + "=" + memberLabelValue
 
 func libraryPath(namespace, name string) string {
 	return libraryPrefix + namespace + "/libraries/" + name
@@ -293,16 +288,6 @@ func configMapsPath(namespace string) string {
 	return corePrefix + namespace + "/configmaps"
 }
 
-// ListLibraries answers a whole pass with one request, and the list's
-// resourceVersion is where the libraries watch resumes from.
-func ListLibraries(ctx context.Context, c *Client) (*LibraryList, error) {
-	list := &LibraryList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, librariesPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
 // PutLibraryStatus writes through the status subresource, which is its
 // own write path: this request can never touch a spec. The
 // resourceVersion in the body is what makes the write conditional, so
@@ -349,40 +334,6 @@ func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, res
 		return "", err
 	}
 	return patched.Metadata.ResourceVersion, nil
-}
-
-// ListPlayers reads every Player in the cluster with one request, the
-// way the pass reads the Libraries. The list's resourceVersion is where the
-// player watch resumes from. A cluster with no media-operator serves no such
-// collection, and the failure is the caller's to report and carry on from.
-func ListPlayers(ctx context.Context, c *Client) (*PlayerList, error) {
-	list := &PlayerList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, playersPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
-// ListMediaPreferences reads the household defaults with one request, on
-// the same terms as the Players: a cluster with no media-operator serves no
-// such collection, and the failure is the caller's to report and carry on
-// from.
-func ListMediaPreferences(ctx context.Context, c *Client) (*MediaPreferencesList, error) {
-	list := &MediaPreferencesList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, mediaPreferencesPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
-// ListCatalogs answers a whole pass with one request, and the list's
-// resourceVersion is where the catalogs watch resumes from.
-func ListCatalogs(ctx context.Context, c *Client) (*CatalogList, error) {
-	list := &CatalogList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, catalogsPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 // PutCatalogStatus writes through the status subresource, so this
@@ -510,18 +461,6 @@ func DeletePersistentVolume(ctx context.Context, c *Client, name string) error {
 		return nil
 	}
 	return err
-}
-
-// ListCatalogMemberPods reads every pod that holds a catalog
-// agent across every namespace, because a Catalog is in whatever
-// namespace its Libraries do. The list's resourceVersion is where the
-// pod watch begins.
-func ListCatalogMemberPods(ctx context.Context, c *Client) (*PodList, error) {
-	list := &PodList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+catalogMemberQuery, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 func GetPod(ctx context.Context, c *Client, namespace, name string) (*Pod, error) {
@@ -668,18 +607,6 @@ func UpdateService(ctx context.Context, c *Client, service *Service) (*Service, 
 	return written, nil
 }
 
-// ListPlays reads every Play in the cluster with one request. The
-// operator reads them to hold the progress finalizer and to publish
-// each Play's audience, so it reads the Plays of every namespace and
-// not only the ones it created.
-func ListPlays(ctx context.Context, c *Client) (*PlayList, error) {
-	list := &PlayList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, playsAllPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
 // PatchPlayMetadata writes the metadata this operator owns on a Play:
 // the finalizer list always, because taking a finalizer off is a write
 // of the shorter list, and the owner references and the annotations
@@ -698,17 +625,6 @@ func PatchPlayMetadata(ctx context.Context, c *Client, namespace, name, resource
 		patch["annotations"] = metadata.Annotations
 	}
 	return patchMetadata(ctx, c, playPath(namespace, name), patch)
-}
-
-// ListPeople reads every Person in the cluster with one request. A
-// cluster that runs no people-operator serves no such collection, and
-// that failure is the caller's to report and carry on from.
-func ListPeople(ctx context.Context, c *Client) (*PersonList, error) {
-	list := &PersonList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, peoplePath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
 
 // PatchPersonFinalizers writes a Person's finalizer list. The operator

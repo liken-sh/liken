@@ -180,7 +180,7 @@ func progressRole(catalog *NamespaceCatalog, image, busAddress, topicBase, media
 	return Container{
 		Name:    recorderContainer,
 		Image:   image,
-		Command: []string{"/library-operator", progressMode},
+		Command: []string{podBinary, progressMode},
 		Env: []EnvVar{
 			{Name: libraryNamespaceVariable, Value: catalog.Metadata.Namespace},
 			{Name: busAddressVariable, Value: busAddress},

@@ -124,6 +124,18 @@ Plan 32 covers a separate part of the system from the enrichment work.
 
 ## Completed
 
+* [71, One operator holds the
+  Lease](completed/71-one-operator-holds-the-lease.md). Built on
+  2026-09-27. Only the copy that holds the `Lease` named
+  `library-operator` watches, reconciles, and opens a bus session, and
+  the `Deployment` rolls with `RollingUpdate`. Every pod and `Job` the
+  operator creates runs the pod build, which links no client-go. The
+  drill on `liken-1` is owed.
+* [70, The watches use client-go](completed/70-the-watches-use-client-go.md).
+  Built on 2026-09-27. The eight watches run on client-go's reflector,
+  and a pass reads those collections from the informers, so a steady
+  pass sends 22 requests where it sent 30. The operator's own status
+  writes wake no pass. The drill on `liken-1` is owed.
 * [69, An agent's exit inside its grace
   period](completed/69-an-agents-exit-inside-its-grace-period.md).
   Built on 2026-09-27. Every pod that runs an agent, except a screen

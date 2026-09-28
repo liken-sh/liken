@@ -135,8 +135,8 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 	provider.Status = desired
 	_, err = PutMetadataProviderStatus(ctx, o.client, provider)
 	if errors.Is(err, ErrConflict) {
-		// Something wrote the provider between the list and this write. The next
-		// pass reads it again.
+		// Something wrote the provider after the watch delivered the copy
+		// this pass read. The next pass reads it again.
 		return nil
 	}
 	return err

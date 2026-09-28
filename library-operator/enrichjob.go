@@ -296,7 +296,7 @@ func enrichContainer(library *Library, name, role string, paths []string, image 
 	return Container{
 		Name:    name,
 		Image:   image,
-		Command: []string{"/library-operator", role},
+		Command: []string{podBinary, role},
 		Env: []EnvVar{
 			{Name: libraryContainerVariable, Value: name},
 			{Name: libraryNamespaceVariable, Value: library.Metadata.Namespace},

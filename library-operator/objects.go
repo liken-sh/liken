@@ -302,8 +302,8 @@ type Pod struct {
 	Status     PodStatus  `json:"status"`
 }
 
-// PodList is the collection ListCatalogMemberPods returns. Its
-// resourceVersion is where the pod watch begins.
+// PodList is one list of pods: the catalog member pods the watch holds,
+// or the pods a pass lists by label.
 type PodList struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []Pod    `json:"items"`

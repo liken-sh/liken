@@ -1,6 +1,6 @@
-# The image the two file facts run on: the same operator binary as Dockerfile's,
-# on liken's ffmpeg base, which carries Debian's ffmpeg and ffprobe and the
-# VA-API drivers on scratch. The probe container of the enricher Job and the
+# The image the two file facts run on: the same pod build of the program as
+# Dockerfile's, on liken's ffmpeg base, which carries Debian's ffmpeg and
+# ffprobe and the VA-API drivers on scratch. The probe container of the enricher Job and the
 # container of the trickplay Job take this image, and every other container
 # takes the operator's own.
 
@@ -19,17 +19,18 @@ RUN go mod download
 COPY *.go ./
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. It runs
-# from scratch, where there is no loader to need.
-RUN CGO_ENABLED=0 go build -trimpath -o /library-operator .
+# from scratch, where there is no loader to need. The tag pod builds the
+# program without the operator, which no container of this image runs.
+RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
 
 FROM ${FFMPEG_BASE}
-COPY --from=build /library-operator /library-operator
+COPY --from=build /library-operator-pod /library-operator-pod
 # A scratch image carries no trust store, and every TLS call fails without
 # one. The bundle is the build stage's own Debian set.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # A scratch image carries no PATH, and the two file facts find their tools by
 # name.
 ENV PATH=/usr/bin
-# The entrypoint is the operator binary, not the base's ffmpeg, because the
-# container runs a fact and the fact runs the tool.
-ENTRYPOINT ["/library-operator"]
+# The entrypoint is the program, not the base's ffmpeg, because the container
+# runs a fact and the fact runs the tool.
+ENTRYPOINT ["/library-operator-pod"]

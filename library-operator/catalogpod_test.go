@@ -102,7 +102,7 @@ func TestCatalogPodRunsTheReporterBesideTheAgent(t *testing.T) {
 	if reporter.Name != reporterContainer || reporter.Image != testScannerImage {
 		t.Errorf("container = %+v, want the operator image as the reporter", reporter)
 	}
-	if strings.Join(reporter.Command, " ") != "/library-operator report" {
+	if strings.Join(reporter.Command, " ") != "/library-operator-pod report" {
 		t.Errorf("command = %v, want the report role", reporter.Command)
 	}
 	want := map[string]string{

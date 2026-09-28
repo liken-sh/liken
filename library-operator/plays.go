@@ -18,17 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 )
-
-// reconcileProgress is the progress half of one pass. The Plays go
-// first, because a Person is released against what the stores answered
-// about the Plays.
-func (o *operator) reconcileProgress(ctx context.Context, plays []Play, people []Person,
-	stores map[string]bool, now time.Time) {
-	o.reconcilePlays(ctx, plays, stores)
-	o.reconcilePeople(ctx, people, stores, now)
-}
 
 // storeNamespaces is the set of namespaces with a progress store.
 // A namespace must have exactly one Catalog, because a namespace with
@@ -184,8 +174,8 @@ func (o *operator) releasePlay(ctx context.Context, play *Play, why string) {
 	_, err := PatchPlayMetadata(ctx, o.client, namespace, name, play.Metadata.ResourceVersion,
 		ObjectMeta{Finalizers: play.Metadata.without(progressFinalizer)})
 	if errors.Is(err, ErrConflict) {
-		// A write between the list and this patch is another pass's,
-		// and the next pass releases again.
+		// A write after the copy this pass read is in the copy the
+		// next pass reads, and that pass releases again.
 		return
 	}
 	// An object that is already gone is the state this release was for.

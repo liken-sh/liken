@@ -91,9 +91,13 @@ type fakeCluster struct {
 	// object, with a conflict: the state a second writer leaves behind.
 	refuseCreate bool
 
-	// Parked holds every watch request open, because a watcher has no
-	// stop and a watch that ended would set it reconnecting.
-	parked chan struct{}
+	// The watch streams the cluster holds open, which watchstreams_test.go
+	// sends each change to.
+	streams []*watchStream
+
+	// Leases answers the coordination API, where a test that runs the
+	// whole process sets one. Every other test leaves it nil.
+	leases http.Handler
 }
 
 func newFakeCluster() *fakeCluster {
@@ -117,19 +121,28 @@ func newFakeCluster() *fakeCluster {
 		people:         map[string]*Person{},
 		nodes:          map[string]*Node{},
 		broken:         map[string]int{},
-		parked:         make(chan struct{}),
 	}
 }
 
+// The handler records each request and answers it. A watch request is
+// not recorded: it holds a stream open, and watchstreams_test.go
+// answers it. Every write sends its change to the open streams.
 func (f *fakeCluster) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f.leases != nil && strings.HasPrefix(r.URL.Path, "/apis/coordination.k8s.io/") {
+			f.leases.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Query().Get("watch") == "true" {
-			<-f.parked
+			f.serveWatch(w, r)
 			return
 		}
 		f.mutex.Lock()
 		defer f.mutex.Unlock()
 		f.serve(w, r)
+		if r.Method != http.MethodGet {
+			f.announceLocked()
+		}
 	})
 }
 
@@ -138,9 +151,19 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete && r.URL.Query().Get("gracePeriodSeconds") == "0" {
 		f.forcedDeletes = append(f.forcedDeletes, r.URL.Path)
 	}
-	// A test breaks a path, one request against a path, or one method
-	// against a path: the two pod lists differ by their selector alone,
-	// so the whole request line is a key too.
+	if status := f.brokenStatus(r); status != 0 {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte("the API server is unwell"))
+		return
+	}
+	f.route(w, r)
+}
+
+// brokenStatus answers the status a test broke a request with, or zero.
+// A test breaks a path, one request against a path, or one method
+// against a path: the two pod lists differ by their selector alone, so
+// the whole request line is a key too.
+func (f *fakeCluster) brokenStatus(r *http.Request) int {
 	status := f.broken[r.URL.Path]
 	if status == 0 {
 		status = f.broken[r.URL.RequestURI()]
@@ -150,11 +173,11 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	if status == 0 {
 		status = f.broken[r.Method+" "+r.URL.Path]
 	}
-	if status != 0 {
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte("the API server is unwell"))
-		return
-	}
+	return status
+}
+
+// route answers one request from the objects the cluster holds.
+func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
 	name := path.Base(r.URL.Path)
 	switch {
 	case r.URL.Path == versionPath:
@@ -1016,9 +1039,11 @@ const testLibraryNamespace = "house"
 func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
-	return newOperator(NewClient(server.URL, server.Client(), ""),
+	operator := newOperator(NewClient(server.URL, server.Client(), ""),
 		testScannerImage, testCorrosionImage, testBrowserImage, testFFmpegImage,
 		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
+	operator.watched = listReads{client: operator.client}
+	return operator
 }
 
 // The namespace the operator itself runs in, which is what every

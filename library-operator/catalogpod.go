@@ -98,7 +98,7 @@ func confirmerSidecar(image string) Container {
 	return Container{
 		Name:    confirmerContainer,
 		Image:   image,
-		Command: []string{"/library-operator", confirmMode},
+		Command: []string{podBinary, confirmMode},
 		Env: []EnvVar{
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: podNameVariable, ValueFrom: &EnvVarSource{
@@ -121,7 +121,7 @@ func reporterSidecar(catalog *NamespaceCatalog, image, busAddress, topicBase str
 	return Container{
 		Name:    reporterContainer,
 		Image:   image,
-		Command: []string{"/library-operator", reportMode},
+		Command: []string{podBinary, reportMode},
 		Env: []EnvVar{
 			{Name: libraryNamespaceVariable, Value: catalog.Metadata.Namespace},
 			{Name: busAddressVariable, Value: busAddress},

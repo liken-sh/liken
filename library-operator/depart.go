@@ -170,8 +170,8 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 		return nil
 	}
 	if errors.Is(err, ErrConflict) {
-		// A write between the list and this patch wakes the libraries
-		// watch, and the next pass releases again.
+		// A write after the copy this pass read is in the copy the
+		// next pass reads, and that pass releases again.
 		return nil
 	}
 	if err != nil {

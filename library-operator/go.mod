@@ -69,6 +69,7 @@ require (
 	github.com/narqo/go-badge v0.0.0-20230821190521-c9a75c019a59 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect

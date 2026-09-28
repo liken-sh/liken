@@ -15,8 +15,9 @@
 # objects carry. It deletes no
 # object a person created. It deletes the CronJob and the claims an
 # earlier release stood for each library, by the names that release gave
-# them. Every grant is cluster-wide, because a
-# Library can be in any namespace.
+# them. Every grant but the Lease's is
+# cluster-wide, because a Library can be in any namespace. The Lease is
+# in the operator's own namespace, and it elects the one copy that acts.
 #
 # The operator also holds a finalizer on every Library, so a delete
 # waits on a cleanup Job that takes the departed library's rows out of
@@ -49,8 +50,8 @@ metadata:
 rules:
   # The libraries, across every namespace, because a cluster keeps its
   # media in whatever namespace it likes and the operator is one
-  # Deployment for the cluster. The watch is the wake signal; every
-  # pass re-reads with a list. A person declares a Library and the
+  # Deployment for the cluster. The operator lists and watches them
+  # once, and every pass reads the copy the watch keeps. A person declares a Library and the
   # operator never edits one: the patch is for the finalizer list
   # alone, sent as a merge patch so a person's own fields on the
   # Library survive the write. The finalizer holds a deleted Library
@@ -65,8 +66,7 @@ rules:
     resources: [libraries/status]
     verbs: [update]
   # The Catalogs, across every namespace, on the same terms as the
-  # libraries: the watch is the wake signal, and every pass re-reads
-  # with a list. Read-only, and only the status half is written.
+  # libraries: every pass reads the copy the watch keeps. Read-only, and only the status half is written.
   - apiGroups: [library.liken.sh]
     resources: [catalogs]
     verbs: [get, list, watch]
@@ -93,16 +93,15 @@ rules:
   # The Players, across every namespace, read-only. media-operator owns
   # them and writes them; this operator reads status.idle and writes no Player
   # at all. It stands a screen pod for a Player whose status.idle.controller
-  # names it, and takes that pod down when the name changes. The watch is the
-  # wake signal, and every pass re-reads with a list.
+  # names it, and takes that pod down when the name changes. Every pass reads
+  # the copy the watch keeps.
   - apiGroups: [media.liken.sh]
     resources: [players]
     verbs: [get, list, watch]
   # The household defaults, cluster-scoped and read-only, for two fields:
   # the wall-clock zone every screen pod carries as TZ, so the browser's
   # clock shows the house's own hour, and the audio languages every
-  # enricher ranks a trailer by. One list per pass reads both. The watch
-  # is the wake signal, so a zone or a language the household sets rolls
+  # enricher ranks a trailer by. The watch keeps both current, so a zone or a language the household sets rolls
   # the screens or the next enricher on the next pass.
   - apiGroups: [media.liken.sh]
     resources: [mediapreferences]
@@ -217,9 +216,9 @@ rules:
   # The workers. A Library runs one Job at a time: a walk on its
   # schedule, for a request, or for a webhook's folders, and a Job that
   # fills gaps between walks. A Job runs the sweep of a departing
-  # Library. The list and watch are cluster-scoped for the reason the
-  # pods are, and every pass re-reads with the list. The delete verb
-  # covers four deletes: a worker Job that succeeded more than the grace
+  # Library. The list is cluster-scoped for the reason the pods are,
+  # and every pass reads the Jobs with it. The delete verb covers four
+  # deletes: a worker Job that succeeded more than the grace
   # ago, a cleanup Job that failed and is stood again on a backoff, the
   # retirement of a cleanup Job when its library is released, and a
   # Jellyfin backfill Job that failed or that a Catalog no longer asks
@@ -266,6 +265,40 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: library-operator
+subjects:
+  - kind: ServiceAccount
+    name: library-operator
+    namespace: liken-system
+---
+# The Lease that elects the one copy of the operator that acts
+# (leader.go). client-go's election reads the Lease with a get, takes
+# and renews it with an update, and releases it with an update. A
+# namespaced Role, because the Lease is in the operator's own namespace
+# and every kubelet's heartbeat is a Lease in kube-node-lease that this
+# operator has no reason to read.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: library-operator-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [library-operator]
+    verbs: [get, update]
+  # create carries no resourceNames, because RBAC cannot read a name off
+  # a create. The first copy to start creates the Lease.
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: library-operator-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: library-operator-lease
 subjects:
   - kind: ServiceAccount
     name: library-operator

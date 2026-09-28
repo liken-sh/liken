@@ -27,10 +27,18 @@ test: test-go test-media-browser test-docs
 # toolchain.
 COVERAGE_TOOLCHAIN := go1.26.7
 
+# The pod build is the program every pod and Job the operator creates
+# runs, built with the tag pod (operate_pod.go says why). The check vets
+# it and fails when anything in it links client-go, so a new import
+# cannot bring client-go into every catalog pod and every library Job.
+POD_BUILD_CLIENT_GO := go list -tags pod -deps . | grep '^k8s.io/client-go'
+
 .PHONY: test-go
 test-go:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go vet ./...
+	go vet -tags pod .
+	test -z "$$($(POD_BUILD_CLIENT_GO))" || { echo 'the pod build links client-go:'; $(POD_BUILD_CLIENT_GO); exit 1; }
 	go test -race ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml

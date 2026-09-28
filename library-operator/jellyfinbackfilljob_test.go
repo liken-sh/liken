@@ -73,7 +73,7 @@ func TestJellyfinBackfillJobRunsTheRoleWithNothingListening(t *testing.T) {
 	if container.Name != jellyfinContainer || container.Image != testScannerImage {
 		t.Errorf("container = %+v, want the operator image in its backfill", container)
 	}
-	if want := "/library-operator " + jellyfinBackfillMode; strings.Join(container.Command, " ") != want {
+	if want := "/library-operator-pod " + jellyfinBackfillMode; strings.Join(container.Command, " ") != want {
 		t.Errorf("command = %v, want %q", container.Command, want)
 	}
 	if len(container.Ports) != 0 {

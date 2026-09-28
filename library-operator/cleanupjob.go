@@ -53,7 +53,7 @@ func cleanupSidecar(library *Library, image string) Container {
 	return Container{
 		Name:    cleanupContainer,
 		Image:   image,
-		Command: []string{"/library-operator", cleanupMode},
+		Command: []string{podBinary, cleanupMode},
 		Env: []EnvVar{
 			{Name: libraryNamespaceVariable, Value: library.Metadata.Namespace},
 			{Name: libraryNameVariable, Value: library.Metadata.Name},

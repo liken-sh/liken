@@ -80,8 +80,8 @@ func (o *operator) forgetPerson(ctx context.Context, person *Person, stores map[
 	_, err := PatchPersonFinalizers(ctx, o.client, name, person.Metadata.ResourceVersion,
 		person.Metadata.without(progressFinalizer))
 	if errors.Is(err, ErrConflict) {
-		// A write between the list and this patch is another pass's,
-		// and the next pass releases again.
+		// A write after the copy this pass read is in the copy the
+		// next pass reads, and that pass releases again.
 		return
 	}
 	// An object that is already gone is the state this release was for.

@@ -66,7 +66,7 @@ func buildJellyfinBackfillJob(catalog *NamespaceCatalog, operatorImage, busAddre
 // address, because nothing posts to it.
 func jellyfinBackfillRole(catalog *NamespaceCatalog, image, busAddress, topicBase, mediaBase string) Container {
 	role := jellyfinRole(catalog, image, busAddress, topicBase, mediaBase)
-	role.Command = []string{"/library-operator", jellyfinBackfillMode}
+	role.Command = []string{podBinary, jellyfinBackfillMode}
 	role.Env = jellyfinEnv(catalog, busAddress, topicBase, mediaBase)
 	role.Ports = nil
 	role.ReadinessProbe = nil

@@ -295,69 +295,8 @@ func expectRequest(t *testing.T, recorded *recordedRequest, method, path string)
 	}
 }
 
-// A pass reads every Library in the cluster with one request, because
-// a house keeps its media in whatever namespace it likes.
-func TestListLibrariesReadsEveryNamespace(t *testing.T) {
-	client, recorded := recordingAPI(t, LibraryList{
-		Metadata: ListMeta{ResourceVersion: "1200"},
-		Items: []Library{{
-			Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
-			Spec:     LibrarySpec{Kind: libraryKindMovies, Storage: LibraryStorage{Claim: "movies", Root: "/"}},
-		}},
-	})
-
-	list, err := ListLibraries(t.Context(), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/apis/library.liken.sh/v1alpha1/libraries")
-	if list.Metadata.ResourceVersion != "1200" {
-		t.Errorf("resourceVersion = %q, want the collection's 1200", list.Metadata.ResourceVersion)
-	}
-	if len(list.Items) != 1 || list.Items[0].Spec.Storage.Claim != "movies" {
-		t.Errorf("items = %+v, want the one library the server answered", list.Items)
-	}
-}
-
 // The status goes through its own subresource, so this request can
 // never touch the spec a person declared.
-// A pass reads every Player in the cluster with one request, and it
-// reads the idle block media-operator publishes.
-func TestListPlayersReadsEveryNamespace(t *testing.T) {
-	client, recorded := recordingAPI(t, PlayerList{
-		Metadata: ListMeta{ResourceVersion: "1200"},
-		Items: []Player{{
-			Metadata: ObjectMeta{Name: "den", Namespace: "house"},
-			Status: PlayerStatus{Idle: &PlayerIdleStatus{
-				Controller: screenController,
-				Claim:      "den-idle-devices",
-				Requests:   []string{"draw"},
-			}},
-		}},
-	})
-
-	list, err := ListPlayers(t.Context(), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/apis/media.liken.sh/v1alpha1/players")
-	if list.Metadata.ResourceVersion != "1200" {
-		t.Errorf("resourceVersion = %q, want the collection's 1200", list.Metadata.ResourceVersion)
-	}
-	if len(list.Items) != 1 {
-		t.Fatalf("items = %+v, want the one player the server answered", list.Items)
-	}
-	idle := list.Items[0].idle()
-	if idle.Claim != "den-idle-devices" || len(idle.Requests) != 1 {
-		t.Errorf("idle = %+v, want the claim and the requests", idle)
-	}
-	if !list.Items[0].delegated() {
-		t.Error("the player is not delegated, but it names this operator")
-	}
-}
-
 func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	written := &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house", ResourceVersion: "1200"},
@@ -499,7 +438,6 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		name string
 		call func(*Client) error
 	}{
-		{name: "ListLibraries", call: func(c *Client) error { _, err := ListLibraries(t.Context(), c); return err }},
 		{name: "PutLibraryStatus", call: func(c *Client) error { _, err := PutLibraryStatus(t.Context(), c, &Library{}); return err }},
 		{name: "PatchLibraryFinalizers", call: func(c *Client) error {
 			_, err := PatchLibraryFinalizers(t.Context(), c, "house", "movies", "1", nil)
@@ -513,18 +451,14 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 			return DeletePersistentVolumeClaim(t.Context(), c, "house", "den-media-browser-catalog")
 		}},
 		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
-		{name: "ListPlayers", call: func(c *Client) error { _, err := ListPlayers(t.Context(), c); return err }},
-		{name: "ListPlays", call: func(c *Client) error { _, err := ListPlays(t.Context(), c); return err }},
 		{name: "PatchPlayMetadata", call: func(c *Client) error {
 			_, err := PatchPlayMetadata(t.Context(), c, "house", "den-b2k9x", "1", ObjectMeta{})
 			return err
 		}},
-		{name: "ListPeople", call: func(c *Client) error { _, err := ListPeople(t.Context(), c); return err }},
 		{name: "PatchPersonFinalizers", call: func(c *Client) error {
 			_, err := PatchPersonFinalizers(t.Context(), c, "person-a", "1", nil)
 			return err
 		}},
-		{name: "ListCatalogMemberPods", call: func(c *Client) error { _, err := ListCatalogMemberPods(t.Context(), c); return err }},
 		{name: "ListWorkerJobs", call: func(c *Client) error { _, err := ListWorkerJobs(t.Context(), c); return err }},
 		{name: "CreateJob", call: func(c *Client) error { _, err := CreateJob(t.Context(), c, &Job{}); return err }},
 		{name: "DeleteJob", call: func(c *Client) error { return DeleteJob(t.Context(), c, "house", "movies-cleanup") }},

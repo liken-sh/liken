@@ -83,7 +83,7 @@ func TestJellyfinPodRunsTheJellyfinRole(t *testing.T) {
 	if role.Name != jellyfinContainer || role.Image != testScannerImage {
 		t.Errorf("container = %+v, want the operator image in its jellyfin role", role)
 	}
-	if want := "/library-operator " + jellyfinMode; strings.Join(role.Command, " ") != want {
+	if want := "/library-operator-pod " + jellyfinMode; strings.Join(role.Command, " ") != want {
 		t.Errorf("command = %v, want %q", role.Command, want)
 	}
 }

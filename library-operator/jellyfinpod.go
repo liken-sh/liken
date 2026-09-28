@@ -101,7 +101,7 @@ func jellyfinRole(catalog *NamespaceCatalog, image, busAddress, topicBase, media
 	return Container{
 		Name:    jellyfinContainer,
 		Image:   image,
-		Command: []string{"/library-operator", jellyfinMode},
+		Command: []string{podBinary, jellyfinMode},
 		Env: append(jellyfinEnv(catalog, busAddress, topicBase, mediaBase),
 			EnvVar{Name: jellyfinListenVariable, Value: defaultJellyfinListen}),
 		Ports: []ContainerPort{

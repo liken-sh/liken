@@ -365,26 +365,6 @@ func TestANumberAnnotationThatIsNoNumberReadsAsNone(t *testing.T) {
 	}
 }
 
-// A pass reads every Play in the cluster with one request, because
-// progress is recorded for every Play and not only the ones a screen of
-// this operator's asked for.
-func TestListPlaysReadsEveryNamespace(t *testing.T) {
-	client, recorded := recordingAPI(t, PlayList{
-		Metadata: ListMeta{ResourceVersion: "1200"},
-		Items:    []Play{{Metadata: ObjectMeta{Name: "den-some-film", Namespace: "house"}}},
-	})
-
-	list, err := ListPlays(t.Context(), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/apis/media.liken.sh/v1alpha1/plays")
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "den-some-film" {
-		t.Errorf("items = %+v, want the one Play the server answered", list.Items)
-	}
-}
-
 // The patch states the finalizer list always, because taking a
 // finalizer off is a write of the shorter list, and it states the owner
 // references and the annotations only where the caller gives them.

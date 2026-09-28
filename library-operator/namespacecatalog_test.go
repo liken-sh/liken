@@ -96,28 +96,6 @@ func TestCatalogsByNamespaceGroupAndSort(t *testing.T) {
 	}
 }
 
-// A pass reads every Catalog in the cluster with one request, and the
-// list's resourceVersion is where the catalogs watch resumes.
-func TestListCatalogsReadsEveryNamespace(t *testing.T) {
-	client, recorded := recordingAPI(t, CatalogList{
-		Metadata: ListMeta{ResourceVersion: "77"},
-		Items:    []NamespaceCatalog{{Metadata: ObjectMeta{Name: "house", Namespace: "house"}}},
-	})
-
-	list, err := ListCatalogs(t.Context(), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/apis/library.liken.sh/v1alpha1/catalogs")
-	if list.Metadata.ResourceVersion != "77" {
-		t.Errorf("resourceVersion = %q, want 77", list.Metadata.ResourceVersion)
-	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house" {
-		t.Errorf("items = %+v, want the one Catalog", list.Items)
-	}
-}
-
 // The status write goes through the status subresource of the Catalog
 // in its own namespace, and it carries the resourceVersion it read.
 func TestPutCatalogStatusWritesTheStatusSubresource(t *testing.T) {

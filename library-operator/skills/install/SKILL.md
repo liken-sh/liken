@@ -113,10 +113,20 @@ is the same every time it is applied:
         newTag: <tag>
 
 The base creates the three `CustomResourceDefinitions`, a
-`ServiceAccount`, a `ClusterRole` with its binding, one `Deployment`,
-and one `Service`. The `Deployment` runs one unprivileged replica with
-every capability dropped. The `Service` is the address every
-`Library`'s [webhook](https://library.liken.sh/docs/guides/webhooks/) is reached at.
+`ServiceAccount`, a `ClusterRole` with its binding, a `Role` with its
+binding, one `Deployment`, and one `Service`. The `Deployment` runs one
+unprivileged replica with every capability dropped. The `Service` is
+the address every `Library`'s [webhook](https://library.liken.sh/docs/guides/webhooks/) is
+reached at.
+
+Only one copy of the operator acts at a time. Each copy competes for
+the `Lease` named `library-operator` in the operator's namespace, and
+only the copy that holds it watches, reconciles, and opens a bus
+session. The `Role` grants that one `Lease`. A rollout starts the new
+pod beside the old one. The old pod finishes its pass and releases the
+`Lease` when it stops, and the new pod takes it within about 11
+seconds. A copy that waits for the `Lease` still takes webhooks, and
+it serves each one when it leads.
 
 The `ClusterRole` is cluster-wide because a `Library` can be in any
 namespace. On this operator's own resources, its grants are read and

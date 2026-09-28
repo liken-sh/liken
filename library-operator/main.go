@@ -14,6 +14,15 @@ import (
 	"os"
 )
 
+// The two builds of this program, as the images carry them. The full
+// build runs the operator and every role. The pod build, built with the
+// tag pod, runs every role but the operator, and every pod and Job the
+// operator creates runs it (operate_pod.go says why).
+const (
+	operatorBinary = "/library-operator"
+	podBinary      = "/library-operator-pod"
+)
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {

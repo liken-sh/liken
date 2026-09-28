@@ -141,25 +141,6 @@ func TestTheDeskFoldsAndDropsAnAnswerAboutAPerson(t *testing.T) {
 	}
 }
 
-// A Person is cluster-scoped, so the collection path carries no
-// namespace.
-func TestListPeopleReadsTheClusterScopedCollection(t *testing.T) {
-	client, recorded := recordingAPI(t, PersonList{
-		Metadata: ListMeta{ResourceVersion: "1200"},
-		Items:    []Person{{Metadata: ObjectMeta{Name: "person-a"}, Spec: PersonSpec{DisplayName: "Person A"}}},
-	})
-
-	list, err := ListPeople(t.Context(), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/apis/people.liken.sh/v1alpha1/people")
-	if len(list.Items) != 1 || list.Items[0].Spec.DisplayName != "Person A" {
-		t.Errorf("items = %+v, want the one Person the server answered", list.Items)
-	}
-}
-
 func TestPatchPersonFinalizersSendsAConditionalMergePatch(t *testing.T) {
 	client, recorded := recordingAPI(t, map[string]any{
 		"metadata": map[string]any{"resourceVersion": "1201"},

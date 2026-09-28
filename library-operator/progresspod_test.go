@@ -132,7 +132,7 @@ func TestProgressPodRunsTheProgressRole(t *testing.T) {
 	if role.Name != recorderContainer || role.Image != testScannerImage {
 		t.Errorf("container = %+v, want the operator image in its progress role", role)
 	}
-	if want := "/library-operator " + progressMode; strings.Join(role.Command, " ") != want {
+	if want := "/library-operator-pod " + progressMode; strings.Join(role.Command, " ") != want {
 		t.Errorf("command = %v, want %q", role.Command, want)
 	}
 	held := envOf(role)

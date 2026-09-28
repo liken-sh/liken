@@ -1,196 +1,15 @@
 package main
 
-// These tests run the operator against an API server that answers the
-// way Kubernetes does, so a pass, the loop around it, and the bus
-// handler that feeds it are proved with no cluster and no broker.
+// These tests run the pass against an API server that answers the way
+// Kubernetes does, so a pass and the bus handler that feeds it are
+// proved with no cluster and no broker. operatorprocess_test.go runs the
+// loop around the pass.
 
 import (
-	"context"
-	"io"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
-
-// The operator refuses to start without the settings only the
-// Deployment can give it, and it names the one that is missing.
-func TestOperateRequiresItsEnvironment(t *testing.T) {
-	cases := []struct {
-		name      string
-		unset     string
-		bus       string
-		namespace string
-	}{
-		{name: "no broker", unset: busAddressVariable,
-			namespace: testOperatorNamespace},
-		{name: "no namespace", unset: operatorNamespaceVariable,
-			bus: testBusAddress},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			t.Setenv(busAddressVariable, one.bus)
-			t.Setenv(operatorNamespaceVariable, one.namespace)
-
-			err := operate()
-
-			if err == nil || !strings.Contains(err.Error(), one.unset) {
-				t.Fatalf("err = %v, want it to name %s", err, one.unset)
-			}
-		})
-	}
-}
-
-func TestOperateRefusesOutsideACluster(t *testing.T) {
-	t.Setenv(scannerImageVariable, testScannerImage)
-	t.Setenv(corrosionImageVariable, testCorrosionImage)
-	t.Setenv(browserImageVariable, testBrowserImage)
-	t.Setenv(busAddressVariable, testBusAddress)
-	t.Setenv(operatorNamespaceVariable, testOperatorNamespace)
-	t.Setenv("KUBERNETES_SERVICE_HOST", "")
-	t.Setenv("KUBERNETES_SERVICE_PORT", "")
-
-	err := operate()
-
-	if err == nil || !strings.Contains(err.Error(), "not running in a cluster") {
-		t.Fatalf("err = %v, want the in-cluster failure", err)
-	}
-}
-
-// TestClusterEnvironment builds the pod's whole environment: the
-// images, the broker, the two address variables, a mounted CA and
-// token, and an API server that answers as Kubernetes does. The
-// returned channel closes when that server is reached.
-//
-// The server outlives the test on purpose. The operator's watchers
-// have no stop, so the test ends with both held in a watch request,
-// and a server that closed would wait on them.
-func testClusterEnvironment(t *testing.T, cluster *fakeCluster) chan struct{} {
-	t.Helper()
-	reached := make(chan struct{})
-	var once sync.Once
-	handler := cluster.handler()
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		once.Do(func() { close(reached) })
-		handler.ServeHTTP(w, r)
-	}))
-
-	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("KUBERNETES_SERVICE_HOST", host)
-	t.Setenv("KUBERNETES_SERVICE_PORT", port)
-	// The operator derives its images from its own pod, so the fake
-	// cluster serves one and the downward API variable names it.
-	cluster.pods[testOperatorPod] = operatorPod(testScannerImage)
-	t.Setenv(podNameVariable, testOperatorPod)
-	t.Setenv(scannerImageVariable, "")
-	t.Setenv(corrosionImageVariable, "")
-	t.Setenv(browserImageVariable, "")
-	// Port 1 answers nothing, so the bus reconnects for the length of
-	// the test and no pass waits on it.
-	t.Setenv(busAddressVariable, "127.0.0.1:1")
-	t.Setenv(topicBaseVariable, "")
-	t.Setenv(operatorNamespaceVariable, testOperatorNamespace)
-	// Port zero is a port the kernel picks, so the webhook server of one
-	// test never collides with another's.
-	t.Setenv(webhookPortVariable, "0")
-
-	directory := testServiceAccountDir(t, testCertificatePEM(t, server))
-	if err := os.WriteFile(filepath.Join(directory, "token"), []byte("a-service-account-token"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	serviceAccountDir = directory
-	t.Cleanup(func() { serviceAccountDir = defaultServiceAccountDir })
-	return reached
-}
-
-func TestOperateRunsUntilTheStopSignal(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	reached := testClusterEnvironment(t, cluster)
-	returned := make(chan error, 1)
-	go func() { returned <- operate() }()
-
-	select {
-	case <-reached:
-	case err := <-returned:
-		t.Fatalf("operate returned %v before it reached the API server", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("operate did not reach the API server")
-	}
-
-	// The request above happens only after operate registers for the
-	// signal, so this signal always reaches operate's handler and never
-	// the default one, which would end the test binary.
-	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case err := <-returned:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("operate did not return after SIGTERM")
-	}
-}
-
-// The loop reconciles before it waits, so one pass runs even when the
-// context has already ended, and the line it reports says what it
-// operates.
-func TestRunReconcilesOnceAndStops(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	library := testOperator(t, cluster)
-	stopped, stop := context.WithCancel(context.Background())
-	stop()
-	var reported strings.Builder
-
-	if err := library.run(stopped, &reported); err != nil {
-		t.Fatal(err)
-	}
-
-	line := reported.String()
-	if !strings.Contains(line, "1 libraries") || !strings.Contains(line, testBusAddress) {
-		t.Errorf("report = %q, want the count and the broker", line)
-	}
-	if !cluster.heldWalk("house", "movies") {
-		t.Error("the pass started no walk")
-	}
-}
-
-func TestRunFailsWhenTheCollectionsCannotBeRead(t *testing.T) {
-	cases := []struct {
-		name string
-		path string
-	}{
-		{name: "the libraries", path: librariesPath},
-		{name: "the catalogs", path: catalogsPath},
-		{name: "the member pods", path: podsAllPath},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			cluster.broken[one.path] = http.StatusInternalServerError
-			library := testOperator(t, cluster)
-
-			err := library.run(testRunContext(t), io.Discard)
-
-			if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
-				t.Fatalf("err = %v, want the server's own message", err)
-			}
-		})
-	}
-}
 
 // A pass reads every Library, and the desk keeps a report only for a
 // Library the collection still holds.
@@ -698,5 +517,23 @@ func TestPassCarriesOnPastAJobItCannotRetire(t *testing.T) {
 
 	if cluster.heldLibrary("movies").Status.Conditions == nil {
 		t.Error("the pass stopped at the delete the API server refused")
+	}
+}
+
+// A pass that cannot read the Plays keeps the marks the progress store
+// published, because a Play that still exists waits on its recorded mark
+// to lose its finalizer. Read as an empty collection, the failure would
+// drop every mark and clear its retained topics.
+func TestPassKeepsThePlayMarksWhenThePlaysCannotBeRead(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	cluster.broken[playsAllPath] = http.StatusServiceUnavailable
+	operator := testOperator(t, cluster)
+	operator.marks.markRecorded(testLibraryNamespace, "den-some-film", &playRecorded{Item: 1, Ended: true})
+
+	operator.pass()
+
+	if _, held := operator.marks.recordedFor(testLibraryNamespace, "den-some-film"); !held {
+		t.Error("the pass dropped the recorded mark of a Play it could not read")
 	}
 }

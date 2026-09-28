@@ -119,8 +119,8 @@ func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
 	version, err := PatchLibraryFinalizers(ctx, o.client, library.Metadata.Namespace,
 		library.Metadata.Name, library.Metadata.ResourceVersion, finalizers)
 	if errors.Is(err, ErrConflict) {
-		// A write between the list and this patch wakes the
-		// libraries watch, and the next pass patches again.
+		// A write after the copy this pass read is in the copy the
+		// next pass reads, and that pass patches again.
 		return nil
 	}
 	if err != nil {

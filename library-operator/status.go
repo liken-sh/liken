@@ -318,10 +318,9 @@ func podFailureMessage(pod *Pod) string {
 }
 
 // writeLibraryStatus writes only a status that differs from the one
-// the Library carries. Every write bumps the resourceVersion, and this
-// operator watches its own collection, so a write on every pass would
-// wake the watch that wakes the pass, and the backstop tick would
-// become one write per library every ten seconds.
+// the Library carries. Without the compare, the backstop tick would be
+// one write per library every ten seconds, and every watcher of the
+// Libraries would receive each one.
 func writeLibraryStatus(ctx context.Context, c *Client, library *Library, desired LibraryStatus) error {
 	same, err := sameStatus(library.Status, desired)
 	if err != nil || same {
@@ -331,10 +330,12 @@ func writeLibraryStatus(ctx context.Context, c *Client, library *Library, desire
 	library.Status = desired
 	_, err = PutLibraryStatus(ctx, c, library)
 	if errors.Is(err, ErrConflict) {
-		// Something wrote this Library between the list and this
-		// write. That write bumped the resourceVersion, which wakes
-		// this operator's own libraries watch, and the pass it wakes
-		// reads the fresh copy and derives the status again.
+		// Something wrote this Library after the watch delivered the
+		// copy this pass read: a person's edit, or this operator's own
+		// write of the pass before, which the watch had not delivered
+		// yet. The next pass reads the fresh copy and derives the status
+		// again. An edit to the spec wakes that pass, and the backstop
+		// tick runs it after any other write.
 		return nil
 	}
 	return err

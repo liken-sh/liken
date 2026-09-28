@@ -231,7 +231,7 @@ func scannerSidecar(library *Library, paths []string, image string) Container {
 	return Container{
 		Name:    scannerContainer,
 		Image:   image,
-		Command: []string{"/library-operator", scanMode},
+		Command: []string{podBinary, scanMode},
 		Env: []EnvVar{
 			{Name: libraryNamespaceVariable, Value: library.Metadata.Namespace},
 			{Name: libraryNameVariable, Value: library.Metadata.Name},

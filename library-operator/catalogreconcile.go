@@ -288,9 +288,9 @@ func catalogMembers(namespace string, pods []Pod) []string {
 }
 
 // WriteCatalogStatus writes only a status that differs from the one the
-// Catalog carries, the rule writeLibraryStatus also follows, so a write on
-// every pass does not wake the catalogs watch that wakes the pass. A conflict
-// means another writer got there first, which the next pass reads.
+// Catalog carries, the rule writeLibraryStatus also follows, so a pass that
+// finds nothing changed writes nothing. A conflict means another write got
+// there first, which the next pass reads.
 func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCatalog, desired CatalogStatus) error {
 	same, err := sameCatalogStatus(catalog.Status, desired)
 	if err != nil || same {

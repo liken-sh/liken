@@ -440,8 +440,7 @@ func (p *Player) delegated() bool {
 	return p.idle().Controller == screenController
 }
 
-// The collection ListPlayers answers. Its resourceVersion is where the
-// player watch begins.
+// Every Player the watch holds, which the pass reads.
 type PlayerList struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []Player `json:"items"`
@@ -474,8 +473,7 @@ type MediaPreferencesSpec struct {
 	AudioLanguages []string `json:"audioLanguages,omitempty"`
 }
 
-// The collection ListMediaPreferences answers. Its resourceVersion is
-// where the watch begins.
+// Every MediaPreferences the watch holds, which the pass reads.
 type MediaPreferencesList struct {
 	Metadata ListMeta           `json:"metadata"`
 	Items    []MediaPreferences `json:"items"`
@@ -615,7 +613,7 @@ type Play struct {
 	Status     PlayStatus `json:"status,omitempty"`
 }
 
-// The collection ListPlays answers, across every namespace.
+// Every Play the watch holds, across every namespace.
 type PlayList struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []Play   `json:"items"`
