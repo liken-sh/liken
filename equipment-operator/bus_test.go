@@ -284,6 +284,7 @@ func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
 // The client newBus builds dials the address over TCP. Nothing answers
 // this port, so the dial fails rather than reaching some other broker.
 func TestNewBusDialsTheAddressOverTCP(t *testing.T) {
+	t.Parallel()
 	bus := newBus("127.0.0.1:1", "equipment-operator", nil, nil, nil)
 
 	_, err := bus.dial(context.Background())
@@ -377,6 +378,7 @@ func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
 // connection, so the broker drops the will. A client that dies sends
 // none, and the broker publishes the will.
 func TestABusThatStopsDisconnectsCleanly(t *testing.T) {
+	t.Parallel()
 	brokers := startFakeBrokerServer(t)
 	connected := make(chan struct{}, 1)
 	bus := newBus(brokers.address(), "equipment-operator", &busWill{Topic: "owner", Retained: true}, func(*Bus) { connected <- struct{}{} }, nil)

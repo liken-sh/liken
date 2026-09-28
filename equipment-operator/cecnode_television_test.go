@@ -226,6 +226,7 @@ func TestABusInListenSendsNoPowerCommand(t *testing.T) {
 // off with its own remote shows in the entry through what the TV sends
 // the bus: a broadcast Standby, or a Routing Change of a TV that is on.
 func TestTheTVsPowerFollowsItsBroadcasts(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		held    cec.PowerStatus
@@ -255,6 +256,7 @@ func TestTheTVsPowerFollowsItsBroadcasts(t *testing.T) {
 // A cluster without the Television definition still runs the bus: the
 // node workload reads the missing collection as empty.
 func TestTheNodeWorkloadRunsWithoutTheTelevisionDefinition(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.noTelevisionDefinition = true
 	_, device := usbAdapter(cecRoom())

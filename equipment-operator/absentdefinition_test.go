@@ -21,6 +21,7 @@ func (a *cecAPI) defineTelevisions() {
 // that kind at its start and then from its store. The passes that the
 // CECBus events wake send no more lists of it.
 func TestTheNodeListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		path string

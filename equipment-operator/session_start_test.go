@@ -43,6 +43,7 @@ func (d *staleDriver) State() equipment.State {
 // A unit built by hand around a stale driver, with no status writer,
 // so nothing else reads the driver while the test swaps it in.
 func TestALineDuringTheSessionStartReachesTheSession(t *testing.T) {
+	t.Parallel()
 	amp := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
 	api := startFakeAPI(t)

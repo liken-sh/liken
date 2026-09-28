@@ -11,6 +11,7 @@ import (
 // bound, and true once every one has stopped. A context with no group
 // runs the work anyway.
 func TestAwaitWorkAnswersWhetherTheWorkStopped(t *testing.T) {
+	t.Parallel()
 	var group sync.WaitGroup
 	ctx := withWork(context.Background(), &group)
 	release := make(chan struct{})

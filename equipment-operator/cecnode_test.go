@@ -58,6 +58,7 @@ func controlBus(name string, adapters ...CECBusAdapter) CECBus {
 }
 
 func TestANewAdapterMakesABusInListen(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := usbAdapter(cecRoom())
 
@@ -75,6 +76,7 @@ func TestANewAdapterMakesABusInListen(t *testing.T) {
 }
 
 func TestAListeningAdapterReportsWhatItHears(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	_, device := usbAdapter(wire)
@@ -95,6 +97,7 @@ func TestAListeningAdapterReportsWhatItHears(t *testing.T) {
 }
 
 func TestAListeningAdapterWithoutCapNetAdminIsRefused(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := cecRoom().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress})
 
@@ -105,6 +108,7 @@ func TestAListeningAdapterWithoutCapNetAdminIsRefused(t *testing.T) {
 }
 
 func TestAPersonsBusTakesOverFromTheDiscoveredOne(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := usbAdapter(cecRoom())
 	startNode(t, api, "node-1", device)
@@ -117,6 +121,7 @@ func TestAPersonsBusTakesOverFromTheDiscoveredOne(t *testing.T) {
 }
 
 func TestABusOfTheMachinesNameThatNamesAnotherMachineIsLeftAlone(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
 	_, device := usbAdapter(cecRoom())
@@ -136,6 +141,7 @@ func TestABusOfTheMachinesNameThatNamesAnotherMachineIsLeftAlone(t *testing.T) {
 
 // A machine that a bus stops naming removes its entry from that bus.
 func TestAMachineThatLeavesABusRemovesItsEntry(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := usbAdapter(cecRoom())
 	api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
@@ -153,6 +159,7 @@ func TestAMachineThatLeavesABusRemovesItsEntry(t *testing.T) {
 // A USB adapter that is unplugged leaves the handle useless, so the
 // node workload ends and the kubelet restarts it.
 func TestTheNodeWorkloadEndsWhenTheAdapterLeaves(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	adapter, device := usbAdapter(cecRoom())
 	done := startNode(t, api, "node-1", device)
@@ -208,6 +215,7 @@ func TestFindAdapterFailsWithNoNode(t *testing.T) {
 }
 
 func TestTheOSDNameIsTheBusNameCutToFourteenBytes(t *testing.T) {
+	t.Parallel()
 	mustMatch(t, osdName("den"), "den")
 	mustMatch(t, osdName("a-very-long-room-name"), "a-very-long-ro")
 }
@@ -257,6 +265,7 @@ func TestServeCECNamesAnAdapterItCannotOpen(t *testing.T) {
 // workload cannot settle, so it follows the first by name and reports
 // to that bus alone.
 func TestTheAdapterFollowsTheFirstOfTwoPersonsBuses(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	for _, name := range []string{"study", "den"} {
 		api.putBus(CECBus{Metadata: ObjectMeta{Name: name}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
@@ -274,6 +283,7 @@ func TestTheAdapterFollowsTheFirstOfTwoPersonsBuses(t *testing.T) {
 // An adapter whose driver has no monitor-all mode listens to the
 // broadcasts, and its entry says so.
 func TestAnAdapterWithoutMonitorAllHearsBroadcasts(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := cecRoom().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress, Monitor: true, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
 
@@ -284,6 +294,7 @@ func TestAnAdapterWithoutMonitorAllHearsBroadcasts(t *testing.T) {
 }
 
 func TestTheNodeWorkloadStopsWhereItCannotStart(t *testing.T) {
+	t.Parallel()
 	t.Run("an adapter that left before the start", func(t *testing.T) {
 		adapter, device := usbAdapter(cecRoom())
 		adapter.Unplug()
@@ -310,6 +321,7 @@ func TestTheNodeWorkloadStopsWhereItCannotStart(t *testing.T) {
 // An API server that refuses the list and the entry for a while delays
 // the report, and the report arrives once the server answers again.
 func TestTheEntryArrivesAfterTheAPIServerRecovers(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	_, device := usbAdapter(wire)

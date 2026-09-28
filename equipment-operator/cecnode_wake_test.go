@@ -443,6 +443,7 @@ func TestTheActiveSourceReachesTheTelevision(t *testing.T) {
 }
 
 func TestAListeningAdapterReportsTheActiveSource(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	_, device := usbAdapter(wire)

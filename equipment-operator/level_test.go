@@ -12,6 +12,7 @@ import (
 )
 
 func TestStepsForLevelMapsTheBusScaleOntoTheDriver(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		level    int
@@ -40,6 +41,7 @@ func TestStepsForLevelMapsTheBusScaleOntoTheDriver(t *testing.T) {
 }
 
 func TestLevelForStepsMapsTheDriverBackOntoTheBus(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		steps    int
@@ -70,6 +72,7 @@ func TestLevelForStepsMapsTheDriverBackOntoTheBus(t *testing.T) {
 // reports back maps to the same steps the operator sent, so an echo is
 // not read as a second change.
 func TestTheLevelMappingReachesAFixedPointInOneStep(t *testing.T) {
+	t.Parallel()
 	limits := []struct {
 		name     string
 		maxSteps int
@@ -95,6 +98,7 @@ func TestTheLevelMappingReachesAFixedPointInOneStep(t *testing.T) {
 }
 
 func TestParseVolumeStateReadsThePayloadOnTheVolumeTopic(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		payload string
@@ -116,6 +120,7 @@ func TestParseVolumeStateReadsThePayloadOnTheVolumeTopic(t *testing.T) {
 }
 
 func TestMarshalVolumeStateWritesTheClampedPayload(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		state volumeState
@@ -135,10 +140,12 @@ func TestMarshalVolumeStateWritesTheClampedPayload(t *testing.T) {
 }
 
 func TestTheOwnerTopicSitsUnderTheVolumeTopic(t *testing.T) {
+	t.Parallel()
 	mustMatch(t, ownerTopic("liken/player/den/volume"), "liken/player/den/volume/owner")
 }
 
 func TestTheOwnerMarkNamesTheReceiverThatHoldsTheSession(t *testing.T) {
+	t.Parallel()
 	mark, err := ownerMark("den")
 	mustSucceed(t, err)
 	mustMatch(t, string(mark), `{"owner":"receiver/den"}`)
@@ -151,6 +158,7 @@ func TestTheOwnerMarkNamesTheReceiverThatHoldsTheSession(t *testing.T) {
 // The ceiling comes from the spec alone, because a driver's own volume
 // limit line moves while the room plays.
 func TestCeilingStepsTakesTheDeclaredCeilingAlone(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		rule ReceiverVolume
@@ -171,6 +179,7 @@ func TestCeilingStepsTakesTheDeclaredCeilingAlone(t *testing.T) {
 
 // An absent step is one whole unit of the driver's scale.
 func TestPressStepsTakesTheDeclaredStep(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		rule       ReceiverVolume
@@ -193,5 +202,6 @@ func TestPressStepsTakesTheDeclaredStep(t *testing.T) {
 
 // A figure the scale cannot express reads as no steps.
 func TestStepsFromScaleOnAnImpossibleResolution(t *testing.T) {
+	t.Parallel()
 	mustMatch(t, stepsFromScale(72, 0), 0)
 }

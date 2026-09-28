@@ -13,6 +13,7 @@ import (
 // had its three sends is held back and named as not confirmed, and the
 // fields beside it still go.
 func TestTheSendBudgetHoldsBackAFieldAfterThreeSends(t *testing.T) {
+	t.Parallel()
 	budget := newSendBudget()
 	led, buttons := true, false
 	onlyLED := wiim.Settings{Device: wiim.DeviceSettings{LED: &led}}
@@ -31,6 +32,7 @@ func TestTheSendBudgetHoldsBackAFieldAfterThreeSends(t *testing.T) {
 // person declares another value. A pass that sends the same pending
 // field again keeps the count.
 func TestTheSendBudgetStartsACountAgainWhenItsFieldChanges(t *testing.T) {
+	t.Parallel()
 	on, off := true, false
 	ledOn := wiim.Settings{Device: wiim.DeviceSettings{LED: &on}}
 	ledOff := wiim.Settings{Device: wiim.DeviceSettings{LED: &off}}

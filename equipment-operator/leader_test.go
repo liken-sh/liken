@@ -150,6 +150,7 @@ func awaitStart(t *testing.T, started <-chan struct{}) {
 // releases it only after act has returned, so no write of the operator
 // lands once another copy can lead. A shutdown is not a loss.
 func TestTheLeaseIsReleasedOnlyAfterTheOperatorStops(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	leader := newCandidate(t, server, "equipment-operator-a")
 	holderWhileActing := ""
@@ -173,6 +174,7 @@ func TestTheLeaseIsReleasedOnlyAfterTheOperatorStops(t *testing.T) {
 // with a conflict. The shutdown still leaves the Lease released, so a
 // waiting copy does not wait out the Lease's duration.
 func TestAStepDownReleasesTheLeaseAfterALateRenewal(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	leader := newCandidate(t, server, "equipment-operator-a")
 	started, finish := leading(t, leader, func() error {
@@ -246,6 +248,7 @@ func TestALeaderWhoseLeaseAnotherProcessTookExits(t *testing.T) {
 // A shutdown that arrives while the copy waits ends the wait with no
 // Lease, runs nothing, and leaves the holder alone.
 func TestAStopWhileWaitingLeavesTheHolderAlone(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	server.holdAs("equipment-operator-old")
 	waiting := newCandidate(t, server, "equipment-operator-new")
@@ -285,6 +288,7 @@ func TestASteadyLeaderRenewsWithNoRead(t *testing.T) {
 }
 
 func TestTheIdentityIsNewForEachProcess(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	first := newCandidate(t, server, "equipment-operator-a")
 	second := newCandidate(t, server, "equipment-operator-a")
@@ -379,6 +383,7 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 // other copy leads while a write can still land. The Lease expires
 // after the process exits.
 func TestAStillWritingOperatorKeepsTheLease(t *testing.T) {
+	t.Parallel()
 	server := newLeaseServer()
 	leader := newCandidate(t, server, "equipment-operator-a")
 	started, finish := leading(t, leader, func() error { return errStillWriting })

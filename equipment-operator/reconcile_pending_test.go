@@ -58,6 +58,7 @@ func settledFolded(operator *controller) bool {
 }
 
 func TestARestartAgainstASettledReceiverSendsNothing(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
 
@@ -68,6 +69,7 @@ func TestARestartAgainstASettledReceiverSendsNothing(t *testing.T) {
 }
 
 func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		reports []string
@@ -101,6 +103,7 @@ func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
 // A change a person makes at the receiver differs from the spec, so
 // the next pass sends the declared value back.
 func TestAChangeAtTheReceiverIsDrivenBack(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
 	mustSucceed(t, operator.pass(t.Context()))
@@ -147,6 +150,7 @@ func recordedBlocks(receiver Receiver) map[string]string {
 // so does an upgrade that finds the earlier operator's
 // status.settingsGeneration and no status.settledSettings.
 func TestAnUnreportedFieldIsSentOnlyForABlockTheStatusDoesNotRecord(t *testing.T) {
+	t.Parallel()
 	edited := func(receiver *Receiver) {
 		receiver.Status.SettledSettings = map[string]string{
 			denonSettingsBlock: digest(denon.Settings{}),
@@ -182,6 +186,7 @@ func TestAnUnreportedFieldIsSentOnlyForABlockTheStatusDoesNotRecord(t *testing.T
 }
 
 func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		store func(*Receiver)
@@ -215,6 +220,7 @@ func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
 // field sends that field once, and a spec change that leaves it alone
 // does not send it.
 func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	receiver := unreportedReceiver(fake)
 	receiver.Status.SettledSettings = recordedBlocks(receiver)
@@ -249,6 +255,7 @@ func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
 // of the declared value does, so a later change at the receiver is
 // driven back.
 func TestAFieldTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
 	arc := true
@@ -293,6 +300,7 @@ func TestAFieldTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 // A zone control the zone never reports at the declared value stops
 // after three sends the same way.
 func TestAZoneControlTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
 	volume := 40.0

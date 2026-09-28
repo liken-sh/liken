@@ -12,6 +12,7 @@ import (
 )
 
 func TestAShutdownKeepsTheOwnerMark(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	amp := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)

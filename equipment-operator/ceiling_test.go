@@ -34,6 +34,7 @@ func (d *fixedDriver) SameSoundMode(declared, reported string) bool {
 }
 
 func TestASessionFallsBackToTheReportedCeiling(t *testing.T) {
+	t.Parallel()
 	reported := &fixedDriver{state: equipment.State{
 		Reachable: equipment.ConditionTrue,
 		Zones: map[string]equipment.ZoneState{

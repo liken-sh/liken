@@ -41,6 +41,7 @@ func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver))
 }
 
 func TestARewiredUnitKeepsTheSessionThatStands(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		receiver func(*testing.T) Receiver

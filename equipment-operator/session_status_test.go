@@ -21,6 +21,7 @@ func inStatus(receiver Receiver) Receiver {
 
 // A session in either place starts on its input.
 func TestASessionInTheStatusOrTheSpecSelectsItsInput(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		place func(Receiver) Receiver
@@ -50,6 +51,7 @@ func TestASessionInTheStatusOrTheSpecSelectsItsInput(t *testing.T) {
 // operator that has moved to the status is not undone by the spec
 // session it has not cleared yet.
 func TestTheStatusSessionWinsOverTheSpecSession(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", fake.address()))
@@ -69,6 +71,7 @@ func TestTheStatusSessionWinsOverTheSpecSession(t *testing.T) {
 // A session that moves from spec.session to status.session unchanged is
 // the same session: it does not end, and it sends nothing.
 func TestASessionThatMovesToTheStatusIsNoChange(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	operator, log := loggedController(t, api, "127.0.0.1:1")
@@ -107,6 +110,7 @@ func statedStatusFields(t *testing.T, bodies [][]byte) []string {
 // The operator's status apply states no session, so the API server
 // leaves the session the media operator's field manager owns in place.
 func TestTheStatusApplyNeverStatesTheSession(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	api.setReceivers(inStatus(sessionedReceiver("theater", fake.address(), "GAME")))

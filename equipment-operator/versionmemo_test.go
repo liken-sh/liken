@@ -17,6 +17,7 @@ import (
 // copy of the API server's: a 404, a 409, or a write whose answer was
 // lost and may have landed.
 func TestTheMemoNotesWhatTheAPIServerAnswered(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name      string
 		answer    error
@@ -49,6 +50,7 @@ func TestTheMemoNotesWhatTheAPIServerAnswered(t *testing.T) {
 // An object the memo has not noted counts as current at any version,
 // and a nil memo remembers nothing and still sends the request.
 func TestAnUnnotedObjectIsCurrent(t *testing.T) {
+	t.Parallel()
 	var none *versionMemo
 	sent := false
 	if err := none.send("studio", func() (string, error) { sent = true; return "8", nil }); err != nil {
@@ -70,6 +72,7 @@ func TestAnUnnotedObjectIsCurrent(t *testing.T) {
 // this operator created a moment ago. A key noted as gone, and a key
 // the store holds, are not among them.
 func TestTheMemoAnswersTheNotedKeysTheStoreDoesNotHold(t *testing.T) {
+	t.Parallel()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	held := &unstructured.Unstructured{}
 	held.SetName("den")

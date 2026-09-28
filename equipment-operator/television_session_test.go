@@ -45,6 +45,7 @@ func denRoom(api *cecAPI, log *logBuffer) *roomTelevision {
 }
 
 func TestTheWakeReachesTheTelevisionThatListsTheDisplay(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	log := &logBuffer{}
 	api.showing(lounge(""), "acm-0001-receiver")
@@ -78,6 +79,7 @@ func TestTheWakeReachesTheTelevisionThatListsTheDisplay(t *testing.T) {
 // A wake writes nothing when no Television lists the input's Display,
 // or when the input names no Display.
 func TestAWakeThatWritesNothing(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		input    string
@@ -108,6 +110,7 @@ func TestAWakeThatWritesNothing(t *testing.T) {
 // again, and for a session a person slept or turned off before the
 // restart. Nothing wakes, and nothing goes to standby.
 func TestAStartingSessionAdoptsAndWakesNothing(t *testing.T) {
+	t.Parallel()
 	held := wokeAt(time.Now().Add(-time.Hour))
 	slept := *held
 	slept.Awake = false
@@ -151,6 +154,7 @@ func TestAStartingSessionAdoptsAndWakesNothing(t *testing.T) {
 // A session that starts and finds its session already in place writes
 // nothing.
 func TestAnAdoptedSessionThatStandsWritesNothing(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.showing(waking(wokeNow()), "acm-0001-receiver")
 
@@ -162,6 +166,7 @@ func TestAnAdoptedSessionThatStandsWritesNothing(t *testing.T) {
 // A session that starts on another Display takes the Player's session
 // off the TV that showed the old Display.
 func TestASessionOnAnotherDisplayLeavesTheOldTelevision(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.showing(waking(wokeNow()), "acm-0001-receiver")
 	api.showing(study(nil), "bnq-0002-monitor")
@@ -180,6 +185,7 @@ func TestASessionOnAnotherDisplayLeavesTheOldTelevision(t *testing.T) {
 
 // Of two Televisions on one bus, the one in charge gets the session.
 func TestTheWakeReachesTheTelevisionInCharge(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.showing(discoveredTV("den"), "acm-0001-receiver")
 	api.showing(lounge(""), "acm-0001-receiver")
@@ -196,6 +202,7 @@ func TestTheWakeReachesTheTelevisionInCharge(t *testing.T) {
 // A sleep marks the session asleep and keeps its wake, once, and leaves
 // another Player's session alone.
 func TestASleepReachesOnlyThePlayersSession(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	held := wokeNow()
 	api.showing(waking(held), "acm-0001-receiver")
@@ -216,6 +223,7 @@ func TestASleepReachesOnlyThePlayersSession(t *testing.T) {
 
 // A write the API server refuses is one line with the server's words.
 func TestARefusedSessionWriteIsLogged(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	log := &logBuffer{}
 	api.showing(lounge(""), "acm-0001-receiver")
@@ -233,6 +241,7 @@ func TestARefusedSessionWriteIsLogged(t *testing.T) {
 // no line, so a room with no CEC is quiet, and a Television list the
 // API server refuses writes nothing either.
 func TestARoomWithNoTelevisionIsQuiet(t *testing.T) {
+	t.Parallel()
 	for _, refused := range []bool{false, true} {
 		api := startCECAPI(t)
 		api.showing(waking(wokeNow()), "acm-0001-receiver")

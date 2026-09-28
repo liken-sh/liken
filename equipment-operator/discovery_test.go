@@ -93,6 +93,7 @@ func discoveredReceiver(name, uuid string) Receiver {
 }
 
 func TestDiscoveryCreatesUnclaimedAndDefersToAPerson(t *testing.T) {
+	t.Parallel()
 	api, client := startDiscoveryAPI(t)
 	api.list = receiversWith(wiimReceiver("studio", firstUUID))
 
@@ -113,6 +114,7 @@ func TestDiscoveryCreatesUnclaimedAndDefersToAPerson(t *testing.T) {
 }
 
 func TestDiscoveryAddressNormalizesTheIdentity(t *testing.T) {
+	t.Parallel()
 	held := newDiscovery(nil, func() {})
 	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
 
@@ -122,6 +124,7 @@ func TestDiscoveryAddressNormalizesTheIdentity(t *testing.T) {
 }
 
 func TestDiscoveredNameIsTheLowercasedIdentity(t *testing.T) {
+	t.Parallel()
 	mustMatch(t, discoveredName("FF98F2F78136CE45A780D8A1"), "ff98f2f78136ce45a780d8a1")
 }
 
@@ -174,6 +177,7 @@ func firstSpellOf(uuid string) string {
 // Discovery writes one line for each Receiver it creates or deletes,
 // and none for an amp whose Receiver stands.
 func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		list  []Receiver
@@ -240,6 +244,7 @@ func searchClock() func() time.Time {
 // count starts with the operator, so a start that has not heard from the
 // amp yet is no evidence either way.
 func TestDiscoveryDeletesItsOwnOnlyAfterTheAmpMissesEnoughSearches(t *testing.T) {
+	t.Parallel()
 	amp := []wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}}
 	cases := []struct {
 		name     string
@@ -279,6 +284,7 @@ func TestDiscoveryDeletesItsOwnOnlyAfterTheAmpMissesEnoughSearches(t *testing.T)
 // A person's Receiver that names the amp replaces the operator's copy at
 // once, whatever the searches have found.
 func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		searches [][]wiim.Device
@@ -311,6 +317,7 @@ func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
 // One missed search is multicast, not an amp that left, so the address
 // stands through it.
 func TestDiscoveryKeepsTheAddressThroughAMissedSearch(t *testing.T) {
+	t.Parallel()
 	held := newDiscovery(nil, func() {})
 	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
 	held.store(nil)

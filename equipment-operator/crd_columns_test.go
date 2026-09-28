@@ -29,6 +29,7 @@ func conditionReason(kind string) string {
 const age = ".metadata.creationTimestamp"
 
 func TestThePrinterColumns(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		path string
 		want []column

@@ -20,6 +20,7 @@ func cecBus(spec map[string]any) map[string]any {
 }
 
 func TestTheCECBusDefinitionValidatesExamples(t *testing.T) {
+	t.Parallel()
 	adapter := func(fields ...string) map[string]any {
 		entry := map[string]any{}
 		for index := 0; index+1 < len(fields); index += 2 {
@@ -52,6 +53,7 @@ func TestTheCECBusDefinitionValidatesExamples(t *testing.T) {
 }
 
 func TestTheCECBusDefinitionIdentity(t *testing.T) {
+	t.Parallel()
 	crd := loadCRDFrom(t, cecBusesCRD)
 	version := crd.Spec.Versions[0]
 	cases := []struct{ name, got, want string }{
@@ -75,6 +77,7 @@ func TestTheCECBusDefinitionIdentity(t *testing.T) {
 // list is a map keyed by machine. Without the key, each node's apply
 // would replace the whole list and remove the other nodes' entries.
 func TestTheAdapterEntriesAreAMapKeyedByMachine(t *testing.T) {
+	t.Parallel()
 	status := loadCRDFrom(t, cecBusesCRD).Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"]
 	adapters := status.Properties["adapters"]
 
@@ -84,6 +87,7 @@ func TestTheAdapterEntriesAreAMapKeyedByMachine(t *testing.T) {
 }
 
 func TestTheExampleCECBusValidates(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("testdata/cecbus.yaml")
 	mustSucceed(t, err)
 	example := map[string]any{}
@@ -97,6 +101,7 @@ func TestTheExampleCECBusValidates(t *testing.T) {
 // A status as the writers write it passes the schema, so no apply is
 // refused for its shape.
 func TestAWrittenStatusValidates(t *testing.T) {
+	t.Parallel()
 	bus := cecBus(map[string]any{"mode": "Control", "adapters": []any{map[string]any{"machine": "node-1", "display": "acm-0001-receiver"}}})
 	bus["status"] = map[string]any{
 		"adapters": []any{map[string]any{

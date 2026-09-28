@@ -28,6 +28,7 @@ func withSession(session map[string]any) map[string]any {
 }
 
 func TestTheTelevisionDefinitionValidatesExamples(t *testing.T) {
+	t.Parallel()
 	onBus := map[string]any{"bus": "den"}
 	cases := []struct {
 		name    string
@@ -62,6 +63,7 @@ func TestTheTelevisionDefinitionValidatesExamples(t *testing.T) {
 }
 
 func TestTheTelevisionDefinitionIdentity(t *testing.T) {
+	t.Parallel()
 	crd := loadCRDFrom(t, televisionsCRD)
 	version := crd.Spec.Versions[0]
 	cases := []struct{ name, got, want string }{
@@ -85,6 +87,7 @@ func TestTheTelevisionDefinitionIdentity(t *testing.T) {
 // the node workload owns PowerApplied. Server-side apply keeps each
 // writer's entry only when the list is a map keyed by type.
 func TestTheTelevisionConditionsAreAMapKeyedByType(t *testing.T) {
+	t.Parallel()
 	status := loadCRDFrom(t, televisionsCRD).Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"]
 	conditions := status.Properties["conditions"]
 
@@ -94,6 +97,7 @@ func TestTheTelevisionConditionsAreAMapKeyedByType(t *testing.T) {
 }
 
 func TestTheExampleTelevisionValidates(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("testdata/television.yaml")
 	mustSucceed(t, err)
 	example := map[string]any{}
@@ -107,6 +111,7 @@ func TestTheExampleTelevisionValidates(t *testing.T) {
 // A status as both writers write it passes the schema, so no apply is
 // refused for its shape.
 func TestAWrittenTelevisionStatusValidates(t *testing.T) {
+	t.Parallel()
 	tv := televisionObject(map[string]any{"cec": map[string]any{"bus": "den"}, "power": "On"})
 	tv["status"] = map[string]any{
 		"cec": map[string]any{

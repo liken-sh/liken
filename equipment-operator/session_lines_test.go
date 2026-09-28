@@ -14,6 +14,7 @@ import (
 )
 
 func TestAPlayThatStartsIsALineForThePowerAndOneForTheInput(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.soundModes = map[string]string{"GAME": "STEREO"}
 
@@ -29,6 +30,7 @@ func TestAPlayThatStartsIsALineForThePowerAndOneForTheInput(t *testing.T) {
 // what the receiver reported. The position the session puts back on
 // the topic and a knob turn add no line.
 func TestEachPressIsOneLine(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
 	first := pressFrom(t, h, broker, 72, 5, "MV51")
@@ -47,6 +49,7 @@ func TestEachPressIsOneLine(t *testing.T) {
 // then reads the top of the scale, so the press reaches the session
 // only when the topic lags the receiver, and the test hands it over.
 func TestAPressThatMovesNothingSaysWhy(t *testing.T) {
+	t.Parallel()
 	h, _, held := listeningWith(t, ReceiverVolume{Max: 50}, 100)
 
 	held.press(volumeState{Level: 99}, volumeState{Level: 100})
@@ -57,6 +60,7 @@ func TestAPressThatMovesNothingSaysWhy(t *testing.T) {
 }
 
 func TestAToggleOnAReceiverThatIsOnIsOneLine(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
 	h.powerOn(t)
@@ -72,6 +76,7 @@ func TestAToggleOnAReceiverThatIsOnIsOneLine(t *testing.T) {
 }
 
 func TestAnEnsureIsOneLine(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		start func(*testing.T) (*sessionHarness, *session)
@@ -104,6 +109,7 @@ func TestAnEnsureIsOneLine(t *testing.T) {
 }
 
 func TestAnEnsureForASessionWithNoInputSaysSo(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	held := h.beginIdle(t, "")
 
@@ -117,6 +123,7 @@ func TestAnEnsureForASessionWithNoInputSaysSo(t *testing.T) {
 
 // Each flag that runs the one-shots names itself in their lines.
 func TestTheOneShotsNameTheFlagThatRanThem(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		played, woke bool
 		want         string

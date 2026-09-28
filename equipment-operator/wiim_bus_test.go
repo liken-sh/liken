@@ -10,6 +10,7 @@ import (
 )
 
 func TestAWiimBusSettingReachesTheDeviceAndTheSpec(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 	api, apiClient := startDiscoveryAPI(t)
@@ -24,6 +25,7 @@ func TestAWiimBusSettingReachesTheDeviceAndTheSpec(t *testing.T) {
 }
 
 func TestAWiimBusCommandReachesTheDevice(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 	api, apiClient := startDiscoveryAPI(t)
@@ -41,6 +43,7 @@ func TestAWiimBusCommandReachesTheDevice(t *testing.T) {
 
 // A settings message the device refuses writes nothing back to the spec.
 func TestARefusedWiimSettingIsNotRecorded(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 	api, apiClient := startDiscoveryAPI(t)

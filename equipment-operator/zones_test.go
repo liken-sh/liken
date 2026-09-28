@@ -26,6 +26,7 @@ func TestZoneSpecConfirmedBySkipsAnUnreportedControl(t *testing.T) {
 // A declared control reported at another value is not confirmed, so the
 // operator sends it again.
 func TestZoneSpecConfirmedByRejectsADifferentReportedValue(t *testing.T) {
+	t.Parallel()
 	volume := 40.0
 	spec := ZoneSpec{Volume: &volume}
 	observed := equipment.ZoneState{Volume: 50}
@@ -51,6 +52,7 @@ func TestZoneSpecConfirmedByAcceptsAnEqualReportedValue(t *testing.T) {
 // A different reported power is not confirmed: a declared on is not met
 // by a standby report, whichever word the receiver used for standby.
 func TestZoneSpecConfirmedByRejectsADifferentPower(t *testing.T) {
+	t.Parallel()
 	spec := ZoneSpec{Power: equipment.PowerOn}
 	for _, power := range []equipment.Power{equipment.PowerStandby, equipment.PowerOff} {
 		if spec.ConfirmedBy(equipment.ZoneState{Power: power}, 2) {
@@ -61,6 +63,7 @@ func TestZoneSpecConfirmedByRejectsADifferentPower(t *testing.T) {
 
 // A different reported input is not confirmed.
 func TestZoneSpecConfirmedByRejectsADifferentInput(t *testing.T) {
+	t.Parallel()
 	spec := ZoneSpec{Input: "CD"}
 	if spec.ConfirmedBy(equipment.ZoneState{Input: "TV"}, 2) {
 		t.Error("a declared input was confirmed by another input")
@@ -86,6 +89,7 @@ func TestZoneSpecConfirmedByRejectsADifferentSleep(t *testing.T) {
 // A declared control whose observed counterpart is empty is skipped, so
 // a power that has not reached the report does not fail the block.
 func TestZoneSpecConfirmedBySkipsAnUnreportedPower(t *testing.T) {
+	t.Parallel()
 	spec := ZoneSpec{Power: equipment.PowerOn}
 	if !spec.ConfirmedBy(equipment.ZoneState{}, 2) {
 		t.Error("a declared power the receiver has not reported did not confirm")
@@ -99,6 +103,7 @@ func TestZoneSpecConfirmedBySkipsAnUnreportedPower(t *testing.T) {
 // taken for confirmed while the receiver holds another value. Each
 // field pairs with the ZoneState field of the same name.
 func TestZoneSpecConfirmedByRejectsADifferenceInAnyDeclaredField(t *testing.T) {
+	t.Parallel()
 	specType := reflect.TypeOf(ZoneSpec{})
 	stateType := reflect.TypeOf(equipment.ZoneState{})
 	for i := 0; i < specType.NumField(); i++ {

@@ -65,6 +65,7 @@ func listeningOnDen(t *testing.T) (*logBuffer, *cectest.Bus) {
 }
 
 func TestTheNodeLogsEachMessageAPersonNotices(t *testing.T) {
+	t.Parallel()
 	const tv = "the TV (logical 0, 0.0.0.0, name not known yet)"
 	cases := []struct {
 		name     string

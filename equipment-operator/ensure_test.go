@@ -6,6 +6,8 @@ package main
 // it. The harness is in session_test.go.
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -27,6 +29,7 @@ func driftedWhileListening(t *testing.T) (*sessionHarness, *session) {
 
 // A press after the room drifted off the player's input brings it back.
 func TestAnEnsureSelectsTheInputAfterADrift(t *testing.T) {
+	t.Parallel()
 	h, held := driftedWhileListening(t)
 
 	held.ensureInput()
@@ -38,6 +41,7 @@ func TestAnEnsureSelectsTheInputAfterADrift(t *testing.T) {
 // A press while the room already shows the player's input sends nothing
 // to the receiver: the check is what keeps every press off the wire.
 func TestAnEnsureOnTheRightInputSendsNothing(t *testing.T) {
+	t.Parallel()
 	h, held := driftedWhileListening(t)
 	held.ensureInput()
 	h.equipment.waitForCommands(t, "SIGAME")
@@ -51,6 +55,7 @@ func TestAnEnsureOnTheRightInputSendsNothing(t *testing.T) {
 // A press on a dark room turns nothing on. The power key is the one that
 // wakes the equipment, so the input ensure never powers a room on.
 func TestAnEnsureInStandbySendsNothing(t *testing.T) {
+	t.Parallel()
 	h, _, held := idleListening(t)
 
 	held.ensureInput()
@@ -61,6 +66,7 @@ func TestAnEnsureInStandbySendsNothing(t *testing.T) {
 // The ask travels in player terms on the receiver's commands topic, and
 // the receiver resolves the input from the session it already holds.
 func TestTheEnsureCommandReachesTheStandingSession(t *testing.T) {
+	t.Parallel()
 	h, held := driftedWhileListening(t)
 	unit := &receiverUnit{session: held, log: h.lines}
 
@@ -72,10 +78,31 @@ func TestTheEnsureCommandReachesTheStandingSession(t *testing.T) {
 // A receiver with no session has no player listening, so the ask is
 // dropped rather than sent to a room nobody asked for.
 func TestTheEnsureCommandWithNoSessionSendsNothing(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	unit := &receiverUnit{log: h.lines}
 
 	unit.handleCommand([]byte(`{"command":"input.ensure"}`))
 
 	h.refuseCommands(t, quietPeriod, "SIGAME", denon.PowerOnCommand)
+}
+
+// The ensure compares the room with what the receiver reported, so it
+// waits for the survey. A receiver that never answers gives it nothing
+// to compare, and the ensure ends with its session, having sent and
+// written nothing.
+func TestAnEnsureTheReceiverNeverAnsweredEndsWithTheSession(t *testing.T) {
+	t.Parallel()
+	var group sync.WaitGroup
+	ctx, cancel := context.WithCancel(withWork(t.Context(), &group))
+	log := &logBuffer{}
+	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
+	held := startSession(ctx, "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(log, "theater"), startFakeBrokerServer(t).address(),
+		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
+
+	held.ensureInput()
+	cancel()
+
+	mustMatch(t, awaitWork(&group, testTimeout), true)
+	mustMatch(t, len(linesWith(log, "input.ensure")), 0)
 }

@@ -48,6 +48,7 @@ func TestAThrottledTelevisionListStillAdoptsTheSession(t *testing.T) {
 // as the adoption the first pass decided on: the pass that retries it
 // is live, and it still wakes nothing.
 func TestARefusedSessionWriteIsWrittenOnALaterPass(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	operator := sessionOperator(t, api)
 	api.mutex.Lock()

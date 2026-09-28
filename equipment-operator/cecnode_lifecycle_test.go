@@ -70,6 +70,7 @@ func TestTheEntryIsWrittenOnASteadyInterval(t *testing.T) {
 // so, because a claim the kernel kept would leave the adapter answering
 // the TV for a machine no pod serves.
 func TestAStoppedNodeReleasesTheAdapter(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	adapter, cancel, done := joinedNode(t, api, cecRoom())
 
@@ -87,6 +88,7 @@ func TestAStoppedNodeReleasesTheAdapter(t *testing.T) {
 }
 
 func TestAnUnpluggedAdapterLeavesAStoppedEntry(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	adapter, _, done := joinedNode(t, api, cecRoom())
 
@@ -116,6 +118,7 @@ func waitForExit(t *testing.T, done <-chan error) error {
 // When no bus names the machine and the node workload cannot make one,
 // the adapter leaves the bus it was on and its entry goes.
 func TestAnAdapterNoBusNamesLeavesTheBus(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	adapter, _, _ := joinedNode(t, api, cecRoom())
 
@@ -131,6 +134,7 @@ func TestAnAdapterNoBusNamesLeavesTheBus(t *testing.T) {
 // A Display that cannot be read is not a new address: the adapter
 // keeps the address it announces, stays joined, and says why.
 func TestAFailedDisplayReadKeepsTheAdapterJoined(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	adapter, _, _ := joinedNode(t, api, wire)
@@ -172,6 +176,7 @@ func TestAFailedJoinIsTriedAgain(t *testing.T) {
 }
 
 func TestTheRetryWaitGrowsToItsBound(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		last time.Duration
 		next time.Duration
@@ -192,6 +197,7 @@ func TestTheRetryWaitGrowsToItsBound(t *testing.T) {
 // the kernel completes the claim when the address arrives. The node
 // workload follows the kernel's event, joins, and answers the TV.
 func TestAClaimTheKernelCompletesLaterJoins(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	adapter, device := wire.Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress, Capabilities: cec.CapLogAddrs | cec.CapTransmit})

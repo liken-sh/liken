@@ -213,6 +213,7 @@ func (h *sessionHarness) refuseCommands(t *testing.T, within time.Duration, unwa
 }
 
 func TestTheSessionPowersOnThenSelectsTheInput(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 
 	h.begin(t, "GAME")
@@ -222,6 +223,7 @@ func TestTheSessionPowersOnThenSelectsTheInput(t *testing.T) {
 }
 
 func TestTheSessionSelectsTheInputOnAReceiverAlreadyOn(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.powerOn(t)
 
@@ -242,6 +244,7 @@ func handOnTheRemote(t *testing.T, equipment *fakeDenon, line string) {
 }
 
 func TestTheSessionSelectsTheInputOnce(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.begin(t, "GAME")
 	h.equipment.waitForCommands(t, "SIGAME")
@@ -253,6 +256,7 @@ func TestTheSessionSelectsTheInputOnce(t *testing.T) {
 }
 
 func TestTheSessionMarksItselfTheOwnerOfTheLevel(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 
 	h.begin(t, "GAME")
@@ -295,6 +299,7 @@ func waitForFrame(t *testing.T, frames <-chan []byte) []byte {
 }
 
 func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	mustSucceed(t, err)
 	t.Cleanup(func() { listener.Close() })
@@ -396,6 +401,7 @@ func pressFrom(t *testing.T, h *sessionHarness, broker *fakeBroker, from, by int
 // A held key arrives as one message per press, and each one moves the
 // receiver a single step from where it actually stands.
 func TestThreePressesMoveTheReceiverThreeSteps(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
 	first := pressFrom(t, h, broker, 72, 5, "MV51")
@@ -410,6 +416,7 @@ func TestThreePressesMoveTheReceiverThreeSteps(t *testing.T) {
 
 // A press down moves the receiver down by the step a person declared.
 func TestAPressDownMovesTheReceiverDownOneStep(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 0.5}, 72)
 
 	mustMatch(t, pressFrom(t, h, broker, 72, -5, "MV495"), volumeState{Level: 71})
@@ -417,6 +424,7 @@ func TestAPressDownMovesTheReceiverDownOneStep(t *testing.T) {
 
 // A step of two moves the receiver two units of its own scale.
 func TestAStepOfTwoMovesTheReceiverTwoUnits(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 2}, 72)
 
 	mustMatch(t, pressFrom(t, h, broker, 72, 5, "MV52"), volumeState{Level: 75})
@@ -425,6 +433,7 @@ func TestAStepOfTwoMovesTheReceiverTwoUnits(t *testing.T) {
 // Presses stop at the ceiling a person declared, and the topic then
 // carries the top of the bus scale.
 func TestPressesStopAtTheDeclaredCeiling(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 52, Step: 1}, 96)
 
 	mustMatch(t, pressFrom(t, h, broker, 96, 5, "MV51"), volumeState{Level: 98})
@@ -443,6 +452,7 @@ func TestPressesStopAtTheDeclaredCeiling(t *testing.T) {
 // the top of the scale, a press up moves nothing, and a press down still
 // steps.
 func TestAReceiverAboveTheCeilingStaysUntilAPressDown(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 45, Step: 1}, 100)
 
 	// The topic already reads the top of the scale, so a press up has
@@ -458,6 +468,7 @@ func TestAReceiverAboveTheCeilingStaysUntilAPressDown(t *testing.T) {
 // The limit a Denon reports wanders while the room is playing, so the
 // session reads none of it and a new figure moves nothing.
 func TestAWanderingReportedLimitMovesNothing(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
 	h.equipment.driftLimit(141)
@@ -469,6 +480,7 @@ func TestAWanderingReportedLimitMovesNothing(t *testing.T) {
 }
 
 func TestAKnobTurnPublishesTheLevelBack(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listening(t)
 
 	h.equipment.turnKnob(120)
@@ -479,6 +491,7 @@ func TestAKnobTurnPublishesTheLevelBack(t *testing.T) {
 }
 
 func TestAMuteOnTheEquipmentPublishesBack(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listening(t)
 
 	h.equipment.setMute(true)
@@ -492,6 +505,7 @@ func TestAMuteOnTheEquipmentPublishesBack(t *testing.T) {
 // The position the session publishes comes back to it from the broker,
 // and moves neither the receiver nor the topic again.
 func TestThePositionTheSessionPublishesMovesNothingWhenItComesBack(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
 	position := pressFrom(t, h, broker, 72, 5, "MV51")
@@ -504,6 +518,7 @@ func TestThePositionTheSessionPublishesMovesNothingWhenItComesBack(t *testing.T)
 }
 
 func TestStoppingTheSessionClearsTheOwnerMarkAndLeavesThePowerAlone(t *testing.T) {
+	t.Parallel()
 	h, broker, held := listening(t)
 	h.drainCommands()
 
@@ -518,6 +533,7 @@ func TestStoppingTheSessionClearsTheOwnerMarkAndLeavesThePowerAlone(t *testing.T
 // A message the session cannot read leaves the receiver alone, so
 // another program's traffic on the broker never moves the room's level.
 func TestAMessageTheSessionCannotReadMovesNothing(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		topic   string
@@ -543,6 +559,7 @@ func TestAMessageTheSessionCannotReadMovesNothing(t *testing.T) {
 // must not push the equipment there when the broker delivers its own
 // message back to it.
 func TestTheSessionsOwnWriteBackDoesNotMoveTheEquipment(t *testing.T) {
+	t.Parallel()
 	const knob, level, wrong = 119, 86, 120
 	h, broker, _ := listening(t)
 
@@ -568,6 +585,7 @@ func stepsForLevelOrZero(level int) int {
 // scale, so the session publishes where the receiver stands and applies
 // nothing until the broker delivers that message back to it.
 func TestASessionAdoptsTheReceiverBeforeItAppliesAnyLevel(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.begin(t, "GAME")
 	broker := h.brokers.waitForSession(t)
@@ -611,6 +629,7 @@ func refuseVolumeSets(t *testing.T, equipment *fakeDenon, within time.Duration) 
 // the adopt publishes. Its return adopts the session, so the echo of
 // the first position on the topic is enough whichever path wrote it.
 func TestAPositionReportedBeforeTheAdoptIsTheAdoptLine(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	held := h.begin(t, "GAME")
 	broker := h.brokers.waitForSession(t)
@@ -627,6 +646,7 @@ func TestAPositionReportedBeforeTheAdoptIsTheAdoptLine(t *testing.T) {
 // A level published after the adopt is a press, and it moves the
 // receiver.
 func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listening(t)
 
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
@@ -639,6 +659,7 @@ func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
 // as the message states, and the session says nothing back because the
 // topic already carries what the equipment now reports.
 func TestAPressThatMutesTheRoomMutesTheReceiver(t *testing.T) {
+	t.Parallel()
 	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
 	broker.push(testVolumeTopic, []byte(`{"level":72,"muted":true}`))
@@ -651,6 +672,7 @@ func TestAPressThatMutesTheRoomMutesTheReceiver(t *testing.T) {
 // A press is bounded at both ends of the scale, and a receiver a hand
 // left above the ceiling is not dragged back down by a press up.
 func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
+	t.Parallel()
 	press := func(rule ReceiverVolume, volume int, up bool) (int, bool) {
 		held := &session{
 			scale:  func() ReceiverVolume { return rule },
@@ -690,6 +712,7 @@ func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
 // A session can start before anyone has declared a ceiling, so the
 // adopt waits for one instead of giving up and ignoring every press.
 func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarnessWith(t, ReceiverVolume{})
 	held := h.begin(t, "GAME")
 	broker := h.brokers.waitForSession(t)
@@ -713,6 +736,7 @@ func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
 // selects the input, with its sound mode, when the remote's power button
 // toggles.
 func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
 	h.soundModes = map[string]string{"GAME": "STEREO"}
@@ -731,6 +755,7 @@ func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
 // A receiver that is already on goes to standby on a toggle, and selects
 // no input.
 func TestAToggleOnAReceiverAlreadyOnGoesToStandby(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
 	h.powerOn(t)
@@ -748,6 +773,7 @@ func TestAToggleOnAReceiverAlreadyOnGoesToStandby(t *testing.T) {
 // A second toggle on the receiver the first put to standby turns it back
 // on and selects the input again.
 func TestASecondTogglePowersTheReceiverBackOn(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
 	h.powerOn(t)
@@ -768,6 +794,7 @@ func TestASecondTogglePowersTheReceiverBackOn(t *testing.T) {
 // A session with no power topic subscribes to nothing and reads nothing
 // as a toggle.
 func TestASessionWithNoPowerTopicIgnoresAToggle(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.beginIdle(t, "GAME")
 	broker := h.brokers.waitForSession(t)
@@ -783,6 +810,7 @@ func TestASessionWithNoPowerTopicIgnoresAToggle(t *testing.T) {
 // alone, so another program's traffic on the power topic never moves the
 // room's power.
 func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		payload string
@@ -797,6 +825,14 @@ func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
 			h.powerTopic = testPowerTopic
 			h.beginIdle(t, "GAME")
 			broker := h.brokers.waitForSession(t)
+			// The fake broker writes CONNACK before it reads a
+			// SUBSCRIBE, so a push after both subscriptions follows the
+			// CONNACK. A push before the CONNACK breaks the client's
+			// read of it, the bus connects again, and the payload
+			// reaches no session, so the test would pass with nothing
+			// read.
+			subscribed := map[string]bool{waitForString(t, broker.subs): true, waitForString(t, broker.subs): true}
+			mustMatch(t, subscribed[testPowerTopic], true)
 
 			broker.push(testPowerTopic, []byte(one.payload))
 
@@ -808,6 +844,7 @@ func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
 // A toggle writes the power it settled on back to the spec, so the next
 // reconcile sees no change to re-assert.
 func TestAToggleWritesTheSpecsPower(t *testing.T) {
+	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{Metadata: ObjectMeta{Name: "theater"}},
 	}}

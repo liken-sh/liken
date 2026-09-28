@@ -12,6 +12,7 @@ import (
 )
 
 func TestRemainingLengthRoundTrips(t *testing.T) {
+	t.Parallel()
 	// The boundaries the variable-byte encoding turns on: the last
 	// value each byte count can hold, and the first that needs one
 	// more byte.
@@ -46,6 +47,7 @@ func TestRemainingLengthRoundTrips(t *testing.T) {
 // A stream that never ends its length is a lost frame, not a large
 // packet, so the decoder refuses it after four bytes.
 func TestRemainingLengthRefusesAFifthByte(t *testing.T) {
+	t.Parallel()
 	runaway := []byte{0x80, 0x80, 0x80, 0x80, 0x01}
 	if _, err := decodeRemainingLength(bufio.NewReader(bytes.NewReader(runaway))); err == nil {
 		t.Fatal("a length past four bytes produced no error")
@@ -53,6 +55,7 @@ func TestRemainingLengthRefusesAFifthByte(t *testing.T) {
 }
 
 func TestEncodeConnectWithNoWill(t *testing.T) {
+	t.Parallel()
 	packet := encodeConnect("op", 30, nil)
 
 	want := []byte{
@@ -72,6 +75,7 @@ func TestEncodeConnectWithNoWill(t *testing.T) {
 // the will is retained, and the topic and payload in the payload after
 // the client identifier.
 func TestEncodeConnectCarriesARetainedWill(t *testing.T) {
+	t.Parallel()
 	packet := encodeConnect("op", 30, &busWill{
 		Topic:    "a/b",
 		Payload:  []byte("offline"),
@@ -91,6 +95,7 @@ func TestEncodeConnectCarriesARetainedWill(t *testing.T) {
 }
 
 func TestEncodePublishSetsTheRetainBit(t *testing.T) {
+	t.Parallel()
 	plain := encodePublish("a/b", []byte("hi"), false)
 	if plain[0] != mqttPublish {
 		t.Errorf("first byte = %#x, want %#x", plain[0], mqttPublish)
@@ -108,6 +113,7 @@ func TestEncodePublishSetsTheRetainBit(t *testing.T) {
 }
 
 func TestEncodeSubscribeNamesOneFilterAtQoSZero(t *testing.T) {
+	t.Parallel()
 	packet := encodeSubscribe(1, "a/+/c")
 
 	want := []byte{
@@ -122,6 +128,7 @@ func TestEncodeSubscribeNamesOneFilterAtQoSZero(t *testing.T) {
 }
 
 func TestEncodePingreqIsTwoBytes(t *testing.T) {
+	t.Parallel()
 	if want := []byte{mqttPingreq, 0x00}; !bytes.Equal(encodePingreq(), want) {
 		t.Errorf("pingreq = %v, want %v", encodePingreq(), want)
 	}
@@ -130,6 +137,7 @@ func TestEncodePingreqIsTwoBytes(t *testing.T) {
 // A PUBLISH encoded by this codec reads back through readPacket and
 // parsePublish as the topic and payload it went in as.
 func TestReadPacketReadsBackAPublish(t *testing.T) {
+	t.Parallel()
 	frame := encodePublish("receivers/theater/volume", []byte(`{"item":1}`), true)
 	reader := bufio.NewReader(bytes.NewReader(frame))
 
@@ -153,6 +161,7 @@ func TestReadPacketReadsBackAPublish(t *testing.T) {
 }
 
 func TestParseConnackReadsTheReturnCode(t *testing.T) {
+	t.Parallel()
 	if err := parseConnack([]byte{0x00, 0x00}); err != nil {
 		t.Errorf("an accepted connack was refused: %v", err)
 	}
@@ -165,6 +174,7 @@ func TestParseConnackReadsTheReturnCode(t *testing.T) {
 }
 
 func TestParseSubackReadsTheGrantedCodes(t *testing.T) {
+	t.Parallel()
 	if err := parseSuback([]byte{0x00, 0x01, 0x00}); err != nil {
 		t.Errorf("a granted suback was refused: %v", err)
 	}
@@ -176,6 +186,7 @@ func TestParseSubackReadsTheGrantedCodes(t *testing.T) {
 // A topic longer than its body claims is a torn frame, and parsePublish
 // refuses it rather than reading past the body.
 func TestParsePublishRefusesAShortBody(t *testing.T) {
+	t.Parallel()
 	if _, _, ok := parsePublish([]byte{0x00, 0x05, 'a'}); ok {
 		t.Error("a short publish body parsed")
 	}
@@ -187,6 +198,7 @@ func TestParsePublishRefusesAShortBody(t *testing.T) {
 // A CONNECT built here reads back with the fields it went in as, so
 // the encoder and reader agree on framing.
 func TestReadPacketReadsBackAConnect(t *testing.T) {
+	t.Parallel()
 	frame := encodeConnect("equipment-operator", 30, nil)
 	first, body, err := readPacket(bufio.NewReader(bytes.NewReader(frame)))
 	if err != nil {

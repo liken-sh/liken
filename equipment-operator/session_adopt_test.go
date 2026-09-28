@@ -37,6 +37,7 @@ func (f *fakeDenon) refuseEveryCommand(t *testing.T, within time.Duration) {
 // standby, because a person turned it off with its own remote, and the
 // operator leaves it there.
 func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
@@ -63,6 +64,7 @@ func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 // sound mode sends nothing, and the line says what the receiver
 // reports.
 func TestAFlipToASettledReceiverSendsNothing(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
 	h.powerOn(t)
 	h.soundModes = map[string]string{"GAME": "MULTI CH IN"}
@@ -81,6 +83,7 @@ func TestAFlipToASettledReceiverSendsNothing(t *testing.T) {
 // A flip that finds the receiver on the session's input in another
 // sound mode sends the sound mode alone.
 func TestAFlipSendsOnlyTheSoundModeThatDiffers(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
 	h.powerOn(t)
 	h.soundModes = map[string]string{"GAME": "STEREO"}
@@ -102,6 +105,7 @@ func TestAFlipSendsOnlyTheSoundModeThatDiffers(t *testing.T) {
 // that selects its family. A flip that finds the receiver on the
 // session's input, in a mode of the declared family, sends nothing.
 func TestAFlipSendsNoSoundModeTheReceiverRunsInOtherWords(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		declared string

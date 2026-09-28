@@ -41,6 +41,7 @@ func reachedController(t *testing.T, receiver Receiver, brokerAddress string) (*
 // Each declared change is one line when the operator sends it, and a
 // later pass with the same spec adds none.
 func TestADeclaredChangeIsOneLine(t *testing.T) {
+	t.Parallel()
 	drc, lfe, volume, last := "low", 0, 40.0, "last"
 	cases := []struct {
 		name    string
@@ -120,6 +121,7 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 // A restart against a receiver that already holds every declared value
 // sends nothing, so it writes no line.
 func TestARestartAgainstASettledReceiverWritesNoLine(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
 	drc := "off"
@@ -136,6 +138,7 @@ func TestARestartAgainstASettledReceiverWritesNoLine(t *testing.T) {
 
 // A command the driver refuses states the driver's own error.
 func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 	log := &logBuffer{}
@@ -152,6 +155,7 @@ func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
 // A message on the receiver's settings or commands topic is a person's
 // command, and each one is a line.
 func TestAMessageOnTheReceiversTopicsIsOneLine(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		topic   string
@@ -206,6 +210,7 @@ func TestAMessageOnTheReceiversTopicsIsOneLine(t *testing.T) {
 // A WiiM answers each command over HTTP, and that answer is the report
 // the line states.
 func TestAWiimSettingsMessageStatesTheDevicesAnswer(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 	log := &logBuffer{}
@@ -222,6 +227,7 @@ func TestAWiimSettingsMessageStatesTheDevicesAnswer(t *testing.T) {
 // A session's start, each change of its flags, and its end are one
 // line each, and a pass that changes nothing adds none.
 func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
 	idle := idleReceiver(fake.address(), ReceiverVolume{Max: 69.5})
@@ -248,6 +254,7 @@ func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 // A WiiM has no standby, so it always reports On, and a spec.power of
 // On sends nothing. The line says why.
 func TestASpecPowerOnForAWiimSaysNothingWasSent(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 	log := &logBuffer{}

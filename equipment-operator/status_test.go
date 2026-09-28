@@ -34,6 +34,7 @@ func testState(power equipment.Power, volume, volumeMax int) equipment.State {
 }
 
 func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		state     equipment.State
@@ -65,6 +66,7 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 }
 
 func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
+	t.Parallel()
 	state := testState(equipment.PowerOn, 100, 139)
 	eco := "auto"
 	settings := &denon.Settings{System: denon.SystemSettings{Eco: &eco}}
@@ -76,6 +78,7 @@ func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
 }
 
 func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
+	t.Parallel()
 	state := testState(equipment.PowerOn, 100, 139)
 	zone := state.Zones[equipment.MainZone]
 	zone.Mute = true
@@ -85,6 +88,7 @@ func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
 }
 
 func TestReachableNamesEachVerdict(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		status   ConditionStatus
@@ -124,6 +128,7 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 }
 
 func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
+	t.Parallel()
 	held := ReceiverStatus{
 		Zones: map[string]ZoneStatus{
 			equipment.MainZone: {Power: "On", Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},

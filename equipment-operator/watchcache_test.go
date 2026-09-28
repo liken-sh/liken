@@ -30,6 +30,7 @@ func heldStore(t *testing.T, synced bool, objects ...*unstructured.Unstructured)
 // the store that does not convert is read from the API server, so the
 // pass leaves out no object.
 func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
+	t.Parallel()
 	theater, lounge := asObject(t, receiverAt("uid-1", 1, "")), asObject(t, receiverAt("uid-2", 1, ""))
 	lounge.SetName("lounge")
 	mistyped := asObject(t, receiverAt("uid-3", 1, ""))
@@ -77,6 +78,7 @@ func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
 // A read of one object from the store answers the object, or not found,
 // and reads the API server while the store has nothing to give.
 func TestADisplayIsReadFromTheStore(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 	held := heldStore(t, true, asObject(t, displayAt("uid-1", "node-2", "2.0.0.0")))
@@ -210,6 +212,7 @@ func delivered(t *testing.T, held *watchStore, versions *versionMemo) {
 // that runs after the watches delivered the last pass's writes, sends
 // the API server no request.
 func TestTheCECBusPassReadsTheStores(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		watched bool
@@ -285,6 +288,7 @@ func runNode(t *testing.T, api *cecAPI) *cecNode {
 // before the watch delivered the node's own entry write reads that
 // CECBus from the API server once, so those reads are not counted.
 func TestTheNodePassReadsFromTheStores(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -304,6 +308,7 @@ func TestTheNodePassReadsFromTheStores(t *testing.T) {
 // field selector on status.node, so its store holds no other machine's
 // Display.
 func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 	api.putDisplay("acm-0002-receiver", "node-2", "2.0.0.0")
@@ -321,6 +326,7 @@ func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
 // workload still starts, and reads the Display it speaks for from the
 // API server.
 func TestTheNodeStartsWhenTheDisplayListIsRefused(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.noDisplayNodeField = true
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")

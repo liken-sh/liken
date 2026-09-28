@@ -38,6 +38,7 @@ becomes a new plan or an open problem.
 ## Open problems
 
 * [WiiM settings that the amp does not report back](open-problems/the-wiim-settings-the-amp-will-not-confirm.md). The equalizer, the output mode, and the subwoofer have setters but no readable value, so they wait for a model whose reads answer. The alarm slots and the per-model command set sit beside them.
+* [The CI `go` job on a cold build cache](open-problems/the-go-job-on-a-cold-build-cache.md). After a change to the module files, the three builds in `make test-go` take about 5 minutes before a test runs, and the CEC and session tests that set package variables still run one at a time.
 
 ## Completed
 

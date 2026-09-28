@@ -58,6 +58,7 @@ func pressPower(t *testing.T, h *sessionHarness) {
 // so the press asks the TV for standby and puts the receiver in standby
 // when it is on.
 func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		on       bool
@@ -96,6 +97,7 @@ func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
 // A TV in standby means the room is off, whatever the receiver reports,
 // so the press wakes the TV and turns the receiver on when it is not.
 func TestAPowerPressTurnsARoomWithTheTVInStandbyOn(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		on    bool
@@ -133,6 +135,7 @@ func TestAPowerPressTurnsARoomWithTheTVInStandbyOn(t *testing.T) {
 // A TV that does not answer has no power to decide with, so the
 // receiver decides, and the press still reaches the TV.
 func TestAPowerPressWithATVThatDoesNotAnswerFollowsTheReceiver(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
 	h.powerOn(t)
@@ -150,6 +153,7 @@ func TestAPowerPressWithATVThatDoesNotAnswerFollowsTheReceiver(t *testing.T) {
 // A session that sleeps asks the TV for nothing: the TV of a living
 // room shows other inputs while the room's player is idle.
 func TestASessionThatSleepsAsksTheTVForNothing(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	api, room := televisionRoom(t, h.lines, "On")
 	h.room = room
@@ -166,6 +170,7 @@ func TestASessionThatSleepsAsksTheTVForNothing(t *testing.T) {
 // goes to standby, and the WiiM stays on, which its line states as the
 // outcome and not as a failed command.
 func TestAPowerPressInAWiimRoomTurnsTheTVOff(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	client, _ := waitingWiim(t, amp)
 	brokers := startFakeBrokerServer(t)
@@ -212,6 +217,7 @@ func (d *unreachableDriver) SetInput(_ string, input string) error {
 // the TV still decides the room and turns off or on. With no TV power
 // to decide, the press is dropped.
 func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		power string
@@ -255,6 +261,7 @@ func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
 // With no TV power to decide the room, a press on an unreachable
 // receiver is dropped: nothing reaches the TV or the receiver.
 func TestAPowerPressWithAnUnreachableReceiverAndNoTVPowerIsDropped(t *testing.T) {
+	t.Parallel()
 	driver := &unreachableDriver{fixedDriver: fixedDriver{state: equipment.State{Reachable: equipment.ConditionFalse}}, sent: make(chan string, 4)}
 	brokers := startFakeBrokerServer(t)
 	log := &logBuffer{}

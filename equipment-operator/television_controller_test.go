@@ -35,6 +35,7 @@ func passes(t *testing.T, api *cecAPI, count int) {
 }
 
 func TestTheDeploymentDiscoversTheTVOfABusInControl(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice, receiverDevice))
 
@@ -53,6 +54,7 @@ func TestTheDeploymentDiscoversTheTVOfABusInControl(t *testing.T) {
 // Discovery creates with a create, not an apply, so an object that
 // already has the bus's name is left as it is.
 func TestDiscoveryCreatesAndLeavesAnExistingName(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
 
@@ -71,6 +73,7 @@ func TestDiscoveryCreatesAndLeavesAnExistingName(t *testing.T) {
 // to it under the bus's name. It keeps the discovered label and stays,
 // because no other Television names the bus.
 func TestAPersonAdoptsTheDiscoveredTelevisionUnderItsName(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
 	passes(t, api, 1)
@@ -88,6 +91,7 @@ func TestAPersonAdoptsTheDiscoveredTelevisionUnderItsName(t *testing.T) {
 }
 
 func TestAPersonsTelevisionTakesOverFromTheDiscoveredOne(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
 	passes(t, api, 1)
@@ -103,6 +107,7 @@ func TestAPersonsTelevisionTakesOverFromTheDiscoveredOne(t *testing.T) {
 }
 
 func TestTheDeploymentWritesWhatTheBusFound(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice, receiverDevice))
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -121,6 +126,7 @@ func TestTheDeploymentWritesWhatTheBusFound(t *testing.T) {
 // A pass that finds nothing changed writes nothing, so a tick of the
 // Deployment's clock costs the API server no write.
 func TestAnUnchangedTelevisionIsNotWrittenAgain(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
 	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
@@ -136,6 +142,7 @@ func TestAnUnchangedTelevisionIsNotWrittenAgain(t *testing.T) {
 // A TV that stops answering loses its power, because a power the TV
 // did not state now would be a guess.
 func TestATVThatStopsAnsweringLosesItsPower(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
 	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
@@ -154,6 +161,7 @@ func TestATVThatStopsAnsweringLosesItsPower(t *testing.T) {
 // The Deployment's loop wakes on a new Television and writes its
 // status with no wait for the clock.
 func TestTheDeploymentLoopFollowsTheTelevisions(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -188,6 +196,7 @@ func runDeploymentLoop(t *testing.T, api *cecAPI) {
 // wakes no other watch, so the test fails if the loop waits for its
 // clock.
 func TestTheDeploymentLoopFollowsADisplaysAddress(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice, receiverDevice))
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -275,6 +284,7 @@ func TestTheDeploymentWatchesTheReceiversOnce(t *testing.T) {
 // derived from a partial read would remove facts that are still true.
 // A write the API server refuses is logged and left for the next pass.
 func TestTheTelevisionPassSkipsAFailedReadAndSurvivesARefusedWrite(t *testing.T) {
+	t.Parallel()
 	buses := CECBusList{Items: []CECBus{*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))}}
 	televisions := TelevisionList{Items: []Television{*tvOn("den")}}
 	everything := map[string]any{
@@ -326,6 +336,7 @@ func TestTheTelevisionPassSkipsAFailedReadAndSurvivesARefusedWrite(t *testing.T)
 }
 
 func TestDeleteTelevisionSettlesOnGoneAndReportsARefusal(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		status  int
@@ -364,6 +375,7 @@ func loggedPasses(t *testing.T, api *cecAPI, count int) *logBuffer {
 // Discovery writes one line when it creates a Television and one when
 // it deletes it, and later passes write none.
 func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
 	created := loggedPasses(t, api, 3)
@@ -383,6 +395,7 @@ func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
 // reached the API server as a 201. A 409 means a name another writer
 // already took, which this call did not create, so it gets no line.
 func TestCreateDiscoveredTelevisionLogsOnlyWhatItCreated(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		preexists bool

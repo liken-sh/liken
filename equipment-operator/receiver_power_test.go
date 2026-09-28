@@ -40,6 +40,7 @@ func asking(fake *fakeDenon, power, settled equipment.Power) Receiver {
 // A restart at the settled power sends nothing, even when a person has
 // turned the receiver on since the operator put it in standby.
 func TestARestartAtTheSettledPowerSendsNoPower(t *testing.T) {
+	t.Parallel()
 	fake := switchedOn(t)
 	_, operator, log := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
 
@@ -62,6 +63,7 @@ func TestARestartAtTheSettledPowerSendsNoPower(t *testing.T) {
 // an unchanged stored value under the new enum, so the operator reads
 // it as its PascalCase value.
 func TestAnUpgradeAdoptsTheSpecPower(t *testing.T) {
+	t.Parallel()
 	fake := switchedOn(t)
 	stored := asking(fake, "", "")
 	stored.Status.PowerGeneration = 3
@@ -80,6 +82,7 @@ func TestAnUpgradeAdoptsTheSpecPower(t *testing.T) {
 // A spec.power that differs from status.settledPower at a restart is an
 // edit no operator settled, so it goes out once.
 func TestASpecPowerEditedWhileTheOperatorWasDownSendsOnce(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
 
@@ -96,6 +99,7 @@ func TestASpecPowerEditedWhileTheOperatorWasDownSendsOnce(t *testing.T) {
 
 // The same edit sends nothing when the receiver already reports it.
 func TestASpecPowerEditedWhileTheOperatorWasDownSendsNothingTheReceiverReports(t *testing.T) {
+	t.Parallel()
 	fake := switchedOn(t)
 	api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
 
@@ -110,6 +114,7 @@ func TestASpecPowerEditedWhileTheOperatorWasDownSendsNothingTheReceiverReports(t
 
 // A spec.power that changes while the operator runs goes out once.
 func TestALiveSpecPowerChangeSendsOnce(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	api, operator, _ := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
 
@@ -127,6 +132,7 @@ func TestALiveSpecPowerChangeSendsOnce(t *testing.T) {
 // A live change compares spec.power with the power the receiver
 // reports, and sends nothing when they agree.
 func TestALiveChangeSendsNoPowerTheReceiverReports(t *testing.T) {
+	t.Parallel()
 	fake := switchedOn(t)
 	api, operator, log := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
 
@@ -145,6 +151,7 @@ func TestALiveChangeSendsNoPowerTheReceiverReports(t *testing.T) {
 // spec.power goes out once, and the line says what the receiver
 // reported.
 func TestAReceiverCreatedWhileRunningSendsItsPowerOnce(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	api := startFakeAPI(t)
 	operator, log := loggedController(t, api, "127.0.0.1:1")
@@ -168,6 +175,7 @@ func TestAReceiverCreatedWhileRunningSendsItsPowerOnce(t *testing.T) {
 // spec.power the operator already applied is not sent again, although
 // a person turned the receiver on after it.
 func TestAnotherFieldsGenerationSendsNoPower(t *testing.T) {
+	t.Parallel()
 	fake := startFakeDenon(t)
 	api, operator, _ := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
 	mustSucceed(t, operator.pass(t.Context()))
@@ -209,6 +217,7 @@ func waitForMainPower(t *testing.T, operator *controller, power equipment.Power)
 // spec.power the old one settled, because a new wiring is no change of
 // spec.power.
 func TestANewAddressSendsNoPower(t *testing.T) {
+	t.Parallel()
 	first := startFakeDenon(t)
 	api, operator, _ := reachedController(t, asking(first, equipment.PowerStandby, ""), "127.0.0.1:1")
 	moved := switchedOn(t)

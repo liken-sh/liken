@@ -39,6 +39,7 @@ func daemonSetIn(t *testing.T, path string) *appsv1.DaemonSet {
 // only expression in that term, because a second one narrows where the
 // pod runs on a node with no label.
 func TestTheDaemonSetStaysOffANodeLabeledNone(t *testing.T) {
+	t.Parallel()
 	daemonSet := daemonSetIn(t, "deploy/cec.yaml")
 	affinity := daemonSet.Spec.Template.Spec.Affinity
 	if affinity == nil || affinity.NodeAffinity == nil ||

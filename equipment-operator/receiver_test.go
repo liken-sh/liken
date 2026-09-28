@@ -49,6 +49,7 @@ func loadCRDFrom(t *testing.T, path string) *apiextensionsv1.CustomResourceDefin
 }
 
 func TestCRDIdentity(t *testing.T) {
+	t.Parallel()
 	crd := loadCRD(t)
 
 	cases := []struct {
@@ -71,6 +72,7 @@ func TestCRDIdentity(t *testing.T) {
 }
 
 func TestCRDHasOneServedStorageVersion(t *testing.T) {
+	t.Parallel()
 	crd := loadCRD(t)
 
 	if len(crd.Spec.Versions) != 1 {
@@ -89,6 +91,7 @@ func TestCRDHasOneServedStorageVersion(t *testing.T) {
 // The status subresource is what keeps this operator's writes off a
 // spec a person declared.
 func TestCRDHasAStatusSubresource(t *testing.T) {
+	t.Parallel()
 	crd := loadCRD(t)
 
 	subresources := crd.Spec.Versions[0].Subresources
@@ -98,6 +101,7 @@ func TestCRDHasAStatusSubresource(t *testing.T) {
 }
 
 func TestCRDSchema(t *testing.T) {
+	t.Parallel()
 	crd := loadCRD(t)
 	schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
 	spec := schema.Properties["spec"]
@@ -173,6 +177,7 @@ func TestCRDSchema(t *testing.T) {
 // cluster refuses whole, and no amount of validating objects against
 // the schema would find it.
 func TestTheAPIServerWouldAcceptTheCRD(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{receiversCRD, cecBusesCRD, televisionsCRD} {
 		t.Run(path, func(t *testing.T) {
 			scheme := runtime.NewScheme()
@@ -271,6 +276,7 @@ func denonSpec() map[string]any {
 }
 
 func TestCRDValidatesExamples(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		receiver map[string]any
@@ -496,6 +502,7 @@ func TestCRDValidatesExamples(t *testing.T) {
 // runs only where the field it is written on exists. The root
 // required list is what refuses it.
 func TestCRDRefusesAReceiverWithNoSpec(t *testing.T) {
+	t.Parallel()
 	errs := validateReceiver(t, map[string]any{
 		"apiVersion": "equipment.liken.sh/v1alpha1",
 		"kind":       "Receiver",
@@ -510,6 +517,7 @@ func TestCRDRefusesAReceiverWithNoSpec(t *testing.T) {
 // The example is the one a reader copies, so the cluster has to
 // accept it.
 func TestTheExampleReceiverValidates(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("testdata/receiver.yaml")
 	mustSucceed(t, err)
 

@@ -77,6 +77,7 @@ func (r *roomRecord) waitFor(t *testing.T, count int) []string {
 // A session that starts, even with both flags on, is adopted and wakes
 // nothing; a flag that turns on later is a wake.
 func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		begin  [2]bool
@@ -117,6 +118,7 @@ func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
 // it turns the receiver on, and puts it to sleep when it turns the
 // receiver off.
 func TestAToggleWakesAndSleepsTheRoom(t *testing.T) {
+	t.Parallel()
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
 	room := &roomRecord{}

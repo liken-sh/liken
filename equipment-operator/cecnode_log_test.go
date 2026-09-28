@@ -84,6 +84,7 @@ func TestTheNodeLogsWhatTheAdapterHeldAndEachStateChange(t *testing.T) {
 }
 
 func TestTheNodeLogsAMessageWithTheState(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := usbAdapter(cecRoom())
 	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -112,6 +113,7 @@ func linesWith(log *logBuffer, text string) []string {
 // Two of a person's buses that name one machine are logged once, not
 // on every pass, and again only when the set changes.
 func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	for _, name := range []string{"study", "den"} {
 		api.putBus(listenBus(name))
@@ -140,6 +142,7 @@ func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
 // adapter moves to the new bus, says so, and removes its entry from the
 // old bus, which still exists and still names the machine.
 func TestAnAdapterThatMovesBusesLeavesTheOldOne(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(listenBus("lounge"))
 	_, device := usbAdapter(cecRoom())
@@ -167,6 +170,7 @@ func listenBus(name string) CECBus {
 // The node workload writes one line when it creates the CECBus of an
 // adapter no bus names, and one when a person's bus replaces it.
 func TestTheNodeLogsTheBusItCreatesAndDeletes(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := usbAdapter(cecRoom())
 	log := loggedNode(t, api, device)

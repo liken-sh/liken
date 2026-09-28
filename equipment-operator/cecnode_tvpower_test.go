@@ -38,6 +38,7 @@ func settle() {
 // never reaches the loop that hears the bus, so it must clear the mark
 // too.
 func TestATVAskedOnceIsAskedAgainAfterItsPowerIsUnknownAgain(t *testing.T) {
+	t.Parallel()
 	wire := roomWithTV(televisionTV(cec.PowerUnknown))
 	api := controlling(t, wire, lounge(""))
 	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
@@ -62,6 +63,7 @@ func TestATVAskedOnceIsAskedAgainAfterItsPowerIsUnknownAgain(t *testing.T) {
 // power question too, and that question finds the power known and
 // sends nothing.
 func TestANewTVIsAskedItsPowerOnce(t *testing.T) {
+	t.Parallel()
 	wire := cectest.NewBus()
 	wire.Add(cectest.Peer{Logical: 5, Physical: 0x1000, PrimaryType: 5, OSDName: "AVR", Vendor: 0x0005cd, Version: cec.Version14, Power: cec.PowerOn})
 	api := controlling(t, wire, lounge(""))
@@ -86,6 +88,7 @@ func TestANewTVIsAskedItsPowerOnce(t *testing.T) {
 // first answer to one of them, so the other would time out and the
 // press would decide from no power.
 func TestAPressReadSharesAQuestionInFlight(t *testing.T) {
+	t.Parallel()
 	wire := roomWithTV(televisionTV(cec.PowerUnknown))
 	api := controlling(t, wire, lounge(""))
 	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
@@ -141,6 +144,7 @@ func pressWhileTheTVAnswers(t *testing.T, wire *cectest.Bus, api *cecAPI) {
 }
 
 func TestAPressSharesTheJoinScansQuestion(t *testing.T) {
+	t.Parallel()
 	wire := roomWithAReceiver()
 	wire.Add(slowTV())
 	api := controlling(t, wire, lounge(""))
@@ -149,6 +153,7 @@ func TestAPressSharesTheJoinScansQuestion(t *testing.T) {
 }
 
 func TestAPressSharesAnIntroductionsQuestion(t *testing.T) {
+	t.Parallel()
 	wire := roomWithAReceiver()
 	api := controlling(t, wire, lounge(""))
 	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })

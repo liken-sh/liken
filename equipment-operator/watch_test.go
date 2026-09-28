@@ -45,6 +45,7 @@ func displayAt(uid, node, physicalAddress string) Display {
 // object deleted while the watch was down, converts as the object it
 // holds.
 func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
+	t.Parallel()
 	good := receiverAt("uid-1", 2, "192.0.2.10")
 	mistyped := asObject(t, good)
 	if err := unstructured.SetNestedField(mistyped.Object, "two", "metadata", "generation"); err != nil {
@@ -82,6 +83,7 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 // that does not convert wakes it too, because nothing says what
 // changed.
 func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
+	t.Parallel()
 	receivers := func(wake chan<- struct{}) cache.ResourceEventHandler {
 		return markHandler[Receiver, specMark]{what: "the Receivers", wake: wake, mark: receiverSpecMark}.handler()
 	}
@@ -149,6 +151,7 @@ func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
 // collection before the watch does, and an object removed between the
 // two reads is in neither the watch's read nor any event.
 func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
+	t.Parallel()
 	const displayAPIVersion = "display.liken.sh/v1alpha1"
 	cases := []struct {
 		name       string
@@ -193,6 +196,7 @@ func sharedSpecWake(t *testing.T) watchFunc {
 // Deployment's shared watch wakes the CECBus loop as the spec watch
 // does.
 func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		after Receiver
@@ -232,6 +236,7 @@ func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 // the watch was down wakes the loop, and a status write made in the
 // same time does not.
 func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		after Receiver
@@ -260,6 +265,7 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 // Through the reflector: a watch that ends is opened again, and each
 // watch opened after the first is counted.
 func TestAWatchThatEndsIsOpenedAgainAndCounted(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		path  string
@@ -295,6 +301,7 @@ func TestAWatchThatEndsIsOpenedAgainAndCounted(t *testing.T) {
 // CA file that is missing ends the watch at once, with the error in
 // the log.
 func TestTheWatchesUseTheServiceAccount(t *testing.T) {
+	t.Parallel()
 	server := newWatchServer(cecBusesPath, equipmentAPIVersion, "CECBus", []string{"[]"})
 	tokens := make(chan string, 64)
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +331,7 @@ func TestTheWatchesUseTheServiceAccount(t *testing.T) {
 // a whole number in a float field as an integer, and the watch decodes
 // it as one.
 func TestAReceiverFromTheWatchIsTheReceiverAListGives(t *testing.T) {
+	t.Parallel()
 	const stored = `{
 		"apiVersion": "equipment.liken.sh/v1alpha1", "kind": "Receiver",
 		"metadata": {"name": "theater", "uid": "uid-1", "generation": 4, "resourceVersion": "812", "labels": {"liken.sh/discovered": "wiim"}},

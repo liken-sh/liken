@@ -13,6 +13,7 @@ import (
 )
 
 func TestAControllingAdapterJoinsAndScans(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	adapter, device := usbAdapter(wire)
@@ -34,6 +35,7 @@ func TestAControllingAdapterJoinsAndScans(t *testing.T) {
 }
 
 func TestAControllingAdapterAnswersTheTV(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	_, device := usbAdapter(wire)
@@ -59,6 +61,7 @@ func TestAControllingAdapterAnswersTheTV(t *testing.T) {
 }
 
 func TestAControllingAdapterWaitsForItsDisplaysAddress(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		display func(*cecAPI)
@@ -92,6 +95,7 @@ func TestAControllingAdapterWaitsForItsDisplaysAddress(t *testing.T) {
 // An adapter on a video port keeps its own port's address, and the
 // entry says that it differs from the Display's.
 func TestAnAdapterThatKeepsItsOwnAddressSaysSo(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	_, device := cecRoom().Adapter(cectest.Options{Physical: 0x2000, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -105,6 +109,7 @@ func TestAnAdapterThatKeepsItsOwnAddressSaysSo(t *testing.T) {
 }
 
 func TestAnAdapterWithNoFreePlaybackAddressSaysSo(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := cecRoom()
 	for _, address := range []cec.LogicalAddress{4, 8, 11} {
@@ -121,6 +126,7 @@ func TestAnAdapterWithNoFreePlaybackAddressSaysSo(t *testing.T) {
 }
 
 func TestAModeChangeReconfiguresTheAdapter(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	adapter, device := usbAdapter(cecRoom())
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -139,6 +145,7 @@ func TestAModeChangeReconfiguresTheAdapter(t *testing.T) {
 // When the kernel takes the adapter's addresses away, the node
 // workload configures the adapter again and joins once more.
 func TestAnAdapterThatLosesItsAddressJoinsAgain(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	adapter, device := usbAdapter(cecRoom())
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -156,6 +163,7 @@ func TestAnAdapterThatLosesItsAddressJoinsAgain(t *testing.T) {
 }
 
 func TestADisplayNameIsWhatControlNeedsFirst(t *testing.T) {
+	t.Parallel()
 	_, device := usbAdapter(cecRoom())
 	node, err := newCECNode(startCECAPI(t).client, "node-1", device)
 	mustSucceed(t, err)
@@ -168,6 +176,7 @@ func TestADisplayNameIsWhatControlNeedsFirst(t *testing.T) {
 // In Control the adapter announces its bus's name, which the TV lists
 // as the source's name, cut to the 14 bytes CEC carries.
 func TestAControllingAdapterAnnouncesItsBusName(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		bus  string
 		name string
@@ -196,6 +205,7 @@ func TestAControllingAdapterAnnouncesItsBusName(t *testing.T) {
 // A move to another bus changes the name the adapter announces, so the
 // adapter claims its logical address again under the new name.
 func TestAMoveToAnotherBusClaimsUnderItsName(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	adapter, device := usbAdapter(cecRoom())
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -219,6 +229,7 @@ func TestAMoveToAnotherBusClaimsUnderItsName(t *testing.T) {
 // adapter off the bus and back, and the TV sees its source leave. A
 // claim under another name is made again.
 func TestAClaimTheKernelHoldsIsKeptWhenItMatches(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		held   cec.Claim

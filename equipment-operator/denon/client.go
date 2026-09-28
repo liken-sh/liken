@@ -28,12 +28,16 @@ var (
 	silenceLimit = 75 * time.Second
 	minBackoff   = time.Second
 	maxBackoff   = 30 * time.Second
-
-	// surveyQuiet is how long the reply stream must stand still after
-	// the connect queries before the survey counts as complete. The
-	// replies arrive in one burst, so a quiet stretch ends it.
-	surveyQuiet = time.Second
 )
+
+// SurveyQuiet is how long the reply stream must stand still after the
+// connect queries before the survey counts as complete. The replies
+// arrive in one burst, so a quiet stretch ends it. It is exported
+// because the root package's tests wait for the survey in almost every
+// test against a fake receiver on loopback, and shorten it once in
+// TestMain, before any client starts. A client reads it after it
+// connects and again on each line it folds.
+var SurveyQuiet = time.Second
 
 // The write queue for one connection. It holds every connect query and
 // a burst of commands. A command that would overflow it is dropped,
@@ -444,7 +448,7 @@ func (d *Client) readLoop(conn net.Conn) (answered bool) {
 	reader := bufio.NewReader(conn)
 	// The connect queries were just written, and their replies arrive in
 	// one burst. The survey is complete once that burst stops.
-	survey := time.AfterFunc(surveyQuiet, d.recordSurveyed)
+	survey := time.AfterFunc(SurveyQuiet, d.recordSurveyed)
 	defer survey.Stop()
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(silenceLimit)); err != nil {
@@ -460,7 +464,7 @@ func (d *Client) readLoop(conn net.Conn) (answered bool) {
 		}
 		if d.fold(line) {
 			answered = true
-			survey.Reset(surveyQuiet)
+			survey.Reset(SurveyQuiet)
 		}
 	}
 }

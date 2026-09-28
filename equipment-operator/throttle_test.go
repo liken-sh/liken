@@ -53,6 +53,7 @@ const initializingBody = `{"kind":"Status","apiVersion":"v1","status":"Failure",
 // The API server ends its Status body with a newline, and an error that
 // carried it would break its log line in two.
 func TestAnErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
+	t.Parallel()
 	api := &busyAPI{busy: 1, body: initializingBody + "\n"}
 
 	_, err := ListCECBuses(testAPIClient(t, http.HandlerFunc(api.handle)))
@@ -63,6 +64,7 @@ func TestAnErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
 }
 
 func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		delete func(*Client) error
@@ -88,6 +90,7 @@ func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T
 }
 
 func TestA429StatesHowLongToWait(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		header string
@@ -130,6 +133,7 @@ func TestRetryThrottledWaitsAndAsksAgain(t *testing.T) {
 }
 
 func TestRetryThrottledStopsWithItsContext(t *testing.T) {
+	t.Parallel()
 	api := &busyAPI{busy: 1000, body: initializingBody}
 	client := testAPIClient(t, http.HandlerFunc(api.handle))
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
@@ -148,6 +152,7 @@ func TestRetryThrottledStopsWithItsContext(t *testing.T) {
 
 // Any other failure is the caller's to handle, at once.
 func TestRetryThrottledPassesOtherErrorsThrough(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	failure := errors.New("refused")
 

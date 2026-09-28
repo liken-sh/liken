@@ -11,6 +11,7 @@ import (
 )
 
 func TestZoneSpecPendingKeepsOnlyTheControlsToSend(t *testing.T) {
+	t.Parallel()
 	forty, thirty := 40.0, 30.0
 	on, off := true, false
 	half, hour := 30, 60

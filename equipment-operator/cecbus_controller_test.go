@@ -10,6 +10,7 @@ import (
 )
 
 func TestTheLoopWritesWhatItDerives(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	bus := *busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))
 	api.putBus(bus)
@@ -24,6 +25,7 @@ func TestTheLoopWritesWhatItDerives(t *testing.T) {
 }
 
 func TestASecondPassWritesNothing(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
 	controller := newCECBusController(api.client)
@@ -44,6 +46,7 @@ func TestASecondPassWritesNothing(t *testing.T) {
 }
 
 func TestTheLoopFollowsAnAdaptersReport(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(*busWith(CECControl, []string{"node-1"}))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,6 +83,7 @@ func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 }
 
 func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		status  int
@@ -105,6 +109,7 @@ func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
 // A failed list is the pass's error, and a refused write is logged and
 // left for the next pass.
 func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		answers map[string]any
@@ -129,6 +134,7 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 // A pod that dies writes nothing more, so the clock is what finds its
 // entry stale.
 func TestTheClockFindsAnEntryGoneStale(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
 	controller := newCECBusController(api.client)

@@ -61,6 +61,7 @@ func TestAnIdleBusHearsNothingAfterTheJoinScan(t *testing.T) {
 // announcement left out, and asks nothing of it when it announces
 // again.
 func TestADeviceThatAnnouncesItselfIsAskedOnce(t *testing.T) {
+	t.Parallel()
 	wire := roomWithTV(televisionTV(cec.PowerOn))
 	api := controlling(t, wire, lounge(""))
 	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
@@ -92,6 +93,7 @@ func TestADeviceThatAnnouncesItselfIsAskedOnce(t *testing.T) {
 // until a press asks. An announcement from a TV whose power is known
 // asks nothing.
 func TestATVWithNoKnownPowerIsAskedWhenItAnnouncesItself(t *testing.T) {
+	t.Parallel()
 	wire := roomWithTV(televisionTV(cec.PowerUnknown))
 	api := controlling(t, wire, lounge(""))
 	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
@@ -120,6 +122,7 @@ func TestATVWithNoKnownPowerIsAskedWhenItAnnouncesItself(t *testing.T) {
 // while the power stays unknown. A player whose power is unknown is
 // asked nothing.
 func TestAnAnnouncingDeviceWithNoKnownPowerIsAskedAtMostOnce(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		device   cectest.Peer
@@ -163,6 +166,7 @@ func askPowerRead(t *testing.T, api *cecAPI, at string) {
 // held: a TV that a person turned off with its own remote sends
 // nothing the adapter hears.
 func TestTheAdapterReadsTheTVsPowerForAPress(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		tv    cectest.Peer
@@ -194,6 +198,7 @@ func TestTheAdapterReadsTheTVsPowerForAPress(t *testing.T) {
 // A request that is in the status when the node workload starts is
 // older than the press's wait, so the adapter sends nothing for it.
 func TestAPowerReadFoundAtStartSendsNothing(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	wire := roomWithTV(televisionTV(cec.PowerOn))
 	_, device := usbAdapter(wire)

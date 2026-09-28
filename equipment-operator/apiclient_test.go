@@ -74,6 +74,7 @@ func (c *cannedAPI) handler() http.Handler {
 // A Receiver is cluster-scoped, so the collection path carries no
 // namespace.
 func TestListReceiversReadsTheClusterScopedCollection(t *testing.T) {
+	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
 		"GET /apis/equipment.liken.sh/v1alpha1/receivers": ReceiverList{
 			Metadata: ListMeta{ResourceVersion: "77"},
@@ -101,6 +102,7 @@ func TestListReceiversReadsTheClusterScopedCollection(t *testing.T) {
 }
 
 func TestGetReceiverReadsOneObjectByName(t *testing.T) {
+	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
 		"GET /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{
 			Metadata: ObjectMeta{Name: "theater", ResourceVersion: "12"},
@@ -129,6 +131,7 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 // owns exactly one leaf of spec.denon.settings, so a bus write to one
 // key never claims the keys around it.
 func TestApplyReceiverSettingsPatchesOneLeaf(t *testing.T) {
+	t.Parallel()
 	bass := 3
 	api := &cannedAPI{answers: map[string]any{
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{
@@ -171,6 +174,7 @@ func TestApplyReceiverSettingsPatchesOneLeaf(t *testing.T) {
 // settingsPath maps a bus id onto the one leaf of spec.denon.settings
 // it names.
 func TestSettingsPathMapsAnIdToItsLeaf(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		id   string
 		want string
@@ -188,6 +192,7 @@ func TestSettingsPathMapsAnIdToItsLeaf(t *testing.T) {
 // the apply media type, this operator's field manager, and a body
 // that carries no spec.
 func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
+	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater/status": Receiver{
 			Metadata: ObjectMeta{Name: "theater"},
@@ -231,6 +236,7 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 // apply media type, this operator's field manager, and a body that
 // carries the one spec field this operator owns and nothing else.
 func TestApplyReceiverPowerPatchesTheMainResource(t *testing.T) {
+	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{
 			Metadata: ObjectMeta{Name: "theater"},
@@ -266,6 +272,7 @@ func TestApplyReceiverPowerPatchesTheMainResource(t *testing.T) {
 // An absent object and a losing write are answers, not failures; the
 // callers act on both.
 func TestTheClientNamesTheTwoOrdinaryAnswers(t *testing.T) {
+	t.Parallel()
 	api := &cannedAPI{statuses: map[string]int{
 		"GET /apis/equipment.liken.sh/v1alpha1/receivers/theater":          http.StatusNotFound,
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater/status": http.StatusConflict,
@@ -288,6 +295,7 @@ func TestTheClientNamesTheTwoOrdinaryAnswers(t *testing.T) {
 // Any other failing status carries the server's own message, so a
 // broken deployment says what the API server said.
 func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
+	t.Parallel()
 	api := &cannedAPI{statuses: map[string]int{
 		"GET /apis/equipment.liken.sh/v1alpha1/receivers": http.StatusInternalServerError,
 	}}
@@ -303,6 +311,7 @@ func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
 // on every request and sends it as a bearer token, because the kubelet
 // refreshes that file as each token nears expiry.
 func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
+	t.Parallel()
 	credentials := t.TempDir()
 	mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("first-token"), 0o600))
 
@@ -327,6 +336,7 @@ func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 // A request the client cannot build and a token it cannot read both fail
 // before anything reaches the network.
 func TestTheClientFailsBeforeItSends(t *testing.T) {
+	t.Parallel()
 	t.Run("the token is not there", func(t *testing.T) {
 		client := NewClient("http://127.0.0.1:1", http.DefaultClient, filepath.Join(t.TempDir(), "absent"))
 		_, err := client.send(t.Context(), http.MethodGet, receiversPath, jsonContentType, nil)

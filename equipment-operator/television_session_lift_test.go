@@ -68,6 +68,27 @@ func TestALiftRemovesTheSessionAfterTheDelay(t *testing.T) {
 	mustDeepEqual(t, untouched.Status.Session, other)
 }
 
+// A lift whose list of Televisions the API server refuses removes
+// nothing, and is tried again until the list answers.
+func TestALiftWhoseListFailsIsTriedAgain(t *testing.T) {
+	fastLift(t)
+	api := startCECAPI(t)
+	api.showing(waking(wokeNow()), "acm-0001-receiver")
+	sessions := newTelevisionSessions(api.client)
+	t.Cleanup(sessions.stop)
+	api.refuseTelevisions(true)
+
+	sessions.lift("media/den")
+	time.Sleep(2 * sessionLiftDelay)
+	kept, _ := api.television("lounge")
+	if kept.Status.Session == nil {
+		t.Fatal("a lift with no list removed the session")
+	}
+	api.refuseTelevisions(false)
+
+	api.waitForTelevision(t, "lounge", func(television Television) bool { return television.Status.Session == nil })
+}
+
 // A lift that waits at operator shutdown is dropped: the next operator
 // adopts the session.
 func TestAShutdownDropsAWaitingLift(t *testing.T) {
@@ -97,6 +118,7 @@ func (a *cecAPI) slowSessions(delay time.Duration) {
 // a sleep and a wake at once could undo each other. The writer takes
 // them one at a time.
 func TestSessionWritesGoOneAtATime(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.showing(waking(wokeNow()), "acm-0001-receiver")
 	api.slowSessions(10 * time.Millisecond)
@@ -167,6 +189,7 @@ func (a *cecAPI) removeReceiver(name string) {
 // writer's fields, then every other writer's, and checks that the
 // first writer's fields survive.
 func TestTheWritersKeepEachOthersFields(t *testing.T) {
+	t.Parallel()
 	session := wokeNow()
 	now := timestamp(time.Now())
 	writers := []struct {
@@ -231,6 +254,7 @@ func liveSessions(api *cecAPI, t *testing.T) *televisionSessions {
 // that started on a Player with no standing session, and it wakes the
 // TV once. An idle one wakes nothing.
 func TestASessionThatAppearsAwakeWhileRunningWakes(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.showing(lounge(""), "acm-0001-receiver")
 	log := &logBuffer{}
@@ -249,6 +273,7 @@ func TestASessionThatAppearsAwakeWhileRunningWakes(t *testing.T) {
 }
 
 func TestASessionThatAppearsIdleWhileRunningWakesNothing(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.showing(lounge(""), "acm-0001-receiver")
 	room := liveSessions(api, t).room(newReceiverLog(&logBuffer{}, "den"), "media/den", "MPLAY", func(string) string { return "acm-0001-receiver" })

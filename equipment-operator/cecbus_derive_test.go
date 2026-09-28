@@ -67,6 +67,7 @@ func stopped(machine string) CECAdapterStatus {
 }
 
 func TestTheConditionsSayWhatTheAdaptersDid(t *testing.T) {
+	t.Parallel()
 	one := []string{"node-1"}
 	two := []string{"node-1", "node-2"}
 	cases := []struct {
@@ -137,6 +138,7 @@ func TestTheConditionsSayWhatTheAdaptersDid(t *testing.T) {
 
 // The messages a person reads carry the machine and the source's text.
 func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		bus     *CECBus
@@ -164,6 +166,7 @@ func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
 }
 
 func TestAConditionKeepsItsTransitionTimeWhileItHolds(t *testing.T) {
+	t.Parallel()
 	bus := busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))
 	_, first := deriveCECBus(bus, derivedAt)
 	bus.Status.Conditions = first
@@ -174,6 +177,7 @@ func TestAConditionKeepsItsTransitionTimeWhileItHolds(t *testing.T) {
 }
 
 func TestTheDevicesMergeAcrossAdapters(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		entries []CECAdapterStatus

@@ -101,11 +101,13 @@ func requireValue(t *testing.T, body, prefix string, want float64) {
 }
 
 func TestBuildInfoNamesTheComponentAndItsRelease(t *testing.T) {
+	t.Parallel()
 	requireSeries(t, scrape(t, newMetrics("2026.09.10-001")),
 		`liken_build_info{component="equipment-operator",version="2026.09.10-001"} 1`)
 }
 
 func TestTheRuntimeLayerReportsTheProcess(t *testing.T) {
+	t.Parallel()
 	body := scrape(t, testMetrics(t))
 	for _, name := range []string{"go_goroutines", "go_memstats_alloc_bytes", "process_start_time_seconds"} {
 		t.Run(name, func(t *testing.T) {
@@ -120,6 +122,7 @@ func TestTheRuntimeLayerReportsTheProcess(t *testing.T) {
 // scrape, so Prometheus has an earlier reading to compute a rate
 // against the moment one first moves.
 func TestTheReconcileWatchAndCommandSeriesPublishAtZero(t *testing.T) {
+	t.Parallel()
 	body := scrape(t, testMetrics(t))
 	for _, line := range []string{
 		`equipment_reconcile_duration_seconds_count{kind="Receiver"} 0`,
@@ -134,6 +137,7 @@ func TestTheReconcileWatchAndCommandSeriesPublishAtZero(t *testing.T) {
 }
 
 func TestAPassCountsWhetherItFailsOrNot(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	m.observeReconcile(2*time.Millisecond, nil)
 	m.observeReconcile(3*time.Millisecond, nil)
@@ -145,6 +149,7 @@ func TestAPassCountsWhetherItFailsOrNot(t *testing.T) {
 }
 
 func TestAReopenedWatchCounts(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	m.watchRestarted()
 	m.watchRestarted()
@@ -152,6 +157,7 @@ func TestAReopenedWatchCounts(t *testing.T) {
 }
 
 func TestRepeatedScrapesLeaveTheCountersUnchanged(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	m.observeReconcile(time.Millisecond, errors.New("no"))
 	m.watchRestarted()
@@ -175,6 +181,7 @@ func TestRepeatedScrapesLeaveTheCountersUnchanged(t *testing.T) {
 }
 
 func TestRecordObservationOnAConnectedReceiver(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 
@@ -194,6 +201,7 @@ func TestRecordObservationOnAConnectedReceiver(t *testing.T) {
 // off the scrape entirely: there is no fact yet, and a fabricated zero
 // would read as a receiver on standby with its volume all the way down.
 func TestRecordObservationOnAReceiverThatHasNeverAnswered(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 
 	m.recordObservation("theater", unreachedState(), 2, time.Now())
@@ -211,6 +219,7 @@ func TestRecordObservationOnAReceiverThatHasNeverAnswered(t *testing.T) {
 // is gone, not a missing reading, so observation_valid falls with
 // connected and the timestamp holds the last moment either was true.
 func TestADroppedConnectionIsAValidObservationOfDisconnected(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	firstRead := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	poweredOn := setZone(connectedState(), func(zone *equipment.ZoneState) { zone.Power = equipment.PowerOn })
@@ -235,6 +244,7 @@ func TestADroppedConnectionIsAValidObservationOfDisconnected(t *testing.T) {
 }
 
 func TestInputInfoMovesToTheNewInputAndDropsTheOld(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	m.recordObservation("theater", connectedState(), 2, time.Now())
 
@@ -250,6 +260,7 @@ func TestInputInfoMovesToTheNewInputAndDropsTheOld(t *testing.T) {
 }
 
 func TestSetClaimedTracksWhetherASessionStands(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 
 	m.setClaimed("theater", true)
@@ -263,6 +274,7 @@ func TestSetClaimedTracksWhetherASessionStands(t *testing.T) {
 // to one, but never off the command counter: a command already sent
 // still happened.
 func TestForgetReceiverRemovesTheReceiverScopedSeries(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	m.recordObservation("theater", connectedState(), 2, time.Now())
 	m.setClaimed("theater", true)
@@ -284,11 +296,13 @@ func TestForgetReceiverRemovesTheReceiverScopedSeries(t *testing.T) {
 // reportCommand on a nil *metrics is what a denon.Client a test builds
 // with no metrics wiring calls, and it must never panic.
 func TestReportCommandOnANilMetricsIsANoOp(t *testing.T) {
+	t.Parallel()
 	var m *metrics
 	m.reportCommand(commandOK)
 }
 
 func TestTheListenerServesTheRegistry(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -307,6 +321,7 @@ func TestTheListenerServesTheRegistry(t *testing.T) {
 }
 
 func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
+	t.Parallel()
 	addr, err := testMetrics(t).Serve(t.Context(), "")
 	mustSucceed(t, err)
 	if addr != nil {
@@ -315,6 +330,7 @@ func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
 }
 
 func TestTheListenerStopsWhenItsContextEnds(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	ctx, cancel := context.WithCancel(t.Context())
 
@@ -340,6 +356,7 @@ func TestTheListenerStopsWhenItsContextEnds(t *testing.T) {
 // denon.Client and a real fake receiver, because Send and the write
 // loop are what equipment_commands_total actually observes.
 func TestCommandsCountByOutcome(t *testing.T) {
+	t.Parallel()
 	m := testMetrics(t)
 	receiver := startFakeDenon(t)
 	client := denon.NewClient(receiver.address(), nil)

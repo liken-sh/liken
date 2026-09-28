@@ -39,6 +39,7 @@ func snapshot(t *testing.T, api *cecAPI, path string) *watchStore {
 // store does not hold it. The third writes the derived status of no
 // CECBus and no Television again, and creates no Television again.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice, receiverDevice))
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -70,6 +71,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 // the receiver a setting again. The read after the write answers the
 // API server's copy.
 func TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putReceiver(receiverAt("uid-1", 1, "10.0.0.8"))
 	held := snapshot(t, api, receiversPath)
@@ -88,6 +90,7 @@ func TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite(t *testing.T) {
 // that read, the read is an error, and the pass acts on nothing and
 // tries again. Once the API server answers, the read answers the write.
 func TestARefusedReadOfACopyOlderThanItsOwnWriteIsAnError(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
 	held := snapshot(t, api, televisionsPath)
@@ -126,6 +129,7 @@ func (s *arrivingStore) ListKeys() []string {
 // discovered CECBus exists, and a list that left it out would make the
 // pass create the CECBus again.
 func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
+	t.Parallel()
 	api := startCECAPI(t)
 	created := asObject(t, CECBus{Metadata: ObjectMeta{Name: "node-1", ResourceVersion: "5"}})
 	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: created}

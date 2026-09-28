@@ -12,12 +12,14 @@ import (
 )
 
 func TestProtocolAddressReadsEitherBlock(t *testing.T) {
+	t.Parallel()
 	mustMatch(t, protocolAddress(&ReceiverSpec{Denon: &DenonProtocol{Address: "denon.example"}}), "denon.example")
 	mustMatch(t, protocolAddress(&ReceiverSpec{Wiim: &WiimProtocol{UUID: "id", Address: "wiim.example"}}), "wiim.example")
 	mustMatch(t, protocolAddress(&ReceiverSpec{}), "")
 }
 
 func TestStartDriverBuildsTheDeclaredProtocol(t *testing.T) {
+	t.Parallel()
 	unit := &receiverUnit{}
 	unit.startDriver(&Receiver{Spec: ReceiverSpec{Wiim: &WiimProtocol{UUID: "FF98F2F7AABBCCDDEEFF0011", Address: "192.0.2.1"}}}, "192.0.2.1", func(string) {})
 	if unit.wiimClient == nil || unit.driver == nil || unit.denonClient != nil {
@@ -35,6 +37,7 @@ func TestStartDriverBuildsTheDeclaredProtocol(t *testing.T) {
 // Each protocol reports only its own snapshot, so a status never
 // carries the other protocol's block.
 func TestProtocolSnapshotsAreNilForTheOtherProtocol(t *testing.T) {
+	t.Parallel()
 	wiimUnit := &receiverUnit{wiimClient: wiim.NewClient("192.0.2.1", nil)}
 	mustMatch(t, wiimUnit.denonSettings(), (*denon.Settings)(nil))
 	if wiimUnit.wiimStatus() == nil {
@@ -51,6 +54,7 @@ func TestProtocolSnapshotsAreNilForTheOtherProtocol(t *testing.T) {
 // A declared settings block reaches only a Denon: the WiiM unit takes
 // the same call as a no-op rather than panic on a nil client.
 func TestSetSettingsIsANoOpForAWiimReceiver(t *testing.T) {
+	t.Parallel()
 	unit := &receiverUnit{}
 	unit.setSettings(denon.Settings{})
 }
@@ -58,6 +62,7 @@ func TestSetSettingsIsANoOpForAWiimReceiver(t *testing.T) {
 // A WiiM's typed snapshot moves into status.wiim, and a change to it
 // makes the next write differ.
 func TestResolvedAddressPrefersTheDeclaredOne(t *testing.T) {
+	t.Parallel()
 	c := &controller{discovery: newDiscovery(nil, func() {})}
 	c.discovery.store([]wiim.Device{{UUID: "FF98F2F78136CE45A780D8A1", Address: "192.0.2.9"}})
 
@@ -67,6 +72,7 @@ func TestResolvedAddressPrefersTheDeclaredOne(t *testing.T) {
 }
 
 func TestWiimStatusTravelsIntoTheStatus(t *testing.T) {
+	t.Parallel()
 	unit := &receiverUnit{wiimClient: wiim.NewClient("192.0.2.1", nil)}
 	state := equipment.State{
 		Reachable: equipment.ConditionTrue,

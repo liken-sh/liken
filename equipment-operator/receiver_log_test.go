@@ -47,6 +47,7 @@ func switchCheck(confirmed *atomic.Bool) func() (string, bool) {
 }
 
 func TestACommandsLineWaitsForTheReportAndPrintsOnce(t *testing.T) {
+	t.Parallel()
 	log := &logBuffer{}
 	lines := newReceiverLog(log, "den")
 	var confirmed atomic.Bool
@@ -65,6 +66,7 @@ func TestACommandsLineWaitsForTheReportAndPrintsOnce(t *testing.T) {
 }
 
 func TestACommandTheReceiverAlreadyReportsPrintsAtOnce(t *testing.T) {
+	t.Parallel()
 	log := &logBuffer{}
 	var confirmed atomic.Bool
 	confirmed.Store(true)
@@ -93,6 +95,7 @@ func TestACommandTheReceiverNeverReportsPrintsWhenTheWaitEnds(t *testing.T) {
 }
 
 func TestARefusedCommandStatesTheDriversError(t *testing.T) {
+	t.Parallel()
 	log := &logBuffer{}
 
 	newReceiverLog(log, "den").refused("generation 2 asks power off; sent power standby", errors.New(`no connection to send "PWSTANDBY"`))
@@ -105,6 +108,7 @@ func TestARefusedCommandStatesTheDriversError(t *testing.T) {
 // A block that a pass sends again with the same value is not a new
 // line; a new value is.
 func TestFreshAnswersOncePerValue(t *testing.T) {
+	t.Parallel()
 	lines := newReceiverLog(&logBuffer{}, "den")
 	steps := []struct {
 		key   string
@@ -123,6 +127,7 @@ func TestFreshAnswersOncePerValue(t *testing.T) {
 }
 
 func TestElapsedReadsTheWayAPersonDoes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		duration time.Duration
 		want     string
@@ -138,6 +143,7 @@ func TestElapsedReadsTheWayAPersonDoes(t *testing.T) {
 }
 
 func TestDeclaredNamesOnlyTheDeclaredValues(t *testing.T) {
+	t.Parallel()
 	volume, mute := 40.0, true
 	cases := []struct {
 		block any

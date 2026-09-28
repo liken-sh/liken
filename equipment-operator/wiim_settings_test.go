@@ -134,6 +134,7 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 // sends nothing: the operator compares the spec with what the device
 // reports, not with a memory it lost in the restart.
 func TestARestartAgainstASettledWiimSendsNothing(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 
@@ -149,6 +150,7 @@ func TestARestartAgainstASettledWiimSendsNothing(t *testing.T) {
 // One declared field the device reports at another value sends that
 // field and nothing beside it.
 func TestOneDifferingWiimFieldSendsOnlyThatField(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 
@@ -168,6 +170,7 @@ func TestOneDifferingWiimFieldSendsOnlyThatField(t *testing.T) {
 }
 
 func TestAnUndeclaredWiimSettingSendsNothing(t *testing.T) {
+	t.Parallel()
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 

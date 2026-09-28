@@ -19,6 +19,7 @@ import (
 )
 
 func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
+	t.Parallel()
 	wake := make(chan struct{}, 1)
 
 	poke(wake)
@@ -305,6 +306,7 @@ func connected(status ReceiverStatus) bool {
 }
 
 func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -329,6 +331,7 @@ func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
 // The connect answers nine lines this operator reads, and they make one
 // status write.
 func TestTheConnectBurstMakesOneStatusWrite(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -343,6 +346,7 @@ func TestTheConnectBurstMakesOneStatusWrite(t *testing.T) {
 }
 
 func TestABurstOfKnobTurnsMakesOneStatusWrite(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -360,19 +364,47 @@ func TestABurstOfKnobTurnsMakesOneStatusWrite(t *testing.T) {
 }
 
 func TestASecondPassWritesNothingFurther(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
 	operator := startController(t, api)
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	// The first pass after the survey settles the declared blocks and
+	// records them, which is a write. The pass after that has nothing
+	// left to write.
+	waitForSurvey(t, operator)
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
 
 	mustSucceed(t, operator.pass(t.Context()))
 
 	api.refuseStatus(t, 2*statusDebounce)
 }
 
+// A receiver repeats a line whenever its own menu or remote touches a
+// field, often with the value it already reported. The burst that line
+// starts builds the same status, so the operator writes nothing.
+func TestALineThatRepeatsTheStateWritesNoStatus(t *testing.T) {
+	t.Parallel()
+	api := startFakeAPI(t)
+	equipment := startFakeDenon(t)
+	api.setReceivers(testReceiver("theater", equipment.address()))
+	operator := startController(t, api)
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
+	mustSucceed(t, operator.pass(t.Context()))
+	settled := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
+
+	equipment.volunteer("PW" + strings.ToUpper(settled.Zones["main"].Power))
+
+	api.refuseStatus(t, 2*statusDebounce)
+}
+
 func TestARemovedReceiverStopsItsClient(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -388,6 +420,7 @@ func TestARemovedReceiverStopsItsClient(t *testing.T) {
 }
 
 func TestAChangedAddressGetsANewConnection(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	first, second := startFakeDenon(t), startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", first.address()))
@@ -402,6 +435,7 @@ func TestAChangedAddressGetsANewConnection(t *testing.T) {
 }
 
 func TestAReceiverWithNoProtocolStartsNothing(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	api.setReceivers(Receiver{Metadata: ObjectMeta{Name: "theater", Generation: 1}})
 	operator := startController(t, api)
@@ -412,6 +446,7 @@ func TestAReceiverWithNoProtocolStartsNothing(t *testing.T) {
 }
 
 func TestPassAnswersTheErrorWhenTheListFails(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	api.breakTheList()
 	operator := startController(t, api)
@@ -436,6 +471,7 @@ func sessionedReceiver(name, address, input string) Receiver {
 // selects that one, and a session that is lifted selects nothing
 // further.
 func TestASessionThatChangesSelectsTheNewInput(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -458,6 +494,7 @@ func TestASessionThatChangesSelectsTheNewInput(t *testing.T) {
 // A session the pass reads again is left alone, because power and input
 // are one-shots the receiver answers once.
 func TestASessionThatHasNotChangedIsLeftAlone(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.setReceivers(testReceiver("theater", equipment.address()))
@@ -505,6 +542,7 @@ func TestTheLoopRunsUntilItsContextEndsAndStopsEveryUnit(t *testing.T) {
 // change writes the whole status again instead of skipping it as
 // already applied.
 func TestARefusedStatusWriteIsTriedAgain(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	api.breakTheStatus(true)
@@ -523,6 +561,7 @@ func TestARefusedStatusWriteIsTriedAgain(t *testing.T) {
 // serve reads the collection once before it runs, and answers the error
 // when that read fails.
 func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	api.breakTheList()
 
@@ -557,6 +596,7 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 // the step a press takes changes without the receiver being powered or
 // its input selected again.
 func TestAVolumeEditReachesAStandingSession(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
@@ -667,6 +707,7 @@ func heldSession(t *testing.T, operator *controller, name string) *session {
 // session that stands: the same connection, the same owner mark, and no
 // second adopt.
 func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
@@ -696,6 +737,7 @@ func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
 // The sound-mode lookup reads the declared inputs and answers nothing
 // for an input the wiring does not name.
 func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
+	t.Parallel()
 	unit := &receiverUnit{}
 	unit.setInputs([]ReceiverInput{{Name: "MPLAY", SoundMode: "STEREO"}})
 
@@ -711,6 +753,7 @@ func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
 // with the same value sends nothing further: the operator owns the
 // field and never re-asserts it.
 func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -742,6 +785,7 @@ func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 // once the receiver is reachable, and once the receiver reports the
 // declared value, a re-list with the same settings sends nothing.
 func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -775,6 +819,7 @@ func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 // right wire lines for each non-main zone, and once the zone reports
 // them, a re-list with the same zones sends nothing further.
 func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		zone    string
@@ -837,6 +882,7 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 // A zones map that names the main zone is rejected, so the main zone
 // never has two writers: spec.power and spec.zones.
 func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -855,6 +901,7 @@ func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
 // snapshot read before a later setZones keeps the earlier value; the two
 // never share a backing map.
 func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -893,6 +940,7 @@ func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 // topics with no session standing, so settings and commands reach a
 // receiver no Player is using.
 func TestTheReceiverBusSubscribesWithoutASession(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
@@ -917,6 +965,7 @@ func TestTheReceiverBusSubscribesWithoutASession(t *testing.T) {
 // same leaf back to spec.denon.settings, in a body that carries only
 // that one leaf, so a manifest-declared neighbor is untouched.
 func TestASettingsMessageSendsAndWritesTheLeafBack(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
@@ -951,6 +1000,7 @@ func TestASettingsMessageSendsAndWritesTheLeafBack(t *testing.T) {
 // A declared setting the receiver cannot carry is logged and not
 // recorded, so the next pass tries again; a later valid change lands.
 func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -977,6 +1027,7 @@ func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
 // A zone control the receiver cannot carry is logged and not recorded,
 // so the next pass tries again; a later valid change lands.
 func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -1003,6 +1054,7 @@ func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
 // A settings message that does not parse, or that names an unknown id,
 // changes nothing: the error is logged and no leaf is written.
 func TestASettingsMessageThatFailsChangesNothing(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
@@ -1031,6 +1083,7 @@ func TestASettingsMessageThatFailsChangesNothing(t *testing.T) {
 // the message behind it on the same topic is still handled. Each
 // handler runs on its own goroutine.
 func TestASlowSettingsPatchDoesNotBlockTheReader(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
@@ -1112,6 +1165,7 @@ func waitForObservedZone(t *testing.T, operator *controller, name, zone string, 
 // again on the next pass until the receiver reports the declared value,
 // then the operator stops.
 func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -1161,6 +1215,7 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 // sent again on the next pass until the zone reports the declared
 // value, then the operator stops.
 func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
@@ -1201,6 +1256,7 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 // id is logged and never fatal, so the bus keeps serving later
 // messages.
 func TestACommandMessageErrorIsLoggedAndNotFatal(t *testing.T) {
+	t.Parallel()
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
