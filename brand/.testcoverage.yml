@@ -38,5 +38,9 @@ override:
   # skills turns each guide into a SKILL.md. The tests run it against
   # a fixture guides directory. What stays untested is main itself
   # and a scattering of I/O error returns.
+  # main() in preview only calls run and exits, and a test cannot
+  # reach it without ending the test binary.
+  - path: ^preview$
+    threshold: 88
   - path: ^skills$
     threshold: 91

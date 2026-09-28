@@ -41,4 +41,7 @@ tag will release them. [`AGENTS.md`](AGENTS.md) holds the rules for
 agents that work in the repository, and `.agents/skills` holds their
 skills.
 
-The manual is at [liken.sh](https://liken.sh/).
+The manual is at [liken.sh](https://liken.sh/). To read every
+component's manual together on a workstation, run `make preview` and
+open <http://localhost:8080/>. The root `Makefile` explains the
+layout.
