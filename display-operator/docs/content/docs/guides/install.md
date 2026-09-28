@@ -230,18 +230,34 @@ node, and a node labeled `none` gets no pod. When a label changes, the
 controller deletes the pod from a node that no longer matches, and
 adds one to a node that matches again.
 
-Label the node with `kubectl`:
+Declare the label in the node's `Machine`, so the label is part of
+the record of the machine:
+
+    spec:
+      nodeLabels:
+        display.liken.sh/display: none
+
+A `Machine` accepts a key in a `liken.sh` subdomain from `liken`
+2026.09.28-002 on, and an older release refuses it, so on an older
+release use the `kubectl label` way below.
+
+The `liken` machine operator applies the label to the running node. A
+machine that is demoted or installed again registers a new Node, and
+the Node has the label from registration. To run the pod on that
+node again, remove the key from `spec.nodeLabels`, and `liken`
+removes the label from the node. `liken` also removes a label that
+you set with `kubectl` before the `Machine` declared it, when the key
+leaves the spec.
+
+You can also label the node with `kubectl`:
 
     kubectl label node node-1 display.liken.sh/display=none
 
-On `liken`, the label stays on the node across reboots, and `liken`
-leaves it in place, because `liken` removes only the labels that a
-`Machine` declared. The label goes with the Node object: a machine
-that is demoted or installed again registers a new Node, and you
-label it again. A `Machine` cannot declare this label: its
-`spec.nodeLabels` refuses every key in `liken.sh` and its subdomains.
-
-To run the pod on that node again, remove the label:
+The label stays on the node across reboots. `liken` leaves it in
+place, because `liken` removes only the labels that a `Machine`
+declared. The label goes with the Node object: a machine that is
+demoted or installed again registers a new Node, and you label it
+again. To run the pod on that node again, remove the label:
 
     kubectl label node node-1 display.liken.sh/display-
 
