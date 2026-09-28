@@ -1,0 +1,125 @@
+# The operator itself: one unprivileged Deployment, in the shape of
+# liken's cluster operator rather than the hardware operators'
+# DaemonSets. Those run a pod per node because they hold that node's
+# hardware; this one holds no hardware at all.
+#
+# The operator serves one HTTP endpoint, the webhook Radarr,
+# Sonarr, and Jellyfin post to, over the Service below. Everything else
+# it hears comes over media-operator's bus, because no pod it creates
+# holds an API credential and the operator alone writes a status.
+#
+# There is no volume for state. The operator re-derives everything
+# from the API server on every pass.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: library-operator
+  labels:
+    # The base binary selects on this label to find the
+    # operator's Deployment, read its image version, and pull the
+    # matching -cli image.
+    cli.liken.sh/plugin: library
+spec:
+  # One replica is enough, because the kubelet restarts a crashed
+  # operator. Two are safe: the Lease in leader.go lets one copy act, and
+  # the other waits and takes over when the first stops. A waiting copy
+  # holds each webhook the Service sends it until it leads, so with two
+  # replicas about half the webhooks wait for a failover.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: library-operator
+  # A rollout starts the new pod beside the old one, and stops the old
+  # one only when the new one runs. The new pod waits for the Lease while
+  # the old one leads. On SIGTERM the old pod finishes its pass, ends its
+  # bus session, and releases the Lease, and the new pod takes it on its
+  # next read, within about 11 seconds. So the image pull happens while
+  # the old pod still leads.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: library-operator
+    spec:
+      serviceAccountName: library-operator
+      # A shutdown finishes the pass in flight (up to 30 s), waits up to
+      # 5 s for the bus session to end, and releases the Lease (up to
+      # 16 s). A kill before the release leaves the Lease to expire, and
+      # a waiting copy then takes it 30 to 41 s later instead of within
+      # about 11 s.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/library-operator:latest
+          env:
+            # The broker the operator and every pod it creates
+            # reach: the bus Service that media-operator's deploy/
+            # creates in this namespace. The operator cannot derive the
+            # Service name, so the manifest states it, and the operator
+            # passes the address into every pod it creates.
+            - name: LIBRARY_BUS_ADDRESS
+              value: bus.liken-system.svc:1883
+            # The operator reads its own pod to learn its image, and
+            # derives every companion image from it at the same tag. The
+            # pod's name also names this copy in the Lease.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # The namespace this pod runs in, which is what the
+            # webhook address the operator reports on every Library
+            # names, and where the operator's Lease is. Nothing in a pod knows its own namespace, so the
+            # downward API reads it off the pod.
+            - name: OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # The port the webhook endpoint answers on, behind
+            # the Service below.
+            - name: WEBHOOK_PORT
+              value: "8080"
+            # The metrics listener's address, milestone 65's port for
+            # every process on the cluster network. An empty value
+            # would serve no metrics; the base states one so a cluster
+            # gets them by taking the manifest as it ships.
+            - name: METRICS_LISTEN_ADDRESS
+              value: ":9200"
+          ports:
+            - name: webhook
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9200
+              protocol: TCP
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+---
+# The one address every Library's webhook is reached at. The path
+# names the Library, so one Service serves every Library in the cluster,
+# and the address holds while Jobs come and go.
+apiVersion: v1
+kind: Service
+metadata:
+  name: library-operator
+spec:
+  selector:
+    app: library-operator
+  ports:
+    - name: webhook
+      port: 80
+      targetPort: webhook
+      protocol: TCP

@@ -1,0 +1,45 @@
+{
+  "responseHeader": {
+    "status": 0,
+    "QTime": 41,
+    "params": {
+      "qin": "collection:movie_trailers AND title:(\"Late Harbor Call\")",
+      "rows": "20",
+      "wt": "json"
+    }
+  },
+  "response": {
+    "numFound": 4,
+    "start": 0,
+    "docs": [
+      {
+        "identifier": "trailer_item_71",
+        "title": "Late Harbor Call",
+        "year": "1940",
+        "mediatype": "movies"
+      },
+      {
+        "identifier": "Late_Harbor_Call_trailer",
+        "title": "Late Harbor Call trailer",
+        "year": 1940,
+        "date": "1940-01-11T00:00:00Z",
+        "licenseurl": "http://creativecommons.org/licenses/publicdomain/",
+        "mediatype": "movies"
+      },
+      {
+        "identifier": "TomWeeksLateHarborCallMovieTrailer1940",
+        "title": "Tom Weeks' \"LATE HARBOR CALL\" movie trailer (1940)",
+        "date": "2013-07-22T16:39:55Z",
+        "mediatype": "movies"
+      },
+      {
+        "identifier": "TheQuietHouse2001TheatricalTrailer",
+        "title": ["The Quiet House (2001) theatrical trailer"],
+        "year": "2001",
+        "date": "2001-06-29T00:00:00Z",
+        "licenseurl": "http://creativecommons.org/licenses/publicdomain/",
+        "mediatype": "movies"
+      }
+    ]
+  }
+}

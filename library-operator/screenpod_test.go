@@ -1,0 +1,999 @@
+package main
+
+// These tests read the screen pod the operator would send to the API
+// server, and what a pass does with the pod that stands. The pod is the
+// whole of what a delegated Player becomes at run time, so what it
+// carries is worth reading field by field: the arguments that name the
+// catalog and every library root, the mounts behind them, and the
+// display claim the browser draws through.
+
+import (
+	"encoding/json"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// DenScreen is the Player these tests start from: a screen media-operator
+// delegated to this operator, with the claim and the requests it published.
+func denScreen() *Player {
+	return &Player{
+		Metadata: ObjectMeta{Name: "den", Namespace: testLibraryNamespace, UID: "den-uid"},
+		Status: PlayerStatus{Idle: &PlayerIdleStatus{
+			Controller: screenController,
+			Claim:      "den-idle-devices",
+			Requests:   []string{"draw", "render"},
+		}},
+	}
+}
+
+// HouseLibraries is the namespace's two libraries, out of name order, so
+// a test reads the order the pod puts them in rather than the order they
+// arrived in.
+func houseLibraries() []Library {
+	return []Library{
+		{
+			Metadata: ObjectMeta{Name: "shows", Namespace: testLibraryNamespace},
+			Spec: LibrarySpec{
+				Storage: LibraryStorage{Claim: "shows-volume", Root: "/"},
+				Kind:    libraryKindSeries,
+			},
+		},
+		{
+			Metadata: ObjectMeta{Name: "films", Namespace: testLibraryNamespace},
+			Spec: LibrarySpec{
+				Storage: LibraryStorage{Claim: "films-volume", Root: "/exports/films"},
+				Kind:    libraryKindMovies,
+			},
+		},
+	}
+}
+
+func testScreenPod(player *Player, libraries []Library) *Pod {
+	return buildScreenPod(player, libraries, testNamespaceCatalog(),
+		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+}
+
+// The pod's name, namespace, owner, and marks are what tie it to the
+// Player: the owner reference is the whole teardown, and the labels are
+// what a person's kubectl and this operator's own list select on.
+func TestScreenPodBelongsToItsPlayer(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	if pod.Metadata.Name != "den-media-browser" {
+		t.Errorf("name = %q, want den-media-browser", pod.Metadata.Name)
+	}
+	if pod.Metadata.Namespace != testLibraryNamespace {
+		t.Errorf("namespace = %q, want %s", pod.Metadata.Namespace, testLibraryNamespace)
+	}
+	if len(pod.Metadata.OwnerReferences) != 1 {
+		t.Fatalf("ownerReferences = %v, want one", pod.Metadata.OwnerReferences)
+	}
+	owner := pod.Metadata.OwnerReferences[0]
+	want := OwnerReference{
+		APIVersion: playerAPIVersion, Kind: "Player",
+		Name: "den", UID: "den-uid", Controller: true,
+	}
+	if owner != want {
+		t.Errorf("owner = %+v, want %+v", owner, want)
+	}
+	if pod.Metadata.Labels[scannerLabelKey] != screenLabelValue {
+		t.Errorf("labels = %v, want the screen name label", pod.Metadata.Labels)
+	}
+	if pod.Metadata.Labels[playerLabelKey] != "den" {
+		t.Errorf("labels = %v, want the player label", pod.Metadata.Labels)
+	}
+}
+
+// A screen is a standing service, so the pod restarts in place, and it
+// stops on the screen's own short grace and not the scanner's minute,
+// because a screen's agent holds no work a longer wait would finish.
+// The pod holds no ServiceAccount token, because nothing in it speaks
+// to the API server.
+func TestScreenPodStandsAndStopsQuickly(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	if pod.Spec.RestartPolicy != "Always" {
+		t.Errorf("restartPolicy = %q, want Always", pod.Spec.RestartPolicy)
+	}
+	if pod.Spec.TerminationGracePeriodSeconds == nil {
+		t.Fatal("terminationGracePeriodSeconds is unset")
+	}
+	if *pod.Spec.TerminationGracePeriodSeconds != 15 {
+		t.Errorf("terminationGracePeriodSeconds = %d, want 15",
+			*pod.Spec.TerminationGracePeriodSeconds)
+	}
+	// The pods that run a catalog agent keep their own period, because a
+	// change to the screen's grace must never reach them.
+	if scannerGracePeriod != 90 {
+		t.Errorf("scannerGracePeriod = %d, want 90", scannerGracePeriod)
+	}
+	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+		t.Error("automountServiceAccountToken is not false; the browser holds no credential")
+	}
+}
+
+// The browser reads the sidecar's own file and its loopback API, and it
+// takes one library root per Library in the namespace, in name order.
+func TestScreenPodBrowserReadsTheCatalogAndEveryLibraryRoot(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	if len(pod.Spec.Containers) != 1 {
+		t.Fatalf("containers = %d, want the browser alone", len(pod.Spec.Containers))
+	}
+	browser := pod.Spec.Containers[0]
+	if browser.Name != browserContainer {
+		t.Errorf("container = %q, want %s", browser.Name, browserContainer)
+	}
+	if browser.Image != testBrowserImage {
+		t.Errorf("image = %q, want %q", browser.Image, testBrowserImage)
+	}
+	want := "--catalog /var/lib/corrosion/state.db --updates http://127.0.0.1:8080 " +
+		"--progress /var/lib/progress/state.db --progress-updates http://127.0.0.1:8081 " +
+		"--people /etc/library/people/people.json " +
+		"--cache-dir /var/cache/media-browser --cache-budget 2013265920 " +
+		"--library-root house/films=/libraries/films/exports/films " +
+		"--library-root house/shows=/libraries/shows"
+	if got := strings.Join(browser.Args, " "); got != want {
+		t.Errorf("args = %q,\nwant %q", got, want)
+	}
+}
+
+// The browser reads the agent's database file itself, so the catalog
+// volume reaches the browser container as well as the agent, at the
+// path its --catalog argument names.
+func TestScreenPodBrowserMountsTheCatalogFile(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+	browser := pod.Spec.Containers[0]
+
+	for _, mount := range browser.VolumeMounts {
+		if mount.Name == catalogVolumeName && mount.MountPath == catalogStatePath && !mount.ReadOnly {
+			return
+		}
+	}
+	t.Errorf("the browser mounts %+v, want %s at %s", browser.VolumeMounts, catalogVolumeName, catalogStatePath)
+}
+
+func artCacheMounts(mounts []VolumeMount) []VolumeMount {
+	found := []VolumeMount{}
+	for _, mount := range mounts {
+		if mount.Name == artCacheVolumeName {
+			found = append(found, mount)
+		}
+	}
+	return found
+}
+
+func artCacheVolume(t *testing.T, volumes []Volume) Volume {
+	t.Helper()
+	for _, volume := range volumes {
+		if volume.Name == artCacheVolumeName {
+			return volume
+		}
+	}
+	t.Fatalf("volumes = %+v, want %s", volumes, artCacheVolumeName)
+	return Volume{}
+}
+
+func serializedVolume(t *testing.T, volume Volume) string {
+	t.Helper()
+	body, err := json.Marshal(volume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+func TestScreenPodGivesOnlyTheBrowserAWritableArtCache(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+	browserMounts := artCacheMounts(pod.Spec.Containers[0].VolumeMounts)
+	catalogMounts := artCacheMounts(pod.Spec.InitContainers[0].VolumeMounts)
+
+	if len(browserMounts) != 1 {
+		t.Fatalf("browser art cache mounts = %+v, want one", browserMounts)
+	}
+	want := VolumeMount{Name: artCacheVolumeName, MountPath: artCacheMountPath}
+	if browserMounts[0] != want {
+		t.Errorf("browser art cache mount = %+v, want %+v", browserMounts[0], want)
+	}
+	if len(catalogMounts) != 0 {
+		t.Errorf("catalog art cache mounts = %+v, want none", catalogMounts)
+	}
+}
+
+// A screen in a namespace with one Catalog keeps its scaled art on a
+// claim of its own. A screen with no Catalog keeps the capped emptyDir.
+func TestScreenPodArtCacheIsAClaimUnderACatalog(t *testing.T) {
+	cases := []struct {
+		name    string
+		catalog *NamespaceCatalog
+		want    string
+	}{
+		{
+			name:    "under a Catalog",
+			catalog: testNamespaceCatalog(),
+			want:    `{"name":"art-cache","persistentVolumeClaim":{"claimName":"den-media-browser-art"}}`,
+		},
+		{
+			name: "with no Catalog",
+			want: `{"name":"art-cache","emptyDir":{"sizeLimit":"640Mi"}}`,
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			pod := buildScreenPod(denScreen(), houseLibraries(), one.catalog,
+				testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+
+			got := serializedVolume(t, artCacheVolume(t, pod.Spec.Volumes))
+			if got != one.want {
+				t.Errorf("art cache volume = %s, want %s", got, one.want)
+			}
+		})
+	}
+}
+
+// The browser is told the claim's size less the 128 MiB of headroom an
+// atomic write needs. A size the operator cannot read, or one no larger
+// than the headroom, tells it nothing.
+func TestScreenPodTellsTheBrowserTheCacheBudget(t *testing.T) {
+	cases := []struct {
+		name string
+		size string
+		want string
+	}{
+		{name: "the default size", want: "--cache-budget 2013265920"},
+		{name: "gibibytes", size: "4Gi", want: "--cache-budget 4160749568"},
+		{name: "mebibytes", size: "512Mi", want: "--cache-budget 402653184"},
+		{name: "a plain count of bytes", size: "1000000000", want: "--cache-budget 865782272"},
+		{name: "a size inside the headroom", size: "128Mi"},
+		{name: "a size the operator cannot read", size: "two gigs"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			catalog := testNamespaceCatalog()
+			catalog.Spec.Screens.ArtCache.Size = one.size
+			pod := buildScreenPod(denScreen(), nil, catalog,
+				testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+
+			args := strings.Join(pod.Spec.Containers[0].Args, " ")
+			if one.want == "" {
+				if strings.Contains(args, "--cache-budget") {
+					t.Errorf("args = %q, want no budget", args)
+				}
+				return
+			}
+			if !strings.Contains(args, one.want) {
+				t.Errorf("args = %q, want %q", args, one.want)
+			}
+		})
+	}
+}
+
+// A screen with no Catalog is on the emptyDir and takes no budget flag,
+// so the browser keeps its own default.
+func TestScreenPodOnTheEmptyDirTellsTheBrowserNoBudget(t *testing.T) {
+	pod := buildScreenPod(denScreen(), nil, nil,
+		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+
+	if args := strings.Join(pod.Spec.Containers[0].Args, " "); strings.Contains(args, "--cache-budget") {
+		t.Errorf("args = %q, want no budget on an emptyDir", args)
+	}
+}
+
+func TestAnUnboundedEmptyDirStillSerializesWithNoSettings(t *testing.T) {
+	volume := screenCatalogVolume(denScreen(), nil)
+
+	got := serializedVolume(t, volume)
+	want := `{"name":"catalog","emptyDir":{}}`
+	if got != want {
+		t.Errorf("volume = %s, want %s", got, want)
+	}
+}
+
+// A namespace with no Library still stands a screen: the browser draws
+// the wall the catalog holds, and it mounts the catalog and no media
+// volume.
+func TestScreenPodWithNoLibrariesMountsNone(t *testing.T) {
+	pod := testScreenPod(denScreen(), nil)
+
+	browser := pod.Spec.Containers[0]
+	if len(browser.VolumeMounts) != 4 || browser.VolumeMounts[0].Name != catalogVolumeName ||
+		browser.VolumeMounts[1].Name != catalogVolumeName ||
+		browser.VolumeMounts[2].Name != artCacheVolumeName ||
+		browser.VolumeMounts[3].Name != peopleVolumeName {
+		t.Errorf("volumeMounts = %+v, want the catalog twice, the art cache, and the people", browser.VolumeMounts)
+	}
+	if strings.Contains(strings.Join(browser.Args, " "), "--library-root") {
+		t.Errorf("args = %v, want no library root", browser.Args)
+	}
+	if len(pod.Spec.Volumes) != 3 || pod.Spec.Volumes[0].Name != catalogVolumeName ||
+		pod.Spec.Volumes[1].Name != artCacheVolumeName || pod.Spec.Volumes[2].Name != peopleVolumeName {
+		t.Errorf("volumes = %+v, want the catalog, the art cache, and the people", pod.Spec.Volumes)
+	}
+}
+
+// The progress agent's file lives in one directory of the catalog claim,
+// and the browser mounts that same directory at the path its --progress
+// argument names. The people file is a ConfigMap the pod can start
+// without, mounted read-only.
+func TestScreenPodBrowserMountsTheProgressDirectoryAndThePeopleFile(t *testing.T) {
+	pod := testScreenPod(denScreen(), nil)
+
+	browser := pod.Spec.Containers[0]
+	progress := browser.VolumeMounts[1]
+	if progress.MountPath != progressStatePath || progress.SubPath != screenProgressSubPath || progress.ReadOnly {
+		t.Errorf("progress mount = %+v, want %s on the %s directory of the claim, writable",
+			progress, progressStatePath, screenProgressSubPath)
+	}
+	people := browser.VolumeMounts[3]
+	if people.MountPath != peopleMountPath || !people.ReadOnly {
+		t.Errorf("people mount = %+v, want %s read-only", people, peopleMountPath)
+	}
+	volume := pod.Spec.Volumes[2]
+	if volume.ConfigMap == nil || volume.ConfigMap.Name != peopleConfigMapName ||
+		volume.ConfigMap.Optional == nil || !*volume.ConfigMap.Optional {
+		t.Errorf("people volume = %+v, want the optional %s map", volume, peopleConfigMapName)
+	}
+}
+
+// Every Library's claim is mounted read-only under its own
+// directory, and the catalog agent's state is the screen's own claim.
+func TestScreenPodMountsEveryLibraryReadOnly(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	mounts := map[string]VolumeMount{}
+	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
+		mounts[mount.Name] = mount
+	}
+	for name, path := range map[string]string{
+		"library-films": "/libraries/films",
+		"library-shows": "/libraries/shows",
+	} {
+		mount, mounted := mounts[name]
+		if !mounted {
+			t.Fatalf("volumeMounts = %+v, want one named %s", pod.Spec.Containers[0].VolumeMounts, name)
+		}
+		if mount.MountPath != path || !mount.ReadOnly {
+			t.Errorf("mount = %+v, want %s read-only", mount, path)
+		}
+	}
+
+	volumes := map[string]Volume{}
+	for _, volume := range pod.Spec.Volumes {
+		volumes[volume.Name] = volume
+	}
+	films := volumes["library-films"]
+	if films.PersistentVolumeClaim == nil || films.PersistentVolumeClaim.ClaimName != "films-volume" {
+		t.Errorf("volume = %+v, want the films library's claim", films)
+	}
+	if !films.PersistentVolumeClaim.ReadOnly {
+		t.Error("the library volume is not read-only")
+	}
+	catalog := volumes[catalogVolumeName]
+	if catalog.EmptyDir != nil || catalog.PersistentVolumeClaim == nil ||
+		catalog.PersistentVolumeClaim.ClaimName != "den-media-browser-catalog" {
+		t.Errorf("catalog volume = %+v, want the screen's catalog claim", catalog)
+	}
+}
+
+// The pod holds the claim media-operator stood, and the browser takes
+// one request of it per name in the Player's status.
+func TestScreenPodHoldsTheDisplayClaim(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	want := []PodResourceClaim{{Name: displayClaimName, ResourceClaimName: "den-idle-devices"}}
+	if len(pod.Spec.ResourceClaims) != 1 || pod.Spec.ResourceClaims[0] != want[0] {
+		t.Errorf("resourceClaims = %+v, want %+v", pod.Spec.ResourceClaims, want)
+	}
+	claims := pod.Spec.Containers[0].Resources.Claims
+	if len(claims) != 2 {
+		t.Fatalf("claims = %+v, want one per request", claims)
+	}
+	if claims[0] != (ResourceClaim{Name: displayClaimName, Request: "draw"}) {
+		t.Errorf("claims[0] = %+v, want the draw request", claims[0])
+	}
+	if claims[1] != (ResourceClaim{Name: displayClaimName, Request: "render"}) {
+		t.Errorf("claims[1] = %+v, want the render request", claims[1])
+	}
+}
+
+// The screen pod tolerates the taint a cluster owner puts on a machine
+// that drives one screen, and nothing else. It tolerates no NoExecute
+// taint, so the browser still leaves an unreachable node.
+func TestScreenPodToleratesThePlayerTaintAlone(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	want := []Toleration{
+		{Key: "media.liken.sh/player", Operator: "Exists", Effect: "NoSchedule"},
+	}
+	if !slices.Equal(pod.Spec.Tolerations, want) {
+		t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, want)
+	}
+}
+
+// A Player with one request takes one, because media-operator names
+// render only for a Player whose display claim holds one.
+func TestScreenPodTakesTheRequestsThePlayerNames(t *testing.T) {
+	player := denScreen()
+	player.Status.Idle.Requests = []string{"draw"}
+
+	claims := testScreenPod(player, nil).Spec.Containers[0].Resources.Claims
+
+	if len(claims) != 1 || claims[0].Request != "draw" {
+		t.Errorf("claims = %+v, want the draw request alone", claims)
+	}
+}
+
+// The browser arms its window watchdog from the environment, and it
+// runs with no capability, as both containers of the scanner pod do.
+func TestScreenPodBrowserArmsTheWatchdogAndRunsUnprivileged(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	browser := pod.Spec.Containers[0]
+	if len(browser.Env) != 2 || browser.Env[0].Name != windowGraceVariable || browser.Env[1].Name != metricsAddressVariable {
+		t.Fatalf("env = %+v, want the window grace and the metrics address", browser.Env)
+	}
+	if browser.Env[0].Value != "15" {
+		t.Errorf("%s = %q, want 15", windowGraceVariable, browser.Env[0].Value)
+	}
+	if browser.SecurityContext == nil || browser.SecurityContext.AllowPrivilegeEscalation == nil ||
+		*browser.SecurityContext.AllowPrivilegeEscalation {
+		t.Errorf("securityContext = %+v, want privilege escalation refused", browser.SecurityContext)
+	}
+}
+
+// The catalog agent is the same native sidecar the scanner pod runs,
+// with the same probes, so the browser starts against an API that is
+// already listening.
+func TestScreenPodRunsTheSameCatalogSidecar(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	if len(pod.Spec.InitContainers) != 2 {
+		t.Fatalf("initContainers = %d, want the catalog and progress sidecars", len(pod.Spec.InitContainers))
+	}
+	sidecar := pod.Spec.InitContainers[0]
+	if sidecar.Name != catalogContainer || sidecar.Image != testCorrosionImage {
+		t.Errorf("sidecar = %q on %q, want the catalog agent", sidecar.Name, sidecar.Image)
+	}
+	if sidecar.RestartPolicy != "Always" || sidecar.StartupProbe == nil {
+		t.Errorf("sidecar = %+v, want a native sidecar with a startup probe", sidecar)
+	}
+	if len(sidecar.VolumeMounts) != 1 || sidecar.VolumeMounts[0].MountPath != catalogStatePath {
+		t.Errorf("volumeMounts = %+v, want the catalog state directory", sidecar.VolumeMounts)
+	}
+}
+
+// The second sidecar is the progress store's own agent, with its file on
+// the screen's catalog claim in a directory of its own, so the screen's
+// two agents share one claim and neither sees the other's files. The pod
+// carries the progress member label, so the namespace's progress
+// EndpointSlice names it as a peer.
+func TestScreenPodRunsTheProgressSidecarOnTheCatalogClaim(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	sidecar := pod.Spec.InitContainers[1]
+	if sidecar.Name != progressContainer || sidecar.Image != testCorrosionImage {
+		t.Errorf("sidecar = %q on %q, want the progress agent", sidecar.Name, sidecar.Image)
+	}
+	if sidecar.RestartPolicy != "Always" || sidecar.StartupProbe == nil {
+		t.Errorf("sidecar = %+v, want a native sidecar with a startup probe", sidecar)
+	}
+	if strings.Join(sidecar.Args, " ") != "agent --config "+progressConfigPath {
+		t.Errorf("args = %v, want the progress configuration", sidecar.Args)
+	}
+	mount := sidecar.VolumeMounts
+	if len(mount) != 1 || mount[0].Name != catalogVolumeName || mount[0].MountPath != progressStatePath ||
+		mount[0].SubPath != screenProgressSubPath {
+		t.Errorf("volumeMounts = %+v, want the %s directory of the catalog claim at %s",
+			mount, screenProgressSubPath, progressStatePath)
+	}
+	if pod.Metadata.Labels[progressMemberLabelKey] != progressMemberLabelValue {
+		t.Errorf("labels = %v, want the progress member label", pod.Metadata.Labels)
+	}
+}
+
+// The pass writes the namespace's people file before it stands a pod,
+// cut to the two fields the browser draws, in name order, and owned
+// by the namespace's Catalog. A later pass with the same people
+// rewrites nothing, and one with a new Person rewrites the file.
+func TestReconcileScreensWritesThePeopleFileOfTheNamespace(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	operator := testOperator(t, cluster)
+	people := []Person{
+		{Metadata: ObjectMeta{Name: "person-b"}, Spec: PersonSpec{DisplayName: "Person B"}},
+		{Metadata: ObjectMeta{Name: "person-a"}},
+		{Metadata: ObjectMeta{Name: "gone", DeletionTimestamp: "2026-09-07T00:00:00Z"}},
+	}
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
+
+	written := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
+	if written == nil {
+		t.Fatal("no people map was written")
+	}
+	want := `[{"name":"person-a","displayName":"person-a"},{"name":"person-b","displayName":"Person B"}]`
+	if got := written.Data[peopleFileName]; got != want {
+		t.Errorf("people = %s, want %s", got, want)
+	}
+	if len(written.Metadata.OwnerReferences) != 1 || written.Metadata.OwnerReferences[0].Kind != "Catalog" {
+		t.Errorf("owners = %+v, want the namespace's Catalog", written.Metadata.OwnerReferences)
+	}
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
+	if got := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName).Metadata.ResourceVersion; got != "1" {
+		t.Errorf("resourceVersion = %s after an unchanged pass, want 1", got)
+	}
+
+	people = append(people, Person{Metadata: ObjectMeta{Name: "io"}, Spec: PersonSpec{DisplayName: "Io"}})
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
+	rewritten := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
+	if rewritten.Metadata.ResourceVersion != "2" || !strings.Contains(rewritten.Data[peopleFileName], `"io"`) {
+		t.Errorf("people = %+v, want the file rewritten with io", rewritten)
+	}
+}
+
+// A namespace with no Catalog gets the file too, unowned, so a screen on
+// an emptyDir still knows its people.
+func TestReconcileScreensWritesAnUnownedPeopleFileWithNoCatalog(t *testing.T) {
+	cluster := newFakeCluster()
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	people := []Person{{Metadata: ObjectMeta{Name: "person-a"}}}
+
+	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
+
+	written := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
+	if written == nil || len(written.Metadata.OwnerReferences) != 0 {
+		t.Errorf("people map = %+v, want an unowned map", written)
+	}
+}
+
+// A pass stands one pod per delegated Player, stamped with the template
+// hash a later pass compares against, and it mounts the Libraries of
+// that Player's namespace and no other.
+func TestReconcileScreensStandsAPodForADelegatedPlayer(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	operator := testOperator(t, cluster)
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, []Library{*cluster.libraries["movies"]}, nil, nil, testNow)
+
+	pod := cluster.heldPod("den-media-browser")
+	if pod == nil {
+		t.Fatal("no screen pod was created")
+	}
+	if pod.Metadata.Annotations[templateHashAnnotation] == "" {
+		t.Error("the pod carries no template hash")
+	}
+	if got := strings.Join(pod.Spec.Containers[0].Args, " "); !strings.Contains(got, "--library-root house/movies=") {
+		t.Errorf("args = %q, want the namespace's library", got)
+	}
+}
+
+// A Player that names another idle controller, and one that names none
+// at all, get no pod, and the pod standing for one is deleted. That
+// delete is the switch away, and it is the only delete this pass sends.
+func TestReconcileScreensStopsThePodOfAPlayerItNoLongerServes(t *testing.T) {
+	cases := []struct {
+		name       string
+		controller string
+	}{
+		{name: "another controller", controller: "media.liken.sh/idle-screen"},
+		{name: "no idle block", controller: ""},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			player := seedPlayer(cluster, "den", testLibraryNamespace, one.controller)
+			cluster.pods["den-media-browser"] = &Pod{
+				Metadata: ObjectMeta{Name: "den-media-browser", Namespace: testLibraryNamespace},
+			}
+
+			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+				[]Player{*player}, nil, nil, []Pod{*cluster.pods["den-media-browser"]}, testNow)
+
+			if cluster.heldPod("den-media-browser") != nil {
+				t.Error("the screen pod still stands for a Player this operator does not serve")
+			}
+		})
+	}
+}
+
+// A Player this operator does not serve costs the pass nothing when no
+// pod stands for it, so a cluster of undelegated units sends no delete
+// on every pass.
+func TestReconcileScreensSendsNoDeleteWhenNoPodStands(t *testing.T) {
+	cluster := newFakeCluster()
+	player := seedPlayer(cluster, "den", testLibraryNamespace, "media.liken.sh/idle-screen")
+
+	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+		[]Player{*player}, nil, nil, nil, testNow)
+
+	if got := cluster.countRequests(http.MethodDelete, "pods"); got != 0 {
+		t.Errorf("the pass sent %d deletes for a Player with no pod", got)
+	}
+}
+
+// A pod built from a different template is stale, so the pass deletes
+// it, and the pass after that creates the replacement.
+func TestReconcileScreensReplacesAStalePod(t *testing.T) {
+	cluster := newFakeCluster()
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	stale := testScreenPod(player, nil)
+	stale.Metadata.Annotations = map[string]string{templateHashAnnotation: "an-older-template"}
+	cluster.pods["den-media-browser"] = stale
+	operator := testOperator(t, cluster)
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
+
+	if cluster.heldPod("den-media-browser") != nil {
+		t.Fatal("the stale pod still stands")
+	}
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
+
+	replacement := cluster.heldPod("den-media-browser")
+	if replacement == nil {
+		t.Fatal("no replacement pod was created")
+	}
+	if replacement.Metadata.Annotations[templateHashAnnotation] == "an-older-template" {
+		t.Error("the replacement carries the stale hash")
+	}
+}
+
+// A pod that matches the template is left as it stands: the pass reads
+// it and writes nothing.
+func TestReconcileScreensKeepsAMatchingPod(t *testing.T) {
+	cluster := newFakeCluster()
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	operator := testOperator(t, cluster)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
+
+	if cluster.countRequests(http.MethodDelete, "pods") != 0 {
+		t.Error("the pass deleted a pod that matched the template")
+	}
+	if cluster.countRequests(http.MethodPost, "pods") != 1 {
+		t.Error("the pass created a second pod")
+	}
+}
+
+// A pass over one namespace reads the Players and the Libraries of that
+// namespace alone, so a screen in one house never mounts another's
+// volumes.
+func TestReconcileScreensReadsOneNamespace(t *testing.T) {
+	cluster := newFakeCluster()
+	house := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	studio := seedPlayer(cluster, "studio", "studio", screenController)
+	libraries := []Library{
+		{
+			Metadata: ObjectMeta{Name: "films", Namespace: testLibraryNamespace},
+			Spec:     LibrarySpec{Storage: LibraryStorage{Claim: "films-volume", Root: "/"}},
+		},
+		{
+			Metadata: ObjectMeta{Name: "shows", Namespace: "studio"},
+			Spec:     LibrarySpec{Storage: LibraryStorage{Claim: "shows-volume", Root: "/"}},
+		},
+	}
+
+	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+		[]Player{*house, *studio}, libraries, nil, nil, testNow)
+
+	if cluster.heldPod("studio-media-browser") != nil {
+		t.Error("the pass stood a pod for a Player in another namespace")
+	}
+	pod := cluster.heldPod("den-media-browser")
+	if pod == nil {
+		t.Fatal("no screen pod was created")
+	}
+	if got := strings.Join(pod.Spec.Containers[0].Args, " "); strings.Contains(got, "studio/shows") {
+		t.Errorf("args = %q, want no library from another namespace", got)
+	}
+}
+
+// A failure on one Player is reported and the pass carries on, so one
+// broken screen does not hold up another room's.
+func TestReconcileScreensCarriesOnPastAFailure(t *testing.T) {
+	cases := []struct {
+		name       string
+		path       string
+		controller string
+		catalog    *NamespaceCatalog
+	}{
+		{
+			name: "the pod cannot be read", controller: screenController,
+			path: "/api/v1/namespaces/house/pods/den-media-browser",
+		},
+		{
+			name: "the pod cannot be deleted", controller: "media.liken.sh/idle-screen",
+			path: "/api/v1/namespaces/house/pods/den-media-browser",
+		},
+		{
+			name: "the claim cannot be read", controller: screenController,
+			path:    claimPath(testLibraryNamespace, "den-media-browser-catalog"),
+			catalog: testNamespaceCatalog(),
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			broken := seedPlayer(cluster, "den", testLibraryNamespace, one.controller)
+			standing := seedPlayer(cluster, "kitchen", testLibraryNamespace, screenController)
+			cluster.broken[one.path] = http.StatusInternalServerError
+
+			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, one.catalog,
+				[]Player{*broken, *standing}, nil, nil, nil, testNow)
+
+			if cluster.heldPod("kitchen-media-browser") == nil {
+				t.Error("the pass stopped at the broken Player")
+			}
+		})
+	}
+}
+
+// The namespaces are read from the Players themselves, in name order,
+// so a pass reconciles each namespace once however many screens it
+// holds.
+func TestScreenNamespacesAreEveryPlayersNamespaceInOrder(t *testing.T) {
+	players := []Player{
+		{Metadata: ObjectMeta{Name: "studio", Namespace: "studio"}},
+		{Metadata: ObjectMeta{Name: "den", Namespace: testLibraryNamespace}},
+		{Metadata: ObjectMeta{Name: "kitchen", Namespace: testLibraryNamespace}},
+	}
+
+	got := screenNamespaces(players)
+
+	if len(got) != 2 || got[0] != testLibraryNamespace || got[1] != "studio" {
+		t.Errorf("namespaces = %v, want house and studio", got)
+	}
+	if len(screenNamespaces(nil)) != 0 {
+		t.Errorf("namespaces = %v, want none", screenNamespaces(nil))
+	}
+}
+
+// The bus block on the status reaches the browser as the variables
+// the media-screen crate reads, so a remote's presses arrive on that
+// controller's events topic and the browser runs the two windows itself.
+func denScreenOnTheBus() *Player {
+	player := denScreen()
+	player.Status.Idle.FadeAfterSeconds = 600
+	player.Status.Idle.OffAfterSeconds = 1800
+	player.Status.Idle.Bus = &PlayerIdleBus{
+		Address:          "bus.liken-system.svc:1883",
+		StatusTopic:      "liken/media/players/house/den/status",
+		VolumeTopic:      "liken/media/players/house/den/volume",
+		VolumeOwnerTopic: "liken/media/players/house/den/volume/owner",
+		CommandsTopic:    "liken/media/players/house/den/commands",
+		PowerTopic:       "liken/media/players/house/den/power",
+		PanelTopic:       "liken/media/players/house/den/panel",
+		Remotes: []PlayerIdleRemote{
+			{
+				Events: "liken/media/remotes/house/sofa/events",
+				Focus:  "liken/media/remotes/house/sofa/focus",
+			},
+			{
+				Events: "liken/media/remotes/house/armchair/events",
+				Focus:  "liken/media/remotes/house/armchair/focus",
+			},
+		},
+	}
+	return player
+}
+
+// The browser container's environment, by name.
+func browserEnvironment(player *Player) map[string]string {
+	environment := map[string]string{}
+	for _, variable := range testScreenPod(player, houseLibraries()).Spec.Containers[0].Env {
+		environment[variable.Name] = variable.Value
+	}
+	return environment
+}
+
+func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
+	environment := browserEnvironment(denScreenOnTheBus())
+
+	want := map[string]string{
+		windowGraceVariable:           windowGraceSeconds,
+		metricsAddressVariable:        ":9200",
+		mediaBusAddressVariable:       "bus.liken-system.svc:1883",
+		mediaPlayerNameVariable:       "den",
+		mediaStatusTopicVariable:      "liken/media/players/house/den/status",
+		mediaVolumeTopicVariable:      "liken/media/players/house/den/volume",
+		mediaVolumeOwnerTopicVariable: "liken/media/players/house/den/volume/owner",
+		mediaCommandsTopicVariable:    "liken/media/players/house/den/commands",
+		mediaPowerTopicVariable:       "liken/media/players/house/den/power",
+		mediaPanelTopicVariable:       "liken/media/players/house/den/panel",
+		mediaRemoteEventsTopicsVariable: "liken/media/remotes/house/sofa/events\n" +
+			"liken/media/remotes/house/armchair/events",
+		mediaRemoteFocusTopicsVariable: "liken/media/remotes/house/sofa/focus\n" +
+			"liken/media/remotes/house/armchair/focus",
+		idleFadeAfterSecondsVariable: "600",
+		idleOffAfterSecondsVariable:  "1800",
+		libraryPlayTopicVariable:     "liken/library/players/house/den/play",
+		libraryAudienceTopicVariable: "liken/library/players/house/den/audience",
+	}
+	for name, value := range want {
+		if environment[name] != value {
+			t.Errorf("%s = %q, want %q", name, environment[name], value)
+		}
+	}
+	if len(environment) != len(want) {
+		t.Errorf("env = %v, want %d variables", environment, len(want))
+	}
+}
+
+// Both windows are set whatever they hold, because zero is a policy:
+// no fade, and a panel that stays lit.
+func TestScreenPodStatesBothWindowsEvenAtZero(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.FadeAfterSeconds = 0
+	player.Status.Idle.OffAfterSeconds = 0
+
+	environment := browserEnvironment(player)
+
+	if environment[idleFadeAfterSecondsVariable] != "0" {
+		t.Errorf("fade = %q, want 0", environment[idleFadeAfterSecondsVariable])
+	}
+	if environment[idleOffAfterSecondsVariable] != "0" {
+		t.Errorf("off = %q, want 0", environment[idleOffAfterSecondsVariable])
+	}
+}
+
+// The volume topic is the speaker gate, so a unit with no sinks
+// carries no variable at all.
+func TestScreenPodWithNoSinksNamesNoVolumeTopic(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.VolumeTopic = ""
+
+	environment := browserEnvironment(player)
+
+	if _, set := environment[mediaVolumeTopicVariable]; set {
+		t.Errorf("env = %v, want no volume topic", environment)
+	}
+}
+
+// An older media-operator states no owner topic, and the browser then
+// draws the level with no gate over it.
+func TestScreenPodWithNoOwnerTopicNamesNoOwnerVariable(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.VolumeOwnerTopic = ""
+
+	environment := browserEnvironment(player)
+
+	if _, set := environment[mediaVolumeOwnerTopicVariable]; set {
+		t.Errorf("env = %v, want no owner topic", environment)
+	}
+}
+
+// An older media-operator states no power topic, and the browser then
+// forwards the power key to its shade.
+func TestScreenPodWithNoPowerTopicNamesNoPowerVariable(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.PowerTopic = ""
+
+	environment := browserEnvironment(player)
+
+	if _, set := environment[mediaPowerTopicVariable]; set {
+		t.Errorf("env = %v, want no power topic", environment)
+	}
+}
+
+// A unit with no controllers carries neither list, because an empty
+// list and one empty line are not the same thing to the crate.
+func TestScreenPodWithNoRemotesNamesNeitherList(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.Remotes = nil
+
+	environment := browserEnvironment(player)
+
+	for _, name := range []string{
+		mediaRemoteEventsTopicsVariable, mediaRemoteFocusTopicsVariable,
+	} {
+		if _, set := environment[name]; set {
+			t.Errorf("env = %v, want no %s", environment, name)
+		}
+	}
+}
+
+// A controller with no focus topic contributes an empty line, so the
+// two lists stay paired by position.
+func TestScreenPodKeepsTheRemoteListsPairedByPosition(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.Remotes[0].Focus = ""
+
+	environment := browserEnvironment(player)
+
+	if environment[mediaRemoteFocusTopicsVariable] !=
+		"\nliken/media/remotes/house/armchair/focus" {
+		t.Errorf("focus topics = %q, want an empty first line",
+			environment[mediaRemoteFocusTopicsVariable])
+	}
+}
+
+// A Player under an older media-operator publishes no bus block,
+// and its browser opens no connection and takes the keyboard alone.
+// The pass reads the household zone once and stamps it on the screen
+// pod it stands, so a cluster that states a zone shows local time on
+// every screen.
+func TestPassStampsTheHouseholdZoneOnTheScreen(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	cluster.preferences = &MediaPreferences{
+		Metadata: ObjectMeta{Name: mediaPreferencesName},
+		Spec:     MediaPreferencesSpec{TimeZone: "America/New_York"},
+	}
+
+	testOperator(t, cluster).pass()
+
+	pod := cluster.heldPod("den-media-browser")
+	if pod == nil {
+		t.Fatal("no screen pod was created")
+	}
+	for _, variable := range pod.Spec.Containers[0].Env {
+		if variable.Name == timeZoneVariable && variable.Value == "America/New_York" {
+			return
+		}
+	}
+	t.Errorf("the screen pod carries no TZ: %v", pod.Spec.Containers[0].Env)
+}
+
+// The household zone reaches the browser as TZ, the name glibc reads,
+// so the clock and the day's draw follow the house. A cluster that states
+// none leaves the variable out, and the pod reads UTC.
+func TestScreenPodCarriesTheHouseholdZoneAsTZ(t *testing.T) {
+	pod := buildScreenPod(denScreen(), houseLibraries(), testNamespaceCatalog(),
+		testBrowserImage, testCorrosionImage, defaultTopicBase, "America/New_York")
+	environment := map[string]string{}
+	for _, variable := range pod.Spec.Containers[0].Env {
+		environment[variable.Name] = variable.Value
+	}
+	if environment[timeZoneVariable] != "America/New_York" {
+		t.Errorf("TZ = %q, want America/New_York", environment[timeZoneVariable])
+	}
+	if _, set := browserEnvironment(denScreen())[timeZoneVariable]; set {
+		t.Error("a cluster with no zone set TZ")
+	}
+}
+
+func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
+	environment := browserEnvironment(denScreen())
+
+	if len(environment) != 2 || environment[windowGraceVariable] != windowGraceSeconds ||
+		environment[metricsAddressVariable] != ":9200" {
+		t.Errorf("env = %v, want the window grace and the metrics address", environment)
+	}
+}
+
+// A franchises library's screen mounts the art claim and never the storage
+// claim, because the art is what a screen reads and the storage holds the
+// checkout the scanner walks.
+func TestTheScreenPodMountsTheArtClaimOfAFranchisesLibrary(t *testing.T) {
+	libraries := append(houseLibraries(), *studioFranchises())
+
+	pod := testScreenPod(denScreen(), libraries)
+
+	held := ""
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == libraryVolumeName+"-franchises" && volume.PersistentVolumeClaim != nil {
+			held = volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	if held != "franchise-art" {
+		t.Errorf("the franchises volume names the claim %q, want the art claim", held)
+	}
+	if !strings.Contains(strings.Join(pod.Spec.Containers[0].Args, " "),
+		"house/franchises=/libraries/franchises") {
+		t.Errorf("args = %v, want the library root of the art claim",
+			pod.Spec.Containers[0].Args)
+	}
+}

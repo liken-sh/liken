@@ -1,0 +1,354 @@
+package main
+
+// attempts.go is the attempts table's Go side: the row, the writes, and how
+// the scanner lifts a folder's .liken files into the rows the gap queries
+// read. The rows are derived from the volume, so a lost catalog gets them
+// back on the next walk.
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// The column of the attempts table that holds the fact. Corrosion applies the
+// difference between the schema file and the database on every start. It adds
+// tables, columns, and indexes, and it refuses to remove a column. This
+// column is also part of the primary key, and Corrosion refuses to add a
+// primary key column to a table that exists. So the column keeps the name it
+// was created with, every Go name is fact, and this constant is the one place
+// the two meet.
+const attemptFactColumn = "concern"
+
+// One enricher's last attempt at one item, as the attempts table holds it.
+// For a file fact the item is the file's path under the library root.
+type attemptRow struct {
+	Library string
+	Item    string
+	Fact    string
+	At      int64
+	Result  string
+	// The provider block that answered, empty for a fact that asks no provider.
+	// A set fact joins the blocks it took the union of with commas.
+	Provider string
+	// The Last-Modified time, in Unix seconds, of the dataset file that answered
+	// the attempt, and 0 where no dataset file answered it.
+	DatasetModified int64
+}
+
+// One attempts row, by the two key columns that follow the library.
+type attemptKey struct {
+	Item string
+	Fact string
+}
+
+// A repeat write updates the row in place, because one item and one fact
+// hold one attempt, the latest. The update names no key column, so the row's
+// identity never moves.
+func (c *Catalog) UpsertAttempts(ctx context.Context, rows []attemptRow) (int, error) {
+	statements := make([]statement, len(rows))
+	for i, row := range rows {
+		statements[i] = statement{
+			sql: `INSERT INTO attempts (library, item, ` + attemptFactColumn + `, at, result, provider, dataset_modified) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?) ` +
+				`ON CONFLICT (library, item, ` + attemptFactColumn + `) DO UPDATE SET at = excluded.at, ` +
+				`result = excluded.result, provider = excluded.provider, dataset_modified = excluded.dataset_modified`,
+			params: []any{row.Library, row.Item, row.Fact, row.At, row.Result, row.Provider, row.DatasetModified},
+		}
+	}
+	return c.apply(ctx, statements)
+}
+
+// The delete names all three key columns, as the link table's delete does, so
+// a sweep takes exactly the rows it marked.
+func (c *Catalog) DeleteAttempts(ctx context.Context, library string, keys []attemptKey) (int, error) {
+	statements := make([]statement, len(keys))
+	for i, key := range keys {
+		statements[i] = statement{
+			sql:    `DELETE FROM attempts WHERE library = ? AND item = ? AND ` + attemptFactColumn + ` = ?`,
+			params: []any{library, key.Item, key.Fact},
+		}
+	}
+	return c.apply(ctx, statements)
+}
+
+// The two key columns travel as one string through a sweep, joined by a
+// separator no path or id holds, so the sweep's mark table keeps one column
+// for every table it covers.
+func attemptKeys(keys []string) []attemptKey {
+	out := make([]attemptKey, len(keys))
+	for i, key := range keys {
+		item, fact, _ := strings.Cut(key, linkKeySeparator)
+		out[i] = attemptKey{Item: item, Fact: fact}
+	}
+	return out
+}
+
+func attemptSeenKey(row attemptRow) string {
+	return row.Item + linkKeySeparator + row.Fact
+}
+
+// Reads the attempts this library holds that the current epoch did not mark,
+// one bounded batch, with the two key columns joined the way the mark joined
+// them.
+func attemptPruneSQL() string {
+	return `SELECT item || char(31) || ` + attemptFactColumn + ` FROM attempts` +
+		` WHERE library = ?` +
+		` AND '` + seenAttempt + `' || item || char(31) || ` + attemptFactColumn +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND at < ?` +
+		` LIMIT ?`
+}
+
+// How a rescan reaches one folder's attempts: a file fact keys on a path
+// under the folder, and an item fact keys on the id of an item the folder
+// holds.
+func scopedAttemptPruneSQL() string {
+	scope := func(table string) string {
+		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")
+	}
+	return `SELECT item || char(31) || ` + attemptFactColumn + ` FROM attempts` +
+		` WHERE library = ?` +
+		` AND '` + seenAttempt + `' || item || char(31) || ` + attemptFactColumn +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND (` + pathScopeClause("item") +
+		` OR item IN (` + scope("movies") + ` UNION ` + scope("series") + ` UNION ` + scope("episodes") + `))` +
+		` AND at < ?` +
+		` LIMIT ?`
+}
+
+func scopedAttemptPruneParams(library, folder string, epoch int64) []any {
+	params := []any{library, epoch}
+	params = append(params, pathScopeParams(folder)...)
+	for range 3 {
+		params = append(params, library)
+		params = append(params, pathScopeParams(folder)...)
+	}
+	return append(params, walkStart(epoch), pruneBatch)
+}
+
+// What one folder's .liken directory means to the scanner: which item the
+// folder's own entry names, and which item each file under it names.
+type likenDir struct {
+	root    string
+	dir     string
+	library string
+	item    string
+	items   map[string]string
+	// The facts whose ledgers this folder can hold. A title folder holds the
+	// title's own, which is the list below, and a person's directory holds the
+	// three contributor facts and no other.
+	facts []string
+}
+
+// The facts this folder is read for, which is the title list where the caller
+// names none.
+func (s likenDir) ledgerFacts() []string {
+	if s.facts != nil {
+		return s.facts
+	}
+	return likenFacts
+}
+
+// The facts the scanner lifts out of a folder. A file fact keys on a
+// path, because it works per file, and the identity fact keys on an item
+// id, because it works per title.
+var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
+	factOverview, factCertification,
+	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
+	factCredits, factCreditsMove,
+	factPoster, factBackdrop, factLogo, factClearart, factBanner,
+	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
+	factTrailer, factTrailerFile, factMarks}
+
+// The rows one folder's trailer ledger becomes: one per trailer the providers
+// hold, keyed on the item its own entry names.
+func (s likenDir) trailerRows(entries []trailerEntry) []trailerRow {
+	rows := make([]trailerRow, 0, len(entries))
+	for _, entry := range entries {
+		item := s.itemOf(factTrailer, entry.Path)
+		if item == "" || entry.Key == "" {
+			continue
+		}
+		rows = append(rows, trailerRow{
+			Library: s.library, Item: item, Provider: entry.Provider, Key: entry.Key,
+			Site: entry.Site, URL: entry.URL, Name: entry.Name, Kind: entry.Kind,
+			Language: entry.Language, Official: entry.Official, Published: entry.Published,
+			Resolution: entry.Resolution, Score: entry.Score, Reason: entry.Reason,
+		})
+	}
+	return rows
+}
+
+// The rows one folder's marks ledger becomes: one per span, keyed on the
+// file its entry names, numbered in ledger order within each file.
+func (s likenDir) markRows(entries []markEntry) []markRow {
+	rows := make([]markRow, 0, len(entries))
+	ordinals := map[string]int{}
+	for _, entry := range entries {
+		path := s.itemOf(factMarks, entry.Path)
+		if path == "" || entry.Kind == "" {
+			continue
+		}
+		rows = append(rows, markRow{
+			Library: s.library, Path: path, Ordinal: ordinals[path],
+			Kind: entry.Kind, Start: entry.Start, End: entry.End, Source: entry.Source,
+		})
+		ordinals[path]++
+	}
+	return rows
+}
+
+// What one folder's .liken files hold as rows: the attempts of every fact,
+// and the three lists a fact keeps in its own ledger.
+type likenRows struct {
+	attempts []attemptRow
+	credits  []creditRow
+	trailers []trailerRow
+	marks    []markRow
+}
+
+// Reads every .liken file the folder holds into attempts rows. A folder that
+// holds none reads as no rows and not as an error, because most folders hold
+// none.
+// One pass answers for every kind of row, because the credits ledger, the
+// trailer ledger, and the marks ledger are files this pass already opens.
+func (s likenDir) read() (likenRows, error) {
+	held := likenRows{}
+	for _, fact := range s.ledgerFacts() {
+		ledger, err := readLikenLedger(s.dir, fact)
+		if err != nil {
+			return held, err
+		}
+		switch fact {
+		case factCredits:
+			held.credits = append(held.credits, creditRows(s.library, s.item, ledger.Credits)...)
+		case factTrailer:
+			held.trailers = append(held.trailers, s.trailerRows(ledger.Trailers)...)
+		case factMarks:
+			held.marks = append(held.marks, s.markRows(ledger.Marks)...)
+		}
+		for _, attempt := range ledger.Attempts {
+			item := s.itemOf(fact, attempt.Path)
+			if item == "" || attempt.Result == "" {
+				continue
+			}
+			held.attempts = append(held.attempts, attemptRow{
+				Library:         s.library,
+				Item:            item,
+				Fact:            fact,
+				At:              attempt.At.Unix(),
+				Result:          attempt.Result,
+				Provider:        strings.Join(attempt.Provider, ","),
+				DatasetModified: unixOrZero(attempt.DatasetModified),
+			})
+		}
+	}
+	return held, nil
+}
+
+// A time in Unix seconds, and 0 for the zero time, which the column holds for
+// an attempt that no dataset file answered.
+func unixOrZero(at time.Time) int64 {
+	if at.IsZero() {
+		return 0
+	}
+	return at.Unix()
+}
+
+// How an entry's path resolves: a file fact names the file itself, and an
+// item fact names the title the folder holds.
+func (s likenDir) itemOf(fact, path string) string {
+	if _, art := artTypes[fact]; fact == factProbe || fact == factArrival || fact == factTrickplay ||
+		fact == factMarks || art {
+		return relativePath(s.root, filepath.Join(s.dir, path))
+	}
+	if path == likenSelfPath || path == "" {
+		return s.item
+	}
+	return s.items[path]
+}
+
+// A folder whose .liken files cannot be read marks the pass incomplete, the
+// way an unreadable .nfo file does, so the sweep never removes rows the volume
+// still holds.
+func readLikenDir(liken likenDir, result *walkResult) {
+	held, err := liken.read()
+	result.noteReadError(err)
+	result.attempts = append(result.attempts, held.attempts...)
+	result.credits = append(result.credits, held.credits...)
+	result.trailers = append(result.trailers, held.trailers...)
+	result.marks = append(result.marks, held.marks...)
+}
+
+// The reporter counts a gap with the same query the container works from, so
+// the number the operator schedules on and the rows the container finds are
+// one set.
+//
+// The reporter runs in the catalog pod, which reads no Library, so it
+// counts with no refresh time and publishes the oldest attempt of each
+// fact beside the counts. The operator holds the Library and reads the
+// two together.
+func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time) (map[string]int, error) {
+	counts := map[string]int{}
+	for fact, query := range gapQueries {
+		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`,
+			gapParams(fact, library, now, time.Time{}))
+		if err != nil {
+			return nil, err
+		}
+		counts[fact] = count
+	}
+	return counts, nil
+}
+
+// The oldest attempt one library holds for each fact, which is what
+// says whether a refresh time has work left: an attempt older than the refresh
+// is a title that fact asks about again.
+// A fact with no attempt at all has no entry.
+const oldestAttemptQuery = `SELECT ` + attemptFactColumn + `, min(at) FROM attempts ` +
+	`WHERE library = ? GROUP BY ` + attemptFactColumn
+
+// The oldest attempt per fact, read with one statement, because a
+// statement per fact is one round trip per fact on every report.
+func (c *Catalog) oldestAttempts(ctx context.Context,
+	library string) (map[string]time.Time, error) {
+	oldest := map[string]time.Time{}
+	err := c.stream(ctx, oldestAttemptQuery, []any{library}, func(cells []any) error {
+		if len(cells) < 2 {
+			return nil
+		}
+		fact, _ := cells[0].(string)
+		if fact == "" {
+			return nil
+		}
+		oldest[fact] = time.Unix(int64(cellNumber(cells[1])), 0).UTC()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return oldest, nil
+}
+
+// The fights of one library: the attempts that found an element group another
+// writer had changed, over every fact. A person reads it on the Library, and
+// the repair is to stop the other writer.
+func (c *Catalog) fightCount(ctx context.Context, library string) (int, error) {
+	return c.queryInt(ctx, fightsQuery, []any{library})
+}
+
+// The two counts a person reads on the Library beside the gaps: the titles
+// that wait for a person, and the titles no provider could name.
+func (c *Catalog) identityCounts(ctx context.Context, library string) (int, int, error) {
+	waiting, err := c.queryInt(ctx, waitingQuery, []any{library})
+	if err != nil {
+		return 0, 0, err
+	}
+	unresolved, err := c.queryInt(ctx, unresolvedQuery, []any{library})
+	if err != nil {
+		return 0, 0, err
+	}
+	return waiting, unresolved, nil
+}

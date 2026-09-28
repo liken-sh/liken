@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Copper Line</title>
+  <year>2008</year>
+  <premiered>2008-01-20</premiered>
+  <plot>A chemistry teacher starts a second life.</plot>
+  <genre>Drama</genre>
+  <genre>Crime</genre>
+  <studio>Northwind Television</studio>
+  <creator>Dale Morrow</creator>
+  <country>United States</country>
+  <mpaa>TV-MA</mpaa>
+  <actor><name>Ben Arlo</name><role>Sam Ember</role></actor>
+  <uniqueid type="tvdb" default="true">800001</uniqueid>
+  <uniqueid type="tmdb">2001</uniqueid>
+</tvshow>

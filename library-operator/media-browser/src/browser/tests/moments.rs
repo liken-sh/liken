@@ -1,0 +1,216 @@
+// The browser's second route: the moments the bus delivers, and the key
+// each remote's name reaches.
+
+use super::*;
+
+#[test]
+fn a_press_on_the_bus_moves_focus_like_the_keyboard() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_RIGHT".into())]);
+
+    assert!(browser.pump(1.0));
+
+    assert_eq!(strip_at(&browser, 3).focus, 1);
+}
+
+#[test]
+fn select_on_the_bus_descends() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_SELECT".into())]);
+
+    assert!(browser.pump(1.0));
+
+    assert!(matches!(browser.top(), screens::Screen::Wall(_)));
+}
+
+#[test]
+fn the_arrows_are_themselves() {
+    assert_eq!(key_of("KEY_UP"), Some("up"));
+    assert_eq!(key_of("KEY_DOWN"), Some("down"));
+    assert_eq!(key_of("KEY_LEFT"), Some("left"));
+    assert_eq!(key_of("KEY_RIGHT"), Some("right"));
+}
+
+#[test]
+fn every_name_a_remote_gives_select_is_enter() {
+    for name in ["KEY_ENTER", "KEY_OK", "KEY_SELECT", "KEY_KPENTER"] {
+        assert_eq!(key_of(name), Some("enter"));
+    }
+}
+
+#[test]
+fn every_name_a_remote_gives_back_is_escape() {
+    for name in ["KEY_BACK", "KEY_ESC", "KEY_EXIT"] {
+        assert_eq!(key_of(name), Some("escape"));
+    }
+}
+
+#[test]
+fn a_press_this_browser_binds_no_key_for_changes_nothing() {
+    assert_eq!(key_of("KEY_PLAYPAUSE"), None);
+
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_PLAYPAUSE".into())]);
+
+    assert!(browser.pump(1.0));
+
+    assert!(browser.stack.is_empty());
+}
+
+#[test]
+fn an_empty_bus_folds_nothing() {
+    let (mut browser, _bus) = on_bus(3, Vec::new());
+
+    assert!(!browser.pump(1.0));
+}
+
+#[test]
+fn the_shade_covers_the_browser_and_lifts_it() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    assert!(browser.asleep());
+
+    *_bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+    browser.pump(2.0);
+
+    assert!(!browser.asleep());
+}
+
+#[test]
+fn a_press_that_arrives_asleep_keeps_the_focus() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep, Moment::Press("KEY_RIGHT".into())]);
+
+    browser.pump(1.0);
+
+    assert!(browser.asleep());
+    assert_eq!(strip_at(&browser, 3).focus, 1);
+}
+
+#[test]
+fn an_asleep_browser_draws_a_black_frame() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+
+    assert!(browser.asleep());
+    assert_eq!(browser.background(), Color::BLACK);
+    let _ = browser.view();
+}
+
+#[test]
+fn a_focus_changes_nothing() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Focus { remote: 0 }]);
+
+    assert!(browser.pump(1.0));
+
+    assert!(!browser.asleep());
+    assert!(!browser.covered());
+}
+
+// Back at the home page is home: focus returns to the banner and no
+// shade is asked for, so a person backing out of a deep page never
+// darkens the screen one press past where they meant to stop.
+#[test]
+fn back_at_the_home_page_returns_to_the_banner_and_asks_no_one() {
+    let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.key("down");
+    browser.key("down");
+
+    browser.key("escape");
+
+    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 0);
+    assert!(!browser.asleep());
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
+    assert_eq!(showing_home(&browser).focus, 0);
+}
+
+#[test]
+fn backspace_at_the_home_page_is_back_too() {
+    let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.key("down");
+
+    browser.key("backspace");
+
+    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 0);
+    assert_eq!(showing_home(&browser).focus, 0);
+}
+
+// The power key is the shade. The crate decides and the moment comes
+// back, so the press itself moves nothing on the screen.
+#[test]
+fn the_power_key_asks_for_the_shade() {
+    let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.key("enter");
+
+    assert!(!browser.key("power"));
+
+    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 1);
+    assert!(!browser.asleep());
+    assert!(!browser.stack.is_empty());
+}
+
+#[test]
+fn the_power_key_with_no_bus_asks_no_one() {
+    let mut browser = browser(3);
+
+    assert!(!browser.key("power"));
+}
+
+#[test]
+fn back_below_the_top_climbs_and_asks_for_nothing() {
+    let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.key("enter");
+
+    browser.key("escape");
+
+    assert!(browser.stack.is_empty());
+    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn back_at_the_home_page_with_no_bus_asks_no_one() {
+    let mut browser = browser(3);
+
+    browser.key("escape");
+
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
+}
+
+#[test]
+fn the_wake_reaches_the_bus() {
+    let (mut browser, bus) = on_bus(3, Vec::new());
+
+    Screen::wake_by(&mut browser, Arc::new(|| {}));
+
+    assert_eq!(bus.woken.load(Ordering::SeqCst), 1);
+}
+
+// The shade hides the same frames a film does, so a change under it is
+// held and not read: nobody would see the read, and the catalog changes
+// all day.
+#[test]
+fn a_change_under_the_shade_reads_nothing() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    assert!(browser.asleep());
+
+    browser.source.calls.clear();
+    browser.source.changed = true;
+    browser.pump(2.0);
+
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+}
+
+// The wake runs the one read the shade held, so the screen a person
+// comes back to is the catalog as it stands.
+#[test]
+fn a_page_held_under_the_shade_is_read_again_on_the_wake() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.key("enter");
+    browser.pump(1.0);
+    browser.source.calls.clear();
+    browser.source.changed = true;
+    browser.pump(2.0);
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+    browser.pump(3.0);
+
+    assert!(browser.source.calls.contains(&"wall"));
+}

@@ -1,0 +1,767 @@
+package main
+
+// prune.go reconciles the catalog against the volume by marking and
+// sweeping, in place of the in-memory record of the last walk it replaced.
+// A full walk marks every id it reads with the walk's epoch in the seen
+// table, and the prune deletes the catalog rows the walk did not mark this
+// epoch. So a removal survives a restart, and the scanner never holds the
+// whole key set in memory.
+//
+// The seen table is local to the agent and never gossips. A mark on a
+// replicated row would gossip to every reader on every walk, and a new
+// column on a populated cr-sqlite table backfills a clock row for every
+// existing row. The scanner creates seen at runtime, not in the schema
+// file, because cr-sqlite makes every table a schema file names a
+// replicated table. A table created through the write API stays local.
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// pruneBatch bounds how many unmarked ids the prune reads and deletes at
+// once, so the prune holds one batch and never the whole set. It is a var
+// so a test drives several batches over a small set.
+var pruneBatch = 500
+
+// pruneMinFraction is the share of the catalog's items a walk must find
+// before the prune runs. A walk that finds a far smaller share than the
+// catalog holds read only part of the volume, so its prune is skipped and
+// the rows stand for the next clean walk. It is a var so a test drives the
+// threshold.
+var pruneMinFraction = 0.5
+
+// pruneRatioFloor is the item count below which the fraction guard does
+// not apply, so a small catalog is not held hostage to a noisy ratio. The
+// read-error guard still applies at any size.
+var pruneRatioFloor = 8
+
+// ensureSeen creates the local seen table if it does not exist. The table
+// is not in the schema file, because every table the schema file names
+// becomes a replicated table that gossips. This one is created through the
+// write API instead, so it stays a plain local table the agent never
+// replicates.
+//
+// The index on epoch is what every prune query reads, because each one
+// asks for the ids this epoch marked.
+func (c *Catalog) ensureSeen(ctx context.Context) error {
+	_, err := c.apply(ctx, []statement{
+		{sql: `CREATE TABLE IF NOT EXISTS seen (id TEXT NOT NULL PRIMARY KEY, epoch INTEGER NOT NULL DEFAULT 0)`},
+		{sql: `CREATE INDEX IF NOT EXISTS seen_epoch ON seen (epoch)`},
+	})
+	return err
+}
+
+// The key spaces of the seen table. Four kinds of key are marked, and an
+// alias can be the same string as an item's id: a title that gains a
+// provider id keeps its old path-derived id as an alias of the new one. With
+// one key space, that alias marks the stale item row every walk, and the
+// prune never removes it, so the catalog holds the title twice. Each kind of
+// key carries its own prefix, so an alias marks only aliases.
+const (
+	seenItem  = "item:"
+	seenFile  = "file:"
+	seenAlias = "alias:"
+	seenLink  = "link:"
+	// An attempt has a key space of its own, and its key is the item and the
+	// fact joined, so a mark on an attempt never touches an item.
+	seenAttempt = "attempt:"
+	// The three key spaces of the people. A person keys on the directory that
+	// holds them, an id on the scheme and the id joined, and a credit on the
+	// title and the billing order joined.
+	seenContributor      = "contributor:"
+	seenContributorAlias = "contributor-alias:"
+	seenCredit           = "credit:"
+	// Every id of every entry keys on the entry and the scheme joined, and a
+	// merge record keys on the path of the entry the merge removed.
+	seenContributorID    = "contributor-id:"
+	seenContributorMerge = "contributor-merge:"
+	// A genre keys on the title and the rank joined, in a key space of its own,
+	// the way a credit does.
+	seenGenre = "genre:"
+	// A trailer keys on the title, the provider, and that provider's own key for
+	// the video, joined, in a key space of its own.
+	seenTrailer = "trailer:"
+)
+
+// The separator between a link key's two halves. A path and an item id can
+// both hold most characters, so the separator is one neither ever holds, and
+// no two different pairs render the same key. SQL rebuilds the identical
+// string with char(31).
+const linkKeySeparator = "\x1f"
+
+// markSeen marks every id with the current epoch. A re-mark of an id
+// already present updates its epoch in place.
+func (c *Catalog) markSeen(ctx context.Context, ids []string, epoch int64) (int, error) {
+	statements := make([]statement, len(ids))
+	for i, id := range ids {
+		statements[i] = statement{
+			sql:    `INSERT INTO seen (id, epoch) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET epoch = excluded.epoch`,
+			params: []any{id, epoch},
+		}
+	}
+	return c.apply(ctx, statements)
+}
+
+// cleanSeen drops the marks behind the current epoch, so the seen table
+// tracks the live catalog and not every id the scanner ever saw. Every row
+// the walk kept was marked with the current epoch, so a mark behind it
+// belongs to a row the prune removed.
+func (c *Catalog) cleanSeen(ctx context.Context, epoch int64) (int, error) {
+	return c.apply(ctx, []statement{{
+		sql:    `DELETE FROM seen WHERE epoch < ?`,
+		params: []any{epoch},
+	}})
+}
+
+// countItems reads how many item rows the catalog holds for this library,
+// across the four item tables. The prune-abort guard reads it to tell a
+// complete walk from a walk that returned far fewer rows than the catalog
+// holds.
+func (c *Catalog) countItems(ctx context.Context, library string) (int, error) {
+	return c.queryInt(ctx, `SELECT `+
+		`(SELECT count(*) FROM movies WHERE library = ?) + `+
+		`(SELECT count(*) FROM series WHERE library = ?) + `+
+		`(SELECT count(*) FROM episodes WHERE library = ?) + `+
+		`(SELECT count(*) FROM franchises WHERE library = ?)`,
+		[]any{library, library, library, library})
+}
+
+// itemKinds are the four tables countItems sums, in the order the
+// library_items metric reports them. The kind label is a catalog table,
+// not a Library's own spec.kind: a franchises Library still holds no
+// franchise until the checkout resolves one, and a movies or series
+// Library never holds a row in the other three tables.
+var itemKinds = []string{libraryKindMovies, libraryKindSeries, "episodes", libraryKindFranchises}
+
+// countItemsByKind reads the same four counts countItems sums, kept apart,
+// which is what the library_items{library, kind} metric reports: catalog
+// size over time, broken out by the kind of row.
+func (c *Catalog) countItemsByKind(ctx context.Context, library string) (map[string]int, error) {
+	counts := make(map[string]int, len(itemKinds))
+	for _, kind := range itemKinds {
+		count, err := c.queryInt(ctx, `SELECT count(*) FROM `+kind+` WHERE library = ?`, []any{library})
+		if err != nil {
+			return nil, err
+		}
+		counts[kind] = count
+	}
+	return counts, nil
+}
+
+// countSeen reads how many ids this epoch marked. The prune guard reads
+// it, because an epoch that marked nothing would sweep every row the
+// library holds.
+func (c *Catalog) countSeen(ctx context.Context, epoch int64) (int, error) {
+	return c.queryInt(ctx, `SELECT count(*) FROM seen WHERE epoch = ?`, []any{epoch})
+}
+
+// countFiles reads how many file rows the catalog holds for this
+// library. The report carries it beside the item count, so a Library's
+// status shows both.
+func (c *Catalog) countFiles(ctx context.Context, library string) (int, error) {
+	return c.queryInt(ctx, `SELECT count(*) FROM files WHERE library = ?`, []any{library})
+}
+
+// markKeys reads every id, file path, link, and alias a walk produced into one
+// deduplicated list, the set the walk marks with its epoch. Each key carries
+// the prefix of its own key space, so an alias that reads the same as an
+// item's id marks the alias and not the item.
+func markKeys(result *walkResult) []string {
+	seen := map[string]bool{}
+	var keys []string
+	add := func(space, key string) {
+		if key == "" || seen[space+key] {
+			return
+		}
+		seen[space+key] = true
+		keys = append(keys, space+key)
+	}
+	for _, row := range result.movies {
+		add(seenItem, row.Id)
+	}
+	for _, row := range result.sets {
+		add(seenItem, row.Id)
+	}
+	for _, row := range result.series {
+		add(seenItem, row.Id)
+	}
+	for _, row := range result.episodes {
+		add(seenItem, row.Id)
+	}
+	for _, row := range result.files {
+		add(seenFile, row.Path)
+		for _, item := range row.Items {
+			add(seenLink, row.Path+linkKeySeparator+item)
+		}
+	}
+	for _, row := range result.aliases {
+		add(seenAlias, row.Alias)
+	}
+	for _, row := range result.attempts {
+		add(seenAttempt, attemptSeenKey(row))
+	}
+	for _, row := range result.contributors {
+		add(seenContributor, row.Path)
+	}
+	for _, row := range result.contributorAliases {
+		add(seenContributorAlias, contributorAliasSeenKey(row))
+		add(seenContributorID, contributorIDSeenKey(row))
+	}
+	for _, row := range result.contributorMerges {
+		add(seenContributorMerge, row.Path)
+	}
+	for _, row := range result.credits {
+		add(seenCredit, creditSeenKey(row))
+	}
+	for _, row := range result.genres {
+		add(seenGenre, genreSeenKey(row))
+	}
+	for _, row := range result.trailers {
+		add(seenTrailer, trailerSeenKey(row))
+	}
+	for _, row := range result.franchises {
+		add(seenItem, row.Id)
+	}
+	for _, row := range result.franchiseMembers {
+		add(seenFranchiseMember, franchiseMemberSeenKey(row))
+	}
+	for _, row := range result.franchiseRuns {
+		add(seenFranchiseRun, franchiseRunSeenKey(row))
+	}
+	return keys
+}
+
+// incompleteWalk reports whether a walk read only part of the volume, so the
+// caller skips the prune and keeps the rows. A read error anywhere in the walk,
+// at any depth, in a directory, an .nfo file, or another file, is one signal. A
+// walk that found far fewer items than the catalog holds is the other, once the
+// catalog holds more than the ratio floor.
+func incompleteWalk(readError bool, items, catalogItems int) bool {
+	if readError {
+		return true
+	}
+	if catalogItems > pruneRatioFloor && float64(items) < pruneMinFraction*float64(catalogItems) {
+		return true
+	}
+	return false
+}
+
+// sweep reads the unmarked ids one bounded batch at a time and deletes
+// each batch, until a query returns fewer than a full batch. It holds one
+// batch and never the whole set. It returns the count of rows deleted.
+//
+// A batch that deletes nothing while the query still answers with keys is
+// a sweep that cannot end, so it stops with an error rather than spinning
+// under the walk lock.
+func (c *Catalog) sweep(ctx context.Context, sql string, params []any, del func(ctx context.Context, keys []string) (int, error)) (int, error) {
+	removed := 0
+	for {
+		keys, err := c.queryStrings(ctx, sql, params)
+		if err != nil {
+			return removed, err
+		}
+		if len(keys) == 0 {
+			return removed, nil
+		}
+		deleted, err := del(ctx, keys)
+		if err != nil {
+			return removed, err
+		}
+		if deleted == 0 {
+			return removed, fmt.Errorf("the sweep deleted none of the %d keys it read", len(keys))
+		}
+		removed += len(keys)
+		if len(keys) < pruneBatch {
+			return removed, nil
+		}
+	}
+}
+
+// pruneLibrary deletes every catalog row this library holds that the
+// current epoch did not mark. It reads the unmarked ids through the query
+// API and deletes them by key, the form that needs no delete-time join
+// against the local seen table. It returns the count of rows removed.
+//
+// Every table carries the library, so each sweep scopes itself, and the
+// order below is free. It runs the aliases, then the items, then the
+// links, then the files.
+func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch int64) (int, error) {
+	removed := 0
+
+	// Every sweep below deletes what this epoch did not mark, so an
+	// epoch with no marks at all would delete the whole library. The walk
+	// wrote its marks before this prune; an epoch with none is a mark
+	// write that did not land, and the rows stand for the next walk.
+	marks, err := catalog.countSeen(ctx, epoch)
+	if err != nil {
+		return removed, err
+	}
+	if marks == 0 {
+		return removed, fmt.Errorf("the walk marked no keys with epoch %d", epoch)
+	}
+
+	n, err := catalog.sweep(ctx, itemPruneSQL("aliases", "alias", seenAlias), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteAliases(ctx, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	for _, table := range []struct {
+		name   string
+		delete func(context.Context, string, []string) (int, error)
+	}{
+		{"movies", catalog.DeleteMovies},
+		{"sets", catalog.DeleteSets},
+		{"series", catalog.DeleteSeries},
+		{"episodes", catalog.DeleteEpisodes},
+		{"franchises", catalog.DeleteFranchises},
+	} {
+		n, err := catalog.sweep(ctx, itemPruneSQL(table.name, "id", seenItem), []any{library, epoch, pruneBatch},
+			func(ctx context.Context, keys []string) (int, error) {
+				return table.delete(ctx, library, keys)
+			})
+		if err != nil {
+			return removed, err
+		}
+		removed += n
+	}
+
+	n, err = catalog.sweep(ctx, linkPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFileItems(ctx, library, fileItemKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, filePruneSQL(), []any{library, epoch, walkStart(epoch), pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return deleteFilesWithStreams(ctx, catalog, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, attemptPruneSQL(), []any{library, epoch, walkStart(epoch), pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteAttempts(ctx, library, attemptKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The people, swept the way every other table is. The credits of a title that
+	// left the volume are unmarked with it, and a person whose directory left the
+	// store leaves with their ids.
+	n, err = catalog.sweep(ctx, creditPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteCredits(ctx, library, creditKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The trailers of a title that left the volume are unmarked with it, and a
+	// provider that dropped a video leaves the row it wrote unmarked.
+	n, err = catalog.sweep(ctx, trailerPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteTrailers(ctx, library, trailerKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, contributorAliasPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributorAliases(ctx, library, contributorAliasKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, contributorIDPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributorIDs(ctx, library, contributorIDKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, itemPruneSQL("contributor_merges", "path", seenContributorMerge),
+		[]any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributorMerges(ctx, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The genres of a title that left the volume are unmarked with it, and an
+	// .nfo file that lists fewer genres than before leaves its higher ranks
+	// unmarked.
+	n, err = catalog.sweep(ctx, genrePruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteGenres(ctx, library, genreKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, itemPruneSQL("contributors", "path", seenContributor),
+		[]any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributors(ctx, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The members and the runs of a franchise that left the repository.
+	// They sweep after the franchises row, because each keys on the
+	// franchise and the position and never on the row the sweep above
+	// took.
+	n, err = catalog.sweep(ctx, franchiseMemberPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFranchiseMembers(ctx, library, franchiseMemberKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, franchiseRunPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFranchiseRuns(ctx, library, franchiseRunKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	if _, err := catalog.cleanSeen(ctx, epoch); err != nil {
+		return removed, err
+	}
+	return removed, nil
+}
+
+// Removes the streams and the marks of each file the sweep found, then the
+// files themselves, and returns the count of file rows removed. The streams
+// and the marks go first so a failure never leaves either without its file.
+func deleteFilesWithStreams(ctx context.Context, catalog *Catalog, library string, paths []string) (int, error) {
+	if _, err := catalog.DeleteStreamsOfFiles(ctx, library, paths); err != nil {
+		return 0, err
+	}
+	if _, err := catalog.DeleteMarksOfFiles(ctx, library, paths); err != nil {
+		return 0, err
+	}
+	return catalog.DeleteFiles(ctx, library, paths)
+}
+
+// fileItemKeys splits each composite key the link sweep read back into the
+// file path and the item id, so the delete names both columns of the row.
+func fileItemKeys(keys []string) []fileItemKey {
+	links := make([]fileItemKey, len(keys))
+	for i, key := range keys {
+		path, item, _ := strings.Cut(key, linkKeySeparator)
+		links[i] = fileItemKey{Path: path, Item: item}
+	}
+	return links
+}
+
+// The three key columns after the library, as a sweep reads them back.
+type trailerKey struct {
+	Item     string
+	Provider string
+	Key      string
+}
+
+// The three keys travel through a sweep as one string, joined by the
+// separator no id or key holds, the way a credit key does.
+func trailerSeenKey(row trailerRow) string {
+	return row.Item + linkKeySeparator + row.Provider + linkKeySeparator + row.Key
+}
+
+func trailerKeys(keys []string) []trailerKey {
+	out := make([]trailerKey, len(keys))
+	for i, key := range keys {
+		parts := strings.SplitN(key, linkKeySeparator, 3)
+		for len(parts) < 3 {
+			parts = append(parts, "")
+		}
+		out[i] = trailerKey{Item: parts[0], Provider: parts[1], Key: parts[2]}
+	}
+	return out
+}
+
+// The trailers this library holds that the current epoch did not mark, one
+// bounded batch, joined the way the mark joined them.
+func trailerPruneSQL() string {
+	return `SELECT item || char(31) || provider || char(31) || key FROM trailers` +
+		` WHERE library = ?` +
+		` AND '` + seenTrailer + `' || item || char(31) || provider || char(31) || key` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` LIMIT ?`
+}
+
+// A rescan reaches one folder's trailers through the movie or series row the
+// folder holds, so this sweep runs before the item sweeps take that row, the
+// way the credit sweep does.
+func scopedTrailerPruneSQL() string {
+	scope := func(table string) string {
+		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")
+	}
+	return `SELECT item || char(31) || provider || char(31) || key FROM trailers` +
+		` WHERE library = ?` +
+		` AND '` + seenTrailer + `' || item || char(31) || provider || char(31) || key` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND item IN (` + scope("movies") + ` UNION ` + scope("series") + `)` +
+		` LIMIT ?`
+}
+
+func scopedTrailerPruneParams(library, folder string, epoch int64) []any {
+	params := []any{library, epoch}
+	for range 2 {
+		params = append(params, library)
+		params = append(params, pathScopeParams(folder)...)
+	}
+	return append(params, pruneBatch)
+}
+
+// linkPruneSQL reads the links this library holds that the current
+// epoch did not mark, one bounded batch. A link row carries its own
+// library, so the read needs no join to files. It reads the two columns
+// joined by the same separator the mark used, so the comparison is one
+// string against one string.
+func linkPruneSQL() string {
+	return `SELECT path || char(31) || item FROM file_items` +
+		` WHERE library = ?` +
+		` AND '` + seenLink + `' || path || char(31) || item` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` LIMIT ?`
+}
+
+// itemPruneSQL reads the keys of a table this library holds that the
+// current epoch did not mark, one bounded batch. table, key, and space are
+// constants this package names and never input, so naming them in the SQL
+// text carries no injection.
+func itemPruneSQL(table, key, space string) string {
+	return `SELECT ` + key + ` FROM ` + table +
+		` WHERE library = ? AND '` + space + `' || ` + key +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?) LIMIT ?`
+}
+
+// pathScopeClause matches the rows of one title folder: the item at the
+// folder's own path, and every file and episode under it. It uses a range
+// over the path rather than a LIKE, so a folder name that holds a LIKE
+// metacharacter still scopes correctly and needs no escape.
+func pathScopeClause(column string) string {
+	return pathScopeBounds(column, "?", "?", "?")
+}
+
+// pathScopeBounds renders the same range against three bounds the query
+// states itself, so a join reads them off the row it scopes to instead of off
+// a parameter.
+func pathScopeBounds(column, folder, under, past string) string {
+	return `(` + column + ` = ` + folder + ` OR (` + column + ` >= ` + under +
+		` AND ` + column + ` < ` + past + `))`
+}
+
+// pathScopeParams renders the three bounds pathScopeClause reads: the
+// folder's own path, and the half-open range that holds every path under
+// it. The upper bound is the folder path with the byte after the
+// separator, so it stops at the end of the folder's children.
+func pathScopeParams(folder string) []any {
+	return []any{folder, folder + "/", folder + "0"}
+}
+
+// pruneScope deletes the rows of one title folder that the current epoch
+// did not mark, the reconciliation a webhook rescan drives. A folder still
+// on the volume keeps the rows the rescan re-read; a folder that left the
+// volume marks nothing, so every one of its rows is unmarked and leaves.
+// It reads no seen marks behind the epoch, because a full walk owns that
+// cleanup. It returns the count of rows removed.
+func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, epoch int64) (int, error) {
+	removed := 0
+
+	// The alias and attempt sweeps run before the item sweeps. Each of them
+	// scopes itself through the item it names, so those item rows must still
+	// stand when these sweeps read them.
+	n, err := catalog.sweep(ctx, scopedAliasPruneSQL(), scopedAliasPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteAliases(ctx, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, scopedAttemptPruneSQL(), scopedAttemptPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteAttempts(ctx, library, attemptKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The genre sweep scopes itself through the folder's title row, so it runs
+	// here, before the item sweeps, like the two above it.
+	n, err = catalog.sweep(ctx, scopedGenrePruneSQL(), scopedGenrePruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteGenres(ctx, library, genreKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The credits of the folder's title are swept the way its genres are. An
+	// .nfo file that lists fewer people than before leaves its higher
+	// billings unmarked, and a title that left the volume leaves every
+	// credit it held.
+	n, err = catalog.sweep(ctx, scopedCreditPruneSQL(), scopedCreditPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteCredits(ctx, library, creditKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The trailers of the folder's title, swept the way its credits are. A
+	// provider that dropped a video leaves the row unmarked, and a title that
+	// left the volume leaves every trailer it held.
+	n, err = catalog.sweep(ctx, scopedTrailerPruneSQL(), scopedTrailerPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteTrailers(ctx, library, trailerKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	for _, table := range []struct {
+		name   string
+		delete func(context.Context, string, []string) (int, error)
+	}{
+		{"movies", catalog.DeleteMovies},
+		{"series", catalog.DeleteSeries},
+		{"episodes", catalog.DeleteEpisodes},
+	} {
+		n, err := catalog.sweep(ctx, scopedItemPruneSQL(table.name, "id", seenItem), scopedItemPruneParams(library, folder, epoch),
+			func(ctx context.Context, keys []string) (int, error) {
+				return table.delete(ctx, library, keys)
+			})
+		if err != nil {
+			return removed, err
+		}
+		removed += n
+	}
+
+	n, err = catalog.sweep(ctx, scopedLinkPruneSQL(), scopedItemPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFileItems(ctx, library, fileItemKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, scopedFilePruneSQL(), append(scopedItemPruneParams(library, folder, epoch)[:5], walkStart(epoch), pruneBatch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return deleteFilesWithStreams(ctx, catalog, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+	return removed, nil
+}
+
+// scopedLinkPruneSQL reads the links under one folder that the current
+// epoch did not mark, one bounded batch. A link row carries both the
+// library and the file path, so the scope reads the link table alone,
+// with the same parameters the scoped item sweeps take.
+func scopedLinkPruneSQL() string {
+	return `SELECT path || char(31) || item FROM file_items` +
+		` WHERE library = ? AND ` + pathScopeClause("path") +
+		` AND '` + seenLink + `' || path || char(31) || item` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` LIMIT ?`
+}
+
+// A walk's epoch is its start in nanoseconds, and a row a fact writes after
+// that start carries no mark from the walk. The sweep spares a file whose
+// modified time, and an attempt whose time, is past the start, so a poster
+// written while the walk ran survives to the next walk, which marks it.
+func walkStart(epoch int64) int64 {
+	return epoch / int64(time.Second)
+}
+
+func filePruneSQL() string {
+	return `SELECT path FROM files` +
+		` WHERE library = ? AND '` + seenFile + `' || path` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND modified < ? LIMIT ?`
+}
+
+func scopedFilePruneSQL() string {
+	return `SELECT path FROM files` +
+		` WHERE library = ? AND ` + pathScopeClause("path") + ` AND '` + seenFile + `' || path` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND modified < ? LIMIT ?`
+}
+
+func scopedItemPruneSQL(table, key, space string) string {
+	return `SELECT ` + key + ` FROM ` + table +
+		` WHERE library = ? AND ` + pathScopeClause("path") + ` AND '` + space + `' || ` + key +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?) LIMIT ?`
+}
+
+func scopedItemPruneParams(library, folder string, epoch int64) []any {
+	params := []any{library}
+	params = append(params, pathScopeParams(folder)...)
+	return append(params, epoch, pruneBatch)
+}
+
+// scopedAliasPruneSQL reads the aliases of one folder's items that the
+// current epoch did not mark. The alias row carries the library, so the
+// library scopes it directly, and the item tables only narrow it to the
+// folder. Each item subquery matches the library as well as the id,
+// because an id names one row only inside its own library.
+func scopedAliasPruneSQL() string {
+	scope := func(table string) string {
+		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")
+	}
+	return `SELECT alias FROM aliases` +
+		` WHERE library = ?` +
+		` AND '` + seenAlias + `' || alias NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND item IN (` +
+		scope("movies") + ` UNION ` + scope("series") + ` UNION ` + scope("episodes") +
+		`) LIMIT ?`
+}
+
+func scopedAliasPruneParams(library, folder string, epoch int64) []any {
+	params := []any{library, epoch}
+	for range 3 {
+		params = append(params, library)
+		params = append(params, pathScopeParams(folder)...)
+	}
+	return append(params, pruneBatch)
+}

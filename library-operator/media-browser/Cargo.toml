@@ -1,0 +1,106 @@
+[package]
+name = "media-browser"
+version = "0.1.0"
+edition = "2024"
+
+# The crate is a library with one binary over it, so the parsers and the
+# measurements have unit tests that open no window.
+[lib]
+name = "media_browser"
+path = "src/lib.rs"
+
+[[bin]]
+name = "media-browser"
+path = "src/main.rs"
+
+# The client drives its own winit loop, so it takes the iced pieces directly
+# instead of the `iced` facade. That is what gives the harness a wgpu surface it
+# can read a frame back from.
+#
+# Every iced crate here turns its default features off where the default would
+# pull X11 or the software renderer in. The target is a Wayland kiosk, so winit
+# builds with Wayland alone.
+#
+# Every version is exact, so a build from this manifest resolves the same
+# crates the lock file names.
+[dependencies]
+iced_winit = { version = "=0.14.0", default-features = false, features = [
+    "wayland",
+] }
+iced_wgpu = { version = "=0.14.0", features = ["geometry", "image"] }
+iced_widget = { version = "=0.14.2", default-features = false, features = [
+    "canvas",
+    "image",
+    "wgpu",
+] }
+# liken-iced carries the mark and the palette. It parses them out of
+# liken.svg and liken.css, so the mark on this screen and the mark on a page
+# are one drawing and cannot drift. The crate is in the brand repository,
+# which this directory takes as a submodule because the image build context is
+# this directory alone. The repository holds a second checkout of the same
+# repository at docs/themes/brand for the documentation theme, and the two
+# pins move together.
+liken-iced = { path = "brand/iced" }
+# image writes the captured frames as PNG and decodes the posters,
+# which are JPEG and PNG on the volumes, so no other decoder builds.
+image = { version = "=0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+] }
+# libc is here for glibc's mallopt, which main.rs calls to pin the
+# allocator's mmap and trim thresholds. Without the pin, image decodes
+# dirty heap arenas the process never returns.
+libc = "=0.2.189"
+# serde_json writes the measurements file.
+serde_json = "=1.0.151"
+# SHA-256 gives each disk cache key a stable file name across processes
+# and Rust releases.
+sha2 = "=0.10.9"
+# rusqlite reads the agent's file; bundled compiles its own SQLite so
+# the read path loads no extension and matches no system library.
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+# media-screen is the bus half of a screen client: the connection, the
+# timers, the focus gate, the shade, the volume step, the cycle request,
+# and the panel desire. media-operator ships it and its own idle client
+# links it, so the two clients of one contract hold the same rules. It
+# brings rumqttc, so this manifest names no broker client of its own.
+# The pin is a media-operator release tag, the way the cluster overlays
+# pin an image, or the full sha of a commit on main while the browser
+# needs a change of the crate that no release carries yet. Cargo.lock
+# holds the commit either way.
+media-screen = { git = "https://github.com/liken-sh/media-operator", rev = "803634287c8777b737c9194476dcb921bf49a3c2" }
+# ureq holds the streaming update subscriptions; it decodes the chunked
+# body and puts a timeout on every read; the defaults come off because the
+# agent answers on loopback with no TLS and no compression.
+ureq = { version = "=2.12.1", default-features = false }
+# The search fold decomposes every string (NFD) and drops the combining
+# marks, so "Brévelle" answers to "brevelle".
+unicode-normalization = "=0.1.25"
+# metrics is the facade milestone 65 puts behind every gauge and
+# histogram in the crate, so the recording call sites name nothing about
+# where the numbers go.
+metrics = "=0.24.6"
+# The Prometheus exporter serves the registry the facade above writes
+# to. push-gateway is off because a scrape reads this process directly.
+metrics-exporter-prometheus = { version = "=0.18.3", default-features = false, features = [
+    "http-listener",
+] }
+# metrics-process is layer 1's process_* series: the memory, the file
+# descriptors, and the CPU time every liken process reports the same way.
+metrics-process = "=2.4.3"
+
+[dev-dependencies]
+# tempfile holds the fixture databases and the fixture volumes the
+# tests build.
+tempfile = "=3.27.0"
+# metrics-util's debugging recorder is the test double for the facade:
+# it holds what a test recorded instead of serving it, so a test proves
+# a metric without opening a port.
+metrics-util = { version = "=0.20.4", default-features = false, features = [
+    "debugging",
+] }
+
+# The measurements need optimized code with symbols the profile does not strip.
+[profile.release]
+opt-level = 3
+lto = "thin"

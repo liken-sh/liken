@@ -1,0 +1,468 @@
+// The play lists a choice resolves to: a movie's main file, a trailer of
+// a movie or of a series, and one episode.
+
+use super::*;
+
+#[test]
+fn a_movie_plays_its_primary_video_file() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/The Lantern.mkv",
+        "movie:tmdb:7001",
+    );
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert_eq!(
+        source.play("default/films", &movie_chosen()),
+        vec![PlayItem {
+            path: "The Lantern/The Lantern.mkv".into(),
+            slug: "lantern-1999".into(),
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: "movie".into(),
+                title: "The Lantern".into(),
+                year: 1999,
+                art: "movie:tmdb:7001.jpg".into(),
+                trickplay: "The Lantern/The Lantern.mkv.trickplay".into(),
+                ..Presentation::default()
+            },
+        }]
+    );
+}
+
+#[test]
+fn a_movie_plays_neither_its_art_nor_its_extras() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
+    );
+    insert_file(
+        &path,
+        "default/films",
+        "The Lantern/poster.jpg",
+        "movie:tmdb:7001",
+        "image",
+        "primary",
+    );
+    insert_file(
+        &path,
+        "default/films",
+        "The Lantern/behind.mkv",
+        "movie:tmdb:7001",
+        "video",
+        "extra",
+    );
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert!(source.play("default/films", &movie_chosen()).is_empty());
+}
+
+#[test]
+fn a_movie_with_two_encodings_plays_one_of_them() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/b.mkv",
+        "movie:tmdb:7001",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/a.mkv",
+        "movie:tmdb:7001",
+    );
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let items = source.play("default/films", &movie_chosen());
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].path, "The Lantern/a.mkv");
+    assert_eq!(
+        items[0].presentation.trickplay,
+        "The Lantern/a.mkv.trickplay"
+    );
+}
+
+// One span of one file, as the walk writes it off the marks ledger. An
+// absent end is a null in the table.
+fn insert_mark(
+    path: &Path,
+    file: &str,
+    ordinal: i64,
+    kind: &str,
+    start: Option<i64>,
+    end: Option<i64>,
+) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO marks (library, path, ordinal, kind, start_ms, end_ms, source) \
+             VALUES ('default/films', ?, ?, ?, ?, ?, 'theintrodb')",
+            (file, ordinal, kind, start, end),
+        )
+        .unwrap();
+}
+
+// A movie's item carries every span of its main file in the ledger's
+// order, and no span of another file.
+#[test]
+fn a_movie_carries_the_marks_of_its_main_file() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/The Lantern.mkv",
+        "movie:tmdb:7001",
+    );
+    insert_mark(
+        &path,
+        "The Lantern/The Lantern.mkv",
+        1,
+        "credits",
+        Some(7_800_000),
+        None,
+    );
+    insert_mark(
+        &path,
+        "The Lantern/The Lantern.mkv",
+        0,
+        "intro",
+        None,
+        Some(23_000),
+    );
+    insert_mark(&path, "Elsewhere/other.mkv", 0, "intro", None, Some(1));
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let items = source.play("default/films", &movie_chosen());
+    assert_eq!(
+        items[0].presentation.marks,
+        vec![
+            Mark {
+                kind: "intro".into(),
+                start: None,
+                end: Some(23_000),
+                source: "theintrodb".into(),
+            },
+            Mark {
+                kind: "credits".into(),
+                start: Some(7_800_000),
+                end: None,
+                source: "theintrodb".into(),
+            },
+        ]
+    );
+}
+
+// An episode's item carries the spans of its own file.
+#[test]
+fn an_episode_carries_the_marks_of_its_file() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO marks (library, path, ordinal, kind, start_ms, end_ms, source) \
+             VALUES ('default/shows', 'Harrow/S01E2.mkv', 0, 'recap', 0, 45000, 'introdb')",
+            (),
+        )
+        .unwrap();
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(2));
+    assert_eq!(
+        items[0].presentation.marks,
+        vec![Mark {
+            kind: "recap".into(),
+            start: Some(0),
+            end: Some(45_000),
+            source: "introdb".into(),
+        }]
+    );
+}
+
+// The season around the chosen episode stays in the catalog, and the play
+// list holds the one work the person chose.
+// the play list holds the one work the person chose.
+#[test]
+fn an_episode_plays_itself_alone() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+    insert_episode(&path, "default/shows", "episode:tvdb:next", SERIES, 2, 1);
+    insert_main_file(
+        &path,
+        "default/shows",
+        "Harrow/S02E1.mkv",
+        "episode:tvdb:next",
+    );
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(2));
+    let paths: Vec<&str> = items.iter().map(|item| item.path.as_str()).collect();
+    assert_eq!(paths, ["Harrow/S01E2.mkv"]);
+}
+
+// The operator names a Play after the chosen item, so the item
+// carries the slug its own row holds.
+#[test]
+fn every_item_carries_the_slug_its_row_holds() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(2));
+    let slugs: Vec<&str> = items.iter().map(|item| item.slug.as_str()).collect();
+    assert_eq!(slugs, ["s01e02"]);
+}
+
+#[test]
+fn an_episodes_presentation_names_its_series_and_its_numbers() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(3));
+    assert_eq!(
+        items[0].presentation,
+        Presentation {
+            kind: "video".into(),
+            hint: "series".into(),
+            series: "Harrow".into(),
+            season: 1,
+            episode: 3,
+            episode_title: "Episode 3".into(),
+            art: "episode:tvdb:3.jpg".into(),
+            trickplay: "Harrow/S01E3.mkv.trickplay".into(),
+            ..Presentation::default()
+        }
+    );
+}
+
+#[test]
+fn an_episode_the_catalog_dates_carries_the_date_and_not_the_year() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_released_episode(&path, "default/shows", "e1", SERIES, 1, 1, "2004-09-22");
+    insert_main_file(&path, "default/shows", "Harrow/S01E1.mkv", "e1");
+    insert_released_episode(&path, "default/shows", "e2", SERIES, 1, 2, "2004");
+    insert_main_file(&path, "default/shows", "Harrow/S01E2.mkv", "e2");
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let dated = source.play("default/shows", &episode_chosen(1));
+    assert_eq!(dated[0].presentation.date, "2004-09-22");
+    assert_eq!(dated[0].presentation.year, 0);
+    let yearly = source.play("default/shows", &episode_chosen(2));
+    assert_eq!(yearly[0].presentation.date, "");
+    assert_eq!(yearly[0].presentation.year, 2004);
+}
+
+#[test]
+fn an_episode_with_no_still_presents_the_art_of_its_series() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+    set_series_art(
+        &path,
+        "default/shows",
+        SERIES,
+        "Harrow/poster.jpg",
+        &["Harrow/poster.jpg", "Harrow/fanart.jpg"],
+    );
+    clear_episode_art(&path, "default/shows", "episode:tvdb:1");
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let cleared = source.play("default/shows", &episode_chosen(1));
+    assert_eq!(cleared[0].presentation.art, "Harrow/fanart.jpg");
+    let held = source.play("default/shows", &episode_chosen(2));
+    assert_eq!(held[0].presentation.art, "episode:tvdb:2.jpg");
+}
+
+#[test]
+fn an_episode_under_no_series_row_names_no_series() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_episode(&path, "default/shows", "e1", SERIES, 1, 1);
+    insert_main_file(&path, "default/shows", "Harrow/S01E1.mkv", "e1");
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(1));
+    assert_eq!(items[0].presentation.series, "");
+    assert_eq!(items[0].presentation.year, 0);
+}
+
+#[test]
+fn an_episode_with_no_file_of_its_own_plays_nothing() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_series(&path, "default/shows", SERIES, "Harrow", "harrow");
+    insert_episode(&path, "default/shows", "e1", SERIES, 1, 1);
+    insert_episode(&path, "default/shows", "e2", SERIES, 1, 2);
+    insert_main_file(&path, "default/shows", "Harrow/S01E2.mkv", "e2");
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert!(source.play("default/shows", &episode_chosen(1)).is_empty());
+}
+
+#[test]
+fn a_choice_in_another_library_plays_nothing() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/The Lantern.mkv",
+        "movie:tmdb:7001",
+    );
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert!(source.play("default/other", &movie_chosen()).is_empty());
+    assert!(source.play("default/other", &episode_chosen(1)).is_empty());
+}
+
+#[test]
+fn a_trailer_plays_the_trailer_file_and_carries_no_trickplay() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_page(&path, "default/films", "one", "1994", "", BODY);
+    insert_main_file(&path, "default/films", "Film one/Film one.mkv", "one");
+    insert_file(
+        &path,
+        "default/films",
+        "Film one/trailer.mkv",
+        "one",
+        "video",
+        "trailer",
+    );
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert_eq!(
+        source.play("default/films", &Selection::Trailer { id: "one".into() }),
+        vec![PlayItem {
+            path: "Film one/trailer.mkv".into(),
+            slug: "film-one".into(),
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: "movie".into(),
+                role: "trailer".into(),
+                title: "Film one".into(),
+                year: 1994,
+                art: "one.jpg".into(),
+                ..Presentation::default()
+            },
+        }]
+    );
+}
+
+#[test]
+fn a_series_trailer_plays_the_trailer_file_under_the_series_row() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_series_page(&path, "default/shows", "series:tvdb:1", "2004", "{}");
+    insert_file(
+        &path,
+        "default/shows",
+        "Serial one/trailers/one.mkv",
+        "series:tvdb:1",
+        "video",
+        "trailer",
+    );
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert_eq!(
+        source.play(
+            "default/shows",
+            &Selection::Trailer {
+                id: "series:tvdb:1".into()
+            }
+        ),
+        vec![PlayItem {
+            path: "Serial one/trailers/one.mkv".into(),
+            slug: "serial-series:tvdb:1".into(),
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: "series".into(),
+                role: "trailer".into(),
+                title: "Serial series:tvdb:1".into(),
+                year: 2004,
+                art: "series:tvdb:1.jpg".into(),
+                ..Presentation::default()
+            },
+        }]
+    );
+}
+
+#[test]
+fn a_series_with_no_trailer_file_plays_nothing() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_series_page(&path, "default/shows", "series:tvdb:1", "2004", "{}");
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert!(
+        source
+            .play(
+                "default/shows",
+                &Selection::Trailer {
+                    id: "series:tvdb:1".into()
+                }
+            )
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_movie_with_no_trailer_file_plays_nothing() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_page(&path, "default/films", "one", "1994", "", BODY);
+    insert_main_file(&path, "default/films", "Film one/Film one.mkv", "one");
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert!(
+        source
+            .play("default/films", &Selection::Trailer { id: "one".into() })
+            .is_empty()
+    );
+}

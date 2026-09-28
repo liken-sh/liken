@@ -1,0 +1,1333 @@
+package main
+
+// The fake cluster every pass runs against: an API server that answers
+// the way Kubernetes does, and the objects one seeded house starts
+// from. A test reads what a pass did from the requests it recorded and
+// what a pass left from the objects it holds.
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// FakeCluster holds the objects an API server would, and records every
+// request, so a test reads what a pass did as well as what it left
+// behind.
+type fakeCluster struct {
+	mutex     sync.Mutex
+	libraries map[string]*Library
+	// The Catalogs the operator reads and writes, by name, one per
+	// namespace in the ordinary case.
+	catalogs map[string]*NamespaceCatalog
+	// The Players media-operator would publish, which the operator reads
+	// and never writes.
+	players map[string]*Player
+	// The household defaults media-operator would publish, or nothing.
+	preferences *MediaPreferences
+	// The MetadataProviders the operator reads and writes the status of,
+	// and the Secrets it reads the keys out of.
+	providers map[string]*MetadataProvider
+	secrets   map[string]*Secret
+	claims    map[string]*PersistentVolumeClaim
+	pods      map[string]*Pod
+	// The catalog objects the operator writes, by namespace and name,
+	// because the operator stands one of each in every namespace that
+	// holds a Library.
+	slices     map[string]*EndpointSlice
+	services   map[string]*Service
+	configMaps map[string]*ConfigMap
+	// The Jobs the operator creates, keyed by namespace and name, because
+	// a worker of one namespace and a worker of another may take the same
+	// name. The CronJobs are the names of those an earlier release stood,
+	// which the operator deletes.
+	jobs     map[string]*Job
+	cronJobs map[string]bool
+	// The events the operator reads about a pod that has not started, which
+	// the operator reads and never writes.
+	events []Event
+	// The ResourceClaimTemplates the operator keeps for the Libraries that name
+	// a render node, by namespace and name.
+	claimTemplates map[string]*ResourceClaimTemplate
+	// The Plays the operator creates, in the order it created them. They
+	// are a list and not a map, because every Play takes a name the API
+	// server mints.
+	plays []Play
+	// The people the progress half reads, by name. A Person is
+	// cluster-scoped, so its name is its whole identity.
+	people map[string]*Person
+	// The nodes the heal of a stranded copy reads, by name, which the
+	// operator reads and never writes.
+	nodes map[string]*Node
+
+	// A PersistentVolume is held as the body the API server serves,
+	// because a volume names its storage with a key on the spec and
+	// not with a field beside it, and reading that key back is the
+	// operator's own work.
+	volumes map[string]string
+	// The StorageClasses, by name. A test seeds the ones its cluster
+	// serves, and the server answers 404 for a class no test seeded.
+	storageClasses map[string]*StorageClass
+	requests       []string
+	// The pods deleted with no grace period, by path. A heal of a copy
+	// on a dead node is the one delete that must be forced.
+	forcedDeletes []string
+
+	// Broken maps a path to the status the server answers it with,
+	// which is how a test drives the failure a pass reports and
+	// carries on from.
+	broken map[string]int
+
+	// RefuseCreate answers every creation, of a pod or of a catalog
+	// object, with a conflict: the state a second writer leaves behind.
+	refuseCreate bool
+
+	// The watch streams the cluster holds open, which watchstreams_test.go
+	// sends each change to.
+	streams []*watchStream
+
+	// Leases answers the coordination API, where a test that runs the
+	// whole process sets one. Every other test leaves it nil.
+	leases http.Handler
+}
+
+func newFakeCluster() *fakeCluster {
+	return &fakeCluster{
+		libraries: map[string]*Library{},
+		catalogs:  map[string]*NamespaceCatalog{},
+		players:   map[string]*Player{},
+		providers: map[string]*MetadataProvider{},
+		secrets:   map[string]*Secret{},
+		claims:    map[string]*PersistentVolumeClaim{},
+		volumes:   map[string]string{},
+
+		storageClasses: map[string]*StorageClass{},
+		pods:           map[string]*Pod{},
+		slices:         map[string]*EndpointSlice{},
+		services:       map[string]*Service{},
+		configMaps:     map[string]*ConfigMap{},
+		jobs:           map[string]*Job{},
+		cronJobs:       map[string]bool{},
+		claimTemplates: map[string]*ResourceClaimTemplate{},
+		people:         map[string]*Person{},
+		nodes:          map[string]*Node{},
+		broken:         map[string]int{},
+	}
+}
+
+// The handler records each request and answers it. A watch request is
+// not recorded: it holds a stream open, and watchstreams_test.go
+// answers it. Every write sends its change to the open streams.
+func (f *fakeCluster) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f.leases != nil && strings.HasPrefix(r.URL.Path, "/apis/coordination.k8s.io/") {
+			f.leases.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Query().Get("watch") == "true" {
+			f.serveWatch(w, r)
+			return
+		}
+		f.mutex.Lock()
+		defer f.mutex.Unlock()
+		f.serve(w, r)
+		if r.Method != http.MethodGet {
+			f.announceLocked()
+		}
+	})
+}
+
+func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
+	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+	if r.Method == http.MethodDelete && r.URL.Query().Get("gracePeriodSeconds") == "0" {
+		f.forcedDeletes = append(f.forcedDeletes, r.URL.Path)
+	}
+	if status := f.brokenStatus(r); status != 0 {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte("the API server is unwell"))
+		return
+	}
+	f.route(w, r)
+}
+
+// brokenStatus answers the status a test broke a request with, or zero.
+// A test breaks a path, one request against a path, or one method
+// against a path: the two pod lists differ by their selector alone, so
+// the whole request line is a key too.
+func (f *fakeCluster) brokenStatus(r *http.Request) int {
+	status := f.broken[r.URL.Path]
+	if status == 0 {
+		status = f.broken[r.URL.RequestURI()]
+	}
+	// A path is broken for one method alone where a test drives a
+	// failure on the write and not on the read before it.
+	if status == 0 {
+		status = f.broken[r.Method+" "+r.URL.Path]
+	}
+	return status
+}
+
+// route answers one request from the objects the cluster holds.
+func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
+	name := path.Base(r.URL.Path)
+	switch {
+	case r.URL.Path == versionPath:
+		_ = json.NewEncoder(w).Encode(Version{GitVersion: "v1.34.1+k3s1"})
+	case r.URL.Path == librariesPath:
+		// The list is sorted, so one pass reads the collection in the
+		// same order every time.
+		list := LibraryList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.libraries) {
+			list.Items = append(list.Items, *f.libraries[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == catalogsPath:
+		list := CatalogList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.catalogs) {
+			list.Items = append(list.Items, *f.catalogs[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == playersPath:
+		list := PlayerList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.players) {
+			list.Items = append(list.Items, *f.players[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == mediaPreferencesPath:
+		list := MediaPreferencesList{Metadata: ListMeta{ResourceVersion: "1"}}
+		if f.preferences != nil {
+			list.Items = append(list.Items, *f.preferences)
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == playsAllPath:
+		list := PlayList{Metadata: ListMeta{ResourceVersion: "1"}, Items: slices.Clone(f.plays)}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
+		f.patchPlay(w, r, name)
+	case r.URL.Path == nodesPath:
+		list := NodeList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.nodes) {
+			list.Items = append(list.Items, *f.nodes[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == peoplePath:
+		list := PersonList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.people) {
+			list.Items = append(list.Items, *f.people[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/people/"):
+		f.patchPerson(w, r, name)
+	case r.URL.Path == metadataProvidersPath:
+		list := MetadataProviderList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.providers) {
+			list.Items = append(list.Items, *f.providers[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.Contains(r.URL.Path, "/metadataproviders/") && strings.HasSuffix(r.URL.Path, "/status"):
+		var written MetadataProvider
+		_ = json.NewDecoder(r.Body).Decode(&written)
+		if !replacesHeld(w, f.providers[written.Metadata.Name], &written.Metadata) {
+			return
+		}
+		f.providers[written.Metadata.Name] = &written
+		_ = json.NewEncoder(w).Encode(written)
+	case strings.Contains(r.URL.Path, "/secrets/"):
+		answer(w, f.secrets[name])
+	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/libraries/"):
+		f.patchLibrary(w, r, name)
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/catalogs/"):
+		answer(w, f.catalogs[name])
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/libraries/"):
+		answer(w, f.libraries[name])
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/metadataproviders/"):
+		answer(w, f.providers[name])
+	case strings.Contains(r.URL.Path, "/catalogs/") && strings.HasSuffix(r.URL.Path, "/status"):
+		var written NamespaceCatalog
+		_ = json.NewDecoder(r.Body).Decode(&written)
+		if !replacesHeld(w, f.catalogs[written.Metadata.Name], &written.Metadata) {
+			return
+		}
+		f.catalogs[written.Metadata.Name] = &written
+		_ = json.NewEncoder(w).Encode(written)
+	case strings.HasSuffix(r.URL.Path, "/status"):
+		var written Library
+		_ = json.NewDecoder(r.Body).Decode(&written)
+		if !replacesHeld(w, f.libraries[written.Metadata.Name], &written.Metadata) {
+			return
+		}
+		f.libraries[written.Metadata.Name] = &written
+		_ = json.NewEncoder(w).Encode(written)
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/persistentvolumeclaims"):
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var created PersistentVolumeClaim
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		f.claims[created.Metadata.Name] = &created
+		_ = json.NewEncoder(w).Encode(created)
+	case r.URL.Path == jobsAllPath:
+		list := JobList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.jobs) {
+			list.Items = append(list.Items, *f.jobs[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.HasSuffix(r.URL.Path, "/events"):
+		f.serveEvents(w, r)
+	case strings.Contains(r.URL.Path, "/cronjobs"):
+		f.serveCronJob(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/jobs"):
+		f.serveJob(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case r.URL.Path == podsAllPath:
+		list := PodList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.pods) {
+			if !selects(r.URL.Query().Get("labelSelector"), f.pods[key]) {
+				continue
+			}
+			list.Items = append(list.Items, *f.pods[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == servicesAllPath:
+		answerSelected(w, r, f.services, func(held *Service) map[string]string { return held.Metadata.Labels })
+	case r.URL.Path == endpointSlicesAllPath:
+		answerSelected(w, r, f.slices, func(held *EndpointSlice) map[string]string { return held.Metadata.Labels })
+	case r.URL.Path == claimTemplatesAllPath:
+		answerSelected(w, r, f.claimTemplates,
+			func(held *ResourceClaimTemplate) map[string]string { return held.Metadata.Labels })
+	case r.URL.Path == configMapsAllPath:
+		answerSelected(w, r, f.configMaps, func(held *ConfigMap) map[string]string { return held.Metadata.Labels })
+	case r.URL.Path == claimsAllPath:
+		list := PersistentVolumeClaimList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.claims) {
+			list.Items = append(list.Items, *f.claims[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.Contains(r.URL.Path, "/persistentvolumeclaims/"):
+		f.serveClaim(w, r, name)
+	case r.URL.Path == storageClassesPath:
+		list := StorageClassList{}
+		for _, key := range sortedNames(f.storageClasses) {
+			list.Items = append(list.Items, *f.storageClasses[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.Contains(r.URL.Path, "/storageclasses/"):
+		answer(w, f.storageClasses[name])
+	case r.URL.Path == volumesPath:
+		f.serveVolumes(w, r)
+	case strings.Contains(r.URL.Path, "/persistentvolumes/"):
+		f.serveVolume(w, r, name)
+	case strings.Contains(r.URL.Path, "/endpointslices"):
+		f.serveEndpointSlice(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/services"):
+		f.serveService(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/configmaps"):
+		f.serveConfigMap(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/resourceclaimtemplates"):
+		f.serveClaimTemplate(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/plays"):
+		f.createPlay(w, r)
+	case r.Method == http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var created Pod
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		f.pods[created.Metadata.Name] = &created
+		_ = json.NewEncoder(w).Encode(created)
+	case r.Method == http.MethodDelete:
+		// A delete that names another pod's uid is refused, as the API
+		// server refuses a failed precondition.
+		var options struct {
+			Preconditions struct {
+				UID string `json:"uid"`
+			} `json:"preconditions"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&options)
+		if held, ok := f.pods[name]; ok && options.Preconditions.UID != "" && options.Preconditions.UID != held.Metadata.UID {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		delete(f.pods, name)
+	default:
+		answer(w, f.pods[name])
+	}
+}
+
+// A claim is read by name and deleted by name, and an absent claim is a
+// 404. A deleted claim leaves the volume behind it Released with the
+// claim's uid in the claimRef, the way the binder does, because the
+// volumes this operator writes are Retain and the sweep reads that
+// phase.
+func (f *fakeCluster) serveClaim(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodDelete {
+		answer(w, f.claims[name])
+		return
+	}
+	if _, held := f.claims[name]; !held {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	held := f.claims[name]
+	delete(f.claims, name)
+	f.releaseVolumeOf(namespaceOf(r.URL.Path), name, held.Metadata.UID)
+}
+
+// The uid the fake binder writes into a claimRef for a claim that carries
+// none of its own, so a Released volume names a claim the way a Bound
+// one does.
+const boundClaimUID = "bound-claim-uid"
+
+// releaseVolumeOf turns Released every volume whose claimRef names one
+// claim, and writes the uid of that claim into the claimRef, which is
+// what the binder writes when it binds.
+func (f *fakeCluster) releaseVolumeOf(namespace, claim, uid string) {
+	if uid == "" {
+		uid = boundClaimUID
+	}
+	for name, body := range f.volumes {
+		volume := decodeVolume(body)
+		if volume.Spec.ClaimRef == nil ||
+			volume.Spec.ClaimRef.Namespace != namespace || volume.Spec.ClaimRef.Name != claim {
+			continue
+		}
+		volume.Status.Phase = volumeReleased
+		volume.Spec.ClaimRef.UID = uid
+		f.volumes[name] = encodeVolume(volume)
+	}
+}
+
+// The volumes collection. A create stores the body the operator sent,
+// and a list answers the volumes one label selector names, in name
+// order.
+func (f *fakeCluster) serveVolumes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		list := PersistentVolumeList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, name := range sortedVolumeNames(f.volumes) {
+			volume := decodeVolume(f.volumes[name])
+			if !selectsLabels(r.URL.Query().Get("labelSelector"), volume.Metadata.Labels) {
+				continue
+			}
+			list.Items = append(list.Items, *volume)
+		}
+		_ = json.NewEncoder(w).Encode(list)
+		return
+	}
+	body, _ := io.ReadAll(r.Body)
+	name := decodeVolume(string(body)).Metadata.Name
+	// A volume of that name already stands, so the API server refuses
+	// the create the way it refuses any duplicate name.
+	if _, held := f.volumes[name]; held || f.refuseCreate {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	f.volumes[name] = string(body)
+	_, _ = w.Write(body)
+}
+
+// One volume by name: the body the cluster holds on a read, and the
+// delete the sweep sends.
+func (f *fakeCluster) serveVolume(w http.ResponseWriter, r *http.Request, name string) {
+	body, held := f.volumes[name]
+	if !held {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		// A delete that names another volume's uid is refused, as the
+		// API server refuses a failed precondition.
+		var options struct {
+			Preconditions struct {
+				UID string `json:"uid"`
+			} `json:"preconditions"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&options)
+		if options.Preconditions.UID != "" && options.Preconditions.UID != decodeVolume(body).Metadata.UID {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		delete(f.volumes, name)
+		return
+	}
+	_, _ = io.WriteString(w, body)
+}
+
+func decodeVolume(body string) *PersistentVolume {
+	volume := &PersistentVolume{}
+	_ = json.Unmarshal([]byte(body), volume)
+	return volume
+}
+
+func encodeVolume(volume *PersistentVolume) string {
+	body, _ := json.Marshal(volume)
+	return string(body)
+}
+
+// heldVolume decodes the volume the cluster holds, so a test reads what a
+// pass wrote.
+func (f *fakeCluster) heldVolume(name string) *PersistentVolume {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	body, held := f.volumes[name]
+	if !held {
+		return nil
+	}
+	return decodeVolume(body)
+}
+
+// seedStorageClass puts one class into the cluster, so a test chooses the
+// provisioner the operator reads behind the class name a Catalog states.
+func seedStorageClass(cluster *fakeCluster, name, provisioner string) {
+	cluster.storageClasses[name] = &StorageClass{
+		Metadata:    ObjectMeta{Name: name},
+		Provisioner: provisioner,
+	}
+}
+
+// ServeJob answers a Job the way the API server does: a create stores
+// what the body carries, a delete removes it, and anything else reads
+// it by name.
+func (f *fakeCluster) serveJob(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var created Job
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		// The API server gives every object it creates a version.
+		created.Metadata.ResourceVersion = "1"
+		f.jobs[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
+		_ = json.NewEncoder(w).Encode(created)
+	case http.MethodDelete:
+		if _, held := f.jobs[key]; !held {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(f.jobs, key)
+	default:
+		answer(w, f.jobs[key])
+	}
+}
+
+// ServeCronJob answers the one request the operator makes of a CronJob:
+// the delete of one an earlier release stood.
+func (f *fakeCluster) serveCronJob(w http.ResponseWriter, r *http.Request, key string) {
+	if r.Method != http.MethodDelete || !f.cronJobs[key] {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	delete(f.cronJobs, key)
+}
+
+// ServeClaimTemplate answers a ResourceClaimTemplate the way the API server
+// does: an absent template is a 404, a create stores what the body carries, and
+// a delete removes it. There is no update, because the API server refuses every
+// change to a template's spec.
+func (f *fakeCluster) serveClaimTemplate(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var created ResourceClaimTemplate
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		created.Metadata.ResourceVersion = "1"
+		f.claimTemplates[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
+		_ = json.NewEncoder(w).Encode(created)
+	case http.MethodDelete:
+		if _, held := f.claimTemplates[key]; !held {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(f.claimTemplates, key)
+	default:
+		answer(w, f.claimTemplates[key])
+	}
+}
+
+// HeldClaimTemplate is the template the cluster holds, so a test reads what a
+// pass wrote.
+func (f *fakeCluster) heldClaimTemplate(namespace, name string) *ResourceClaimTemplate {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.claimTemplates[namespace+"/"+name]
+}
+
+// HoldClaimTemplate puts a template into the cluster, so a test drives the
+// state a pass reads.
+func (f *fakeCluster) holdClaimTemplate(template *ResourceClaimTemplate) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.claimTemplates[template.Metadata.Namespace+"/"+template.Metadata.Name] = template
+}
+
+func (f *fakeCluster) heldJob(namespace, name string) *Job {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.jobs[namespace+"/"+name]
+}
+
+func (f *fakeCluster) heldCronJob(namespace, name string) bool {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.cronJobs[namespace+"/"+name]
+}
+
+// Whether the cluster holds a walk Job of one Library, which is what a pass
+// that reconciled a new Library creates.
+func (f *fakeCluster) heldWalk(namespace, library string) bool {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	for _, job := range f.jobs {
+		if job.Metadata.Namespace == namespace && job.Metadata.Labels[libraryLabelKey] == library &&
+			job.Metadata.Labels[workerLabelKey] == jobModeWalk {
+			return true
+		}
+	}
+	return false
+}
+
+// HoldCronJob puts a CronJob an earlier release stood into the cluster.
+func (f *fakeCluster) holdCronJob(namespace, name string) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.cronJobs[namespace+"/"+name] = true
+}
+
+// HoldJob puts a Job into the cluster as the Job controller would have
+// left it, so a test drives the state a pass reads.
+func (f *fakeCluster) holdJob(job *Job) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.jobs[job.Metadata.Namespace+"/"+job.Metadata.Name] = job
+}
+
+// HeldJobs is every Job the cluster holds, in name order, so a test
+// reads what one pass created.
+func (f *fakeCluster) heldJobs() []Job {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	held := []Job{}
+	for _, key := range sortedNames(f.jobs) {
+		held = append(held, *f.jobs[key])
+	}
+	return held
+}
+
+// The suffix the API server mints onto a generateName. Its own is
+// random; this one is fixed, so a test names the object a pass created.
+const mintedSuffix = "b2k9x"
+
+// CreatePlay answers a create the way the API server does: the name is
+// minted from the generateName, and the object it answers with is the one it
+// holds.
+func (f *fakeCluster) createPlay(w http.ResponseWriter, r *http.Request) {
+	if f.refuseCreate {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	var created Play
+	_ = json.NewDecoder(r.Body).Decode(&created)
+	created.Metadata.Name = created.Metadata.GenerateName + mintedSuffix
+	created.Metadata.GenerateName = ""
+	created.Metadata.UID = mintedSuffix + "-uid"
+	f.plays = append(f.plays, created)
+	_ = json.NewEncoder(w).Encode(created)
+}
+
+// Selects answers a label selector over one pod's labels, the way
+// selectsLabels does, so a list of scanner pods never answers with a
+// screen pod.
+func selects(selector string, pod *Pod) bool {
+	return selectsLabels(selector, pod.Metadata.Labels)
+}
+
+// selectsLabels answers a label selector of the three forms the operator
+// sends. A key with a value keeps the objects that carry that pair. A key
+// alone keeps the objects that carry the key with any value. A key with
+// "in" and a list of values keeps the objects that carry one of them. An
+// empty selector keeps everything. Terms are separated by commas outside
+// the parentheses, and every term must hold.
+func selectsLabels(selector string, labels map[string]string) bool {
+	if selector == "" {
+		return true
+	}
+	for _, term := range selectorTerms(selector) {
+		if key, set, isSet := strings.Cut(term, " in "); isSet {
+			values := strings.Split(strings.Trim(set, "()"), ",")
+			if !slices.Contains(values, labels[key]) {
+				return false
+			}
+			continue
+		}
+		key, value, stated := strings.Cut(term, "=")
+		if stated && labels[key] != value {
+			return false
+		}
+		if !stated && labels[key] == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// The terms of one selector: the commas inside a set's parentheses belong
+// to the set.
+func selectorTerms(selector string) []string {
+	var terms []string
+	depth, start := 0, 0
+	for index, character := range selector {
+		switch character {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				terms = append(terms, selector[start:index])
+				start = index + 1
+			}
+		}
+	}
+	return append(terms, selector[start:])
+}
+
+// The API server's own behavior: conditional on the stated
+// resourceVersion, and a deleting object with no finalizer left is
+// removed.
+func (f *fakeCluster) patchLibrary(w http.ResponseWriter, r *http.Request, name string) {
+	held := f.libraries[name]
+	if held == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var patch struct {
+		Metadata struct {
+			ResourceVersion string   `json:"resourceVersion"`
+			Finalizers      []string `json:"finalizers"`
+		} `json:"metadata"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&patch)
+	if patch.Metadata.ResourceVersion != held.Metadata.ResourceVersion {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	held.Metadata.Finalizers = patch.Metadata.Finalizers
+	held.Metadata.ResourceVersion = nextVersion(held.Metadata.ResourceVersion)
+	if held.Metadata.deleting() && len(held.Metadata.Finalizers) == 0 {
+		delete(f.libraries, name)
+	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// The metadata a merge patch of this operator's carries: the
+// conditional resourceVersion, and the three fields it owns. A field
+// the patch does not state is left as it stands, the way the API server
+// reads a merge patch.
+type metadataPatch struct {
+	Metadata struct {
+		ResourceVersion string            `json:"resourceVersion"`
+		Finalizers      *[]string         `json:"finalizers"`
+		OwnerReferences *[]OwnerReference `json:"ownerReferences"`
+		Annotations     map[string]string `json:"annotations"`
+	} `json:"metadata"`
+}
+
+// ApplyMetadataPatch answers the way the API server does: a patch
+// against a stale resourceVersion is a conflict, and one that matches
+// writes the fields it states and produces the next version.
+func applyMetadataPatch(w http.ResponseWriter, r *http.Request, metadata *ObjectMeta) bool {
+	var patch metadataPatch
+	_ = json.NewDecoder(r.Body).Decode(&patch)
+	if patch.Metadata.ResourceVersion != metadata.ResourceVersion {
+		w.WriteHeader(http.StatusConflict)
+		return false
+	}
+	if patch.Metadata.Finalizers != nil {
+		metadata.Finalizers = *patch.Metadata.Finalizers
+	}
+	if patch.Metadata.OwnerReferences != nil {
+		metadata.OwnerReferences = *patch.Metadata.OwnerReferences
+	}
+	if patch.Metadata.Annotations != nil {
+		metadata.Annotations = patch.Metadata.Annotations
+	}
+	metadata.ResourceVersion = nextVersion(metadata.ResourceVersion)
+	return true
+}
+
+// PatchPlay writes one Play's metadata, and removes a deleting Play
+// whose last finalizer is gone, which is the act the operator's release
+// is waiting on.
+func (f *fakeCluster) patchPlay(w http.ResponseWriter, r *http.Request, name string) {
+	for index := range f.plays {
+		play := &f.plays[index]
+		if play.Metadata.Name != name || play.Metadata.Namespace != namespaceOf(r.URL.Path) {
+			continue
+		}
+		if !applyMetadataPatch(w, r, &play.Metadata) {
+			return
+		}
+		written := *play
+		if written.Metadata.deleting() && len(written.Metadata.Finalizers) == 0 {
+			f.plays = slices.Delete(f.plays, index, index+1)
+		}
+		_ = json.NewEncoder(w).Encode(written)
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+// PatchPerson writes one Person's finalizer list, and removes a
+// deleting Person whose last finalizer is gone.
+func (f *fakeCluster) patchPerson(w http.ResponseWriter, r *http.Request, name string) {
+	held := f.people[name]
+	if held == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if !applyMetadataPatch(w, r, &held.Metadata) {
+		return
+	}
+	if held.Metadata.deleting() && len(held.Metadata.Finalizers) == 0 {
+		delete(f.people, name)
+	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+func (f *fakeCluster) heldPerson(name string) *Person {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.people[name]
+}
+
+// replacesHeld answers a status write the way the API server does. A
+// write from an older copy states an older resourceVersion and is
+// refused with a 409, as a patch is. One that matches produces the next
+// version. It reports whether the write lands.
+func replacesHeld[T any](w http.ResponseWriter, held *T, written *ObjectMeta) bool {
+	if held != nil {
+		fields, _ := json.Marshal(held)
+		var current struct {
+			Metadata ObjectMeta `json:"metadata"`
+		}
+		_ = json.Unmarshal(fields, &current)
+		if current.Metadata.ResourceVersion != written.ResourceVersion {
+			w.WriteHeader(http.StatusConflict)
+			return false
+		}
+	}
+	written.ResourceVersion = nextVersion(written.ResourceVersion)
+	return true
+}
+
+// The resourceVersion a write produces, which every later conditional
+// write on the object has to state.
+func nextVersion(current string) string {
+	number, err := strconv.Atoi(current)
+	if err != nil {
+		return "1"
+	}
+	return strconv.Itoa(number + 1)
+}
+
+// NamespaceOf reads the namespace out of a collection path, which is
+// how the fake cluster keys the objects a namespaced verb writes. A
+// path with no namespace segment answers an empty string, and no verb
+// the operator sends takes one.
+func namespaceOf(urlPath string) string {
+	_, after, found := strings.Cut(urlPath, "/namespaces/")
+	if !found {
+		return ""
+	}
+	namespace, _, _ := strings.Cut(after, "/")
+	return namespace
+}
+
+// ServeEndpointSlice answers a catalog slice the way the API server
+// does: an absent slice is a 404, a create stores what the body
+// carries, and an update replaces it. The stored resourceVersion is
+// what a conditional write is checked against.
+func (f *fakeCluster) serveEndpointSlice(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		f.writeEndpointSlice(w, r, "1")
+	case http.MethodPut:
+		f.writeEndpointSlice(w, r, "2")
+	default:
+		answer(w, f.slices[key])
+	}
+}
+
+func (f *fakeCluster) writeEndpointSlice(w http.ResponseWriter, r *http.Request, resourceVersion string) {
+	var written EndpointSlice
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	written.Metadata.ResourceVersion = resourceVersion
+	f.slices[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
+	_ = json.NewEncoder(w).Encode(written)
+}
+
+// AssignedClusterIP is the address the fake API server gives a Service
+// that asked for none, which is what an update must carry back
+// untouched.
+const assignedClusterIP = "10.43.0.7"
+
+// ServeService answers a Service the same way, and it assigns the
+// clusterIP the API server would: a headless Service keeps the None the
+// operator asked for, and any other Service is given an address. The
+// value is the API server's from then on.
+func (f *fakeCluster) serveService(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		f.writeService(w, r, "1")
+	case http.MethodPut:
+		f.writeService(w, r, "2")
+	case http.MethodDelete:
+		if _, held := f.services[key]; !held {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(f.services, key)
+	default:
+		answer(w, f.services[key])
+	}
+}
+
+func (f *fakeCluster) serveConfigMap(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		f.writeConfigMap(w, r, "1")
+	case http.MethodPut:
+		f.writeConfigMap(w, r, "2")
+	default:
+		answer(w, f.configMaps[key])
+	}
+}
+
+func (f *fakeCluster) writeConfigMap(w http.ResponseWriter, r *http.Request, resourceVersion string) {
+	var written ConfigMap
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	written.Metadata.ResourceVersion = resourceVersion
+	f.configMaps[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
+	_ = json.NewEncoder(w).Encode(written)
+}
+
+func (f *fakeCluster) heldConfigMap(namespace, name string) *ConfigMap {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.configMaps[namespace+"/"+name]
+}
+
+func (f *fakeCluster) writeService(w http.ResponseWriter, r *http.Request, resourceVersion string) {
+	var written Service
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	written.Metadata.ResourceVersion = resourceVersion
+	if written.Spec.ClusterIP == "" {
+		written.Spec.ClusterIP = assignedClusterIP
+	}
+	if written.Spec.ClusterIPs == nil {
+		written.Spec.ClusterIPs = []string{written.Spec.ClusterIP}
+	}
+	f.services[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
+	_ = json.NewEncoder(w).Encode(written)
+}
+
+// Held reads one object out of the cluster under the lock, so a test
+// that inspects the cluster while a watch request is in flight reads
+// no torn map.
+func (f *fakeCluster) heldPod(name string) *Pod {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.pods[name]
+}
+
+func (f *fakeCluster) heldPlays() []Play {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return slices.Clone(f.plays)
+}
+
+func (f *fakeCluster) heldLibrary(name string) *Library {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.libraries[name]
+}
+
+func (f *fakeCluster) heldEndpointSlice(namespace, name string) *EndpointSlice {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.slices[namespace+"/"+name]
+}
+
+func (f *fakeCluster) heldService(namespace, name string) *Service {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.services[namespace+"/"+name]
+}
+
+// HoldService puts a Service into the cluster as something other than
+// this operator wrote it, so a test drives the divergence a pass finds
+// and repairs.
+func (f *fakeCluster) holdService(service *Service) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.services[service.Metadata.Namespace+"/"+service.Metadata.Name] = service
+}
+
+func (f *fakeCluster) heldCatalog(name string) *NamespaceCatalog {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.catalogs[name]
+}
+
+// The MetadataProvider the cluster holds, so a test reads the status a
+// check wrote.
+func (f *fakeCluster) heldProvider(name string) *MetadataProvider {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.providers[name]
+}
+
+func (f *fakeCluster) heldClaim(name string) *PersistentVolumeClaim {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.claims[name]
+}
+
+// SeedPlayer puts one Player in the cluster with the idle block
+// media-operator would publish. An empty controller stands for a Player with
+// no idle block at all.
+func seedPlayer(cluster *fakeCluster, name, namespace, controller string) *Player {
+	player := &Player{
+		Metadata: ObjectMeta{Name: name, Namespace: namespace, UID: name + "-uid"},
+	}
+	if controller != "" {
+		player.Status.Idle = &PlayerIdleStatus{
+			Controller: controller,
+			Claim:      name + "-idle-devices",
+			Requests:   []string{"draw", "render"},
+		}
+	}
+	cluster.players[name] = player
+	return player
+}
+
+// CountRequests counts the requests of one method against one kind of
+// object, so a test reads what a pass did rather than only what it
+// left.
+func (f *fakeCluster) countRequests(method, kind string) int {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	count := 0
+	for _, request := range f.requests {
+		if strings.HasPrefix(request, method) && strings.Contains(request, "/"+kind) {
+			count++
+		}
+	}
+	return count
+}
+
+// Where one method against one kind of object first appears in the
+// requests a pass sent, so a test reads the order of two writes. A kind the
+// pass never wrote answers -1.
+func (f *fakeCluster) firstRequest(method, kind string) int {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	for index, request := range f.requests {
+		if strings.HasPrefix(request, method) && strings.Contains(request, "/"+kind) {
+			return index
+		}
+	}
+	return -1
+}
+
+// answerSelected answers a list of one kind across every namespace, in
+// key order, with the objects the request's label selector selects.
+func answerSelected[T any](w http.ResponseWriter, r *http.Request, held map[string]*T, labels func(*T) map[string]string) {
+	list := struct {
+		Metadata ListMeta `json:"metadata"`
+		Items    []T      `json:"items"`
+	}{Metadata: ListMeta{ResourceVersion: "1"}, Items: []T{}}
+	for _, key := range sortedNames(held) {
+		if selectsLabels(r.URL.Query().Get("labelSelector"), labels(held[key])) {
+			list.Items = append(list.Items, *held[key])
+		}
+	}
+	_ = json.NewEncoder(w).Encode(list)
+}
+
+func answer[T any](w http.ResponseWriter, held *T) {
+	if held == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// sortedVolumeNames returns the volume names in order, so one list reads
+// the same way every time. The volumes are held as bodies and not as
+// objects, so sortedNames cannot sort them.
+func sortedVolumeNames(volumes map[string]string) []string {
+	names := make([]string, 0, len(volumes))
+	for name := range volumes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedNames[T any](objects map[string]*T) []string {
+	names := make([]string, 0, len(objects))
+	for name := range objects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// The namespace the seeded Library is in, and so the namespace its
+// catalog Service and EndpointSlice are in.
+const testLibraryNamespace = "house"
+
+// TestOperator builds the operator around one fake cluster. Its bus is
+// never run by the tests that only take a pass, so a publish finds no
+// write queue and drops, which is what a pass wants with no broker
+// under the test.
+//
+// The server outlives the test on purpose. The operator's watchers
+// have no stop, so a test that runs the loop ends with both held in a
+// watch request, and a server that closed would wait on them.
+func testOperator(t *testing.T, cluster *fakeCluster) *operator {
+	t.Helper()
+	server := httptest.NewServer(cluster.handler())
+	operator := newOperator(NewClient(server.URL, server.Client(), ""),
+		testScannerImage, testCorrosionImage, testBrowserImage, testFFmpegImage,
+		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
+	operator.watched = listReads{client: operator.client}
+	return operator
+}
+
+// The namespace the operator itself runs in, which is what every
+// reported webhook address names, and the address its own endpoint
+// listens on. Port zero is a port the kernel picks, so two tests that
+// serve at once never collide.
+const (
+	testOperatorNamespace = "liken-system"
+	testWebhookAddress    = "127.0.0.1:0"
+)
+
+// OperatorOnABroker is the operator of testOperator with its
+// bus connected to a broker the test reads. A test that watches what
+// the operator publishes needs the connection, because a publish made
+// while the client is disconnected is dropped at QoS 0. The helper
+// returns once the client has its write queue, so the first publish
+// after it goes out on the connection.
+func operatorOnABroker(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+	t.Helper()
+	address, accepted := testBroker(t)
+	operator := testOperator(t, cluster)
+
+	connected := make(chan *Bus, 1)
+	running, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	operator.bus = newBus(address, "library-operator", nil, func(bus *Bus) { connected <- bus }, nil)
+	go operator.bus.Run(running)
+
+	broker := waitForBroker(t, accepted)
+	waitForConnect(t, connected)
+	return operator, broker
+}
+
+// ClearedTopics reads the next count publishes and answers
+// with the topics they cleared. A message that clears a retained
+// topic is empty and retained, and one that is not fails the test,
+// because a payload of any length leaves the topic standing.
+func clearedTopics(t *testing.T, broker *fakeBroker, count int) map[string]bool {
+	t.Helper()
+	cleared := map[string]bool{}
+	for range count {
+		message := waitForPublish(t, broker.pubs)
+		if len(message.payload) != 0 {
+			t.Errorf("the payload on %s is %q, want an empty one", message.topic, message.payload)
+		}
+		if !message.retained {
+			t.Errorf("the message on %s is not retained, so it clears nothing", message.topic)
+		}
+		cleared[message.topic] = true
+	}
+	return cleared
+}
+
+// LibraryTopics names the two retained topics one Library
+// stands on the bus, which is the pair a clear has to cover.
+func libraryTopics(namespace, name string) []string {
+	return []string{
+		libraryStatusTopic(defaultTopicBase, namespace, name),
+		libraryAvailabilityTopic(defaultTopicBase, namespace, name),
+	}
+}
+
+// TestRunContext ends when the test does, so the bus the loop starts
+// stops dialing a broker that is not there.
+func testRunContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// CatalogOwner is the ownerReference the catalog Service and
+// EndpointSlice carry, so a test states the owner it expects in the
+// same shape a pass builds. The Catalog owns both, and it is the
+// controller, because a namespace holds one Catalog.
+func catalogOwner(name, uid string) OwnerReference {
+	return OwnerReference{APIVersion: catalogAPIVersion, Kind: "Catalog", Name: name, UID: uid, Controller: true}
+}
+
+// SeedCatalog seeds one Catalog in a namespace, so a Library there
+// proceeds and the operator stands the namespace's catalog cluster.
+func seedCatalog(cluster *fakeCluster, name, namespace string) *NamespaceCatalog {
+	catalog := &NamespaceCatalog{
+		Metadata: ObjectMeta{Name: name, Namespace: namespace, UID: name + "-uid"},
+	}
+	cluster.catalogs[name] = catalog
+	return catalog
+}
+
+// TestNamespaceCatalog is one Catalog a reconcile reads, so a test
+// hands reconcile the choice a namespace with one Catalog resolves to.
+func testNamespaceCatalog() *NamespaceCatalog {
+	return &NamespaceCatalog{Metadata: ObjectMeta{Name: "house", Namespace: "house", UID: "house-uid"}}
+}
+
+// WithCatalog is the catalog choice a namespace with one Catalog
+// resolves to, the ordinary state a Library is reconciled against.
+func withCatalog() catalogChoice {
+	return catalogChoice{catalog: testNamespaceCatalog()}
+}
+
+// ReadyCatalogPod is the namespace's catalog pod as the kubelet
+// reports it with both containers up, which is the state a Library
+// needs before it is Ready.
+func readyCatalogPod(catalog, namespace string) *Pod {
+	pod := buildCatalogPod(
+		&NamespaceCatalog{Metadata: ObjectMeta{Name: catalog, Namespace: namespace, UID: catalog + "-uid"}},
+		0, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+	// The stamp is what a pass compares against, so a pod without one
+	// would read as stale and be replaced on the pass that read it.
+	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
+		panic(err)
+	}
+	pod.Status = PodStatus{
+		Phase:                 podRunning,
+		PodIP:                 "10.42.0.9",
+		InitContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: true}},
+		ContainerStatuses:     []ContainerStatus{{Name: reporterContainer, Ready: true}},
+	}
+	return pod
+}
+
+// ReadyCatalogCopy is one durable copy of the namespace's catalog past
+// the first, as the kubelet reports it: the agent alone, and up.
+func readyCatalogCopy(catalog, namespace string, index int) *Pod {
+	pod := buildCatalogPod(
+		&NamespaceCatalog{Metadata: ObjectMeta{Name: catalog, Namespace: namespace, UID: catalog + "-uid"}},
+		index, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
+		panic(err)
+	}
+	pod.Status = PodStatus{
+		Phase:             podRunning,
+		PodIP:             "10.42.0.10",
+		ContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: true}},
+	}
+	return pod
+}
+
+// StandingCatalog is the namespace's Catalog with its pod up, as
+// a Library is reconciled against in the ordinary case.
+func standingCatalog() catalogChoice {
+	catalog := testNamespaceCatalog()
+	return catalogChoice{
+		catalog: catalog,
+		pod:     readyCatalogPod(catalog.Metadata.Name, catalog.Metadata.Namespace),
+	}
+}
+
+// BoundHouse seeds the cluster with a movies Library over a claim bound
+// to an NFS volume, and the namespace's one Catalog, which is the
+// ordinary state every other state is read against.
+func boundHouse(cluster *fakeCluster) *Library {
+	library := studioMovies()
+	cluster.libraries["movies"] = library
+	seedCatalog(cluster, "house", "house")
+	cluster.claims["movies"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
+		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
+	}
+	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
+		`{"capacity":{"storage":"4Ti"},"accessModes":["ReadOnlyMany"],` +
+		`"nfs":{"server":"syn.example","path":"/srv/media/movies"}}}`
+	return library
+}
+
+// BoundStudio seeds a second Library in a second namespace, over a
+// claim of its own and with its own Catalog, so a test sees two catalog
+// clusters stand apart.
+func boundStudio(cluster *fakeCluster) *Library {
+	library := &Library{
+		Metadata: ObjectMeta{Name: "series", Namespace: "studio", UID: "series-uid"},
+		Spec: LibrarySpec{
+			Storage: LibraryStorage{Claim: "shows", Root: "/"},
+			Kind:    libraryKindSeries,
+			Series:  &LibrarySettings{},
+		},
+	}
+	cluster.libraries["series"] = library
+	seedCatalog(cluster, "studio", "studio")
+	cluster.claims["shows"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "shows", Namespace: "studio"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
+		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
+	}
+	return library
+}
+
+// The events of one namespace that the field selector names, the way the API
+// server narrows the list to one object and one type.
+func (f *fakeCluster) serveEvents(w http.ResponseWriter, r *http.Request) {
+	list := EventList{}
+	for _, event := range f.events {
+		selector := "involvedObject.name=" + event.InvolvedObject.Name + ",type=" + event.Type
+		if event.Metadata.Namespace == namespaceOf(r.URL.Path) && r.URL.Query().Get("fieldSelector") == selector {
+			list.Items = append(list.Items, event)
+		}
+	}
+	_ = json.NewEncoder(w).Encode(list)
+}

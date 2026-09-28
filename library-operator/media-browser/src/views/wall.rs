@@ -1,0 +1,533 @@
+// The wall: a grid of art slots, each with the card's lines under it, and
+// a stroke of the accent outside the one that holds focus. Only the slots
+// inside the viewport become geometry, so a wall of five thousand titles
+// builds a couple of dozen slots a frame.
+//
+// The slot ratio, the column count, and the scroll offset are parameters,
+// because a wall of posters is 2:3 at six across and a wall of episode
+// stills is 16:9 at four across, and the two walls are one primitive. The
+// offset lets a page draw one grid for each season of a series inside one
+// scrolled region.
+//
+// Every slot draws at one size, focused or not, so the store decodes each
+// slot once and a press redraws from the cache.
+
+use iced_wgpu::Renderer;
+use iced_widget::canvas;
+use iced_winit::core::{Color, Rectangle};
+
+use super::{Card, Tone, area, artwork, card, mark, progress, scroll, text};
+use crate::art::Art;
+use crate::look;
+
+/// The wall's column count, fixed so focus movement is a function of
+/// the index alone and never of the window size.
+pub const COLUMNS: usize = 6;
+
+/// The height of a poster slot as a share of its width: the 2:3 portrait
+/// that a movie's and a series' primary art is.
+pub const POSTER: f32 = 1.5;
+
+/// The height of a still slot as a share of its width: the 16:9 that an
+/// episode's own art is.
+pub const STILL: f32 = 9.0 / 16.0;
+
+// The poster's share of its cell; the rest is the gutter, which holds the
+// mark of a focused slot.
+const POSTER_SHARE: f32 = 0.84;
+
+// The space between a slot and the line under it, and the space under
+// that line before the next row. Both are wider than the mark reaches, so
+// no mark ever touches a caption or the row above.
+const GAP: f32 = 12.0;
+const FOOT: f32 = 14.0;
+
+/// The wall's cell measures, derived from the viewport width, the slot
+/// ratio, and the column count.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Cells {
+    /// One cell's width, a column of the viewport.
+    pub width: f32,
+    /// One cell's height: the slot, the gap, the caption, and the foot.
+    pub height: f32,
+    /// The poster slot's width inside the cell.
+    pub poster_width: f32,
+    /// The poster slot's height: the width at the ratio the caller asked
+    /// for.
+    pub poster_height: f32,
+}
+
+/// The cell measures for a viewport of this width, at this slot ratio,
+/// with this many slots across and one caption line under each.
+pub fn cells(width: f32, ratio: f32, columns: usize) -> Cells {
+    lined(width, ratio, columns, 1)
+}
+
+/// The cell measures for a viewport of this width, at this slot ratio,
+/// with this many slots across and this many lines under each. Every
+/// wall that draws cards asks for two.
+pub fn lined(width: f32, ratio: f32, columns: usize, lines: usize) -> Cells {
+    let width = width / columns as f32;
+    let poster_width = width * POSTER_SHARE;
+    let poster_height = poster_width * ratio;
+    Cells {
+        width,
+        height: poster_height + GAP + card::height(lines) + FOOT,
+        poster_width,
+        poster_height,
+    }
+}
+
+// The width the wall lays a cell out at when a read cuts a card to it.
+// The frame the wall draws in is not known at the read, so the cut runs
+// at the size the browser is drawn for.
+const SCREEN: f32 = 1920.0;
+
+/// The band a card's lines are cut to at the read: one cell of a wall of
+/// this many columns.
+pub fn band(columns: usize) -> f32 {
+    cells(SCREEN, POSTER, columns).width
+}
+
+/// A cell is wider than the art inside it, by the gutter that holds the
+/// focus mark. A grid laid out inside a content region would therefore
+/// place its art one gutter further in than the heading over it.
+/// `columned` returns the grid region that puts the first and the last
+/// column's art on the content region's own edges: the content region
+/// widened by one gutter at each side.
+pub fn columned(region: Rectangle, columns: usize) -> Rectangle {
+    let gutter = (1.0 - POSTER_SHARE) / 2.0;
+    let width = region.width / (1.0 - 2.0 * gutter / columns as f32);
+    let out = (width - region.width) / 2.0;
+    area(region.x - out, region.y, width, region.height)
+}
+
+/// The poster slot of one index, in viewport space after the scroll.
+pub fn slot(cells: &Cells, index: usize, offset: f32, columns: usize) -> Rectangle {
+    let column = (index % columns) as f32;
+    let row = (index / columns) as f32;
+    Rectangle {
+        x: column * cells.width + (cells.width - cells.poster_width) / 2.0,
+        y: row * cells.height - offset,
+        width: cells.poster_width,
+        height: cells.poster_height,
+    }
+}
+
+/// The band one slot's caption draws in: one line, under the slot and
+/// inside its own cell, so no caption ever runs under a neighbour's.
+pub fn caption(cells: &Cells, slot: Rectangle) -> Rectangle {
+    area(
+        slot.center_x() - cells.width / 2.0,
+        slot.y + slot.height + GAP,
+        cells.width,
+        text::height(1, look::CAPTION),
+    )
+}
+
+/// The band one slot's second line draws in, under its caption.
+pub fn under(cells: &Cells, slot: Rectangle) -> Rectangle {
+    card::under(caption(cells, slot))
+}
+
+/// The words and the color one slot's caption draws in: the slot's own
+/// line, muted, and the facts of the slot that holds focus, bright. The
+/// focused slot draws the whole facts that fit the band's character
+/// estimate, so the caption never cuts inside a fact.
+pub fn captioned<T: Card>(item: &T, focused: bool, chars: usize) -> (&str, Color) {
+    match focused {
+        true => (item.line_fitting(chars), look::text()),
+        false => (item.caption(), look::muted()),
+    }
+}
+
+/// How many characters one caption band holds.
+pub fn caption_fits(cells: &Cells) -> usize {
+    text::fits(look::CAPTION, cells.width)
+}
+
+/// The offset that keeps the focused row of a whole wall centered in a
+/// viewport this tall.
+pub fn scrolled(focus: usize, count: usize, columns: usize, cells: &Cells, height: f32) -> f32 {
+    scroll::offset(
+        focus / columns,
+        scroll::rows(count, columns),
+        cells.height,
+        height,
+    )
+}
+
+/// One wall to draw: the items, the focus, the region it draws in, the
+/// shape of a slot, and how far its rows have scrolled.
+pub struct Grid<'a, T> {
+    /// The items in draw order.
+    pub items: &'a [T],
+    /// The focused item's index, or nothing where focus is elsewhere on
+    /// the screen.
+    pub focus: Option<usize>,
+    /// Whether the focused slot carries the mark. It does not while the
+    /// band above holds focus.
+    pub marked: bool,
+    /// The library the art paths resolve against.
+    pub library: &'a str,
+    /// The height of a slot as a share of its width.
+    pub ratio: f32,
+    /// How many slots a row holds.
+    pub columns: usize,
+    /// How many caption lines stand under each slot, one or two.
+    pub lines: usize,
+    /// The part of the frame the grid draws in, under the band.
+    pub region: Rectangle,
+    /// How far the grid's first row has scrolled above the region's top.
+    /// It is negative for a grid whose rows start below the top.
+    pub offset: f32,
+}
+
+/// The space over the first row. It keeps the mark of a focused slot in
+/// the first row off the band.
+pub const HEAD: f32 = 20.0;
+
+/// Draw one wall. The store is asked for the slots this frame draws and
+/// for one row past them, so a scroll's next art decodes before it
+/// appears.
+pub fn draw<T: Card, A: Art>(
+    frame: &mut canvas::Frame<Renderer>,
+    store: &mut A,
+    grid: &Grid<'_, T>,
+) {
+    let cells = lined(grid.region.width, grid.ratio, grid.columns, grid.lines);
+    let chars = caption_fits(&cells);
+    let range = scroll::visible(
+        grid.offset,
+        grid.region.height,
+        cells.height,
+        grid.items.len(),
+        grid.columns,
+    );
+
+    for index in range.clone() {
+        let item = &grid.items[index];
+        let slot = placed(slot(&cells, index, grid.offset, grid.columns), grid.region);
+        artwork(
+            frame,
+            store,
+            library_of(item, grid.library),
+            item.art(),
+            slot,
+            item.name(),
+            Tone::Full,
+        );
+        progress::draw(frame, item, slot);
+        let focused = Some(index) == grid.focus;
+        if focused && grid.marked {
+            mark(frame, slot);
+        }
+        // A card's lines clip to their own bands, and a band's clip does
+        // not inherit the wall's, so a line whose band has left the region
+        // draws nothing at all, instead of over what stands above the
+        // wall.
+        let band = caption(&cells, slot);
+        if band.y < grid.region.y {
+            continue;
+        }
+        match grid.lines {
+            1 => {
+                let (content, color) = captioned(item, focused, chars);
+                written(frame, band, content, color);
+            }
+            _ => card::draw(frame, item, band),
+        }
+    }
+
+    // One row past the viewport is asked for and not drawn, so a
+    // scroll's next art decodes before it appears.
+    for index in range.end..(range.end + grid.columns).min(grid.items.len()) {
+        let item = &grid.items[index];
+        let ahead = slot(&cells, index, grid.offset, grid.columns);
+        if !item.art().is_empty() {
+            let _ = store.covered(
+                library_of(item, grid.library),
+                item.art(),
+                ahead.width as u32,
+                ahead.height as u32,
+            );
+        }
+    }
+}
+
+// One line centered in its band and clipped to it, so a long title never
+// runs off the screen or over the row below.
+// The strip draws its captions through this too, so the two read as
+// one.
+pub(crate) fn written(
+    frame: &mut canvas::Frame<Renderer>,
+    band: Rectangle,
+    content: &str,
+    color: Color,
+) {
+    text::centered(frame, content, band, look::CAPTION, color);
+}
+
+// One slot in frame space: its place in the grid, moved to the region's
+// corner. The grid's own space starts at zero, and the region says where
+// on the frame that space starts.
+fn placed(slot: Rectangle, region: Rectangle) -> Rectangle {
+    Rectangle {
+        x: slot.x + region.x,
+        y: slot.y + region.y,
+        ..slot
+    }
+}
+
+// The library one slot's art resolves against: the slot's own where it
+// names one, and the grid's otherwise.
+fn library_of<'a, T: Card>(item: &'a T, grid: &'a str) -> &'a str {
+    match item.library().is_empty() {
+        true => grid,
+        false => item.library(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::views::{REACH, marked, underlined};
+
+    // The two walls this screen draws: posters six across, and episode
+    // stills four across.
+    const WALLS: [(f32, usize); 2] = [(POSTER, COLUMNS), (STILL, 4)];
+
+    // One item of a wall, with a caption of its own and a longer line
+    // under focus.
+    const NAME: &str = "Specimen 0001";
+    const LINE: &str = "Specimen 0001 · 1987 · 1h 37m · PG-13";
+
+    struct Slot;
+
+    impl Card for Slot {
+        fn name(&self) -> &str {
+            NAME
+        }
+
+        fn line_fitting(&self, chars: usize) -> &str {
+            match LINE.chars().count() <= chars {
+                true => LINE,
+                false => NAME,
+            }
+        }
+    }
+
+    struct Elsewhere(&'static str);
+
+    impl Card for Elsewhere {
+        fn name(&self) -> &str {
+            "A Title"
+        }
+
+        fn library(&self) -> &str {
+            self.0
+        }
+    }
+
+    // The gutter inside a cell means a region flush with the margin puts
+    // the art further in than the margin, so the region starts outside it.
+    #[test]
+    fn the_first_and_last_column_s_art_lands_on_the_content_region_s_edges() {
+        for (ratio, columns) in WALLS {
+            let content = crate::views::screen::region(area(0.0, 0.0, 1920.0, 1080.0));
+            let grid = columned(content, columns);
+            let cells = cells(grid.width, ratio, columns);
+            let first = slot(&cells, 0, 0.0, columns);
+            let last = slot(&cells, columns - 1, 0.0, columns);
+
+            assert!((grid.x + first.x - content.x).abs() < 0.01, "{first:?}");
+            assert!(
+                (grid.x + last.x + last.width - (content.x + content.width)).abs() < 0.01,
+                "{last:?}"
+            );
+        }
+    }
+
+    // A person's wall holds titles from more than one library, and a slot
+    // that names its own library resolves its poster there.
+    #[test]
+    fn a_slot_that_names_a_library_resolves_its_art_there() {
+        assert_eq!(
+            library_of(&Elsewhere("default/series"), "default/movies"),
+            "default/series"
+        );
+        assert_eq!(
+            library_of(&Elsewhere(""), "default/movies"),
+            "default/movies"
+        );
+    }
+
+    #[test]
+    fn cells_keep_the_two_three_poster_ratio() {
+        let cells = cells(1920.0, POSTER, COLUMNS);
+        assert_eq!(cells.width, 320.0);
+        assert_eq!(cells.poster_height, cells.poster_width * 1.5);
+        assert!(cells.height > cells.poster_height);
+    }
+
+    #[test]
+    fn a_second_line_makes_the_cell_taller_by_the_smaller_size_it_draws_at() {
+        let one = cells(1920.0, POSTER, COLUMNS);
+        let two = lined(1920.0, POSTER, COLUMNS, 2);
+        assert!((two.height - one.height - text::height(1, look::FACE)).abs() < 1e-3);
+        assert!(two.height - one.height < text::height(1, look::CAPTION));
+        assert_eq!(two.poster_height, one.poster_height);
+    }
+
+    #[test]
+    fn a_cards_band_is_one_cell_of_the_wall_it_is_cut_for() {
+        assert_eq!(band(COLUMNS), cells(1920.0, POSTER, COLUMNS).width);
+        assert!(band(4) > band(COLUMNS));
+    }
+
+    #[test]
+    fn the_second_line_stands_right_under_the_caption() {
+        let cells = lined(1920.0, POSTER, COLUMNS, 2);
+        let slot = slot(&cells, 0, 0.0, COLUMNS);
+        let caption = caption(&cells, slot);
+        let under = under(&cells, slot);
+        assert_eq!(under.y, caption.y + caption.height);
+        assert_eq!(under.x, caption.x);
+        assert_eq!(under.width, caption.width);
+    }
+
+    #[test]
+    fn a_wider_ratio_gives_a_shorter_slot() {
+        let stills = cells(1920.0, STILL, COLUMNS);
+        assert_eq!(stills.width, 320.0);
+        assert_eq!(stills.poster_height, stills.poster_width * 9.0 / 16.0);
+        assert!(stills.height < cells(1920.0, POSTER, COLUMNS).height);
+    }
+
+    #[test]
+    fn fewer_columns_give_a_wider_cell() {
+        let four = cells(1920.0, STILL, 4);
+        assert_eq!(four.width, 480.0);
+        assert!(four.poster_width > cells(1920.0, STILL, COLUMNS).poster_width);
+    }
+
+    #[test]
+    fn slots_land_in_their_column_and_row() {
+        let cells = cells(1920.0, POSTER, COLUMNS);
+        let first = slot(&cells, 0, 0.0, COLUMNS);
+        assert_eq!(first.y, 0.0);
+        let below = slot(&cells, COLUMNS, 0.0, COLUMNS);
+        assert_eq!(below.x, first.x);
+        assert_eq!(below.y, cells.height);
+        let beside = slot(&cells, 1, 0.0, COLUMNS);
+        assert_eq!(beside.x, first.x + cells.width);
+    }
+
+    #[test]
+    fn the_scroll_lifts_every_slot() {
+        let cells = cells(1920.0, POSTER, COLUMNS);
+        assert_eq!(slot(&cells, 0, 200.0, COLUMNS).y, -200.0);
+    }
+
+    #[test]
+    fn a_grid_whose_rows_start_below_the_region_takes_a_negative_offset() {
+        let cells = cells(1920.0, STILL, 4);
+        assert_eq!(slot(&cells, 0, -300.0, 4).y, 300.0);
+    }
+
+    #[test]
+    fn the_region_moves_every_slot_to_its_own_corner() {
+        let cells = cells(1920.0, POSTER, COLUMNS);
+        let region = area(60.0, 78.0, 1800.0, 1000.0);
+        let first = slot(&cells, 0, 0.0, COLUMNS);
+        let placed = placed(first, region);
+
+        assert_eq!(placed.y, 78.0);
+        assert_eq!(placed.x, 60.0 + first.x);
+    }
+
+    #[test]
+    fn every_slot_carries_one_caption_under_it() {
+        for (ratio, columns) in WALLS {
+            let cells = cells(1920.0, ratio, columns);
+            let slot = slot(&cells, 0, 0.0, columns);
+            let band = caption(&cells, slot);
+            assert_eq!(band.height, text::height(1, look::CAPTION));
+            assert_eq!(band.width, cells.width);
+            assert!(band.y > slot.y + slot.height);
+        }
+    }
+
+    #[test]
+    fn a_caption_stays_clear_of_the_mark_and_of_the_row_below() {
+        for (ratio, columns) in WALLS {
+            let cells = cells(1920.0, ratio, columns);
+            let slot = slot(&cells, 0, 0.0, columns);
+            let band = caption(&cells, slot);
+            let below = super::slot(&cells, columns, 0.0, columns);
+            assert!(band.y > marked(slot).y + marked(slot).height);
+            assert!(band.y + band.height < marked(below).y);
+        }
+    }
+
+    #[test]
+    fn a_caption_stays_inside_its_own_cell() {
+        let cells = cells(1920.0, POSTER, COLUMNS);
+        let first = caption(&cells, slot(&cells, 0, 0.0, COLUMNS));
+        assert_eq!(first.x, 0.0);
+        let last = caption(&cells, slot(&cells, COLUMNS - 1, 0.0, COLUMNS));
+        assert_eq!(last.x + last.width, 1920.0);
+    }
+
+    #[test]
+    fn the_focused_caption_is_bright_and_carries_the_facts() {
+        let (content, color) = captioned(&Slot, true, LINE.chars().count());
+        assert_eq!(content, LINE);
+        assert_eq!(color, look::text());
+    }
+
+    #[test]
+    fn a_focused_caption_wider_than_its_band_gives_facts_up() {
+        let (content, _) = captioned(&Slot, true, LINE.chars().count() - 1);
+        assert_eq!(content, NAME);
+    }
+
+    #[test]
+    fn every_other_caption_is_muted_and_carries_the_name() {
+        let (content, color) = captioned(&Slot, false, 0);
+        assert_eq!(content, NAME);
+        assert_eq!(color, look::muted());
+    }
+
+    #[test]
+    fn a_wider_cell_holds_more_of_the_focused_line() {
+        let posters = caption_fits(&cells(1920.0, POSTER, COLUMNS));
+        assert_eq!(posters, text::fits(look::CAPTION, 320.0));
+        assert!(caption_fits(&cells(1920.0, STILL, 4)) > posters);
+    }
+
+    #[test]
+    fn the_head_holds_the_mark_of_the_first_row_off_the_band() {
+        const { assert!(HEAD > REACH) };
+        const { assert!(GAP > REACH) };
+        const { assert!(FOOT > REACH) };
+    }
+
+    #[test]
+    fn a_whole_wall_scrolls_its_focused_row_to_the_middle() {
+        let cells = cells(1920.0, POSTER, COLUMNS);
+        assert_eq!(scrolled(0, 60, COLUMNS, &cells, 1080.0), 0.0);
+        assert!(scrolled(59, 60, COLUMNS, &cells, 1080.0) > 0.0);
+    }
+
+    #[test]
+    fn the_underline_is_the_bottom_edge_of_the_mark_and_no_more() {
+        let slot = area(100.0, 100.0, 200.0, 300.0);
+        let around = marked(slot);
+        let bar = underlined(slot);
+        assert_eq!(bar.height, look::MARK);
+        assert_eq!(bar.y + bar.height / 2.0, around.y + around.height);
+        assert!(bar.x < around.x && bar.x + bar.width > around.x + around.width);
+        assert!(around.x < slot.x && around.y + around.height > slot.y + slot.height);
+    }
+}

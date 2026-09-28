@@ -1,0 +1,133 @@
+# The Corrosion agent's configuration, in the image at
+# `/etc/corrosion/config.toml`. The agent runs as a sidecar in a
+# distroless container with no shell, so nothing in the pod can render
+# a file before the agent starts, and a `ConfigMap` for it would be one
+# more object to keep in step with the image. Corrosion reads an
+# environment variable over any setting here, with `__` between the
+# table and the key, so a pod changes one setting and keeps the rest.
+
+[db]
+# The pod mounts the durable catalog claim on this directory, so a pod
+# that restarts keeps the catalog it holds. The agent writes the
+# database, its write-ahead log, its subscription files, and its admin
+# socket under this one directory, so the container needs no other
+# writable path.
+path = "/var/lib/corrosion/state.db"
+
+# Every agent in the cluster loads the same schema. Corrosion reads
+# each `.sql` file in this directory in name order and applies the
+# difference on every start. The directory holds one file,
+# `catalog.sql`, which defines the item header and the item tables.
+schema_paths = ["/etc/corrosion/schema"]
+
+# The SQLite page cache, in KiB as a negative number. 64 MiB in place
+# of the 1 GiB default cost nothing measurable in write speed and saved
+# up to 94 MB of resident memory per agent. Every scanner and every
+# screen runs an agent, so that saving repeats once per pod.
+cache_size_kib = -65536
+
+[api]
+# The HTTP API answers on loopback only. A scanner posts its writes to
+# it from another container in the same pod, and a media browser reads
+# its updates stream the same way. Nothing outside the pod writes the
+# catalog, so the API needs no address on the pod's network and no
+# authorization.
+addr = "127.0.0.1:8080"
+
+[gossip]
+# Agents replicate to each other over QUIC on this port. The image is
+# built before any pod exists, so the file cannot name the pod's
+# address, and this default binds every address. The pod sets
+# `GOSSIP__ADDR` to `<pod IP>:8787` from the downward API, so the agent
+# binds the pod's own address and announces that address to its peers.
+# An agent that starts without that variable serves its API and
+# announces `0.0.0.0:8787`, which no peer can dial. It also finds its
+# own pod in the bootstrap list, because Corrosion drops its own
+# address from that list by comparison with the address it bound.
+#
+# The bind address is IPv4 because Corrosion keeps only the peers whose
+# address family matches the family it bound. An agent bound on
+# `[::]:8787` discards every IPv4 address that plan 03's bootstrap list
+# resolves to.
+addr = "0.0.0.0:8787"
+
+# Gossip carries no TLS. The traffic stays inside the cluster network,
+# it holds the titles and paths the scanner read from the volume, and
+# TLS needs a certificate per pod that nothing in this project mints.
+plaintext = true
+
+# How long, in seconds, an agent remembers a member that left. Foca
+# keeps announcing to a remembered member, and every announcement to a
+# pod that is gone is a QUIC connect attempt that ends in a five-second
+# timeout. A scan Job's agent leaves every hour and never returns under
+# the same identity, and the fork's default remembers it for two days.
+# Five minutes is longer than the thirty seconds foca takes to declare
+# a silent member down, so a member is never forgotten while it is
+# still suspect.
+remove_down_after_secs = 300
+
+# The bootstrap list names `catalog`, a short name with no namespace.
+# The pod's own search path resolves it to the `catalog` `Service` in
+# the pod's namespace. The operator creates that `Service` in every
+# namespace that holds a `Library`, with no selector, and writes its
+# `EndpointSlice` over that namespace's pods. So an agent joins its
+# namespace's cluster and no other.
+#
+# The list is in this file and not in the pod, because Corrosion loads
+# its configuration with the `config` crate 0.13, which cannot parse a
+# list from an environment variable: `GOSSIP__BOOTSTRAP` fails with
+# "expected a sequence". Every other setting a pod changes is a scalar
+# and still arrives as a variable.
+#
+# An agent resolves this list again for its whole life, on a backoff
+# from 5 s to 120 s, and ignores its own address in the answer. So a
+# pod that starts before its peers joins them when they arrive, and
+# one name serves every agent.
+bootstrap = ["catalog:8787"]
+
+[perf]
+# How long the agent waits, in milliseconds, before it applies a batch of
+# peer changes smaller than its threshold. Corrosion's default is 10 ms,
+# and the agent re-arms that wait forever while its queue is empty, so an
+# idle agent wakes a hundred times a second. At 100 ms it wakes ten
+# times a second, and a peer's change lands within a tenth of a second,
+# which no screen can notice. Every agent reads this, so the whole
+# cluster pays the lower idle cost.
+apply_queue_timeout = 100
+
+# How many changesets the agent holds in memory while they wait to be
+# applied. A first sync on an empty claim receives changesets from its
+# peers faster than SQLite applies them, and the queue has no bound in
+# bytes, only this count. When the count is full, the agent drops the
+# oldest changeset and a later sync fetches it again, so a smaller
+# queue costs a second fetch and loses no data. A full sync changeset
+# is about 8 KiB on the wire, and in the drill of plan 68 each one in
+# the queue added about 100 KB to the agent's memory. At that size, the
+# default of 20,000 changesets can hold about 2 GB, and on a home
+# cluster the full queue grew until the kernel killed a `Job`'s agent
+# at its 1Gi limit. At 1,000 the queue holds about 100 MB. In a first
+# sync of a synthetic catalog of 600,000 rows, the agent's peak fell
+# from 1,029Mi at the default to 537Mi, and the sync took 392 s against
+# 412 s.
+#
+# The same count also bounds the queue of broadcasts the agent sends,
+# and the agent drops the most-sent broadcast above it. A peer then
+# receives that change by sync. In the drill of plan 68, a writer that
+# posted 100,000 rows in transactions of 500, the scanner's batch size,
+# dropped no broadcast at 1,000.
+processing_queue_len = 1000
+
+[admin]
+# The admin socket answers `corrosion cluster members` and the other
+# operator commands. It moves off its default under `/var/run` so that
+# the one mounted directory holds every path the agent writes, and the
+# container can run with a read-only root filesystem.
+path = "/var/lib/corrosion/admin.sock"
+
+[telemetry.prometheus]
+# Every address on the pod's network, because the PodMonitor in
+# deploy/monitoring/ scrapes it the way it scrapes this operator's own
+# port: over the pod network, not loopback. This is a separate listener
+# from `[api]`, which stays loopback-only, so opening it adds no way to
+# reach the catalog's write API.
+addr = "0.0.0.0:9090"

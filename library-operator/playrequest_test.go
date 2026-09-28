@@ -1,0 +1,954 @@
+package main
+
+// These tests read what a play request becomes: the Play a pass created,
+// the claim references it carries, and the requests that create nothing.
+// The refusals matter as much as the creation, because a request arrives
+// over the bus from a pod that holds no credential of its own.
+
+import (
+	"context"
+	"encoding/json"
+	"maps"
+	"net"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// The namespace, the Player, and the library key every request here
+// names, so one request differs from another only where the test differs.
+const (
+	testPlayer      = "den"
+	testLibraryKey  = testLibraryNamespace + "/movies"
+	testFilmPath    = "Some Film (1999)/Some Film (1999).mkv"
+	testPosterPath  = "Some Film (1999)/poster.jpg"
+	testTrickplay   = "Some Film (1999)/Some Film (1999).trickplay"
+	testFilmClaimed = "claim://movies//movies/Some Film (1999)/Some Film (1999).mkv"
+)
+
+// A house with one delegated screen over the bound movies library, which
+// is the state every request here is read against.
+func playingHouse(t *testing.T) (*operator, *fakeCluster) {
+	t.Helper()
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
+	return testOperator(t, cluster), cluster
+}
+
+// One request as the browser publishes it, with the paths the test names.
+func filmRequest(items ...playRequestItem) []byte {
+	request := playRequest{Library: testLibraryKey, Items: items}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+func film(path string) playRequestItem {
+	return playRequestItem{
+		Path: path,
+		Presentation: &PlayPresentation{
+			Type:  "video",
+			Hint:  "movie",
+			Title: "Some Film",
+			Year:  1999,
+		},
+	}
+}
+
+// The same request with the slug the catalog holds for the chosen item.
+func slugRequest(slug string, items ...playRequestItem) []byte {
+	request := playRequest{Library: testLibraryKey, Slug: slug, Items: items}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+// The request reaches the operator the way the broker delivers it: on
+// the Player's own play topic.
+func publishPlay(operator *operator, payload []byte) {
+	operator.handleBusMessage(
+		playRequestTopic(defaultTopicBase, testLibraryNamespace, testPlayer), payload)
+}
+
+func TestAPlayRequestCreatesAPlayOnThePlayerThatAsked(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	plays := cluster.heldPlays()
+	if len(plays) != 1 {
+		t.Fatalf("plays = %+v, want one", plays)
+	}
+	play := plays[0]
+	if play.APIVersion != playerAPIVersion || play.Kind != "Play" {
+		t.Errorf("play = %s %s, want %s Play", play.APIVersion, play.Kind, playerAPIVersion)
+	}
+	if play.Metadata.Namespace != testLibraryNamespace {
+		t.Errorf("namespace = %q, want %q", play.Metadata.Namespace, testLibraryNamespace)
+	}
+	if play.Metadata.Name != testPlayer+"-"+mintedSuffix {
+		t.Errorf("name = %q, want a name minted from %q", play.Metadata.Name, testPlayer+"-")
+	}
+	if len(play.Spec.Players) != 1 || play.Spec.Players[0] != testPlayer {
+		t.Errorf("players = %v, want [%s]", play.Spec.Players, testPlayer)
+	}
+	if len(play.Spec.Items) != 1 || play.Spec.Items[0].URI != testFilmClaimed {
+		t.Errorf("items = %+v, want one at %q", play.Spec.Items, testFilmClaimed)
+	}
+}
+
+func TestAPlayCarriesThePresentationTheBrowserResolved(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	presentation := cluster.heldPlays()[0].Spec.Items[0].Presentation
+	want := PlayPresentation{Type: "video", Hint: "movie", Title: "Some Film", Year: 1999}
+	if presentation == nil || !reflect.DeepEqual(*presentation, want) {
+		t.Errorf("presentation = %+v, want %+v", presentation, want)
+	}
+}
+
+// The marks travel through the request unread, every candidate in the order
+// the browser sent them, and an open end stays absent rather than zero.
+func TestTheMarksTravelThroughTheRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	marks := `[{"kind":"intro","end":107},` +
+		`{"kind":"intro","start":7.007,"end":106.482,"source":"theintrodb"},` +
+		`{"kind":"credits","start":3253,"source":"theintrodb"}]`
+	payload := `{"library":"` + testLibraryKey + `","items":[{"path":"` + testFilmPath + `",` +
+		`"presentation":{"type":"video","marks":` + marks + `}}]}`
+	publishPlay(operator, []byte(payload))
+
+	operator.pass()
+
+	written, err := json.Marshal(cluster.heldPlays()[0].Spec.Items[0].Presentation.Marks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != marks {
+		t.Errorf("marks = %s, want %s", written, marks)
+	}
+}
+
+func TestTheArtAndTheTrickplayAreStampedOntoTheSameClaim(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	item := film(testFilmPath)
+	item.Presentation.Art = testPosterPath
+	item.Presentation.Trickplay = testTrickplay
+	publishPlay(operator, filmRequest(item))
+
+	operator.pass()
+
+	presentation := cluster.heldPlays()[0].Spec.Items[0].Presentation
+	if presentation.Art != "claim://movies//movies/"+testPosterPath {
+		t.Errorf("art = %q", presentation.Art)
+	}
+	if presentation.Trickplay != "claim://movies//movies/"+testTrickplay {
+		t.Errorf("trickplay = %q", presentation.Trickplay)
+	}
+}
+
+// The role travels through the request untouched, because the browser
+// names a trailer with it and the display reads the word off the Play.
+func TestTheRoleTravelsThroughTheRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	item := film(testFilmPath)
+	item.Presentation.Role = "trailer"
+	publishPlay(operator, filmRequest(item))
+
+	operator.pass()
+
+	if role := cluster.heldPlays()[0].Spec.Items[0].Presentation.Role; role != "trailer" {
+		t.Errorf("role = %q, want trailer", role)
+	}
+}
+
+func TestAnItemWithNoArtCarriesNone(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	presentation := cluster.heldPlays()[0].Spec.Items[0].Presentation
+	if presentation.Art != "" || presentation.Trickplay != "" {
+		t.Errorf("art = %q and trickplay = %q, want both empty",
+			presentation.Art, presentation.Trickplay)
+	}
+}
+
+func TestAnEpisodeRequestKeepsTheOrderTheBrowserResolved(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, filmRequest(
+		film("Show/S01E02.mkv"), film("Show/S01E03.mkv"), film("Show/S01E04.mkv")))
+
+	operator.pass()
+
+	items := cluster.heldPlays()[0].Spec.Items
+	want := []string{
+		"claim://movies//movies/Show/S01E02.mkv",
+		"claim://movies//movies/Show/S01E03.mkv",
+		"claim://movies//movies/Show/S01E04.mkv",
+	}
+	if len(items) != len(want) {
+		t.Fatalf("items = %+v, want %d", items, len(want))
+	}
+	for index, uri := range want {
+		if items[index].URI != uri {
+			t.Errorf("item %d = %q, want %q", index, items[index].URI, uri)
+		}
+	}
+}
+
+// A library with no root of its own puts the file at the top of the
+// claim, so the reference carries no empty level.
+func TestALibraryWithNoRootStampsThePathAlone(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	cluster.libraries["movies"].Spec.Storage.Root = ""
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	if uri := cluster.heldPlays()[0].Spec.Items[0].URI; uri != "claim://movies/"+testFilmPath {
+		t.Errorf("uri = %q, want %q", uri, "claim://movies/"+testFilmPath)
+	}
+}
+
+// A reference names the claim that holds the files a screen reads: the art
+// claim of a franchises library, and the storage claim of every other kind.
+func TestAReferenceNamesTheClaimAScreenReads(t *testing.T) {
+	cases := []struct {
+		name    string
+		library *Library
+		want    string
+	}{
+		{
+			name:    "a movies library",
+			library: studioMovies(),
+			want:    "claim://movies//movies/Some Film (1999)/poster.jpg",
+		},
+		{
+			name:    "a franchises library",
+			library: studioFranchises(),
+			want:    "claim://franchise-art//Long Survey/poster.jpg",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			relative := "Long Survey/poster.jpg"
+			if testCase.library.Spec.Kind == libraryKindMovies {
+				relative = "Some Film (1999)/poster.jpg"
+			}
+
+			got, err := reference(testCase.library, relative)
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != testCase.want {
+				t.Errorf("reference = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestAPassLeavesNoRequestBehindIt(t *testing.T) {
+	operator, _ := playingHouse(t)
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	if held := operator.plays.take(); len(held) != 0 {
+		t.Errorf("the queue holds %+v, want nothing", held)
+	}
+}
+
+// Every request that names something the screen may not reach. Each one
+// creates no Play, and the reason is the line the pod log carries.
+func TestARequestTheOperatorRefusesCreatesNoPlay(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(cluster *fakeCluster)
+		payload []byte
+	}{
+		{
+			name:    "a player this operator does not serve",
+			arrange: func(c *fakeCluster) { c.players[testPlayer].Status.Idle = nil },
+			payload: filmRequest(film(testFilmPath)),
+		},
+		{
+			name: "a player another controller draws",
+			arrange: func(c *fakeCluster) {
+				c.players[testPlayer].Status.Idle.Controller = "someone.example/other"
+			},
+			payload: filmRequest(film(testFilmPath)),
+		},
+		{
+			name:    "a player of another name",
+			arrange: func(c *fakeCluster) { delete(c.players, testPlayer) },
+			payload: filmRequest(film(testFilmPath)),
+		},
+		{
+			name:    "a library of another namespace",
+			payload: []byte(`{"library":"studio/series","items":[{"path":"a.mkv"}]}`),
+		},
+		{
+			name:    "a library the namespace does not hold",
+			payload: []byte(`{"library":"house/photos","items":[{"path":"a.mkv"}]}`),
+		},
+		{
+			name:    "a library key with no namespace in it",
+			payload: []byte(`{"library":"movies","items":[{"path":"a.mkv"}]}`),
+		},
+		{
+			name:    "a library that names no claim",
+			arrange: func(c *fakeCluster) { c.libraries["movies"].Spec.Storage.Claim = "" },
+			payload: filmRequest(film(testFilmPath)),
+		},
+		{
+			name:    "a path that climbs above the root",
+			payload: filmRequest(film("../elsewhere/private.mkv")),
+		},
+		{
+			name:    "a path that is absolute",
+			payload: filmRequest(film("/etc/shadow")),
+		},
+		{
+			name:    "a path that is empty",
+			payload: filmRequest(film("")),
+		},
+		{
+			name:    "an item list with nothing in it",
+			payload: filmRequest(),
+		},
+		{
+			name:    "a payload that does not decode",
+			payload: []byte("play it"),
+		},
+		{
+			name:    "a payload with nothing in it",
+			payload: nil,
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			operator, cluster := playingHouse(t)
+			boundStudio(cluster)
+			if each.arrange != nil {
+				each.arrange(cluster)
+			}
+			publishPlay(operator, each.payload)
+
+			operator.pass()
+
+			if plays := cluster.heldPlays(); len(plays) != 0 {
+				t.Errorf("plays = %+v, want none", plays)
+			}
+		})
+	}
+}
+
+// The art and the trickplay take the same rule as the file's own path,
+// so a request cannot reach a poster outside the library either.
+func TestAnArtPathOutsideTheLibraryRefusesTheWholeRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	item := film(testFilmPath)
+	item.Presentation.Art = "../../etc/shadow"
+	publishPlay(operator, filmRequest(film(testFilmPath), item))
+
+	operator.pass()
+
+	if plays := cluster.heldPlays(); len(plays) != 0 {
+		t.Errorf("plays = %+v, want none", plays)
+	}
+}
+
+func TestATrickplayPathOutsideTheLibraryRefusesTheWholeRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	item := film(testFilmPath)
+	item.Presentation.Trickplay = "/var/run/secrets"
+	publishPlay(operator, filmRequest(item))
+
+	operator.pass()
+
+	if plays := cluster.heldPlays(); len(plays) != 0 {
+		t.Errorf("plays = %+v, want none", plays)
+	}
+}
+
+// A payload cannot name a Player of its own: the topic is what says
+// which Player asked, and a request on one Player's topic reaches that
+// Player alone.
+func TestARequestOnAnotherPlayersTopicNamesThatPlayer(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	seedPlayer(cluster, "kitchen", testLibraryNamespace, screenController)
+	operator.handleBusMessage(
+		playRequestTopic(defaultTopicBase, testLibraryNamespace, "kitchen"),
+		filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	if players := cluster.heldPlays()[0].Spec.Players; len(players) != 1 || players[0] != "kitchen" {
+		t.Errorf("players = %v, want [kitchen]", players)
+	}
+}
+
+// A create the API server refuses is reported and the pass carries on,
+// and the request is gone, because a person who saw nothing start
+// presses again.
+func TestAPlayTheAPIServerRefusesLeavesNothingBehind(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	cluster.refuseCreate = true
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	if plays := cluster.heldPlays(); len(plays) != 0 {
+		t.Errorf("plays = %+v, want none", plays)
+	}
+	if held := operator.plays.take(); len(held) != 0 {
+		t.Errorf("the queue holds %+v, want nothing", held)
+	}
+}
+
+// A message on a topic this operator does not read reaches neither the
+// report desk nor the play queue.
+func TestATopicThatIsNeitherAReportNorAPlayRequestHoldsNothing(t *testing.T) {
+	operator, _ := playingHouse(t)
+
+	operator.handleBusMessage("liken/media/players/house/den/commands",
+		filmRequest(film(testFilmPath)))
+
+	if held := operator.plays.take(); len(held) != 0 {
+		t.Errorf("the queue holds %+v, want nothing", held)
+	}
+}
+
+// The operator's bus, on a broker the test reads. TestOperator builds
+// the bus and never runs it, so the filters it remembers reach a broker
+// only here.
+func operatorsBroker(t *testing.T, operator *operator) *fakeBroker {
+	t.Helper()
+	shorterBackoff(t)
+	near, far := net.Pipe()
+	t.Cleanup(func() {
+		near.Close()
+		far.Close()
+	})
+	broker := newFakeBroker(far)
+	conns := make(chan net.Conn, 1)
+	conns <- near
+	operator.bus.dial = func(ctx context.Context) (net.Conn, error) {
+		select {
+		case conn := <-conns:
+			return conn, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	go operator.bus.Run(testRunContext(t))
+	return broker
+}
+
+// Every subscription the operator remembers, which a fresh connection
+// re-sends in sorted order: the reports it folds, the requests it
+// serves, and the two marks the progress store publishes.
+func TestTheOperatorSubscribesToEveryTopicItActsOn(t *testing.T) {
+	operator, _ := playingHouse(t)
+	broker := operatorsBroker(t, operator)
+	want := []string{
+		catalogAvailabilityFilter(defaultTopicBase),
+		libraryStatusFilter(defaultTopicBase),
+		personForgottenFilter(defaultTopicBase),
+		playRequestFilter(defaultTopicBase),
+		playRecordedFilter(defaultTopicBase),
+	}
+
+	filters := []string{}
+	for range want {
+		filters = append(filters, waitForString(t, broker.subs))
+	}
+
+	slices.Sort(filters)
+	if !slices.Equal(filters, want) {
+		t.Errorf("the operator subscribed to %v, want %v", filters, want)
+	}
+}
+
+// A request whose item carries no presentation still plays: the file is
+// what a Play needs, and the words beside it are what the catalog held.
+func TestAnItemWithNoPresentationCarriesNone(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, filmRequest(playRequestItem{Path: testFilmPath}))
+
+	operator.pass()
+
+	item := cluster.heldPlays()[0].Spec.Items[0]
+	if item.URI != testFilmClaimed || item.Presentation != nil {
+		t.Errorf("item = %+v, want %q with no presentation", item, testFilmClaimed)
+	}
+}
+
+func TestAPlayCarriesTheChosenItemsSlugInItsName(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, slugRequest("some-film-1999", film(testFilmPath)))
+
+	operator.pass()
+
+	name := cluster.heldPlays()[0].Metadata.Name
+	if name != testPlayer+"-some-film-1999-"+mintedSuffix {
+		t.Errorf("name = %q, want the player, the slug, and the minted suffix", name)
+	}
+}
+
+// The catalog builds the slug, but it arrives over the bus, so the
+// operator folds it to what a name may hold.
+func TestTheSlugFoldsToALabelFragment(t *testing.T) {
+	cases := []struct {
+		name string
+		slug string
+		want string
+	}{
+		{"a slug the catalog built passes through", "some-film-1999", "some-film-1999"},
+		{"a title folds to lowercase and hyphens", "Some Film (1999)", "some-film-1999"},
+		{"a run of separators becomes one hyphen", "a  --  b", "a-b"},
+		{"the edges carry no hyphen", "--some film--", "some-film"},
+		{"a letter this fold does not name becomes a hyphen", "séance", "s-ance"},
+		{"a slug of nothing but separators folds to nothing", "--- ---", ""},
+		{"an empty slug folds to nothing", "", ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := labelFragment(testCase.slug); got != testCase.want {
+				t.Errorf("fold = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// The name has a budget, and a fragment longer than it ends on a whole
+// word where one is in reach.
+func TestALongSlugIsCutToTheBudget(t *testing.T) {
+	cases := []struct {
+		name     string
+		fragment string
+		budget   int
+		want     string
+	}{
+		{"a fragment inside the budget is itself", "some-film-1999", 42, "some-film-1999"},
+		{"a fragment at the budget is itself", "abcde", 5, "abcde"},
+		{"the cut falls back to the last hyphen", "some-film-of-1999", 14, "some-film-of"},
+		{"a fragment with no hyphen in reach is cut hard", "abcdefghij", 4, "abcd"},
+		{"a budget of nothing leaves no fragment", "some-film", 0, ""},
+		{"a player longer than the budget leaves no fragment", "some-film", -3, ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := capped(testCase.fragment, testCase.budget); got != testCase.want {
+				t.Errorf("cap = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// The whole name fits inside the budget, whatever the slug holds, so
+// the API server's own suffix lands inside a label.
+func TestAPlayNameFitsTheBudget(t *testing.T) {
+	long := "the-very-long-title-of-a-film-nobody-has-heard-of-1999"
+
+	name := playGenerateName(testPlayer, long)
+
+	if len(name) > playNameBudget {
+		t.Errorf("name = %q, %d bytes, want at most %d", name, len(name), playNameBudget)
+	}
+	if name != testPlayer+"-the-very-long-title-of-a-film-nobody-has-" {
+		t.Errorf("name = %q, want the cut at a hyphen", name)
+	}
+}
+
+// A request that names no slug, and one whose slug folds to nothing,
+// name the Player alone, because a name is worth less than a Play that
+// starts.
+func TestAPlayWithNoUsableSlugNamesThePlayerAlone(t *testing.T) {
+	if got := playGenerateName(testPlayer, ""); got != testPlayer+"-" {
+		t.Errorf("name = %q, want %q", got, testPlayer+"-")
+	}
+	if got := playGenerateName(testPlayer, "((( )))"); got != testPlayer+"-" {
+		t.Errorf("name = %q, want %q", got, testPlayer+"-")
+	}
+}
+
+// The audience the browser named, and the identity it read out of the
+// catalog beside it, as one request carries them.
+func audienceRequest(people ...string) []byte {
+	request := playRequest{
+		Library: testLibraryKey,
+		Slug:    "a-series-s03e05",
+		Items:   []playRequestItem{film(testFilmPath)},
+		People:  people,
+		Aliases: map[string]string{"tmdb": "2101", "imdb": "tt9002101"},
+		Season:  3,
+		Episode: 5,
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+// Owner references rather than a field, because then the Play's schema
+// stays media-operator's own, and the garbage collector deletes the
+// Play only when every owner is gone.
+func TestAPlayCarriesItsAudienceAsOwnerReferences(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	seedPerson(cluster, "person-a")
+	seedPerson(cluster, "person-b")
+	publishPlay(operator, audienceRequest("person-a", "person-b"))
+
+	operator.pass()
+
+	owners := cluster.heldPlays()[0].Metadata.OwnerReferences
+	if len(owners) != 2 {
+		t.Fatalf("owners = %+v, want the two people", owners)
+	}
+	if owners[0].Kind != personKind || owners[0].Name != "person-a" || owners[0].UID != "person-a-uid" {
+		t.Errorf("owner = %+v, want the Person with its uid", owners[0])
+	}
+	if owners[0].APIVersion != personAPIVersion || owners[0].Controller {
+		t.Errorf("owner = %+v, want people-operator's group and no controller flag", owners[0])
+	}
+	if owners[1].Name != "person-b" {
+		t.Errorf("owners = %+v, want one Person per name the request carried", owners)
+	}
+}
+
+// Annotations rather than labels, because a label value stops at 63
+// characters and an alias list has no such rule.
+func TestAPlayCarriesTheWorksIdentityAsAnnotations(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, audienceRequest())
+
+	operator.pass()
+
+	annotations := cluster.heldPlays()[0].Metadata.Annotations
+	want := map[string]string{
+		libraryAnnotation:              "movies",
+		aliasAnnotationPrefix + "tmdb": "2101",
+		aliasAnnotationPrefix + "imdb": "tt9002101",
+		seasonAnnotation:               "3",
+		episodeAnnotation:              "5",
+	}
+	if !maps.Equal(annotations, want) {
+		t.Errorf("annotations = %v, want %v", annotations, want)
+	}
+}
+
+// A movie has no season and no episode, and the annotations say so by
+// carrying neither.
+func TestAMovieCarriesNoSeasonAndNoEpisode(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	annotations := cluster.heldPlays()[0].Metadata.Annotations
+	if !maps.Equal(annotations, map[string]string{libraryAnnotation: "movies"}) {
+		t.Errorf("annotations = %v, want the library alone", annotations)
+	}
+}
+
+// A person at the screen is waiting for the film, so a name the cluster
+// does not hold is dropped and the Play still plays.
+func TestANameNobodyHoldsIsDroppedAndThePlayStillPlays(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	seedPerson(cluster, "person-a")
+	publishPlay(operator, audienceRequest("person-a", "nobody"))
+
+	operator.pass()
+
+	plays := cluster.heldPlays()
+	if len(plays) != 1 {
+		t.Fatalf("plays = %+v, want the one the request asked for", plays)
+	}
+	owners := plays[0].Metadata.OwnerReferences
+	if len(owners) != 1 || owners[0].Name != "person-a" {
+		t.Errorf("owners = %+v, want the one person the cluster holds", owners)
+	}
+}
+
+// One request as play reads it, with the house's Player and its movies
+// library around it.
+func housePlay(t *testing.T, request playRequest, catalog bool) *Play {
+	t.Helper()
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	player := seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
+	request.Namespace, request.Player = testLibraryNamespace, testPlayer
+	request.Library, request.Items = testLibraryKey, []playRequestItem{film(testFilmPath)}
+
+	play, err := request.play([]Player{*player}, []Library{*library}, nil, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return play
+}
+
+// The store that releases the finalizer stands beside the namespace's
+// Catalog, so a namespace with none takes no finalizer at all.
+func TestAPlayCarriesTheFinalizerOnlyWhereAStoreStands(t *testing.T) {
+	cases := []struct {
+		name    string
+		catalog bool
+		want    []string
+	}{
+		{name: "a namespace with a catalog", catalog: true, want: []string{progressFinalizer}},
+		{name: "a namespace with none", catalog: false, want: nil},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			play := housePlay(t, playRequest{}, testCase.catalog)
+
+			if !slices.Equal(play.Metadata.Finalizers, testCase.want) {
+				t.Errorf("finalizers = %v, want %v", play.Metadata.Finalizers, testCase.want)
+			}
+		})
+	}
+}
+
+// startRequest is a request for these items that begins the first one at
+// the position given.
+func startRequest(start string, items ...playRequestItem) []byte {
+	request := playRequest{Library: testLibraryKey, Start: start, Items: items}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+func TestAPlayBeginsWhereTheRequestNamed(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, startRequest("1393", film(testFilmPath)))
+
+	operator.pass()
+
+	if start := cluster.heldPlays()[0].Spec.Start; start != "1393" {
+		t.Errorf("start = %q, want the position the request named", start)
+	}
+}
+
+// The absent case reads the JSON the API client sends, because a decoded
+// object cannot tell an absent key from an empty string.
+func TestARequestThatNamesNoStartCarriesNone(t *testing.T) {
+	play := housePlay(t, playRequest{}, false)
+
+	spec, err := json.Marshal(play.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(spec), "start") {
+		t.Errorf("spec = %s, want no start", spec)
+	}
+}
+
+// The request block is the browser's own bytes. This operator carries it
+// and never reads it.
+func nextRequest(next *playRequestNext) []byte {
+	request := playRequest{
+		Library: testLibraryKey,
+		Items:   []playRequestItem{film(testFilmPath)},
+		Next:    next,
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+func testNext() *playRequestNext {
+	return &playRequestNext{
+		Reason:  "Next in The Serial · S01",
+		Title:   "E03 · Segment 3",
+		Detail:  "The Serial · S01 · E03 · 46 min",
+		Art:     testPosterPath,
+		Request: json.RawMessage(`{"library":"house/movies","selection":{"movie":{"id":"movies:2"}}}`),
+	}
+}
+
+func TestAPlayCarriesTheWorkThatFollowsIt(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, nextRequest(testNext()))
+
+	operator.pass()
+
+	next := cluster.heldPlays()[0].Spec.Next
+	if next == nil {
+		t.Fatal("the play carries no next")
+	}
+	want := testNext()
+	if next.Reason != want.Reason || next.Title != want.Title || next.Detail != want.Detail {
+		t.Errorf("next = %+v, want the three lines the browser spelled", next)
+	}
+	if next.Art != "claim://movies//movies/"+testPosterPath {
+		t.Errorf("art = %q, want the poster stamped onto the library's claim", next.Art)
+	}
+	if string(next.Request) != string(want.Request) {
+		t.Errorf("request = %s, want the browser's own block", next.Request)
+	}
+}
+
+// A next block with no art carries none, the way an item with no art does.
+func TestANextWithNoArtCarriesNone(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	next := testNext()
+	next.Art = ""
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	if art := cluster.heldPlays()[0].Spec.Next.Art; art != "" {
+		t.Errorf("art = %q, want none", art)
+	}
+}
+
+// The next work's art follows an item's rule, so a request cannot reach a
+// poster outside the library through it.
+func TestANextArtOutsideTheLibraryRefusesTheWholeRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	next := testNext()
+	next.Art = "../../etc/shadow"
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	if plays := cluster.heldPlays(); len(plays) != 0 {
+		t.Errorf("plays = %+v, want none", plays)
+	}
+}
+
+// A second library in the same namespace, on a claim and a root of its own,
+// so a next work can be where the items are not.
+func boundShows(cluster *fakeCluster) *Library {
+	library := &Library{
+		Metadata: ObjectMeta{
+			Name: "shows", Namespace: testLibraryNamespace, UID: "shows-uid",
+		},
+		Spec: LibrarySpec{
+			Storage: LibraryStorage{Claim: "shows", Root: "/shows"},
+			Kind:    libraryKindSeries,
+			Series:  &LibrarySettings{},
+		},
+	}
+	cluster.libraries["shows"] = library
+	cluster.claims["shows"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "shows", Namespace: testLibraryNamespace},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
+		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
+	}
+	return library
+}
+
+// A franchise runs from a film to an episode in another library, so the art
+// of the next work is on that library's own claim and root.
+func TestANextInAnotherLibraryStampsTheArtToThatLibrary(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	boundShows(cluster)
+	next := testNext()
+	next.Library = testLibraryNamespace + "/shows"
+	next.Art = "Show/Season 01/S01E03-thumb.jpg"
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	art := cluster.heldPlays()[0].Spec.Next.Art
+	if art != "claim://shows//shows/Show/Season 01/S01E03-thumb.jpg" {
+		t.Errorf("art = %q, want the still on the shows library's own claim", art)
+	}
+}
+
+// The Play carries the three lines, the art, and the request, and never the
+// library, which the operator reads and drops.
+func TestTheLibraryOfTheNextWorkStaysOffThePlay(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	boundShows(cluster)
+	next := testNext()
+	next.Library = testLibraryNamespace + "/shows"
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	spec, err := json.Marshal(cluster.heldPlays()[0].Spec.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(spec, &keys); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"art", "detail", "reason", "request", "title"}
+	if got := slices.Sorted(maps.Keys(keys)); !slices.Equal(got, want) {
+		t.Errorf("next = %v, want %v", got, want)
+	}
+}
+
+// A library key the namespace does not hold refuses the whole request, the
+// way a path outside a library does.
+func TestANextNamingALibraryTheNamespaceDoesNotHoldCreatesNoPlay(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(cluster *fakeCluster)
+		key     string
+	}{
+		{name: "a library the namespace does not hold", key: testLibraryNamespace + "/photos"},
+		{name: "a library of another namespace", key: "studio/series"},
+		{name: "a library key with no namespace in it", key: "shows"},
+		{
+			name:    "a library that names no claim",
+			arrange: func(c *fakeCluster) { c.libraries["shows"].Spec.Storage.Claim = "" },
+			key:     testLibraryNamespace + "/shows",
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			operator, cluster := playingHouse(t)
+			boundStudio(cluster)
+			boundShows(cluster)
+			if each.arrange != nil {
+				each.arrange(cluster)
+			}
+			next := testNext()
+			next.Library = each.key
+			publishPlay(operator, nextRequest(next))
+
+			operator.pass()
+
+			if plays := cluster.heldPlays(); len(plays) != 0 {
+				t.Errorf("plays = %+v, want none", plays)
+			}
+		})
+	}
+}
+
+// The absent case reads the JSON the API client sends, because a decoded
+// object cannot tell an absent key from an empty block.
+func TestARequestThatNamesNoNextCarriesNone(t *testing.T) {
+	play := housePlay(t, playRequest{}, false)
+
+	spec, err := json.Marshal(play.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(spec), "next") {
+		t.Errorf("spec = %s, want no next", spec)
+	}
+}

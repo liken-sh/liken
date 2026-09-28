@@ -1,0 +1,249 @@
+# The library-operator design
+
+The library operator is the media library layer of a
+[`liken`](https://liken.sh/) cluster, expressed as Kubernetes resources.
+It runs above
+[`media-operator`](https://github.com/liken-sh/media-operator), which
+owns the players, the plays, and the remotes, and above the hardware
+operators, which publish each screen, speaker, and controller as a
+claimable device. Those layers answer what plays where and who drives
+it. This layer answers what there is to play, and it draws that answer
+on the screen.
+
+Like the layers below, this is an optional workload. A cluster runs
+without it. It depends on `media-operator`'s public resources, its bus,
+and its idle-client contract. `media-operator` does not depend on it.
+
+## The problem
+
+A `Play` names its media as URIs, and a person supplies them with
+`kubectl`. The files on a library's volume have folders, `.nfo`
+files, artwork, and thumbnails beside them, written by the tools that
+manage the volume, and nothing in the cluster reads any of it. A person
+in a room has no way to see what is there and pick something. A catalog
+of the volume and a media browser on the screen make a media system out
+of the playback layer, and those are what this operator adds.
+
+## Responsibilities
+
+The operator has six responsibilities. Each one is a loop of its own,
+and the loops meet on the library's volume: one loop writes files there,
+and the next reads them.
+
+1. **Monitor.** Detect that a library's files changed.
+2. **Index.** Read a library into a catalog: its titles, their
+   structure, and the paths of the metadata and art beside them. The
+   catalog is derived. Losing it costs a rescan.
+3. **Enrich.** Fetch what the volume does not hold, from named metadata
+   providers, into the same metadata files the indexer reads.
+4. **Organize.** Rename and move files to the library's naming
+   convention.
+5. **Serve.** Replicate the catalog to every reader with no query
+   service in the path, and notify each reader when a row changes.
+6. **Browse.** Draw the catalog on a screen, let a person walk into a
+   library, and start a `Play` on that screen's `Player`.
+
+## Libraries and kinds
+
+A `Library` is one root directory on one volume, of one kind. A cluster
+has many: two movie libraries on two volumes, a series library, a music
+library, a photo library. Every relation between libraries and the
+things that read them is many-to-many. A screen may browse several
+libraries, and a library may appear on every screen in its namespace.
+
+A kind is a plugin in the scanner and a screen design in the media
+browser. In the scanner it defines how to walk a root and how to read
+the metadata files that kind's ecosystem writes. Each kind runs as its own
+scanner image, so a photo scanner never contains an `.nfo` parser. A new
+kind is a new image and a new typed settings block in the `Library`
+schema. In the media browser each kind gets screens designed for it,
+composed from shared drawing primitives, so a movie, a series, and an
+album each look like what they are. The kinds are movies, series,
+music, photos, audiobooks, books, and games.
+
+Each kind uses the format its ecosystem uses. Movies and series use the
+`.nfo` files, artwork, and thumbnails that Jellyfin, Kodi, and the
+`*arr` tools read and write. Music uses the tags in the files. Photos
+use EXIF and XMP. The operator writes no format of its own on the
+volume, so every file it reads or writes stays useful to other programs.
+
+## Namespaces
+
+A namespace is a boundary. A `Library` is namespaced, and it is visible
+to the screens in its namespace and to nothing outside it. The catalog
+follows the same rule: each namespace that holds a `Library` has a
+catalog cluster of its own, and a screen's sidecar joins the cluster of
+the screen's namespace. Every reference this operator makes stays
+inside one namespace. A `Library` names a claim in its namespace, a
+screen shows libraries in its namespace, and a `Play` is created in the
+`Player`'s namespace. A cluster that wants every library on every
+screen keeps them in one namespace.
+
+This rule is the design's own. It does not follow from what a volume
+or a database can do, and no later plan derives a scope from those.
+
+## Storage
+
+A `Library` binds to a `PersistentVolumeClaim` in its namespace. The
+claim can be any volume the cluster can mount: an NFS export, a Longhorn
+volume, a local disk on a single-node cluster. The scanner mounts it
+read-only. The enricher and the organizer mount it read-write. Nothing
+in this operator depends on the volume's kind.
+
+A `Play` reaches the files by a media reference the `Player` accepts.
+The operator builds it from the library's claim and the item's path:
+`claim://<claim>/<path>`, the scheme `media-operator`'s plan 19 adds.
+The playback pod mounts the same claim the scanner mounts, so no layer
+reads the volume's kind or names a server, and a library on a Longhorn
+volume or a local disk plays the same way one on NFS does. The
+`PersistentVolume` behind the claim is reported in the `Library`'s
+status for a person to read, and playback does not depend on it.
+
+## The catalog
+
+The catalog is a SQLite database replicated by
+[Corrosion](https://github.com/superfly/corrosion). A Corrosion agent
+runs as a sidecar in every pod that reads or writes the catalog: beside
+each scanner, and beside the media browser on each screen. The agents
+of one namespace form one cluster. They find each other by SWIM gossip
+over QUIC, and each change reaches every peer in that cluster. Every
+agent stores a full copy of its namespace's catalog on its own disk.
+
+The contract has three rules. Every write goes through the local agent's
+HTTP API, and only scanners write. A screen never writes. Every read is
+a SQLite read of the local file, with no extension loaded and no service
+in the path. A media browser receives each change from its agent's
+update stream, which names the primary keys that changed, and re-reads
+those rows from its own file.
+
+The catalog separates three things. An item is a logical work: a movie,
+a series, an episode. A file is a physical file on the volume that holds
+an item, and one item has many files, because an upgrade to 4K or a
+second encoding is another file and not another work. An alias is one of
+the several ids that name one item, so a movie's `tmdb` id and its
+`imdb` id resolve to the same work.
+
+An item's id is derived from the strongest durable fact the volume
+already holds: the provider id in the `.nfo`, scoped by kind, such as
+`movie:tmdb:1001`. The project trusts the public databases' ids over an
+id of its own. The scanner reads the id off the volume on every walk and
+mints nothing, so a lost catalog rebuilds with the same ids by a rescan,
+and watch state keyed on them re-links. A folder with no provider id,
+about a fifth of the lab's movies, takes an id derived from its path,
+which a move of that folder breaks. Writing a cleaner id back to the
+volume would fix that, and it waits in
+[`open-problems/`](open-problems/).
+
+The schema is one file that every agent loads. An item carries a header,
+the columns every kind shares and every list sorts on, and a body in the
+kind's own shape, stored as JSON. One table with every kind's columns as
+optional fields is the shape the header-and-body rule prevents.
+
+A proof of concept confirmed the fit. A change written on one node
+reached a subscriber on another in 17 ms at the median, and an agent
+with 105,000 rows used 74 MB of resident memory at rest. The costs it
+found are in [`open-problems/`](open-problems/).
+
+## Enrichment
+
+The volume holds every fact, and the catalog is derived from the volume
+alone. An enricher writes the ecosystem's formats first, the `.nfo` and
+the art files under Kodi's names, and a `.liken/` directory for what
+those formats cannot say: provider ids, the link from a credit to a
+person, and a record of every attempt. People have a store of their
+own, `.contributors/` at a library's root. A franchise is a library
+kind of its own, because it crosses libraries.
+
+A `MetadataProvider` names one provider, with the same
+discriminator-and-block shape as `Library`: one typed block per
+provider, with its `Secret` reference and the concerns it serves. A
+`Library` lists its providers in order and may narrow one to some
+concerns.
+
+The unit of enrichment is a concern: one gap in the catalog, filled by
+a `Job` that reads the gap through the catalog pod and writes only the
+volume. The enricher never writes the catalog, and it never removes or
+overwrites a file it did not write. [Plan 27](completed/27-enrichment.md) holds
+the contracts, and plans 28 to 31 build them.
+
+One program writes metadata files into a folder. A library that another tool
+enriches, such as Jellyfin, has no enricher of its own until that tool's
+writer is turned off.
+
+## Organization
+
+The organizer is the one loop that moves or renames files. It takes the
+naming convention from the same settings block the scanner parses by, so
+the two agree on what a name means. A move is announced to the scanner
+through the same path an import uses, so the catalog updates the row
+rather than losing one title and finding another. The organizer is
+opt-in per `Library`, and it stays off for a library that another tool
+organizes.
+
+## The media browser
+
+The media browser is one native Wayland client, built with
+[Iced](https://iced.rs) in Rust. At rest it draws the idle screen that
+`media-operator` defines: the mark, the clock, the unit's name and
+parts, and their animations. On a press it draws the home page. It runs
+in a pod this operator creates for a `Player` whose `spec.idle.controller`
+names this operator, and it reads the same bus topics the idle screen
+reads, which `media-operator` names in the `Player`'s `status.idle.bus`:
+the `Player`'s status, volume, volume owner mark, commands, and panel
+topics, and each remote's events and focus topics. `media-operator`
+settles the fade and off windows, and the browser runs the timers and
+states the panel desire on the panel topic. `media-operator` has no
+notion of libraries.
+
+The media browser reads the catalog from its own sidecar's file and
+subscribes to that sidecar's update stream. Which libraries a screen
+shows, and what its first view contains, are facts of this layer. They
+belong to a resource of this operator and never to the `Player`.
+
+When a person picks a title, the media browser publishes a request on
+the bus, on a topic that names its `Player`: the library, the paths of
+the items to play, their presentation, the people watching, the
+work's aliases, and the start position. The operator, which has the
+RBAC, creates the `Play` in the `Player`'s namespace with each path as
+a claim reference, the art and trickplay references, the people as
+owner references, the aliases as annotations, and the start position. The screen holds no API credential. When the
+`Play` ends, the media browser is where the person left it.
+`docs/content/docs/reference/bus.md` is the contract of every topic on
+this operator's tree.
+
+## Watch state and people
+
+Progress belongs to a set of people, not to one person. A `Person`
+is a fact of the whole cluster, a cluster-scoped CRD in a repository
+of its own, `people-operator`, with no controller. A `Play` names its
+people through owner references, and the work's aliases through
+annotations. The set of people on a `Play` is the whole record of who
+shares its progress: there is no resource for a group, because the
+people at the screen name the group every time they play. A second
+`Corrosion` cluster per namespace, the progress store, records every
+`Play` from the bus, keyed on aliases and `Person` names and never on
+catalog ids, and every screen holds a copy. Plan 14 states the
+contracts, and plan 51 removed the `Watch` it also defined.
+
+## Dependencies point one way
+
+This operator reads `Player` and `Play`, writes `Play`, and uses
+`media-operator`'s bus. `media-operator` reads nothing of this
+operator's. Where the design needs a change below, a plan here describes
+it and names the repository it lands in. Four are known.
+
+- A `Player` field for the idle client image.
+- A way to add containers and volumes to the idle pod.
+- A `Play` status field for the current item of a list.
+- A media reference that names a claim: `media-operator` plan 19,
+  the `claim://` scheme.
+
+## Technology
+
+The operator, the scanners the project ships, and the release tooling
+are Go, like the operators below. The media browser is Rust, because
+Iced is. Corrosion is Rust and arrives as a binary in a sidecar image. A
+scanner is a contract: an image that reads a mount and posts to a local
+HTTP API, in whatever language suits its parsers.
+
+The project patches and forks what it needs. The plans name the patches.

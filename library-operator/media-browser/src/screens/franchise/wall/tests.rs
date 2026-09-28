@@ -1,0 +1,1024 @@
+// The wall's measures over an invented order: the universes it names,
+// the rows it lays out, the headings it derives, and the boxes it places.
+
+use super::*;
+use crate::catalog::franchise::{Calendar, Held, MOVIE};
+use crate::look;
+use crate::views::text;
+
+// The day the tests stand on.
+const TODAY: &str = "2026-09-04";
+
+const COPPICE: &str = "The Coppice";
+const FEN: &str = "The Fen";
+const MARSH: &str = "The Marsh";
+
+fn calendar() -> Calendar {
+    Calendar {
+        unit: "years".into(),
+        zero: "the Survey".into(),
+        before: "BS".into(),
+        after: "AS".into(),
+    }
+}
+
+fn held(id: &str) -> Held {
+    Held {
+        arts: vec![format!("{id}.jpg"), format!("{id}/backdrop.jpg")],
+        library: "sample/features".into(),
+        id: id.into(),
+        kind: "movies".into(),
+        title: format!("Film {id}"),
+        art: format!("{id}.jpg"),
+        released: "1980".into(),
+        slug: id.into(),
+        tagline: format!("A line about {id}."),
+        plot: format!("The plot of {id}."),
+        duration: 7_440,
+    }
+}
+
+fn entry(position: i64, span: (f64, f64), universes: &[&str]) -> Entry {
+    Entry {
+        position,
+        kind: MOVIE.into(),
+        alias: format!("movie:tmdb:{position}"),
+        title: format!("Film {position}"),
+        released: "1980".into(),
+        release_year: 1980,
+        timed: true,
+        from: span.0,
+        to: span.1,
+        universes: universes.iter().map(|name| name.to_string()).collect(),
+        held: Some(held(&format!("movie:path:{position}"))),
+        episodes: 0,
+        runs: Vec::new(),
+    }
+}
+
+fn gap(position: i64, span: (f64, f64), universes: &[&str]) -> Entry {
+    Entry {
+        held: None,
+        ..entry(position, span, universes)
+    }
+}
+
+fn franchise(entries: Vec<Entry>) -> Franchise {
+    Franchise {
+        library: "sample/orders".into(),
+        id: "franchise:name:the-cycle".into(),
+        title: "The Cycle".into(),
+        art: String::new(),
+        universe: COPPICE.into(),
+        calendar: Some(calendar()),
+        eras: Vec::new(),
+        entries,
+    }
+}
+
+#[test]
+fn the_franchises_own_universe_is_the_first_column() {
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[]),
+        entry(2, (-30.0, -30.0), &[MARSH]),
+        entry(3, (-28.0, -28.0), &[FEN]),
+        entry(4, (-26.0, -26.0), &[MARSH]),
+    ]);
+    assert_eq!(columns(&page), [COPPICE, MARSH, FEN]);
+}
+
+#[test]
+fn a_franchise_that_names_no_universe_still_holds_one_column() {
+    let page = Franchise {
+        universe: String::new(),
+        ..franchise(vec![entry(1, (0.0, 0.0), &[])])
+    };
+    assert_eq!(columns(&page), [""]);
+}
+
+#[test]
+fn an_entry_takes_a_dot_on_the_line_of_every_universe_it_names() {
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[]),
+        entry(2, (-30.0, -30.0), &[MARSH]),
+        entry(3, (10.0, 12.0), &[COPPICE, MARSH, FEN]),
+        entry(4, (14.0, 14.0), &["Nowhere"]),
+    ]);
+    let columns = columns(&page);
+    assert_eq!(columns, [COPPICE, MARSH, FEN, "Nowhere"]);
+    let rows = story(&page, &columns[..3], TODAY);
+    assert_eq!(rows[0].cell.universes, [0]);
+    assert_eq!(rows[1].cell.universes, [1]);
+    assert_eq!(rows[2].cell.universes, [0, 1, 2]);
+    assert_eq!(rows[3].cell.universes, [0]);
+}
+
+#[test]
+fn two_entries_the_story_tells_at_once_each_take_a_row_of_their_own() {
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[]),
+        entry(2, (-30.0, -28.0), &[FEN]),
+        entry(3, (-29.0, -27.0), &[MARSH]),
+    ]);
+    let columns = columns(&page);
+    let rows = story(&page, &columns, TODAY);
+    assert_eq!(rows.len(), 3);
+    assert_eq!((rows[1].from, rows[1].to), (-30.0, -28.0));
+    assert_eq!(rows[1].time, "30 to 28 BS");
+    assert_eq!(rows[2].time, "29 to 27 BS");
+}
+
+#[test]
+fn an_entry_with_no_time_draws_no_time() {
+    let page = franchise(vec![Entry {
+        timed: false,
+        ..entry(2, (0.0, 0.0), &[FEN])
+    }]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].time, "");
+    assert!(!rows[0].timed);
+}
+
+#[test]
+fn a_franchise_with_no_calendar_draws_no_time() {
+    let page = Franchise {
+        calendar: None,
+        ..franchise(vec![entry(1, (-32.0, -32.0), &[])])
+    };
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].time, "");
+    assert!(rows[0].timed);
+}
+
+#[test]
+fn a_row_reads_its_span_in_the_calendars_own_words() {
+    let page = franchise(vec![entry(1, (-32.0, -32.0), &[])]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].time, "32 BS");
+}
+
+#[test]
+fn a_held_entry_opens_its_own_page_and_a_gap_opens_nothing() {
+    let page = franchise(vec![entry(1, (0.0, 0.0), &[]), gap(2, (1.0, 1.0), &[])]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(
+        rows[0].cell.opens(),
+        Some(("sample/features", "movies", "movie:path:1"))
+    );
+    assert!(rows[0].cell.held());
+    assert_eq!(rows[1].cell.opens(), None);
+    assert!(!rows[1].cell.held());
+    assert_eq!(rows[1].cell.name, "Film 2");
+    assert_eq!(rows[1].cell.note, "Missing");
+}
+
+#[test]
+fn a_gap_whose_release_year_is_ahead_of_today_is_coming() {
+    let page = franchise(vec![Entry {
+        released: "2099".into(),
+        release_year: 2099,
+        title: "A Later Film".into(),
+        ..gap(1, (0.0, 0.0), &[])
+    }]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].cell.note, "Coming 2099");
+    assert_eq!(rows[0].cell.facts, "Film · 2099");
+    assert_eq!(rows[0].cell.standing, Standing::Coming);
+}
+
+#[test]
+fn a_coming_note_reads_as_much_of_the_date_as_the_file_knows() {
+    let cases = [
+        ("2027", "Coming 2027"),
+        ("2027-03", "Coming March"),
+        ("2027-03-12", "Coming March 12"),
+        ("2027-03-01", "Coming March 1"),
+        ("2027-12", "Coming December 2027"),
+    ];
+    for (released, note) in cases {
+        let page = franchise(vec![Entry {
+            released: released.into(),
+            release_year: 2027,
+            ..gap(1, (0.0, 0.0), &[])
+        }]);
+        let rows = story(&page, &columns(&page), TODAY);
+        assert_eq!(rows[0].cell.note, note, "{released}");
+        assert_eq!(rows[0].cell.facts, "Film · 2027", "{released}");
+    }
+}
+
+#[test]
+fn a_coming_note_whose_date_is_not_one_reads_the_year_it_holds() {
+    let noted = |released: &str| {
+        let page = franchise(vec![Entry {
+            released: released.into(),
+            release_year: 2027,
+            ..gap(1, (0.0, 0.0), &[])
+        }]);
+        story(&page, &columns(&page), TODAY)[0].cell.note.clone()
+    };
+    assert_eq!(noted("2027-13"), "Coming 2027");
+    assert_eq!(noted("2027-xx-01"), "Coming 2027");
+    assert_eq!(noted("2027-00"), "Coming 2027");
+}
+
+#[test]
+fn a_gap_dated_this_month_is_coming_until_its_month_and_missing_after() {
+    let dated = |released: &str, today: &str| {
+        let page = franchise(vec![Entry {
+            released: released.into(),
+            ..gap(1, (0.0, 0.0), &[])
+        }]);
+        story(&page, &columns(&page), today)[0].cell.standing
+    };
+    assert_eq!(dated("2026-10", "2026-09-30"), Standing::Coming);
+    assert_eq!(dated("2026-10", "2026-10-01"), Standing::Missing);
+    assert_eq!(dated("2026-09-20", "2026-09-04"), Standing::Coming);
+}
+
+#[test]
+fn a_series_run_says_how_many_episodes_the_catalog_holds() {
+    let serial = |episodes, held| Entry {
+        kind: SERIES.into(),
+        episodes,
+        held,
+        ..entry(1, (0.0, 0.0), &[])
+    };
+    let page = franchise(vec![
+        serial(30, Some(held("series:path:1"))),
+        serial(1, Some(held("series:path:2"))),
+        Entry {
+            title: "A Serial".into(),
+            ..serial(0, None)
+        },
+    ]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].cell.facts, "Series · 1980 · 30 episodes");
+    assert_eq!(rows[0].cell.note, "");
+    assert_eq!(rows[1].cell.facts, "Series · 1980 · 1 episode");
+    // A series no library holds counts no episodes, so its note is the
+    // standing alone.
+    assert_eq!(rows[2].cell.facts, "Series · 1980");
+    assert_eq!(rows[2].cell.note, "Missing");
+}
+
+#[test]
+fn a_series_run_names_the_seasons_it_covers() {
+    let serial = |runs: Vec<(i64, i64)>| Entry {
+        kind: SERIES.into(),
+        episodes: 20,
+        held: Some(held("series:path:1")),
+        runs,
+        ..entry(1, (0.0, 0.0), &[])
+    };
+    let page = franchise(vec![serial(vec![(3, 0)]), serial(Vec::new())]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].cell.facts, "Series · 1980 · Season 3 · 20 episodes");
+    assert_eq!(rows[1].cell.facts, "Series · 1980 · 20 episodes");
+}
+
+fn era(name: &str, from: f64, to: f64) -> Era {
+    Era {
+        name: name.into(),
+        from,
+        to,
+    }
+}
+
+fn walled() -> Vec<Row> {
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[]),
+        entry(2, (-20.0, -20.0), &[]),
+        entry(3, (0.0, 0.0), &[]),
+        Entry {
+            timed: false,
+            ..entry(4, (0.0, 0.0), &[])
+        },
+    ]);
+    story(&page, &columns(&page), TODAY)
+}
+
+#[test]
+fn an_era_heads_the_first_row_that_starts_inside_it_and_covers_to_the_last() {
+    let headings = headings(
+        &[era("The Long Survey", -40.0, 40.0)],
+        &walled(),
+        &Some(calendar()),
+    );
+    assert_eq!(headings.len(), 1);
+    assert_eq!((headings[0].first, headings[0].last), (0, 2));
+    assert_eq!(headings[0].name, "The Long Survey");
+    assert_eq!(headings[0].count, "81 years");
+    assert_eq!(headings[0].label(), "The Long Survey · 81 years");
+}
+
+#[test]
+fn a_row_an_era_only_touches_does_not_wear_its_heading() {
+    // The walled rows start at -32, -30, and -20. An era from -31 touches
+    // the first row and starts inside none of it, so the second row
+    // heads it; an era every row starts before draws no heading.
+    let headings = headings(
+        &[era("Late start", -31.0, 40.0), era("Earlier", -40.0, -33.0)],
+        &walled(),
+        &Some(calendar()),
+    );
+    assert_eq!(headings.len(), 1);
+    assert_eq!(
+        (headings[0].name.as_str(), headings[0].first),
+        ("Late start", 1)
+    );
+}
+
+#[test]
+fn headings_come_by_first_row_and_the_widest_first_on_one_row_and_nest_by_depth() {
+    let headings = headings(
+        &[
+            era("The Coppice Years", -33.0, -30.0),
+            era("The Long Survey", -40.0, 40.0),
+            era("Late", -25.0, 40.0),
+        ],
+        &walled(),
+        &Some(calendar()),
+    );
+    let named: Vec<(&str, usize, usize, usize)> = headings
+        .iter()
+        .map(|heading| {
+            (
+                heading.name.as_str(),
+                heading.first,
+                heading.last,
+                heading.depth,
+            )
+        })
+        .collect();
+    assert_eq!(
+        named,
+        [
+            ("The Long Survey", 0, 2, 0),
+            ("The Coppice Years", 0, 0, 1),
+            ("Late", 1, 2, 0),
+        ]
+    );
+    assert_eq!(over(&headings, 0), 2);
+    assert_eq!(over(&headings, 1), 1);
+    assert_eq!(over(&headings, 2), 0);
+    // A row inside an era that started above it keeps the held line's
+    // room over its own headings.
+    assert_eq!(reach(&headings, 0), 2);
+    assert_eq!(reach(&headings, 1), 2);
+    assert_eq!(reach(&headings, 2), 1);
+}
+
+#[test]
+fn left_and_right_find_the_first_row_of_the_era_before_and_after() {
+    let headings = headings(
+        &[era("Early", -40.0, -25.0), era("Late", -25.0, 40.0)],
+        &walled(),
+        &Some(calendar()),
+    );
+    assert_eq!(before(&headings, 2), Some(1));
+    assert_eq!(before(&headings, 1), Some(0));
+    assert_eq!(before(&headings, 0), None);
+    assert_eq!(after(&headings, 0), Some(1));
+    assert_eq!(after(&headings, 2), None);
+}
+
+#[test]
+fn an_era_covers_one_unbroken_run_and_a_row_with_no_time_breaks_none() {
+    // Story order jumps back: the fifth row is set inside the era again,
+    // after a row outside it, and the third row carries no time.
+    let page = franchise(vec![
+        entry(1, (-40.0, -35.0), &[]),
+        entry(2, (-34.0, -30.0), &[]),
+        Entry {
+            timed: false,
+            ..entry(3, (0.0, 0.0), &[])
+        },
+        entry(4, (10.0, 12.0), &[]),
+        entry(5, (-38.0, -36.0), &[]),
+        Entry {
+            timed: false,
+            ..entry(6, (0.0, 0.0), &[])
+        },
+    ]);
+    let rows = story(&page, &columns(&page), TODAY);
+    let headings = headings(
+        &[era("Early", -40.0, -30.0), era("Late", 5.0, 20.0)],
+        &rows,
+        &Some(calendar()),
+    );
+    let named: Vec<(&str, usize, usize)> = headings
+        .iter()
+        .map(|heading| (heading.name.as_str(), heading.first, heading.last))
+        .collect();
+    assert_eq!(named, [("Early", 0, 1), ("Late", 3, 3)]);
+}
+
+#[test]
+fn an_era_no_row_starts_inside_draws_no_heading() {
+    assert!(
+        headings(
+            &[era("Before", -500.0, -100.0)],
+            &walled(),
+            &Some(calendar())
+        )
+        .is_empty()
+    );
+    assert!(headings(&[], &walled(), &Some(calendar())).is_empty());
+}
+
+#[test]
+fn a_wall_of_untimed_rows_draws_no_heading() {
+    let page = Franchise {
+        calendar: None,
+        ..franchise(vec![Entry {
+            timed: false,
+            ..entry(1, (0.0, 0.0), &[])
+        }])
+    };
+    let rows = story(&page, &columns(&page), TODAY);
+    assert!(headings(&[era("An Era", -40.0, 40.0)], &rows, &Some(calendar())).is_empty());
+}
+
+const REGION: Rectangle = Rectangle {
+    x: 0.0,
+    y: 100.0,
+    width: 1920.0,
+    height: 900.0,
+};
+
+// The room the rows have in a 1080p frame, which the art's cap is two
+// fifths of.
+const ROWS: f32 = 924.0;
+
+// A wall of a card, a thin row, and a card.
+fn mixed() -> Vec<Row> {
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[]),
+        gap(2, (-20.0, -20.0), &[]),
+        entry(3, (0.0, 0.0), &[]),
+    ]);
+    story(&page, &columns(&page), TODAY)
+}
+
+#[test]
+fn the_strip_and_the_cards_stand_to_the_right_of_the_time_column() {
+    let time = time_width(&mixed());
+    let columned = columned(REGION, time);
+    assert_eq!(columned.x, time);
+    assert_eq!(columned.width, REGION.width - time);
+    assert_eq!(self::columned(REGION, 0.0), REGION);
+}
+
+#[test]
+fn the_column_is_as_wide_as_the_widest_label_it_draws() {
+    let rows = story(
+        &franchise(vec![
+            entry(1, (-1_200.0, -1_200.0), &[]),
+            entry(2, (-30.0, -30.0), &[]),
+        ]),
+        &[],
+        TODAY,
+    );
+    assert_eq!(rows[0].time, "1200 BS");
+    assert_eq!(
+        time_width(&rows),
+        text::measured("1200 BS", look::CAPTION) + GAP
+    );
+
+    // A span stacks on two lines, so the column holds one time and its
+    // mark and not the whole span.
+    let spanned = story(
+        &franchise(vec![entry(1, (-1_200.0, -1_100.0), &[])]),
+        &[],
+        TODAY,
+    );
+    assert_eq!(spanned[0].time, "1200 to 1100 BS");
+    assert_eq!(
+        time_width(&spanned),
+        text::measured("to 1100 BS", look::CAPTION) + GAP
+    );
+    assert!(time_width(&spanned) < text::measured(&spanned[0].time, look::CAPTION));
+}
+
+#[test]
+fn a_column_of_short_times_keeps_the_floor_and_a_wall_of_none_takes_no_column() {
+    let short = story(&franchise(vec![entry(1, (1.0, 1.0), &[])]), &[], TODAY);
+    assert_eq!(short[0].time, "1 AS");
+    assert_eq!(time_width(&short), floor());
+    assert!(floor() > text::measured("2026", look::CAPTION));
+
+    let untimed = story(
+        &Franchise {
+            calendar: None,
+            ..franchise(vec![entry(1, (0.0, 0.0), &[])])
+        },
+        &[],
+        TODAY,
+    );
+    assert!(!labelled(&untimed));
+    assert_eq!(time_width(&untimed), 0.0);
+    assert_eq!(time_width(&[]), 0.0);
+}
+
+#[test]
+fn a_span_stacks_the_second_time_on_a_line_of_its_own() {
+    let cases = [
+        ("32 BS", ("32 BS", "")),
+        ("22 to 20 BS", ("22", "to 20 BS")),
+        ("5 BS to 5 AS", ("5 BS", "to 5 AS")),
+        ("Day 1141 to 1142", ("Day 1141", "to 1142")),
+        ("2002 to 2005", ("2002", "to 2005")),
+        ("", ("", "")),
+    ];
+    for (time, (first, second)) in cases {
+        assert_eq!(
+            stacked(time),
+            (first.to_string(), second.to_string()),
+            "{time}"
+        );
+    }
+}
+
+#[test]
+fn a_row_prints_its_time_only_where_it_differs_from_the_row_above() {
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[]),
+        entry(2, (-32.0, -32.0), &[]),
+        entry(3, (-30.0, -30.0), &[]),
+        Entry {
+            timed: false,
+            ..entry(4, (-30.0, -30.0), &[])
+        },
+        Entry {
+            timed: false,
+            ..entry(5, (0.0, 0.0), &[])
+        },
+        entry(6, (-30.0, -30.0), &[]),
+    ]);
+    let rows = story(&page, &columns(&page), TODAY);
+    let printed: Vec<&str> = (0..rows.len()).map(|row| label_at(&rows, row)).collect();
+    assert_eq!(printed, ["32 BS", "", "30 BS", "", "", "30 BS"]);
+    assert_eq!(label_at(&rows, 9), "");
+    assert_eq!(label_at(&[], 0), "");
+}
+
+#[test]
+fn the_caption_is_the_calendars_one_line() {
+    let rows = mixed();
+    let caption = caption(&Some(calendar()), time_width(&rows));
+    assert_eq!(caption, "Years from the Survey");
+}
+
+#[test]
+fn a_calendar_with_no_zero_and_a_wall_with_no_column_carry_no_caption() {
+    let bare = Calendar {
+        zero: String::new(),
+        ..calendar()
+    };
+    assert!(caption(&Some(bare), 200.0).is_empty());
+    assert!(caption(&None, 200.0).is_empty());
+    assert!(caption(&Some(calendar()), 0.0).is_empty());
+}
+
+#[test]
+fn the_head_of_the_wall_is_the_room_the_first_rows_mark_reaches_into() {
+    assert_eq!(HEAD, crate::views::REACH);
+    let rows = mixed();
+    assert_eq!(tops(&rows, &[], art_height(ROWS), HEAD)[0], HEAD);
+}
+
+#[test]
+fn a_wall_with_no_eras_no_time_labels_and_one_universe_centers_its_cards() {
+    let page = Franchise {
+        calendar: None,
+        ..franchise(vec![entry(1, (0.0, 0.0), &[]), gap(2, (1.0, 1.0), &[])])
+    };
+    let rows = story(&page, &columns(&page), TODAY);
+    assert!(!labelled(&rows));
+    let lane = Lane::of(REGION, &metro::runs(&rows, &columns(&page)), 0.0, 0.0);
+    assert_eq!(lane.wall, REGION);
+    assert_eq!(lane.strip.width, 0.0);
+    assert_eq!(lane.cards.width, REGION.width - floor());
+    assert_eq!(lane.cards.center_x(), REGION.center_x());
+    assert_eq!(lane.cards.y, REGION.y);
+}
+
+#[test]
+fn a_time_label_earns_its_column_and_a_strip_a_pitch_for_every_lane() {
+    let rows = mixed();
+    let time = time_width(&rows);
+    assert!(labelled(&rows));
+    let one = Lane::of(REGION, &[], time, 0.0);
+    assert_eq!(one.columned.x, REGION.x + time);
+    assert_eq!(one.cards, one.columned);
+
+    // Three universes the story tells at once, so the strip takes three
+    // lanes.
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[COPPICE, FEN, MARSH]),
+        entry(2, (-30.0, -20.0), &[COPPICE, FEN, MARSH]),
+    ]);
+    let crossed = story(&page, &columns(&page), TODAY);
+    let runs = metro::runs(&crossed, &columns(&page));
+    let three = Lane::of(REGION, &runs, time, 0.0);
+    assert_eq!(three.strip.x, REGION.x + time);
+    assert_eq!(three.strip.width, 3.0 * metro::PITCH);
+    assert_eq!(three.cards.x, three.strip.x + three.strip.width + GAP);
+    assert_eq!(three.cards.x + three.cards.width, REGION.x + REGION.width);
+    assert_eq!(three.wall, REGION);
+}
+
+// The walled rows under two eras: one over all three rows, and one over
+// the first row alone, inside it.
+fn headed() -> (Vec<Heading>, Vec<Row>) {
+    let rows = walled();
+    let headings = headings(
+        &[
+            era("The Coppice Years", -33.0, -30.0),
+            era("The Long Survey", -40.0, 40.0),
+        ],
+        &rows,
+        &Some(calendar()),
+    );
+    (headings, rows)
+}
+
+#[test]
+fn a_heading_takes_its_height_over_its_first_row_and_stacks_over_one_row() {
+    let art = art_height(ROWS);
+    let (headings, rows) = headed();
+    let tops = tops(&rows, &headings, art, HEAD);
+    assert_eq!(tops[0], HEAD + 2.0 * HEADING);
+    assert_eq!(tops[1], tops[0] + rows[0].height(art) + GAP);
+    assert_eq!(heading_top(&headings, 0, &tops), HEAD);
+    assert_eq!(heading_top(&headings, 1, &tops), HEAD + HEADING);
+
+    let bare = self::tops(&rows, &[], art, HEAD);
+    assert_eq!(bare[0], HEAD);
+}
+
+#[test]
+fn a_heading_stands_at_its_own_top_and_scrolls_with_the_wall() {
+    let art = art_height(ROWS);
+    let (headings, rows) = headed();
+    let tops = tops(&rows, &headings, art, HEAD);
+    let lane = area(500.0, 100.0, 1200.0, 900.0);
+    let boxes = heading_boxes(lane, &headings, &tops, 0.0);
+    assert_eq!(boxes[0], area(lane.x, lane.y + HEAD, lane.width, HEADING));
+    assert_eq!(
+        boxes[1],
+        area(lane.x, lane.y + HEAD + HEADING, lane.width, HEADING)
+    );
+    let scrolled = heading_boxes(lane, &headings, &tops, 30.0);
+    assert_eq!(scrolled[0].y, boxes[0].y - 30.0);
+}
+
+#[test]
+fn the_held_line_names_the_eras_the_wall_is_inside_outer_to_inner() {
+    let art = art_height(ROWS);
+    let (headings, rows) = headed();
+    let tops = tops(&rows, &headings, art, HEAD);
+
+    // At the top of the wall nothing holds.
+    assert_eq!(crumb(&headings, &tops, 0.0), None);
+
+    // Scrolled into the first row, the wall is inside both eras, and
+    // the line reads them outer to inner with the inner one's count.
+    let down = HEAD + 2.0 * HEADING + 10.0;
+    assert_eq!(
+        crumb(&headings, &tops, down).as_deref(),
+        Some("The Long Survey › The Coppice Years · 4 years")
+    );
+
+    // Scrolled past the first row, the inner era has ended and the outer
+    // one holds alone.
+    let down = tops[1] + 10.0;
+    assert_eq!(
+        crumb(&headings, &tops, down).as_deref(),
+        Some("The Long Survey · 81 years")
+    );
+}
+
+#[test]
+fn the_held_line_takes_a_band_over_the_cards_and_none_while_nothing_holds() {
+    let cards = area(500.0, 100.0, 1200.0, 900.0);
+    assert_eq!(
+        band(cards, true),
+        area(cards.x, cards.y, cards.width, HEADING)
+    );
+    assert_eq!(under(cards, true).y, cards.y + HEADING);
+    assert_eq!(under(cards, true).height, cards.height - HEADING);
+    assert_eq!(band(cards, false).height, 0.0);
+    assert_eq!(under(cards, false), cards);
+}
+
+#[test]
+fn the_wall_moves_only_when_focus_leaves_the_view() {
+    let art = art_height(ROWS);
+    let page = franchise((1..=40).map(|n| entry(n, (0.0, 0.0), &[])).collect());
+    let rows = story(&page, &columns(&page), TODAY);
+    let tops = tops(&rows, &[], art, HEAD);
+    let height = 900.0;
+    // Down from the top: the wall stands until a row would leave the
+    // foot, then brings it to the foot.
+    assert_eq!(scroll(0.0, 0, &[], &tops, height), 0.0);
+    assert_eq!(scroll(0.0, 1, &[], &tops, height), 0.0);
+    let third = scroll(0.0, 3, &[], &tops, height);
+    assert!(third > 0.0);
+    assert_eq!(tops[4] - third, height);
+    // Up to a row still in view: nothing moves.
+    assert_eq!(scroll(third, 2, &[], &tops, height), third);
+    // Up past the top: the row comes to the top. About three rows fit,
+    // so the row two above the foot is already out of view.
+    assert!(tops[1] < third);
+    assert_eq!(scroll(third, 1, &[], &tops, height), tops[1]);
+    assert_eq!(scroll(third, 0, &[], &tops, height), tops[0]);
+    // A jump far down brings that row to the foot, and the last row
+    // pulls the space under it into view.
+    let last = scroll(third, 39, &[], &tops, height);
+    assert_eq!(last, content(&tops) - height);
+}
+
+#[test]
+fn a_heading_counts_how_long_its_era_runs() {
+    let years = Some(calendar());
+    assert_eq!(counted(&era("The Survey", -40.0, 40.0), &years), "81 years");
+    assert_eq!(counted(&era("A Day", 3.0, 3.0), &years), "1 year");
+    let days = Some(Calendar {
+        unit: "days".into(),
+        ..calendar()
+    });
+    assert_eq!(counted(&era("The Long Watch", 10.0, 12.0), &days), "3 days");
+    assert_eq!(counted(&era("Bare", 0.0, 9.0), &None), "");
+    let bare = Heading {
+        name: "Bare".into(),
+        count: String::new(),
+        first: 0,
+        last: 0,
+        depth: 0,
+    };
+    assert_eq!(bare.label(), "Bare");
+    assert_eq!(
+        bright("The Specimen Saga › Phase Two · 3 years"),
+        "The Specimen Saga › Phase Two"
+    );
+    assert_eq!(bright("Bare"), "Bare");
+}
+
+#[test]
+fn the_scroll_keeps_the_held_line_off_the_focused_row() {
+    let art = art_height(ROWS);
+    let page = franchise((1..=40).map(|n| entry(n, (0.0, 0.0), &[])).collect());
+    let rows = story(&page, &columns(&page), TODAY);
+    let headings = headings(&[era("All", -1.0, 1.0)], &rows, &Some(calendar()));
+    let tops = tops(&rows, &headings, art, HEAD);
+    // Focus on a row deep in the era: the row never stands under the
+    // held heading, wherever the scroll puts it.
+    let down = scroll(0.0, 20, &headings, &tops, 900.0);
+    assert!(tops[20] - down >= HEADING);
+    // Up from there to a row above the view: the row lands one held
+    // line under the top, not under it.
+    let up = scroll(down, 10, &headings, &tops, 900.0);
+    assert!(up < down);
+    assert_eq!(tops[10] - up, HEADING);
+    // Focus on the first row: the wall stands at its top, and the
+    // heading is inline over the row.
+    assert_eq!(scroll(0.0, 0, &headings, &tops, 900.0), 0.0);
+}
+
+#[test]
+fn a_card_is_the_arts_height_and_the_gaps_around_it_and_a_gap_is_thin() {
+    let art = art_height(ROWS);
+    let rows = mixed();
+    assert_eq!(rows[0].height(art), art + 2.0 * GAP);
+    assert_eq!(rows[1].height(art), THIN);
+    assert_eq!(THIN, 56.0);
+    assert_eq!(card_height(art), art + 2.0 * GAP);
+}
+
+#[test]
+fn the_rows_start_under_the_first_marks_room_and_each_after_the_one_before_it() {
+    let art = art_height(ROWS);
+    let tops = tops(&mixed(), &[], art, HEAD);
+    assert_eq!(tops.len(), 4);
+    assert_eq!(tops[0], HEAD);
+    assert_eq!(tops[1], HEAD + card_height(art) + GAP);
+    assert_eq!(tops[2], tops[1] + THIN + GAP);
+    assert_eq!(tops[3], tops[2] + card_height(art) + GAP);
+    assert_eq!(self::tops(&[], &[], art, HEAD), [HEAD]);
+}
+
+#[test]
+fn a_row_takes_the_cards_width_and_its_own_height_and_scrolls_with_the_wall() {
+    let art = art_height(ROWS);
+    let tops = tops(&mixed(), &[], art, HEAD);
+    let cards = area(500.0, 100.0, 1200.0, 900.0);
+    let card = cell_box(cards, 0, &[], &tops, 0.0);
+    assert_eq!(card.x, cards.x);
+    assert_eq!(card.width, cards.width);
+    assert_eq!(card.y, cards.y + HEAD);
+    assert_eq!(card.height, card_height(art));
+
+    let thin = cell_box(cards, 1, &[], &tops, 40.0);
+    assert_eq!(thin.y, cards.y + tops[1] - 40.0);
+    assert_eq!(thin.height, THIN);
+    assert_eq!(cell_box(cards, 9, &[], &tops, 0.0).height, 0.0);
+}
+
+#[test]
+fn the_art_stops_at_the_cap_so_a_page_shows_about_two_and_a_half_cards() {
+    let art = art_height(ROWS);
+    assert_eq!(art, ROWS * 0.3);
+    assert!(2.0 * (card_height(art) + GAP) <= ROWS);
+    assert!(3.0 * (card_height(art) + GAP) > ROWS);
+    assert_eq!(art_height(0.0), 0.0);
+}
+
+#[test]
+fn a_title_takes_two_lines_and_the_second_ends_in_an_ellipsis() {
+    let width = 200.0;
+    let room = text::fits(look::NAME, width);
+    assert_eq!(
+        titled("A Film", width),
+        ("A Film".to_string(), String::new())
+    );
+
+    let two = "The Specimen Saga: Part I The Marsh Awakens";
+    let (first, second) = titled(two, width);
+    assert!(first.chars().count() <= room);
+    assert!(!second.is_empty());
+    assert!(!first.ends_with(' '));
+    assert!(two.starts_with(&first));
+
+    let long: String = "wordy ".repeat(20);
+    let (_, cut) = titled(&long, width);
+    assert!(cut.ends_with('\u{2026}'));
+    assert!(cut.chars().count() <= room);
+}
+
+#[test]
+fn a_title_of_one_long_word_breaks_where_the_line_ends() {
+    let width = 60.0;
+    let room = text::fits(look::NAME, width);
+    let (first, second) = titled(&"a".repeat(room * 3), width);
+    assert_eq!(first.chars().count(), room);
+    assert!(second.ends_with('\u{2026}'));
+}
+
+#[test]
+fn a_focused_row_lies_wholly_inside_the_clip() {
+    let columned = columned(REGION, time_width(&mixed()));
+    let tops = tops(&mixed(), &[], art_height(ROWS), HEAD);
+    let row = cell_box(columned, 0, &[], &tops, 0.0);
+    let marked = crate::views::marked(row);
+    let clip = clipped(columned);
+    assert!(marked.x >= clip.x, "{marked:?} {clip:?}");
+    assert!(marked.y >= clip.y, "{marked:?} {clip:?}");
+    assert!(marked.x + marked.width <= clip.x + clip.width);
+    assert!(marked.y + marked.height <= clip.y + clip.height);
+}
+
+#[test]
+fn the_clip_starts_at_the_top_of_the_lane_and_the_first_row_below_it() {
+    let columned = columned(REGION, time_width(&mixed()));
+    let clip = clipped(columned);
+    assert_eq!(clip.y, columned.y);
+    assert_eq!(clip.height, columned.height);
+}
+
+#[test]
+fn the_time_label_stands_beside_its_own_row() {
+    let time = time_width(&mixed());
+    let tops = tops(&mixed(), &[], art_height(ROWS), HEAD);
+    let box_of = time_box(REGION, time, 1, &[], &tops, 40.0);
+    assert_eq!(box_of.x, REGION.x);
+    assert_eq!(box_of.y, REGION.y + tops[1] - 40.0);
+    assert_eq!(box_of.width, time - GAP);
+    assert_eq!(box_of.height, THIN);
+}
+
+#[test]
+fn a_wall_that_fits_stands_at_its_top_and_a_long_one_scrolls() {
+    let art = art_height(ROWS);
+    let page = franchise((1..=40).map(|n| entry(n, (0.0, 0.0), &[])).collect());
+    let tops = tops(&story(&page, &columns(&page), TODAY), &[], art, HEAD);
+    assert_eq!(scroll(0.0, 0, &[], &tops, 900.0), 0.0);
+    assert!(scroll(0.0, 30, &[], &tops, 900.0) > 0.0);
+    assert_eq!(scroll(0.0, 39, &[], &tops, 900.0), content(&tops) - 900.0);
+    assert_eq!(content(&tops), tops[40] + TAIL);
+    assert_eq!(content(&[]), TAIL);
+    assert_eq!(scroll(0.0, 0, &[], &[], 900.0), 0.0);
+
+    let two = self::tops(&mixed()[..2], &[], art, HEAD);
+    assert_eq!(scroll(0.0, 1, &[], &two, 900.0), 0.0);
+}
+
+#[test]
+fn a_poster_is_the_arts_height_at_the_walls_poster_ratio() {
+    assert_eq!(poster_width(150.0), 150.0 / wall::POSTER);
+}
+
+#[test]
+fn a_cell_draws_the_landscape_art_of_its_item_and_falls_back_to_the_poster() {
+    let cases = [
+        (
+            vec!["a/folder.jpg", "a/landscape.jpg", "a/fanart.jpg"],
+            "a/landscape.jpg",
+            true,
+        ),
+        (
+            vec!["a/folder.jpg", "a/fanart.jpg", "a/backdrop.jpg"],
+            "a/fanart.jpg",
+            true,
+        ),
+        (
+            vec!["a/folder.jpg", "a/backdrop.jpg"],
+            "a/backdrop.jpg",
+            true,
+        ),
+        (
+            vec!["a/folder.jpg", "a/clearlogo.png"],
+            "a/folder.jpg",
+            false,
+        ),
+        (Vec::new(), "a/folder.jpg", false),
+    ];
+    for (arts, drawn, wide) in cases {
+        let entry = Entry {
+            held: Some(Held {
+                art: "a/folder.jpg".into(),
+                arts: arts.iter().map(|art| art.to_string()).collect(),
+                ..held("movie:path:1")
+            }),
+            ..entry(1, (0.0, 0.0), &[])
+        };
+        let cell = &story(&franchise(vec![entry]), &[], TODAY)[0].cell;
+        assert_eq!((cell.art.as_str(), cell.wide), (drawn, wide), "{arts:?}");
+    }
+}
+
+#[test]
+fn a_gap_draws_no_art_at_all() {
+    let page = franchise(vec![gap(1, (0.0, 0.0), &[])]);
+    let cell = &story(&page, &[], TODAY)[0].cell;
+    assert_eq!(cell.art, "");
+    assert!(!cell.wide);
+}
+
+#[test]
+fn a_film_the_catalog_holds_no_running_time_for_says_its_kind_and_its_year() {
+    let page = franchise(vec![Entry {
+        held: Some(Held {
+            duration: 0,
+            ..held("movie:path:1")
+        }),
+        ..entry(1, (0.0, 0.0), &[])
+    }]);
+    let cell = &story(&page, &columns(&page), TODAY)[0].cell;
+    assert_eq!(cell.facts, "Film · 1980");
+}
+
+#[test]
+fn a_cell_carries_the_year_and_the_tagline_of_its_item() {
+    let page = franchise(vec![entry(1, (0.0, 0.0), &[])]);
+    let cell = &story(&page, &columns(&page), TODAY)[0].cell;
+    assert_eq!(cell.facts, "Film · 1980 · 2h 4m");
+    assert_eq!(cell.note, "");
+    assert_eq!(cell.blurb, "A line about movie:path:1.");
+}
+
+#[test]
+fn a_cell_falls_back_to_the_plot_where_the_item_has_no_tagline() {
+    let page = franchise(vec![Entry {
+        held: Some(Held {
+            tagline: String::new(),
+            ..held("movie:path:1")
+        }),
+        ..entry(1, (0.0, 0.0), &[])
+    }]);
+    let cell = &story(&page, &columns(&page), TODAY)[0].cell;
+    assert_eq!(cell.blurb, "The plot of movie:path:1.");
+}
+
+#[test]
+fn a_cell_takes_the_year_of_the_items_release_where_the_file_gives_none() {
+    let page = franchise(vec![Entry {
+        release_year: 0,
+        held: Some(Held {
+            released: "1999-12-31".into(),
+            ..held("movie:path:1")
+        }),
+        ..entry(1, (0.0, 0.0), &[])
+    }]);
+    let cell = &story(&page, &columns(&page), TODAY)[0].cell;
+    assert_eq!(cell.facts, "Film · 1999 · 2h 4m");
+}
+
+#[test]
+fn a_gap_carries_its_year_and_no_blurb() {
+    let page = franchise(vec![gap(1, (0.0, 0.0), &[])]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].cell.facts, "Film · 1980");
+    assert_eq!(rows[0].cell.blurb, "");
+}

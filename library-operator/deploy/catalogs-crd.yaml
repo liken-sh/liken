@@ -1,0 +1,308 @@
+# The Catalog API, declared to Kubernetes. A namespace has exactly one
+# Catalog. It creates the durable copies that hold the namespace's
+# catalog, and the first copy reports it. It sizes the volume every
+# catalog agent uses, and it owns those pods, their claims, and the
+# namespace's catalog Service and EndpointSlice. More than one Catalog
+# in a namespace marks every Catalog Blocked and creates no cluster.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: catalogs.library.liken.sh
+spec:
+  group: library.liken.sh
+  names:
+    kind: Catalog
+    listKind: CatalogList
+    plural: catalogs
+    singular: catalog
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Size
+          type: string
+          jsonPath: .status.storageSize
+        - name: Copies
+          type: integer
+          jsonPath: .status.replicas.catalog.wanted
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            The namespace's shared catalog. Declare one Catalog in a
+            namespace, and every Library in it writes into that catalog.
+          properties:
+            spec:
+              type: object
+              required: [storage]
+              description: >-
+                Where the catalog is stored and how large each agent's
+                copy is.
+              properties:
+                storage:
+                  type: object
+                  default: {}
+                  description: >-
+                    The catalog of record every other agent copies,
+                    held on one claim that every durable copy mounts.
+                    The size is also the size of every working copy,
+                    and the class is the default class for the progress
+                    and libraries claims.
+                  properties:
+                    size:
+                      type: string
+                      default: 1Gi
+                      description: >-
+                        The size of each agent's catalog volume. Small
+                        by default.
+                    storageClassName:
+                      type: string
+                      minLength: 1
+                      description: >-
+                        The StorageClass each agent's catalog volume
+                        binds to. Omitted, the cluster's default binds
+                        it. A class the per-node driver serves, whose
+                        provisioner is per-node.liken.sh, lets the
+                        operator run more than one copy of the
+                        catalog, because every copy then holds a
+                        directory of its own on the node where it runs.
+                        The operator reads the provisioner of the class
+                        and never matches its name.
+                    claimName:
+                      type: string
+                      minLength: 1
+                      description: "An existing PersistentVolumeClaim in this namespace for every copy of the catalog to mount, in place of the one the operator provisions. The operator creates no claim and no volume when it is set."
+                    replicas:
+                      type: integer
+                      minimum: 1
+                      default: 1
+                      description: >-
+                        How many durable copies of the catalog the
+                        operator runs for the namespace. The copies are peers that
+                        Corrosion syncs from one another, and every copy
+                        mounts one claim of storage.size, named after
+                        the Catalog with the suffix -catalog. More than
+                        one copy needs a per-node class. On any other
+                        class the operator runs one copy, and the
+                        Ready condition is False with the reason
+                        ClassNotPerNode. No two copies share a node, so
+                        a copy the scheduler cannot place stays Pending
+                        and the Catalog is not Ready. A copy on a node
+                        that stays NotReady for ten minutes is deleted
+                        and started again elsewhere. It takes the claim
+                        with it only on a class that binds the claim to
+                        the node. A copy taken away by a lower count
+                        loses its pod alone, because the claim serves
+                        the copies that remain.
+                progress:
+                  type: object
+                  default: {}
+                  description: "The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size."
+                  properties:
+                    size:
+                      type: string
+                      description: "The size of the progress claim, in a binary unit such as 256Mi. The progress rows are small next to the catalog, so a namespace that keeps both central stores on a durable class names a smaller size here. Omitted, the claim takes storage.size. A size change applies to a new claim, not an existing one, because a bound claim's spec is immutable. Delete the existing claim, and the next pass creates it at the new size."
+                    storageClassName:
+                      type: string
+                      minLength: 1
+                      description: "The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it. A per-node class lets the operator run more than one copy of the progress store, on the same terms as storage.storageClassName."
+                    replicas:
+                      type: integer
+                      minimum: 1
+                      default: 1
+                      description: >-
+                        How many durable copies of the progress store
+                        the operator runs for the namespace, on the same terms as
+                        storage.replicas, against the class this block
+                        names. Every copy mounts one claim, named after
+                        the Catalog with the suffix -progress. More than
+                        one copy needs a per-node class here as well,
+                        and on any other class the Ready condition is
+                        False with the reason ClassNotPerNode. The first
+                        copy records what crosses the bus, and every
+                        copy after it holds the rows.
+                libraries:
+                  type: object
+                  default: {}
+                  description: "The claim each Library's Jobs run on, one Job at a time, named after the Library with the suffix -catalog. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. On a per-node class the claim is ReadWriteOncePod, so Kubernetes admits one pod of it in the cluster at a time."
+                  properties:
+                    storageClassName:
+                      type: string
+                      minLength: 1
+                      description: "The StorageClass a Library's catalog claim binds to. Omitted, it takes storage.storageClassName, and when that is also omitted the cluster's default binds it. There is no size here: every agent holds the whole catalog, so the claim takes storage.size."
+                screens:
+                  type: object
+                  default: {}
+                  description: "The settings every screen pod in the namespace takes."
+                  properties:
+                    storageClassName:
+                      type: string
+                      minLength: 1
+                      description: "The StorageClass both of a screen's claims bind to. Omitted, the cluster's default binds them. A node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display. On such a class, a screen the scheduler refuses for five minutes loses its pod and both claims, and the next pass creates them again where the display is. On a per-node class the claims pin the pod to no node, and the operator never deletes them."
+                    artCache:
+                      type: object
+                      default: {}
+                      description: "The volume each screen's browser keeps its scaled art on: posters, backdrops, episode stills, logos, and headshots. A screen that restarts draws the wall from art it already scaled."
+                      properties:
+                        size:
+                          type: string
+                          default: 2Gi
+                          description: "The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change applies to new screens, not existing ones, because a bound claim's spec is immutable. Delete an existing screen's claim, and the next pass creates it at the new size."
+                jellyfin:
+                  type: object
+                  required: [url, secretRef]
+                  description: "The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator run a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, the operator runs neither and deletes the previous pair."
+                  properties:
+                    url:
+                      type: string
+                      format: uri
+                      minLength: 1
+                      description: "The Jellyfin server's address on the cluster network, such as http://jellyfin.jellyfin.svc:8096."
+                    secretRef:
+                      type: object
+                      required: [name]
+                      description: "The Secret in this namespace that holds a Jellyfin API key, and the key inside it. The API key is one an administrator issues on the server, because the pod writes the playback position of any user."
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                          description: "The Secret's name, in this Catalog's own namespace."
+                        key:
+                          type: string
+                          minLength: 1
+                          default: token
+                          description: "The key inside that Secret. When omitted, token."
+            status:
+              type: object
+              description: >-
+                The cluster the Catalog stands, written only by the
+                library operator.
+              properties:
+                members:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: "The pods that are members of the namespace's catalog cluster: the durable copies of the catalog, the pods of the Jobs that are running, and the screen pods."
+                  items:
+                    type: string
+                storageSize:
+                  type: string
+                  description: >-
+                    The storage size the agents were given.
+                replicas:
+                  type: object
+                  description: "The durable copies of the namespace's two stores: for each, the count that is up beside the count the Catalog asks for."
+                  properties:
+                    catalog:
+                      type: object
+                      description: "The copies of the catalog."
+                      properties:
+                        ready:
+                          type: integer
+                          description: "How many copies run with every container ready."
+                        wanted:
+                          type: integer
+                          description: "How many copies the Catalog asks for, from storage.replicas. The count is the one the Catalog states, so a Catalog whose class cannot hold more than one copy reports the copies it asked for beside the one that is up."
+                    progress:
+                      type: object
+                      description: "The copies of the progress store."
+                      properties:
+                        ready:
+                          type: integer
+                          description: "How many copies run with every container ready."
+                        wanted:
+                          type: integer
+                          description: "How many copies the Catalog asks for, from progress.replicas."
+                screens:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: "One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the claim its art cache is on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on emptyDirs and names neither claim."
+                  items:
+                    type: object
+                    properties:
+                      player:
+                        type: string
+                        description: "The Player the screen draws for."
+                      claim:
+                        type: string
+                        description: "The claim the screen's catalog agent runs on, or empty for a screen on an emptyDir."
+                      artClaim:
+                        type: string
+                        description: "The claim the screen's art cache is on, or empty for a screen on an emptyDir."
+                      node:
+                        type: string
+                        description: "The node the screen pod runs on. On a node-local class it is the node both of its claims are bound to."
+                      phase:
+                        type: string
+                        description: "The screen pod's phase, as the kubelet reports it."
+                jellyfin:
+                  type: object
+                  description: "The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, its current phase, and when it finished. Present only while spec.jellyfin names a server."
+                  properties:
+                    server:
+                      type: string
+                      description: "The server address the backfill ran against, from spec.jellyfin.url. A Catalog that changes the address runs the backfill again against the new one."
+                    backfill:
+                      type: string
+                      description: "The backfill's current phase. Pending waits for every durable copy of the progress store to be up. Running means the Job is running. Failed means the Job failed past its backoff limit, and the operator deletes it and creates it again after a wait that doubles each time. Finished means the Job exited zero. To run the backfill again against the same server, clear status.jellyfin."
+                    backfilled:
+                      type: string
+                      format: date-time
+                      description: "When the backfill finished, in UTC. Absent until it did."
+                conditions:
+                  type: array
+                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check this entry reports, in CamelCase. It
+                          is the key of this list.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. True is the good verdict, and
+                          Unknown means the operator cannot tell yet.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition judged.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for why the condition holds
+                          this verdict, meant for a program to match on.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The same answer in a sentence a person reads.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the verdict last changed. It moves only
+                          when the status flips.

@@ -1,0 +1,593 @@
+package main
+
+// The operator's loop has the shape liken's own operators use:
+// level-triggered, woken by a watch, with a ticker as the backstop,
+// and a reconcile before the first event ever arrives.
+//
+// A pass reads the whole collection instead of acting on the object an
+// event carried. The event is only a wake. Every pass derives every
+// status from what the watches, the API server, and the report desk
+// hold right now, so a lost event costs at most one backstop tick, a
+// burst of events collapses into one pass, and a restarted operator
+// starts correct with no replay.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+)
+
+// The four image overrides. A variable that is set wins over the
+// image operatorimages.go derives from the operator's own pod, and
+// one that is unset derives.
+const (
+	scannerImageVariable   = "SCANNER_IMAGE"
+	corrosionImageVariable = "CORROSION_IMAGE"
+	browserImageVariable   = "BROWSER_IMAGE"
+	ffmpegImageVariable    = "FFMPEG_IMAGE"
+)
+
+// The name this operator answers to as an idle controller. A Player
+// whose status.idle.controller reads this gets a screen pod, and no other
+// Player does. media-operator writes the name; this operator only compares it.
+const screenController = "library.liken.sh/media-browser"
+
+// BackstopInterval is the loop's clock. The watches deliver every change
+// to the objects the pass reads (watch.go names the rules), and a report
+// that changes a decision wakes the pass at once (report.go), so the tick
+// finds no change that an event did not already deliver. A pass reads
+// every watched object from its store, so a tick that finds nothing due
+// sends the API server no request for them. It serves these clocks:
+//
+//   - The decisions that fall due with time and no event: a scan
+//     schedule, the backoff of a failed Job, of a cleanup Job, and of the
+//     Jellyfin backfill, the grace before a succeeded Job is deleted, the
+//     cadence of a provider check, the grace on an unschedulable screen,
+//     and the grace on a NotReady node. Without the tick, each waits for
+//     an unrelated wake.
+//   - The counts of a report that changes no decision, which fold holds
+//     for the next pass instead of waking one.
+//   - A patch that met a conflict: the next tick reads the object again
+//     and patches once more.
+//
+// A few reads are not from a store, because no watch can select them or
+// they run only when something falls due:
+//
+//   - The Secret each keyed MetadataProvider names, read only when a
+//     check of that provider is due (providercadence.go). A person names
+//     the Secret, and no label selects it, so no watch can select it
+//     without list and watch on every Secret in the cluster.
+//   - The events about a library Job's pod that has not started, while
+//     it has not started.
+//   - A StorageClass, read by name the first time a pass creates a claim
+//     on it, and the list of StorageClasses on a check of an imdb
+//     provider.
+//   - A claim read by name just before a recovery, a heal, or a
+//     departure deletes it.
+const backstopInterval = 10 * time.Second
+
+// PassTimeout bounds every request one pass makes. The pass owns the
+// context rather than taking the stop signal, so a shutdown lets the pass
+// in flight finish its writes, and the loop returns on the next turn. A
+// pass whose API server stops answering ends here, and the next pass
+// starts clean. It is a variable so a test drives a short timeout.
+var passTimeout = 30 * time.Second
+
+// Operator holds what every pass needs: the client it reads and writes
+// through, the settings it stamps into each pod and Job it
+// creates, the bus, and the desks the bus folds each message onto. They
+// are fields rather than globals so a test builds an operator around a
+// desk and a cluster it controls.
+type operator struct {
+	client         *Client
+	scannerImage   string
+	corrosionImage string
+	browserImage   string
+	// The image the phases that open a media file run on: the probe,
+	// trickplay, and the trailer files.
+	ffmpegImage string
+	// The household wall-clock zone the pass read last, which every screen
+	// pod it stands carries as TZ. Empty where the cluster states none.
+	timeZone string
+	// The household languages the pass read last. Every enricher the pass stands
+	// ranks a provider's answers by them.
+	languages []string
+
+	busAddress string
+	topicBase  string
+	bus        *Bus
+	reports    *reports
+
+	// The provider endpoint every reachability check calls, one per provider
+	// block, and the client it calls through, as fields so a test points them
+	// at a server of its own and no test reaches the internet.
+	providerBases  map[string]string
+	providerClient *http.Client
+	// The last call to each provider's check, which says whether the next pass
+	// calls it again. providercadence.go holds the rule.
+	providerCalls map[string]providerCall
+
+	// The namespace this operator runs in, which is what the
+	// webhook address it reports on every Library names, and the address
+	// its own webhook server listens on.
+	namespace      string
+	webhookAddress string
+
+	// Whether each namespace's reporter is on the bus, which is
+	// what "online" means for every Library of that namespace.
+	reporters *reporters
+
+	// The webhook paths the server holds for the next pass, one
+	// set per Library. A path becomes a scan Job on the pass that finds
+	// no full walk running.
+	paths *heldPaths
+
+	// The play requests the bus handler holds for the next pass. A
+	// screen's choice reaches the API server only here, because the
+	// screen pod holds no credential of its own.
+	plays *playRequests
+
+	// The marks the progress store publishes, folded by the bus handler
+	// and read by the pass: what each Play recorded, and which
+	// namespaces have forgotten a person.
+	marks *storeMarks
+
+	// What this operator last published on each retained progress
+	// topic, so a pass that changed nothing publishes nothing. The pass
+	// is its only reader and writer.
+	published map[string]string
+
+	// The base of media-operator's topic tree, which every progress
+	// pod reads each Play's position from. The operator passes it
+	// down, so a cluster that moved that tree names it once, here.
+	mediaTopicBase string
+
+	// Wake is the loop's own wake channel, and one channel serves the
+	// watches, the bus handler, and the webhook server, because a wake
+	// says nothing beyond "read the collection again".
+	wake chan struct{}
+
+	// The recreate backoff of each departing Library's cleanup Job,
+	// keyed the way the report desk keys a Library, and dropped when
+	// the Library goes.
+	cleanupStands map[string]cleanupStand
+
+	// the recreate backoff of each Catalog's Jellyfin backfill Job, keyed
+	// the same way, and dropped when the backfill finishes or the Catalog
+	// names no server.
+	backfillStands map[string]cleanupStand
+
+	// The backoff of each Library whose newest Job failed, keyed by the
+	// Library, so the curve survives the new name each Job takes.
+	failedStands map[string]cleanupStand
+
+	// The Libraries whose objects from an earlier release this process has
+	// deleted, keyed the way the report desk keys a Library.
+	legacyRetired map[string]bool
+
+	// Which of the classes this pass has read are served by the per-node
+	// driver, by class name. The pass clears it when it starts, so an
+	// answer is one pass old at most and the operator watches no
+	// storageclasses.
+	perNodeClasses map[string]bool
+
+	// The eight collections the operator watches, which the pass reads
+	// instead of listing them from the API server.
+	watched collections
+
+	// The resourceVersion of each Library, Catalog, and MetadataProvider
+	// the operator last wrote or read from the API server. Every write to
+	// the three kinds notes its answer here, and objectcache.go reads an
+	// object from the API server where the store's copy has another
+	// version (versionmemo.go says why).
+	versions objectVersions
+
+	// The claims, volumes, and pods the pass in flight read, which
+	// passreads.go holds the rule for. It is nil between passes, so a caller
+	// outside a pass reads each object by name.
+	reads *passReads
+
+	// The Prometheus registry and the address it answers on. A nil
+	// metrics or an empty address is the disabled state: run starts no
+	// listener, and every recording method on a nil metrics is a no-op,
+	// so a test that builds an operator by hand needs to set neither.
+	metrics        *metrics
+	metricsAddress string
+
+	// Where the lines of logline.go go: standard output in the process, and
+	// a buffer in a test that reads them. The mutex is logf's.
+	log      io.Writer
+	logMutex sync.Mutex
+}
+
+// NewOperator builds the operator and the two things it listens
+// through: the desk that holds each Library's newest report, and the
+// bus subscriptions that fill it. The subscriptions are remembered
+// here and sent on every connection, so they outlive a broker
+// restart.
+func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffmpegImage,
+	busAddress, topicBase, namespace, webhookAddress string) *operator {
+	wake := make(chan struct{}, 1)
+	library := &operator{
+		client:         client,
+		versions:       newObjectVersions(),
+		scannerImage:   scannerImage,
+		corrosionImage: corrosionImage,
+		browserImage:   browserImage,
+		ffmpegImage:    ffmpegImage,
+		busAddress:     busAddress,
+		topicBase:      topicBase,
+		namespace:      namespace,
+		webhookAddress: webhookAddress,
+		reports:        newReports(wake),
+		reporters:      newReporters(wake),
+		paths:          newHeldPaths(wake),
+		plays:          newPlayRequests(wake),
+		marks:          newStoreMarks(wake),
+		published:      map[string]string{},
+		mediaTopicBase: defaultMediaTopicBase,
+		wake:           wake,
+		cleanupStands:  map[string]cleanupStand{},
+		backfillStands: map[string]cleanupStand{},
+		failedStands:   map[string]cleanupStand{},
+		legacyRetired:  map[string]bool{},
+
+		perNodeClasses: map[string]bool{},
+		providerBases:  defaultProviderBases(),
+		providerClient: &http.Client{Timeout: providerCheckTimeout},
+		providerCalls:  map[string]providerCall{},
+		log:            os.Stdout,
+	}
+	// The operator names no will. Its one publish is the empty
+	// retained payload that drops a departed library's topics, and a
+	// will replaces nothing about that: there is no message of the
+	// operator's own that a broker should stand in for when the
+	// connection breaks.
+	library.bus = newBus(busAddress, "library-operator", nil, nil, library.handleBusMessage)
+	library.bus.Subscribe(libraryStatusFilter(topicBase))
+	library.bus.Subscribe(catalogAvailabilityFilter(topicBase))
+	library.bus.Subscribe(playRequestFilter(topicBase))
+	// The two marks the progress store publishes. The operator holds
+	// the credential, so every write the store's rows call for is made
+	// on the pass that reads these.
+	library.bus.Subscribe(playRecordedFilter(topicBase))
+	library.bus.Subscribe(personForgottenFilter(topicBase))
+	return library
+}
+
+// Pass reconciles every Library in the cluster against its namespace's
+// Catalog, then stands the catalog cluster of each namespace that holds
+// a Catalog. That is the namespace's work and not one Library's. A
+// failure on one object is reported and the pass continues, because one
+// library's broken claim must not freeze every other library's status.
+//
+// it stands the screen of every delegated Player as well, after the
+// libraries and before the catalog cluster, so the catalog step reads the
+// screen pods this pass created. A pod with no address yet reaches the
+// EndpointSlice on the pass after the kubelet gives it one.
+func (o *operator) pass() {
+	ctx, done := context.WithTimeout(context.Background(), passTimeout)
+	defer done()
+
+	// The class answers are this pass's own, so a class a person edits
+	// is read again on the next pass.
+	clear(o.perNodeClasses)
+
+	libraries, err := o.watched.readLibraries(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the libraries: %v\n", err)
+		return
+	}
+	// The Catalog decides whether a Library proceeds, so the pass reads
+	// the collection before it reconciles a Library, not after.
+	catalogs, err := o.watched.readCatalogs(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the catalogs: %v\n", err)
+		return
+	}
+	// The Players are read after the Catalogs and reported the same
+	// way, except that a failure here is not the end of the pass: a cluster
+	// with no media-operator serves no Players, and its libraries are still
+	// scanned and still reported.
+	players, err := o.watched.readPlayers()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the players: %v\n", err)
+		players = &PlayerList{}
+	}
+	// The household zone is one setting per cluster, read once for the
+	// pass and stamped on every screen pod it stands. A collection that
+	// has not been read reads as no zone, and the screens stay on UTC until the next pass.
+	preferences, err := o.watched.readMediaPreferences()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the media preferences: %v\n", err)
+		preferences = &MediaPreferencesList{}
+	}
+	o.timeZone = householdZone(preferences)
+	// The languages come off the same list, so one read per pass answers both
+	// fields.
+	o.languages = householdLanguages(preferences)
+	// The Jobs and the member pods are read once for the whole
+	// pass, because a Library's status reads both and the catalog step
+	// reads the pods again. The member pods include the pods of every
+	// library Job, because each one runs a catalog agent. A read that fails ends the pass: without the
+	// Jobs the pass cannot tell what is running, and without the pods it
+	// cannot tell whether a namespace's catalog stands.
+	jobs, err := o.watched.readWorkerJobs(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the worker jobs: %v\n", err)
+		return
+	}
+	members, err := o.watched.readMemberPods()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the catalog member pods: %v\n", err)
+		return
+	}
+	reads, err := readPass(o.watched)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the claims, volumes, and pods the pass stands: %v\n", err)
+		return
+	}
+	o.reads = reads
+	defer func() { o.reads = nil }()
+	// The providers of every namespace, read once per pass and called only when
+	// providercadence.go says their verdict can have changed. A
+	// cluster that has not applied the CRD serves no such collection, and its
+	// libraries are still scanned and still reported.
+	providers, err := o.watched.readMetadataProviders(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the metadata providers: %v\n", err)
+		providers = &MetadataProviderList{}
+	}
+	// The Plays and the people of the whole cluster, for the progress
+	// half of the pass. Each is read on the Players' terms:
+	// a cluster that runs no media-operator serves no Plays, and one
+	// that runs no people-operator serves no people, and its libraries
+	// are still scanned and still reported.
+	plays, err := o.watched.readPlays()
+	playsRead := err == nil
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the plays: %v\n", err)
+		plays = &PlayList{}
+	}
+	people, err := o.watched.readPeople()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the people: %v\n", err)
+		people = &PersonList{}
+	}
+	byNamespace := catalogsByNamespace(catalogs.Items)
+	// The namespaces a progress store stands in, which are the ones
+	// whose Plays the operator holds a finalizer on.
+	stores := storeNamespaces(byNamespace)
+	now := time.Now().UTC()
+	// The succeeded Jobs of every namespace go first, so what a person sees in
+	// kubectl get pods is what runs now and what failed.
+	o.retireSucceededJobs(ctx, jobs.Items, now)
+	checked := o.checkProviders(ctx, providers.Items, now)
+
+	live := make(map[string]bool, len(libraries.Items))
+	for index := range libraries.Items {
+		library := &libraries.Items[index]
+		namespace, name := library.Metadata.Namespace, library.Metadata.Name
+		live[libraryKey(namespace, name)] = true
+
+		choice := singleCatalog(byNamespace[namespace])
+		choice.pod = catalogPodOf(choice.catalog, members.Items)
+
+		// A deleting Library takes the departure and never the
+		// reconcile, because the reconcile would stand the schedule
+		// back up to rewrite the rows the sweep is deleting. Both count
+		// as one reconcile pass over one Library for layer 2, because
+		// both are this operator working the same resource kind.
+		started := time.Now()
+		if library.Metadata.deleting() {
+			err := o.depart(ctx, library, choice, jobs.Items)
+			o.metrics.observeReconcile(kindLibrary, time.Since(started), err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "departing library %s/%s: %v\n", namespace, name, err)
+			}
+			continue
+		}
+
+		err := o.reconcile(ctx, library, choice, jobs.Items, members.Items, checked, now)
+		o.metrics.observeReconcile(kindLibrary, time.Since(started), err)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n", namespace, name, err)
+		}
+	}
+	// The collection this pass read is the whole set of Libraries, so
+	// anything else the desk holds belongs to a Library that is gone.
+	// The pass clears the topics of every key it drops, because the
+	// desk holds a key only while a retained message stands on the
+	// bus: a report from before this operator cleared topics is
+	// standing there still. Only a pass may clear one, because
+	// the bus handler holds no Library list; the subscription
+	// delivers the litter, the desk holds it, and the next pass
+	// drops it.
+	for _, key := range o.reports.retain(live) {
+		namespace, name, _ := strings.Cut(key, "/")
+		o.clearLibraryTopics(namespace, name)
+		o.metrics.dropLibrary(name)
+	}
+	o.paths.retain(live)
+	for key := range o.cleanupStands {
+		if !live[key] {
+			delete(o.cleanupStands, key)
+		}
+	}
+	for key := range o.legacyRetired {
+		if !live[key] {
+			delete(o.legacyRetired, key)
+		}
+	}
+	// A restand key names a Library and a worker, so the Library it names is
+	// the part before the last separator.
+	for key := range o.failedStands {
+		if !live[key[:strings.LastIndex(key, "/")]] {
+			delete(o.failedStands, key)
+		}
+	}
+
+	// The screen pods come from the pass's one read of the pods it stands,
+	// so the pass deletes only a pod that stands.
+	screens := reads.screenPods()
+	for _, namespace := range screenNamespaces(players.Items) {
+		// A screen's catalog claim is sized and classed by the
+		// namespace's one Catalog, and a namespace with none, or with more
+		// than one, stands its screens on an emptyDir.
+		o.reconcileScreens(ctx, namespace, singleCatalog(byNamespace[namespace]).catalog,
+			players.Items, libraries.Items, people.Items, screens, now)
+	}
+	// The play requests are served last, on the collections this pass
+	// already read. A request is one moment: the pass creates its Play
+	// now or drops it, and the person presses again.
+	o.createPlays(ctx, players.Items, libraries.Items, people.Items, stores)
+	// The progress half runs on the Plays this pass read, so a Play the
+	// call above created is held and published on the next pass, after
+	// the API server has minted its name. The Plays go before the people,
+	// because a Person is released against what the stores answered about
+	// the Plays. A read of the Plays that failed
+	// skips the Plays: read as empty, it would clear the retained marks
+	// of every Play that still exists, and a deleting Play waits on its
+	// recorded mark to lose its finalizer.
+	if playsRead {
+		o.reconcilePlays(ctx, plays.Items, stores)
+	}
+	o.reconcilePeople(ctx, people.Items, stores, now)
+
+	o.reconcileCatalogs(ctx, byNamespace, members.Items, jobs.Items, now)
+
+	// The sweep goes last, after every reconcile, so a sweep the server
+	// refuses costs the pass its volume cleanup and nothing else.
+	if err := o.sweepReleasedVolumes(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "sweeping the released volumes: %v\n", err)
+	}
+}
+
+// HandleBusMessage folds one message from the broker onto the place
+// that holds it: a library report onto the desk, a play request onto
+// its queue. It runs on the bus reader's goroutine, so it does nothing
+// beyond the fold. A fold that changes what the pass reads raises the wake
+// that carries the message into the next pass, and a fold that changes
+// nothing the pass reads raises none.
+func (o *operator) handleBusMessage(topic string, payload []byte) {
+	// A play request is the one message that is not a report. It is
+	// held for the next pass, because creating a Play is a write and
+	// the bus reader's goroutine makes none.
+	if namespace, player, ok := parsePlayRequestTopic(o.topicBase, topic); ok {
+		o.readPlayRequest(namespace, player, topic, payload)
+		return
+	}
+	// The three marks the progress store publishes. Each is folded onto
+	// the desk the next pass reads, and an empty payload drops what the
+	// desk holds.
+	if namespace, name, kind, ok := parsePlayTopic(o.topicBase, topic); ok {
+		if kind == playRecordedKind {
+			foldMark("the recorded mark of "+playNamed(namespace, name), payload, func(recorded *playRecorded) {
+				o.marks.markRecorded(namespace, name, recorded)
+			})
+		}
+		return
+	}
+	if person, kind, namespace, ok := parsePersonTopic(o.topicBase, topic); ok {
+		if kind == personForgottenKind {
+			o.marks.markForgotten(person, namespace, len(payload) != 0)
+		}
+		return
+	}
+	// A namespace's reporter says online or offline on a topic of
+	// its own, and that one signal stands for every Library of the
+	// namespace.
+	if namespace, ok := parseCatalogAvailabilityTopic(o.topicBase, topic); ok {
+		if len(payload) != 0 {
+			o.reporters.mark(namespace, string(payload) == availabilityOnline)
+		}
+		return
+	}
+	namespace, name, kind, ok := parseLibraryTopic(o.topicBase, topic)
+	if !ok {
+		return
+	}
+	// An empty payload is how a retained topic is cleared, so it
+	// carries nothing to fold. The operator subscribes to the topics it
+	// clears, so its own clears come back to it, and folding one would
+	// put back the desk state the pass just dropped.
+	if len(payload) == 0 || kind != libraryStatusKind {
+		return
+	}
+	var report libraryReport
+	if err := json.Unmarshal(payload, &report); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the report on %s: %v\n", topic, err)
+		return
+	}
+	for _, run := range o.reports.fold(namespace, name, report) {
+		o.logRun(namespace, name, run)
+	}
+}
+
+// logRun writes the line of one run that ended: the Job, the worker, and
+// what it left, or the failure in the worker's own words. Only a walk counts
+// titles, so only a walk's line carries counts.
+func (o *operator) logRun(namespace, name string, run libraryRun) {
+	switch {
+	case run.Failure != "":
+		o.logf("library %s/%s: the job %s ended its %s run with a failure: %s",
+			namespace, name, run.Job, run.Worker, opaqueText(run.Failure))
+	case run.Worker == workerScan || run.Worker == workerRescan:
+		o.logf("library %s/%s: the job %s finished its %s run: %d unidentified, %d removed",
+			namespace, name, run.Job, run.Worker, run.Unidentified, run.Removed)
+	default:
+		o.logf("library %s/%s: the job %s finished its %s run", namespace, name, run.Job, run.Worker)
+	}
+}
+
+// collections is where the pass reads the eight collections the
+// operator watches. watch.go answers it from the informers, so a pass
+// sends no list for any of them. A collection that has not been read
+// answers the error of its last read.
+//
+// The three kinds the operator writes take the pass's context, because
+// objectcache.go reads one of them from the API server where the
+// store's copy is older than the operator's own write.
+type collections interface {
+	readLibraries(ctx context.Context) (*LibraryList, error)
+	readCatalogs(ctx context.Context) (*CatalogList, error)
+	readMemberPods() (*PodList, error)
+	readPlayers() (*PlayerList, error)
+	readMediaPreferences() (*MediaPreferencesList, error)
+	readMetadataProviders(ctx context.Context) (*MetadataProviderList, error)
+	readPlays() (*PlayList, error)
+	readPeople() (*PersonList, error)
+
+	// The objects the pass stands and the objects it reads to stand them.
+	// The pass reads each collection once when it starts (passreads.go).
+	readClaims() (*PersistentVolumeClaimList, error)
+	readVolumes() (*PersistentVolumeList, error)
+	readStoodPods() (*PodList, error)
+	readProgressMembers() (*PodList, error)
+	readWorkerJobs(ctx context.Context) (*JobList, error)
+	readNodes() (*NodeList, error)
+
+	// The objects of which the pass stands one by name, and writes only
+	// where it differs from the one the pass builds. An absent object is
+	// ErrNotFound.
+	readService(ctx context.Context, namespace, name string) (*Service, error)
+	readEndpointSlice(ctx context.Context, namespace, name string) (*EndpointSlice, error)
+	readConfigMap(ctx context.Context, namespace, name string) (*ConfigMap, error)
+	readClaimTemplate(ctx context.Context, namespace, name string) (*ResourceClaimTemplate, error)
+}
+
+// Poke never blocks, and the wake channel buffers exactly one. A wake
+// already queued says everything a second one would say, because the
+// pass that answers it reads the whole collection.
+func poke(wake chan<- struct{}) {
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}

@@ -1,0 +1,156 @@
+package main
+
+// identity.go rolls every name a title carries onto its one canonical id, so a
+// lookup by any of its provider ids or its folder key resolves the same work.
+// aliasesFor in rows.go covers the providers in the canonical order; this file
+// adds the rest, so a movie that also lists a tvdb id still resolves by it.
+
+import (
+	"iter"
+	"sort"
+)
+
+// aliasRowsForItem builds every alias an item carries. It starts with
+// aliasesFor, which reads the providers in the canonical order and the folder
+// key, then adds an alias for every other provider id the .nfo file named. The
+// extra providers are added in sorted order, so a re-walk of the same .nfo file
+// writes the same rows.
+func aliasRowsForItem(library, kind string, providerIDs map[string]string, folderKey, canonicalID string) []aliasRow {
+	rows := aliasesFor(library, kind, providerIDs, folderKey, canonicalID)
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.Alias] = true
+	}
+	extras := make([]string, 0, len(providerIDs))
+	for provider, value := range providerIDs {
+		if value == "" {
+			continue
+		}
+		alias := kind + ":" + provider + ":" + value
+		if !seen[alias] {
+			extras = append(extras, alias)
+		}
+	}
+	sort.Strings(extras)
+	for _, alias := range extras {
+		rows = append(rows, aliasRow{Alias: alias, Library: library, Item: canonicalID, Source: aliasSourceProvider})
+	}
+	return rows
+}
+
+// walkResult is what one walk read off the volume: the item rows per kind,
+// the file rows and their item links, the alias rows, the attempts the .liken
+// files record, and the two counts the report carries.
+type walkResult struct {
+	movies []movieRow
+	// No folder produces a set row. The full walk fills sets after its last
+	// folder, from the fold over every movie it read.
+	sets     []setRow
+	series   []seriesRow
+	episodes []episodeRow
+	files    []fileRow
+	// The streams of the files above, one row per stream, from the probe
+	// ledger the walk read beside them.
+	streams []streamRow
+	aliases []aliasRow
+	// The volume holds the attempts and the catalog only derives them, so a
+	// folder that left takes its attempts with it.
+	attempts []attemptRow
+	// The people, which no title folder holds. The credits of each title come off
+	// its own credits ledger, and the people themselves come off the walk of
+	// .contributors/ after the last title folder.
+	credits []creditRow
+	// The trailers of each title, off the trailer ledger the fact wrote, the way
+	// the credits come off theirs.
+	trailers []trailerRow
+	// The marks of each video file, off the marks ledger of the folder that
+	// holds the file, the way the streams come off the probe ledger.
+	marks        []markRow
+	contributors []contributorRow
+	// The ids of the people. Each row becomes one row of contributor_aliases
+	// and one row of contributor_ids.
+	contributorAliases []contributorAliasRow
+	// The entries a merge removed, one row each, which the walk reads in place
+	// of a person.
+	contributorMerges []contributorMergeRow
+	// The genres of each movie and series, in the .nfo file's order, derived
+	// from the .nfo file the way the attempts are derived from the ledgers.
+	genres []genreRow
+	// The three tables one franchise directory writes. The members and
+	// the runs key on the franchise and the position, so they travel with
+	// the franchises row that names them.
+	franchises       []franchiseRow
+	franchiseMembers []franchiseMemberRow
+	franchiseRuns    []franchiseRunRow
+	titles           int
+	unidentified     int
+	// the paths of the folders this walk could not identify, so a
+	// full walk names a sample of them in its log without holding every
+	// one. It carries one path per unidentified folder.
+	unidentifiedNames []string
+	// A walk that could not read a directory, an .nfo file, or a file read
+	// only part of the volume, whatever the depth of the failure. The
+	// prune-abort guard then skips the prune for this pass and keeps the
+	// rows the walk did not reach.
+	readError bool
+	// the directories the walk left unread, with the error each read
+	// returned. The mark above says only that some read failed, so the
+	// collector logs these to name the paths a person has to fix.
+	readFailures []walkReadFailure
+}
+
+// walkReadFailure is one directory the walk could not read: the path it
+// tried and the error the read returned.
+type walkReadFailure struct {
+	path string
+	err  error
+}
+
+// noteReadError folds one failed read into the walk's incomplete mark. A
+// folder the scanner could not read in full must never sweep as departed,
+// and the mark is what holds the prune back.
+func (r *walkResult) noteReadError(err error) {
+	if err != nil {
+		r.readError = true
+	}
+}
+
+// appendFolder folds one folder's rows into a running buffer, so the streaming
+// full walk gathers several folders before it writes them in one batch and never
+// holds the whole library.
+func appendFolder(buffer, folder *walkResult) {
+	buffer.movies = append(buffer.movies, folder.movies...)
+	buffer.series = append(buffer.series, folder.series...)
+	buffer.episodes = append(buffer.episodes, folder.episodes...)
+	buffer.files = append(buffer.files, folder.files...)
+	buffer.streams = append(buffer.streams, folder.streams...)
+	buffer.aliases = append(buffer.aliases, folder.aliases...)
+	buffer.attempts = append(buffer.attempts, folder.attempts...)
+	buffer.credits = append(buffer.credits, folder.credits...)
+	buffer.trailers = append(buffer.trailers, folder.trailers...)
+	buffer.marks = append(buffer.marks, folder.marks...)
+	buffer.contributors = append(buffer.contributors, folder.contributors...)
+	buffer.contributorAliases = append(buffer.contributorAliases, folder.contributorAliases...)
+	buffer.contributorMerges = append(buffer.contributorMerges, folder.contributorMerges...)
+	buffer.genres = append(buffer.genres, folder.genres...)
+	buffer.franchises = append(buffer.franchises, folder.franchises...)
+	buffer.franchiseMembers = append(buffer.franchiseMembers, folder.franchiseMembers...)
+	buffer.franchiseRuns = append(buffer.franchiseRuns, folder.franchiseRuns...)
+}
+
+// collectFolders reads a whole folder stream into one walkResult, with the
+// counts and the read-error signal. The tests and a small library read a root
+// this way.
+func collectFolders(folders iter.Seq[*walkResult]) *walkResult {
+	result := &walkResult{}
+	for folder := range folders {
+		appendFolder(result, folder)
+		result.titles += folder.titles
+		result.unidentified += folder.unidentified
+		if folder.readError {
+			result.readError = true
+		}
+		result.readFailures = append(result.readFailures, folder.readFailures...)
+	}
+	return result
+}

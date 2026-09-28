@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# Local/scan runs one scan Job against a directory of media on this
+# workstation, into the local Corrosion cluster local/catalog starts, so a
+# parser change shows in the catalog without a cluster. The Job exits when
+# the harness reporter publishes its run back, the same wait a Job makes in
+# the cluster.
+#
+# Usage:
+#   local/scan <media-directory> [kind]   walk the directory into the catalog;
+#                                         kind is movies (the default) or series
+#   local/scan <checkout-directory> franchises <art-directory>
+#                                         walk the checkout into the catalog
+#                                         as a franchises library, and
+#                                         download its art into the art
+#                                         directory
+set -euo pipefail
+
+# The repository is the directory above this file, so every path resolves
+# from this script's own directory and none is absolute.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/.." && pwd)"
+
+# The scanner runs from the image the root Dockerfile builds, not from a
+# go build on the workstation, so it runs the same bytes here and in the
+# cluster.
+image="library-operator:local"
+
+# The scanner posts to one local agent's HTTP API, the first the
+# local/catalog harness answers on. The other two replicate the writes,
+# so a read against any of them shows the walk.
+catalog_api="http://127.0.0.1:20081"
+
+# The cap on the run. The walk and the confirmation end the run, so this number
+# bounds only a Job that never reaches its last line.
+run_seconds="${RUN_SECONDS:-600}"
+
+# The mount point inside the container, the path the pod mounts the claim
+# at. The root is the whole mount, so the scanner reads the workstation
+# directory the way it reads a claim. Every kind mounts the directory
+# read-only, a franchises checkout included.
+container_mount="/library"
+
+# Where a franchises run writes the art it downloads, the path the pod
+# mounts the art claim at. It is a second workstation directory, because
+# the art outlives the run the way the art claim does.
+container_art="/art"
+
+usage() {
+  sed -n '8,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+media="${1:-}"
+kind="${2:-movies}"
+[ -n "$media" ] || usage
+
+# A franchises library names two directories: the first holds the
+# checkout, one directory per franchise, and the second stands in for the
+# art claim the scan downloads into. The checkout is mounted read-only, the
+# way every kind's storage is, and the art directory is mounted writable.
+art_mount=""
+if [ ! -d "$media" ]; then
+  echo "local/scan: $media is not a directory" >&2
+  exit 1
+fi
+media="$(cd "$media" && pwd)"
+source_volume=(--volume "$media:$container_mount:ro")
+if [ "$kind" = franchises ]; then
+  art="${3:-}"
+  [ -n "$art" ] || usage
+  if [ ! -d "$art" ]; then
+    echo "local/scan: $art is not a directory" >&2
+    exit 1
+  fi
+  art="$(cd "$art" && pwd)"
+  art_mount="$container_art"
+  source_volume+=(--volume "$art:$container_art")
+fi
+
+# The local cluster must be up, because the scanner writes through an
+# agent's API and reports nothing a read can find without one.
+if ! curl --silent --fail --max-time 2 \
+  --header 'content-type: application/json' \
+  --data '"SELECT 1"' "$catalog_api/v1/queries" >/dev/null 2>&1; then
+  echo "local/scan: no catalog agent answers on $catalog_api; run 'local/catalog up' first" >&2
+  exit 1
+fi
+
+# A missing image is built here rather than reported, and the build is
+# the same one CI runs.
+if [ -z "$(docker images --quiet "$image")" ]; then
+  echo "local/scan: building $image" >&2
+  docker build "$repo" --tag "$image" >&2
+fi
+
+# `--network host` puts the Job on loopback, where the catalog API
+# port is the address it uses. --user runs it as the person at the
+# keyboard, so it reads a media directory they own.
+#
+# The Job runs detached, because this script reads its log while it runs.
+echo "local/scan: walking $media as a $kind library into $catalog_api" >&2
+container="library-operator-scan-$$"
+docker run --detach --name "$container" \
+  --network host \
+  --user "$(id -u):$(id -g)" \
+  "${source_volume[@]}" \
+  --env LIBRARY_NAMESPACE=local \
+  --env LIBRARY_ART="$art_mount" \
+  --env LIBRARY_NAME="$kind" \
+  --env LIBRARY_KIND="$kind" \
+  --env LIBRARY_ROOT=/ \
+  --env LIBRARY_CATALOG_API="$catalog_api" \
+  --env JOB_NAME="$container" \
+  --env HANDOFF_TIMEOUT=2m \
+  "$image" scan >/dev/null
+
+# The Job exits on its own, and every way out of this script removes
+# what is left of its container. Only the trap calls cleanup, and
+# ShellCheck does not count a trap as a call.
+# shellcheck disable=SC2329
+cleanup() {
+  docker rm --force "$container" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+# The Job logs one line for the end of its walk, and that line
+# reports the prune as well. The log runs to the end of the container,
+# because the Job holds the container open until its run is confirmed.
+walk="capped"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >&2
+  case "$line" in
+    *"walk complete:"*)
+      walk="complete"
+      case "$line" in
+        *"prune deferred"*) walk="unpruned" ;;
+      esac
+      ;;
+    *"incomplete walk:"*)
+      walk="incomplete"
+      ;;
+  esac
+done < <(timeout --signal=TERM "$run_seconds" docker logs --follow "$container" 2>&1)
+
+# A container still running at the cap is a Job that did not finish,
+# and one that left carries the exit code the Job ended with: zero once the
+# a catalog pod has confirmed its run, and non-zero on a failed walk or a
+# confirmation that never came.
+job=1
+if [ -n "$(docker ps --quiet --filter "name=^${container}\$")" ]; then
+  echo "local/scan: the job did not finish within the RUN_SECONDS cap of ${run_seconds}s" >&2
+else
+  job="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || echo 1)"
+  if [ "$walk" = "capped" ]; then
+    walk="ended"
+  fi
+fi
+
+# A walk prunes only when it read the whole directory, so a run that
+# did not finish leaves the rows of every file that left the directory.
+case "$walk" in
+  complete) ;;
+  unpruned)
+    echo "local/scan: the walk finished and its prune did not run; rows for files that left $media are still in the catalog" >&2
+    ;;
+  incomplete)
+    echo "local/scan: the walk did not read all of $media, so it pruned nothing; rows for files that left $media are still in the catalog" >&2
+    ;;
+  ended)
+    echo "local/scan: the job ended before it finished a walk; the catalog holds what it wrote up to that point" >&2
+    ;;
+  capped)
+    echo "local/scan: the walk did not finish within the RUN_SECONDS cap of ${run_seconds}s, so it pruned nothing; rows for files that left $media are still in the catalog, and a longer RUN_SECONDS finishes the walk" >&2
+    ;;
+esac
+
+# The row count the walk left, read straight off the agent, so a person
+# sees the walk landed without opening the database.
+count="$(curl --silent --fail --max-time 5 \
+  --header 'content-type: application/json' \
+  --data "\"SELECT count(*) FROM $kind\"" \
+  "$catalog_api/v1/queries" 2>/dev/null | grep -o '\[[0-9]*\]' | head -1 || true)"
+echo "local/scan: the $kind table holds ${count:-an unknown number of} rows" >&2
+
+# The script ends with what the Job ended with, so a failed walk or
+# a confirmation that never came fails the run here too.
+exit "$job"

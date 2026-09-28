@@ -1,0 +1,128 @@
+# The browser at 4K
+
+Plan 45. The media browser lays out in logical pixels and decodes
+every piece of art at physical pixels, so a 4K panel at Weston's
+scale 2 shows the 1080p layout with art at the panel's full
+resolution. The same build stops the browser drawing under a film.
+
+## The problem
+
+The first `Player` on a home cluster drove a 4K television, and two
+things showed.
+
+The browser drew at half size. Display-operator plan 15 answers the
+layout: Weston states `scale=2` on the output, and iced lays the
+browser out in logical pixels. But every view asks the art store for
+art at the logical size of its slot. At scale 2 a 270-wide poster slot
+would get a 270-pixel decode stretched across 540 physical pixels,
+and the whole point of a 4K panel is the art.
+
+The browser drew sixty frames a second under every film. A `Play`
+press enters a loading state whose mark pulses, and while that state
+is active, the browser asks for a frame on every pass. The state ends
+only on the bus's `Present` or `Wake` moment, which arrives when the
+`Play` ends. The present mode is `AutoNoVsync` on purpose, because a
+FIFO surface blocks a covered client and it goes deaf. So for the
+length of the film the browser rendered a full 3840x2160 surface that
+nobody saw, and on an Alder Lake-N the film dropped half its frames.
+The bus already delivers a `Status` moment with the unit's activity,
+and the browser ignored it.
+
+## The contract
+
+- **Layout is logical, art is physical.** Every view keeps asking the
+  store for art at the logical size of its slot. The store multiplies
+  that size by the window's scale before it decodes, so the texture
+  it hands the canvas is one texel per physical pixel. The canvas
+  draws it into the logical bounds, and the result is 1:1 on the
+  panel. The disk cache keys on the physical size, so a 1080p run and
+  a 4K run of the same screen keep separate files.
+- **An image reports its logical size.** A contain fit answers the
+  size the decode landed at, and two views lay out from it. The image
+  reports that size in logical pixels, so those views place a logo the
+  same at either scale.
+- **The scale follows the window.** The harness tells the screen the
+  window's scale on every resize, the same place it builds the
+  viewport. A `--scale FACTOR` flag overrides the window's answer, for
+  a run on a machine whose compositor states 1. The pod never passes
+  it. It is a test knob, and `local/browse --size 3840x2160 --scale 2`
+  is the 4K panel on a laptop.
+- **A film covers the browser, and the harness draws nothing.** The
+  screen answers one question, whether something opaque covers its
+  surface. The browser answers yes on a `Status` whose activity is
+  `Playing`, and no again on the `Status` that returns to `Idle`, on
+  the `Wake`, and on the `Present`. While the answer is yes the
+  harness builds no frame at all: it leaves the screen's own schedule
+  unasked, holds the glass stale, and still folds every delivery,
+  takes the script's keys, and keeps the deadline. So nothing that
+  lands under the film draws, whether the loading pulse, an art
+  decode, a home page read, or the position the running `Play` writes
+  to the progress store every second. The first frame after the cover
+  lifts draws everything that changed. One gate in the loop, not one
+  guard per source, because every source found later would otherwise
+  need its own. The loading state stays where it is, so the `Present`
+  at the end of the film still runs the return motion.
+- **The return waits for the surface.** A `Present` asks the harness
+  for a fresh window. The harness draws the first frame on that window
+  as the page stood, and tells the screen the surface is up after that
+  frame is presented, with the clock at that moment. The return starts
+  on the frame after. The return runs on the clock, a compositor takes
+  its own time to map a window, and the first frame on a fresh surface
+  is the slow one, so a return started at the `Present`, or at the
+  window's creation, ran out before the first frame anyone saw. That is
+  why the return was never seen on a home cluster's `Player`, and then seen
+  only as a jump.
+- **The mark fades in place, and the head draws the curtain's logo.**
+  The loading state's mark fades in under the centre and fades out
+  there, at the state's own share, while the title's logo slides from
+  the head to the centre past it. The departure and the return both
+  take 0.4 seconds, so the two read as one motion. A page's head
+  decodes its logo at the curtain's centre size and draws it scaled
+  down into its own box, so the head and the state draw one decode,
+  and the state never falls back to the title's text while a second
+  decode lands. That fallback was the flicker on a home cluster's `Player`:
+  the logo, then the name in type, then the logo again.
+- **The memory budget follows the window.** The store's in-memory
+  budget is computed from the window's physical size on every resize,
+  the same count of posters and backdrops at the size the panel draws
+  them. The pod passes no window size, so a budget fixed at the
+  default 1080p held too little at 4K to draw one series page: every
+  delivery evicted art the page still drew, and the decodes never
+  ended. The art claim keeps its size.
+
+## What was considered
+
+- **Every view multiplies by the scale itself.** Each of the store's
+  callers could pass a physical size. There are a dozen callers, and
+  every new view would have to remember. One multiplication in the
+  store is the rule stated once.
+- **A present mode that waits for frame callbacks.** FIFO would make
+  the compositor pace the browser, and a covered surface gets no
+  callbacks, so the browser would stop drawing by itself. Media plan
+  20 measured that: a FIFO client under a film blocks in present and
+  stops folding the bus, so a press arrives seconds late. Mailbox with
+  a paced loop is the design, and the pace has to know when to stop.
+- **A timeout on the loading state.** The pulse could run for a few
+  seconds and then hold. That stops the waste without a bus change,
+  but it guesses at how long a `Play` takes to cover the screen, and
+  the `Status` moment already says so.
+
+## The proof
+
+Local, on a workstation, before any push:
+
+1. `local/browse --size 3840x2160 --scale 2 --headless --capture`
+   draws the home page with the 1080p layout and poster textures at
+   twice the slot size. The captures at scale 1 and scale 2 lay out
+   the same.
+2. The unit tests state the store's multiplication, the image's
+   logical size, and the covered schedule: a `Status` of `Playing`
+   answers no frame, and `Present` answers one.
+
+On the living room `Player`, on a dev build, with display plan 15:
+
+3. The home page lays out as at 1080p and the art is sharp.
+4. Start a film from the browser. The browser's CPU stays near its
+   idle level for the length of the film, and mpv drops no frames.
+5. Read the browser's memory at the end of the film and write it
+   here.

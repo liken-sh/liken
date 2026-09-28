@@ -1,0 +1,648 @@
+package main
+
+// These tests walk the testdata movies tree, so the
+// grouping-folder descent, the .nfo file and name identities, the file
+// attributes, and the unidentified count are proved against real files.
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"testing"
+)
+
+// moviesByTitle indexes a walk's movie rows by title, so a test reads
+// one title without depending on the order the walk read the volume in.
+func moviesByTitle(result *walkResult) map[string]movieRow {
+	index := map[string]movieRow{}
+	for _, row := range result.movies {
+		index[row.Title] = row
+	}
+	return index
+}
+
+// fileByItem finds the first file row linked to an item.
+func fileByItem(result *walkResult, item string) (fileRow, bool) {
+	for _, row := range result.files {
+		for _, held := range row.Items {
+			if held == item {
+				return row, true
+			}
+		}
+	}
+	return fileRow{}, false
+}
+
+// filesByPath indexes a walk's file rows by path, so a test reads one
+// file without depending on the order the walk read the folder in.
+func filesByPath(result *walkResult) map[string]fileRow {
+	index := map[string]fileRow{}
+	for _, row := range result.files {
+		index[row.Path] = row
+	}
+	return index
+}
+
+// Every file a title folder holds is one classified row, and the junk a
+// desktop or a storage appliance leaves is no row at all.
+func TestWalkMoviesReadsEveryFileTheTitleCarries(t *testing.T) {
+	result := walkMovies("testdata/movies", "house/movies", nil)
+	files := filesByPath(result)
+	film := filepath.Join("Action", "Some Film (1999)")
+
+	cases := []struct {
+		path         string
+		wantType     string
+		wantRole     string
+		wantLanguage string
+	}{
+		{path: "Some Film (1999).mkv", wantType: fileTypeVideo, wantRole: fileRolePrimary},
+		{path: "movie.nfo", wantType: fileTypeMetadata, wantRole: fileRoleMovie},
+		{path: "folder.jpg", wantType: fileTypeImage, wantRole: fileRolePoster},
+		{path: "backdrop.jpg", wantType: fileTypeImage, wantRole: fileRoleBackdrop},
+		{path: "logo.png", wantType: fileTypeImage, wantRole: fileRoleLogo},
+		{path: "Some Film (1999).en.srt", wantType: fileTypeSubtitle, wantRole: fileRoleFull, wantLanguage: "en"},
+		{path: "Some Film (1999).fr.forced.srt", wantType: fileTypeSubtitle, wantRole: fileRoleForced, wantLanguage: "fr"},
+		{path: "Some Film (1999).trickplay", wantType: fileTypeTrickplay, wantRole: fileRoleTiles},
+		{path: filepath.Join("Extras", "Some Film (1999)-trailer.mkv"), wantType: fileTypeVideo, wantRole: fileRoleTrailer},
+		{path: filepath.Join("Extras", "Making Of.mkv"), wantType: fileTypeVideo, wantRole: fileRoleExtra},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.path, func(t *testing.T) {
+			row, held := files[filepath.Join(film, testCase.path)]
+			if !held {
+				t.Fatalf("the walk read no row for %s", testCase.path)
+			}
+			if row.Type != testCase.wantType || row.Role != testCase.wantRole || row.Language != testCase.wantLanguage {
+				t.Errorf("class = %s/%s/%s, want %s/%s/%s",
+					row.Type, row.Role, row.Language, testCase.wantType, testCase.wantRole, testCase.wantLanguage)
+			}
+			if row.Items[0] != "movie:tmdb:1001" {
+				t.Errorf("items = %v, want the movie the folder holds", row.Items)
+			}
+			if row.Library != "house/movies" || !row.Present {
+				t.Errorf("row = %+v, want it in this library and present", row)
+			}
+			if row.SizeBytes == 0 || row.Modified == 0 {
+				t.Errorf("size = %d, modified = %d, want both from the walk's own stat", row.SizeBytes, row.Modified)
+			}
+		})
+	}
+
+	for _, junk := range []string{"Thumbs.db", ".DS_Store", filepath.Join("Some Film (1999).trickplay", "1.jpg")} {
+		if _, held := files[filepath.Join(film, junk)]; held {
+			t.Errorf("the walk cataloged %s, which is no part of the title", junk)
+		}
+	}
+}
+
+// A title folder whose only extra files are junk yields the title and its
+// video, and no row for the junk.
+func TestWalkMoviesReadsNoRowFromAFolderOfJunk(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Thumbs.db"), "junk")
+	writeFile(t, filepath.Join(dir, "desktop.ini"), "junk")
+	writeFile(t, filepath.Join(dir, ".DS_Store"), "junk")
+
+	result := walkMovies(root, "house/movies", nil)
+	if len(result.files) != 1 {
+		t.Errorf("files = %v, want only the video", filesByPath(result))
+	}
+}
+
+// The walk reads a title folder and the extras folders under it, and goes no
+// deeper, so a folder whose name is outside the extras set yields no rows.
+func TestWalkMoviesDescendsNoFurtherThanAnExtrasFolder(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "Grey Lantern.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Subs", "Grey Lantern.en.srt"), "subtitle")
+	writeFile(t, filepath.Join(dir, "Extras", "Making Of.mkv"), "video")
+
+	files := filesByPath(walkMovies(root, "house/movies", nil))
+	if _, held := files[filepath.Join("Grey Lantern (1972)", "Subs", "Grey Lantern.en.srt")]; held {
+		t.Errorf("files = %v, want nothing from a folder outside the extras set", files)
+	}
+	if _, held := files[filepath.Join("Grey Lantern (1972)", "Extras", "Making Of.mkv")]; !held {
+		t.Errorf("files = %v, want the extras folder read", files)
+	}
+}
+
+func TestWalkMoviesCountsAndIdentifies(t *testing.T) {
+	result := walkMovies("testdata/movies", "house/movies", nil)
+
+	if result.titles != 3 {
+		t.Errorf("titles = %d, want 3", result.titles)
+	}
+	if result.unidentified != 1 {
+		t.Errorf("unidentified = %d, want 1 (Mystery Folder)", result.unidentified)
+	}
+
+	movies := moviesByTitle(result)
+	film, held := movies["Some Film"]
+	if !held {
+		t.Fatal("the walk did not read Some Film under the Action grouping folder")
+	}
+	if film.Id != "movie:tmdb:1001" {
+		t.Errorf("id = %q, want movie:tmdb:1001", film.Id)
+	}
+	if film.Slug != "some-film-1999" || film.SortKey != "Some Film" {
+		t.Errorf("slug/sort = %q %q", film.Slug, film.SortKey)
+	}
+	if film.Path != filepath.Join("Action", "Some Film (1999)") {
+		t.Errorf("path = %q, want the folder relative to the root", film.Path)
+	}
+	if film.Art != filepath.Join("Action", "Some Film (1999)", "folder.jpg") {
+		t.Errorf("art = %q, want folder.jpg relative to the root", film.Art)
+	}
+	if film.Duration != 8160 {
+		t.Errorf("duration = %d, want the streamdetails runtime", film.Duration)
+	}
+	if film.Body.Collection != "Some Film Collection" {
+		t.Errorf("collection = %q", film.Body.Collection)
+	}
+}
+
+// The art the movie row carries is the art the file rows of the same
+// folder carry, so a folder whose only poster is name-prefixed is browsable.
+func TestWalkMoviesReadsNamePrefixedArt(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972).mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972)-poster.jpg"), "image")
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972)-fanart.jpg"), "image")
+
+	result := walkMovies(root, "house/movies", nil)
+	movies := moviesByTitle(result)
+	lantern, held := movies["Grey Lantern"]
+	if !held {
+		t.Fatal("the walk did not read Grey Lantern")
+	}
+	poster := filepath.Join("Grey Lantern (1972)", "Grey Lantern (1972)-poster.jpg")
+	if lantern.Art != poster {
+		t.Errorf("art = %q, want %q", lantern.Art, poster)
+	}
+	want := []string{poster, filepath.Join("Grey Lantern (1972)", "Grey Lantern (1972)-fanart.jpg")}
+	if !reflect.DeepEqual(lantern.Arts, want) {
+		t.Errorf("arts = %v, want %v", lantern.Arts, want)
+	}
+	files := filesByPath(result)
+	if row := files[poster]; row.Role != fileRolePoster {
+		t.Errorf("the poster's file row is %q, and the item's art is the same file", row.Role)
+	}
+}
+
+func TestWalkMoviesReadsFileAttributesFromStreamdetails(t *testing.T) {
+	result := walkMovies("testdata/movies", "house/movies", nil)
+	file, held := fileByItem(result, "movie:tmdb:1001")
+	if !held {
+		t.Fatal("Some Film has no file linked")
+	}
+	if file.Width != 1920 || file.Height != 1080 || file.VideoCodec != "h264" || file.AudioCodec != "dts" {
+		t.Errorf("attributes = %dx%d %s/%s, want the streamdetails values", file.Width, file.Height, file.VideoCodec, file.AudioCodec)
+	}
+	if file.Container != "mkv" {
+		t.Errorf("container = %q, want mkv", file.Container)
+	}
+	if file.Trickplay == "" {
+		t.Error("the file has no trickplay path")
+	}
+	if !file.Present {
+		t.Error("the file is not marked present")
+	}
+}
+
+func TestWalkMoviesReadsResolutionFromTheNameWithoutAnNFO(t *testing.T) {
+	result := walkMovies("testdata/movies", "house/movies", nil)
+	movies := moviesByTitle(result)
+	survey, held := movies["The Long Survey"]
+	if !held {
+		t.Fatal("the walk did not read The Long Survey from its release-name folder")
+	}
+	if survey.Id != "movie:path:the-long-survey-1982-1080p-bluray-x264-group" {
+		t.Errorf("id = %q, want a path-scoped id", survey.Id)
+	}
+	file, _ := fileByItem(result, survey.Id)
+	if file.Width != 1920 || file.Height != 1080 {
+		t.Errorf("resolution = %dx%d, want the 1080p token from the name", file.Width, file.Height)
+	}
+}
+
+func TestWalkMoviesCatalogsAnUnidentifiedFolderByName(t *testing.T) {
+	result := walkMovies("testdata/movies", "house/movies", nil)
+	movies := moviesByTitle(result)
+	mystery, held := movies["Mystery Folder"]
+	if !held {
+		t.Fatal("the unidentified folder was not cataloged by its name")
+	}
+	if mystery.Id != "movie:path:mystery-folder" {
+		t.Errorf("id = %q, want a path-scoped id", mystery.Id)
+	}
+}
+
+func TestWalkMoviesEmitsEveryProviderAlias(t *testing.T) {
+	result := walkMovies("testdata/movies", "house/movies", nil)
+	aliases := map[string]string{}
+	for _, row := range result.aliases {
+		aliases[row.Alias] = row.Item
+	}
+	// Some Film lists a tvdb id outside the canonical movie order, and
+	// it still rolls onto the canonical id, so a lookup by it resolves.
+	if aliases["movie:tvdb:12345"] != "movie:tmdb:1001" {
+		t.Errorf("tvdb alias = %q, want it to resolve Some Film", aliases["movie:tvdb:12345"])
+	}
+	if aliases["movie:imdb:tt9001001"] != "movie:tmdb:1001" {
+		t.Errorf("imdb alias = %q", aliases["movie:imdb:tt9001001"])
+	}
+	if aliases["movie:path:some-film-1999"] != "movie:tmdb:1001" {
+		t.Errorf("folder alias = %q", aliases["movie:path:some-film-1999"])
+	}
+}
+
+func TestWalkMoviesOnAMissingRoot(t *testing.T) {
+	result := walkMovies("testdata/does-not-exist", "house/movies", nil)
+	if result.titles != 0 || len(result.movies) != 0 {
+		t.Errorf("result = %+v, want an empty walk", result)
+	}
+}
+
+// A loose file at the root is skipped, and a root-level title folder
+// with a movie.nfo is read as a title, so the walk reads both shapes
+// the root can hold.
+func TestWalkMoviesReadsARootLevelNFOTitle(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "readme.txt"), "not a title")
+	writeFile(t, filepath.Join(root, "Grey Lantern (1972)", "movie.nfo"), `<movie><title>Grey Lantern</title><year>1972</year><uniqueid type="tmdb">1072</uniqueid></movie>`)
+	writeFile(t, filepath.Join(root, "Grey Lantern (1972)", "Grey Lantern.mkv"), "video")
+
+	result := walkMovies(root, "house/movies", nil)
+	if result.titles != 1 {
+		t.Fatalf("titles = %d, want the one .nfo file title and not the loose file", result.titles)
+	}
+	if result.movies[0].Id != "movie:tmdb:1072" {
+		t.Errorf("id = %q, want the .nfo file's id", result.movies[0].Id)
+	}
+}
+
+// A folder named in the ignore list, and everything under it, is left
+// out of the walk, while a nil set catalogs it. The ignore list is what a
+// Library declares about its own volume. The service directories are skipped
+// by name whatever the ignore list holds, so a recycle bin stays off the
+// catalog with no configuration.
+func TestWalkMoviesSkipsIgnoredFolders(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Some Film (1999)", "movie.nfo"), `<movie><title>Some Film</title><year>1999</year></movie>`)
+	writeFile(t, filepath.Join(root, "Archive", "Old Movie (2001)", "old.mkv"), "video")
+	writeFile(t, filepath.Join(root, "#recycle", "Deleted Movie (2002)", "gone.mkv"), "video")
+
+	kept := walkMovies(root, "house/movies", ignoreSet{"Archive": true})
+	if kept.titles != 1 {
+		t.Fatalf("titles = %d, want only the title outside the ignored folder", kept.titles)
+	}
+	if kept.movies[0].Title != "Some Film" {
+		t.Errorf("title = %q, want Some Film", kept.movies[0].Title)
+	}
+
+	all := walkMovies(root, "house/movies", nil)
+	if all.titles != 2 {
+		t.Errorf("titles with no ignore = %d, want both, including the archived folder", all.titles)
+	}
+	for _, movie := range all.movies {
+		if movie.Title == "Deleted Movie" {
+			t.Errorf("the walk read %q from the recycle bin", movie.Title)
+		}
+	}
+}
+
+// A title nested under two grouping folders, genre then studio, is still
+// found. The walk descends through a folder that has no movie.nfo and no
+// video rather than cataloging it as a title, so a studio folder is a path
+// on the way to a film, not a film itself.
+func TestWalkMoviesDescendsThroughNestedGroupingFolders(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Genre", "Studio", "The Relay Tower (2024)", "movie.nfo"),
+		`<movie><title>The Relay Tower</title><year>2024</year><uniqueid type="tmdb">424242</uniqueid></movie>`)
+	writeFile(t, filepath.Join(root, "Genre", "Studio", "The Relay Tower (2024)", "The Relay Tower.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Genre", "The Far Beacon (2019)", "The Far Beacon.mkv"), "video")
+
+	result := walkMovies(root, "house/movies", nil)
+	if result.titles != 2 {
+		t.Fatalf("titles = %d, want the deep title and the shallow one, not the grouping folders", result.titles)
+	}
+	titles := moviesByTitle(result)
+	if _, grouped := titles["Studio"]; grouped {
+		t.Errorf("the studio grouping folder was cataloged as a title")
+	}
+	nested, found := titles["The Relay Tower"]
+	if !found {
+		t.Fatalf("the title two grouping folders down was not found")
+	}
+	if nested.Path != filepath.Join("Genre", "Studio", "The Relay Tower (2024)") {
+		t.Errorf("path = %q, want the folder relative to the root", nested.Path)
+	}
+}
+
+// A title with no .nfo file is an ordinary title with no provider id:
+// the walk falls back to the folder name and reads the volume in full.
+func TestAMovieWithNoNFOKeepsThePathIdentity(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Grey Lantern (1972)", "movie.mkv"), "video")
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if result.readError {
+		t.Error("a title with no .nfo file marked the walk incomplete")
+	}
+	if len(result.movies) != 1 || result.movies[0].Id != "movie:path:grey-lantern-1972" {
+		t.Errorf("movies = %+v, want the path-derived id", result.movies)
+	}
+}
+
+// An .nfo file that the scanner cannot read is not the same as a missing .nfo
+// file. The fall-back would make a path-derived id for a title the catalog
+// holds under its provider id, and the sweep would then delete the
+// provider-derived rows. The walk marks itself incomplete instead, and
+// the prune stands down.
+func TestAnUnreadableMovieNFOMarksTheWalkIncomplete(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+	// A directory in the .nfo file's place is a read that fails for a
+	// reason other than an absent file, on every filesystem and for any
+	// user.
+	if err := os.MkdirAll(filepath.Join(dir, "movie.nfo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if !result.readError {
+		t.Error("an .nfo file that could not be read left the walk complete")
+	}
+}
+
+// A hidden AppleDouble stub is a resource fork a storage appliance
+// leaves beside a video, and never a video the catalog holds. It sorts
+// before the video it shadows, so a walk that read it would make it the
+// primary file.
+func TestTheWalkSkipsAppleDoubleStubs(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "._Grey Lantern.mkv"), "resource fork")
+	writeFile(t, filepath.Join(dir, "Grey Lantern.mkv"), "video")
+
+	files := filesByPath(walkMovies(root, "house/movies", nil))
+
+	if _, held := files[filepath.Join("Grey Lantern (1972)", "._Grey Lantern.mkv")]; held {
+		t.Errorf("files = %v, want no row for the AppleDouble stub", files)
+	}
+	if _, held := files[filepath.Join("Grey Lantern (1972)", "Grey Lantern.mkv")]; !held {
+		t.Errorf("files = %v, want the video itself", files)
+	}
+}
+
+// A folder holding nothing but AppleDouble stubs is no title folder, so
+// the walk reads it as a grouping folder and mints no title.
+func TestAFolderOfAppleDoubleStubsIsNoTitle(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Grey Lantern (1972)", "._Grey Lantern.mkv"), "resource fork")
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.movies) != 0 {
+		t.Errorf("movies = %+v, want no title from a folder of stubs", result.movies)
+	}
+}
+
+// A folder whose .nfo file could not be read writes no row this pass. A
+// row read from the folder name would carry a path-derived id beside the
+// provider-derived one the catalog already holds, and a browser would
+// then draw the title twice.
+func TestAnUnreadableNFOWritesNoRow(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+	if err := os.MkdirAll(filepath.Join(dir, "movie.nfo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.movies) != 0 {
+		t.Errorf("movies = %+v, want no row from a folder with no identity", result.movies)
+	}
+	if len(result.files) != 0 {
+		t.Errorf("files = %+v, want no file row either", result.files)
+	}
+}
+
+// streamNFO is the .nfo file the probe writes for one video: the root element
+// the scanner reads, and the stream details inside it. The root is the
+// caller's, because the probe writes movie in a movies library and
+// episodedetails in a series library.
+func streamNFO(rootElement, title, videoCodec, audioCodec string, width, height, seconds int) string {
+	return `<` + rootElement + `><title>` + title + `</title><fileinfo><streamdetails>` +
+		`<video><codec>` + videoCodec + `</codec>` +
+		`<width>` + strconv.Itoa(width) + `</width>` +
+		`<height>` + strconv.Itoa(height) + `</height>` +
+		`<durationinseconds>` + strconv.Itoa(seconds) + `</durationinseconds></video>` +
+		`<audio><codec>` + audioCodec + `</codec></audio>` +
+		`</streamdetails></fileinfo></` + rootElement + `>`
+}
+
+// partedMovieFolder holds every shape the .nfo file rule covers: the first
+// video, which the folder's own movie.nfo describes, a second video with its
+// own .nfo file, a second video with none, and an extra with its own.
+func partedMovieFolder(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "movie.nfo"), streamNFO(nfoRootMovie, "Grey Lantern", "h264", "dts", 1920, 1080, 8000))
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972) - part1.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972) - part2.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972) - part2.nfo"),
+		streamNFO(nfoRootMovie, "Grey Lantern", "hevc", "eac3", 3840, 2160, 3000))
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972) - part3.720p.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Extras", "Making Of.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Extras", "Making Of.nfo"),
+		streamNFO(nfoRootMovie, "Making Of", "mpeg4", "mp3", 640, 480, 600))
+	return root
+}
+
+// Every video reads the .nfo file the probe wrote for it, and a video with no
+// .nfo file still reads its name.
+func TestEveryVideoReadsTheNFOBesideIt(t *testing.T) {
+	files := filesByPath(walkMovies(partedMovieFolder(t), "house/movies", nil))
+
+	cases := []struct {
+		name           string
+		path           string
+		wantWidth      int
+		wantHeight     int
+		wantVideoCodec string
+		wantDurationMs int64
+	}{
+		{name: "the first video reads the folder's movie.nfo",
+			path: "Grey Lantern (1972) - part1.mkv", wantWidth: 1920, wantHeight: 1080,
+			wantVideoCodec: "h264", wantDurationMs: 8000000},
+		{name: "a second video reads its own .nfo file",
+			path: "Grey Lantern (1972) - part2.mkv", wantWidth: 3840, wantHeight: 2160,
+			wantVideoCodec: "hevc", wantDurationMs: 3000000},
+		{name: "a video with no .nfo file reads its name",
+			path: "Grey Lantern (1972) - part3.720p.mkv", wantWidth: 1280, wantHeight: 720},
+		{name: "an extra reads its own .nfo file",
+			path: filepath.Join("Extras", "Making Of.mkv"), wantWidth: 640, wantHeight: 480,
+			wantVideoCodec: "mpeg4", wantDurationMs: 600000},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			row := files[filepath.Join("Grey Lantern (1972)", test.path)]
+
+			if row.Width != test.wantWidth || row.Height != test.wantHeight ||
+				row.VideoCodec != test.wantVideoCodec || row.DurationMs != test.wantDurationMs {
+				t.Errorf("attributes = %dx%d %s %dms, want %dx%d %s %dms",
+					row.Width, row.Height, row.VideoCodec, row.DurationMs,
+					test.wantWidth, test.wantHeight, test.wantVideoCodec, test.wantDurationMs)
+			}
+		})
+	}
+}
+
+// A per-file .nfo file that the scanner cannot read marks the walk incomplete,
+// the way an unreadable movie.nfo does, so the prune stands down.
+func TestAnUnreadablePerFileNFOMarksTheWalkIncomplete(t *testing.T) {
+	cases := []struct {
+		name string
+		nfo  string
+	}{
+		{name: "beside a second video", nfo: "Grey Lantern (1972) - part2.nfo"},
+		{name: "inside an extras folder", nfo: filepath.Join("Extras", "Making Of.nfo")},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := partedMovieFolder(t)
+			nfoPath := filepath.Join(root, "Grey Lantern (1972)", test.nfo)
+			// A directory in the .nfo file's place is a read that fails for a
+			// reason other than an absent file, on every filesystem and for any
+			// user.
+			if err := os.RemoveAll(nfoPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(nfoPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			if result := walkMovies(root, "house/movies", nil); !result.readError {
+				t.Error("an .nfo file that could not be read left the walk complete")
+			}
+		})
+	}
+}
+
+// A folder with an extras name that holds video files is an extras folder
+// wherever it is, so the walk reads no title from it and nothing under it. A
+// person with the 2016 film Trailers names its folder Trailers (2016), which
+// is not the bare word.
+func TestWalkMoviesReadsNoTitleFromAnExtrasFolderAtTheRoot(t *testing.T) {
+	cases := []struct {
+		name   string
+		folder string
+	}{
+		{name: "the folder a trailer pull writes", folder: "trailers"},
+		{name: "the same name in Jellyfin's own case", folder: "Trailers"},
+		{name: "an extras folder", folder: "Extras"},
+		{name: "a featurettes folder", folder: "featurettes"},
+		{name: "a title whose name carries its year", folder: "Trailers (2016)"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, test.folder, "Official Trailer.mp4"), "video")
+			writeFile(t, filepath.Join(root, "Grey Lantern (1972)", "Grey Lantern.mkv"), "video")
+
+			result := walkMovies(root, "house/movies", nil)
+
+			wantTitles := 1
+			if test.folder == "Trailers (2016)" {
+				wantTitles = 2
+			}
+			if result.titles != wantTitles {
+				t.Errorf("titles = %d, want %d", result.titles, wantTitles)
+			}
+			_, held := filesByPath(result)[filepath.Join(test.folder, "Official Trailer.mp4")]
+			if held != (wantTitles == 2) {
+				t.Errorf("the walk cataloged %s under %s, want %v",
+					"Official Trailer.mp4", test.folder, wantTitles == 2)
+			}
+		})
+	}
+}
+
+// The .nfo file and the tiles an earlier run left beside a pulled trailer are
+// rows of the title that holds them, and the walk removes neither.
+func TestWalkMoviesReadsTheNFOAndTheTilesBesideAPulledTrailer(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "Grey Lantern.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "trailers", "Official Trailer.mp4"), "video")
+	writeFile(t, filepath.Join(dir, "trailers", "Official Trailer.nfo"), "<movie><title>Official Trailer</title></movie>")
+	writeFile(t, filepath.Join(dir, "trailers", "Official Trailer.trickplay", "0.jpg"), "tile")
+
+	files := filesByPath(walkMovies(root, "house/movies", nil))
+
+	cases := []struct {
+		path     string
+		wantType string
+		wantRole string
+	}{
+		{path: "Official Trailer.mp4", wantType: fileTypeVideo, wantRole: fileRoleTrailer},
+		{path: "Official Trailer.nfo", wantType: fileTypeMetadata, wantRole: fileRoleMovie},
+		{path: "Official Trailer.trickplay", wantType: fileTypeTrickplay, wantRole: fileRoleTiles},
+	}
+	for _, test := range cases {
+		t.Run(test.path, func(t *testing.T) {
+			row, held := files[filepath.Join("Grey Lantern (1972)", "trailers", test.path)]
+			if !held {
+				t.Fatalf("the walk read no row for %s", test.path)
+			}
+			if row.Type != test.wantType || row.Role != test.wantRole {
+				t.Errorf("class = %s/%s, want %s/%s", row.Type, row.Role, test.wantType, test.wantRole)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "trailers", test.path)); err != nil {
+				t.Errorf("the walk did not leave %s on the volume: %v", test.path, err)
+			}
+		})
+	}
+}
+
+// A folder with an extras name that holds no video file of its own is a
+// grouping folder, so a volume that groups by genre keeps its Shorts and its
+// Extras, and the walk reads the titles under them.
+func TestWalkMoviesDescendsIntoAGroupingFolderWithAnExtrasName(t *testing.T) {
+	cases := []struct {
+		name   string
+		folder string
+	}{
+		{name: "a genre of short films", folder: "Shorts"},
+		{name: "a folder of the extras of a collection", folder: "Extras"},
+		{name: "the name a trailer pull writes", folder: "trailers"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, test.folder, "The Far Beacon (2019)", "The Far Beacon.mkv"), "video")
+
+			result := walkMovies(root, "house/movies", nil)
+
+			if result.titles != 1 {
+				t.Fatalf("titles = %d, want the title under the grouping folder", result.titles)
+			}
+			if result.movies[0].Path != filepath.Join(test.folder, "The Far Beacon (2019)") {
+				t.Errorf("path = %q, want the title under %s", result.movies[0].Path, test.folder)
+			}
+		})
+	}
+}

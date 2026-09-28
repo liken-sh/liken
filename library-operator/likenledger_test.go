@@ -1,0 +1,229 @@
+package main
+
+import (
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+// The one time every ledger test writes, so the files a test compares read
+// the same on every run.
+var ledgerTime = time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC)
+
+func TestAFolderWithNoLikenDirectoryReadsAsAnEmptyLedger(t *testing.T) {
+	ledger, err := readLikenLedger(t.TempDir(), factIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Items) != 0 || len(ledger.Attempts) != 0 {
+		t.Errorf("read %+v, want an empty ledger", ledger)
+	}
+}
+
+func TestALedgerThatIsNotYAMLIsAnError(t *testing.T) {
+	folder := t.TempDir()
+	writeFile(t, filepath.Join(folder, likenDirectory, "identity.yaml"), "items: [oh: {: no\n")
+
+	if _, err := readLikenLedger(folder, factIdentity); err == nil {
+		t.Error("the read reported no error, want one")
+	}
+}
+
+func TestAProbeAttemptIsWrittenInThePlansShape(t *testing.T) {
+	folder := t.TempDir()
+
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
+		ledger.noteAttempt(likenAttempt{Path: "The Long Survey (1982).mkv", At: ledgerTime, Result: attemptFound})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "attempts:\n    - path: The Long Survey (1982).mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n"
+	if got := readFileString(t, filepath.Join(folder, likenDirectory, "probe.yaml")); got != want {
+		t.Errorf("wrote\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestAnIdentityLedgerHoldsAnIdAndItsReason(t *testing.T) {
+	folder := t.TempDir()
+
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
+		ledger.noteItem(likenItem{Path: likenSelfPath, ID: providerIDs{"tmdb": "1001"}, Reason: reasonFrom(testTitle, testYear), Written: ledgerTime})
+		ledger.noteAttempt(likenAttempt{Path: likenSelfPath, At: ledgerTime, Result: attemptFound})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := readFileString(t, filepath.Join(folder, likenDirectory, "identity.yaml"))
+	want := "items:\n    - path: .\n      id: {tmdb: 1001}\n      reason: title and year\n" +
+		"      written: 2026-09-02T14:00:00Z\nattempts:\n    - path: .\n      at: 2026-09-02T14:00:00Z\n      result: found\n"
+	if got != want {
+		t.Errorf("wrote\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestAnIdentityLedgerHoldsCandidatesWithTheirReceipts(t *testing.T) {
+	folder := t.TempDir()
+
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
+		ledger.noteItem(likenItem{Path: likenSelfPath, Candidates: []likenCandidate{
+			{ID: providerIDs{"tmdb": "1111"}, Title: "Deep Orbit", Year: 1977, Receipt: map[string]string{"title": "match"}},
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ledger, err := readLikenLedger(folder, factIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Items) != 1 || len(ledger.Items[0].Candidates) != 1 {
+		t.Fatalf("read %+v, want one item with one candidate", ledger)
+	}
+	if got := ledger.Items[0].Candidates[0]; got.ID["tmdb"] != "1111" || got.Receipt["title"] != "match" {
+		t.Errorf("candidate = %+v, want the id and the receipt", got)
+	}
+}
+
+func TestALaterEntryReplacesTheOneForItsOwnPath(t *testing.T) {
+	folder := t.TempDir()
+	writer := newVolumeWriter("movies-enrich")
+
+	for _, result := range []string{attemptError, attemptFound} {
+		err := writer.updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
+			ledger.noteAttempt(likenAttempt{Path: "a.mkv", At: ledgerTime, Result: result})
+			ledger.noteAttempt(likenAttempt{Path: "b.mkv", At: ledgerTime, Result: attemptFound})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ledger, err := readLikenLedger(folder, factProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Attempts) != 2 {
+		t.Fatalf("the ledger holds %d attempts, want one per path", len(ledger.Attempts))
+	}
+	if ledger.Attempts[0].Result != attemptFound {
+		t.Errorf("the first attempt is %q, want the second run's result", ledger.Attempts[0].Result)
+	}
+}
+
+func TestAnIdentityItemReplacesTheAnswerBeforeIt(t *testing.T) {
+	folder := t.TempDir()
+	writer := newVolumeWriter("movies-enrich")
+
+	for _, reason := range []string{"", reasonFrom(testTitle, testYear)} {
+		err := writer.updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
+			ledger.noteItem(likenItem{Path: likenSelfPath, Reason: reason})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ledger, err := readLikenLedger(folder, factIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Items) != 1 || ledger.Items[0].Reason != reasonFrom(testTitle, testYear) {
+		t.Errorf("read %+v, want one item with the second reason", ledger.Items)
+	}
+}
+
+func TestAnIdReadsBackFromANumberOrAString(t *testing.T) {
+	cases := []struct {
+		name     string
+		document string
+		want     string
+	}{
+		{name: "a number, as the ledger writes it", document: "items:\n  - path: .\n    id: {tmdb: 1001}\n", want: "1001"},
+		{name: "a string, as a person may write it", document: "items:\n  - path: .\n    id: {tmdb: \"1001\"}\n", want: "1001"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			folder := t.TempDir()
+			writeFile(t, filepath.Join(folder, likenDirectory, "identity.yaml"), test.document)
+
+			ledger, err := readLikenLedger(folder, factIdentity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != test.want {
+				t.Errorf("read %+v, want the id %s", ledger.Items, test.want)
+			}
+		})
+	}
+}
+
+// A set fact records every provider that answered, and a person reads the list
+// back as the list it wrote.
+func TestALedgerReadsBackTheProvidersThatAnswered(t *testing.T) {
+	cases := []struct {
+		name  string
+		names providerNames
+		want  string
+	}{
+		{name: "one provider", names: providerNames{"tmdb"}, want: "provider: tmdb"},
+		{name: "a set of two", names: providerNames{"tmdb", "omdb"}, want: "provider:\n"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			folder := t.TempDir()
+			err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factOverview,
+				func(ledger *likenLedger) {
+					ledger.noteItem(likenItem{Path: likenSelfPath, Provider: test.names, Wrote: "3b1f"})
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			held := readFileString(t, filepath.Join(folder, likenDirectory, likenLedgerName(factOverview)))
+			if !strings.Contains(held, test.want) {
+				t.Errorf("the ledger reads:\n%s\nwant %q", held, test.want)
+			}
+			ledger, err := readLikenLedger(folder, factOverview)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal([]string(ledger.Items[0].Provider), []string(test.names)) {
+				t.Errorf("provider = %v, want %v", ledger.Items[0].Provider, test.names)
+			}
+		})
+	}
+}
+
+// A trailer ledger reads back every field the trailer fact wrote.
+func TestATrailerLedgerReadsBackWhatItHolds(t *testing.T) {
+	folder := t.TempDir()
+	want := trailerEntry{
+		Path: likenSelfPath, Provider: providerBlockTMDb, Key: "Tq7xHarb003",
+		Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=Tq7xHarb003",
+		Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en",
+		Official: true, Published: "2026-08-01", Score: 90, Reason: "official trailer",
+	}
+
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factTrailer,
+		func(ledger *likenLedger) { ledger.Trailers = []trailerEntry{want} })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ledger, err := readLikenLedger(folder, factTrailer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Trailers) != 1 {
+		t.Fatalf("read %+v, want the one trailer", ledger.Trailers)
+	}
+	if got := ledger.Trailers[0]; got != want {
+		t.Errorf("read %+v, want %+v", got, want)
+	}
+}

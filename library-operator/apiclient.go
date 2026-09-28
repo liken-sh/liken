@@ -1,0 +1,647 @@
+package main
+
+// This is a Kubernetes client written straight against the HTTP API,
+// following liken's own (kubernetes/apiclient.go) and the media
+// operator's: the API is HTTPS that serves JSON, and the operator's
+// structs hold only the fields it reads. Every write, and every read
+// that the watches do not answer, goes through it. Only the watches and
+// the Lease use client-go (watch.go and leader.go), and the pod build
+// links no client-go.
+//
+// Every pod already holds what it needs to reach the API server.
+// Kubernetes injects two environment variables that name the
+// server's in-cluster address, and the kubelet mounts a CA
+// certificate and a ServiceAccount token at a known path.
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"time"
+)
+
+// The path the kubelet mounts the ServiceAccount credentials on.
+const defaultServiceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+// ServiceAccountDir is a variable so a test points it at a directory
+// it controls.
+var serviceAccountDir = defaultServiceAccountDir
+
+// These two answers are values, not failures. An absent object is the
+// normal state the caller answers by creating it, and a conflict is
+// the normal state under optimistic concurrency that the caller
+// answers by reading again.
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("conflict: something else wrote this object first")
+)
+
+type Client struct {
+	base        string
+	http        *http.Client
+	credentials string
+}
+
+// NewClient builds a client from its three parts. InClusterClient
+// reads them from the pod's environment; a test hands in an
+// httptest server's base and no credentials.
+func NewClient(base string, httpClient *http.Client, credentials string) *Client {
+	return &Client{base: base, http: httpClient, credentials: credentials}
+}
+
+func InClusterClient() (*Client, error) {
+	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+	if host == "" || port == "" {
+		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
+	}
+
+	// The client trusts the cluster's own CA and not the system
+	// store, so it accepts this API server and no other server that
+	// answers on the address.
+	caPEM, err := os.ReadFile(serviceAccountDir + "/ca.crt")
+	if err != nil {
+		return nil, fmt.Errorf("reading service account CA: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("service account CA contains no certificates")
+	}
+
+	return NewClient("https://"+host+":"+port, &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: roots},
+			// Each timeout bounds the same failure: a server that
+			// stops answering without sending anything. There is no
+			// overall client timeout, because every request carries
+			// the context of the pass that sends it, and the pass
+			// bounds it.
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 10 * time.Second,
+			}).DialContext,
+			ResponseHeaderTimeout: 10 * time.Second,
+			IdleConnTimeout:       30 * time.Second,
+		},
+	}, serviceAccountDir), nil
+}
+
+// RequestJSON sends one request and decodes the answer, turning every
+// non-2xx status into an error that carries the server's own message.
+func (c *Client) RequestJSON(ctx context.Context, method, path string, body []byte, out any) error {
+	return c.RequestWithType(ctx, method, path, jsonContentType, body, out)
+}
+
+// The two content types this client sends. A PATCH needs its own,
+// because the API server reads which patch dialect a request speaks
+// from the Content-Type header alone.
+const (
+	jsonContentType = "application/json"
+	mergePatchType  = "application/merge-patch+json"
+)
+
+// RequestWithType is RequestJSON with the request's own content type
+// stated, which is what a merge patch needs.
+func (c *Client) RequestWithType(ctx context.Context, method, path, contentType string, body []byte, out any) error {
+	resp, err := c.do(ctx, method, path, contentType, body)
+	if err != nil {
+		return err
+	}
+	defer drain(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// do sends one request and hands back the open response, which is what
+// RequestWithType is built on. The body's content type is stated, so
+// one request path sends both a JSON write and a merge patch.
+//
+// The context is the caller's, so a pass that ends takes its requests
+// with it.
+func (c *Client) do(ctx context.Context, method, path, contentType string, body []byte) (*http.Response, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, reader)
+	if err != nil {
+		return nil, err
+	}
+	// The token is read from disk on every request. The mounted
+	// token is short-lived and the kubelet refreshes the file as
+	// each one nears expiry, so a client that held one in memory
+	// would start getting 401s.
+	if c.credentials != "" {
+		token, err := os.ReadFile(c.credentials + "/token")
+		if err != nil {
+			return nil, fmt.Errorf("reading service account token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+string(token))
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", contentType)
+	}
+	return c.http.Do(req)
+}
+
+// Drain reads whatever the caller left in the body, then closes it.
+// Go returns a connection to its pool only when the body reaches
+// EOF, so an early close costs a fresh connection and TLS handshake,
+// and reaches the server as a hang-up on a request it answered.
+const maxDrain = 4 << 20
+
+func drain(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
+	_ = body.Close()
+}
+
+// Every API server answers /version, and the answer needs no RBAC
+// rule, so it is the cheapest proof that the client reached the
+// server it was configured for.
+const versionPath = "/version"
+
+// Version holds the one field of /version the operator reports.
+type Version struct {
+	GitVersion string `json:"gitVersion"`
+}
+
+func ServerVersion(ctx context.Context, client *Client) (Version, error) {
+	var version Version
+	if err := client.RequestJSON(ctx, http.MethodGet, versionPath, nil, &version); err != nil {
+		return Version{}, err
+	}
+	return version, nil
+}
+
+// The collection paths. Libraries are listed and watched across every
+// namespace and written back per namespace. The storage and the pods
+// are ordinary core-group objects: a claim and a pod are namespaced,
+// and a volume is not.
+const (
+	librariesPath = "/apis/" + libraryAPIVersion + "/libraries"
+	// The Catalogs, listed and watched across every namespace and
+	// written back per namespace, the same shape as the Libraries.
+	catalogsPath = "/apis/" + libraryAPIVersion + "/catalogs"
+	// The Players, listed and watched across every namespace,
+	// read-only. A Player is media-operator's object, and this operator
+	// reads the collection to find the screens delegated to it.
+	playersPath = "/apis/" + playerAPIVersion + "/players"
+	// The Plays of every namespace. The operator creates a Play in one
+	// namespace and reads the whole collection back, because progress
+	// is recorded for every Play in the cluster and not only for the
+	// ones a screen of this operator's asked for.
+	playsAllPath = "/apis/" + playerAPIVersion + "/plays"
+	// The people, cluster-scoped, in the group people-operator serves.
+	peoplePath = "/apis/" + personAPIVersion + "/people"
+	// The MediaPreferences, cluster-scoped and read-only here, for the
+	// household zone the screen pods carry.
+	mediaPreferencesPath = "/apis/" + playerAPIVersion + "/mediapreferences"
+
+	libraryPrefix = "/apis/" + libraryAPIVersion + "/namespaces/"
+	corePrefix    = "/api/v1/namespaces/"
+	volumesPath   = "/api/v1/persistentvolumes"
+	podsAllPath   = "/api/v1/pods"
+
+	// The StorageClasses, cluster-scoped in the storage group, read by
+	// name for the provisioner behind the class a claim names.
+	storageClassesPath = "/apis/storage.k8s.io/v1/storageclasses"
+
+	// The slices behind the catalog Services, one in every namespace that
+	// holds a Library.
+	endpointSlicePrefix = "/apis/" + endpointSliceAPIVersion + "/namespaces/"
+)
+
+// catalogMemberSelector narrows the pod watch to the pods that hold a
+// catalog agent, whatever kind of pod they are: the catalog pod, a
+// running Job's pod, and a screen pod.
+const catalogMemberSelector = memberLabelKey + "=" + memberLabelValue
+
+func libraryPath(namespace, name string) string {
+	return libraryPrefix + namespace + "/libraries/" + name
+}
+
+func catalogPath(namespace, name string) string {
+	return libraryPrefix + namespace + "/catalogs/" + name
+}
+
+func claimPath(namespace, name string) string {
+	return corePrefix + namespace + "/persistentvolumeclaims/" + name
+}
+
+func claimsPath(namespace string) string {
+	return corePrefix + namespace + "/persistentvolumeclaims"
+}
+
+// playsPath is the plays collection of one namespace. A Play is
+// created in the Player's namespace, which is the Library's namespace
+// as well, so no reference this operator makes crosses a namespace.
+func playsPath(namespace string) string {
+	return "/apis/" + playerAPIVersion + "/namespaces/" + namespace + "/plays"
+}
+
+// playPath is one Play by name, which is where the operator patches
+// the finalizer it holds on the Play.
+func playPath(namespace, name string) string {
+	return playsPath(namespace) + "/" + name
+}
+
+// personPath is one Person by name. A Person is cluster-scoped, so the
+// path carries no namespace.
+func personPath(name string) string {
+	return peoplePath + "/" + name
+}
+
+func podsPath(namespace string) string {
+	return corePrefix + namespace + "/pods"
+}
+
+func endpointSlicesPath(namespace string) string {
+	return endpointSlicePrefix + namespace + "/endpointslices"
+}
+
+func servicesPath(namespace string) string {
+	return corePrefix + namespace + "/services"
+}
+
+func configMapsPath(namespace string) string {
+	return corePrefix + namespace + "/configmaps"
+}
+
+// PatchLibraryFinalizers writes a Library's finalizer list and
+// answers with the resourceVersion the write produced, which a
+// caller needs before it writes the same object again in one pass.
+//
+// It is a merge patch and not a replace, because a replace sends
+// every field this program models and drops every field it does not,
+// which would take a person's own labels and annotations off the
+// Library. The resourceVersion inside the patch makes the write
+// conditional the same way a replace is: a write that raced another
+// answers ErrConflict instead of clobbering it.
+func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, resourceVersion string, finalizers []string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"resourceVersion": resourceVersion,
+			"finalizers":      finalizers,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	var patched struct {
+		Metadata ObjectMeta `json:"metadata"`
+	}
+	path := libraryPath(namespace, name)
+	if err := c.RequestWithType(ctx, http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
+		return "", err
+	}
+	return patched.Metadata.ResourceVersion, nil
+}
+
+// GetPersistentVolumeClaim reads the claim a Library names, for two
+// answers: whether it is bound, and which volume it is bound to. An
+// absent claim is ErrNotFound, which the pass reports as the
+// ClaimNotFound reason rather than as a failure. It also reads the
+// catalog claim the operator provisions, to tell an existing one from
+// none.
+func GetPersistentVolumeClaim(ctx context.Context, c *Client, namespace, name string) (*PersistentVolumeClaim, error) {
+	claim := &PersistentVolumeClaim{}
+	if err := c.RequestJSON(ctx, http.MethodGet, claimPath(namespace, name), nil, claim); err != nil {
+		return nil, err
+	}
+	return claim, nil
+}
+
+// CreatePersistentVolumeClaim provisions a catalog claim: a Library's,
+// the catalog pod's, or a screen's. The operator creates one once and never
+// updates it, because a claim's spec is immutable once it binds.
+func CreatePersistentVolumeClaim(ctx context.Context, c *Client, claim *PersistentVolumeClaim) (*PersistentVolumeClaim, error) {
+	body, err := json.Marshal(claim)
+	if err != nil {
+		return nil, err
+	}
+	created := &PersistentVolumeClaim{}
+	if err := c.RequestJSON(ctx, http.MethodPost, claimsPath(claim.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// DeletePersistentVolumeClaim removes the catalog claim of a screen
+// the scheduler cannot place. It is the one claim this operator deletes. An
+// already-absent claim is success, because the operator deletes the claim to
+// replace it and a delete that races another pass must not fail.
+func DeletePersistentVolumeClaim(ctx context.Context, c *Client, namespace, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, claimPath(namespace, name), nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// GetPersistentVolume reads the volume behind a bound claim, for what
+// serves it. A PersistentVolume is cluster-scoped, so the path carries
+// no namespace.
+func GetPersistentVolume(ctx context.Context, c *Client, name string) (*PersistentVolume, error) {
+	volume := &PersistentVolume{}
+	if err := c.RequestJSON(ctx, http.MethodGet, volumesPath+"/"+name, nil, volume); err != nil {
+		return nil, err
+	}
+	return volume, nil
+}
+
+// GetStorageClass reads the class a claim names, for its provisioner. A
+// class the cluster does not serve is ErrNotFound, which the caller reads
+// as a class that is not per-node.
+func GetStorageClass(ctx context.Context, c *Client, name string) (*StorageClass, error) {
+	class := &StorageClass{}
+	if err := c.RequestJSON(ctx, http.MethodGet, storageClassesPath+"/"+name, nil, class); err != nil {
+		return nil, err
+	}
+	return class, nil
+}
+
+// ListStorageClasses reads every class the cluster serves, for the one class
+// whose provisioner is per-node. The cache of a provider's dataset files
+// needs that class whatever class the libraries use.
+func ListStorageClasses(ctx context.Context, c *Client) (*StorageClassList, error) {
+	list := &StorageClassList{}
+	if err := c.RequestJSON(ctx, http.MethodGet, storageClassesPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// CreatePersistentVolume writes the volume a per-node claim binds to. The
+// operator writes it before the claim, because the claim names it and no
+// provisioner answers a claim of that class.
+func CreatePersistentVolume(ctx context.Context, c *Client, volume *PersistentVolume) (*PersistentVolume, error) {
+	body, err := json.Marshal(volume)
+	if err != nil {
+		return nil, err
+	}
+	created := &PersistentVolume{}
+	if err := c.RequestJSON(ctx, http.MethodPost, volumesPath, body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// uidPrecondition is the body of a delete that the API server refuses with
+// a 409 unless the object holds this uid. An empty uid is no precondition,
+// because the API server reads an empty uid as one no object holds.
+func uidPrecondition(uid string) ([]byte, error) {
+	if uid == "" {
+		return nil, nil
+	}
+	return json.Marshal(map[string]any{
+		"apiVersion":    "v1",
+		"kind":          "DeleteOptions",
+		"preconditions": map[string]string{"uid": uid},
+	})
+}
+
+// DeletePersistentVolume removes a volume this operator wrote whose claim
+// is gone. A volume that is already absent is success, because two
+// passes may sweep the same volume.
+//
+// The delete names the uid of the copy the caller read. The copy can come
+// from a watch's store, and a pass can delete a spent volume and write a
+// fresh one of the same name before the store holds the fresh one. The
+// API server refuses a delete whose uid is not the volume's with a 409,
+// so the delete never takes the fresh volume, and the refusal is success.
+func DeletePersistentVolume(ctx context.Context, c *Client, name, uid string) error {
+	body, err := uidPrecondition(uid)
+	if err != nil {
+		return err
+	}
+	err = c.RequestJSON(ctx, http.MethodDelete, volumesPath+"/"+name, body, nil)
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) {
+		return nil
+	}
+	return err
+}
+
+func GetPod(ctx context.Context, c *Client, namespace, name string) (*Pod, error) {
+	pod := &Pod{}
+	if err := c.RequestJSON(ctx, http.MethodGet, podsPath(namespace)+"/"+name, nil, pod); err != nil {
+		return nil, err
+	}
+	return pod, nil
+}
+
+func CreatePod(ctx context.Context, c *Client, pod *Pod) (*Pod, error) {
+	body, err := json.Marshal(pod)
+	if err != nil {
+		return nil, err
+	}
+	created := &Pod{}
+	if err := c.RequestJSON(ctx, http.MethodPost, podsPath(pod.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// CreatePlay posts the Play one play request became. The API server
+// mints the name from the prefix, because a person may start the same
+// title twice and each start is its own Play.
+func CreatePlay(ctx context.Context, c *Client, play *Play) (*Play, error) {
+	body, err := json.Marshal(play)
+	if err != nil {
+		return nil, err
+	}
+	created := &Play{}
+	if err := c.RequestJSON(ctx, http.MethodPost, playsPath(play.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// DeletePod removes one pod this operator stands. An
+// already-absent pod is success, because the operator deletes a pod to
+// replace it and a delete that races another pass must not fail.
+func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// ForceDeletePod deletes one pod with no grace period, so the API server
+// removes it at once and waits for no kubelet. A pod on a node that is
+// gone never finishes a graceful delete: it stays Terminating for as long
+// as the node is away, and the claim it mounts stays with it. The heal
+// uses this and nothing else does.
+//
+// The delete names the uid of the pod the caller read. The copy comes
+// from a watch's store, and the heal stands a new pod of the same name
+// in the pass that deletes the old one, so a later pass can read the old
+// copy before the watch delivers the delete. The API server refuses a
+// delete whose uid is not the pod's with a 409, and the answer is false:
+// the pod under that name is not the one the caller read.
+func ForceDeletePod(ctx context.Context, c *Client, namespace, name, uid string) (bool, error) {
+	body, err := uidPrecondition(uid)
+	if err != nil {
+		return false, err
+	}
+	err = c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name+"?gracePeriodSeconds=0", body, nil)
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// GetService reads one Service by name from the API server. The pass
+// reads the Services it stands from the watch, and through this only
+// where the memo says the watch's copy is not current (objectcache.go).
+func GetService(ctx context.Context, c *Client, namespace, name string) (*Service, error) {
+	service := &Service{}
+	if err := c.RequestJSON(ctx, http.MethodGet, servicesPath(namespace)+"/"+name, nil, service); err != nil {
+		return nil, err
+	}
+	return service, nil
+}
+
+func CreateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
+	body, err := json.Marshal(service)
+	if err != nil {
+		return nil, err
+	}
+	created := &Service{}
+	path := servicesPath(service.Metadata.Namespace)
+	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// DeleteService removes one Service this operator stands. An absent Service
+// is success, because a Catalog that drops a block the operator stood a
+// Service for is reconciled on every pass.
+func DeleteService(ctx context.Context, c *Client, namespace, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, servicesPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// GetConfigMap reads one ConfigMap by name. The pass reads the people
+// ConfigMap from the watch instead; a test reads it through this.
+func GetConfigMap(ctx context.Context, c *Client, namespace, name string) (*ConfigMap, error) {
+	configMap := &ConfigMap{}
+	if err := c.RequestJSON(ctx, http.MethodGet, configMapsPath(namespace)+"/"+name, nil, configMap); err != nil {
+		return nil, err
+	}
+	return configMap, nil
+}
+
+func CreateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*ConfigMap, error) {
+	body, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, err
+	}
+	created := &ConfigMap{}
+	if err := c.RequestJSON(ctx, http.MethodPost, configMapsPath(configMap.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func UpdateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*ConfigMap, error) {
+	body, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, err
+	}
+	written := &ConfigMap{}
+	path := configMapsPath(configMap.Metadata.Namespace) + "/" + configMap.Metadata.Name
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+// UpdateService writes the whole Service back. The resourceVersion in
+// the body makes the write conditional, so a Service that changed
+// underneath answers ErrConflict, and the next pass reads it again.
+func UpdateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
+	body, err := json.Marshal(service)
+	if err != nil {
+		return nil, err
+	}
+	written := &Service{}
+	path := servicesPath(service.Metadata.Namespace) + "/" + service.Metadata.Name
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+// PatchPlayMetadata writes the metadata this operator owns on a Play:
+// the finalizer list always, because taking a finalizer off is a write
+// of the shorter list, and the owner references and the annotations
+// where the caller states them. It is a merge patch, so every other
+// field media-operator wrote survives the write, and the
+// resourceVersion makes it conditional the same way a replace is.
+func PatchPlayMetadata(ctx context.Context, c *Client, namespace, name, resourceVersion string, metadata ObjectMeta) (string, error) {
+	patch := map[string]any{
+		"resourceVersion": resourceVersion,
+		"finalizers":      metadata.Finalizers,
+	}
+	if metadata.OwnerReferences != nil {
+		patch["ownerReferences"] = metadata.OwnerReferences
+	}
+	if metadata.Annotations != nil {
+		patch["annotations"] = metadata.Annotations
+	}
+	return patchMetadata(ctx, c, playPath(namespace, name), patch)
+}
+
+// PatchPersonFinalizers writes a Person's finalizer list. The operator
+// holds one until every namespace's progress store has dropped that
+// person's rows.
+func PatchPersonFinalizers(ctx context.Context, c *Client, name, resourceVersion string, finalizers []string) (string, error) {
+	return patchMetadata(ctx, c, personPath(name), map[string]any{
+		"resourceVersion": resourceVersion,
+		"finalizers":      finalizers,
+	})
+}
+
+// patchMetadata sends one conditional merge patch of an object's
+// metadata and answers with the resourceVersion the write produced,
+// which a caller needs before it writes the same object again in one
+// pass.
+func patchMetadata(ctx context.Context, c *Client, path string, metadata map[string]any) (string, error) {
+	body, err := json.Marshal(map[string]any{"metadata": metadata})
+	if err != nil {
+		return "", err
+	}
+	var patched struct {
+		Metadata ObjectMeta `json:"metadata"`
+	}
+	if err := c.RequestWithType(ctx, http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
+		return "", err
+	}
+	return patched.Metadata.ResourceVersion, nil
+}

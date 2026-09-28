@@ -1,0 +1,77 @@
+{
+  "id": 1001,
+  "results": [
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Official Trailer",
+      "key": "Xq7vTr4iL01",
+      "site": "YouTube",
+      "size": 1080,
+      "type": "Trailer",
+      "official": true,
+      "published_at": "2026-03-18T15:00:00.000Z",
+      "id": "700000000000000000000001"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Teaser",
+      "key": "Tz3eAs8r-02",
+      "site": "YouTube",
+      "size": 720,
+      "type": "Teaser",
+      "official": false,
+      "published_at": "2025-11-02T09:30:00.000Z",
+      "id": "700000000000000000000002"
+    },
+    {
+      "iso_639_1": "fr",
+      "iso_3166_1": "FR",
+      "name": "Bande-annonce",
+      "key": "10000001",
+      "site": "Vimeo",
+      "size": 1080,
+      "type": "Trailer",
+      "official": true,
+      "published_at": "2026-04-01T12:00:00.000Z",
+      "id": "700000000000000000000003"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Making Some Film",
+      "key": "Fm9kQe2bW03",
+      "site": "YouTube",
+      "size": 480,
+      "type": "Featurette",
+      "official": true,
+      "published_at": "",
+      "id": "700000000000000000000004"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Harbor Scene",
+      "key": "Cl4pHn6sV04",
+      "site": "YouTube",
+      "size": 480,
+      "type": "Clip",
+      "official": false,
+      "published_at": "2024-02-11T10:00:00.000Z",
+      "id": "700000000000000000000005"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Left Door Or Right Door",
+      "key": "x7a1bcd",
+      "site": "Dailymotion",
+      "size": 480,
+      "type": "Clip",
+      "official": false,
+      "published_at": "2023-07-04T08:15:00.000Z",
+      "id": "700000000000000000000006"
+    }
+  ]
+}

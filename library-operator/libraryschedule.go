@@ -1,0 +1,338 @@
+package main
+
+// libraryschedule.go decides when a Library runs its Job. The operator starts
+// a Job only when no other Job of the Library is unfinished, because every
+// Job of a Library runs an agent on the one catalog claim, and two agents on
+// one database corrupt it. The gate reads the Job list the pass read, so a
+// restarted operator keeps it with no state of its own.
+//
+// Behind the gate the pass chooses one Job. A walk runs when
+// spec.scan.schedule says a walk is due, when spec.refresh asks for one, and
+// when a webhook named folders. A Job that fills gaps runs when no walk is
+// due and the last report counted gaps that a cause has opened since the last
+// Job.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+	"time"
+)
+
+// How many pods Kubernetes replaces before a Job itself fails, and how long
+// a finished Job stays for a person to read its logs. The TTL is the hour a
+// failed Job keeps. A succeeded Job goes sooner, because the operator deletes
+// it after succeededJobGrace, and the TTL is the backstop when the operator
+// is down.
+const (
+	scanBackoffLimit = 2
+	scanJobTTL       = 3600
+)
+
+// How long a Job of a Library may run before Kubernetes fails it. The gate
+// holds every other Job of the Library while one is unfinished, so without a
+// deadline a Job whose pod never starts holds them for ever. The deadline
+// counts from the Job's start, and the time a pod stays Pending counts. At the
+// deadline the Job controller fails the Job with the reason DeadlineExceeded,
+// and the next Job follows on the backoff that mayFollow applies.
+//
+// The deadline is above the longest healthy Job. The longest Job measured on
+// liken-1 ran for 7 minutes 53 seconds: a full walk of a large movies
+// library onto an empty catalog claim, where the agent's first sync took
+// most of the time.
+// Trickplay and the trailer files start no title after phaseTimeLimit, 15
+// minutes, and then finish the title they have. One trickplay title can
+// decode for up to ffmpegTimeout, one hour, and one trailer file can take
+// trailerPullTimeout and then trailerRemuxTimeout, 20 minutes. So a healthy
+// Job ends in about 15 + 60 minutes after its phases start, plus the sync
+// before them and the hand-off after them. Two hours leaves room for all of
+// it. A Job that Kubernetes retries after a failed pod has less time for its
+// last pod, because the deadline counts every pod of the Job.
+const libraryJobDeadline = 2 * time.Hour
+
+// The Jobs of one Library and one worker, out of the whole cluster's Jobs
+// the pass listed.
+func jobsOf(jobs []Job, namespace, library, worker string) []Job {
+	return slices.DeleteFunc(jobsOfLibrary(jobs, namespace, library), func(job Job) bool {
+		return job.Metadata.Labels[workerLabelKey] != worker
+	})
+}
+
+// Every Job of one Library, whatever its worker.
+func jobsOfLibrary(jobs []Job, namespace, library string) []Job {
+	held := []Job{}
+	for index := range jobs {
+		job := &jobs[index]
+		if job.Metadata.Namespace == namespace && job.Metadata.Labels[libraryLabelKey] == library {
+			held = append(held, *job)
+		}
+	}
+	return held
+}
+
+// Whether any Job of this Library is unfinished: one the controller has
+// marked neither Complete nor Failed. A Job between the pods of its backoff
+// counts. Every worker counts, the cleanup Job and a Job an earlier release
+// created included, because each of them runs an agent on the Library's
+// catalog claim.
+func libraryJobUnfinished(jobs []Job, namespace, library string) bool {
+	return slices.ContainsFunc(jobsOfLibrary(jobs, namespace, library), func(job Job) bool {
+		return !job.finished()
+	})
+}
+
+// When the operator created a Job, off the annotation it wrote, and the zero
+// time for a Job that carries none.
+func jobCreated(job *Job) time.Time {
+	created, err := time.Parse(time.RFC3339Nano, job.Metadata.Annotations[jobCreatedAnnotation])
+	if err != nil {
+		return time.Time{}
+	}
+	return created
+}
+
+// The library step of one Library's pass. It creates at most one Job.
+func (o *operator) runLibrary(ctx context.Context, library *Library, report *libraryReport,
+	jobs []Job, providers providerSet, now time.Time) error {
+	namespace, name := library.Metadata.Namespace, library.Metadata.Name
+	if libraryJobUnfinished(jobs, namespace, name) || !o.mayFollow(jobs, reportRuns(report), namespace, name, now) {
+		return nil
+	}
+	held := o.paths.held(namespace, name)
+	plan, due := nextLibraryJob(library, report, jobs, providers, held, now)
+	if !due {
+		return nil
+	}
+	if report != nil {
+		plan.sync = syncTargetFor(report.Runs)
+	}
+	job := buildLibraryJob(library, providers, o.languages, plan,
+		jobImages{operator: o.scannerImage, ffmpeg: o.ffmpegImage, corrosion: o.corrosionImage}, now)
+	_, err := o.createJob(ctx, job)
+	if err != nil && !errors.Is(err, ErrConflict) {
+		return fmt.Errorf("creating the library job %s: %w", job.Metadata.Name, err)
+	}
+	// A conflict is another writer's create of the same Job, and that
+	// writer's line is the one that says so.
+	if err == nil {
+		o.logf("library %s/%s: created the job %s, %s, because %s",
+			namespace, name, job.Metadata.Name, plan.described(), plan.cause)
+	}
+	// A walk covers every folder the webhooks named before it, so each one
+	// the pass read is released. A folder named after the read stays for
+	// the next Job.
+	if plan.mode == jobModeWalk {
+		for _, path := range held {
+			o.paths.release(namespace, name, path)
+		}
+	}
+	return nil
+}
+
+// Whether the pass may start a Job after one failed. A failure that no later
+// Job answered is followed on the backoff curve a cleanup Job uses, so a cause
+// nobody has repaired costs one Job per delay and not one Job per pass. A later
+// success resets the curve. The status reads the same failure, so the gate and
+// the Ready condition agree.
+func (o *operator) mayFollow(jobs []Job, runs []libraryRun, namespace, library string, now time.Time) bool {
+	key := libraryKey(namespace, library) + "/job"
+	if unansweredFailure(jobsOfLibrary(jobs, namespace, library), runs) == nil {
+		delete(o.failedStands, key)
+		return true
+	}
+	return o.mayRestandFailed(key, now)
+}
+
+// The runs a report carries, and none for a Library with no report yet.
+func reportRuns(report *libraryReport) []libraryRun {
+	if report == nil {
+		return nil
+	}
+	return report.Runs
+}
+
+// The Job this pass would start, and whether one is due. A walk comes first,
+// because it covers what a Job that fills gaps would do.
+func nextLibraryJob(library *Library, report *libraryReport, jobs []Job, providers providerSet,
+	held []string, now time.Time) (libraryJob, bool) {
+	served := servedPhases(library, providers)
+	last := lastWalkStart(report, jobs, library.Metadata.Namespace, library.Metadata.Name)
+	if cause := walkCause(library, last, held, now); cause != "" {
+		return libraryJob{mode: jobModeWalk, phases: served, cause: cause}, true
+	}
+	if len(held) > 0 {
+		return libraryJob{mode: jobModeWalk, paths: held, phases: served,
+			cause: "a webhook named " + counted(len(held), "folder")}, true
+	}
+	if report == nil {
+		return libraryJob{}, false
+	}
+	gaps := gapPhases(library, report, providers, served, now)
+	return libraryJob{mode: jobModeGaps, phases: gaps, cause: gapCause(library, report.Runs, now)}, len(gaps) > 0
+}
+
+// Why a full walk is due, in the words of the log line, or empty where
+// none is due. The schedule comes first, because a walk it starts answers
+// a request and a webhook too.
+func walkCause(library *Library, last time.Time, held []string, now time.Time) string {
+	switch {
+	case last.IsZero():
+		return "the library has no walk yet"
+	case walkDue(library, last, now):
+		return "spec.scan.schedule came due"
+	case walkRequested(library, last):
+		return "spec.refresh asked for a walk at " + library.Spec.Refresh[refreshWalk].UTC().Format(time.RFC3339)
+	case slices.Contains(held, ""):
+		return "a webhook asked for a full walk"
+	}
+	return ""
+}
+
+// Why a Job that fills gaps is due, in the words of the log line: the facts
+// a person asked again for through spec.refresh since the last Job started,
+// or the gaps alone.
+func gapCause(library *Library, runs []libraryRun, now time.Time) string {
+	enrich, _ := runOf(runs, workerEnrich)
+	var asked []string
+	for _, fact := range slices.Sorted(maps.Keys(library.Spec.Refresh)) {
+		refresh := library.Spec.Refresh[fact]
+		if isContainerFact(fact) && !refresh.After(now) && refresh.After(enrich.Started) {
+			asked = append(asked, fact)
+		}
+	}
+	if len(asked) == 0 {
+		return "gaps are open"
+	}
+	return "spec.refresh asked again for " + strings.Join(asked, ", ")
+}
+
+// When the last full walk of this Library started: the later of the scan run
+// the report carries and the newest full walk Job the pass listed. The Job is
+// read as well, because a Job that ended can reach the pass before its row
+// reaches the report.
+func lastWalkStart(report *libraryReport, jobs []Job, namespace, library string) time.Time {
+	var last time.Time
+	if report != nil {
+		if walk, ran := runOf(report.Runs, workerScan); ran {
+			last = walk.Started
+		}
+	}
+	for _, job := range jobsOf(jobs, namespace, library, jobModeWalk) {
+		if job.Metadata.Annotations[jobPathsAnnotation] != "" {
+			continue
+		}
+		if created := jobCreated(&job); created.After(last) {
+			last = created
+		}
+	}
+	return last
+}
+
+// Whether spec.scan.schedule has a time between the last walk's start and
+// now. A Library with no walk at all is due, so a new Library has rows
+// before its schedule's first time. A schedule that does not parse is never
+// due, and the Ready condition says why.
+func walkDue(library *Library, last, now time.Time) bool {
+	if last.IsZero() {
+		return true
+	}
+	schedule, err := parseScanSchedule(library.Spec.scanSchedule())
+	if err != nil {
+		return false
+	}
+	next := nextWalk(schedule, last)
+	return !next.IsZero() && !next.After(now)
+}
+
+// Whether spec.refresh asks for a walk that has not started. A walk that
+// started before the request does not answer it, because that walk may have
+// read the volume before the person asked.
+func walkRequested(library *Library, last time.Time) bool {
+	requested, named := library.Spec.Refresh[refreshWalk]
+	return named && requested.After(last)
+}
+
+// The phases a Job that fills gaps runs. Trickplay and the trailer files run
+// while their gap is open, because a run stops at its time limit and leaves
+// the rest for the next Job. Every other phase runs while its gap is open and
+// a cause has come that no Job has answered, so a gap that no phase can close
+// does not start a Job on every pass.
+func gapPhases(library *Library, report *libraryReport, providers providerSet,
+	served []servedPhase, now time.Time) []servedPhase {
+	cause := enrichCause(library, report.Runs, providers, now)
+	// An IMDb rating that became old enough to read again is a cause of its
+	// own, at the time it became old, so one Job answers it and the next
+	// waits for the next rating to age.
+	if reopened := datasetReopenCause(library, report, providers, now); reopened.After(cause) {
+		cause = reopened
+	}
+	due := enrichDue(cause, report.Runs)
+	var phases []servedPhase
+	for _, phase := range served {
+		if !phaseGapOpen(library, report, providers, phase.served, now) {
+			continue
+		}
+		if timeLimitedPhases[phase.name] || due {
+			phases = append(phases, phase)
+		}
+	}
+	return phases
+}
+
+// The cause of the next Job that fills gaps: the newest of a refresh time
+// that has come, a source provider that turned Ready, and a walk whose own
+// Job ran no phases. A walk Job runs every phase after its walk, so its walk
+// is answered already.
+func enrichCause(library *Library, runs []libraryRun, providers providerSet, now time.Time) time.Time {
+	var cause time.Time
+	enrich, _ := runOf(runs, workerEnrich)
+	for _, worker := range []string{workerScan, workerRescan} {
+		if walk, ran := runOf(runs, worker); ran && walk.Job != enrich.Job && walk.Finished.After(cause) {
+			cause = walk.Finished
+		}
+	}
+	for fact, refresh := range library.Spec.Refresh {
+		if isContainerFact(fact) && !refresh.After(now) && refresh.After(cause) {
+			cause = refresh
+		}
+	}
+	for _, name := range library.Spec.Sources {
+		provider, held := providers[libraryKey(library.Metadata.Namespace, name)]
+		if !held || !provider.ready() {
+			continue
+		}
+		if ready := provider.readyCondition().LastTransitionTime; ready.After(cause) {
+			cause = ready
+		}
+	}
+	return cause
+}
+
+// Whether a cause has come that no Job has answered. A Job reads the
+// providers and spec.refresh when the operator creates it, so a Job that
+// started before the cause never saw it. A run that wrote no finish
+// answered nothing.
+func enrichDue(cause time.Time, runs []libraryRun) bool {
+	if cause.IsZero() {
+		return false
+	}
+	enrich, held := runOf(runs, workerEnrich)
+	return !held || enrich.Finished.IsZero() || cause.After(enrich.Started)
+}
+
+// Whether one fact's refresh time has titles left to ask about. The
+// reporter counts a gap with no refresh, so a title whose file and rows
+// are there counts as filled; the oldest attempt of the fact is what
+// says the refresh still has work, and the fact's own run moves that
+// attempt past the refresh, which is what ends the work.
+func refreshHasWork(library *Library, report *libraryReport, fact string) bool {
+	refresh, named := library.Spec.Refresh[fact]
+	if !named {
+		return false
+	}
+	oldest, held := report.OldestAttempts[fact]
+	return held && refresh.After(oldest) && !refresh.After(time.Now())
+}

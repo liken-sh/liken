@@ -1,0 +1,24 @@
+# Built binaries and the Rust build tree. The plans name the browser and
+# the scanners as separate images, and each build lands here.
+/library-operator
+/bin/
+/media-browser/target/
+
+# Hugo's build output, once the site exists.
+/docs/dist/
+/docs/.hugo_build.lock
+/docs/public/
+
+# The coverage data the gates measure, and the page `make
+# coverage-report` draws from it. CI writes them on every run and
+# reads them once; they never belong to the tree.
+/coverage.out
+/coverage-media-browser.xml
+/coverage.html
+
+# State the local harness writes: catalogs, agent logs, and captures.
+/local/state/
+
+# Agent worktrees this session tool keeps beside the checkout.
+/.claude/
+/cli/dist/

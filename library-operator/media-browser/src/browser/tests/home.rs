@@ -1,0 +1,766 @@
+// The home page at the browser: its strips, where the arrows take
+// focus, what a select opens, and what a rest asks the store for.
+
+use super::*;
+use crate::catalog::{GenreSort, Sort};
+
+// A browser whose recency strips hold an airing episode, a folded
+// serial, and a movie.
+// More movies than a strip shows, so a strip of them has more to see.
+const MORE_THAN_SHOWN: usize = crate::catalog::recency::SHOWN + 6;
+
+fn with_recent(movies: usize) -> Browser<Fake, NoArt> {
+    Browser::new(
+        Fake {
+            movies,
+            recent: true,
+            ..Fake::default()
+        },
+        NoArt::default(),
+    )
+}
+
+// The row that holds focus, and the slot inside that strip.
+fn at(browser: &Browser<Fake, NoArt>) -> (usize, usize) {
+    let home = showing_home(browser);
+    let strip = home.blocks[home.focus]
+        .strip()
+        .expect("a strip holds focus");
+    (home.focus, strip.focus)
+}
+
+// The strips of the page in order, the banner left out.
+fn strips(browser: &Browser<Fake, NoArt>) -> Vec<&crate::screens::home::Strip> {
+    showing_home(browser)
+        .blocks
+        .iter()
+        .filter_map(|block| block.strip())
+        .collect()
+}
+
+// A browser with recent titles and focus on the first strip. The page
+// opens on the banner, and these tests are about the strips.
+fn on_strips(movies: usize) -> Browser<Fake, NoArt> {
+    let mut browser = with_recent(movies);
+    browser.key("down");
+    browser
+}
+
+#[test]
+fn the_page_holds_the_two_recency_strips_over_the_libraries() {
+    let browser = on_strips(3);
+    let home = showing_home(&browser);
+    assert_eq!(
+        headings(&browser),
+        [
+            "Recently released",
+            "Recently added",
+            "Libraries",
+            "Genres",
+            "Franchises · 2"
+        ]
+    );
+    assert_eq!(home.focus, 1);
+
+    let strips = strips(&browser);
+    let released = strips[0];
+    assert_eq!(
+        released.last.as_ref().map(|last| last.words.as_str()),
+        Some("See all")
+    );
+    assert_eq!(released.lines, 2);
+    assert_eq!(released.items.len(), 2);
+    assert_eq!(released.items[0].caption, "Segment 2");
+    assert_eq!(released.items[0].under, "The Serial · S01 · E02 · 46m");
+    assert_eq!(released.items[0].art, "s1e2.jpg");
+    assert_eq!(released.items[1].caption, "The Serial");
+    let added = strips[1];
+    assert_eq!(added.items.len(), 1);
+    assert_eq!(added.items[0].caption, "Entry 1");
+    assert!(strips[2].last.is_none());
+    assert_eq!(strips[2].lines, 2);
+}
+
+#[test]
+fn up_and_down_move_between_the_strips_and_each_remembers_its_focus() {
+    let mut browser = on_strips(3);
+    browser.key("right");
+    assert_eq!(at(&browser), (1, 1));
+
+    browser.key("down");
+    assert_eq!(at(&browser), (2, 0));
+    browser.key("right");
+    browser.key("down");
+    assert_eq!(at(&browser), (3, 0));
+    browser.key("down");
+    assert_eq!(at(&browser), (4, 0));
+    browser.key("down");
+    assert_eq!(at(&browser), (5, 0));
+    browser.key("down");
+    assert_eq!(at(&browser), (5, 0));
+
+    browser.key("up");
+    assert_eq!(at(&browser), (4, 0));
+    browser.key("up");
+    assert_eq!(at(&browser), (3, 0));
+    browser.key("up");
+    assert_eq!(at(&browser), (2, 1));
+    browser.key("up");
+    assert_eq!(at(&browser), (1, 1));
+}
+
+#[test]
+fn right_reaches_see_all_and_no_further() {
+    let mut browser = on_strips(3);
+    for _ in 0..6 {
+        browser.key("right");
+    }
+    assert_eq!(at(&browser), (1, 2));
+    browser.key("left");
+    assert_eq!(at(&browser), (1, 1));
+}
+
+#[test]
+fn up_from_the_first_strip_reaches_the_banner_then_the_strip_and_down_returns() {
+    let mut browser = on_strips(3);
+    browser.key("right");
+
+    browser.key("up");
+    assert_eq!(showing_home(&browser).focus, 0);
+    browser.key("up");
+
+    assert!(browser.on_strip);
+    browser.key("right");
+    assert!(browser.on_strip);
+    browser.key("left");
+    assert!(browser.on_strip);
+    // Select on the strip opens the search wall, and back leaves the
+    // strip without focus, because the stack changed under it.
+    browser.key("enter");
+    assert_eq!(browser.stack.len(), 1);
+    browser.key("escape");
+    assert!(browser.stack.is_empty());
+    assert!(!browser.on_strip);
+
+    browser.key("up");
+    browser.key("down");
+
+    assert!(!browser.on_strip);
+    assert_eq!(showing_home(&browser).focus, 0);
+    browser.key("down");
+    assert_eq!(at(&browser), (1, 1));
+}
+
+#[test]
+fn an_empty_strip_is_skipped_and_up_from_the_libraries_reaches_the_strip() {
+    let mut browser = browser(3);
+    assert_eq!(at(&browser), (3, 0));
+
+    browser.key("up");
+
+    assert!(browser.on_strip);
+    browser.key("down");
+    assert_eq!(at(&browser), (3, 0));
+}
+
+#[test]
+fn a_select_on_an_episode_opens_the_series_page_on_that_episode() {
+    let mut browser = on_strips(3);
+
+    browser.key("enter");
+
+    let page = showing_series(&browser);
+    assert_eq!(page.id, SERIAL);
+    assert_eq!(page.library, SERIALS);
+    assert_eq!(page.focus, SeriesFocus::Still(1));
+    assert_eq!(page.stills[1].fitted, "Segment 2");
+}
+
+#[test]
+fn a_select_on_a_folded_series_opens_its_page_on_the_first_episode() {
+    let mut browser = on_strips(3);
+    browser.key("right");
+
+    browser.key("enter");
+
+    let page = showing_series(&browser);
+    assert_eq!(page.id, SERIAL);
+    assert_eq!(page.focus, SeriesFocus::Still(0));
+}
+
+#[test]
+fn a_select_on_a_movie_opens_its_page() {
+    let mut browser = on_strips(3);
+    browser.key("down");
+
+    browser.key("enter");
+
+    assert_eq!(showing_page(&browser).id, "movies:1");
+}
+
+#[test]
+fn see_all_opens_the_wall_of_every_title_and_back_returns_to_it() {
+    let mut browser = on_strips(3);
+    browser.key("down");
+    for _ in 0..3 {
+        browser.key("right");
+    }
+
+    browser.key("enter");
+
+    let wall = showing_wall(&browser);
+    assert_eq!(wall.heading, "Recently added · 2");
+    assert_eq!(wall.slots.query, Query::Added { fold: Fold::Titles });
+    assert!(wall.slots.items.iter().all(|item| item.episode.is_none()));
+
+    browser.key("escape");
+
+    assert_eq!(at(&browser), (2, 1));
+}
+
+#[test]
+fn the_released_strip_holds_the_window_of_today_and_the_added_strip_the_rest() {
+    let browser = on_strips(3);
+    let strips = strips(&browser);
+    let released: Vec<&str> = strips[0]
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
+    let added: Vec<&str> = strips[1]
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(released, ["episode:1:2", SERIAL]);
+    assert_eq!(added, ["movies:1"]);
+    assert!(released.iter().all(|id| !added.contains(id)));
+}
+
+#[test]
+fn the_walls_behind_see_all_are_neither_windowed_nor_subtracted() {
+    let mut browser = on_strips(3);
+    browser.key("right");
+    browser.key("right");
+    browser.key("enter");
+    let wall = showing_wall(&browser);
+    assert_eq!(wall.slots.query, Query::Released { fold: Fold::Titles });
+    let ids: Vec<&str> = wall
+        .slots
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(ids, [SERIAL, "movies:1"]);
+    assert_eq!(wall.slots.items[1].name, "Entry 1");
+
+    browser.key("escape");
+    browser.key("down");
+    browser.key("right");
+    browser.key("enter");
+    let wall = showing_wall(&browser);
+    assert_eq!(wall.slots.query, Query::Added { fold: Fold::Titles });
+    let ids: Vec<&str> = wall
+        .slots
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(ids, [SERIAL, "movies:1"]);
+}
+
+#[test]
+fn a_select_on_a_library_opens_its_wall() {
+    let mut browser = on_strips(3);
+    browser.key("down");
+    browser.key("down");
+    browser.key("right");
+
+    browser.key("enter");
+
+    let wall = showing_wall(&browser);
+    assert_eq!(wall.heading, "serials · 2");
+    assert_eq!(
+        wall.slots.query,
+        Query::Library {
+            library: SERIALS.into(),
+            sort: Sort::default(),
+        }
+    );
+}
+
+#[test]
+fn a_change_rereads_the_strips_and_keeps_the_focus() {
+    let mut browser = browser(3);
+    browser.key("right");
+    assert_eq!(at(&browser), (3, 1));
+
+    browser.source.recent = true;
+    browser.source.changed = true;
+    assert!(browser.pump(1.0));
+
+    assert_eq!(at(&browser), (3, 1));
+    assert_eq!(strips(&browser)[0].items.len(), 2);
+}
+
+#[test]
+fn a_change_that_empties_the_focused_strip_moves_focus_to_the_next() {
+    let mut browser = on_strips(3);
+    browser.key("right");
+
+    browser.source.recent = false;
+    browser.source.changed = true;
+    browser.pump(1.0);
+
+    assert_eq!(at(&browser), (3, 0));
+}
+
+#[test]
+fn a_change_that_empties_every_strip_leaves_focus_on_a_row_that_holds_titles() {
+    let mut browser = with_recent(3);
+    browser.source.recent = false;
+    browser.source.movies = 0;
+    browser.source.changed = true;
+    browser.pump(1.0);
+    assert_eq!(strips(&browser)[2].items.len(), 2);
+
+    browser.key("down");
+    assert_eq!(at(&browser), (4, 0));
+}
+
+#[test]
+fn a_rest_on_a_title_asks_for_its_backdrop_and_on_a_library_for_nothing() {
+    let mut browser = on_strips(3);
+    browser.tick(0.0);
+    browser.key("right");
+    browser.minute = Some(MINUTE);
+    assert_eq!(browser.next_frame(0.0), Some(REST));
+    browser.tick(REST);
+    assert!(browser.store.get_mut().asked.contains(&(
+        SERIALS.into(),
+        format!("{SERIAL}.backdrop.jpg"),
+        1920,
+        1080
+    )));
+
+    browser.key("down");
+    browser.key("down");
+    browser.minute = Some(MINUTE);
+    assert_eq!(browser.next_frame(REST), Some(MINUTE));
+}
+
+#[test]
+fn a_rest_on_an_episode_asks_for_its_series_backdrop() {
+    let mut browser = on_strips(3);
+    browser.tick(0.0);
+    browser.key("left");
+    browser.tick(REST);
+    assert!(browser.store.get_mut().asked.contains(&(
+        SERIALS.into(),
+        format!("{SERIAL}.backdrop.jpg"),
+        1920,
+        1080
+    )));
+}
+
+#[test]
+fn a_rest_on_see_all_and_on_the_strip_asks_for_nothing() {
+    let mut browser = on_strips(3);
+    browser.tick(0.0);
+    for _ in 0..3 {
+        browser.key("right");
+    }
+    browser.minute = Some(MINUTE);
+    assert_eq!(browser.next_frame(0.0), Some(MINUTE));
+    browser.key("up");
+    browser.key("up");
+    assert_eq!(browser.next_frame(0.0), Some(MINUTE));
+}
+
+#[test]
+fn the_view_builds_with_strips_and_with_the_strip_in_focus() {
+    let mut browser = on_strips(3);
+    let _ = browser.view();
+    browser.key("down");
+    browser.key("down");
+    let _ = browser.view();
+    for _ in 0..4 {
+        browser.key("up");
+    }
+    assert!(browser.on_strip);
+    let _ = browser.view();
+    let _ = super::browser(0).view();
+}
+
+// A browser whose pool holds every kind, so the page draws four strips
+// between the recency strips and the libraries.
+// A browser whose pool holds every kind and whose library holds more
+// movies than a strip shows, so a genre's and a person's strip end in
+// "see all" and the set's strip, of three, does not.
+fn with_draw() -> Browser<Fake, NoArt> {
+    Browser::new(
+        Fake {
+            movies: MORE_THAN_SHOWN,
+            recent: true,
+            people: true,
+            sets: true,
+            pool: true,
+            ..Fake::default()
+        },
+        NoArt::default(),
+    )
+}
+
+fn headings(browser: &Browser<Fake, NoArt>) -> Vec<&str> {
+    strips(browser)
+        .into_iter()
+        .map(|strip| strip.heading.as_str())
+        .collect()
+}
+
+#[test]
+fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
+    let browser = with_draw();
+    let headings = headings(&browser);
+    assert_eq!(headings.len(), 9);
+    assert_eq!(headings[0], "Recently released");
+    assert_eq!(headings[1], "Recently added");
+    assert_eq!(headings[6], "Libraries");
+    assert_eq!(headings[7], "Genres");
+    assert_eq!(headings[8], "Franchises · 2");
+    let mut drawn: Vec<&str> = headings[2..6].to_vec();
+    drawn.sort_unstable();
+    assert_eq!(drawn, [PLAYER_STRIP, "Drama", "The Entries", "Western"]);
+    let first_three = &headings[2..5];
+    assert!(first_three.contains(&PLAYER_STRIP));
+    assert!(first_three.contains(&"The Entries"));
+    let last: Vec<(&str, Option<&str>)> = strips(&browser)[2..6]
+        .iter()
+        .map(|strip| {
+            (
+                strip.heading.as_str(),
+                strip.last.as_ref().map(|last| last.words.as_str()),
+            )
+        })
+        .collect();
+    for (heading, last) in last {
+        let want = match heading {
+            "The Entries" => None,
+            PLAYER_STRIP => Some("About A Player"),
+            _ => Some("See all"),
+        };
+        assert_eq!(last, want, "{heading}");
+    }
+}
+
+#[test]
+fn a_drawn_strip_captions_every_title_with_its_own_title_and_its_facts_under_it() {
+    let browser = with_draw();
+    let strips = strips(&browser);
+    let western = strips
+        .iter()
+        .find(|strip| strip.heading == "Western")
+        .expect("the page drew Western");
+    assert_eq!(western.items[0].caption, "Entry 1");
+    assert_eq!(western.items[0].under, "1980 · 1h 30m · PG");
+    let player = strips
+        .iter()
+        .find(|strip| strip.heading == PLAYER_STRIP)
+        .expect("the page drew the player");
+    assert_eq!(player.items[0].caption, "Entry 1");
+    assert_eq!(player.items[0].under, "Film · 1980");
+    let set = strips
+        .iter()
+        .find(|strip| strip.heading == "The Entries")
+        .expect("the page drew the set");
+    assert_eq!(set.items.len(), IN_SET);
+    assert_eq!(set.items[0].under, "1980 · 1h 30m");
+}
+
+// The browser after a "see all" on the drawn strip under this heading.
+// The presses go down to the strip and right to its "see all" slot,
+// which right stops on. A strip that holds nothing takes no press,
+// because down skips it.
+fn see_all_on(heading: &str) -> Browser<Fake, NoArt> {
+    let mut browser = with_draw();
+    let before = strips(&browser)
+        .iter()
+        .take_while(|strip| strip.heading != heading)
+        .filter(|strip| !strip.items.is_empty())
+        .count();
+    for _ in 0..=before {
+        browser.key("down");
+    }
+    for _ in 0..=MORE_THAN_SHOWN {
+        browser.key("right");
+    }
+    browser.key("enter");
+    browser
+}
+
+#[test]
+fn see_all_on_a_genre_strip_opens_the_genre_page() {
+    let browser = see_all_on("Western");
+
+    let wall = showing_wall(&browser);
+    assert_eq!(
+        wall.heading,
+        format!("Western · {MORE_THAN_SHOWN} movies, 1 series")
+    );
+    assert_eq!(
+        wall.slots.query,
+        Query::Genre {
+            name: "Western".into(),
+            order: Order::Released,
+            sort: GenreSort::default(),
+        }
+    );
+}
+
+#[test]
+fn a_reread_of_a_genre_page_counts_its_slots_again() {
+    let mut browser = see_all_on("Western");
+
+    browser.source.movies = 1;
+    browser.source.changed = true;
+    browser.pump(1.0);
+
+    assert_eq!(
+        showing_wall(&browser).heading,
+        "Western · 1 movie, 1 series"
+    );
+}
+
+#[test]
+fn see_all_on_a_persons_strip_opens_their_page() {
+    let browser = see_all_on(PLAYER_STRIP);
+
+    let page = showing_person(&browser);
+    assert_eq!(page.name, PLAYER);
+    assert_eq!(page.path, ENTRY);
+    assert_eq!(page.works.items.len(), MORE_THAN_SHOWN);
+}
+
+#[test]
+fn a_reread_keeps_focus_on_the_drawn_strip_it_was_on() {
+    let mut browser = with_draw();
+    for _ in 0..4 {
+        browser.key("down");
+    }
+    browser.key("right");
+    let before = headings(&browser)[3].to_string();
+
+    browser.source.changed = true;
+    browser.pump(1.0);
+
+    assert_eq!(at(&browser), (4, 1));
+    assert_eq!(headings(&browser)[3], before);
+}
+
+#[test]
+fn a_pool_that_empties_takes_its_strips_with_it() {
+    let mut browser = with_draw();
+    for _ in 0..4 {
+        browser.key("down");
+    }
+
+    browser.source.pool = false;
+    browser.source.changed = true;
+    browser.pump(1.0);
+
+    assert_eq!(
+        headings(&browser),
+        [
+            "Recently released",
+            "Recently added",
+            "Libraries",
+            "Genres",
+            "Franchises · 2"
+        ]
+    );
+    assert_eq!(at(&browser), (4, 0));
+}
+
+#[test]
+fn the_genres_strip_holds_every_genre() {
+    let mut browser = on_strips(3);
+    browser.key("down");
+    browser.key("down");
+    browser.key("down");
+
+    let (row, slot) = at(&browser);
+    let strips = strips(&browser);
+    let genres = strips[3];
+    assert_eq!((row, slot), (4, 0));
+    assert_eq!(genres.heading, "Genres");
+    assert!(genres.last.is_none());
+    let names: Vec<&str> = genres.items.iter().map(|item| item.name.as_str()).collect();
+    assert_eq!(names, ["Drama", "Western"]);
+    assert_eq!(genres.items[0].under, "2 titles");
+    assert_eq!(
+        genres.items[0].tiles,
+        [("screening/films".to_string(), "1.jpg".to_string())]
+    );
+    assert_eq!(genres.items[1].under, "1 title");
+}
+
+#[test]
+fn a_select_on_a_genre_opens_the_genres_page() {
+    let mut browser = on_strips(3);
+    for _ in 0..3 {
+        browser.key("down");
+    }
+    browser.key("right");
+
+    browser.key("enter");
+
+    let wall = showing_wall(&browser);
+    assert!(wall.heading.starts_with("Western · "), "{}", wall.heading);
+    assert_eq!(
+        wall.slots.query,
+        Query::Genre {
+            name: "Western".into(),
+            order: Order::Released,
+            sort: GenreSort::default(),
+        }
+    );
+}
+
+#[test]
+fn a_rest_on_a_genre_asks_for_the_clocks_frame_alone() {
+    let mut browser = on_strips(3);
+    browser.tick(0.0);
+    browser.minute = Some(MINUTE);
+    for _ in 0..3 {
+        browser.key("down");
+    }
+
+    assert_eq!(browser.next_frame(REST), Some(MINUTE));
+}
+
+#[test]
+fn a_wake_with_nothing_changed_reads_the_home_page_no_further() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    browser.source.calls.clear();
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+
+    browser.pump(2.0);
+
+    assert!(browser.source.calls.is_empty());
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![status(Activity::Playing), status(Activity::Idle)];
+    browser.pump(3.0);
+    assert!(browser.source.calls.is_empty());
+}
+
+// The day after today, so a test moves the day without the wall clock.
+fn tomorrow() -> Date {
+    Date::from_seconds(Date::today().seconds() + 86_400)
+}
+
+#[test]
+fn a_wake_on_a_new_day_reads_the_home_page_and_its_pool_again() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    browser.source.calls.clear();
+    browser.today = tomorrow;
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+
+    browser.pump(2.0);
+
+    assert!(browser.source.calls.contains(&"pool"));
+    assert!(browser.source.calls.contains(&"libraries"));
+}
+
+#[test]
+fn back_from_a_page_with_nothing_changed_reads_the_home_page_no_further() {
+    let mut browser = on_strips(3);
+    browser.key("enter");
+    browser.source.calls.clear();
+
+    browser.key("escape");
+
+    assert!(browser.source.calls.is_empty());
+    assert_eq!(at(&browser), (1, 0));
+}
+
+#[test]
+fn back_from_a_page_after_a_change_reads_the_home_page_again() {
+    let mut browser = on_strips(3);
+    browser.key("enter");
+    browser.source.changed = true;
+    browser.pump(1.0);
+    browser.source.calls.clear();
+
+    browser.key("escape");
+
+    assert!(browser.source.calls.contains(&"pool"));
+    assert_eq!(at(&browser), (1, 0));
+}
+
+#[test]
+fn the_slot_about_a_person_draws_their_headshot() {
+    let browser = with_draw();
+    let player = strips(&browser)
+        .into_iter()
+        .find(|strip| strip.heading == PLAYER_STRIP)
+        .expect("the page drew the person's strip");
+
+    let last = player.last.as_ref().expect("the strip ends in a slot");
+    assert_eq!(last.words, format!("About {PLAYER}"));
+    assert_eq!(last.library, "screening/films");
+    assert_eq!(last.art, format!("{ENTRY}/headshot.jpg"));
+}
+
+#[test]
+fn the_franchises_strip_ends_the_page_and_holds_every_franchise() {
+    let mut browser = on_strips(3);
+    for _ in 0..4 {
+        browser.key("down");
+    }
+
+    let (row, slot) = at(&browser);
+    let strips = strips(&browser);
+    let franchises = strips.last().expect("the page ends with the franchises");
+    assert_eq!((row, slot), (5, 0));
+    assert_eq!(franchises.heading, "Franchises · 2");
+    assert!(franchises.last.is_none());
+    let names: Vec<&str> = franchises
+        .items
+        .iter()
+        .map(|item| item.name.as_str())
+        .collect();
+    assert_eq!(names, ["The Cycle", "The Saga"]);
+    assert_eq!(franchises.items[0].art, "cycle.jpg");
+    assert_eq!(franchises.items[0].under, "4 films and series");
+    assert_eq!(franchises.items[1].art, "");
+}
+
+#[test]
+fn a_select_on_a_franchise_opens_its_page() {
+    let mut browser = on_strips(3);
+    for _ in 0..4 {
+        browser.key("down");
+    }
+
+    browser.key("enter");
+
+    let page = showing_franchise(&browser);
+    assert_eq!(page.title, "The Cycle");
+    assert_eq!(page.rows.len(), 2);
+}
+
+#[test]
+fn a_select_on_a_franchise_the_catalog_dropped_opens_nothing() {
+    let mut browser = on_strips(3);
+    for _ in 0..4 {
+        browser.key("down");
+    }
+    browser.key("right");
+
+    browser.key("enter");
+
+    showing_home(&browser);
+}

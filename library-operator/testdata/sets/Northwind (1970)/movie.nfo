@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<movie>
+  <title>Northwind</title>
+  <year>1970</year>
+  <premiered>1970-03-04</premiered>
+  <runtime>96</runtime>
+  <set>Northwind Trilogy</set>
+  <uniqueid type="tmdb">900003</uniqueid>
+</movie>

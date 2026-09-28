@@ -1,0 +1,303 @@
+# A MetadataProvider is one account with one metadata provider, in the
+# namespace of the libraries that name it. It holds the Secret for its
+# key and states the facts it may serve. A Library's spec.sources
+# orders the providers it asks. The operator checks each provider with
+# one cheap call, on its first pass, after an edit of the provider or its
+# Secret, and then once an hour, or every five minutes while the provider
+# gives no usable answer. It reports the answer in its status.
+# The key reaches each phase container of a Library's Job through a
+# secretKeyRef, and never through the catalog or a status.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: metadataproviders.library.liken.sh
+spec:
+  group: library.liken.sh
+  names:
+    kind: MetadataProvider
+    listKind: MetadataProviderList
+    plural: metadataproviders
+    singular: metadataprovider
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Provider
+          type: string
+          jsonPath: .status.provider
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Reason
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].reason
+        # The oldest time IMDb replaced one of the dataset files an imdb
+        # provider reads. The column is empty for every other block.
+        - name: Updated
+          type: date
+          jsonPath: .status.imdb.updated
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "One account with one metadata provider, named by the Libraries of its namespace in spec.sources."
+          properties:
+            spec:
+              type: object
+              description: "The provider this account is with, and the facts it may serve. A spec that names no facts serves every fact the operator can request from this provider."
+              # The block names the provider, the way a Library's kind
+              # names its settings block. Each provider is one block
+              # here, and the rule below holds an account to one of
+              # them: an account is a key, and a key is with one
+              # provider.
+              x-kubernetes-validations:
+                - rule: >-
+                    [has(self.tmdb), has(self.omdb), has(self.fanart),
+                    has(self.tvmaze), has(self.peertube),
+                    has(self.archive), has(self.theintrodb),
+                    has(self.introdb), has(self.imdb)].exists_one(block, block)
+                  message: >-
+                    A MetadataProvider names exactly one provider block:
+                    tmdb, omdb, fanart, tvmaze, peertube, archive,
+                    theintrodb, introdb, or imdb.
+              properties:
+                tmdb:
+                  type: object
+                  required: [secretRef]
+                  description: "The account is with The Movie Database, which serves movies, series, and people."
+                  properties:
+                    secretRef:
+                      type: object
+                      required: [name]
+                      description: "The Secret in this namespace that holds the credential, and the key inside it. Either credential TMDb issues works: a v3 API key of 32 hex characters, or a v4 read access token."
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                          description: "The Secret's name, in this provider's own namespace."
+                        key:
+                          type: string
+                          minLength: 1
+                          default: token
+                          description: "The key inside that Secret. When omitted, token."
+                omdb:
+                  type: object
+                  required: [secretRef]
+                  description: "The account is with OMDb. OMDb answers on an IMDb id, and it serves the plot, the US certification, and the ratings of IMDb, Rotten Tomatoes, and Metacritic."
+                  properties:
+                    secretRef:
+                      type: object
+                      required: [name]
+                      description: "The Secret in this namespace that holds the OMDb key, and the key inside it. The free tier of a key is a thousand calls a day."
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                          description: "The Secret's name, in this provider's own namespace."
+                        key:
+                          type: string
+                          minLength: 1
+                          default: token
+                          description: "The key inside that Secret. When omitted, token."
+                fanart:
+                  type: object
+                  required: [secretRef]
+                  description: "The account is with Fanart.tv, which provides art only. It is the only provider of clearart, banner, landscape, discart, and season-banner files."
+                  properties:
+                    secretRef:
+                      type: object
+                      required: [name]
+                      description: "The Secret in this namespace that holds the Fanart.tv project key, and the key inside it."
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                          description: "The Secret's name, in this provider's own namespace."
+                        key:
+                          type: string
+                          minLength: 1
+                          default: token
+                          description: "The key inside that Secret. When omitted, token."
+                tvmaze:
+                  type: object
+                  description: "The account is with TVmaze, which serves series alone and needs no account. The block is empty, and its presence says that the operator may ask TVmaze."
+                peertube:
+                  type: object
+                  required: [endpoint]
+                  description: "The account is with one PeerTube instance, which provides only the trailer fact and needs no account. Many people run PeerTube, so this block identifies the instance by its address."
+                  properties:
+                    endpoint:
+                      type: string
+                      pattern: '^https://'
+                      maxLength: 253
+                      description: "The address of the instance, such as https://tube.example. The operator checks it at /api/v1/config, and the trailer fact searches its videos by title."
+                archive:
+                  type: object
+                  description: "The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second."
+                theintrodb:
+                  type: object
+                  description: "The account is with TheIntroDB, a community database of the intro, recap, credits, and preview spans of movies and episodes. It provides only the marks fact, and it finds a work by its TMDb id. A key is optional. Without one, TheIntroDB answers 500 asks a day for each address and serves accepted submissions alone. With one, it answers 1000 asks a day for the account and adds the account's own pending submissions. The operator checks it at /health, which spends none of the daily allowance and cannot test the key."
+                  properties:
+                    secretRef:
+                      type: object
+                      required: [name]
+                      description: "The Secret in this namespace that holds the TheIntroDB API key, and the key inside it. Omit it to ask with no key."
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                          description: "The Secret's name, in this provider's own namespace."
+                        key:
+                          type: string
+                          minLength: 1
+                          default: token
+                          description: "The key inside that Secret. When omitted, token."
+                introdb:
+                  type: object
+                  description: "The account is with IntroDB, a community database of the intro, recap, credits, and post-credits spans of movies and episodes. It provides only the marks fact, finds a work by its IMDb id, and needs no account. The block is empty, and its presence says that the operator may ask IntroDB."
+                imdb:
+                  type: object
+                  description: "The account is with IMDb's published datasets, which serve the rating.imdb fact for movies, series, and episodes, and the credits fact for movies and series, and need no account. The credits hold about nine people for each title, so the block answers them only where no source before it in a Library's sources answered. The block is empty, and its presence says that the operator may download the files. IMDb publishes the files for personal and non-commercial use, so each cluster downloads them from IMDb. An enricher reads each file once per run and keeps only the rows of the titles in its gap list. Where the cluster has a StorageClass whose provisioner is per-node.liken.sh, the operator makes the claim <provider>-datasets of 3Gi on it, and each node keeps a copy of each file there."
+                facts:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  minItems: 1
+                  maxItems: 30
+                  description: "The facts this account may serve, from the fixed vocabulary. The list narrows what the operator can request from this provider. Omit it to serve all of them. A Library asks this provider only for a fact that status.facts lists."
+                  items:
+                    type: string
+                    # The fact vocabulary of the enrichment design. A
+                    # fact is one gap in the catalog, one name in a
+                    # container's LIBRARY_FACTS, and one attempts file
+                    # it writes.
+                    enum:
+                      - probe
+                      - arrival
+                      - trickplay
+                      - identity
+                      - overview
+                      - certification
+                      - rating.tmdb
+                      - rating.imdb
+                      - rating.rottentomatoes
+                      - rating.metacritic
+                      - credits
+                      - poster
+                      - backdrop
+                      - logo
+                      - clearart
+                      - banner
+                      - landscape
+                      - discart
+                      - season-poster
+                      - season-banner
+                      - episode-thumb
+                      - trailer
+                      - marks
+                      - contributor.ids
+                      - contributor.biography
+                      - contributor.headshot
+            status:
+              type: object
+              description: "What the operator's own check found, written only by the library operator."
+              properties:
+                provider:
+                  type: string
+                  description: "The provider block this account names. The PROVIDER column reads it here, because no printer column can read which block a spec holds."
+                facts:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 30
+                  description: "The facts this provider serves now: what the operator can request from this provider, narrowed by spec.facts. The list is empty while the Ready condition is not True, because an unreachable provider serves nothing."
+                  items:
+                    type: string
+                lastRefusal:
+                  type: string
+                  format: date-time
+                  description: "When the provider last refused the key. The time remains after the key works again, so a person can see that it once failed."
+                imdb:
+                  type: object
+                  description: "What the check of an imdb block read from IMDb. A failed check leaves the entries of the last check that read the files, because the last version IMDb published is still a fact."
+                  properties:
+                    updated:
+                      type: string
+                      format: date-time
+                      description: "The oldest lastModified in datasets, which the UPDATED column shows."
+                    datasets:
+                      type: array
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [name]
+                      maxItems: 8
+                      description: "One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode, and credits reads title.principals and name.basics."
+                      items:
+                        type: object
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                            description: "The file's name at IMDb, without the .tsv.gz suffix."
+                          lastModified:
+                            type: string
+                            format: date-time
+                            description: "When IMDb last replaced the file, from its Last-Modified header. IMDb replaces each file every day."
+                          etag:
+                            type: string
+                            description: "The file's ETag header."
+                          size:
+                            type: integer
+                            format: int64
+                            description: "The size of the gzipped file in bytes, from its Content-Length header."
+                conditions:
+                  type: array
+                  description: "Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, LimitReached, Unreachable, or Unavailable. LimitReached is a key the provider answered with its request limit, as OMDb does when a key has spent its calls for the day. The key is good, and the check asks again in an hour. Refused and LimitReached carry the provider's own words in the message. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check this entry reports, in CamelCase. It
+                          is the key of this list.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. True is the good verdict, and
+                          Unknown means the operator cannot tell yet.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition judged.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for why the condition holds
+                          this verdict, meant for a program to match on.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The same answer in a sentence a person reads.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the verdict last changed. It moves only
+                          when the status flips.

@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# local/progress runs one Corrosion agent on the progress store's schema on
+# this workstation, so progress rows can be written and read without a
+# cluster. It is a second cluster beside local/catalog's, on its own ports
+# and its own state directory, the way a screen pod runs the two agents side
+# by side.
+#
+# Usage:
+#   local/progress up      start the agent and wait until its API answers;
+#                          prints the API address
+#   local/progress down    stop it
+#   local/progress status  print whether it is up
+set -euo pipefail
+
+# The repository is the directory above this file, so every path resolves
+# from this script's own directory and none is absolute.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/.." && pwd)"
+
+# The agent runs from the image corrosion/Dockerfile builds, the same bytes
+# the cluster runs. local/catalog builds the same tag.
+image="library-operator-corrosion:local"
+
+# The container name, and the ports. The ports are fixed and above 20000,
+# beside the catalog harness's, so a second run reaches the same agent.
+name="library-progress-1"
+api_port=20091
+gossip_port=20881
+
+# The harness writes under local/state, which .gitignore excludes. The agent
+# keeps its configuration, its database, its write-ahead log, and its admin
+# socket in one directory.
+state="$repo/local/state/progress/agent-1"
+
+# The two paths inside the container. The schema mount hides the copy the
+# image carries, so an edit to progress.sql shows on the next start with no
+# image build.
+container_state="/var/lib/corrosion"
+container_schema="/etc/corrosion/progress-schema"
+
+usage() {
+  sed -n '8,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+# The agent is up when a container of its name runs. docker's own filter is
+# the record, so the harness keeps no pid file, and a stale file cannot
+# survive a reboot.
+running() {
+  [ -n "$(docker ps --quiet --filter "name=^${name}\$")" ]
+}
+
+# The agent's configuration, rendered before its container starts. The
+# bootstrap list holds its own address, which Corrosion drops from what it
+# dials, so one agent is a cluster of one.
+render_config() {
+  cat >"$state/config.toml" <<EOF
+[db]
+path = "$container_state/state.db"
+schema_paths = ["$container_schema"]
+cache_size_kib = -65536
+
+[api]
+addr = "127.0.0.1:$api_port"
+
+[gossip]
+addr = "127.0.0.1:$gossip_port"
+plaintext = true
+bootstrap = ["127.0.0.1:$gossip_port"]
+
+[admin]
+path = "$container_state/admin.sock"
+EOF
+}
+
+# Whether the agent's HTTP API answers. A query is the smallest request that
+# proves the API and the database behind it are both up.
+api_answers() {
+  curl --silent --fail --max-time 2 \
+    --header 'content-type: application/json' \
+    --data '"SELECT 1"' \
+    "http://127.0.0.1:$api_port/v1/queries" >/dev/null 2>&1
+}
+
+up() {
+  if running; then
+    echo "local/progress: $name is already running; run 'local/progress down' first" >&2
+    exit 1
+  fi
+
+  # A missing image is built here rather than reported, and the build is the
+  # same one CI runs.
+  if [ -z "$(docker images --quiet "$image")" ]; then
+    echo "local/progress: building $image" >&2
+    docker build "$repo/corrosion" --tag "$image" >&2
+  fi
+
+  mkdir -p "$state"
+  render_config
+
+  # --network host puts the agent on loopback, where the port above is the
+  # address a harness on this workstation dials. --user runs it as the person
+  # at the keyboard, because the media browser opens the SQLite file from the
+  # host, and a database in WAL mode needs a writable -shm file beside it.
+  docker run --detach --rm \
+    --name "$name" \
+    --network host \
+    --user "$(id -u):$(id -g)" \
+    --volume "$state:$container_state" \
+    --volume "$repo/corrosion/progress-schema:$container_schema:ro" \
+    "$image" agent --config "$container_state/config.toml" >/dev/null
+
+  # Thirty seconds is the ceiling. One agent on loopback answers in a second
+  # or two, so an agent that has not answered by then has failed.
+  local deadline=$((SECONDS + 30))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if api_answers; then
+      echo "127.0.0.1:$api_port"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "local/progress: the agent did not answer in 30 seconds" >&2
+  status
+  exit 1
+}
+
+down() {
+  running || return 0
+  # A busy agent flushes its database on the way out, so the stop gives it
+  # thirty seconds before docker sends the kill.
+  docker stop --timeout 30 "$name" >/dev/null
+}
+
+status() {
+  if running; then
+    echo "$name up on 127.0.0.1:$api_port"
+  else
+    echo "$name down"
+  fi
+}
+
+case "${1:-}" in
+  up) up ;;
+  down) down ;;
+  status) status ;;
+  *) usage ;;
+esac

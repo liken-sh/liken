@@ -1,0 +1,349 @@
+package main
+
+// what these tests read: which titles each nfo fact's gap holds, against the
+// shipped schema in a real database, and what an .nfo file says it already
+// answers.
+
+import (
+	"slices"
+	"testing"
+	"time"
+)
+
+// the four titles a gap test reads: one with nothing, one with the overview and
+// the credits, one no provider has named, and one series.
+func seedNFOFactRows(t *testing.T, catalog *Catalog) {
+	t.Helper()
+	seed := &walkResult{
+		movies: []movieRow{
+			{Id: "movie:tmdb:1", Library: "house/movies", Path: "One (2001)", Title: "One"},
+			{
+				Id: "movie:tmdb:2", Library: "house/movies", Path: "Two (2002)", Title: "Two",
+				NFOFacts: nfoFactList([]string{factOverview, factRatingIMDb, factCredits}),
+			},
+			{Id: "movie:path:three-2003", Library: "house/movies", Path: "Three (2003)", Title: "Three"},
+		},
+		series: []seriesRow{
+			{Id: "series:tvdb:9", Library: "house/movies", Path: "Ninefold (2009)", Title: "Ninefold"},
+		},
+	}
+	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnNFOGapHoldsTheTitlesWhoseNFOLacksTheFactAgainstTheRealSchema(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedNFOFactRows(t, catalog)
+	now := time.Now().UTC()
+
+	cases := []struct {
+		fact string
+		want []string
+	}{
+		{fact: factOverview, want: []string{"movie:tmdb:1", "series:tvdb:9"}},
+		{fact: factCertification, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
+		{fact: factRatingTMDb, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
+		{fact: factRatingIMDb, want: []string{"movie:tmdb:1", "series:tvdb:9"}},
+		{fact: factRatingRottenTomatoes, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
+		{fact: factRatingMetacritic, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
+		{fact: factCredits, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
+	}
+	for _, test := range cases {
+		t.Run(test.fact, func(t *testing.T) {
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[test.fact],
+				gapParams(test.fact, "house/movies", now, time.Time{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			slices.Sort(ids)
+			if !slices.Equal(ids, test.want) {
+				t.Errorf("gap = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
+// The credits gap is credits.yaml and never the .nfo file's actors: a title
+// Jellyfin gave a cast is a gap until the fact wrote the file, and a title
+// whose providers named no cast holds it through the attempt window.
+func TestTheCreditsGapIsATitleWithNoCreditsFileAgainstTheRealSchema(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name     string
+		credits  []creditRow
+		attempts []attemptRow
+		want     []string
+	}{
+		{
+			name: "every title with an id, the one Jellyfin gave a cast included",
+			want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"},
+		},
+		{
+			name: "a title whose credits.yaml names a person",
+			credits: []creditRow{{
+				Library: "house/movies", Item: "movie:tmdb:2", Billing: 0,
+				Name: "Nora Vance", Contributor: ".contributors/no/nora-vance",
+			}},
+			want: []string{"movie:tmdb:1", "series:tvdb:9"},
+		},
+		{
+			name: "a title whose providers named no cast, inside the window",
+			attempts: []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:1", Fact: factCredits,
+				At: now.Unix(), Result: attemptFound, Provider: "tmdb",
+			}},
+			want: []string{"movie:tmdb:2", "series:tvdb:9"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedNFOFactRows(t, catalog)
+			if _, err := catalog.UpsertCredits(t.Context(), test.credits); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), test.attempts); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
+				gapParams(factCredits, "house/movies", now, time.Time{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			slices.Sort(ids)
+			if !slices.Equal(ids, test.want) {
+				t.Errorf("gap = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
+// An nfo gap holds a title again only after that title's last attempt has
+// passed the window its own kind carries.
+func TestEveryAttemptKindGatesTheNFOGap(t *testing.T) {
+	for _, test := range attemptWindowCases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			now := time.Now().UTC()
+			seed := &walkResult{movies: []movieRow{
+				{Id: "movie:tmdb:1", Library: "house/movies", Path: "One (2001)", Title: "One"},
+			}}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:1", Fact: factOverview,
+				At: now.Add(-test.age).Unix(), Result: test.result, Provider: "tmdb",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
+				gapParams(factOverview, "house/movies", now, time.Time{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(ids) != test.wantGap {
+				t.Errorf("gap = %v, want %d", ids, test.wantGap)
+			}
+		})
+	}
+}
+
+// The reporter counts every gap with the same query the container works from,
+// so the nfo facts arrive in the report with the two facts of plan 29.
+func TestTheGapCountsHoldEveryNFOFact(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedNFOFactRows(t, catalog)
+
+	counts, err := catalog.gapCounts(t.Context(), "house/movies", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, fact := range nfoFacts {
+		if _, held := counts[fact]; !held {
+			t.Errorf("counts = %v, want a count for %s", counts, fact)
+		}
+	}
+	if counts[factOverview] != 2 || counts[factCertification] != 3 {
+		t.Errorf("counts = %v, want two titles with no overview and three with no certification", counts)
+	}
+}
+
+// The fights a person reads on the Library are the attempts every fact left
+// because another writer holds the group.
+func TestTheFightCountReadsEveryFactsFights(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	now := time.Now().UTC().Unix()
+	if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{
+		{Library: "house/movies", Item: "movie:tmdb:1", Fact: factOverview, At: now, Result: attemptFight},
+		{Library: "house/movies", Item: "movie:tmdb:1", Fact: factCredits, At: now, Result: attemptFight},
+		{Library: "house/movies", Item: "movie:tmdb:2", Fact: factOverview, At: now, Result: attemptFound},
+		{Library: "house/series", Item: "series:tvdb:9", Fact: factOverview, At: now, Result: attemptFight},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fights, err := catalog.fightCount(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fights != 2 {
+		t.Errorf("fights = %d, want the two this library left", fights)
+	}
+}
+
+// The scanner reads which facts an .nfo file answers off the elements it holds,
+// so a title Jellyfin filled is no gap at all.
+func TestAnNFOSaysWhichFactsItAnswers(t *testing.T) {
+	cases := []struct {
+		name string
+		nfo  string
+		want []string
+	}{
+		{
+			name: "an .nfo file with the title alone",
+			nfo:  "<movie><title>One</title></movie>",
+			want: nil,
+		},
+		{
+			name: "an .nfo file Jellyfin filled",
+			nfo: `<movie><title>One</title><plot>A plot.</plot><mpaa>PG</mpaa>` +
+				`<ratings><rating name="themoviedb" max="10"><value>8</value></rating></ratings>` +
+				`<actor><name>Nora Vance</name></actor></movie>`,
+			want: []string{factOverview, factCertification, factRatingTMDb},
+		},
+		{
+			name: "an .nfo file with the rating of each site",
+			nfo: `<movie><title>One</title><ratings>` +
+				`<rating name="imdb" max="10"><value>7</value></rating>` +
+				`<rating name="tomatometerallcritics" max="100"><value>91</value></rating>` +
+				`<rating name="metacritic" max="100"><value>76</value></rating>` +
+				`</ratings></movie>`,
+			want: []string{factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic},
+		},
+		{
+			name: "an .nfo file with a site no fact holds",
+			nfo: `<movie><title>One</title>` +
+				`<ratings><rating name="trakt" max="10"><value>7</value></rating></ratings></movie>`,
+			want: nil,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			meta, err := parseMovieNFO([]byte(test.nfo))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if meta.NFOFacts != nfoFactList(test.want) {
+				t.Errorf("answers = %q, want %q", meta.NFOFacts, nfoFactList(test.want))
+			}
+		})
+	}
+}
+
+// A refresh later than a title's credits attempt puts that title in the
+// gap again, although credits.yaml is there and the catalog holds its
+// rows, and a refresh earlier than the attempt leaves it closed.
+func TestARefreshOpensTheCreditsGapAgainstTheRealSchema(t *testing.T) {
+	now := time.Now().UTC()
+	attempted := now.Add(-time.Hour)
+	cases := []struct {
+		name    string
+		refresh time.Time
+		want    []string
+	}{
+		{
+			name: "no refresh at all",
+			want: []string{"movie:tmdb:1", "series:tvdb:9"},
+		},
+		{
+			name:    "a refresh earlier than the attempt",
+			refresh: attempted.Add(-time.Minute),
+			want:    []string{"movie:tmdb:1", "series:tvdb:9"},
+		},
+		{
+			name:    "a refresh later than the attempt",
+			refresh: attempted.Add(time.Minute),
+			want:    []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedNFOFactRows(t, catalog)
+			if _, err := catalog.UpsertCredits(t.Context(), []creditRow{{
+				Library: "house/movies", Item: "movie:tmdb:2", Billing: 0,
+				Name: "Nora Vance", Contributor: ".contributors/no/nora-vance",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:2", Fact: factCredits,
+				At: attempted.Unix(), Result: attemptFound, Provider: "tmdb",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
+				gapParams(factCredits, "house/movies", now, test.refresh))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			slices.Sort(ids)
+			if !slices.Equal(ids, test.want) {
+				t.Errorf("gap = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
+// An nfo fact reads the title's own release date, so the overview a provider
+// had none of before the film came out is a gap again on the day it does.
+func TestAnNFOAttemptBeforeTheReleaseStandsOnlyUntilIt(t *testing.T) {
+	cases := []struct {
+		name  string
+		today string
+		want  int
+	}{
+		{name: "the film is not out yet", today: "2026-09-05"},
+		{name: "the film comes out today", today: "2026-09-21", want: 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seed := &walkResult{movies: []movieRow{{
+				Id: "movie:tmdb:1", Library: "house/movies", Path: "One (2026)",
+				Title: "One", Released: "2026-09-21",
+			}}}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:1", Fact: factOverview,
+				At: dayOf(t, "2026-09-04").Unix(), Result: attemptNothing, Provider: "tmdb",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
+				gapParams(factOverview, "house/movies", dayOf(t, test.today), time.Time{}))
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ids) != test.want {
+				t.Errorf("gap = %v, want %d", ids, test.want)
+			}
+		})
+	}
+}

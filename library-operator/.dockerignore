@@ -1,0 +1,19 @@
+# The root Dockerfile copies go.mod, go.sum, and the Go sources at the
+# root, and nothing else. Everything below is documentation, plans,
+# manifests, test data, a workstation's build output, or the media
+# browser's Rust tree, which builds from its own context. Sending any
+# of it to the daemon costs the build time and no build reads it; the
+# two cargo target directories are the large ones, gigabytes each on a
+# workstation.
+.git
+.github
+deploy
+docs
+plans
+testdata
+local
+media-browser/target
+media-browser/brand/iced/target
+README.md
+LICENSE
+/library-operator

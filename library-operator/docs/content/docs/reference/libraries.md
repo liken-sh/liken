@@ -1,0 +1,268 @@
+---
+title: Libraries
+weight: 10
+toc: true
+---
+
+<!-- Generated from deploy/libraries-crd.yaml by crdref. Do not edit. -->
+
+A `Library` is one root directory on one volume, holding media of one
+kind. It names a `PersistentVolumeClaim` in its namespace, a directory
+inside it, and the kind that directory holds. The operator reconciles
+it into `Job`s, one at a time, that walk the volume into the
+namespace's catalog and fill in what the walk found, and it reports
+back what the catalog holds: how many titles, how many folders the walk
+could not identify, and when it last walked. An import can rescan
+folders at once through the webhook address in the status.
+
+A namespace may hold many libraries, of any mix of kinds, and one
+volume may hold several libraries, each with its own root. The kind
+and the storage are immutable: a different volume or a different kind
+is a different `Library`.
+
+    apiVersion: library.liken.sh/v1alpha1
+    kind: Library
+    metadata:
+      name: movies
+      namespace: media
+    spec:
+      storage:
+        claim: movies
+        root: /
+      kind: movies
+      movies: {}
+
+The block named by `kind` must be present and the other kinds' blocks
+must not. Each block holds that kind's own settings, and an empty
+block is a complete one.
+
+A Library is media of one kind, indexed into the catalog the screens read. Every kind covers one volume, a Library of franchises included: its volume holds one directory per franchise, and it names a second claim for the art the scan downloads. Create one for each volume and kind you hold.
+
+## spec
+
+The storage this library covers, the kind of media it holds, and the settings for that kind.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | Where the media is: a claim, and a directory inside it. A franchises library names the claim that holds its checkout here, one directory per franchise, and names the claim for its art under spec.franchises.art. |
+| <span id="spec--kind"></span>`kind` | string | yes | What this library holds. The kind selects the scanner that walks the storage and the shape the catalog stores each title in. The settings block of the same name must be present, and no other. One of: `movies`, `series`, `franchises`. |
+| <span id="spec--movies"></span>`movies` | [object](#specmovies) | no | The settings for a library of movies, one folder per title. Present exactly when kind is movies, and empty is a complete block: every setting has a default. |
+| <span id="spec--series"></span>`series` | [object](#specseries) | no | The settings for a library of series, one folder per series with a folder per season inside it. Present exactly when kind is series, and empty is a complete block. |
+| <span id="spec--franchises"></span>`franchises` | [object](#specfranchises) | no | The settings for a library of franchises: one directory per franchise on the storage claim, each with a franchise.yaml, and the claim the scan writes the art into. Present exactly when the kind is franchises, and the art claim is its one required setting. |
+| <span id="spec--sources"></span>`sources` | []string | no | The MetadataProviders in this namespace to ask about a title, by name, in the order they are asked: for each fact, the first provider in the list that serves it and is Ready is the one asked. The Sources condition reports a name that resolves to no provider, or a list where none serves a fact this library needs. A library that omits the list runs only the facts that need no provider. |
+| <span id="spec--scan"></span>`scan` | [object](#specscan) | no | When the full walk of this library runs. |
+| <span id="spec--trickplay"></span>`trickplay` | [object](#spectrickplay) | no | The thumbnail sheets a scrub bar reads, built beside each video from the file alone, with no provider, in the folder layout Jellyfin reads and writes. |
+| <span id="spec--trailers"></span>`trailers` | [object](#spectrailers) | no | The trailer files this library pulls beside its titles, from the links the trailer fact recorded. |
+| <span id="spec--languages"></span>`languages` | []string | no | The languages this library prefers, most preferred first, as tags such as en or en-US. Enrichment ranks a trailer in one of these languages above one in another. The list goes before the household's audio languages from MediaPreferences, and a library that names none takes the household's list alone. |
+| <span id="spec--ignore"></span>`ignore` | []string | no | Path components to skip. The scanner leaves out any folder whose name matches an entry, and everything under it, so a volume's non-media folders such as a recycle bin or a staging directory stay out of the catalog. |
+| <span id="spec--refresh"></span>`refresh` | map[string]string | no | One time per refresh target. A key named for a fact, by the names status.gaps uses, reopens that fact's gap: an attempt whose time is before the refresh does not count, so the title is in the gap again although its file and its rows are there, the fact asks a provider again, and it rewrites its own files and rows in place. The key scan asks for one full walk of the library, and a walk that starts at or after the time answers it. Nothing is deleted, and a target this map does not name is untouched. A time that has not come yet waits, and the work runs once when it arrives. |
+
+### spec.storage
+
+Where the media is: a claim, and a directory inside it. A franchises library names the claim that holds its checkout here, one directory per franchise, and names the claim for its art under spec.franchises.art.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specstorage--claim"></span>`claim` | string | yes | The PersistentVolumeClaim in this namespace that holds the media. Any volume the cluster can mount will do, an NFS export or a CSI volume or a disk on one node. Every scanner mounts it read-only and writes nothing to it. The operator reads the PersistentVolume behind the claim and reports it in the status, because playing a title needs to know how the volume is served. |
+| <span id="specstorage--root"></span>`root` | string | no | The directory inside the claim this library starts at, as an absolute path from the root of the volume. One volume may hold several libraries, each with its own root, such as /movies beside /kids-movies. Omitted, it is /, the whole volume. Default: `/`. |
+
+### spec.movies
+
+The settings for a library of movies, one folder per title. Present exactly when kind is movies, and empty is a complete block: every setting has a default.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specmovies--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for movies. Set it to run a scanner of your own, which must speak the scanner contract: mount the volume read-only, write through the catalog sidecar, and write its runs row last. Omitted, the operator runs the project's own image. |
+
+### spec.series
+
+The settings for a library of series, one folder per series with a folder per season inside it. Present exactly when kind is series, and empty is a complete block.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specseries--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for series, on the same terms as the movies image. |
+
+### spec.franchises
+
+The settings for a library of franchises: one directory per franchise on the storage claim, each with a franchise.yaml, and the claim the scan writes the art into. Present exactly when the kind is franchises, and the art claim is its one required setting.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specfranchises--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for franchises, on the same terms as the movies image. |
+| <span id="specfranchises--art"></span>`art` | [object](#specfranchisesart) | yes | Where the art the scan downloads lands. The storage claim holds the checkout and is read-only, so the art needs a claim of its own, and a screen reads this library's art from that claim. |
+
+#### spec.franchises.art
+
+Where the art the scan downloads lands. The storage claim holds the checkout and is read-only, so the art needs a claim of its own, and a screen reads this library's art from that claim.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specfranchisesart--claim"></span>`claim` | string | yes | The PersistentVolumeClaim in this namespace that the scan writes the art into, under one directory per franchise with Kodi's names. The Job of this library mounts it writable, and a screen mounts it read-only. The Job and every screen that shows this library mount it at once, so it has to allow that. |
+
+### spec.scan
+
+When the full walk of this library runs.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specscan--schedule"></span>`schedule` | string | no | The cron expression the full walk runs on, in the form a CronJob takes, in UTC unless it starts with a CRON_TZ= prefix; omitted, once an hour on the hour. The operator starts the walk when a time in the schedule has passed since the last walk started and no Job of this library runs. An expression the operator cannot read sets Ready to False with the reason ScheduleInvalid, and no walk starts on a schedule. Default: `0 * * * *`. |
+
+### spec.trickplay
+
+The thumbnail sheets a scrub bar reads, built beside each video from the file alone, with no provider, in the folder layout Jellyfin reads and writes.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, the Job of this library runs a trickplay container, which fills the gap one feature after another and starts no new feature after fifteen minutes of one run. The next Job continues the gap. Default: `false`. |
+| <span id="spectrickplay--render"></span>`render` | [object](#spectrickplayrender) | no | The render node the trickplay Job decodes on. Set, the operator keeps a ResourceClaimTemplate for the Library and the Job's pod claims one device of the class. Unset, the Job decodes in software. |
+
+#### spec.trickplay.render
+
+The render node the trickplay Job decodes on. Set, the operator keeps a ResourceClaimTemplate for the Library and the Job's pod claims one device of the class. Unset, the Job decodes in software.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrickplayrender--class"></span>`class` | string | yes | The name of the DeviceClass the render node is allocated from. |
+| <span id="spectrickplayrender--selector"></span>`selector` | string | no | A CEL expression over device.attributes, for a class that offers more than one render node. |
+
+### spec.trailers
+
+The trailer files this library pulls beside its titles, from the links the trailer fact recorded.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrailers--enabled"></span>`enabled` | boolean | no | Off by default, because every title pulls a video file of tens of megabytes onto the library volume. Turned on, the Job of this library runs a trailer-files container, which pulls one trailer per title: the highest-scored trailer whose site it can fetch from, at the tallest height the title's own feature allows, remuxed and checked before it lands under the title's trailers folder. The container starts no new title after fifteen minutes of one run, and the next Job continues the gap. Default: `false`. |
+
+## status
+
+What the volume resolved to and what the namespace's reporter says about this library, written only by the library operator. No pod it creates holds an API credential. The catalog pod publishes a retained report on the bus, and the operator folds that report in here.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="status--volume"></span>`volume` | [object](#statusvolume) | no | The PersistentVolume the claim is bound to. It is absent until the claim binds. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume. |
+| <span id="status--phase"></span>`phase` | string | no | What this library is doing. Scanning while a walk runs, Enriching while the Job's phases run after its walk or in a Job that fills gaps, Idle between Jobs, Pending while the storage, the catalog pod, or the schedule is not ready, Blocked while a Job of this library has a pod that has not started for five minutes, Failed when the last walk failed and wrote no rows or when a Job failed and no later Job succeeded, and Offline when the namespace's reporter has left the bus. The Ready condition names the Job and the reason Kubernetes gives for Blocked and for a failed Job. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached. |
+| <span id="status--titles"></span>`titles` | integer | no | How many titles the scanner's last walk cataloged. |
+| <span id="status--items"></span>`items` | integer | no | How many entries this library holds: its movies, or its series and their episodes counted together. |
+| <span id="status--files"></span>`files` | integer | no | How many files this library holds: the video files and everything beside them, the `.nfo` files, the artwork, the subtitles, and the trickplay directories. |
+| <span id="status--unidentified"></span>`unidentified` | integer | no | How many folders the last walk could not identify: no `.nfo` file, and no confident parse of the folder name. They are cataloged under their folder names, so they are still browsable. |
+| <span id="status--removedlastsweep"></span>`removedLastSweep` | integer | no | How many catalog rows the scanner's last full sweep removed. A mass delete that a partial walk caused shows here, without a shell. |
+| <span id="status--gaps"></span>`gaps` | map[string]integer | no | The namespace reporter counts the catalog rows still missing each fact. Between walks, the operator creates a Job that fills gaps with the phases whose counts are above zero, once a refresh time, a provider that turned Ready, or a walk has given them work. The count falls as each phase writes its rows. After a fact attempts a row, the row is excluded from that fact's count while its attempt window is active: thirty days for a miss and one day for an error. The marks fact holds a find or a miss for one day while the work is in its first week and for seven days until it is ninety days old. The row becomes eligible for the count again when that window expires. An attempt made before the item's release date excludes the row only until that date, so an episode a fact asked about before it aired is in the count again on the day it airs. |
+| <span id="status--waiting"></span>`waiting` | integer | no | How many titles the identity fact left as candidates for a person to choose from. The candidates are in the title's .liken/identity.yaml. A person puts the right uniqueid into the .nfo, and the next scan identifies the title. |
+| <span id="status--unresolved"></span>`unresolved` | integer | no | How many titles no provider could name. A miss is recorded with its date, and the identity fact asks again after its retry interval. |
+| <span id="status--fights"></span>`fights` | integer | no | How many titles a fact left because another writer changed the elements it writes, and how many .contributors/ entries the merge of one person's entries left because a person edited a contributor.yaml of the group. The fact recorded the attempt and wrote nothing. The repair for a title is to stop the other writer for this library, such as Jellyfin with its metadata saver on. For an entry, .liken/contributor.merge.yaml in each entry of the group names the file a person edited. |
+| <span id="status--lastwalk"></span>`lastWalk` | string | no | When the scanner last finished a full walk of the volume. |
+| <span id="status--lastchange"></span>`lastChange` | string | no | When the scanner last wrote a change to the catalog. A walk that finds nothing new moves lastWalk and leaves this alone. |
+| <span id="status--runs"></span>`runs` | [\[\]object](#statusruns) | no | The last run of each worker of this library, as the namespace's reporter published it. |
+| <span id="status--sources"></span>`sources` | [\[\]object](#statussources) | no | One entry per name in spec.sources, in the order the spec names them, so you read which providers this library asks and which it drops. A name that spec.sources repeats appears once per repeat. |
+| <span id="status--sourcessummary"></span>`sourcesSummary` | string | no | How many of the sources are ready against how many names spec.sources holds, in the form 6/6. The SOURCES column of kubectl get reads this field. |
+| <span id="status--webhook"></span>`webhook` | string | no | The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, spec.scan.schedule parses, the library's Jobs start and succeed, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScheduleInvalid, JobNotStarted, JobFailed, Offline, or NoReport. JobNotStarted names a Job whose pod has stayed Pending for five minutes, with the reason from the pod's scheduling condition or from its newest Warning event. JobFailed names the newest Job that failed, with the reason the Job controller gives, until a later Job succeeds. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, AwaitingEcho, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition. |
+
+### status.volume
+
+The PersistentVolume the claim is bound to. It is absent until the claim binds. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusvolume--name"></span>`name` | string | no | The PersistentVolume's name. |
+| <span id="statusvolume--type"></span>`type` | string | no | How the volume is served, which is the name of the source key on the PersistentVolume, such as nfs, csi, local, or hostPath. |
+| <span id="statusvolume--server"></span>`server` | string | no | The NFS server that exports the volume. Only an nfs volume has one. |
+| <span id="statusvolume--path"></span>`path` | string | no | The path the NFS server exports. Only an nfs volume has one. A title's media reference is this path and the title's own path under it. |
+
+### status.runs[]
+
+The last run of each worker of this library, as the namespace's reporter published it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, or cleanup. |
+| <span id="statusruns--job"></span>`job` | string | no | The name of the Job that ran, for kubectl describe and logs. |
+| <span id="statusruns--started"></span>`started` | string | no | When that Job started its work. |
+| <span id="statusruns--finished"></span>`finished` | string | no | When that Job wrote its last row, which is what a catalog pod confirms before the Job exits. |
+| <span id="statusruns--unidentified"></span>`unidentified` | integer | no | How many folders that run could not identify. |
+| <span id="statusruns--removed"></span>`removed` | integer | no | How many rows that run removed. |
+| <span id="statusruns--failure"></span>`failure` | string | no | Why that run failed, in one sentence. It is empty for a run that finished its work, and status.phase reads Failed while the scan run carries one. |
+
+### status.sources[]
+
+One entry per name in spec.sources, in the order the spec names them, so you read which providers this library asks and which it drops. A name that spec.sources repeats appears once per repeat.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussources--name"></span>`name` | string | yes | The MetadataProvider this entry reports, as spec.sources spells it. |
+| <span id="statussources--block"></span>`block` | string | no | The provider block that MetadataProvider declares, such as tmdb, peertube, or archive. It is empty where no MetadataProvider of this name exists. |
+| <span id="statussources--ready"></span>`ready` | boolean | yes | Whether the provider passed its last check, which decides whether the phases of a library Job ask it at all. |
+| <span id="statussources--reason"></span>`reason` | string | no | The reason of that provider's Ready condition, or Missing where the namespace holds no MetadataProvider of this name. |
+
+### status.conditions[]
+
+The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, spec.scan.schedule parses, the library's Jobs start and succeed, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScheduleInvalid, JobNotStarted, JobFailed, Offline, or NoReport. JobNotStarted names a Job whose pod has stayed Pending for five minutes, with the reason from the pod's scheduling condition or from its newest Warning event. JobFailed names the newest Job that failed, with the reason the Job controller gives, until a later Job succeeds. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, AwaitingEcho, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusconditions--type"></span>`type` | string | yes | The check this entry reports, in CamelCase. It is the key of this list, so a library carries one entry for each type. The description of the conditions field lists the types this operator publishes. Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`. |
+| <span id="statusconditions--status"></span>`status` | string | yes | The verdict. Bound and Ready state a healthy fact, so True is the good verdict for both. Departing states work in progress, so its True says the teardown is running, and its reason says how far. Unknown means the operator cannot tell yet. One of: `True`, `False`, `Unknown`. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The metadata.generation this condition judged. The generation counts spec edits, so a reader can tell a verdict on the spec as it stands from a verdict on an earlier spec. |
+| <span id="statusconditions--reason"></span>`reason` | string | no | One CamelCase word for why the condition holds this verdict, meant for a program to match on. Pattern: `^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`. |
+| <span id="statusconditions--message"></span>`message` | string | no | The same answer in a sentence a person reads, such as the claim that is not bound or the container that will not start. |
+| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When the verdict last changed. It moves only when the status flips, not on every write, so it answers how long a library has been Ready. |
+
+## On the bus
+
+No pod the operator creates holds an API credential. The namespace's
+catalog pod publishes one report per `Library` on `media-operator`'s
+bus, under this operator's own topic base, `liken/library` by default,
+and the operator folds each report into that `Library`'s status.
+[The library bus](/docs/reference/bus/) is the contract of the whole
+tree, and it gives every field of the report.
+
+| Topic | Writer | Retained | Carries |
+|---|---|---|---|
+| `libraries/{namespace}/{name}/status` | the catalog pod | yes | the library's report |
+| `catalogs/{namespace}/availability` | the catalog pod | yes | `online` or `offline` |
+
+### `status`
+
+The report, as the operator writes it into the status: the counts, the
+rows the last sweep removed, the two times, the gaps and the oldest
+attempts per fact, and the last run of each worker. The close container
+of a `Library`'s `Job` writes the `enrich` run as the `Job`'s last
+catalog write and exits only when a catalog pod confirms it, so a run
+in this report with a finish is also the proof that a catalog pod holds
+every row the `Job` wrote.
+
+    {
+      "titles": 128,
+      "unidentified": 9,
+      "lastWalk": "2026-08-29T21:04:11Z",
+      "lastChange": "2026-08-29T21:04:11Z",
+      "items": 128,
+      "files": 560,
+      "walking": false,
+      "removedLastSweep": 3,
+      "runs": [
+        {"worker": "scan", "job": "movies-walk-dlcg1z2yyzgw",
+         "started": "2026-08-29T21:03:02Z", "finished": "2026-08-29T21:04:11Z",
+         "unidentified": 9, "removed": 3}
+      ],
+      "gaps": {"art": 4, "identity": 2},
+      "oldestAttempts": {"identity": "2026-08-01T03:15:00Z"},
+      "waiting": 1,
+      "unresolved": 1,
+      "fights": 0
+    }
+
+`walking` is true while a walk runs, and the operator's phase
+follows it. `oldestAttempts` is what the operator reads `spec.refresh`
+against: a refresh later than the oldest attempt is a fact with work
+left, whatever `gaps` says.
+
+### `availability`
+
+`online` while the catalog pod's reporter runs. The reporter names this
+topic as its MQTT Last Will with `offline` as the payload, so a pod the
+kubelet killed reads `offline`, and every `Library` of the namespace
+reads `Offline` with it. The reports it left behind stand: the counts
+describe the catalog, and they hold until the next run replaces them.
+One reporter serves every `Library` of the namespace, so there is one
+availability topic per namespace and none per `Library`.

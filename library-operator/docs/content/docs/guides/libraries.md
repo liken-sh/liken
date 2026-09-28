@@ -1,0 +1,139 @@
+---
+title: Declare a library
+weight: 20
+description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace determines. Use when adding a movies, series, or music root to a namespace, or when a title will not play."
+---
+
+# Declare a library
+
+A `Library` is one root directory on one volume, holding media of one
+kind. This guide declares one, reads what it reports, and describes
+what its namespace determines.
+
+## The declaration
+
+A `Library` names a claim in its namespace, a directory inside it,
+and the kind that directory holds:
+
+    apiVersion: library.liken.sh/v1alpha1
+    kind: Library
+    metadata:
+      name: movies
+      namespace: media
+    spec:
+      storage:
+        claim: movies-pvc
+        root: /media/movies
+      kind: movies
+      movies: {}
+
+The block named by `kind` must be present, and the other kinds'
+blocks must not. An empty block is a complete one. The kinds are
+`movies`, `series`, and `franchises`. A series library holds one
+folder per series with a season folder inside. A franchises library
+is the one kind whose files are written by people, and
+[Franchises](/docs/guides/franchises/) covers it.
+
+`root` defaults to `/` and must be absolute. One volume can therefore
+hold several libraries at different roots. The kind and the storage
+are immutable. A different volume, root, or kind is a different
+`Library`.
+
+[Library](/docs/reference/libraries/) describes every field. The ones
+you are likely to set:
+
+* `spec.sources` names the `MetadataProviders` to ask, in order.
+  [Enrichment](/docs/guides/enrichment/) covers them.
+* `spec.ignore` lists path components the scanner skips, such as a
+  recycle bin or a staging directory.
+* `spec.scan.schedule` is the cron expression the full walk runs on,
+  in the cluster's time zone. It defaults to once an hour, on the hour.
+* `spec.trickplay.enabled` builds the thumbnail sheets for the scrub
+  bar. It is off by default, because the first pass reads every video
+  end to end. `spec.trickplay.render` names the DeviceClass of the
+  node's GPU, so the decode runs there instead of on the CPU.
+* `spec.refresh` reopens one fact at a time, so it asks its provider
+  again and rewrites its own files in place.
+
+## What it reports
+
+The listing shows the counts and the phase:
+
+    $ kubectl -n media get libraries
+    NAME     KIND     TITLES   ITEMS   FILES   WAITING   SOURCES   STATUS   READY   AGE
+    movies   movies   128      128     560     1         2/2       Idle     True    12d
+
+`Titles` is what the last walk cataloged. `Items` counts movies, or
+series and episodes together. `Files` counts the video files with their
+`.nfo` files, art, subtitles, and trickplay directories. `Waiting` counts
+the titles a provider returned candidates for, which a person resolves
+by naming the right `uniqueid` in the `.nfo`. `Sources` counts the
+ready providers against the names in `spec.sources`, and it is empty
+for a library that names none. With `-o wide` the listing
+adds the claim and the `Unidentified` count. Those are the folders the
+walk could not name, and they are still browsable under their folder
+names.
+
+`Status` is the phase. `Pending` means the storage, the catalog pod, or
+the schedule is not ready yet. `Scanning` means a walk runs, and
+`Enriching` means the phases of a `Job` run after its walk or in a
+`Job` that fills gaps. `Idle` is the state between `Jobs`. `Blocked`
+means the pod of a `Job` has stayed `Pending` for five minutes, and no
+other `Job` of the `Library` starts until that `Job` ends. `Failed`
+means the last walk failed and wrote no rows, or a `Job` failed and no
+later `Job` succeeded. [A Job that does not start or that
+fails](/docs/guides/scanning/#a-job-that-does-not-start-or-that-fails)
+says what to do for both. `Offline` means the
+namespace's reporter has left the bus. `Departing` means a deleted
+`Library` is still removing its rows from the catalog.
+
+Four conditions report why the phase is what it is:
+
+* `Bound` reports the storage. The reasons for `False` are
+  `ClaimNotFound`, `ClaimUnbound`, and `VolumeNotFound`.
+* `Ready` reports the scanning path: the catalog pod runs,
+  `spec.scan.schedule` parses, the library's `Jobs` start and succeed,
+  and the reporter has reported this library. The reasons for `False`,
+  in the order they are checked, are `NotBound`, `NoCatalog`,
+  `ManyCatalogs`, `CatalogPending`, `ScheduleInvalid`, `JobNotStarted`,
+  `JobFailed`, `Offline`, and `NoReport`. The message of
+  `JobNotStarted` and of `JobFailed` names the `Job` and the reason
+  Kubernetes gives.
+* `Sources` reports `spec.sources`. It is absent on a library that
+  names none.
+* `Departing` reports the teardown of a deleted library, for as long
+  as its finalizer keeps the object from being removed.
+
+`status.runs` holds the last run of each worker, with its `Job`, its
+times, and its failure if it had one. `scan` is a full walk, `rescan`
+is a walk of the folders webhooks named, `enrich` is the phases of a
+`Job` and its hand-off, and `cleanup` is the sweep of a deleted
+`Library`. A phase that failed names its failure in the `enrich` run,
+and the `Job` still succeeds, so the next `Job` tries that phase's
+titles again. `status.webhook` is the address that rescans one folder;
+[Webhooks](/docs/guides/webhooks/) gives it to Radarr, Sonarr, and
+Jellyfin.
+
+## The namespace is a boundary
+
+Every `Library` in a namespace writes into that namespace's one
+catalog, and every screen in the namespace shows that catalog. So a
+`Library` waits with the reason `NoCatalog` until the namespace holds
+a `Catalog`, and two `Catalogs` block both. Every catalog row is keyed
+by its library. So two libraries in one namespace never touch each
+other's rows, even on the same relative path or the same provider id.
+
+Put libraries that should show together in one namespace. Put
+libraries that should never meet on a screen in different namespaces.
+
+## How a title is played
+
+When a person plays a title from the browser, the operator creates a
+`Play` for `media-operator`. The media reference in it names the
+claim, never the volume behind it:
+
+    claim://movies-pvc//media/movies/Some Film (1999)/Some Film (1999).mkv
+
+The claim is the one the screen already mounts read-only, so
+`media-operator` plays from the same claim, and no second claim is
+created. A path outside the library's root is refused.

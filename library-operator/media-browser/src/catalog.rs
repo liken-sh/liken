@@ -1,0 +1,809 @@
+// The seam between the catalog and the views. The views draw rows, and a
+// `Source` yields them, so one set of views draws the agent's file, a
+// test fixture, and the sample data the same way.
+
+use std::collections::HashMap;
+
+use crate::harness::Waker;
+use crate::log::opaque;
+
+// The local module implements this seam over plan 06's delivery: a
+// read-only open of the agent's file, and its update stream.
+pub mod local;
+
+// The query module: the closed set of queries a wall is fed by, and the
+// slots a source answers one with.
+pub mod query;
+
+// The franchise module: what the two franchise reads answer with.
+pub mod franchise;
+
+// The recency module: the fold the Released and Added queries share,
+// and the constants that bound them.
+pub mod recency;
+
+// The pool module: the candidate strips the home page draws from, each
+// with its weight.
+pub mod pool;
+
+// The draw module: the date seed and the weighted draw of the day's
+// strips from the pool.
+pub mod draw;
+
+// The art module: which file an item's art is, out of the list of every
+// art file beside it.
+pub mod art;
+
+// The search module: the in-memory index the `Search` query is answered
+// from, with its fold and its ranking.
+pub mod search;
+
+// The progress module: where a play reached, and what a screen draws for
+// it.
+pub mod progress;
+
+// The identity module: the ids the providers know a work by, which a play
+// request carries so the progress store keys on the work.
+pub mod identity;
+
+// The mark module: one span of a file, such as its intro or its credits,
+// which a play request carries to the display.
+pub mod mark;
+
+pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
+pub use identity::Identity;
+pub use mark::Mark;
+pub use progress::{Played, Progress, Resume};
+pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
+
+/// How many posters the tile of a library or a genre draws, as a 2x2.
+pub const TILES: usize = 4;
+
+/// How many posters a genre offers [`unrepeated`], so a genre whose
+/// newest posters an earlier genre took has more to fall back on.
+pub const TILE_CANDIDATES: usize = 3 * TILES;
+
+/// One library as the home page's libraries strip draws it: the name,
+/// the kind, the count of items it holds, and the art of its newest-added
+/// titles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryEntry {
+    /// The catalog's `library` column: the `Library`'s namespace and name,
+    /// joined as `namespace/name`.
+    pub library: String,
+    /// The library's kind, `movies` or `series`. The libraries strip draws
+    /// it under the name. The wall it opens reads by the library alone, and
+    /// every slot names its own kind.
+    pub kind: String,
+    /// How many items the library holds.
+    pub items: u64,
+    /// The posters of the library's newest-added titles that have one, up
+    /// to [`TILES`] of them, which the libraries strip draws as a mosaic.
+    /// Every path resolves against the library itself.
+    pub art: Vec<String>,
+}
+
+/// One genre as the home page's genres strip draws it: the name, how
+/// many titles carry it, and the art it draws as, with the library that
+/// art resolves against.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GenreEntry {
+    /// The genre, as the catalog's genres table spells it.
+    pub name: String,
+    /// How many movies and series carry the genre at any rank, across
+    /// every library.
+    pub titles: u64,
+    /// The posters the genre's tile draws, each with the library it
+    /// resolves against, because a genre spans libraries. A read answers up
+    /// to [`TILE_CANDIDATES`] of them, the titles that lead with the genre
+    /// first and the newest release next, and [`unrepeated`] cuts each
+    /// entry to the [`TILES`] no earlier genre took.
+    pub art: Vec<(String, String)>,
+}
+
+/// The posters each genre's tile draws, in the strip's order: the first
+/// [`TILES`] candidates of the entry that no earlier entry took, so one
+/// poster never stands on two tiles of the row. An entry whose candidates
+/// run out draws fewer.
+pub fn unrepeated(entries: &mut [GenreEntry]) {
+    let mut taken: Vec<(String, String)> = Vec::new();
+    for entry in entries {
+        let mut drawn: Vec<(String, String)> = Vec::with_capacity(TILES);
+        for poster in std::mem::take(&mut entry.art) {
+            if drawn.len() == TILES {
+                break;
+            }
+            if taken.contains(&poster) {
+                continue;
+            }
+            taken.push(poster.clone());
+            drawn.push(poster);
+        }
+        entry.art = drawn;
+    }
+}
+
+/// One franchise as the home page's franchises strip draws it. `library` and
+/// `id` name the `Library` of kind franchises and the row in it, which is what
+/// a press opens. `title` is the name a person reads, and the strip draws it
+/// on the slot where the row carries no art. `art` is the file beside the
+/// franchise.yaml, or where the directory holds none, the poster of the first
+/// held member in story order. `art_library` is the library that art
+/// resolves against, which is the member's own library in the second case.
+/// `slug` is the catalog's own name for the row.
+/// `movies` and `series` count every entry of the order by kind, held or
+/// not: the scope the tile draws under the title, and the count a strip
+/// heading carries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FranchiseEntry {
+    pub library: String,
+    pub id: String,
+    pub title: String,
+    pub art: String,
+    pub art_library: String,
+    pub slug: String,
+    pub movies: i64,
+    pub series: i64,
+}
+
+/// One title in a kind's top list: a movie, or a series.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Title {
+    /// The item's provider-scoped id, unique inside its library.
+    pub id: String,
+    /// The name a person reads.
+    pub title: String,
+    /// The year or the date of release, as the catalog stores it.
+    pub released: String,
+    /// The path of the primary art, relative to the library root, or empty
+    /// where the item has none.
+    pub art: String,
+    /// The item's running time in seconds, zero where the catalog holds
+    /// none.
+    pub duration: i64,
+    /// The content rating from the body, empty where the .nfo file named
+    /// none.
+    pub rating: String,
+    /// The tagline from the body, empty where the .nfo file held none. A
+    /// film's card leads with it.
+    pub tagline: String,
+}
+
+/// One credited person and the part they played, from the body's cast.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Credit {
+    /// The person's name.
+    pub name: String,
+    /// The part they played, empty where the .nfo file named none.
+    pub role: String,
+}
+
+/// What a movie's page draws: the item's own columns, the fields of its
+/// body, and the three files the page reads by role.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MovieDetails {
+    /// The name a person reads.
+    pub title: String,
+    /// The year or the date of release, as the catalog stores it.
+    pub released: String,
+    /// The running time in seconds, zero where the catalog holds none.
+    pub duration: i64,
+    /// The content rating, empty where the .nfo file named none.
+    pub rating: String,
+    /// The genres, in the order the .nfo file named them.
+    pub genres: Vec<String>,
+    /// The one-line tagline, empty where the .nfo file named none.
+    pub tagline: String,
+    /// The plot. The page cuts it to four lines.
+    pub plot: String,
+    /// The directors, in the order the .nfo file named them.
+    pub directors: Vec<String>,
+    /// The writers, in the order the .nfo file named them.
+    pub writers: Vec<String>,
+    /// The cast, in the order the .nfo file named them.
+    pub cast: Vec<Credit>,
+    /// The studios, in the order the .nfo file names them.
+    pub studios: Vec<String>,
+    /// Each site's score of the movie, keyed by the .nfo file's own name for
+    /// the site, on that site's own scale.
+    pub ratings: Vec<(String, f64)>,
+    /// The id of the set the movie belongs to, empty where it belongs to
+    /// none.
+    pub set_id: String,
+    /// The path of the backdrop file, relative to the library root, or
+    /// empty where the item has none.
+    pub backdrop: String,
+    /// The path of the logo file, relative to the library root, or empty
+    /// where the item has none.
+    pub logo: String,
+    /// The path of the trailer file, relative to the library root, or
+    /// empty where the item has none.
+    pub trailer: String,
+}
+
+/// One set and every movie in it, in release order, as the strip on a
+/// movie's page draws them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MovieSet {
+    /// The set's own title. The strip draws it as its heading.
+    pub title: String,
+    /// The movies in the set, in release order.
+    pub members: Vec<Title>,
+}
+
+/// The name half of a `library` column, `namespace/name`, which is the
+/// half a screen draws.
+pub fn library_name(library: &str) -> &str {
+    library.split_once('/').map_or(library, |(_, name)| name)
+}
+
+/// What a series' page draws: the item's own columns, the fields of its
+/// body, the files it reads by role, and how many seasons its episodes
+/// fall into.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SeriesDetails {
+    /// The name a person reads.
+    pub title: String,
+    /// The year or the date of release, as the catalog stores it.
+    pub released: String,
+    /// The running time in seconds, zero where the catalog holds none.
+    pub duration: i64,
+    /// The content rating, empty where the .nfo file named none.
+    pub rating: String,
+    /// The genres, in the order the .nfo file named them.
+    pub genres: Vec<String>,
+    /// The one-line tagline, empty where the .nfo file named none.
+    pub tagline: String,
+    /// The plot. The page cuts it to two lines.
+    pub plot: String,
+    /// The creators, in the order the .nfo file named them.
+    pub creators: Vec<String>,
+    /// The cast, in the order the .nfo file named them.
+    pub cast: Vec<Credit>,
+    /// The studios, in the order the .nfo file names them.
+    pub studios: Vec<String>,
+    /// Each site's score of the series, keyed by the .nfo file's own name for
+    /// the site, on that site's own scale.
+    pub ratings: Vec<(String, f64)>,
+    /// The path of the backdrop file, relative to the library root, or
+    /// empty where the item has none.
+    pub backdrop: String,
+    /// The path of the logo file, relative to the library root, or empty
+    /// where the item has none.
+    pub logo: String,
+    /// The path of the trailer file, relative to the library root, or
+    /// empty where the item has none.
+    pub trailer: String,
+    /// How many seasons the series' episodes fall into.
+    pub seasons: i64,
+}
+
+/// One episode of a series, as one still of the series page's wall.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Episode {
+    /// The episode's id inside its library, which its files are read by.
+    pub id: String,
+    /// The aired season number that places the episode.
+    pub season: i64,
+    /// The aired episode number inside the season.
+    pub episode: i64,
+    /// The name a person reads.
+    pub title: String,
+    /// The year or the date the episode aired, as the catalog stores it.
+    pub released: String,
+    /// The running time in seconds, zero where the catalog holds none.
+    pub duration: i64,
+    /// The plot, empty where the .nfo file named none.
+    pub plot: String,
+    /// The path the still draws, relative to the library root: the
+    /// episode's own still, and the art of its series where the catalog
+    /// holds no still for the episode. Empty where the series holds no
+    /// art either. See [`art::still`].
+    pub art: String,
+}
+
+/// One slot of a title's stripe: the person, what they did on this
+/// title, and where their entry lives.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CreditSlot {
+    /// The name a person reads, as the title's own credits name it.
+    pub name: String,
+    /// The character an actor played, empty for the crew and for an
+    /// actor the credits gave no role.
+    pub role: String,
+    /// The person's directory relative to the library volume, empty
+    /// where the library's store holds no entry for them.
+    pub contributor: String,
+    /// Whether `headshot.jpg` is beside that entry.
+    pub headshot: bool,
+}
+
+/// One file of a title, as the foot of a page reads it: what the file is,
+/// how it is encoded, and how large it is.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileFacts {
+    /// Which one of its kind the file is, such as `primary`.
+    pub role: String,
+    /// The file's category, such as `video` or `subtitle`.
+    pub kind: String,
+    /// The container the file is written in.
+    pub container: String,
+    /// The video codec, empty where the scanner read none.
+    pub video_codec: String,
+    /// The audio codec, empty where the scanner read none.
+    pub audio_codec: String,
+    /// The width in pixels, zero where the scanner read none.
+    pub width: i64,
+    /// The height in pixels, zero where the scanner read none.
+    pub height: i64,
+    /// The size in bytes, zero where the scanner read none.
+    pub size_bytes: i64,
+    /// The language tag the file name carries, empty where it carries none.
+    pub language: String,
+}
+
+/// One title's credited people, split into the three stripes a page
+/// draws, each in billing order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Credits {
+    /// The directors, in billing order.
+    pub directors: Vec<CreditSlot>,
+    /// The writers, in billing order.
+    pub writers: Vec<CreditSlot>,
+    /// The cast, in billing order.
+    pub cast: Vec<CreditSlot>,
+}
+
+/// One person, as their own page draws them. `library` and `path` name
+/// the entry the page opened from. The headshot and the biography can
+/// each come from another library's entry for the same person, so the
+/// four fields after the flags say which library and which directory
+/// hold each file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Person {
+    /// The library the page opened from, as `namespace/name`.
+    pub library: String,
+    /// The person's directory in that library, relative to its
+    /// volume.
+    pub path: String,
+    /// The name a person reads.
+    pub name: String,
+    /// The date of birth the entry holds, empty where it holds
+    /// none.
+    pub born: String,
+    /// The date of death the entry holds, empty where it holds
+    /// none.
+    pub died: String,
+    /// Whether any library holding this person has `biography.txt`
+    /// beside the entry.
+    pub biography: bool,
+    /// Whether any library holding this person has `headshot.jpg`
+    /// beside the entry.
+    pub headshot: bool,
+    /// The library whose entry holds the biography, empty where no
+    /// library holds one.
+    pub biography_library: String,
+    /// The person's directory in that library.
+    pub biography_path: String,
+    /// The library whose entry holds the headshot, empty where no
+    /// library holds one.
+    pub headshot_library: String,
+    /// The person's directory in that library.
+    pub headshot_path: String,
+}
+
+/// What a source found changed since the browser last asked. The browser
+/// keeps the two stores apart because they change on different terms:
+/// the catalog changes when a scan lands, and the progress store changes
+/// every second a film plays somewhere in the house.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Change {
+    #[default]
+    None,
+    Catalog,
+    Progress,
+    Both,
+}
+
+impl Change {
+    /// The two flags a source holds, as one value.
+    pub fn of(catalog: bool, progress: bool) -> Self {
+        match (catalog, progress) {
+            (false, false) => Self::None,
+            (true, false) => Self::Catalog,
+            (false, true) => Self::Progress,
+            (true, true) => Self::Both,
+        }
+    }
+
+    /// Whether the catalog itself changed. A person sees that change at
+    /// once, so the browser reads it at once.
+    pub fn catalog(self) -> bool {
+        matches!(self, Self::Catalog | Self::Both)
+    }
+
+    /// Whether the progress store changed.
+    pub fn progress(self) -> bool {
+        matches!(self, Self::Progress | Self::Both)
+    }
+}
+
+/// What the views read. Every list comes back in the order the views draw
+/// it, so the views sort nothing: titles by the scanner's sort key, and
+/// episodes by their aired numbers.
+///
+/// Every method reads local state and returns at once; no call waits on a
+/// network. [`Source::changed`] carries the freshness contract from plan
+/// 06: a source with an update stream folds events in behind these calls,
+/// wakes the loop through the handle from [`Source::wake_by`], and names
+/// what changed once, and the views then re-read what they show.
+pub trait Source {
+    /// Start one home page read. A source can retain repeated answers until
+    /// [`Source::end_page_read`].
+    fn begin_page_read(&mut self) {}
+
+    /// End one home page read and release any answers retained for it.
+    fn end_page_read(&mut self) {}
+
+    /// Every library in the catalog, ordered by name. Which libraries a
+    /// screen shows is an open problem, so until that resource exists the
+    /// home page's libraries strip shows them all.
+    fn libraries(&mut self) -> Vec<LibraryEntry>;
+
+    /// Every genre the catalog holds, in name order, each with its count
+    /// of titles and the art the strip draws it as. One read, because the
+    /// genres strip is a row of every home page.
+    fn genres(&mut self) -> Vec<GenreEntry>;
+
+    /// Every franchise the catalog holds, across every library of the
+    /// namespace, in the sort order a wall of them draws. The franchises strip
+    /// of the home page reads it, and draws every row and not a sample of
+    /// them, the way the genres strip does.
+    fn franchises(&mut self) -> Vec<FranchiseEntry>;
+
+    /// The one read behind every wall. Every slot carries its library and
+    /// its kind, so one wall draws a library, a person's works, a set, and
+    /// a franchise's held members from the same answer. The answer names
+    /// what the query is about and holds its slots in the query's order.
+    /// It is empty where the query names nothing the catalog holds.
+    fn wall(&mut self, query: &Query) -> Answer;
+
+    /// Every candidate strip the day may draw, with its weight: every
+    /// genre, every person with more than `WORKS_FLOOR` works, and every set
+    /// with at least two members. The pool is one read because the draw is a
+    /// pure function of the date and the pool, so the draw needs nothing
+    /// else.
+    fn pool(&mut self) -> Vec<pool::Candidate>;
+
+    /// One movie's details, or nothing where the library holds no movie
+    /// under that id.
+    fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails>;
+
+    /// One series' details, or nothing where the library holds no series
+    /// under that id.
+    fn series(&mut self, library: &str, id: &str) -> Option<SeriesDetails>;
+
+    /// Every episode of one series, in aired order: by season, and by
+    /// episode inside a season.
+    fn episodes(&mut self, library: &str, series: &str) -> Vec<Episode>;
+
+    /// One set and its members in release order, or nothing where the
+    /// library holds no set under that id.
+    fn set(&mut self, library: &str, id: &str) -> Option<MovieSet>;
+
+    /// Every franchise one title belongs to, with the members some library
+    /// of the namespace holds, in story order. The strip on the title's
+    /// page draws them, so it draws what a person can play. The title's
+    /// own aliases find the franchises, so a member resolves by string
+    /// match and no library reads another's volume.
+    fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership>;
+
+    // Every franchise any of these works belongs to, each once, in the
+    // order of the franchise's library and id, with the members some
+    // library holds in story order: the same rows `franchises_of` answers
+    // for one work. It is one read for the continue-watching row's seeds,
+    // which are hundreds of works. The default folds `franchises_of` over
+    // the works, which a source with few works may keep.
+    fn memberships(&mut self, works: &[(String, String)]) -> Vec<Membership> {
+        let mut found: Vec<Membership> = Vec::new();
+        for (library, id) in works {
+            for membership in self.franchises_of(library, id) {
+                if !found
+                    .iter()
+                    .any(|held| held.library == membership.library && held.id == membership.id)
+                {
+                    found.push(membership);
+                }
+            }
+        }
+        found.sort_by(|one, other| (&one.library, &one.id).cmp(&(&other.library, &other.id)));
+        found
+    }
+
+    /// One franchise as its own page draws it, or nothing where that
+    /// `Library` holds no franchise under that id. Every entry is in story
+    /// order, held or not, so a gap draws with the file's own title.
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise>;
+
+    /// The play list one choice resolves to: one item, or none. The list is
+    /// for an album, one work in several files. An episode is a work of its
+    /// own, so what follows it is the `Play`'s next block and not a second
+    /// item.
+    /// A choice whose own main file is missing resolves to nothing.
+    fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem>;
+
+    /// One title's credited people, split by part and in billing
+    /// order within a part.
+    fn credits(&mut self, library: &str, id: &str) -> Credits;
+
+    /// Every file of one item, in path order, as the foot of a page reads
+    /// them.
+    fn files(&mut self, library: &str, item: &str) -> Vec<FileFacts>;
+
+    /// One person by the library and the directory that name them,
+    /// or nothing where that library holds no such entry.
+    fn person(&mut self, library: &str, path: &str) -> Option<Person>;
+
+    /// The work this choice plays, as the providers name it. A source with
+    /// no aliases answers the default, and a play of it is then recorded
+    /// against the `Player` alone.
+    fn identity(&mut self, _library: &str, _selection: &Selection) -> Identity {
+        Identity::default()
+    }
+
+    /// Every play these people are on, one row per play and work across
+    /// every library, newest first, finished or not. A source with no
+    /// progress store answers nothing.
+    fn continue_watching(&mut self, _people: &[String]) -> Vec<Resume> {
+        Vec::new()
+    }
+
+    // Every play these people are on of one movie or one series, newest
+    // first. A source with no progress store answers nothing.
+    fn plays_of(&mut self, _library: &str, _id: &str, _people: &[String]) -> Vec<Resume> {
+        Vec::new()
+    }
+
+    /// Every movie of one library these people have a play of, keyed by the
+    /// movie's id, with the latest play's position and duration. Finished
+    /// plays are in it; series ids are not. A source with no progress store
+    /// answers an empty map.
+    // A movie is in the map when every one of these people has a play of it,
+    // in any group.
+    fn progress_by_item(&mut self, _library: &str, _people: &[String]) -> HashMap<String, Played> {
+        HashMap::new()
+    }
+
+    /// Where these people reached in each episode of one series: the latest
+    /// play per episode, in aired order.
+    // An episode is in the answer when every one of these people has a play
+    // of it, in any group.
+    fn episode_progress(
+        &mut self,
+        _library: &str,
+        _series: &str,
+        _people: &[String],
+    ) -> Vec<Progress> {
+        Vec::new()
+    }
+
+    /// How large this source's search index is, or nothing where the
+    /// source holds none. The stats line reports the numbers, so a run
+    /// says what the index cost on the machine it ran on. A source that
+    /// answers `Search` from no index of its own answers nothing.
+    fn index_size(&mut self) -> Option<search::Size> {
+        None
+    }
+
+    /// What changed since the last call.
+    fn changed(&mut self) -> Change;
+
+    /// A second source over the same catalog, for a reader thread of its
+    /// own, so a read runs off the frame thread. A source that has no
+    /// second read to give answers nothing, and the caller then reads in
+    /// place. The second source reports no changes and wakes no loop: the
+    /// first one carries the stream.
+    fn reader(&mut self) -> Option<Box<dyn Source + Send>> {
+        None
+    }
+
+    /// Take the handle that wakes the loop, for a source with a stream of
+    /// its own. A source with no stream takes it and does nothing.
+    fn wake_by(&mut self, wake: Waker);
+}
+
+/// What a person chose, as the three things that resolve to a play
+/// list: a movie by its id, a trailer by its title's id, and an
+/// episode by its series, season, and aired number. The library is not in here because every read
+/// takes it beside the choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    /// One movie, named by its provider-scoped id.
+    Movie {
+        /// The movie's id inside its library.
+        id: String,
+    },
+    /// One title's trailer, named by the title's own id.
+    Trailer {
+        /// The movie's or the series' id inside its library.
+        id: String,
+    },
+    // One episode, which is one work.
+    Episode {
+        /// The parent series' id inside the library.
+        series: String,
+        /// The aired season number.
+        season: i64,
+        /// The aired episode number the person chose.
+        episode: i64,
+    },
+}
+
+impl Selection {
+    /// The choice as the browser's log lines name it. Each id goes
+    /// through `log::opaque`, so an id that carries a folder name
+    /// names no title in the pod log.
+    pub fn named(&self) -> String {
+        match self {
+            Self::Movie { id } => opaque(id),
+            Self::Trailer { id } => format!("{} trailer", opaque(id)),
+            Self::Episode {
+                series,
+                season,
+                episode,
+            } => format!("{} S{season}E{episode}", opaque(series)),
+        }
+    }
+}
+
+/// One item of a play list: the main file's path relative to the
+/// library root, and the words the film's own display shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayItem {
+    /// The main file's path, relative to the library root.
+    pub path: String,
+    /// The catalog's slug for this item, such as `some-film-1999`. The
+    /// operator folds the chosen item's slug into the `Play`'s name, so
+    /// `kubectl get plays` reads as titles.
+    pub slug: String,
+    /// The presentation the operator passes through to the `Play`.
+    pub presentation: Presentation,
+}
+
+/// media-operator's own presentation block, as the catalog answers it.
+/// Every empty field is left out of the request, so this type carries
+/// the same absences the JSON does.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Presentation {
+    /// The medium, `video` for everything this plan resolves. It is
+    /// `type` in the JSON, which Rust reserves.
+    pub kind: String,
+    /// What the item is, `movie` or `series`.
+    pub hint: String,
+    /// The part the file plays in the work: `trailer`, or empty for the
+    /// work itself.
+    pub role: String,
+    /// The movie's title. An episode carries none.
+    pub title: String,
+    /// The series' title, from the series row.
+    pub series: String,
+    /// The aired season number.
+    pub season: i64,
+    /// The aired episode number.
+    pub episode: i64,
+    /// The episode's own title.
+    pub episode_title: String,
+    /// The year of release, the first four digits of the catalog's
+    /// released column.
+    pub year: i64,
+    /// The full ISO date of release, where the catalog holds one.
+    pub date: String,
+    /// The art path, relative to the library root.
+    pub art: String,
+    /// The trickplay path, relative to the library root.
+    pub trickplay: String,
+    /// Every span the catalog holds for the main file, in the order the
+    /// marks ledger holds them.
+    pub marks: Vec<Mark>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, art: &[&str]) -> GenreEntry {
+        GenreEntry {
+            name: name.into(),
+            titles: art.len() as u64,
+            art: art
+                .iter()
+                .map(|path| ("screening/films".to_string(), (*path).to_string()))
+                .collect(),
+        }
+    }
+
+    fn posters(entry: &GenreEntry) -> Vec<&str> {
+        entry.art.iter().map(|(_, path)| path.as_str()).collect()
+    }
+
+    #[test]
+    fn a_genre_draws_the_first_four_posters_no_earlier_genre_took() {
+        let mut entries = [
+            entry("Crime", &["a", "b", "c", "d", "e", "f"]),
+            entry("Drama", &["a", "b", "e", "g", "h", "i"]),
+        ];
+        unrepeated(&mut entries);
+        assert_eq!(posters(&entries[0]), ["a", "b", "c", "d"]);
+        assert_eq!(posters(&entries[1]), ["e", "g", "h", "i"]);
+    }
+
+    #[test]
+    fn a_genre_whose_candidates_run_out_draws_fewer() {
+        let mut entries = [
+            entry("Crime", &["a", "b"]),
+            entry("Drama", &["a", "b", "c"]),
+            entry("Silent", &[]),
+        ];
+        unrepeated(&mut entries);
+        assert_eq!(posters(&entries[0]), ["a", "b"]);
+        assert_eq!(posters(&entries[1]), ["c"]);
+        assert!(entries[2].art.is_empty());
+    }
+
+    #[test]
+    fn one_path_in_two_libraries_is_two_posters() {
+        let mut entries = [
+            entry("Crime", &["a"]),
+            GenreEntry {
+                art: vec![("screening/serials".into(), "a".into())],
+                ..entry("Drama", &[])
+            },
+        ];
+        unrepeated(&mut entries);
+        assert_eq!(entries[0].art, [("screening/films".into(), "a".into())]);
+        assert_eq!(entries[1].art, [("screening/serials".into(), "a".into())]);
+    }
+
+    #[test]
+    fn a_library_names_itself_after_its_namespace() {
+        assert_eq!(library_name("screening/features"), "features");
+        assert_eq!(library_name("features"), "features");
+    }
+
+    #[test]
+    fn every_choice_names_itself_for_the_log() {
+        assert_eq!(
+            Selection::Movie {
+                id: "movie:tmdb:7001".into()
+            }
+            .named(),
+            "movie:tmdb:7001"
+        );
+        assert_eq!(
+            Selection::Trailer {
+                id: "movie:tmdb:7001".into()
+            }
+            .named(),
+            "movie:tmdb:7001 trailer"
+        );
+        assert_eq!(
+            Selection::Episode {
+                series: "series:tvdb:1".into(),
+                season: 2,
+                episode: 4,
+            }
+            .named(),
+            "series:tvdb:1 S2E4"
+        );
+    }
+
+    #[test]
+    fn a_choice_named_by_its_folder_names_no_folder_in_the_log() {
+        let named = Selection::Movie {
+            id: "movie:path:Film A (2001)".into(),
+        }
+        .named();
+        assert_eq!(named, crate::log::opaque("movie:path:Film A (2001)"));
+        assert!(!named.contains("Film A"));
+    }
+}

@@ -1,0 +1,310 @@
+# The operator's identity in the cluster, and deliberately
+# nothing more. It reads libraries and catalogs, writes their statuses,
+# reads the storage behind each library, provisions the catalog claims,
+# stands the durable copies of each namespace's two stores with the
+# Services and EndpointSlices beside them, and creates the Jobs each
+# library runs and the Job a departure asks for. It
+# deletes an object to replace a stale one, to end a run, to recover a
+# screen the scheduler cannot place, to take down a copy the Catalog no
+# longer asks for, or to free a copy stranded on a node that stays
+# NotReady. A recovered screen loses its claims with its pod, and a
+# stranded copy loses the claim under it only on a class that binds the
+# claim to the node.
+# Every other teardown is the garbage collector's, through the
+# ownerReferences the pods, the claims, the Jobs, and the catalog
+# objects carry. It deletes no
+# object a person created. It deletes the CronJob and the claims an
+# earlier release stood for each library, by the names that release gave
+# them. Every grant but the Lease's is
+# cluster-wide, because a Library can be in any namespace. The Lease is
+# in the operator's own namespace, and it elects the one copy that acts.
+#
+# The operator also holds a finalizer on every Library, so a delete
+# waits on a cleanup Job that takes the departed library's rows out of
+# the namespace's catalog. The finalizer is why libraries carry patch
+# below.
+#
+# The webhook is on the operator itself, over one Service in the
+# operator's own namespace, so this file grants nothing for it.
+#
+# it also reads the Players media-operator publishes, and stands one
+# screen pod for each Player that names it as the idle controller. It writes
+# no Player. A screen pod is deleted for a third reason beyond a stale
+# template and a departure: the Player it stands for named another idle
+# controller, or none.
+#
+# No pod this operator creates holds a credential of its own.
+# The catalog pod reports over the bus, and the operator writes what it
+# reports. A screen asks over the bus, and the operator creates the Play
+# it asked for. So nothing in this file grants a pod anything.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: library-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: library-operator
+rules:
+  # The libraries, across every namespace, because a cluster keeps its
+  # media in whatever namespace it likes and the operator is one
+  # Deployment for the cluster. The operator lists and watches them
+  # once, and every pass reads the copy the watch keeps. A person declares a Library and the
+  # operator never edits one: the patch is for the finalizer list
+  # alone, sent as a merge patch so a person's own fields on the
+  # Library survive the write. The finalizer holds a deleted Library
+  # open until its rows are out of every surviving agent's catalog.
+  # There is no update verb, because nothing here rewrites a spec.
+  - apiGroups: [library.liken.sh]
+    resources: [libraries]
+    verbs: [get, list, watch, patch]
+  # Only the status half. The API server's subresource split is what
+  # keeps this operator from ever rewriting a spec a person declared.
+  - apiGroups: [library.liken.sh]
+    resources: [libraries/status]
+    verbs: [update]
+  # The Catalogs, across every namespace, on the same terms as the
+  # libraries: every pass reads the copy the watch keeps. Read-only, and only the status half is written.
+  - apiGroups: [library.liken.sh]
+    resources: [catalogs]
+    verbs: [get, list, watch]
+  - apiGroups: [library.liken.sh]
+    resources: [catalogs/status]
+    verbs: [update]
+  # The operator reads the MetadataProviders of every namespace and
+  # writes only their status: the verdict of the one reachability
+  # check it runs per pass. A person declares a provider, and the
+  # operator never edits one.
+  - apiGroups: [library.liken.sh]
+    resources: [metadataproviders]
+    verbs: [get, list, watch]
+  - apiGroups: [library.liken.sh]
+    resources: [metadataproviders/status]
+    verbs: [update]
+  # The operator reads a Secret only to run that check. The key
+  # reaches an enricher container through a secretKeyRef the kubelet
+  # resolves, and the operator never writes it into a status, a log,
+  # or the catalog.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+  # The Players, across every namespace, read-only. media-operator owns
+  # them and writes them; this operator reads status.idle and writes no Player
+  # at all. It stands a screen pod for a Player whose status.idle.controller
+  # names it, and takes that pod down when the name changes. Every pass reads
+  # the copy the watch keeps.
+  - apiGroups: [media.liken.sh]
+    resources: [players]
+    verbs: [get, list, watch]
+  # The household defaults, cluster-scoped and read-only, for two fields:
+  # the wall-clock zone every screen pod carries as TZ, so the browser's
+  # clock shows the house's own hour, and the audio languages every
+  # enricher ranks a trailer by. The watch keeps both current, so a zone or a language the household sets rolls
+  # the screens or the next enricher on the next pass.
+  - apiGroups: [media.liken.sh]
+    resources: [mediapreferences]
+    verbs: [get, list, watch]
+  # The Plays this operator creates, one per request a screen publishes
+  # on the bus with the audience already on its metadata, and every
+  # other Play in the cluster, which it reads to record what was
+  # watched. The patch covers one field: the finalizer it holds until
+  # the namespace's progress store has that Play's last position.
+  # There is no update and no delete, because media-operator owns a
+  # Play's spec and status and the garbage collector takes a Play whose
+  # owners are gone. The grant is cluster-wide because a Play is
+  # created in the Player's namespace, and a Player can be in any
+  # namespace.
+  - apiGroups: [media.liken.sh]
+    resources: [plays]
+    verbs: [get, list, watch, create, patch]
+  # The people, cluster-scoped and owned by people-operator, read for
+  # the names a Play points at. The patch is for the
+  # finalizer alone, which keeps a delete from outrunning the sweep of
+  # that person's rows out of every namespace's progress store.
+  - apiGroups: [people.liken.sh]
+    resources: [people]
+    verbs: [get, list, watch, patch]
+  # The media claim each Library names, read to learn whether it is
+  # bound and which volume it is bound to. The operator watches the
+  # claims of every namespace and each pass reads them from the watch,
+  # because a Library's claim is a person's and carries no label to
+  # select on. A get reads one claim a recovery is about to delete. The claims the operator
+  # provisions: one per Library, which its Jobs mount one at a time,
+  # one for each of a Catalog's two stores, which every copy of that
+  # store mounts, and two per screen. Each is owned by the object it
+  # belongs to, so the garbage collector removes it with that owner.
+  # There is no update, because a claim's spec is immutable once it
+  # binds.
+  #
+  # The delete covers three cases, each guarded by the labels or the
+  # names the operator itself wrote: the two claims of a screen the
+  # scheduler has refused for longer than the grace, the claim of a
+  # store whose copy is stranded on a node that has stayed NotReady past
+  # the grace, and the enrich, trickplay, and trailers claims an earlier
+  # release stood for each Library. The first two never fire on a
+  # per-node class, where the claim pins no pod to a node.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, create, delete]
+  # The ResourceClaimTemplate each Library that names a render node keeps, one
+  # per Library, owned by it. The operator watches the templates that carry
+  # its Library label, and each pass reads them from the watch. A library Job that runs trickplay names the template and the
+  # kubelet mints the claim from it. The delete covers two cases: a Library that
+  # no longer names a render node, and a render block that changed, because a
+  # template's spec is immutable.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaimtemplates]
+    verbs: [get, list, watch, create, delete]
+  # The StorageClass every claim names, read by name for one answer: the
+  # provisioner behind it. A class the per-node driver serves is the one
+  # the operator writes the volume for itself. The operator never
+  # matches a class by name. The list finds the per-node class the cache
+  # of an imdb provider's dataset files needs, whatever class the
+  # libraries use.
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list]
+  # The nodes, read for the Ready verdict of the machine each durable
+  # copy of a store runs on. A copy on a node that stays NotReady is
+  # deleted, with its claim on a class that binds the claim to the
+  # node, so it can stand elsewhere.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
+  # The volume behind that claim, read by name for its source: an NFS
+  # server and export, or the name of whatever other key serves it.
+  # Playing a title from the library needs that, so the operator reads
+  # it on each pass and reports it in the status. PersistentVolumes
+  # are cluster-scoped, which is why this rule needs a ClusterRole.
+  #
+  # The create is the volume the operator writes for a claim on a
+  # per-node class, because that driver provisions nothing, and a claim
+  # of that class binds only to a volume something wrote first.
+  #
+  # The operator watches every volume, because a Library's claim binds
+  # to any volume. Each pass reads the volume behind each Library's claim
+  # from the watch, and the sweep reads the volumes the operator's own
+  # labels name from it and deletes the ones whose claim is gone. The
+  # delete names the uid of the volume it read. A volume is
+  # cluster-scoped, so no ownerReference ties it to a Catalog, a
+  # Library, or a Player, and those labels take an owner's place.
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, list, watch, create, delete]
+  # The pods this operator stands itself: the catalog pod of each
+  # namespace that holds a Catalog, and one screen pod per delegated
+  # Player. Both are created, read back on every pass from a
+  # cluster-scoped watch, and deleted to
+  # rebuild a stale template; a screen pod is deleted for a second
+  # reason, that its Player named another idle controller. The list and
+  # watch are cluster-scoped, because a Catalog and a Player live in any
+  # namespace, and the watch wakes the loop when a pod becomes ready or
+  # Kubernetes removes one. The pods of a Job are the Job controller's
+  # and never this operator's. The operator reads them to learn whether
+  # a library Job's pod has started.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+  # The Warning events about a library Job's pod that has not started.
+  # A pod whose volume the kubelet cannot mount has no reason in its
+  # status, and the Library status copies the event's words. The
+  # operator lists the events of one pod by a field selector, and only
+  # while that pod stays Pending. It writes no event.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [list]
+  # The workers. A Library runs one Job at a time: a walk on its
+  # schedule, for a request, or for a webhook's folders, and a Job that
+  # fills gaps between walks. A Job runs the sweep of a departing
+  # Library. The watch is cluster-scoped for the reason the pods are,
+  # and every pass reads the Jobs from it. The delete verb covers four
+  # deletes: a worker Job that succeeded more than the grace
+  # ago, a cleanup Job that failed and is stood again on a backoff, the
+  # retirement of a cleanup Job when its library is released, and a
+  # Jellyfin backfill Job that failed or that a Catalog no longer asks
+  # for. A Job is never updated: it runs once as it was created.
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, delete]
+  # The CronJob an earlier release ran each Library's walk from, which
+  # the operator deletes by name. The operator creates none.
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [delete]
+  # The headless catalog and progress Services of each namespace that
+  # holds a Catalog, and the jellyfin Service. The grant is cluster-wide
+  # because a Catalog can be in any namespace, and the operator is one
+  # Deployment for the cluster. The list and the watch select the
+  # operator's own Services by their name label, and each pass reads
+  # them from the watch.
+  #
+  # The delete verb is for the jellyfin Service alone. A Catalog
+  # that drops spec.jellyfin keeps the Catalog, so the garbage collector
+  # removes nothing and the operator deletes that Service itself.
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list, watch, create, update, delete]
+  # The people file every screen reads, one ConfigMap per namespace
+  # that holds a Player, written from the Person list and rewritten
+  # when it changes. Owned by the namespace's Catalog where one stands.
+  # The list and the watch select it by its name label.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update]
+  # The EndpointSlice behind the catalog Service, on the same terms
+  # and for the same reasons. There is one per namespace that holds a
+  # Catalog, and the operator writes it because that Service names no
+  # selector. The list and the watch select the operator's own slices by
+  # their managed-by label.
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: library-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: library-operator
+subjects:
+  - kind: ServiceAccount
+    name: library-operator
+    namespace: liken-system
+---
+# The Lease that elects the one copy of the operator that acts
+# (leader.go). client-go's election reads the Lease with a get, takes
+# and renews it with an update, and releases it with an update. A
+# namespaced Role, because the Lease is in the operator's own namespace
+# and every kubelet's heartbeat is a Lease in kube-node-lease that this
+# operator has no reason to read.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: library-operator-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [library-operator]
+    verbs: [get, update]
+  # create carries no resourceNames, because RBAC cannot read a name off
+  # a create. The first copy to start creates the Lease.
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: library-operator-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: library-operator-lease
+subjects:
+  - kind: ServiceAccount
+    name: library-operator
+    namespace: liken-system

@@ -1,0 +1,589 @@
+#!/usr/bin/env bash
+# local/seed-progress writes example progress rows into the local progress
+# agent, so a media browser on this workstation shows a realistic record of
+# who watched what, with no Player ever having run. It picks its items out
+# of the local catalog in a fixed order, so two runs against the same
+# catalog write the same rows. It deletes its own rows before it writes, so
+# a rerun replaces the set and does not add to it.
+#
+# Usage:
+#   local/seed-progress NAME NAME [NAME ...]
+#
+# Each NAME is a Person name in lower case. The scenarios take six roles
+# and wrap around the names given, so two names are enough.
+set -euo pipefail
+
+# The repository is the directory above this file, so every path resolves
+# from this script's own directory and none is absolute.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/.." && pwd)"
+
+# The progress agent's API, which local/progress answers on, and the
+# catalog file the item picks read.
+updates="http://127.0.0.1:20091"
+catalog="$repo/local/state/catalog/agent-1/state.db"
+
+# The people file the media browser reads through --people, beside the two
+# agents' state directories.
+people_file="$repo/local/state/people.json"
+
+# The Player every seeded Play names. No Player ran on this workstation, so
+# the name is invented.
+player="lab"
+
+# The separator every catalog read uses between columns. A title holds
+# spaces, and a tab is the one character a slug and an id cannot hold.
+tab="$(printf '\t')"
+
+usage() {
+  sed -n '9,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+[ "$#" -ge 2 ] || usage
+names=("$@")
+
+if ! curl --silent --fail --max-time 5 \
+  --header 'content-type: application/json' \
+  --data '"SELECT 1"' "$updates/v1/queries" >/dev/null 2>&1; then
+  echo "local/seed-progress: no progress agent answers on $updates; run 'local/progress up' first" >&2
+  exit 1
+fi
+
+if [ ! -f "$catalog" ]; then
+  echo "local/seed-progress: $catalog does not exist; run 'local/catalog up' and 'local/scan' first" >&2
+  exit 1
+fi
+
+# The statements, the agent's answer, and the report of one run, all under
+# one directory that goes when the run ends.
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+statements="$work/statements"
+report="$work/report"
+: >"$statements"
+: >"$report"
+
+# Role i takes the name at (i - 1) modulo the count, so six roles wrap
+# around however many names the run was given.
+person() {
+  printf '%s' "${names[$((($1 - 1) % ${#names[@]}))]}"
+}
+
+# The audience of one scenario, as the comma-separated list emit_play splits.
+# The roles wrap around the names given, so a run with fewer names than
+# roles names one person twice. The store holds one row per play and
+# person, so a repeated name is dropped.
+people_of() {
+  local out="" role name
+  for role in "$@"; do
+    name="$(person "$role")"
+    case ",$out," in *",$name,"*) continue ;; esac
+    [ -n "$out" ] && out="$out,"
+    out="$out$name"
+  done
+  printf '%s' "$out"
+}
+
+# One read of the catalog file. The script opens it read-only, because the
+# catalog agent owns every write to it.
+catalog_query() {
+  sqlite3 -readonly -separator "$tab" "$catalog" "$1"
+}
+
+# One value as a SQL string literal with every quote doubled, because sqlite3
+# takes its statement on the command line and binds nothing.
+quoted() {
+  printf "'%s'" "${1//\'/\'\'}"
+}
+
+# One row of the plays table, in the [sql, params] shape the agent's
+# transactions endpoint takes. The three statement builders below share it.
+play_statement() {
+  jq --null-input --compact-output \
+    --arg play "$1" --arg player "$2" --arg library "$3" --arg phase "$4" \
+    --argjson started "$5" --argjson ended "$6" --argjson position "$7" \
+    --argjson duration "$8" --argjson season "$9" --argjson episode "${10}" \
+    --argjson recorded "${11}" \
+    '["INSERT INTO plays (play, player, library, watch, started, ended, item, position, duration, phase, season, episode, recorded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [$play, $player, $library, "", $started, $ended, 0, $position, $duration, $phase, $season, $episode, $recorded]]'
+}
+
+play_person_statement() {
+  jq --null-input --compact-output --arg play "$1" --arg person "$2" \
+    '["INSERT INTO play_people (play, person) VALUES (?, ?)", [$play, $person]]'
+}
+
+play_alias_statement() {
+  jq --null-input --compact-output --arg play "$1" --arg provider "$2" --arg id "$3" \
+    '["INSERT INTO play_aliases (play, provider, id) VALUES (?, ?, ?)", [$play, $provider, $id]]'
+}
+
+delete_statement() {
+  jq --null-input --compact-output --arg sql "$1" '[$sql, []]'
+}
+
+# Every alias of one catalog item as the store holds it. The kind is
+# dropped and the provider is the key, so one row per provider and never
+# two.
+aliases_of() {
+  catalog_query "
+    WITH tails AS (
+      SELECT substr(alias, instr(alias, ':') + 1) AS tail
+      FROM aliases WHERE library = $(quoted "$1") AND item = $(quoted "$2")
+    )
+    SELECT substr(tail, 1, instr(tail, ':') - 1) AS provider,
+           min(substr(tail, instr(tail, ':') + 1))
+    FROM tails GROUP BY provider ORDER BY provider"
+}
+
+# A position given as a percentage of the work's own duration, or as a
+# count of seconds.
+position_of() {
+  case "$1" in
+    *%) printf '%s' "$(("${1%\%}" * $2 / 100))" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# One Play: its row, its people, and its aliases. The start time follows
+# from the moment it was recorded and the position it reached.
+emit_play() {
+  local play="$1" library_key="$2" alias_item="$3" season="$4" episode="$5"
+  local position="$6" duration="$7" recorded="$8" audience="$9" mode="${10}"
+
+  local phase="Finished" ended="$recorded"
+  if [ "$mode" = running ]; then
+    phase="Running"
+    ended=0
+  fi
+
+  play_statement "$play" "$player" "${library_key##*/}" "$phase" \
+    "$((recorded - position))" "$ended" "$position" "$duration" \
+    "$season" "$episode" "$recorded" >>"$statements"
+
+  local roll person
+  if [ -n "$audience" ]; then
+    IFS=',' read -r -a roll <<<"$audience"
+    for person in "${roll[@]}"; do
+      play_person_statement "$play" "$person" >>"$statements"
+    done
+  fi
+
+  local provider id
+  while IFS="$tab" read -r provider id; do
+    [ -n "$provider" ] || continue
+    play_alias_statement "$play" "$provider" "$id" >>"$statements"
+  done < <(aliases_of "$library_key" "$alias_item")
+
+  printf '%s\t%s\t%s/%s\n' "$play" "${audience:--}" "$position" "$duration" >>"$report"
+}
+
+# The seven movies the scenarios play, newest added first. Each one has a
+# provider id and a duration, so a position inside it means something.
+mapfile -t movies < <(catalog_query "
+  SELECT m.library, m.id, m.slug, m.duration FROM movies m
+  WHERE m.duration > 0
+    AND EXISTS (SELECT 1 FROM aliases a
+                WHERE a.library = m.library AND a.item = m.id AND a.alias LIKE 'movie:tmdb:%')
+  ORDER BY m.added DESC, m.id LIMIT 7")
+
+if [ "${#movies[@]}" -lt 7 ]; then
+  echo "local/seed-progress: the catalog holds ${#movies[@]} identified movies with a duration, and the scenarios need seven" >&2
+  exit 1
+fi
+
+# The series the scenarios play, newest added first. The first three carry
+# three seasons or more; the fourth carries at least one; no two are the
+# same series.
+seasons_of="(SELECT count(DISTINCT e.season) FROM episodes e
+  WHERE e.library = s.library AND e.series = s.id AND e.duration > 0 AND e.season > 0)"
+mapfile -t deep_series < <(catalog_query "
+  SELECT s.library, s.id FROM series s WHERE $seasons_of >= 3
+  ORDER BY s.added DESC, s.id LIMIT 3")
+mapfile -t any_series < <(catalog_query "
+  SELECT s.library, s.id FROM series s WHERE $seasons_of >= 1
+  ORDER BY s.added DESC, s.id LIMIT 4")
+
+if [ "${#deep_series[@]}" -lt 3 ] || [ "${#any_series[@]}" -lt 4 ]; then
+  echo "local/seed-progress: the catalog does not hold four series with episode durations, three of them with three seasons" >&2
+  exit 1
+fi
+
+first_series="${deep_series[0]}"
+second_series="${deep_series[1]}"
+third_series="${deep_series[2]}"
+
+# The fourth series is the first of the one-season list that the three above
+# did not take.
+short_series=""
+for candidate in "${any_series[@]}"; do
+  [ "$candidate" = "$first_series" ] && continue
+  [ "$candidate" = "$second_series" ] && continue
+  [ "$candidate" = "$third_series" ] && continue
+  short_series="$candidate"
+  break
+done
+
+# One episode of one series. Where the series holds no episode the scenario
+# names, the last episode of its last season stands in, and stderr says so.
+episode_row() {
+  local library_key="$1" series_id="$2" season="$3" episode="$4" columns row
+  columns="SELECT slug, duration, season, episode FROM episodes
+    WHERE library = $(quoted "$library_key") AND series = $(quoted "$series_id") AND duration > 0"
+  row="$(catalog_query "$columns AND season = $season AND episode = $episode LIMIT 1")"
+  if [ -z "$row" ]; then
+    row="$(catalog_query "$columns AND season > 0 ORDER BY season DESC, episode DESC LIMIT 1")"
+    echo "local/seed-progress: $series_id holds no S${season}E${episode}; taking its last episode instead" >&2
+  fi
+  printf '%s\n' "$row"
+}
+
+# One movie scenario. The play name carries the movie's slug, so a rerun
+# writes the same play names.
+movie_play() {
+  local scenario="$1" index="$2" spec="$3" ago="$4" audience="$5" mode="${6:-finished}"
+  local library_key id slug duration
+  IFS="$tab" read -r library_key id slug duration <<<"${movies[$index]}"
+  emit_play "seed-$scenario-$slug" "$library_key" "$id" 0 0 \
+    "$(position_of "$spec" "$duration")" "$duration" "$((now - ago))" "$audience" "$mode"
+}
+
+# One episode scenario. The Play carries its series' aliases and the season
+# and episode numbers, because a reader joins on the series and not on the
+# episode's own ids.
+episode_play() {
+  local scenario="$1" series_row="$2" want_season="$3" want_episode="$4"
+  local spec="$5" ago="$6" audience="$7"
+  local library_key series_id slug duration season episode
+  IFS="$tab" read -r library_key series_id <<<"$series_row"
+  IFS="$tab" read -r slug duration season episode \
+    <<<"$(episode_row "$library_key" "$series_id" "$want_season" "$want_episode")"
+  emit_play "seed-$scenario-$slug" "$library_key" "$series_id" "$season" "$episode" \
+    "$(position_of "$spec" "$duration")" "$duration" "$((now - ago))" "$audience" finished
+}
+
+now="$(date +%s)"
+hour=3600
+day=86400
+
+movie_play 1 0 45% $((2 * day)) "$(people_of 1)"
+movie_play 2 1 97% $((8 * day)) "$(people_of 1)"
+episode_play 3 "$first_series" 1 1 98% $((5 * day)) "$(people_of 1)"
+episode_play 3 "$first_series" 1 2 98% $((4 * day)) "$(people_of 1)"
+episode_play 3 "$first_series" 1 3 98% $((3 * day)) "$(people_of 1)"
+episode_play 3 "$first_series" 1 4 40% "$day" "$(people_of 1)"
+movie_play 4 2 70% $((26 * hour)) "$(people_of 1 2)"
+episode_play 5 "$second_series" 2 4 99% $((4 * day)) "$(people_of 1 2)"
+episode_play 5 "$second_series" 2 5 900 $((3 * day)) "$(people_of 1 2)"
+episode_play 6 "$third_series" 3 3 99% $((10 * day)) "$(people_of 1 2 3)"
+episode_play 6 "$third_series" 3 4 99% $((3 * day)) "$(people_of 1 2 3)"
+movie_play 7 3 100% $((14 * hour)) "$(people_of 3)"
+movie_play 8 4 10% "$hour" "$(people_of 4 5)"
+episode_play 8 "$short_series" 1 1 20% $((2 * hour)) "$(people_of 4 5)"
+movie_play 9 5 50% $((6 * hour)) ""
+episode_play 10 "$second_series" 4 1 480 $((12 * hour)) "$(people_of 1)"
+movie_play 11 0 100% $((20 * day)) "$(people_of 2)"
+movie_play 12 6 30% 0 "$(people_of 1 2 3)" running
+
+# The thread scenarios of plan 52. Each one is a night the continue row
+# has to read the right way: a guest joins a group, an old solo run of
+# one person meets a new group's run, a film sits in a set and a
+# franchise with different successors, a film sits in a franchise alone,
+# and a series sits inside a franchise.
+
+# One play of every episode of a series, all finished, one hour apart
+# and ending at the moment given. A series the scenario needs whole.
+series_run() {
+  local scenario="$1" series_row="$2" ago="$3" audience="$4"
+  local library_key series_id count index season episode
+  IFS="$tab" read -r library_key series_id <<<"$series_row"
+  mapfile -t run < <(catalog_query "SELECT season, episode FROM episodes
+    WHERE library = $(quoted "$library_key") AND series = $(quoted "$series_id")
+      AND duration > 0 AND season > 0 ORDER BY season, episode")
+  count="${#run[@]}"
+  for index in "${!run[@]}"; do
+    IFS="$tab" read -r season episode <<<"${run[$index]}"
+    episode_play "$scenario" "$series_row" "$season" "$episode" 99% \
+      "$((ago + (count - index) * hour))" "$audience"
+  done
+}
+
+# A film in a set with a film before and after it, and in a franchise
+# whose next member is held and is not the set's next film. The play
+# before it is the film before it in the set, so the pair reads as a run.
+mapfile -t crossing < <(catalog_query "
+  SELECT m.library, m.id, m.slug, m.duration,
+         (SELECT p.id FROM movies p WHERE p.library = m.library AND p.set_id = m.set_id
+            AND p.released < m.released ORDER BY p.released DESC LIMIT 1)
+  FROM movies m
+  JOIN aliases a ON a.library = m.library AND a.item = m.id
+  JOIN franchise_members fm ON fm.alias = a.alias
+  WHERE m.duration > 0 AND m.set_id != ''
+    AND EXISTS (SELECT 1 FROM movies p WHERE p.library = m.library
+                AND p.set_id = m.set_id AND p.released < m.released)
+    AND EXISTS (SELECT 1 FROM movies s WHERE s.library = m.library
+                AND s.set_id = m.set_id AND s.released > m.released)
+    AND EXISTS (SELECT 1 FROM franchise_members n JOIN aliases b ON b.alias = n.alias
+                WHERE n.library = fm.library AND n.franchise = fm.franchise
+                  AND n.position = fm.position + 1
+                  AND NOT EXISTS (SELECT 1 FROM movies s
+                                  WHERE s.library = b.library AND s.id = b.item
+                                    AND s.set_id = m.set_id))
+  ORDER BY fm.franchise, fm.position LIMIT 1")
+
+# A film in no set, in a franchise whose next member is held.
+mapfile -t lone < <(catalog_query "
+  SELECT m.library, m.id, m.slug, m.duration FROM movies m
+  JOIN aliases a ON a.library = m.library AND a.item = m.id
+  JOIN franchise_members fm ON fm.alias = a.alias
+  WHERE m.duration > 0 AND m.set_id = ''
+    AND EXISTS (SELECT 1 FROM franchise_members n JOIN aliases b ON b.alias = n.alias
+                WHERE n.library = fm.library AND n.franchise = fm.franchise
+                  AND n.position = fm.position + 1)
+  ORDER BY fm.franchise, fm.position LIMIT 1")
+
+# A series held in a franchise, and the first episode of its first run
+# there, or S01E01 where the file names no run.
+mapfile -t within < <(catalog_query "
+  SELECT s.library, s.id,
+         coalesce((SELECT r.season FROM franchise_runs r
+                   WHERE r.library = fm.library AND r.franchise = fm.franchise
+                     AND r.position = fm.position ORDER BY r.season, r.episode LIMIT 1), 1),
+         coalesce((SELECT max(r.episode, 1) FROM franchise_runs r
+                   WHERE r.library = fm.library AND r.franchise = fm.franchise
+                     AND r.position = fm.position ORDER BY r.season, r.episode LIMIT 1), 1)
+  FROM series s
+  JOIN aliases a ON a.library = s.library AND a.item = s.id
+  JOIN franchise_members fm ON fm.alias = a.alias AND fm.kind = 'series'
+  WHERE EXISTS (SELECT 1 FROM episodes e WHERE e.library = s.library AND e.series = s.id
+                AND e.duration > 0 AND e.season > 0)
+  ORDER BY fm.franchise, fm.position LIMIT 1")
+
+if [ "${#crossing[@]}" -lt 1 ] || [ "${#lone[@]}" -lt 1 ] || [ "${#within[@]}" -lt 1 ]; then
+  echo "local/seed-progress: the catalog holds no franchise with a film in a set, a film in no set, and a series; scan a franchises library first" >&2
+  exit 1
+fi
+
+# One play of a film named by its catalog row rather than by its index
+# in the seven above.
+movie_row_play() {
+  local scenario="$1" library_key="$2" id="$3" slug="$4" duration="$5"
+  local spec="$6" ago="$7" audience="$8"
+  emit_play "seed-$scenario-$slug" "$library_key" "$id" 0 0 \
+    "$(position_of "$spec" "$duration")" "$duration" "$((now - ago))" "$audience" finished
+}
+
+# 13. A guest night. The three of scenario 6 watch the next episode with
+# a fourth person, so the group's thread moves on without the guest.
+episode_play 13 "$third_series" 3 5 99% "$day" "$(people_of 1 2 3 4)"
+
+# 14. An old solo run. One person finished a whole series long ago, and
+# a new group with that person in it starts it. Alone, that person sees
+# nothing of the group's run.
+series_run 14 "$short_series" $((40 * day)) "$(people_of 3)"
+episode_play 15 "$short_series" 1 1 99% $((5 * hour)) "$(people_of 3 4 5)"
+
+# 16. A film in a set and a franchise. The set's next film and the
+# franchise's next member are two cards with two reasons.
+IFS="$tab" read -r library_key id slug duration before <<<"${crossing[0]}"
+IFS="$tab" read -r before_slug before_duration <<<"$(catalog_query "
+  SELECT slug, duration FROM movies WHERE library = $(quoted "$library_key") AND id = $(quoted "$before")")"
+movie_row_play 16 "$library_key" "$before" "$before_slug" "$before_duration" 98% $((7 * day)) "$(people_of 1 2 3)"
+movie_row_play 16 "$library_key" "$id" "$slug" "$duration" 98% $((6 * day)) "$(people_of 1 2 3)"
+
+# 17. A film in a franchise and no set, so the one reason is the
+# franchise and the card opens the franchise page.
+IFS="$tab" read -r library_key id slug duration <<<"${lone[0]}"
+movie_row_play 17 "$library_key" "$id" "$slug" "$duration" 98% $((9 * day)) "$(people_of 2 4)"
+
+# 18. A series inside a franchise. The next episode is one card with the
+# series and the franchise stacked on it.
+IFS="$tab" read -r library_key id season episode <<<"${within[0]}"
+episode_play 18 "$(printf '%s\t%s' "$library_key" "$id")" "$season" "$episode" 99% $((2 * day)) "$(people_of 1 2 3)"
+
+# 19. A franchise that cuts one series into runs. The room is inside the
+# second run, one person alone is on the film before it, and one person
+# alone is through the last leaf of the whole story. The franchise page
+# then shows the room's stack, one solo circle, no marker for the person
+# who finished, and a bar under each run.
+#
+# The SQL fragment the picker and the member reads share: episode e is
+# inside the runs of member m. A member that names no run covers its
+# whole show.
+covers_run="(NOT EXISTS (SELECT 1 FROM franchise_runs r
+                         WHERE r.library = m.library AND r.franchise = m.franchise
+                           AND r.position = m.position)
+             OR EXISTS (SELECT 1 FROM franchise_runs r
+                        WHERE r.library = m.library AND r.franchise = m.franchise
+                          AND r.position = m.position AND r.season = e.season
+                          AND r.episode IN (0, e.episode)))"
+
+# The first franchise, in the order the browser lists them, that cuts one
+# series into two or more runs with episodes the catalog holds. The
+# second run must hold the two episodes the scenario plays, and a film
+# must stand before it, so the solo half of the scenario has a film to
+# play. Without that last condition the first hit is a franchise with no
+# film before its cut, and the scenario shows no solo circle.
+mapfile -t split < <(catalog_query "
+  WITH covered AS (
+    SELECT m.library, m.franchise, m.position, m.alias,
+           count(DISTINCT e.season || 'e' || e.episode) AS leaves
+    FROM franchise_members m
+    JOIN aliases a ON a.alias = m.alias
+    JOIN episodes e ON e.library = a.library AND e.series = a.item
+    WHERE m.kind = 'series' AND e.duration > 0 AND $covers_run
+    GROUP BY m.library, m.franchise, m.position
+  ),
+  cut AS (
+    SELECT c.library, c.franchise, min(c.position) AS first_run,
+           (SELECT min(n.position) FROM covered n
+            WHERE n.library = c.library AND n.franchise = c.franchise
+              AND n.alias = c.alias AND n.position > min(c.position)) AS second_run
+    FROM covered c GROUP BY c.library, c.franchise, c.alias HAVING count(*) >= 2
+  )
+  SELECT cut.library, cut.franchise, cut.first_run, cut.second_run
+  FROM cut JOIN franchises f ON f.library = cut.library AND f.id = cut.franchise
+  WHERE EXISTS (SELECT 1 FROM covered n
+                WHERE n.library = cut.library AND n.franchise = cut.franchise
+                  AND n.position = cut.second_run AND n.leaves >= 2)
+    AND EXISTS (SELECT 1 FROM franchise_members b
+                WHERE b.library = cut.library AND b.franchise = cut.franchise
+                  AND b.kind = 'movie' AND b.position < cut.second_run)
+  ORDER BY f.sort_key, cut.library, cut.franchise, cut.first_run LIMIT 1")
+
+if [ "${#split[@]}" -lt 1 ]; then
+  echo "local/seed-progress: the catalog holds no franchise that cuts a series into two runs it holds episodes for; the franchise scenario writes nothing" >&2
+else
+  IFS="$tab" read -r franchise_library franchise first_run second_run <<<"${split[0]}"
+
+  # The series one member names, as the library that holds it and its id.
+  # The alias resolves the way the browser's franchise read resolves it:
+  # the first library by name wins.
+  member_series() {
+    catalog_query "
+      SELECT a.library, a.item FROM franchise_members m
+      JOIN aliases a ON a.alias = m.alias
+      JOIN series s ON s.library = a.library AND s.id = a.item
+      WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+        AND m.position = $1
+      ORDER BY a.library LIMIT 1"
+  }
+
+  # The episodes one member covers, with a duration, in aired order.
+  member_episodes() {
+    catalog_query "
+      SELECT e.season, e.episode FROM franchise_members m
+      JOIN aliases a ON a.alias = m.alias
+      JOIN episodes e ON e.library = a.library AND e.series = a.item
+      WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+        AND m.position = $1 AND e.duration > 0 AND $covers_run
+      GROUP BY e.season, e.episode ORDER BY e.season, e.episode"
+  }
+
+  # The film one member names, where the catalog holds it with a duration.
+  member_movie() {
+    catalog_query "
+      SELECT mv.library, mv.id, mv.slug, mv.duration FROM franchise_members m
+      JOIN aliases a ON a.alias = m.alias
+      JOIN movies mv ON mv.library = a.library AND mv.id = a.item
+      WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+        AND m.position = $1 AND mv.duration > 0
+      ORDER BY mv.library LIMIT 1"
+  }
+
+  # The room is the first two names as one audience. It finished the first
+  # episode of the second run and is partway through the next. These are
+  # the latest plays of the whole set, because the thread rule stands on
+  # the latest play that names exactly the audience, and scenarios 7 and 8
+  # play this same franchise hours earlier.
+  room_series="$(member_series "$second_run")"
+  mapfile -t room_leaves < <(member_episodes "$second_run")
+  IFS="$tab" read -r season episode <<<"${room_leaves[0]}"
+  episode_play 19 "$room_series" "$season" "$episode" 99% $((hour / 2)) "$(people_of 1 2)"
+  IFS="$tab" read -r season episode <<<"${room_leaves[1]}"
+  episode_play 19 "$room_series" "$season" "$episode" 40% $((hour / 4)) "$(people_of 1 2)"
+
+  # The first person alone is partway into the held film nearest before the
+  # second run. Where the catalog holds no such film, that person finished
+  # the last episode of the first run instead.
+  film_position="$(catalog_query "
+    SELECT max(m.position) FROM franchise_members m
+    JOIN aliases a ON a.alias = m.alias
+    JOIN movies mv ON mv.library = a.library AND mv.id = a.item
+    WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+      AND m.kind = 'movie' AND m.position < $second_run AND mv.duration > 0")"
+  if [ -n "$film_position" ]; then
+    IFS="$tab" read -r film_library film_id film_slug film_duration <<<"$(member_movie "$film_position")"
+    movie_row_play 19 "$film_library" "$film_id" "$film_slug" "$film_duration" 30% $((3 * hour)) "$(people_of 1)"
+  else
+    mapfile -t first_leaves < <(member_episodes "$first_run")
+    IFS="$tab" read -r season episode <<<"${first_leaves[-1]}"
+    episode_play 19 "$(member_series "$first_run")" "$season" "$episode" 99% $((3 * hour)) "$(people_of 1)"
+  fi
+
+  # The second person alone finished the last leaf the catalog holds of the
+  # story: the last film, or the last covered episode of the last series
+  # member. A thread past the last leaf offers nothing, so this person
+  # draws no marker.
+  IFS="$tab" read -r last_position last_kind <<<"$(catalog_query "
+    SELECT m.position, m.kind FROM franchise_members m
+    JOIN aliases a ON a.alias = m.alias
+    WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+      AND ((m.kind = 'movie' AND EXISTS (SELECT 1 FROM movies mv
+             WHERE mv.library = a.library AND mv.id = a.item AND mv.duration > 0))
+        OR (m.kind = 'series' AND EXISTS (SELECT 1 FROM episodes e
+             WHERE e.library = a.library AND e.series = a.item AND e.duration > 0
+               AND $covers_run)))
+    ORDER BY m.position DESC LIMIT 1")"
+  if [ "$last_kind" = movie ]; then
+    IFS="$tab" read -r leaf_library leaf_id leaf_slug leaf_duration <<<"$(member_movie "$last_position")"
+    movie_row_play 19 "$leaf_library" "$leaf_id" "$leaf_slug" "$leaf_duration" 99% $((2 * hour)) "$(people_of 2)"
+  else
+    mapfile -t last_leaves < <(member_episodes "$last_position")
+    IFS="$tab" read -r season episode <<<"${last_leaves[-1]}"
+    episode_play 19 "$(member_series "$last_position")" "$season" "$episode" 99% $((2 * hour)) "$(people_of 2)"
+  fi
+fi
+
+# One batch of statements, posted and answered as a whole. An answer other
+# than 200, or one statement the agent refused, ends the run before anything
+# is reported as written.
+apply() {
+  local label="$1" payload="$2" status failure
+  status="$(curl --silent --show-error --max-time 60 \
+    --header 'content-type: application/json' \
+    --data-binary "@$payload" \
+    --output "$work/answer" --write-out '%{http_code}' \
+    "$updates/v1/transactions")"
+  if [ "$status" != 200 ]; then
+    echo "local/seed-progress: the progress agent answered $status to the $label: $(head -c 500 "$work/answer")" >&2
+    exit 1
+  fi
+  failure="$(jq --raw-output \
+    '[.results[]? | select(.error != null and .error != "") | .error] | join("; ")' <"$work/answer")"
+  if [ -n "$failure" ]; then
+    echo "local/seed-progress: the progress agent refused the $label: $failure" >&2
+    exit 1
+  fi
+}
+
+# The rows of an earlier run go first, so a rerun replaces the set and does
+# not add a second copy of it.
+{
+  delete_statement "DELETE FROM play_people WHERE play LIKE 'seed-%'"
+  delete_statement "DELETE FROM play_aliases WHERE play LIKE 'seed-%'"
+  delete_statement "DELETE FROM plays WHERE play LIKE 'seed-%'"
+} | jq --slurp --compact-output . >"$work/delete.json"
+apply "delete" "$work/delete.json"
+
+jq --slurp --compact-output . <"$statements" >"$work/write.json"
+apply "write" "$work/write.json"
+
+cat "$report"
+
+# The people the browser draws, one entry per name given. The display name
+# is the name with its first letter in upper case.
+printf '%s\n' "${names[@]}" | jq --raw-input --slurp --compact-output \
+  'split("\n") | map(select(length > 0))
+   | map({name: ., displayName: ((.[0:1] | ascii_upcase) + .[1:])})' >"$people_file"

@@ -1,0 +1,212 @@
+// The reads that turn a choice into a play list. The main file of a
+// title is its `files` row reached through `file_items`, typed `video`
+// and in the `primary` role, and its trickplay path comes with it.
+// Every read is parameterised, like every other read of this source.
+
+use rusqlite::Connection;
+
+use super::{collect, item};
+use crate::catalog::{Mark, PlayItem, Presentation, art};
+
+// The join from an item to one of its video files. A title with a
+// second encoding holds more than one file in a role, so MIN(path) picks
+// one, and the bare trickplay column comes from that same row, which
+// is SQLite's rule for a bare column beside a single min or max.
+//
+// The role is a literal in this file and never a caller's word, so no
+// string from outside reaches the query text.
+fn video(role: &'static str) -> String {
+    format!(
+        "JOIN file_items ON file_items.library = item.library AND file_items.item = item.id \
+         JOIN files ON files.library = file_items.library AND files.path = file_items.path \
+         AND files.type = 'video' AND files.role = '{role}'"
+    )
+}
+
+// Every span the marks table holds for one file, in ordinal order, which
+// is the order of the ledger. A null end reads as no end.
+fn marks(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Mark>> {
+    collect(
+        connection,
+        "SELECT kind, start_ms, end_ms, source FROM marks \
+         WHERE library = ? AND path = ? ORDER BY ordinal",
+        &[&library, &path],
+        |row| {
+            Ok(Mark {
+                kind: row.get(0)?,
+                start: row.get(1)?,
+                end: row.get(2)?,
+                source: row.get(3)?,
+            })
+        },
+    )
+}
+
+// A play list with the marks of each item's main file, so the display can
+// skip an intro and place the credits.
+fn marked(
+    connection: &Connection,
+    library: &str,
+    mut items: Vec<PlayItem>,
+) -> rusqlite::Result<Vec<PlayItem>> {
+    for item in &mut items {
+        item.presentation.marks = marks(connection, library, &item.path)?;
+    }
+    Ok(items)
+}
+
+/// One movie's play list: the one item it resolves to, or nothing when
+/// the movie holds no main file.
+pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Result<Vec<PlayItem>> {
+    let sql = format!(
+        "SELECT item.title, item.released, item.art, MIN(files.path), files.trickplay, \
+                item.slug \
+         FROM movies item {} \
+         WHERE item.library = ? AND item.id = ? GROUP BY item.id",
+        video("primary")
+    );
+    let items = collect(connection, &sql, &[&library, &id], |row| {
+        let released: String = row.get(1)?;
+        Ok(PlayItem {
+            path: row.get(3)?,
+            slug: row.get(5)?,
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: "movie".into(),
+                title: row.get(0)?,
+                year: year(&released),
+                art: row.get(2)?,
+                trickplay: row.get(4)?,
+                ..Presentation::default()
+            },
+        })
+    })?;
+    marked(connection, library, items)
+}
+
+/// One title's trailer: the trailer file's path, the title's own
+/// presentation, and no trickplay, because a trailer has none. The
+/// film's display then shows the title the person was looking at.
+pub fn trailer(
+    connection: &Connection,
+    library: &str,
+    id: &str,
+) -> rusqlite::Result<Vec<PlayItem>> {
+    // An item's id starts with its kind, so the prefix says which table
+    // holds the row. The table name and the hint are literals of this
+    // file and never a slice of the id, so the id reaches the SQL only as
+    // a bound parameter.
+    let (table, hint) = match id.starts_with("series:") {
+        true => ("series", "series"),
+        false => ("movies", "movie"),
+    };
+    let sql = format!(
+        "SELECT item.title, item.released, item.art, MIN(files.path), item.slug \
+         FROM {table} item {} \
+         WHERE item.library = ? AND item.id = ? GROUP BY item.id",
+        video("trailer")
+    );
+    collect(connection, &sql, &[&library, &id], |row| {
+        let released: String = row.get(1)?;
+        Ok(PlayItem {
+            path: row.get(3)?,
+            slug: row.get(4)?,
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: hint.into(),
+                role: "trailer".into(),
+                title: row.get(0)?,
+                year: year(&released),
+                art: row.get(2)?,
+                ..Presentation::default()
+            },
+        })
+    })
+}
+
+/// The chosen episode alone. What follows it is the `Play`'s own next
+/// block, so the list holds one work, and a list of several files is left
+/// for an album.
+/// An episode with no main file resolves to nothing. The series row
+/// carries the art an episode with no still of its own is presented
+/// with.
+pub fn episodes(
+    connection: &Connection,
+    library: &str,
+    series: &str,
+    season: i64,
+    chosen: i64,
+) -> rusqlite::Result<Vec<PlayItem>> {
+    let sql = format!(
+        "SELECT item.episode, item.title, item.released, item.art, IFNULL(parent.title, ''), \
+                MIN(files.path), files.trickplay, item.slug, \
+                IFNULL(parent.art, ''), IFNULL(parent.arts, '[]') \
+         FROM episodes item {} \
+         LEFT JOIN series parent ON parent.library = item.library AND parent.id = item.series \
+         WHERE item.library = ? AND item.series = ? AND item.season = ? AND item.episode = ? \
+         GROUP BY item.id",
+        video("primary")
+    );
+    let items = collect(
+        connection,
+        &sql,
+        &[&library, &series, &season, &chosen],
+        |row| {
+            let released: String = row.get(2)?;
+            let mut presentation = Presentation {
+                kind: "video".into(),
+                hint: "series".into(),
+                series: row.get(4)?,
+                season,
+                episode: row.get(0)?,
+                episode_title: row.get(1)?,
+                art: art::still(
+                    &item::text(row, 3)?,
+                    &item::text(row, 8)?,
+                    &item::strings(&item::text(row, 9)?),
+                ),
+                trickplay: row.get(6)?,
+                ..Presentation::default()
+            };
+            dated(&mut presentation, released);
+            Ok(PlayItem {
+                path: row.get(5)?,
+                slug: row.get(7)?,
+                presentation,
+            })
+        },
+    )?;
+    marked(connection, library, items)
+}
+
+// An episode carries the release the catalog holds: a full ISO date
+// where the provider gave one, and the year alone otherwise. The film's
+// display shows the date when it has one.
+fn dated(presentation: &mut Presentation, released: String) {
+    if is_date(&released) {
+        presentation.date = released;
+        return;
+    }
+    presentation.year = year(&released);
+}
+
+// The year, the first four digits of the released column. A column that
+// holds neither a year nor a date answers zero, which the request leaves
+// out.
+fn year(released: &str) -> i64 {
+    released
+        .get(..4)
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or(0)
+}
+
+// Whether the released column holds a whole date, yyyy-mm-dd, and not a
+// year alone.
+fn is_date(released: &str) -> bool {
+    let mut parts = released.split('-');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(year), Some(month), Some(day), None)
+            if year.len() == 4 && month.len() == 2 && day.len() == 2
+    )
+}

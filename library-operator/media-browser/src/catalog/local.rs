@@ -1,0 +1,596 @@
+// The Source over plan 06's delivery. Every read is a SQLite read of
+// the agent's local file, and a background stream marks changes, so
+// the views re-read the file and never ask a service.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
+use rusqlite::{Connection, OpenFlags, Row};
+
+use crate::catalog::franchise;
+use crate::catalog::pool::Candidate;
+use crate::catalog::recency::DRAWN;
+use crate::catalog::{
+    Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
+    LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Played, Progress,
+    Query, Resume, Selection, SeriesDetails, Slot, Sort, Source, TILES, library_name, recency,
+};
+use crate::harness::Waker;
+
+mod details;
+mod files;
+mod franchises;
+mod genres;
+mod identity;
+mod item;
+mod people;
+mod play;
+mod pool;
+mod progress;
+mod recent;
+mod search;
+mod series;
+mod updates;
+
+// The file opens read-only because only scanners write, through their
+// agents. A write from here would bypass the agent's CRDT bookkeeping,
+// and the row would never reach a peer.
+pub struct LocalCatalog {
+    database: PathBuf,
+    // The progress store's file, attached beside the catalog on the same
+    // connection, so a progress read is one statement across the two.
+    // Nothing here means the progress reads answer empty.
+    store: Option<PathBuf>,
+    connection: Option<Connection>,
+    shared: Arc<updates::Shared>,
+    shelf: Arc<search::Shelf>,
+    page_reads: Option<PageReads>,
+    // Whether this source owns the update streams. The source the browser
+    // holds owns them and stops them when it drops. The second source over
+    // the same file reads alone and stops nothing.
+    streams: bool,
+}
+
+type PersonEntries = Arc<Vec<(String, String)>>;
+
+#[derive(Default)]
+struct PageReads {
+    people: HashMap<(String, String), PersonEntries>,
+    kinds: Option<Arc<HashMap<String, String>>>,
+}
+
+impl LocalCatalog {
+    // `database` is the agent's SQLite file, and `api` is the agent's
+    // loopback HTTP base. One stream per item table follows updates
+    // from construction on, so an event before the first read still
+    // marks a re-read and nothing lands unseen.
+    pub fn new(database: impl Into<PathBuf>, api: &str) -> Self {
+        Self::quieting(database, api, search::QUIET)
+    }
+
+    // The same source with the search index's quiet period given, so a
+    // test can wait milliseconds for a build instead of two seconds.
+    fn quieting(database: impl Into<PathBuf>, api: &str, quiet: Duration) -> Self {
+        let shared = Arc::new(updates::Shared::default());
+        for table in ["movies", "series", "episodes"] {
+            updates::follow(shared.clone(), api.to_string(), table, Change::Catalog);
+        }
+        let database = database.into();
+        let shelf = Arc::new(search::Shelf::default());
+        search::follow(shelf.clone(), shared.clone(), database.clone(), quiet);
+        Self {
+            database,
+            store: None,
+            connection: None,
+            shared,
+            shelf,
+            page_reads: None,
+            streams: true,
+        }
+    }
+
+    /// The same source with the progress store beside the catalog.
+    /// `updates` is the progress agent's own HTTP API base; a change to its
+    /// two tables marks the same changed flag the catalog's tables do. A
+    /// file that is not there yet leaves the progress reads empty.
+    pub fn with_progress(mut self, path: PathBuf, updates: &str) -> Self {
+        if !path.exists() {
+            eprintln!("media-browser: no progress store at {}", path.display());
+            return self;
+        }
+        for table in ["plays", "play_people"] {
+            updates::follow(
+                self.shared.clone(),
+                updates.to_string(),
+                table,
+                Change::Progress,
+            );
+        }
+        self.store = Some(path);
+        self
+    }
+
+    // The connection opens on demand and drops on any failure, because
+    // plan 06 lets the agent be absent for a moment. A missing or
+    // half-born file reads as empty, and the next call retries. The
+    // failure is logged, because a wall that draws nothing looks the
+    // same whether the catalog is empty or the file is unreachable, and
+    // the log is where the difference shows.
+    fn read_result<T>(
+        &mut self,
+        run: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<T> {
+        if self.connection.is_none() {
+            let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+            match Connection::open_with_flags(&self.database, flags) {
+                Ok(connection) => {
+                    self.attach(&connection);
+                    self.connection = Some(connection);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "media-browser: cannot open the catalog {}: {error}",
+                        self.database.display()
+                    );
+                    return Err(error);
+                }
+            }
+        }
+        let result = run(self.connection.as_ref().expect("the connection opened"));
+        if result.is_err() {
+            self.connection = None;
+        }
+        result
+    }
+
+    // The progress file joins this connection as the schema `progress`.
+    // SQLite opens an attached file with the flags the main file carries,
+    // and the main file is read-only, so the store is read-only too, and no
+    // write from here can bypass the agent's bookkeeping. A failed attach
+    // leaves the progress reads answering empty, and the log line is
+    // the only sign of the difference from an empty store.
+    fn attach(&self, connection: &Connection) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let path = store.to_string_lossy().into_owned();
+        if let Err(error) = connection.execute("ATTACH DATABASE ?1 AS progress", [&path]) {
+            eprintln!(
+                "media-browser: cannot open the progress store {}: {error}",
+                store.display()
+            );
+        }
+    }
+
+    fn read<T>(&mut self, run: impl FnOnce(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
+        self.read_result(run).unwrap_or_default()
+    }
+
+    // A progress read runs only where a store is attached. A source without
+    // one answers empty and keeps its connection.
+    fn stored<T>(&mut self, run: impl FnOnce(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
+        if self.store.is_none() {
+            return Vec::new();
+        }
+        self.read(run)
+    }
+
+    fn person_entries(&mut self, library: &str, path: &str) -> Option<PersonEntries> {
+        let key = (library.to_string(), path.to_string());
+        if let Some(entries) = self
+            .page_reads
+            .as_ref()
+            .and_then(|reads| reads.people.get(&key))
+        {
+            return Some(entries.clone());
+        }
+
+        let entries = Arc::new(
+            self.read_result(|connection| people::entries(connection, library, path))
+                .ok()?,
+        );
+        if let Some(reads) = self.page_reads.as_mut()
+            && reads.people.len() < DRAWN
+        {
+            reads.people.insert(key, entries.clone());
+        }
+        Some(entries)
+    }
+
+    fn library_kinds(&mut self) -> Option<Arc<HashMap<String, String>>> {
+        if let Some(kinds) = self
+            .page_reads
+            .as_ref()
+            .and_then(|reads| reads.kinds.as_ref())
+        {
+            return Some(kinds.clone());
+        }
+
+        let kinds = Arc::new(self.read_result(people::kinds).ok()?);
+        if let Some(reads) = self.page_reads.as_mut() {
+            reads.kinds = Some(kinds.clone());
+        }
+        Some(kinds)
+    }
+}
+
+impl Drop for LocalCatalog {
+    fn drop(&mut self) {
+        if self.streams {
+            self.shared.halt();
+        }
+    }
+}
+
+// The kind names the item table. This closed match is the whole of
+// what may reach the SQL text, so no caller-supplied string is ever
+// formatted into a query.
+fn item_table(kind: &str) -> Option<&'static str> {
+    match kind {
+        "movies" => Some("movies"),
+        "series" => Some("series"),
+        _ => None,
+    }
+}
+
+// One library's slots come off both item tables in one read. A library
+// has one kind, so one half of the union is empty and the whole is that
+// kind's rows, each stamped with its kind. The library binds once as
+// `?1` for both halves, and the sort key is selected only to order the
+// union.
+// The sort formats into the outer ORDER BY. Title reads off the
+// (library, sort_key) index and the two release orders off (library,
+// released), so no order scans.
+fn library_slots(
+    connection: &Connection,
+    library: &str,
+    sort: Sort,
+) -> rusqlite::Result<Vec<Slot>> {
+    let sql = format!(
+        "SELECT * FROM (\
+           SELECT {columns}, {movies} AS seasons, 'movies' AS kind, sort_key \
+           FROM movies WHERE library = ?1 \
+           UNION ALL \
+           SELECT {columns}, {series} AS seasons, 'series' AS kind, sort_key \
+           FROM series WHERE library = ?1\
+         ) ORDER BY {ordering}",
+        columns = item::COLUMNS,
+        movies = item::seasons("movies"),
+        series = item::seasons("series"),
+        ordering = ordering(sort),
+    );
+    collect(connection, &sql, &[&library], |row| {
+        let kind: String = row.get(item::WIDTH + 1)?;
+        Ok(Slot {
+            seasons: row.get(item::WIDTH)?,
+            ..Slot::of(library, &kind, item::title(row)?)
+        })
+    })
+}
+
+// The ORDER BY one sort names. The closed match is all that can reach
+// the SQL text, and the sort key breaks every tie so a read answers the
+// same order every time.
+fn ordering(sort: Sort) -> &'static str {
+    match sort {
+        Sort::Title => "sort_key",
+        Sort::Newest => "released DESC, sort_key",
+        Sort::Oldest => "released ASC, sort_key",
+    }
+}
+
+// The posters of one library's newest-added titles that have one, in the
+// order the Added query reads them, and no more than a tile holds.
+fn newest_art(connection: &Connection, library: &str, kind: &str) -> rusqlite::Result<Vec<String>> {
+    let Some(table) = item_table(kind) else {
+        return Ok(Vec::new());
+    };
+    let sql = format!(
+        "SELECT art FROM {table} WHERE library = ?1 AND art != '' \
+         ORDER BY added DESC, id LIMIT {TILES}"
+    );
+    collect(connection, &sql, &[&library], |row| row.get(0))
+}
+
+fn collect<T>(
+    connection: &Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+    map: impl Fn(&Row<'_>) -> rusqlite::Result<T>,
+) -> rusqlite::Result<Vec<T>> {
+    let mut statement = connection.prepare(sql)?;
+    let rows = statement.query_map(params, |row| map(row))?;
+    rows.collect()
+}
+
+impl Source for LocalCatalog {
+    fn begin_page_read(&mut self) {
+        self.page_reads = Some(PageReads::default());
+    }
+
+    fn end_page_read(&mut self) {
+        self.page_reads = None;
+    }
+
+    fn libraries(&mut self) -> Vec<LibraryEntry> {
+        // A library has one kind, so the union yields one row per library, and
+        // the outer ORDER BY gives the libraries strip its order.
+        let sql = "SELECT library, kind, items FROM (\
+                     SELECT library, 'movies' AS kind, COUNT(*) AS items \
+                     FROM movies GROUP BY library \
+                     UNION ALL \
+                     SELECT library, 'series' AS kind, COUNT(*) AS items \
+                     FROM series GROUP BY library\
+                   ) ORDER BY library";
+        let mut entries: Vec<LibraryEntry> = self.read(|connection| {
+            collect(connection, sql, &[], |row| {
+                Ok(LibraryEntry {
+                    library: row.get(0)?,
+                    kind: row.get(1)?,
+                    items: row.get::<_, i64>(2)?.max(0) as u64,
+                    art: Vec::new(),
+                })
+            })
+        });
+        // The art is one read per library, because the count is a grouped
+        // read of the whole table and the art is the head of that library's
+        // own (library, added) index.
+        for entry in &mut entries {
+            let library = entry.library.clone();
+            let kind = entry.kind.clone();
+            entry.art = self.read(|connection| newest_art(connection, &library, &kind));
+        }
+        entries
+    }
+
+    fn genres(&mut self) -> Vec<GenreEntry> {
+        let Some(kinds) = self.library_kinds() else {
+            return Vec::new();
+        };
+        self.read(|connection| genres::entries(connection, &kinds))
+    }
+
+    fn franchises(&mut self) -> Vec<FranchiseEntry> {
+        self.read(franchises::all)
+    }
+
+    fn wall(&mut self, query: &Query) -> Answer {
+        match query {
+            Query::Library { library, sort } => Answer {
+                name: library_name(library).to_string(),
+                slots: self.read(|connection| library_slots(connection, library, *sort)),
+            },
+            Query::Person { library, path } => {
+                let name = self
+                    .read(|connection| people::name(connection, library, path))
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default();
+                let slots = if let Some(entries) = self.person_entries(library, path) {
+                    let kinds = self.library_kinds();
+                    kinds.map_or_else(Vec::new, |kinds| {
+                        self.read(|connection| people::works(connection, &entries, &kinds))
+                    })
+                } else {
+                    Vec::new()
+                };
+                Answer { name, slots }
+            }
+            Query::Set { library, id } => {
+                let Some(set) = self.set(library, id) else {
+                    return Answer::default();
+                };
+                Answer {
+                    name: set.title,
+                    slots: set
+                        .members
+                        .into_iter()
+                        .map(|member| Slot::of(library, "movies", member))
+                        .collect(),
+                }
+            }
+            Query::Released { fold } => Answer {
+                name: String::new(),
+                slots: recency::filled(
+                    *fold,
+                    self.read(|connection| recent::candidates(connection, Order::Released)),
+                ),
+            },
+            Query::Added { fold } => Answer {
+                name: String::new(),
+                slots: recency::filled(
+                    *fold,
+                    self.read(|connection| recent::candidates(connection, Order::Added)),
+                ),
+            },
+            Query::Genre { name, order, sort } => {
+                let kinds = self.library_kinds();
+                Answer {
+                    name: name.clone(),
+                    slots: kinds.map_or_else(Vec::new, |kinds| {
+                        self.read(|connection| {
+                            genres::titles(connection, name, *order, *sort, &kinds)
+                        })
+                    }),
+                }
+            }
+            Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
+            Query::Search { text } => Answer {
+                name: String::new(),
+                slots: self.shelf.find(text),
+            },
+        }
+    }
+
+    fn index_size(&mut self) -> Option<crate::catalog::search::Size> {
+        Some(self.shelf.held()?.size())
+    }
+
+    fn pool(&mut self) -> Vec<Candidate> {
+        self.read(pool::candidates)
+    }
+
+    fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails> {
+        self.read(|connection| details::movie(connection, library, id))
+            .into_iter()
+            .next()
+    }
+
+    fn set(&mut self, library: &str, id: &str) -> Option<MovieSet> {
+        self.read(|connection| details::set(connection, library, id))
+            .into_iter()
+            .next()
+    }
+
+    fn series(&mut self, library: &str, id: &str) -> Option<SeriesDetails> {
+        self.read(|connection| series::series(connection, library, id))
+            .into_iter()
+            .next()
+    }
+
+    fn episodes(&mut self, library: &str, id: &str) -> Vec<Episode> {
+        self.read(|connection| series::episodes(connection, library, id))
+    }
+
+    fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem> {
+        match selection {
+            Selection::Movie { id } => self.read(|connection| play::movie(connection, library, id)),
+            Selection::Trailer { id } => {
+                self.read(|connection| play::trailer(connection, library, id))
+            }
+            Selection::Episode {
+                series,
+                season,
+                episode,
+            } => self
+                .read(|connection| play::episodes(connection, library, series, *season, *episode)),
+        }
+    }
+
+    fn identity(&mut self, library: &str, selection: &Selection) -> Identity {
+        // An episode records against its series, because an episode has no
+        // provider id of its own. A trailer records against nothing, because
+        // a trailer is not the work.
+        let (item, season, episode) = match selection {
+            Selection::Movie { id } => (id, 0, 0),
+            Selection::Episode {
+                series,
+                season,
+                episode,
+            } => (series, *season, *episode),
+            Selection::Trailer { .. } => return Identity::default(),
+        };
+
+        let mut found = self
+            .read(|connection| identity::of(connection, library, item))
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        found.season = season;
+        found.episode = episode;
+        found
+    }
+
+    fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership> {
+        self.read(|connection| franchises::strips(connection, library, id))
+    }
+
+    fn memberships(&mut self, works: &[(String, String)]) -> Vec<Membership> {
+        if works.is_empty() {
+            return Vec::new();
+        }
+        self.read(|connection| franchises::memberships(connection, works))
+    }
+
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
+        self.read(|connection| franchises::franchise(connection, library, id))
+            .into_iter()
+            .next()
+    }
+
+    fn credits(&mut self, library: &str, id: &str) -> Credits {
+        self.read(|connection| people::credits(connection, library, id))
+            .into_iter()
+            .next()
+            .unwrap_or_default()
+    }
+
+    fn files(&mut self, library: &str, item: &str) -> Vec<FileFacts> {
+        self.read(|connection| files::files(connection, library, item))
+    }
+
+    fn person(&mut self, library: &str, path: &str) -> Option<Person> {
+        let person = self
+            .read(|connection| people::local_person(connection, library, path))
+            .into_iter()
+            .next()?;
+        if person.biography && person.headshot {
+            return Some(person);
+        }
+        let entries = self.person_entries(library, path)?;
+        self.read(|connection| people::person(connection, person, &entries))
+            .into_iter()
+            .next()
+    }
+
+    fn continue_watching(&mut self, people: &[String]) -> Vec<Resume> {
+        self.stored(|connection| progress::resumes(connection, people))
+    }
+
+    fn plays_of(&mut self, library: &str, id: &str, people: &[String]) -> Vec<Resume> {
+        self.stored(|connection| progress::plays(connection, library, id, people))
+    }
+
+    fn progress_by_item(&mut self, library: &str, people: &[String]) -> HashMap<String, Played> {
+        self.stored(|connection| progress::by_item(connection, library, people))
+            .into_iter()
+            .collect()
+    }
+
+    fn episode_progress(
+        &mut self,
+        library: &str,
+        series: &str,
+        people: &[String],
+    ) -> Vec<Progress> {
+        self.stored(|connection| progress::episodes(connection, library, series, people))
+    }
+
+    fn changed(&mut self) -> Change {
+        if !self.streams {
+            return Change::None;
+        }
+        Change::of(
+            self.shared.changed.swap(false, Ordering::AcqRel),
+            self.shared.progressed.swap(false, Ordering::AcqRel),
+        )
+    }
+
+    fn wake_by(&mut self, wake: Waker) {
+        if self.streams {
+            *self.shared.wake.lock().unwrap() = Some(wake);
+        }
+    }
+
+    // The second source over the same file: its own read-only connection,
+    // opened on its first read, and no claim on the streams.
+    // It attaches the same progress store, so a read off the reader thread
+    // answers what the first source answers.
+    fn reader(&mut self) -> Option<Box<dyn Source + Send>> {
+        Some(Box::new(Self {
+            database: self.database.clone(),
+            store: self.store.clone(),
+            connection: None,
+            shared: self.shared.clone(),
+            shelf: self.shelf.clone(),
+            page_reads: None,
+            streams: false,
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests;
