@@ -74,6 +74,22 @@ spec:
       # it starts, and the devices have to publish before anything
       # can claim them.
       priorityClassName: system-node-critical
+      # A node labeled bluetooth.liken.sh/bluetooth: none gets no pod. The
+      # claim alone leaves a pod on a node with no Bluetooth adapter Pending
+      # for good, so a person marks such a node with that one label.
+      # NotIn also matches a node with no such label, so with no
+      # label the DaemonSet makes a pod on every node, and the claim
+      # decides where it can start. A patch that sets its own node
+      # affinity replaces this list of terms, because the list is
+      # atomic.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: bluetooth.liken.sh/bluetooth
+                    operator: NotIn
+                    values: ["none"]
       tolerations:
         - operator: Exists
       # AF_BLUETOOTH sockets exist only in the host's network

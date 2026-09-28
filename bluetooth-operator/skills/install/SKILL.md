@@ -148,6 +148,54 @@ Whichever path you take, the manifests contain:
 * A `DaemonSet` and the `ResourceClaimTemplate` its pods claim the
   adapter through.
 
+## Keep the pods off nodes with no Bluetooth adapter
+
+The `DaemonSet` makes a pod on every node. On a node with no
+Bluetooth adapter, the claim matches no device, and the pod stays `Pending`. To make no
+pod on such a node, label the node `bluetooth.liken.sh/bluetooth: none`.
+
+The `DaemonSet` in the base carries this node affinity, so no patch is
+needed:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: bluetooth.liken.sh/bluetooth
+              operator: NotIn
+              values: ["none"]
+```
+
+`NotIn` matches a node whose label has a different value, and also a
+node that has no such label. The Kubernetes page on
+[set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
+gives this rule. So with no label the `DaemonSet` makes a pod on every
+node, and a node labeled `none` gets no pod. When a label changes, the
+[`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
+controller deletes the pod from a node that no longer matches, and
+adds one to a node that matches again.
+
+Label the node with `kubectl`:
+
+    kubectl label node node-1 bluetooth.liken.sh/bluetooth=none
+
+On `liken`, the label stays on the node across reboots, and `liken`
+leaves it in place, because `liken` removes only the labels that a
+`Machine` declared. The label goes with the Node object: a machine
+that is demoted or installed again registers a new Node, and you
+label it again. A `Machine` cannot declare this label: its
+`spec.nodeLabels` refuses every key in `liken.sh` and its subdomains.
+
+To run the pod on that node again, remove the label:
+
+    kubectl label node node-1 bluetooth.liken.sh/bluetooth-
+
+A patch of your own that sets a node affinity on this `DaemonSet`
+replaces the list of terms in the base, and the `none` term with it.
+Copy the `none` requirement into each term of your patch.
+
 ## Running a development build
 
 Every push to the operator's main branch publishes a development
@@ -179,7 +227,10 @@ lines in its summary.
 The `DaemonSet` puts a pod on every node, and each pod claims one
 `bluetooth-adapter` device. On a node with an adapter the claim
 matches and the pod runs. On a node with no adapter the claim matches
-nothing, so the pod parks `Pending` and costs nothing. Nobody writes
+nothing, so the pod parks `Pending` and costs nothing. A node labeled
+`bluetooth.liken.sh/bluetooth: none` gets no pod, as
+[Keep the pods off nodes with no Bluetooth adapter](#keep-the-pods-off-nodes-with-no-bluetooth-adapter)
+describes. Nobody writes
 down which machine has the radio, and a dongle moved to another
 machine works there on the next pod start.
 
@@ -193,7 +244,8 @@ adapter.
     kubectl get pods -n liken-system -l app=bluetooth-operator
 
 A healthy install has one `Running` pod on each machine with an
-adapter, and a `Pending` pod on each machine without one. Then read
+adapter. Each machine without one has a `Pending` pod, or no pod when
+its node is labeled `bluetooth.liken.sh/bluetooth: none`. Then read
 the radio the operator holds:
 
     $ kubectl get adapters

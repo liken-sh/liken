@@ -28,6 +28,7 @@ require (
 require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
+	sigs.k8s.io/yaml v1.6.0
 )
 
 // The CLI plugin reaches the cluster through client-go and the
@@ -120,7 +121,6 @@ require (
 	sigs.k8s.io/kustomize/kyaml v0.21.1 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
 tool github.com/vladopajic/go-test-coverage/v2
