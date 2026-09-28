@@ -198,3 +198,24 @@ func TestAPodBuiltFromAPlayerEditTheViewHasNotSeenIsKept(t *testing.T) {
 	mustMatch(t, countMethod(cluster.requests, "POST"), 0)
 	mustMatch(t, countPathRequests(cluster.requests, "GET "+playerPath("house", "theater")), 1)
 }
+
+// An ending that names the pod the pass replaced labels nothing, even
+// while the view still holds that pod under the name. The merge patch
+// names the pod by its name alone, so a patch on the view's evidence
+// would label the new pod and fade a film that plays.
+func TestAnEndingOfAReplacedPodLabelsNothingWhileTheViewLags(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	cluster.pods["movie-playback"].Metadata.UID = "new-pod"
+	stale := runningCluster(housePlayer())
+	stale.pods["movie-playback"].Metadata.UID = "old-pod"
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.view = stale.view()
+	media.reports.readPodsFrom(media.view)
+
+	media.reports.fold("house", "movie", playReport{Item: 1, Position: "1:58:03", Ended: true, Pod: "old-pod"})
+	media.pass()
+
+	mustMatch(t, podPatches(cluster, "movie-playback"), 0)
+	_, labeled := cluster.pods["movie-playback"].Metadata.Labels[endingLabelKey]
+	mustMatch(t, labeled, false)
+}

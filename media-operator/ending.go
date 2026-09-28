@@ -133,6 +133,11 @@ func (o *operator) labelEnding(play *Play) {
 	}
 	pod := podName(name)
 	if uid != "" {
+		// A direct read, not the view: an earlier pass may have created
+		// the pod that holds the name now, and the view can still hold
+		// the pod it replaced, whose UID matches the ending. The patch
+		// names the pod by its name alone, so a patch on the view's copy
+		// would label the new pod and fade a film that plays.
 		held, err := GetPod(o.client, namespace, pod)
 		switch {
 		case errors.Is(err, ErrNotFound) || (err == nil && held.Metadata.UID != uid):
