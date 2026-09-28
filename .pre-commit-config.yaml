@@ -1,11 +1,11 @@
-# The hooks for the files at the top of the repository: the plans,
-# the agent files, and the CI workflows. Each component directory has
-# its own .pre-commit-config.yaml, which prek finds from this one and
-# runs on that directory's files. prek also passes every file in the
-# repository to this config, so the filter below keeps these hooks to
-# the files that no component owns: a component's own exclusions, such
-# as its test data, stay in force.
-files: ^(\.agents/|\.github/|plans/|[^/]+$)
+# The hooks for the files at the top of the repository: the plans, the
+# agent files, the CI workflows, and the liken.sh domain. Each component
+# directory has its own .pre-commit-config.yaml, which prek finds from
+# this one and runs on that directory's files. prek also passes every
+# file in the repository to this config, so the filter below keeps
+# these hooks to the files that no component owns: a component's own
+# exclusions, such as its test data, stay in force.
+files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

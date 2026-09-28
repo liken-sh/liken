@@ -12,5 +12,3 @@ operator/operator
 # version as a file Make can track, rewritten only when the version
 # actually changes.
 .version
-
-.envrc.private

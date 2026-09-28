@@ -90,8 +90,8 @@ serves the last tree it received at liken.sh. The site carries the
 test coverage report at `/coverage.html`.
 
 The name reaches Pages through DNS: the apex records in
-`liken.sh/terraform.tf` point liken.sh at GitHub's published Pages
-addresses, and www CNAMEs to the Pages hostname. GitHub issues and
+`liken.sh/terraform.tf`, at the repository root, point liken.sh at
+GitHub's published Pages addresses, and www CNAMEs to the Pages hostname. GitHub issues and
 renews the site's TLS certificate. The Pages configuration itself
 (the workflow source and the custom domain) is in the
 repository's settings, set once by hand, the same class of one-time

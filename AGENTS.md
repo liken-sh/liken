@@ -4,7 +4,9 @@ The `liken` project is one system, and this repository holds all of
 it. Each top-level directory is one component, named for what it
 ships. `liken/` is the OS. The operators claim a machine's hardware
 and serve its interfaces. The CSI drivers attach storage, and `brand/`
-holds the theme, the voice rules, and the site tools. `plans/` holds
+holds the theme, the voice rules, and the site tools. `liken.sh/`
+declares the domain, the release channel, and the organization's
+repositories in Terraform. `plans/` holds
 the plans that cover more than one component, and each component keeps
 its own plans in its own `plans/`. Each component has its own
 `AGENTS.md` for the work inside it.

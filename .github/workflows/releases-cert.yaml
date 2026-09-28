@@ -10,7 +10,7 @@
 #
 # Everything here depends on one credential: RELEASES_CERT_TOKEN, a
 # Linode token scoped to Domains and Object Storage read/write,
-# delivered to this repository by Terraform (liken/liken.sh/terraform.tf).
+# delivered to this repository by Terraform (liken.sh/terraform.tf).
 # Nothing persists between runs. Each run mints a fresh ACME account
 # and a fresh certificate, and Let's Encrypt's rate limits allow this
 # volume many times over.

@@ -5,7 +5,7 @@ zone, the release channel at `https://releases.liken.sh`, and the
 records that point liken.sh at the website's host. `terraform.tf`
 declares all of it, and its comments explain each choice. The
 website's content and deploy belong to the docs domain
-(`docs/README.md`); what the site needs from here is only its DNS.
+(`liken/docs/README.md`); what the site needs from here is only its DNS.
 
 ## The release channel
 

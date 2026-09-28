@@ -13,7 +13,7 @@
 # could never be rescued by an update. The website is the same shape
 # of thing, a tree of files built ahead of time, and GitHub Pages
 # serves it at liken.sh; the DNS records below are everything the
-# site needs from this file (docs/README.md tells the deploy story).
+# site needs from this file (liken/docs/README.md tells the deploy story).
 #
 # Terraform fits here for the same reason that the Machine and
 # Cluster documents fit the OS: the desired state is declared in
@@ -331,7 +331,7 @@ resource "linode_object_storage_bucket" "releases" {
 # not only the root, so a page inside a release's directory makes
 # https://releases.liken.sh/<version>/ answer. `liken index` renders
 # the pages from the channel's own documents and the release workflow
-# uploads them (releases/index.go).
+# uploads them (liken/releases/index.go).
 #
 # The error document is the front page, so a mistyped path lands on
 # the list of every release. A dedicated 404 page would not read as

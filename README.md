@@ -34,6 +34,9 @@ Each top-level directory is one component, named for what it ships:
   the voice rules, and the tools that build the sites.
 
 Each component has its own `README.md`, `AGENTS.md`, and `Makefile`.
+[`liken.sh/`](liken.sh/) declares the project's public presence in
+Terraform: the liken.sh DNS zone, the release channel, and the
+settings of every repository in the organization.
 [`plans/`](plans/) holds the plans that cover more than one component,
 and each component keeps its own plans in its own `plans/`. Plan 69
 describes how the components came into this repository and how one

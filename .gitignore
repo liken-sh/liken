@@ -1,2 +1,5 @@
 # The tree `make docs` builds.
 /dist/
+
+# The credentials .envrc loads. .envrc.private.example lists them.
+.envrc.private
