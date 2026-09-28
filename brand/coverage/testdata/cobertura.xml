@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<!DOCTYPE coverage SYSTEM "https://cobertura.sourceforge.net/xml/coverage-04.dtd">
+<coverage branch-rate="0" branches-covered="0" branches-valid="0" complexity="0" line-rate="0.75" lines-covered="3" lines-valid="4" timestamp="1788609635" version="2.0.3">
+    <sources>
+        <source>/nowhere/tree</source>
+    </sources>
+    <packages>
+        <package line-rate="0.75" branch-rate="0" name="spin.src" complexity="0">
+            <classes>
+                <class branch-rate="0" complexity="0" filename="spin/src/spin.rs" line-rate="0.75" name="spin.src.spin.rs">
+                    <methods>
+                        <method name="spin" signature="" complexity="0" line-rate="0.75" branch-rate="0">
+                            <lines>
+                                <line hits="3" number="1" branch="false"/>
+                            </lines>
+                        </method>
+                    </methods>
+                    <lines>
+                        <line hits="3" number="1" branch="false"/>
+                        <line hits="3" number="2" branch="false"/>
+                        <line hits="0" number="3" branch="false"/>
+                        <line hits="3" number="5" branch="false"/>
+                    </lines>
+                </class>
+            </classes>
+        </package>
+    </packages>
+</coverage>

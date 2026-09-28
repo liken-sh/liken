@@ -1,0 +1,21 @@
+[package]
+name = "liken-iced"
+version = "0.1.0"
+edition = "2024"
+
+# The crate reads liken.svg and liken.css from this repository, so a consumer
+# takes the whole repository as a git submodule and names the crate as a path
+# dependency inside it.
+#
+# iced_widget carries the canvas the mark draws into, and it re-exports
+# iced_core and iced_graphics, so this is the only dependency the crate needs.
+# The canvas feature alone builds no renderer, because a consumer picks the
+# renderer and this crate draws through whichever one it picks.
+#
+# The version is exact, and it is the one library-operator's media browser
+# names. Two versions of iced in one binary do not compile, so a bump moves
+# both manifests in one change.
+[dependencies]
+iced_widget = { version = "=0.14.2", default-features = false, features = [
+    "canvas",
+] }

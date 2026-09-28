@@ -1,0 +1,61 @@
+/*
+ * The report's own rules. The shared stylesheet comes before them
+ * and brings the palette, the type, and the tables, so this file
+ * adds only what a coverage report needs: two colors for the source
+ * lines, and blocks wider than the prose.
+ */
+
+:root {
+  /* The line colors are washes of the accent green and of a red at
+     the same lightness. They sit under code all the way down a
+     file, so they stay pale enough to read through. */
+  --covered: #e6efdb;
+  --uncovered: #f7dedb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --covered: #24301c;
+    --uncovered: #3b2422;
+  }
+}
+
+/* The prose keeps the sites' measure. A table and a block of source
+   are wider than prose, so they center on the text column and grow
+   into the page's margins before they scroll. */
+table,
+details.file {
+  width: fit-content;
+  min-width: 100%;
+  max-width: min(100vw - 3rem, 80rem);
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+
+details.file { margin-top: 1.5rem; }
+
+summary { cursor: pointer; }
+summary .percent { color: var(--ink-muted); }
+
+pre.source { padding: 0.6rem 0; }
+
+/* Each line is a block, inside one block as wide as the widest line
+   in the file. Because of this a line's color reaches the end of the
+   line, however far the reader scrolls sideways. */
+pre.source code { display: block; min-width: max-content; }
+pre.source .line { display: block; padding: 0 0.6rem; }
+pre.source .covered { background: var(--covered); }
+pre.source .uncovered { background: var(--uncovered); }
+
+/* The line numbers are not the code. A reader who copies a block
+   gets the source alone. */
+pre.source .number {
+  display: inline-block;
+  min-width: 4ch;
+  margin-right: 1.5ch;
+  text-align: right;
+  color: var(--ink-muted);
+  user-select: none;
+}
+
+p.missing { color: var(--ink-muted); }

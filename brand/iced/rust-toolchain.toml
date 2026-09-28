@@ -1,0 +1,8 @@
+# The pin makes a workstation, a consumer's image build, and CI compile with
+# the same rustc. The channel is the one library-operator pins, because the
+# media browser links this crate and a mismatch would build it twice. The
+# components are what the gates run: clippy, rustfmt, and the LLVM tools that
+# cargo-llvm-cov measures coverage with.
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "llvm-tools", "rustfmt"]
