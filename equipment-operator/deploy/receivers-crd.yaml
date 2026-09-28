@@ -1,0 +1,592 @@
+# A Receiver is one audio/video receiver the cluster drives over
+# the network.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: receivers.equipment.liken.sh
+spec:
+  group: equipment.liken.sh
+  names:
+    kind: Receiver
+    listKind: ReceiverList
+    plural: receivers
+    singular: receiver
+    categories: [equipment]
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only the operator writes
+      # status.
+      subresources:
+        status: {}
+      # The default view says what the main zone does and which Player
+      # holds it, from status.session. kubectl get -o wide adds the
+      # columns with priority 1: the driver, the address, whether a Play
+      # stands, and the sound mode.
+      additionalPrinterColumns:
+        - name: Power
+          type: string
+          jsonPath: .status.zones.main.power
+        - name: Input
+          type: string
+          jsonPath: .status.zones.main.input
+        - name: Volume
+          type: string
+          jsonPath: .status.zones.main.volume
+        - name: Player
+          type: string
+          jsonPath: .status.session.player
+        - name: Reachable
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Reachable")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Driver
+          type: string
+          jsonPath: .status.driver
+          priority: 1
+        - name: Address
+          type: string
+          jsonPath: .status.address
+          priority: 1
+        - name: Playing
+          type: boolean
+          jsonPath: .status.session.active
+          priority: 1
+        - name: Sound
+          type: string
+          jsonPath: .status.zones.main.soundMode
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "One piece of A/V equipment on the far end of a machine's cable. The resource declares the protocol that reaches it, the inputs liken machines feed, and the session that currently uses it."
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              description: "How to reach the receiver and how its inputs are wired. The cluster owner writes every field except session. The session belongs in status.session, and spec.session holds the session only for a media operator that still writes it here."
+              # One protocol block names the receiver, and this rule
+              # holds a Receiver to one of them. A second protocol is
+              # one more entry in this list.
+              x-kubernetes-validations:
+                - rule: "[has(self.denon), has(self.wiim)].exists_one(block, block)"
+                  message: "a Receiver names exactly one protocol block"
+                # A Denon reports a limit beside every volume, and that
+                # number moves under the room, so a Denon needs a
+                # ceiling the owner states.
+                - rule: "!has(self.denon) || (has(self.volume) && has(self.volume.max))"
+                  message: "a Denon receiver states spec.volume.max"
+                # An input name is how a session asks for an input, so a
+                # session that names an input the wiring does not declare
+                # would select nothing.
+                - rule: "!has(self.session) || (has(self.inputs) && self.inputs.exists(input, input.name == self.session.input))"
+                  message: "a session names an input the wiring declares"
+              properties:
+                denon:
+                  type: object
+                  required: [address]
+                  description: "The receiver accepts the Denon and Marantz control protocol on TCP port 23. Commands such as MV50 and receiver events use the same plain-text form."
+                  properties:
+                    address:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
+                    settings:
+                      type: object
+                      description: "The receiver's settings, one family per block, in display units. The operator compares each declared field with the value the receiver reports and sends only a field that differs, so a restart against a receiver that already holds the declared values sends nothing, and a change made at the receiver is sent back. It sends one field at most 3 times at one declared value; a field the receiver still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the receiver does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
+                      properties:
+                        system:
+                          type: object
+                          description: "The unit-wide settings. Power is reported by the driver but not declarable here, because the controller owns it through spec.power."
+                          properties:
+                            eco:
+                              type: string
+                              description: "The Eco mode the receiver uses: auto, on, or off."
+                            dimmer:
+                              type: string
+                              description: "The display dimmer: off, dim, dark, or bright."
+                            autoStandby:
+                              type: string
+                              description: "The auto standby timer: off, or 15m, 30m, 60m, 2h, 4h, or 8h."
+                            speakerPreset:
+                              type: integer
+                              minimum: 1
+                              maximum: 4
+                              description: "The speaker preset, 1 through 4."
+                            audioInputMode:
+                              type: string
+                              description: "The audio input mode: auto, hdmi, digital, or analog."
+                            videoSelect:
+                              type: string
+                              description: "The video source the receiver selects, a name it already knows, or off."
+                            bluetoothTransmitter:
+                              type: string
+                              description: "The Bluetooth transmitter: on or off."
+                            bluetoothOutput:
+                              type: string
+                              description: "The Bluetooth output: speakers or bluetooth."
+                        tone:
+                          type: object
+                          description: "The tone control and the two trims, in display units where 0dB is neutral."
+                          properties:
+                            control:
+                              type: boolean
+                              description: "Whether the tone trims apply. False bypasses them."
+                            bass:
+                              type: integer
+                              minimum: -12
+                              maximum: 12
+                              description: "The bass trim, 12dB on each side of neutral."
+                            treble:
+                              type: integer
+                              minimum: -12
+                              maximum: 12
+                              description: "The treble trim, 12dB on each side of neutral."
+                        audyssey:
+                          type: object
+                          description: "The Audyssey room correction settings."
+                          properties:
+                            multeq:
+                              type: string
+                              description: "The MultEQ mode: reference, l/r bypass, flat, manual, or off."
+                            dynamicEq:
+                              type: boolean
+                              description: "Whether Dynamic EQ is on."
+                            referenceLevelOffset:
+                              type: integer
+                              enum: [0, 5, 10, 15]
+                              description: "The reference level offset, in dB, one of 0, 5, 10, or 15."
+                            dynamicVolume:
+                              type: string
+                              description: "The Dynamic Volume mode, such as off, light, medium, or heavy."
+                            loudnessManagement:
+                              type: boolean
+                              description: "Whether Loudness Management is on."
+                        audio:
+                          type: object
+                          description: "The audio processing settings."
+                          properties:
+                            drc:
+                              type: string
+                              description: "The Dynamic Range mode: off, auto, low, mid, or hi."
+                            lfe:
+                              type: integer
+                              minimum: -10
+                              maximum: 0
+                              description: "The LFE level, a cut from 0dB down to 10dB."
+                            effect:
+                              type: integer
+                              description: "The effect level."
+                            delay:
+                              type: integer
+                              minimum: 0
+                              maximum: 999
+                              description: "The delay, 0 to 999 milliseconds."
+                            audioDelay:
+                              type: integer
+                              minimum: 0
+                              maximum: 999
+                              description: "The audio delay, 0 to 999 milliseconds."
+                            subwoofer:
+                              type: boolean
+                              description: "Whether the subwoofer is on."
+                            restorer:
+                              type: string
+                              description: "The Audio Restorer mode: off, low, medium, or high."
+                            graphicEq:
+                              type: string
+                              description: "The Graphic EQ: off or on."
+                            headphoneEq:
+                              type: string
+                              description: "The Headphone EQ: off or on."
+                            speakerVirtualizer:
+                              type: boolean
+                              description: "Whether the Speaker Virtualizer is on."
+                            dialogEnhancer:
+                              type: string
+                              description: "The Dialog Enhancer level: off, low, mid, or high."
+                        hdmi:
+                          type: object
+                          description: "The HDMI setup, the receiver's Video > HDMI Setup menu, with its HDMI-CEC switches."
+                          properties:
+                            audioOut:
+                              type: string
+                              enum: [avr, tv]
+                              description: "Where HDMI audio plays: avr for the receiver's own amplifier, or tv."
+                            passThrough:
+                              type: boolean
+                              description: "Whether HDMI Pass Through sends a source to the TV while the receiver is in standby."
+                            passThroughSource:
+                              type: string
+                              enum: [last, hdmi1, hdmi2, hdmi3, hdmi4, hdmi5, hdmi6, hdmi7]
+                              description: "The source that passes through in standby: last for the last source selected, or hdmi1 to hdmi7 for one HDMI input jack. The receiver offers only the jacks that have a source assigned."
+                            rcSourceSelect:
+                              type: string
+                              enum: [powerOnAndSource, sourceSelectOnly]
+                              description: "What a source button on the remote does while the receiver is in standby: powerOnAndSource turns the receiver on and selects the source, and sourceSelectOnly selects the source for pass through and leaves the receiver in standby."
+                            control:
+                              type: boolean
+                              description: "Whether HDMI Control, the receiver's HDMI-CEC switch, is on."
+                            arc:
+                              type: boolean
+                              description: "Whether the Audio Return Channel is on. It needs HDMI Control."
+                            tvAudioSwitching:
+                              type: boolean
+                              description: "Whether the receiver selects the TV input when the TV plays its own sound over HDMI Control."
+                            powerOffControl:
+                              type: string
+                              enum: [all, video, off]
+                              description: "Which devices the TV's power off turns off over HDMI Control: all, video, or off."
+                            powerSaving:
+                              type: boolean
+                              description: "Whether HDMI Control's power saving is on."
+                        channelVolumes:
+                          type: object
+                          description: "One trim per channel, keyed by the channel's name, in display units where 0dB is neutral."
+                          additionalProperties:
+                            type: number
+                wiim:
+                  type: object
+                  required: [uuid]
+                  description: "The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything."
+                  properties:
+                    uuid:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                      description: "The device's LinkPlay UUID: twelve bytes of hex, the value getStatusEx returns as uuid and the first twelve bytes of the UUID mDNS and SSDP advertise. It is the identity, stable across a reboot and a DHCP lease change. The operator reads the device's uuid and compares it before it sends any command, so an address that moved never drives the wrong amp."
+                    address:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: "The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional while network discovery is on, because discovery resolves the UUID to an address on its own. With the operator's EQUIPMENT_NETWORK_DISCOVERY set to off, nothing resolves the UUID, so a WiiM receiver needs this field. With no address from either, the receiver is unreachable."
+                    settings:
+                      type: object
+                      description: "The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times at one declared value; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the device does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the device unchanged. An empty block sends nothing."
+                      properties:
+                        audio:
+                          type: object
+                          description: "The level controls the device parses."
+                          properties:
+                            balance:
+                              type: number
+                              minimum: -1
+                              maximum: 1
+                              description: "The left-right balance, -1.0 fully left to 1.0 fully right."
+                        device:
+                          type: object
+                          description: "The device's own name and its front-panel controls."
+                          properties:
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 63
+                              description: "The device's human label, set over the API. It is not the identity: the LinkPlay uuid is."
+                            led:
+                              type: boolean
+                              description: "Whether the status light is on."
+                            buttons:
+                              type: boolean
+                              description: "Whether the touch controls are enabled."
+                volume:
+                  type: object
+                  description: "The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max."
+                  # A ceiling of zero would mute the room, and a step of
+                  # zero would freeze it, so both must be above zero
+                  # when stated.
+                  x-kubernetes-validations:
+                    - rule: "!has(self.max) || self.max > 0"
+                      message: "the volume ceiling is above zero"
+                    - rule: "!has(self.step) || self.step > 0"
+                      message: "the volume step is above zero"
+                  properties:
+                    max:
+                      type: number
+                      maximum: 98
+                      description: "The loudest a press may drive this receiver, in its own scale. A Denon counts 0 to 98 and this is capped there. 100 on the bus means this value. A hand on the receiver's own remote can still go past it."
+                    step:
+                      type: number
+                      description: "How far one press moves the receiver, in its own scale. Half steps are allowed. Absent means one whole unit."
+                inputs:
+                  type: array
+                  maxItems: 32
+                  x-kubernetes-list-type: atomic
+                  description: "The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine."
+                  # A name is how a session asks for an input, so two
+                  # entries under one name name two different inputs
+                  # and the request is ambiguous. maxItems bounds the
+                  # cost of the pairwise check.
+                  x-kubernetes-validations:
+                    - rule: "self.all(input, self.exists_one(other, other.name == input.name))"
+                      message: "input names are unique"
+                  items:
+                    type: object
+                    required: [name, machine, monitor]
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                        maxLength: 63
+                        description: "The input's name on the receiver, as its protocol spells it: MPLAY, GAME, TV, CBL/SAT."
+                      machine:
+                        type: string
+                        minLength: 1
+                        maxLength: 253
+                        description: "The liken machine whose HDMI output lands on this input, by node name."
+                      monitor:
+                        type: string
+                        minLength: 1
+                        maxLength: 253
+                        description: "The monitor id the display and audio operators publish for this cable, such as don-0070-denon-avr. It is the check that the wire is really there."
+                      soundMode:
+                        type: string
+                        maxLength: 63
+                        description: "The sound mode the receiver selects with this input, when present. The session selects it in the same one-shot that selects the input, so a Play brings the picture and the mode together."
+                session:
+                  type: object
+                  required: [player, input, volumeTopic]
+                  description: "The Player that currently uses the receiver, as a media operator that does not write status.session writes it. The operator reads status.session first and uses this block only while status.session is absent. A media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
+                  properties:
+                    player:
+                      type: string
+                      minLength: 3
+                      maxLength: 507
+                      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                      description: "The Player, as namespace/name."
+                    input:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                      description: "The input the Player plays through, by its name in spec.inputs."
+                    volumeTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it."
+                    powerTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The topic on which the remote's power button publishes a toggle, in full. When present, the operator subscribes to it, and each {\"action\":\"toggle\"} message turns the room on or off. When the session's input names a Display that a Television lists, the TV's reported power decides: a TV that reports On or ToOn means the press turns the room off, and a TV in Standby or ToStandby means it turns the room on. No timer asks the TV for its power, so for a Television whose TV an adapter in Control finds, Reachable or not Reachable with the reason NoPower, the press asks the CEC node workload for one read through status.session.powerReadAt, waits up to 3 seconds for status.powerRead, and decides from the Television's status.power when no answer arrives. With no such Television, or a TV that does not answer the read and reports no power, the receiver's power decides. A room that goes off asks the Television for standby through its status.session.standbyAt and puts the receiver in standby. A receiver with no standby command, such as a WiiM, stays on, and the log line says so. A room that comes on wakes the Television and turns the receiver on. A receiver the operator cannot reach gets nothing, and the log line says so; the TV still turns off or on when it reports its power, and the press is dropped when it does not. The operator updates spec.power to match what the receiver did. An absent topic subscribes the session to nothing."
+                    active:
+                      type: boolean
+                      description: "Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once, each only when the receiver reports another value. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false."
+                    awake:
+                      type: boolean
+                      description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
+                power:
+                  type: string
+                  enum: ["On", Standby, "Off"]
+                  description: "The power state the operator drives the receiver to. The operator owns this field: it applies each new value once and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it, and a person who turns the receiver on or off by hand is not overruled. An edit of another field, such as a label or the session, sends nothing. The operator acts on a change of this field, including a Receiver created while the operator runs: it waits until it has read the receiver's own state, and sends the value only when the receiver reports another power. After an operator start it adopts the value it finds and sends nothing, unless the value differs from status.settledPower. Such a value is an edit made while the operator was down, and the operator handles it as a change. A status with no settledPower, such as one an earlier operator wrote, adopts. A toggle from the session's power topic rewrites it. The Denon cannot tell Standby from Off, so both mean Standby. A WiiM has no standby, so it always reports On. Quote the values On and Off in YAML, as power: \"On\": kubectl reads an unquoted On or Off as a boolean, and the API server refuses it."
+                settingsTopic:
+                  type: string
+                  minLength: 1
+                  maxLength: 1024
+                  description: "The topic the operator subscribes to for the life of the Receiver. A message on it is a settings toggle write, {\"setting\":\"tone.bass\",\"value\":3}, with the value in display units. An absent topic subscribes to nothing."
+                commandsTopic:
+                  type: string
+                  minLength: 1
+                  maxLength: 1024
+                  description: "The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {\"command\":\"quick.3\"}, an action that is not a setting. An absent topic subscribes to nothing."
+                zones:
+                  type: object
+                  description: "The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. The operator sends only a declared control the zone reports at another value, with the same rules as spec.denon.settings: at most 3 sends of one control at one declared value, and a control the zone does not report is sent once for each change of spec.zones, the same way."
+                  properties:
+                    zone2:
+                      type: object
+                      description: "The receiver's second zone. Every field is optional, so a bare key just claims the zone."
+                      properties:
+                        power:
+                          type: string
+                          enum: ["On", Standby, "Off"]
+                          description: "The power state the operator drives this zone to. Quote On and Off in YAML."
+                        input:
+                          type: string
+                          minLength: 1
+                          maxLength: 63
+                          description: "The input this zone selects, by its name in spec.inputs."
+                        volume:
+                          type: number
+                          description: "The zone's volume in the receiver's display units."
+                        mute:
+                          type: boolean
+                          description: "Whether this zone is muted."
+                        sleep:
+                          type: integer
+                          minimum: 0
+                          maximum: 120
+                          description: "Minutes until this zone sleeps, and zero means no sleep timer."
+                    zone3:
+                      type: object
+                      description: "The receiver's third zone. Every field is optional, so a bare key just claims the zone."
+                      properties:
+                        power:
+                          type: string
+                          enum: ["On", Standby, "Off"]
+                          description: "The power state the operator drives this zone to. Quote On and Off in YAML."
+                        input:
+                          type: string
+                          minLength: 1
+                          maxLength: 63
+                          description: "The input this zone selects, by its name in spec.inputs."
+                        volume:
+                          type: number
+                          description: "The zone's volume in the receiver's display units."
+                        mute:
+                          type: boolean
+                          description: "Whether this zone is muted."
+                        sleep:
+                          type: integer
+                          minimum: 0
+                          maximum: 120
+                          description: "Minutes until this zone sleeps, and zero means no sleep timer."
+            status:
+              type: object
+              description: "What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it."
+              properties:
+                address:
+                  type: string
+                  description: "The address the operator reached the receiver on: a WiiM's is its declared address, or the address discovery found when it declares none, and a Denon's is the declared address resolved. Empty until the operator builds the driver."
+                driver:
+                  type: string
+                  description: "The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver."
+                zones:
+                  type: object
+                  description: "One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main."
+                  additionalProperties:
+                    type: object
+                    properties:
+                      power:
+                        type: string
+                        description: "The power state the zone last reported: On, Standby, or Off. A WiiM has no standby, so it always reports On."
+                      input:
+                        type: string
+                        description: "The input the zone last reported as selected, whether liken selected it or a person did."
+                      soundMode:
+                        type: string
+                        description: "The sound mode the zone last reported, such as STEREO or MULTI CH IN."
+                      mute:
+                        type: boolean
+                        description: "Whether the zone last reported itself muted."
+                      volume:
+                        type: string
+                        description: "The zone's volume in the receiver's own scale. A Denon counts 0 to 98 in half steps."
+                      volumeMax:
+                        type: string
+                        description: "The last volume limit the receiver sent for this zone, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume."
+                      sleep:
+                        type: integer
+                        description: "Minutes until the zone sleeps, and zero when no sleep timer stands."
+                denon:
+                  type: object
+                  description: "The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, the HDMI setup, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it."
+                  x-kubernetes-preserve-unknown-fields: true
+                wiim:
+                  type: object
+                  description: "The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it."
+                  x-kubernetes-preserve-unknown-fields: true
+                service:
+                  type: string
+                  description: "The Service that represents the receiver on the cluster network after the operator creates it. Empty until then."
+                session:
+                  type: object
+                  required: [player, input, volumeTopic]
+                  description: "The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. It is status and not spec, so a change of either flag changes no metadata.generation. The operator reads this block first and falls back to spec.session only while this block is absent, and its own status apply never states this block. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A Denon reports a sound mode in other words than the command that selects its family, so the operator compares the declared mode with the reported one by the command families the driver knows. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
+                  properties:
+                    player:
+                      type: string
+                      minLength: 3
+                      maxLength: 507
+                      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                      description: "The Player, as namespace/name."
+                    input:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                      description: "The input the Player plays through, by its name in spec.inputs."
+                    volumeTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it."
+                    powerTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The topic on which the remote's power button publishes a toggle, in full. When present, the operator subscribes to it, and each {\"action\":\"toggle\"} message turns the room on or off. When the session's input names a Display that a Television lists, the TV's reported power decides: a TV that reports On or ToOn means the press turns the room off, and a TV in Standby or ToStandby means it turns the room on. No timer asks the TV for its power, so for a Television whose TV an adapter in Control finds, Reachable or not Reachable with the reason NoPower, the press asks the CEC node workload for one read through status.session.powerReadAt, waits up to 3 seconds for status.powerRead, and decides from the Television's status.power when no answer arrives. With no such Television, or a TV that does not answer the read and reports no power, the receiver's power decides. A room that goes off asks the Television for standby through its status.session.standbyAt and puts the receiver in standby. A receiver with no standby command, such as a WiiM, stays on, and the log line says so. A room that comes on wakes the Television and turns the receiver on. A receiver the operator cannot reach gets nothing, and the log line says so; the TV still turns off or on when it reports its power, and the press is dropped when it does not. The operator updates spec.power to match what the receiver did. An absent topic subscribes the session to nothing."
+                    active:
+                      type: boolean
+                      description: "Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once, each only when the receiver reports another value. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false."
+                    awake:
+                      type: boolean
+                      description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
+                settledPower:
+                  type: string
+                  enum: ["On", Standby, "Off"]
+                  description: "The spec.power the operator settled: it sent the value, found the receiver already at it, or adopted the value it found when it started. A restart that finds spec.power at this value sends nothing."
+                settledSettings:
+                  type: object
+                  description: "A digest of each declared block the operator has sent, including the fields the receiver does not report, keyed by the block's path in the spec: spec.denon.settings, spec.wiim.settings, and spec.zones. After an operator restart, the operator sends a block's unreported fields again only when the block's digest differs from this one, so a restart sends nothing for a block no one changed, whatever metadata.generation says, and a new Receiver or a block edited while the operator was down sends them once."
+                  additionalProperties:
+                    type: string
+                powerGeneration:
+                  type: integer
+                  format: int64
+                  description: "The record an earlier operator wrote of the metadata.generation whose spec.power it settled. The operator does not read or write it, and its first status apply removes it."
+                settingsGeneration:
+                  type: integer
+                  format: int64
+                  description: "The record an earlier operator wrote of the metadata.generation whose declared settings it had sent. The operator reads it once, when it starts: a status that holds it and no settledSettings is from that operator, which had sent the declared blocks, so the operator records each declared block as sent and sends nothing for it. The operator does not write it, and its first status apply removes it."
+                conditions:
+                  type: array
+                  description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check this entry reports, in CamelCase. It
+                          is the key of this list.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. True is the good verdict, and
+                          Unknown means the operator cannot tell yet.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition judged.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for why the condition holds
+                          this verdict, meant for a program to match on.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The same answer in a sentence a person reads.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the verdict last changed. It moves only
+                          when the status flips.

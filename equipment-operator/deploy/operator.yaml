@@ -1,0 +1,101 @@
+# The operator itself: one unprivileged Deployment for the cluster,
+# in the shape of the media operator and not the hardware operators'
+# DaemonSets.
+#
+# A receiver answers over the network, so the pod holds no hardware and
+# runs on any node. It does share the node's network namespace, because
+# finding a device is link-local multicast: a pod on the overlay gets
+# no answer to an mDNS or SSDP search, and discovery would find nothing.
+#
+# There is no volume for state. The operator re-derives everything
+# from the API server on every pass.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: equipment-operator
+spec:
+  # One replica acts at a time, because each copy takes the Lease
+  # equipment-operator before it does anything (leader.go). A copy
+  # that waits binds no port, searches for no device, and opens no
+  # receiver session. So replicas: 2 is safe: the pod uses the host
+  # network, the API server gives a host-network pod a hostPort for each
+  # port it declares, and the scheduler places no two pods with the
+  # same hostPort on one node. The second copy runs on another node and
+  # waits there, or stays Pending on a one-node cluster.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: equipment-operator
+  # Recreate, because the pod uses the host network and port 9260: a
+  # RollingUpdate that starts the new pod before it stops the old one
+  # needs a second node for it, and on a one-node cluster the new pod
+  # stays Pending and the rollout never finishes. The Lease still
+  # guards against a second copy that a node partition or a patch of
+  # the replica count starts.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: equipment-operator
+    spec:
+      serviceAccountName: equipment-operator
+      # The operator shares the node's network namespace so its mDNS and
+      # SSDP searches reach the LAN. A policy that keeps the cluster's
+      # own DNS is what still resolves the broker and a declared
+      # equipment name from this namespace.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/equipment-operator:latest
+          env:
+            # The Lease is in the pod's namespace, and the pod's name
+            # starts the identity it holds the Lease under, so the
+            # operator exits when either is unset.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # The broker the operator reads a session's volume from.
+            # The operator cannot derive the Service name, so the
+            # manifest states it.
+            - name: EQUIPMENT_BUS_ADDRESS
+              value: bus.liken-system.svc:1883
+            # Host network moves the listener into the node's namespace,
+            # where port 9200 is already liken-machine-operator's. This
+            # operator takes 9260, the next free port in the series that
+            # bluetooth-operator also took one from. The deploy/monitoring
+            # component is what a cluster owner adds to scrape it; the
+            # base runs the same either way.
+            - name: EQUIPMENT_METRICS_ADDRESS
+              value: :9260
+            # Network discovery searches the LAN for WiiM amps with mDNS
+            # and SSDP, and creates a Receiver for each amp that no
+            # Receiver names, so the operator drives every amp it finds.
+            # A cluster that shares its LAN with amps it must not drive
+            # sets "off" with a patch; the install guide shows the patch.
+            # The quotes keep a YAML 1.1 reader, such as kubectl, from
+            # reading on and off as booleans. The operator takes only on
+            # and off, and stops at start on any other value.
+            - name: EQUIPMENT_NETWORK_DISCOVERY
+              value: "on"
+          ports:
+            - name: metrics
+              containerPort: 9260
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi

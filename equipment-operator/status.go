@@ -1,0 +1,161 @@
+package main
+
+// The status one receiver reports: what it last said, in its own units,
+// the condition that says whether the operator can still reach it, and
+// the condition that names the declared fields the receiver did not
+// confirm.
+
+import (
+	"fmt"
+	"maps"
+	"reflect"
+	"strings"
+	"time"
+
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/equipment-operator/wiim"
+)
+
+// The conditions this operator reports, and the reason for each
+// verdict.
+const (
+	reachableConditionType = "Reachable"
+	reasonConnected        = "Connected"
+	reasonUnreachable      = "Unreachable"
+	reasonConnecting       = "Connecting"
+
+	settingsConfirmedConditionType = "SettingsConfirmed"
+	reasonNotConfirmed             = "NotConfirmed"
+)
+
+// reachableWords is the reason and the message each verdict carries.
+func reachableWords(status ConditionStatus) (reason, message string) {
+	switch status {
+	case ConditionTrue:
+		return reasonConnected, "the receiver answered"
+	case ConditionFalse:
+		return reasonUnreachable, "the receiver did not answer"
+	}
+	return reasonConnecting, "the operator has not reached the receiver yet"
+}
+
+// timestamp writes a moment the way the API server holds one.
+func timestamp(at time.Time) string {
+	return at.UTC().Format(time.RFC3339)
+}
+
+// reachable builds the condition. It keeps the moment the verdict last
+// changed, so the stamp moves only when the verdict flips.
+func reachable(status ConditionStatus, generation int64, previous []Condition, now time.Time) Condition {
+	reason, message := reachableWords(status)
+	condition := Condition{
+		Type:               reachableConditionType,
+		Status:             status,
+		ObservedGeneration: generation,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: timestamp(now),
+	}
+	for _, held := range previous {
+		if held.Type == reachableConditionType && held.Status == status && held.LastTransitionTime != "" {
+			condition.LastTransitionTime = held.LastTransitionTime
+		}
+	}
+	return condition
+}
+
+// settingsConfirmed builds the condition that names the declared fields
+// the operator stopped sending, because the receiver did not report the
+// declared value after sendLimit sends at that value. It exists
+// only while such a field exists, and it keeps the moment it appeared.
+func settingsConfirmed(unconfirmed []string, generation int64, previous []Condition, now time.Time) (Condition, bool) {
+	if len(unconfirmed) == 0 {
+		return Condition{}, false
+	}
+	condition := Condition{
+		Type:               settingsConfirmedConditionType,
+		Status:             ConditionFalse,
+		ObservedGeneration: generation,
+		Reason:             reasonNotConfirmed,
+		Message:            fmt.Sprintf("the receiver did not report the declared value after %d sends: %s", sendLimit, strings.Join(unconfirmed, ", ")),
+		LastTransitionTime: timestamp(now),
+	}
+	for _, held := range previous {
+		if held.Type == settingsConfirmedConditionType && held.Status == ConditionFalse && held.LastTransitionTime != "" {
+			condition.LastTransitionTime = held.LastTransitionTime
+		}
+	}
+	return condition, true
+}
+
+// buildReceiverStatus is the whole status one receiver's state makes,
+// in the receiver's own units, plus the protocol's own typed snapshot:
+// the Denon settings or the WiiM status, whichever the receiver's
+// protocol block names. status.service stays empty until the operator
+// makes the Service front.
+func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimStatus *wiim.Status, address string, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
+	zones := make(map[string]ZoneStatus, len(state.Zones))
+	for name, zone := range state.Zones {
+		zones[name] = ZoneStatus{
+			Power:     string(zone.Power),
+			Input:     zone.Input,
+			SoundMode: zone.SoundMode,
+			Mute:      zone.Mute,
+			Volume:    formatSteps(zone.Volume, resolution),
+			VolumeMax: formatSteps(zone.VolumeMax, resolution),
+			Sleep:     sleepMinutes(zone.Sleep),
+		}
+	}
+	return ReceiverStatus{
+		Address:    address,
+		Zones:      zones,
+		Driver:     protocolName(settings, wiimStatus),
+		Denon:      settings,
+		Wiim:       wiimStatus,
+		Conditions: []Condition{reachable(state.Reachable, generation, previous, now)},
+	}
+}
+
+// protocolName is the driver the receiver's protocol block selected,
+// written the way the listing shows it.
+func protocolName(settings *denon.Settings, wiimStatus *wiim.Status) string {
+	switch {
+	case wiimStatus != nil:
+		return "wiim"
+	case settings != nil:
+		return "denon"
+	}
+	return ""
+}
+
+// sleepMinutes writes one zone's sleep timer the way the status carries
+// it. A driver that has not reported the timer reads as off, because a
+// zero the receiver never said would read as a real answer.
+func sleepMinutes(minutes int) int {
+	if minutes < 0 {
+		return 0
+	}
+	return minutes
+}
+
+// sameStatus answers whether a write would change anything.
+func sameStatus(a, b ReceiverStatus) bool {
+	if a.Service != b.Service || a.Driver != b.Driver || a.SettledPower != b.SettledPower || !maps.Equal(a.SettledSettings, b.SettledSettings) || !reflect.DeepEqual(a.Denon, b.Denon) ||
+		!reflect.DeepEqual(a.Wiim, b.Wiim) ||
+		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
+		return false
+	}
+	for name, zone := range a.Zones {
+		other, held := b.Zones[name]
+		if !held || zone != other {
+			return false
+		}
+	}
+	for index := range a.Conditions {
+		if a.Conditions[index] != b.Conditions[index] {
+			return false
+		}
+	}
+	return true
+}

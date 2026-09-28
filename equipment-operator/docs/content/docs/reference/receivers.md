@@ -1,0 +1,280 @@
+---
+title: Receiver
+weight: 10
+toc: true
+---
+
+<!-- Generated from deploy/receivers-crd.yaml by crdref. Do not edit. -->
+
+One piece of A/V equipment on the far end of a machine's cable. The resource declares the protocol that reaches it, the inputs liken machines feed, and the session that currently uses it.
+
+## spec
+
+How to reach the receiver and how its inputs are wired. The cluster owner writes every field except session. The session belongs in status.session, and spec.session holds the session only for a media operator that still writes it here.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spec--denon"></span>`denon` | [object](#specdenon) | no | The receiver accepts the Denon and Marantz control protocol on TCP port 23. Commands such as MV50 and receiver events use the same plain-text form. |
+| <span id="spec--wiim"></span>`wiim` | [object](#specwiim) | no | The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything. |
+| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max. |
+| <span id="spec--inputs"></span>`inputs` | [\[\]object](#specinputs) | no | The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine. |
+| <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that currently uses the receiver, as a media operator that does not write status.session writes it. The operator reads status.session first and uses this block only while status.session is absent. A media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them. |
+| <span id="spec--power"></span>`power` | string | no | The power state the operator drives the receiver to. The operator owns this field: it applies each new value once and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it, and a person who turns the receiver on or off by hand is not overruled. An edit of another field, such as a label or the session, sends nothing. The operator acts on a change of this field, including a Receiver created while the operator runs: it waits until it has read the receiver's own state, and sends the value only when the receiver reports another power. After an operator start it adopts the value it finds and sends nothing, unless the value differs from status.settledPower. Such a value is an edit made while the operator was down, and the operator handles it as a change. A status with no settledPower, such as one an earlier operator wrote, adopts. A toggle from the session's power topic rewrites it. The Denon cannot tell Standby from Off, so both mean Standby. A WiiM has no standby, so it always reports On. Quote the values On and Off in YAML, as power: "On": kubectl reads an unquoted On or Off as a boolean, and the API server refuses it. One of: `On`, `Standby`, `Off`. |
+| <span id="spec--settingstopic"></span>`settingsTopic` | string | no | The topic the operator subscribes to for the life of the Receiver. A message on it is a settings toggle write, {"setting":"tone.bass","value":3}, with the value in display units. An absent topic subscribes to nothing. |
+| <span id="spec--commandstopic"></span>`commandsTopic` | string | no | The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {"command":"quick.3"}, an action that is not a setting. An absent topic subscribes to nothing. |
+| <span id="spec--zones"></span>`zones` | [object](#speczones) | no | The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. The operator sends only a declared control the zone reports at another value, with the same rules as spec.denon.settings: at most 3 sends of one control at one declared value, and a control the zone does not report is sent once for each change of spec.zones, the same way. |
+
+### spec.denon
+
+The receiver accepts the Denon and Marantz control protocol on TCP port 23. Commands such as MV50 and receiver events use the same plain-text form.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenon--address"></span>`address` | string | yes | The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent. |
+| <span id="specdenon--settings"></span>`settings` | [object](#specdenonsettings) | no | The receiver's settings, one family per block, in display units. The operator compares each declared field with the value the receiver reports and sends only a field that differs, so a restart against a receiver that already holds the declared values sends nothing, and a change made at the receiver is sent back. It sends one field at most 3 times at one declared value; a field the receiver still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the receiver does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field. |
+
+#### spec.denon.settings
+
+The receiver's settings, one family per block, in display units. The operator compares each declared field with the value the receiver reports and sends only a field that differs, so a restart against a receiver that already holds the declared values sends nothing, and a change made at the receiver is sent back. It sends one field at most 3 times at one declared value; a field the receiver still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the receiver does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettings--system"></span>`system` | [object](#specdenonsettingssystem) | no | The unit-wide settings. Power is reported by the driver but not declarable here, because the controller owns it through spec.power. |
+| <span id="specdenonsettings--tone"></span>`tone` | [object](#specdenonsettingstone) | no | The tone control and the two trims, in display units where 0dB is neutral. |
+| <span id="specdenonsettings--audyssey"></span>`audyssey` | [object](#specdenonsettingsaudyssey) | no | The Audyssey room correction settings. |
+| <span id="specdenonsettings--audio"></span>`audio` | [object](#specdenonsettingsaudio) | no | The audio processing settings. |
+| <span id="specdenonsettings--hdmi"></span>`hdmi` | [object](#specdenonsettingshdmi) | no | The HDMI setup, the receiver's Video > HDMI Setup menu, with its HDMI-CEC switches. |
+| <span id="specdenonsettings--channelvolumes"></span>`channelVolumes` | map[string]number | no | One trim per channel, keyed by the channel's name, in display units where 0dB is neutral. |
+
+#### spec.denon.settings.system
+
+The unit-wide settings. Power is reported by the driver but not declarable here, because the controller owns it through spec.power.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingssystem--eco"></span>`eco` | string | no | The Eco mode the receiver uses: auto, on, or off. |
+| <span id="specdenonsettingssystem--dimmer"></span>`dimmer` | string | no | The display dimmer: off, dim, dark, or bright. |
+| <span id="specdenonsettingssystem--autostandby"></span>`autoStandby` | string | no | The auto standby timer: off, or 15m, 30m, 60m, 2h, 4h, or 8h. |
+| <span id="specdenonsettingssystem--speakerpreset"></span>`speakerPreset` | integer | no | The speaker preset, 1 through 4. |
+| <span id="specdenonsettingssystem--audioinputmode"></span>`audioInputMode` | string | no | The audio input mode: auto, hdmi, digital, or analog. |
+| <span id="specdenonsettingssystem--videoselect"></span>`videoSelect` | string | no | The video source the receiver selects, a name it already knows, or off. |
+| <span id="specdenonsettingssystem--bluetoothtransmitter"></span>`bluetoothTransmitter` | string | no | The Bluetooth transmitter: on or off. |
+| <span id="specdenonsettingssystem--bluetoothoutput"></span>`bluetoothOutput` | string | no | The Bluetooth output: speakers or bluetooth. |
+
+#### spec.denon.settings.tone
+
+The tone control and the two trims, in display units where 0dB is neutral.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingstone--control"></span>`control` | boolean | no | Whether the tone trims apply. False bypasses them. |
+| <span id="specdenonsettingstone--bass"></span>`bass` | integer | no | The bass trim, 12dB on each side of neutral. |
+| <span id="specdenonsettingstone--treble"></span>`treble` | integer | no | The treble trim, 12dB on each side of neutral. |
+
+#### spec.denon.settings.audyssey
+
+The Audyssey room correction settings.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingsaudyssey--multeq"></span>`multeq` | string | no | The MultEQ mode: reference, l/r bypass, flat, manual, or off. |
+| <span id="specdenonsettingsaudyssey--dynamiceq"></span>`dynamicEq` | boolean | no | Whether Dynamic EQ is on. |
+| <span id="specdenonsettingsaudyssey--referenceleveloffset"></span>`referenceLevelOffset` | integer | no | The reference level offset, in dB, one of 0, 5, 10, or 15. One of: `0`, `5`, `10`, `15`. |
+| <span id="specdenonsettingsaudyssey--dynamicvolume"></span>`dynamicVolume` | string | no | The Dynamic Volume mode, such as off, light, medium, or heavy. |
+| <span id="specdenonsettingsaudyssey--loudnessmanagement"></span>`loudnessManagement` | boolean | no | Whether Loudness Management is on. |
+
+#### spec.denon.settings.audio
+
+The audio processing settings.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingsaudio--drc"></span>`drc` | string | no | The Dynamic Range mode: off, auto, low, mid, or hi. |
+| <span id="specdenonsettingsaudio--lfe"></span>`lfe` | integer | no | The LFE level, a cut from 0dB down to 10dB. |
+| <span id="specdenonsettingsaudio--effect"></span>`effect` | integer | no | The effect level. |
+| <span id="specdenonsettingsaudio--delay"></span>`delay` | integer | no | The delay, 0 to 999 milliseconds. |
+| <span id="specdenonsettingsaudio--audiodelay"></span>`audioDelay` | integer | no | The audio delay, 0 to 999 milliseconds. |
+| <span id="specdenonsettingsaudio--subwoofer"></span>`subwoofer` | boolean | no | Whether the subwoofer is on. |
+| <span id="specdenonsettingsaudio--restorer"></span>`restorer` | string | no | The Audio Restorer mode: off, low, medium, or high. |
+| <span id="specdenonsettingsaudio--graphiceq"></span>`graphicEq` | string | no | The Graphic EQ: off or on. |
+| <span id="specdenonsettingsaudio--headphoneeq"></span>`headphoneEq` | string | no | The Headphone EQ: off or on. |
+| <span id="specdenonsettingsaudio--speakervirtualizer"></span>`speakerVirtualizer` | boolean | no | Whether the Speaker Virtualizer is on. |
+| <span id="specdenonsettingsaudio--dialogenhancer"></span>`dialogEnhancer` | string | no | The Dialog Enhancer level: off, low, mid, or high. |
+
+#### spec.denon.settings.hdmi
+
+The HDMI setup, the receiver's Video > HDMI Setup menu, with its HDMI-CEC switches.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingshdmi--audioout"></span>`audioOut` | string | no | Where HDMI audio plays: avr for the receiver's own amplifier, or tv. One of: `avr`, `tv`. |
+| <span id="specdenonsettingshdmi--passthrough"></span>`passThrough` | boolean | no | Whether HDMI Pass Through sends a source to the TV while the receiver is in standby. |
+| <span id="specdenonsettingshdmi--passthroughsource"></span>`passThroughSource` | string | no | The source that passes through in standby: last for the last source selected, or hdmi1 to hdmi7 for one HDMI input jack. The receiver offers only the jacks that have a source assigned. One of: `last`, `hdmi1`, `hdmi2`, `hdmi3`, `hdmi4`, `hdmi5`, `hdmi6`, `hdmi7`. |
+| <span id="specdenonsettingshdmi--rcsourceselect"></span>`rcSourceSelect` | string | no | What a source button on the remote does while the receiver is in standby: powerOnAndSource turns the receiver on and selects the source, and sourceSelectOnly selects the source for pass through and leaves the receiver in standby. One of: `powerOnAndSource`, `sourceSelectOnly`. |
+| <span id="specdenonsettingshdmi--control"></span>`control` | boolean | no | Whether HDMI Control, the receiver's HDMI-CEC switch, is on. |
+| <span id="specdenonsettingshdmi--arc"></span>`arc` | boolean | no | Whether the Audio Return Channel is on. It needs HDMI Control. |
+| <span id="specdenonsettingshdmi--tvaudioswitching"></span>`tvAudioSwitching` | boolean | no | Whether the receiver selects the TV input when the TV plays its own sound over HDMI Control. |
+| <span id="specdenonsettingshdmi--poweroffcontrol"></span>`powerOffControl` | string | no | Which devices the TV's power off turns off over HDMI Control: all, video, or off. One of: `all`, `video`, `off`. |
+| <span id="specdenonsettingshdmi--powersaving"></span>`powerSaving` | boolean | no | Whether HDMI Control's power saving is on. |
+
+### spec.wiim
+
+The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiim--uuid"></span>`uuid` | string | yes | The device's LinkPlay UUID: twelve bytes of hex, the value getStatusEx returns as uuid and the first twelve bytes of the UUID mDNS and SSDP advertise. It is the identity, stable across a reboot and a DHCP lease change. The operator reads the device's uuid and compares it before it sends any command, so an address that moved never drives the wrong amp. |
+| <span id="specwiim--address"></span>`address` | string | no | The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional while network discovery is on, because discovery resolves the UUID to an address on its own. With the operator's EQUIPMENT_NETWORK_DISCOVERY set to off, nothing resolves the UUID, so a WiiM receiver needs this field. With no address from either, the receiver is unreachable. |
+| <span id="specwiim--settings"></span>`settings` | [object](#specwiimsettings) | no | The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times at one declared value; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the device does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the device unchanged. An empty block sends nothing. |
+
+#### spec.wiim.settings
+
+The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times at one declared value; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the device does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the device unchanged. An empty block sends nothing.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiimsettings--audio"></span>`audio` | [object](#specwiimsettingsaudio) | no | The level controls the device parses. |
+| <span id="specwiimsettings--device"></span>`device` | [object](#specwiimsettingsdevice) | no | The device's own name and its front-panel controls. |
+
+#### spec.wiim.settings.audio
+
+The level controls the device parses.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiimsettingsaudio--balance"></span>`balance` | number | no | The left-right balance, -1.0 fully left to 1.0 fully right. |
+
+#### spec.wiim.settings.device
+
+The device's own name and its front-panel controls.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiimsettingsdevice--name"></span>`name` | string | no | The device's human label, set over the API. It is not the identity: the LinkPlay uuid is. |
+| <span id="specwiimsettingsdevice--led"></span>`led` | boolean | no | Whether the status light is on. |
+| <span id="specwiimsettingsdevice--buttons"></span>`buttons` | boolean | no | Whether the touch controls are enabled. |
+
+### spec.volume
+
+The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specvolume--max"></span>`max` | number | no | The loudest a press may drive this receiver, in its own scale. A Denon counts 0 to 98 and this is capped there. 100 on the bus means this value. A hand on the receiver's own remote can still go past it. |
+| <span id="specvolume--step"></span>`step` | number | no | How far one press moves the receiver, in its own scale. Half steps are allowed. Absent means one whole unit. |
+
+### spec.inputs[]
+
+The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specinputs--name"></span>`name` | string | yes | The input's name on the receiver, as its protocol spells it: MPLAY, GAME, TV, CBL/SAT. |
+| <span id="specinputs--machine"></span>`machine` | string | yes | The liken machine whose HDMI output lands on this input, by node name. |
+| <span id="specinputs--monitor"></span>`monitor` | string | yes | The monitor id the display and audio operators publish for this cable, such as don-0070-denon-avr. It is the check that the wire is really there. |
+| <span id="specinputs--soundmode"></span>`soundMode` | string | no | The sound mode the receiver selects with this input, when present. The session selects it in the same one-shot that selects the input, so a Play brings the picture and the mode together. |
+
+### spec.session
+
+The Player that currently uses the receiver, as a media operator that does not write status.session writes it. The operator reads status.session first and uses this block only while status.session is absent. A media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specsession--player"></span>`player` | string | yes | The Player, as namespace/name. Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$`. |
+| <span id="specsession--input"></span>`input` | string | yes | The input the Player plays through, by its name in spec.inputs. |
+| <span id="specsession--volumetopic"></span>`volumeTopic` | string | yes | The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it. |
+| <span id="specsession--powertopic"></span>`powerTopic` | string | no | The topic on which the remote's power button publishes a toggle, in full. When present, the operator subscribes to it, and each {"action":"toggle"} message turns the room on or off. When the session's input names a Display that a Television lists, the TV's reported power decides: a TV that reports On or ToOn means the press turns the room off, and a TV in Standby or ToStandby means it turns the room on. No timer asks the TV for its power, so for a Television whose TV an adapter in Control finds, Reachable or not Reachable with the reason NoPower, the press asks the CEC node workload for one read through status.session.powerReadAt, waits up to 3 seconds for status.powerRead, and decides from the Television's status.power when no answer arrives. With no such Television, or a TV that does not answer the read and reports no power, the receiver's power decides. A room that goes off asks the Television for standby through its status.session.standbyAt and puts the receiver in standby. A receiver with no standby command, such as a WiiM, stays on, and the log line says so. A room that comes on wakes the Television and turns the receiver on. A receiver the operator cannot reach gets nothing, and the log line says so; the TV still turns off or on when it reports its power, and the press is dropped when it does not. The operator updates spec.power to match what the receiver did. An absent topic subscribes the session to nothing. |
+| <span id="specsession--active"></span>`active` | boolean | no | Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once, each only when the receiver reports another value. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false. |
+| <span id="specsession--awake"></span>`awake` | boolean | no | Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep. |
+
+### spec.zones
+
+The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. The operator sends only a declared control the zone reports at another value, with the same rules as spec.denon.settings: at most 3 sends of one control at one declared value, and a control the zone does not report is sent once for each change of spec.zones, the same way.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speczones--zone2"></span>`zone2` | [object](#speczoneszone2) | no | The receiver's second zone. Every field is optional, so a bare key just claims the zone. |
+| <span id="speczones--zone3"></span>`zone3` | [object](#speczoneszone3) | no | The receiver's third zone. Every field is optional, so a bare key just claims the zone. |
+
+#### spec.zones.zone2
+
+The receiver's second zone. Every field is optional, so a bare key just claims the zone.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speczoneszone2--power"></span>`power` | string | no | The power state the operator drives this zone to. Quote On and Off in YAML. One of: `On`, `Standby`, `Off`. |
+| <span id="speczoneszone2--input"></span>`input` | string | no | The input this zone selects, by its name in spec.inputs. |
+| <span id="speczoneszone2--volume"></span>`volume` | number | no | The zone's volume in the receiver's display units. |
+| <span id="speczoneszone2--mute"></span>`mute` | boolean | no | Whether this zone is muted. |
+| <span id="speczoneszone2--sleep"></span>`sleep` | integer | no | Minutes until this zone sleeps, and zero means no sleep timer. |
+
+#### spec.zones.zone3
+
+The receiver's third zone. Every field is optional, so a bare key just claims the zone.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speczoneszone3--power"></span>`power` | string | no | The power state the operator drives this zone to. Quote On and Off in YAML. One of: `On`, `Standby`, `Off`. |
+| <span id="speczoneszone3--input"></span>`input` | string | no | The input this zone selects, by its name in spec.inputs. |
+| <span id="speczoneszone3--volume"></span>`volume` | number | no | The zone's volume in the receiver's display units. |
+| <span id="speczoneszone3--mute"></span>`mute` | boolean | no | Whether this zone is muted. |
+| <span id="speczoneszone3--sleep"></span>`sleep` | integer | no | Minutes until this zone sleeps, and zero means no sleep timer. |
+
+## status
+
+What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="status--address"></span>`address` | string | no | The address the operator reached the receiver on: a WiiM's is its declared address, or the address discovery found when it declares none, and a Denon's is the declared address resolved. Empty until the operator builds the driver. |
+| <span id="status--driver"></span>`driver` | string | no | The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver. |
+| <span id="status--zones"></span>`zones` | [map\[string\]object](#statuszones) | no | One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main. |
+| <span id="status--denon"></span>`denon` | object | no | The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, the HDMI setup, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it. |
+| <span id="status--wiim"></span>`wiim` | object | no | The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it. |
+| <span id="status--service"></span>`service` | string | no | The Service that represents the receiver on the cluster network after the operator creates it. Empty until then. |
+| <span id="status--session"></span>`session` | [object](#statussession) | no | The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. It is status and not spec, so a change of either flag changes no metadata.generation. The operator reads this block first and falls back to spec.session only while this block is absent, and its own status apply never states this block. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A Denon reports a sound mode in other words than the command that selects its family, so the operator compares the declared mode with the reported one by the command families the driver knows. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them. |
+| <span id="status--settledpower"></span>`settledPower` | string | no | The spec.power the operator settled: it sent the value, found the receiver already at it, or adopted the value it found when it started. A restart that finds spec.power at this value sends nothing. One of: `On`, `Standby`, `Off`. |
+| <span id="status--settledsettings"></span>`settledSettings` | map[string]string | no | A digest of each declared block the operator has sent, including the fields the receiver does not report, keyed by the block's path in the spec: spec.denon.settings, spec.wiim.settings, and spec.zones. After an operator restart, the operator sends a block's unreported fields again only when the block's digest differs from this one, so a restart sends nothing for a block no one changed, whatever metadata.generation says, and a new Receiver or a block edited while the operator was down sends them once. |
+| <span id="status--powergeneration"></span>`powerGeneration` | integer | no | The record an earlier operator wrote of the metadata.generation whose spec.power it settled. The operator does not read or write it, and its first status apply removes it. |
+| <span id="status--settingsgeneration"></span>`settingsGeneration` | integer | no | The record an earlier operator wrote of the metadata.generation whose declared settings it had sent. The operator reads it once, when it starts: a status that holds it and no settledSettings is from that operator, which had sent the declared blocks, so the operator records each declared block as sent and sends nothing for it. The operator does not write it, and its first status apply removes it. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise. |
+
+### status.zones.*
+
+One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuszones--power"></span>`power` | string | no | The power state the zone last reported: On, Standby, or Off. A WiiM has no standby, so it always reports On. |
+| <span id="statuszones--input"></span>`input` | string | no | The input the zone last reported as selected, whether liken selected it or a person did. |
+| <span id="statuszones--soundmode"></span>`soundMode` | string | no | The sound mode the zone last reported, such as STEREO or MULTI CH IN. |
+| <span id="statuszones--mute"></span>`mute` | boolean | no | Whether the zone last reported itself muted. |
+| <span id="statuszones--volume"></span>`volume` | string | no | The zone's volume in the receiver's own scale. A Denon counts 0 to 98 in half steps. |
+| <span id="statuszones--volumemax"></span>`volumeMax` | string | no | The last volume limit the receiver sent for this zone, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume. |
+| <span id="statuszones--sleep"></span>`sleep` | integer | no | Minutes until the zone sleeps, and zero when no sleep timer stands. |
+
+### status.session
+
+The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. It is status and not spec, so a change of either flag changes no metadata.generation. The operator reads this block first and falls back to spec.session only while this block is absent, and its own status apply never states this block. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A Denon reports a sound mode in other words than the command that selects its family, so the operator compares the declared mode with the reported one by the command families the driver knows. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussession--player"></span>`player` | string | yes | The Player, as namespace/name. Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$`. |
+| <span id="statussession--input"></span>`input` | string | yes | The input the Player plays through, by its name in spec.inputs. |
+| <span id="statussession--volumetopic"></span>`volumeTopic` | string | yes | The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it. |
+| <span id="statussession--powertopic"></span>`powerTopic` | string | no | The topic on which the remote's power button publishes a toggle, in full. When present, the operator subscribes to it, and each {"action":"toggle"} message turns the room on or off. When the session's input names a Display that a Television lists, the TV's reported power decides: a TV that reports On or ToOn means the press turns the room off, and a TV in Standby or ToStandby means it turns the room on. No timer asks the TV for its power, so for a Television whose TV an adapter in Control finds, Reachable or not Reachable with the reason NoPower, the press asks the CEC node workload for one read through status.session.powerReadAt, waits up to 3 seconds for status.powerRead, and decides from the Television's status.power when no answer arrives. With no such Television, or a TV that does not answer the read and reports no power, the receiver's power decides. A room that goes off asks the Television for standby through its status.session.standbyAt and puts the receiver in standby. A receiver with no standby command, such as a WiiM, stays on, and the log line says so. A room that comes on wakes the Television and turns the receiver on. A receiver the operator cannot reach gets nothing, and the log line says so; the TV still turns off or on when it reports its power, and the press is dropped when it does not. The operator updates spec.power to match what the receiver did. An absent topic subscribes the session to nothing. |
+| <span id="statussession--active"></span>`active` | boolean | no | Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once, each only when the receiver reports another value. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false. |
+| <span id="statussession--awake"></span>`awake` | boolean | no | Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep. |
+
+### status.conditions[]
+
+Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusconditions--type"></span>`type` | string | yes | The check this entry reports, in CamelCase. It is the key of this list. Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`. |
+| <span id="statusconditions--status"></span>`status` | string | yes | The verdict. True is the good verdict, and Unknown means the operator cannot tell yet. One of: `True`, `False`, `Unknown`. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The metadata.generation this condition judged. |
+| <span id="statusconditions--reason"></span>`reason` | string | no | One CamelCase word for why the condition holds this verdict, meant for a program to match on. Pattern: `^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`. |
+| <span id="statusconditions--message"></span>`message` | string | no | The same answer in a sentence a person reads. |
+| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When the verdict last changed. It moves only when the status flips. |

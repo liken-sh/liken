@@ -1,0 +1,9 @@
+apiVersion: equipment.liken.sh/v1alpha1
+kind: CECBus
+metadata:
+  name: den
+spec:
+  mode: Control
+  adapters:
+    - machine: node-1
+      display: acm-0001-receiver

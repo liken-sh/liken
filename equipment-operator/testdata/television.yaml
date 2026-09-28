@@ -1,0 +1,8 @@
+apiVersion: equipment.liken.sh/v1alpha1
+kind: Television
+metadata:
+  name: den
+spec:
+  cec:
+    bus: den
+  power: "On"

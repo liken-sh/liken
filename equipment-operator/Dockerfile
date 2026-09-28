@@ -1,0 +1,39 @@
+# The operator's image: static Go binaries and nothing else. The
+# operator holds the cluster credentials and writes every status, so
+# its image carries no shell, no libc, and no tools, which is the
+# least there is to attack.
+#
+# The image holds two builds of the program. /equipment-operator is
+# the full build, and the Deployment runs it. /equipment-operator-node
+# is the node build, with the build tag node, and the cec DaemonSet
+# runs it on each node with a CEC adapter. The node build leaves out
+# client-go's leader election, which the Deployment alone needs, so
+# the program on each node is about half the size. leader_node.go says
+# why.
+
+FROM golang:1.27.0-bookworm AS build
+WORKDIR /src
+# The module files come first, so a source edit reuses the cached
+# download layer.
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
+# The driver packages are their own directories, and a plain *.go copy
+# leaves them out.
+COPY denon ./denon
+COPY equipment ./equipment
+COPY wiim ./wiim
+COPY cec ./cec
+# The version reaches the binary through -ldflags, so liken_build_info
+# names the release actually running and not dev.
+ARG VERSION=dev
+# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
+# static binary with no paths from the build machine in it. It runs
+# from scratch, where there is no loader to need.
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /equipment-operator . \
+    && CGO_ENABLED=0 go build -trimpath -tags node -ldflags "-s -w -X main.version=${VERSION}" -o /equipment-operator-node .
+
+FROM scratch
+COPY --from=build /equipment-operator /equipment-operator
+COPY --from=build /equipment-operator-node /equipment-operator-node
+ENTRYPOINT ["/equipment-operator"]

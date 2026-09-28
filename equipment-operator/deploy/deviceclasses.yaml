@@ -1,0 +1,26 @@
+# The class the CEC node workload's pod claims through. It ships with
+# the base because the claim template in cec.yaml names it literally:
+# it is wiring, not policy, and the node workload cannot start without
+# it.
+---
+# The CEC bus device, as liken publishes it for an attached USB CEC
+# adapter: the adapter's -cec device, whose one node is /dev/cecN. The
+# adapter's other device, -input, carries the TV remote's buttons, and
+# a media Remote claims that one, so the selector names the cec
+# subsystem and never the input device. The claim places the pod,
+# because only a machine with an adapter publishes one, and it
+# arbitrates, because the device allocates once, so the pod is the
+# only program that configures the adapter. Many liken devices carry no
+# subsystem attribute, and reading a missing attribute is a CEL error,
+# so the has() test comes first.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: cec-adapter
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].subsystem) &&
+          device.attributes["liken.sh"].subsystem == "cec"
