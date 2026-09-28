@@ -172,8 +172,27 @@ func (a *arming) find(ctx context.Context, staged *volume) (claimReference, bool
 
 // claimOf finds the claim through the PersistentVolume that carries the
 // handle. The kubelet passes the handle and never the object's name, so
-// the driver lists the volumes and matches on the handle.
+// the driver matches on the handle.
+//
+// The node's watch on PersistentVolumes already holds every one in the
+// cluster, so the claim comes from its store, and a lookup sends the
+// API server no request. The store can lag the API server by the
+// moment the watch takes to deliver a change, and before the watch's
+// first read it holds nothing. So when the store holds no
+// PersistentVolume of the handle, or holds one whose phase is not
+// Bound, the driver lists the PersistentVolumes from the API server,
+// which answers what is bound now. A PersistentVolume that moves to
+// another claim passes through Released or Available first, so a copy
+// in the store names an old claim only when the watch missed each of
+// those changes.
 func (a *arming) claimOf(ctx context.Context, handle string) (claimReference, error) {
+	if held, found := a.node.demands.heldVolume(handle); found &&
+		held.Status.Phase == corev1.VolumeBound && held.Spec.ClaimRef != nil {
+		return claimReference{
+			namespace: held.Spec.ClaimRef.Namespace,
+			name:      held.Spec.ClaimRef.Name,
+		}, nil
+	}
 	volumes, err := a.client.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return claimReference{}, err
@@ -211,6 +230,10 @@ func (a *arming) read(
 	var rules *policy
 	invalid := ""
 	if name != "" {
+		// The node watches no VolumeAttributesClass, so no store holds
+		// the class, and the node reads it from the API server: one
+		// request for each copy of the claim that reads takes, and one
+		// for each retry while the class is missing.
 		class, err := a.client.StorageV1().VolumeAttributesClasses().
 			Get(ctx, name, metav1.GetOptions{})
 		switch {

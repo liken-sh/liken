@@ -76,6 +76,7 @@ func claimedVolume(t *testing.T, answering *node, id string) {
 	t.Helper()
 	held := csiVolume(id, driverName)
 	held.Spec.ClaimRef = &corev1.ObjectReference{Namespace: "home", Name: id}
+	held.Status.Phase = corev1.VolumeBound
 	client := cluster(t, answering)
 	if _, err := client.CoreV1().PersistentVolumes().
 		Create(t.Context(), held, metav1.CreateOptions{}); err != nil {

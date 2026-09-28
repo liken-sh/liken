@@ -38,6 +38,7 @@ func boundVolume(t *testing.T, answering *node, handle, class string) {
 			},
 			ClaimRef: &corev1.ObjectReference{Namespace: "home", Name: "config"},
 		},
+		Status: corev1.PersistentVolumeStatus{Phase: corev1.VolumeBound},
 	}
 	claim := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},

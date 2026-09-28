@@ -224,6 +224,74 @@ by taking the repository's lock that the pass holds.
   It has nothing to guard, and it would stop a second replica from
   answering webhooks.
 
+## The node reads the claim from the watch
+
+Built on 2026-09-27, after the port. The organization's rule is that a
+pass reads an object from an informer's store when an informer in the
+same process holds it, and reads the API server only for a read after
+its own write or for an object that no watch holds.
+
+The node plugin's watch on `PersistentVolume`s holds every
+`PersistentVolume` in the cluster. `claimOf` still listed all of them
+from the API server to find the one that carries a handle. Four
+callers use it: the arming loop of a writeable volume when it stages
+and on each retry, `findClaim` when a read-only volume stages,
+`claimFor` when a stage diverges, and `swept` for the Event after the
+sweep removes a work tree. `claimOf` now reads the watch's store. The
+store has an index by volume handle, for the `PersistentVolume`s of
+this driver only, so the lookup reads one entry and not the whole
+store. `collection` builds the informer with that index, and
+`demanding` keeps the store while its watch runs.
+
+The store can lag the API server by the moment the watch takes to
+deliver a change, and it holds nothing before the watch's first read.
+So `claimOf` lists from the API server, as before, when the store
+holds no `PersistentVolume` of the handle, holds two of one handle, or
+holds one whose phase is not `Bound`. A `PersistentVolume` that moves
+to another claim passes through `Released` or `Available` first, so a
+copy in the store names an old claim only when the watch missed each
+of those changes. The node's start resumes its volumes before the
+watch starts, so each lookup during the resume lists from the API
+server. The node plugin writes no `PersistentVolume` and no claim, so
+no read follows a write of its own.
+
+Requests to the API server, counted in the fake clientset
+(`TestTheClaimComesFromTheWatchWhenItHoldsTheVolume`). The fake
+answers no streaming list, so the first read of a watch is a list. A
+real API server takes that first read as a streaming list, which is
+one watch request.
+
+| Event | Before | After |
+|---|---|---|
+| A writeable volume stages, and the watch holds its `PersistentVolume` | 1 list of every `PersistentVolume`, then 1 list and 1 watch of the claim | 1 list and 1 watch of the claim |
+| A read-only volume stages, a stage diverges, or the sweep posts its Event, and the watch holds the `PersistentVolume` | 1 list of every `PersistentVolume` | 0 |
+| Any of those lookups before the watch's first read, or during the resume | 1 list of every `PersistentVolume` | the same |
+| The arming loop reads a copy of the claim that names a class | 1 `GET` of the `VolumeAttributesClass` | the same |
+| A demand arrives on a `PersistentVolume` | 0 | 0 |
+| A push arrives at the controller's webhook | 1 list of every `PersistentVolume`, and 1 `PATCH` for each match | the same |
+| The controller starts | 1 list of every `PersistentVolume`, and 1 `PATCH` for each read-only volume | the same |
+
+These reads stay on the API server, each for a reason that a comment
+at the read gives:
+
+* The class. The node watches no `VolumeAttributesClass`.
+* The controller's lists. The controller holds no watch. A watch
+  would keep a copy of every `PersistentVolume` in the cluster for
+  the controller's whole life, to answer a request that comes only
+  when a person pushes, and the controller's start reads them once.
+
+The claim's own watch is unchanged: the arming loop reads the copy of
+the claim that each event delivers, and sends no read for it.
+
+The stripped binary grew from 48,861,344 bytes to 48,869,536 bytes.
+The linked packages stayed at 682. The index adds one entry for each
+`PersistentVolume` of this driver to the store the watch already
+held. Nobody measured the RSS again.
+
+The metrics reference page now has the row for
+`git_csi_watch_restarts_total`, which the port added and the page did
+not list.
+
 ## The drill still owed
 
 On liken-1, with the driver on a build of this change:

@@ -31,6 +31,7 @@ components:
 | git-csi-driver | `git_csi_diverged{namespace, claim}` | gauge | one while the volume pushes to its side branch, zero while it pushes to its ref |
 | git-csi-driver | `git_csi_volume_abnormal{namespace, volume}` | gauge | one while the volume's report says something is wrong with it, zero while it says nothing is |
 | git-csi-driver | `git_csi_demanded_pulls_total{namespace, volume}` | counter | pulls a demand on the volume's `PersistentVolume` started |
+| git-csi-driver | `git_csi_watch_restarts_total{kind}` | counter | watches the node plugin opened again after one ended, by the kind it watches. Each watch restarts 6 to 12 times an hour when it is healthy. The node holds one `PersistentVolume` watch and one `PersistentVolumeClaim` watch for each writeable volume, so a higher rate than that is a watch that fails soon after it opens. A refused watch is not counted, so a rate near zero is a watch the API server refuses |
 | git-csi-driver | `git_csi_webhook_requests_total{result}` | counter | webhook requests the controller answered, by what it answered |
 | git-csi-driver | `git_csi_webhook_marked_total` | counter | `PersistentVolumes` a verified push marked |
 

@@ -60,11 +60,21 @@ type collection struct {
 	// after it.
 	handler  cache.ResourceEventHandler
 	readings *metrics
+	// indexers, when set, index the store the informer fills, so a
+	// reader finds an object by a field and not by a list.
+	indexers cache.Indexers
 }
 
 // follow runs the watch until the context ends. It returns only after
 // the last handler call.
 func (c collection) follow(ctx context.Context) {
+	_, informer := c.informer()
+	informer.RunWithContext(ctx)
+}
+
+// informer builds the watch and the store it fills, and does not start
+// it. A caller that reads the store runs the informer itself.
+func (c collection) informer() (cache.Indexer, cache.Controller) {
 	// Every watch after the first counts as a restart. The reflector
 	// opens one watch at a time. The flag is atomic all the same, so a
 	// change in client-go that opens watches from two goroutines makes
@@ -80,13 +90,22 @@ func (c collection) follow(ctx context.Context) {
 			return watching, err
 		},
 	}
-	_, informer := cache.NewInformerWithOptions(cache.InformerOptions{
+	// NewInformerWithOptions stores into an Indexer whenever Indexers
+	// is not nil, and answers it as a plain Store. An empty set of
+	// indexers makes that Indexer for every collection, so the
+	// assertion below always holds.
+	indexers := c.indexers
+	if indexers == nil {
+		indexers = cache.Indexers{}
+	}
+	store, informer := cache.NewInformerWithOptions(cache.InformerOptions{
 		ListerWatcher: cache.ToListWatcherWithWatchListSemantics(source, c.client),
 		ObjectType:    c.object,
 		Handler:       c.handler,
 		Transform:     dropManagedFields,
+		Indexers:      indexers,
 	})
-	informer.RunWithContext(ctx)
+	return store.(cache.Indexer), informer
 }
 
 // dropManagedFields removes metadata.managedFields from each object

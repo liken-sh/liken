@@ -20,6 +20,11 @@ import (
 // and returns how many it marked. A person who configures a webhook
 // reads that count, so a list the API server refuses returns the error
 // and not a count of zero.
+//
+// The controller holds no watch on PersistentVolumes, so each push
+// costs one list. A watch would hold a copy of every PersistentVolume
+// in the cluster for the controller's whole life, to answer a request
+// that comes only when a person pushes.
 func (w *webhook) mark(
 	ctx context.Context, namespace, secret string, pushed push,
 ) (int, error) {

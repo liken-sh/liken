@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -63,6 +64,45 @@ type demanding struct {
 	// the volume to the node.
 	mu   sync.Mutex
 	seen map[string]time.Time
+
+	// held is the watch's store of every PersistentVolume, indexed by
+	// the handle of each one of this driver. It is nil until follow
+	// builds the watch, after the watch ends, and in a driver outside a
+	// cluster.
+	held atomic.Pointer[cache.Indexer]
+}
+
+// handleIndex names the index of the store by volume handle. The
+// kubelet names a volume by its handle, never by the name of its
+// PersistentVolume, so a stage finds its PersistentVolume by the
+// handle.
+const handleIndex = "handle"
+
+// volumeHandle indexes a PersistentVolume of this driver by its handle.
+// A PersistentVolume of any other driver is in no index entry.
+func volumeHandle(object any) ([]string, error) {
+	held, isVolume := object.(*corev1.PersistentVolume)
+	if !isVolume || held.Spec.CSI == nil || held.Spec.CSI.Driver != driverName {
+		return nil, nil
+	}
+	return []string{held.Spec.CSI.VolumeHandle}, nil
+}
+
+// heldVolume is the watch's copy of the PersistentVolume that carries
+// the handle, and false when the watch holds none. Two PersistentVolumes
+// of this driver that carry one handle also answer false, so the
+// caller reads the API server and takes the answer it always took.
+func (d *demanding) heldVolume(handle string) (*corev1.PersistentVolume, bool) {
+	store := d.held.Load()
+	if store == nil {
+		return nil, false
+	}
+	found, err := (*store).ByIndex(handleIndex, handle)
+	if err != nil || len(found) != 1 {
+		return nil, false
+	}
+	held, isVolume := found[0].(*corev1.PersistentVolume)
+	return held, isVolume
 }
 
 func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Logger) *demanding {
@@ -89,7 +129,7 @@ func (d *demanding) follow(ctx context.Context) {
 		return
 	}
 	volumes := d.client.CoreV1().PersistentVolumes()
-	collection{
+	store, informer := collection{
 		kind:   persistentVolumeKind,
 		client: d.client,
 		object: &corev1.PersistentVolume{},
@@ -107,7 +147,11 @@ func (d *demanding) follow(ctx context.Context) {
 			DeleteFunc: func(object any) { d.deleted(ctx, object) },
 		},
 		readings: d.node.readings,
-	}.follow(ctx)
+		indexers: cache.Indexers{handleIndex: volumeHandle},
+	}.informer()
+	d.held.Store(&store)
+	defer d.held.Store(nil)
+	informer.RunWithContext(ctx)
 }
 
 // deleted forgets the demand of a PersistentVolume the watch reports
