@@ -556,35 +556,35 @@ func TestAResumedVolumeThatPullsNeverIsNormalAfterItsRepublish(t *testing.T) {
 	}
 }
 
-func TestAReturnedCredentialPassesOverAVolumeTheLoopDropped(t *testing.T) {
+func TestAnArrivedCredentialPassesOverAVolumeTheLoopDropped(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	loop := followerOf(answering, "file:///nowhere")
-	loop.returned = make(chan struct{}, 1)
+	loop.arrived = make(chan struct{}, 1)
 	loop.wanted = map[string]*volume{}
 	dropped := &volume{id: "csi-1"}
 
-	loop.credentialReturned(dropped)
-	if len(loop.wanted) != 0 || len(loop.returned) != 0 {
+	loop.credentialArrived(dropped)
+	if len(loop.wanted) != 0 || len(loop.arrived) != 0 {
 		t.Errorf("a volume off the loop left %d wanted and %d wakes, want none",
-			len(loop.wanted), len(loop.returned))
+			len(loop.wanted), len(loop.arrived))
 	}
 }
 
-func TestAReturnedCredentialWakesEachLoopOnce(t *testing.T) {
+func TestAnArrivedCredentialWakesEachLoopOnce(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	held := &volume{id: "csi-1"}
 	loop := followerOf(answering, "file:///nowhere")
-	loop.returned = make(chan struct{}, 1)
+	loop.arrived = make(chan struct{}, 1)
 	loop.wanted = map[string]*volume{}
 	loop.volumes[held.id] = held
-	seeing := &watcher{returned: make(chan struct{}, 1)}
+	seeing := &watcher{arrived: make(chan struct{}, 1)}
 
 	for range 2 {
-		loop.credentialReturned(held)
-		seeing.credentialReturned()
+		loop.credentialArrived(held)
+		seeing.credentialArrived()
 	}
-	if len(loop.returned) != 1 || len(seeing.returned) != 1 {
-		t.Errorf("two returns left %d wakes on the loop and %d on the watch, want one each",
-			len(loop.returned), len(seeing.returned))
+	if len(loop.arrived) != 1 || len(seeing.arrived) != 1 {
+		t.Errorf("two arrivals left %d wakes on the loop and %d on the watch, want one each",
+			len(loop.arrived), len(seeing.arrived))
 	}
 }

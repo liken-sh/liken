@@ -283,6 +283,7 @@ func (n *node) armed(
 	rules *policy,
 	invalid string,
 ) {
+	before := staged.policyNow()
 	if staged.reportArmed(claim, class, rules, invalid) {
 		reason, message := reasonArmed, fmt.Sprintf("armed by the class %s", class)
 		if rules == nil {
@@ -292,6 +293,9 @@ func (n *node) armed(
 			}
 		}
 		n.report(ctx, staged, claim, corev1.EventTypeNormal, reason, message)
+	}
+	if rules != nil && (before == nil || before.quiesce != rules.quiesce) {
+		n.classChanged(staged)
 	}
 	n.readings.record(staged)
 	n.noteHealth(ctx, staged)

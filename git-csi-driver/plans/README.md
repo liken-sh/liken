@@ -22,7 +22,7 @@ becomes a new plan or an open problem.
 
 ## Planned
 
-Nothing is planned, and no open problem is written down.
+Nothing is planned. One open problem is written down.
 
 ## Designs
 
@@ -101,7 +101,11 @@ Nothing is planned, and no open problem is written down.
 ## Open problems
 
 Each one is a question the current work does not answer, written down
-so the next plan can start from the facts. None is open.
+so the next plan can start from the facts.
+
+* [Every node watches every `PersistentVolume`](open-problems/every-node-watches-every-persistentvolume.md).
+  No selector names the driver, so each node plugin lists, stores, and
+  watches the `PersistentVolume`s of every driver in the cluster.
 
 ## Rejected
 

@@ -234,7 +234,10 @@ owns file modes.
 2. **Publish.** Refuse any access mode other than `ReadWriteOncePod`.
    Bind-mount the tree onto the target path. Start the inotify watch,
    with a periodic `git status` sweep as the backstop.
-3. **Run.** A write starts the quiesce timer. When it fires on an
+3. **Run.** A write starts the quiesce timer. The start of the watch
+   starts it too, because a write made while no watch ran sends no
+   event, and a class that arms the volume or sets a new quiesce sets
+   it again. When it fires on an
    armed volume the driver records metadata, stages every change under
    the size guard, and commits. It pushes when `push.quiesce` or
    `push.maxLatency` says so. A push the remote rejects fetches,

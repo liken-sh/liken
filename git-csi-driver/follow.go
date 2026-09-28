@@ -23,9 +23,10 @@ type follower struct {
 	// demanded is the second wake. It runs a pass at once instead of
 	// reading the interval again. demand.go sends on it.
 	demanded chan struct{}
-	// returned is the third. It runs a pass at once when a republish
-	// returns a credential a restart lost. republish.go sends on it.
-	returned chan struct{}
+	// arrived is the third. It runs a pass at once when a republish
+	// returns a credential a restart lost, or carries a rotated one.
+	// republish.go sends on it.
+	arrived chan struct{}
 
 	mu      sync.Mutex
 	volumes map[string]*volume
@@ -62,7 +63,7 @@ func (n *node) follow(mounting *volume) {
 			cancel:     cancel,
 			wake:       make(chan struct{}, 1),
 			demanded:   make(chan struct{}, 1),
-			returned:   make(chan struct{}, 1),
+			arrived:    make(chan struct{}, 1),
 			volumes:    map[string]*volume{},
 			wanted:     map[string]*volume{},
 		}
@@ -172,7 +173,7 @@ func (f *follower) run(ctx context.Context) {
 			waiting = false
 			f.settle(f.tick(ctx), retry)
 			f.arm(timer)
-		case <-f.returned:
+		case <-f.arrived:
 			f.settle(f.tick(ctx), retry)
 			f.arm(timer)
 		case <-timer.C:

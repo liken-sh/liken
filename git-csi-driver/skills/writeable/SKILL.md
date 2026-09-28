@@ -119,9 +119,11 @@ committed at once, with no restart of the application. Until then, the
 volume's report and the abnormal gauge say the volume waits for its
 credential.
 
-A rotated `Secret` reaches the driver at the next publish, so the next
-push uses the new key. A publish whose `Secret` differs from the stage's
-is refused with `GitVolumeRefused`, because the driver cannot choose
+A rotated `Secret` reaches the driver at the next publish, and the
+driver then pushes every commit the remote does not hold yet, at once,
+with the new key. So a commit that a push with a revoked key could not
+send does not wait for the next timed push. A publish whose `Secret`
+differs from the stage's is refused with `GitVolumeRefused`, because the driver cannot choose
 between two credentials for one volume.
 
 A `PersistentVolume` with `nodeStageSecretRef` and no
@@ -152,9 +154,13 @@ The driver waits until the tree has been quiet for `push.quiesce`,
 then commits every changed path that is not ignored and not over
 `commit.maxFileSize`. It pushes when the quiesce passes with no new
 write, or when the oldest unpushed commit is older than
-`push.maxLatency`, and always when the pod stops. The driver records
-modes, owners, and empty directories on a ref of its own,
-`refs/git-csi/metadata`. That ref never appears in the tree or on the
+`push.maxLatency`, and always when the pod stops. A write made while
+the driver was not running, for example during an upgrade, sends the
+driver no event. So the driver also starts the quiesce when it starts
+to watch the tree, and commits that write when the quiesce passes.
+
+The driver records modes, owners, and empty directories on a ref of its
+own, `refs/git-csi/metadata`. That ref never appears in the tree or on the
 forge's file view.
 
 ## When upstream moves

@@ -98,9 +98,8 @@ func (v *volume) credentialReport() (string, bool) {
 }
 
 // takeCredential holds the credential a publish carried, and reports
-// whether the volume waited for one. Only that first credential after a
-// restart has to start a fetch or a push, because every earlier attempt
-// failed without it.
+// whether the volume waited for one after a restart. That credential
+// also clears the report of the wait.
 func (v *volume) takeCredential(fresh *credentials) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -155,16 +154,24 @@ func (n *node) takeSecret(ctx context.Context, held *volume, holder *credentials
 	if holder == nil {
 		return held.needsCredential() && n.noPublishSecret(ctx, held)
 	}
-	if held.credential().same(holder) {
+	old := held.credential()
+	if old.same(holder) {
 		return false
 	}
-	if !held.takeCredential(holder) {
+	switch {
+	case held.takeCredential(holder):
+		n.logger.InfoContext(ctx, "the credential returned", "volume", held.id)
+		n.noteHealth(ctx, held)
+	case old != nil:
 		n.logger.InfoContext(ctx, "the credential changed", "volume", held.id)
+	default:
+		// A first publish that carries the Secret the stage did not.
+		// The stage fetched without a credential and worked, so no
+		// fetch or push waits for this one.
+		n.logger.InfoContext(ctx, "the credential arrived", "volume", held.id)
 		return true
 	}
-	n.logger.InfoContext(ctx, "the credential returned", "volume", held.id)
-	n.noteHealth(ctx, held)
-	n.credentialReturned(held)
+	n.credentialArrived(held)
 	return true
 }
 
@@ -193,28 +200,35 @@ func (n *node) noPublishSecret(ctx context.Context, held *volume) bool {
 	return true
 }
 
-// credentialReturned starts the work the missing credential held back,
-// at once and not at the next timer. A read-only volume fetches its ref,
-// and a writeable volume pushes what it committed.
-func (n *node) credentialReturned(held *volume) {
+// credentialArrived starts the work the missing or old credential held
+// back, at once and not at the next timer. A read-only volume fetches
+// its ref, and a writeable volume pushes what it committed.
+//
+// A restart is one case: every fetch and push before the republish
+// failed without a credential. A rotation is the other: when the old
+// key is revoked, a fetch or a push with it fails, and a fetch that a
+// demand asked for waits a backoff of up to five minutes before it
+// tries again. The new key ends that wait. A rotation is rare, so the
+// cost is one extra fetch or push for each volume at each rotation.
+func (n *node) credentialArrived(held *volume) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if seeing, found := n.watchers[held.id]; found && seeing.volume == held {
-		seeing.credentialReturned()
+		seeing.credentialArrived()
 	}
 	if !held.attributes.pull.follows() {
 		return
 	}
 	if loop := n.loopOf(held); loop != nil {
-		loop.credentialReturned(held)
+		loop.credentialArrived(held)
 	}
 }
 
-// credentialReturned wants a pass for the volume and wakes the loop
+// credentialArrived wants a pass for the volume and wakes the loop
 // past --demand-min-interval. The pass counts no demand, because nobody
-// demanded it, and a pass that fails fetches again after the backoff a
-// failed demand takes.
-func (f *follower) credentialReturned(held *volume) {
+// demanded it. A pass that works ends the backoff, and a pass that
+// fails fetches again after the backoff a failed demand takes.
+func (f *follower) credentialArrived(held *volume) {
 	f.mu.Lock()
 	if f.volumes[held.id] != held {
 		f.mu.Unlock()
@@ -223,23 +237,23 @@ func (f *follower) credentialReturned(held *volume) {
 	f.wanted[held.id] = held
 	f.mu.Unlock()
 	select {
-	case f.returned <- struct{}{}:
+	case f.arrived <- struct{}{}:
 	default:
 	}
 }
 
-// credentialReturned wakes the watch to push.
-func (w *watcher) credentialReturned() {
+// credentialArrived wakes the watch to push.
+func (w *watcher) credentialArrived() {
 	select {
-	case w.returned <- struct{}{}:
+	case w.arrived <- struct{}{}:
 	default:
 	}
 }
 
-// pushReturned pushes what the tree committed while the credential was
-// missing. It commits nothing, because the class's quiesce decides when
-// a write is finished.
-func (w *watcher) pushReturned(ctx context.Context) {
+// pushArrived pushes what the tree committed while the credential was
+// missing or old. It commits nothing, because the class's quiesce
+// decides when a write is finished.
+func (w *watcher) pushArrived(ctx context.Context) {
 	w.node.push(ctx, w.volume)
 	w.node.noteHealth(ctx, w.volume)
 }

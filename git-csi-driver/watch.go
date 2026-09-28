@@ -40,10 +40,13 @@ type watcher struct {
 	sweep   time.Duration
 	cancel  context.CancelFunc
 	changes chan struct{}
-	// returned wakes the loop to push when a republish returns a
-	// credential a restart lost.
-	returned chan struct{}
-	running  sync.WaitGroup
+	// arrived wakes the loop to push when a republish returns a
+	// credential a restart lost, or carries a rotated one.
+	arrived chan struct{}
+	// classed wakes the loop when the class sets a new quiesce, so the
+	// timer that started before the class runs for the class's rest.
+	classed chan struct{}
+	running sync.WaitGroup
 
 	// The raw descriptor adds watches, and the file reads events. Calling
 	// Fd on the file would take it out of the runtime's poller and make
@@ -66,15 +69,16 @@ func (n *node) watch(published *volume) {
 	}
 	ctx, cancel := context.WithCancel(n.base)
 	seeing := &watcher{
-		node:     n,
-		volume:   published,
-		quiesce:  n.quiesce,
-		sweep:    n.sweep,
-		cancel:   cancel,
-		changes:  make(chan struct{}, 1),
-		returned: make(chan struct{}, 1),
-		watched:  map[int32]string{},
-		written:  time.Now(),
+		node:    n,
+		volume:  published,
+		quiesce: n.quiesce,
+		sweep:   n.sweep,
+		cancel:  cancel,
+		changes: make(chan struct{}, 1),
+		arrived: make(chan struct{}, 1),
+		classed: make(chan struct{}, 1),
+		watched: map[int32]string{},
+		written: time.Now(),
 	}
 	n.watchers[published.id] = seeing
 	seeing.running.Add(2)
@@ -210,8 +214,8 @@ func (w *watcher) quietFor() time.Duration {
 	return time.Since(w.written)
 }
 
-// rest is the quiesce in force. A class that changes it reaches
-// the timer at the next nudge, so no remount is needed.
+// rest is the quiesce in force. A class that arms the volume or sets a
+// new quiesce reaches the timer at once, so no remount is needed.
 func (w *watcher) rest() time.Duration {
 	if rules := w.volume.policyNow(); rules != nil {
 		return rules.quiesce
@@ -219,13 +223,36 @@ func (w *watcher) rest() time.Duration {
 	return w.quiesce
 }
 
+// classChanged sets the quiesce timer of a writeable volume's watch
+// again when a class arms the volume or sets a new quiesce. The class
+// arrives from the claim's own watch, after the watch on the tree may
+// have started its timer: a timer that ran out on an unarmed volume
+// committed nothing, and a timer that runs for the driver's own quiesce
+// is not the class's. Without this, a write that no event follows waits
+// for the sweep.
+func (n *node) classChanged(staged *volume) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if seeing, found := n.watchers[staged.id]; found && seeing.volume == staged {
+		select {
+		case seeing.classed <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // run waits until the tree has been quiet for the quiesce, then reads
 // what is pending. The sweep reads it anyway on a timer, because an
 // inotify watch the kernel refused reports nothing.
+//
+// The quiesce also starts with the watch. A write made while the driver
+// was down, or while no pod held the tree, sends no event, so without
+// that start only the sweep would commit it. The rest counts from the
+// start of the watch, because the driver cannot know when the write
+// ended.
 func (w *watcher) run(ctx context.Context) {
 	defer w.running.Done()
-	quiesce := time.NewTimer(w.quiesce)
-	quiesce.Stop()
+	quiesce := time.NewTimer(w.rest())
 	defer quiesce.Stop()
 	sweep := time.NewTicker(w.sweep)
 	defer sweep.Stop()
@@ -238,12 +265,14 @@ func (w *watcher) run(ctx context.Context) {
 			return
 		case <-w.changes:
 			quiesce.Reset(w.rest())
+		case <-w.classed:
+			quiesce.Reset(max(0, w.rest()-w.quietFor()))
 		case <-quiesce.C:
 			w.scan(ctx)
 		case <-sweep.C:
 			w.scan(ctx)
-		case <-w.returned:
-			w.pushReturned(ctx)
+		case <-w.arrived:
+			w.pushArrived(ctx)
 		}
 	}
 }

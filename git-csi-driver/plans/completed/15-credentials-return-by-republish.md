@@ -138,6 +138,10 @@ nothing else does:
 The wake happens only when the volume waited for a credential. A
 rotation reaches the next timed fetch or push with no extra fetch.
 
+A later change reversed this rule: a rotation wakes the volume too,
+because a fetch that failed with a revoked key otherwise waits out its
+backoff. `republish.go` holds the rule in force.
+
 ### A volume that waits fetches and pushes nothing
 
 A volume that waits for its credential runs no fetch and no push, and

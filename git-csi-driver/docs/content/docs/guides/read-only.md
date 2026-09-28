@@ -263,7 +263,9 @@ driver's publish again for every mounted volume on each pod sync, about
 once a minute, and reads the `Secret` again for each call. A driver
 that restarts, for example in an upgrade, holds no credential until the
 next of those calls, and then fetches at once, with no restart of the
-pod. A rotated `Secret` reaches the driver the same way. Each volume
+pod. A rotated `Secret` reaches the driver the same way, and the
+driver fetches at once with it. A fetch that failed with a revoked key
+does not wait for its retry. Each volume
 fetches with its own credential alone, so two volumes of one
 repository each wait for their own publish.
 
