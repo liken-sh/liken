@@ -127,10 +127,10 @@ rules:
     resources: [people]
     verbs: [get, list, watch, patch]
   # The media claim each Library names, read to learn whether it is
-  # bound and which volume it is bound to. A pass lists the claims of
-  # every namespace once and reads each claim from that list, because a
-  # Library's claim is a person's and carries no label to select on. A
-  # get reads one claim a recovery is about to delete. The claims the operator
+  # bound and which volume it is bound to. The operator watches the
+  # claims of every namespace and each pass reads them from the watch,
+  # because a Library's claim is a person's and carries no label to
+  # select on. A get reads one claim a recovery is about to delete. The claims the operator
   # provisions: one per Library, which its Jobs mount one at a time,
   # one for each of a Catalog's two stores, which every copy of that
   # store mounts, and two per screen. Each is owned by the object it
@@ -147,9 +147,10 @@ rules:
   # per-node class, where the claim pins no pod to a node.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
-    verbs: [get, list, create, delete]
+    verbs: [get, list, watch, create, delete]
   # The ResourceClaimTemplate each Library that names a render node keeps, one
-  # per Library, owned by it. A library Job that runs trickplay names the template and the
+  # per Library, owned by it. The operator watches the templates that carry
+  # its Library label, and each pass reads them from the watch. A library Job that runs trickplay names the template and the
   # kubelet mints the claim from it. The delete covers two cases: a Library that
   # no longer names a render node, and a render block that changed, because a
   # template's spec is immutable.
@@ -175,26 +176,27 @@ rules:
   # The volume behind that claim, read by name for its source: an NFS
   # server and export, or the name of whatever other key serves it.
   # Playing a title from the library needs that, so the operator reads
-  # it once per pass and reports it in the status. PersistentVolumes
+  # it on each pass and reports it in the status. PersistentVolumes
   # are cluster-scoped, which is why this rule needs a ClusterRole.
   #
   # The create is the volume the operator writes for a claim on a
   # per-node class, because that driver provisions nothing, and a claim
   # of that class binds only to a volume something wrote first.
   #
-  # One list reads every volume once per pass, for the volume behind each
-  # Library's claim. A second list reads the volumes the operator's own
-  # labels name, after the pass's writes, and the delete takes the ones
-  # whose claim is gone. A volume is
+  # The operator watches every volume, because a Library's claim binds
+  # to any volume. Each pass reads the volume behind each Library's claim
+  # from the watch, and the sweep reads the volumes the operator's own
+  # labels name from it and deletes the ones whose claim is gone. The
+  # delete names the uid of the volume it read. A volume is
   # cluster-scoped, so no ownerReference ties it to a Catalog, a
   # Library, or a Player, and those labels take an owner's place.
   - apiGroups: [""]
     resources: [persistentvolumes]
-    verbs: [get, list, create, delete]
+    verbs: [get, list, watch, create, delete]
   # The pods this operator stands itself: the catalog pod of each
   # namespace that holds a Catalog, and one screen pod per delegated
-  # Player. Both are created, read back on every pass from one
-  # cluster-scoped list, and deleted to
+  # Player. Both are created, read back on every pass from a
+  # cluster-scoped watch, and deleted to
   # rebuild a stale template; a screen pod is deleted for a second
   # reason, that its Player named another idle controller. The list and
   # watch are cluster-scoped, because a Catalog and a Player live in any
@@ -216,8 +218,8 @@ rules:
   # The workers. A Library runs one Job at a time: a walk on its
   # schedule, for a request, or for a webhook's folders, and a Job that
   # fills gaps between walks. A Job runs the sweep of a departing
-  # Library. The list is cluster-scoped for the reason the pods are,
-  # and every pass reads the Jobs with it. The delete verb covers four
+  # Library. The watch is cluster-scoped for the reason the pods are,
+  # and every pass reads the Jobs from it. The delete verb covers four
   # deletes: a worker Job that succeeded more than the grace
   # ago, a cleanup Job that failed and is stood again on a backoff, the
   # retirement of a cleanup Job when its library is released, and a
@@ -231,31 +233,34 @@ rules:
   - apiGroups: [batch]
     resources: [cronjobs]
     verbs: [delete]
-  # The headless catalog Service of each namespace that holds a
-  # Catalog, read by name. The grant is cluster-wide because a Catalog
-  # can be in any namespace, and the operator is one Deployment for the
-  # cluster. There is no list and no watch: it is read by name, in the
-  # namespaces the Catalog list already named.
+  # The headless catalog and progress Services of each namespace that
+  # holds a Catalog, and the jellyfin Service. The grant is cluster-wide
+  # because a Catalog can be in any namespace, and the operator is one
+  # Deployment for the cluster. The list and the watch select the
+  # operator's own Services by their name label, and each pass reads
+  # them from the watch.
   #
   # The delete verb is for the jellyfin Service alone. A Catalog
   # that drops spec.jellyfin keeps the Catalog, so the garbage collector
   # removes nothing and the operator deletes that Service itself.
   - apiGroups: [""]
     resources: [services]
-    verbs: [get, create, update, delete]
+    verbs: [get, list, watch, create, update, delete]
   # The people file every screen reads, one ConfigMap per namespace
   # that holds a Player, written from the Person list and rewritten
   # when it changes. Owned by the namespace's Catalog where one stands.
+  # The list and the watch select it by its name label.
   - apiGroups: [""]
     resources: [configmaps]
-    verbs: [get, create, update]
+    verbs: [get, list, watch, create, update]
   # The EndpointSlice behind the catalog Service, on the same terms
   # and for the same reasons. There is one per namespace that holds a
   # Catalog, and the operator writes it because that Service names no
-  # selector.
+  # selector. The list and the watch select the operator's own slices by
+  # their managed-by label.
   - apiGroups: [discovery.k8s.io]
     resources: [endpointslices]
-    verbs: [get, create, update]
+    verbs: [get, list, watch, create, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

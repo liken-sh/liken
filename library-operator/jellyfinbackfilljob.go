@@ -111,7 +111,7 @@ func (o *operator) standJellyfinBackfill(ctx context.Context, catalog *Namespace
 		return &CatalogJellyfinStatus{Server: server, Backfill: backfillPending}
 	}
 	created := buildJellyfinBackfillJob(catalog, o.scannerImage, o.busAddress, o.topicBase, o.mediaTopicBase)
-	_, err := CreateJob(ctx, o.client, created)
+	_, err := o.createJob(ctx, created)
 	if err != nil && !errors.Is(err, ErrConflict) {
 		o.logf("catalog %s/%s: could not create the job %s: %v", namespace, name, created.Metadata.Name, err)
 		return &CatalogJellyfinStatus{Server: server, Backfill: backfillPending}
@@ -215,5 +215,5 @@ func (o *operator) mayStandBackfill(key string, now time.Time) bool {
 // the backfill Job of a Catalog that no longer asks for one, and of one whose
 // Job gave up. An already-absent Job is success, the rule DeleteJob follows.
 func (o *operator) retireJellyfinBackfill(ctx context.Context, namespace, catalog string) error {
-	return DeleteJob(ctx, o.client, namespace, jellyfinBackfillJobName(catalog))
+	return o.deleteJob(ctx, namespace, jellyfinBackfillJobName(catalog))
 }

@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"slices"
 	"time"
@@ -203,21 +202,6 @@ func metadataProviderPath(namespace, name string) string {
 
 func secretPath(namespace, name string) string {
 	return corePrefix + namespace + "/secrets/" + name
-}
-
-// The status subresource is its own write path, so this request never touches
-// the spec a person declared.
-func PutMetadataProviderStatus(ctx context.Context, c *Client, provider *MetadataProvider) (*MetadataProvider, error) {
-	body, err := json.Marshal(provider)
-	if err != nil {
-		return nil, err
-	}
-	written := &MetadataProvider{}
-	path := metadataProviderPath(provider.Metadata.Namespace, provider.Metadata.Name) + "/status"
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
 }
 
 // The operator reads the Secret for the reachability check alone. The key

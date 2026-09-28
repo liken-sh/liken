@@ -32,7 +32,24 @@ var watchedKinds = map[string]struct{ apiVersion, kind string }{
 	playsAllPath:          {playerAPIVersion, "Play"},
 	peoplePath:            {personAPIVersion, "Person"},
 	podsAllPath:           {podAPIVersion, "Pod"},
+	claimsAllPath:         {"v1", "PersistentVolumeClaim"},
+	volumesPath:           {"v1", "PersistentVolume"},
+	jobsAllPath:           {batchAPIVersion, "Job"},
+	nodesPath:             {"v1", "Node"},
+	servicesAllPath:       {"v1", "Service"},
+	endpointSlicesAllPath: {endpointSliceAPIVersion, "EndpointSlice"},
+	configMapsAllPath:     {"v1", "ConfigMap"},
+	claimTemplatesAllPath: {deviceAPIVersion, "ResourceClaimTemplate"},
 }
+
+// The cluster-wide lists of the three kinds the operator stands one of by
+// name in each namespace, which only its watches read.
+const (
+	servicesAllPath       = "/api/v1/services"
+	endpointSlicesAllPath = "/apis/" + endpointSliceAPIVersion + "/endpointslices"
+	configMapsAllPath     = "/api/v1/configmaps"
+	claimTemplatesAllPath = "/apis/" + deviceAPIVersion + "/resourceclaimtemplates"
+)
 
 // One open watch: the collection and the selector it asked for, and the
 // objects it has been sent, by namespace and name.

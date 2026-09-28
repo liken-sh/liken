@@ -111,7 +111,7 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	}
 	job := buildLibraryJob(library, providers, o.languages, plan,
 		jobImages{operator: o.scannerImage, ffmpeg: o.ffmpegImage, corrosion: o.corrosionImage}, now)
-	_, err := CreateJob(ctx, o.client, job)
+	_, err := o.createJob(ctx, job)
 	if err != nil && !errors.Is(err, ErrConflict) {
 		return fmt.Errorf("creating the library job %s: %w", job.Metadata.Name, err)
 	}

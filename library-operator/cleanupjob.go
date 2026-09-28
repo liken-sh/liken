@@ -86,7 +86,7 @@ func (o *operator) standCleanupJob(ctx context.Context, library *Library, jobs [
 		if !o.mayStandCleanup(libraryKey(namespace, name)) {
 			return nil, nil
 		}
-		created, err := CreateJob(ctx, o.client, buildCleanupJob(library, o.scannerImage, o.corrosionImage))
+		created, err := o.createJob(ctx, buildCleanupJob(library, o.scannerImage, o.corrosionImage))
 		if errors.Is(err, ErrConflict) {
 			// Another writer created it first, which is the state this
 			// create was for; the next pass reads it.
@@ -103,7 +103,7 @@ func (o *operator) standCleanupJob(ctx context.Context, library *Library, jobs [
 		return live, nil
 	}
 	if live.gaveUp() {
-		if err := DeleteJob(ctx, o.client, namespace, cleanupJobName(name)); err != nil {
+		if err := o.deleteJob(ctx, namespace, cleanupJobName(name)); err != nil {
 			return nil, err
 		}
 	}
@@ -198,5 +198,5 @@ func cleanupComplete(job *Job, latest *libraryReport) bool {
 // The cleanup Job of a released Library goes with its pods, so
 // nothing is left holding the claim the garbage collector removes next.
 func (o *operator) retireCleanupJob(ctx context.Context, namespace, library string) error {
-	return DeleteJob(ctx, o.client, namespace, cleanupJobName(library))
+	return o.deleteJob(ctx, namespace, cleanupJobName(library))
 }

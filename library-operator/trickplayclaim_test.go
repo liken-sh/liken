@@ -117,3 +117,21 @@ func TestALibraryWithNoRenderBlockWritesNoTemplate(t *testing.T) {
 		t.Errorf("the pass deleted %d templates, want none", got)
 	}
 }
+
+// A Library that drops its render block, states it again, and drops it
+// again has the template the second block made deleted.
+func TestATemplateStoodAgainIsDeleted(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	operator := testOperator(t, cluster)
+
+	for _, library := range []*Library{studioMovies(), libraryWithRender("gpu.liken.sh", ""), studioMovies()} {
+		if err := operator.standTrickplayTemplate(t.Context(), library); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if left := cluster.heldClaimTemplate("house", "movies-trickplay"); left != nil {
+		t.Errorf("the template stands at %+v, want it gone with the render block", left)
+	}
+}

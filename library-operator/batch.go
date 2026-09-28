@@ -45,7 +45,7 @@ type Job struct {
 	Status     JobStatus  `json:"status"`
 }
 
-// The collection ListWorkerJobs answers.
+// The worker Jobs one read answers.
 type JobList struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []Job    `json:"items"`
@@ -155,24 +155,14 @@ func cronJobsPath(namespace string) string {
 	return batchPrefix + namespace + "/cronjobs"
 }
 
-// The narrowing that keeps a Job list to this operator's own
-// workers, by the name label every Job it creates carries. The equals
-// sign is percent-encoded, so the server reads one parameter.
-const workerJobsQuery = "labelSelector=" + scannerLabelKey + "%3D" + workerLabelValue
+// workerJobsSelector selects this operator's own workers, by the name
+// label every Job it creates carries, in every namespace, because a
+// Library is in whatever namespace its claim is.
+const workerJobsSelector = scannerLabelKey + "=" + workerLabelValue
 
 // A delete of a Job removes the pods under it as well, which the
 // default policy of orphaning would leave behind holding the claim.
 const backgroundDeletion = "?propagationPolicy=Background"
-
-// ListWorkerJobs reads this operator's Jobs across every namespace,
-// because a Library is in whatever namespace its claim is.
-func ListWorkerJobs(ctx context.Context, c *Client) (*JobList, error) {
-	list := &JobList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, jobsAllPath+"?"+workerJobsQuery, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
 
 func CreateJob(ctx context.Context, c *Client, job *Job) (*Job, error) {
 	body, err := json.Marshal(job)
@@ -184,6 +174,23 @@ func CreateJob(ctx context.Context, c *Client, job *Job) (*Job, error) {
 		return nil, err
 	}
 	return created, nil
+}
+
+// createJob creates one worker Job and notes the version the API server
+// answered, so the next pass lists the Job before the watch delivers it.
+func (o *operator) createJob(ctx context.Context, job *Job) (*Job, error) {
+	return written(o.versions.jobs, storeKey(&job.Metadata), func() (*Job, error) {
+		return CreateJob(ctx, o.client, job)
+	})
+}
+
+// deleteJob deletes one worker Job and notes that the operator holds no
+// copy of it, so the next pass reads it from the API server, and leaves
+// it out, while the watch's store still holds it.
+func (o *operator) deleteJob(ctx context.Context, namespace, name string) error {
+	return o.versions.jobs.send(storeKey(&ObjectMeta{Namespace: namespace, Name: name}), func() (string, error) {
+		return "", DeleteJob(ctx, o.client, namespace, name)
+	})
 }
 
 // DeleteJob removes one Job and the pods under it. An already-absent
@@ -215,7 +222,7 @@ func (o *operator) retireSucceededJobs(ctx context.Context, jobs []Job, now time
 			!job.Status.CompletionTime.Before(cutoff) {
 			continue
 		}
-		if err := DeleteJob(ctx, o.client, job.Metadata.Namespace, job.Metadata.Name); err != nil {
+		if err := o.deleteJob(ctx, job.Metadata.Namespace, job.Metadata.Name); err != nil {
 			fmt.Fprintf(os.Stderr, "retiring the finished job %s/%s: %v\n",
 				job.Metadata.Namespace, job.Metadata.Name, err)
 		}

@@ -255,6 +255,23 @@ func TestStandJellyfinTakesDownThePairACatalogNoLongerAsksFor(t *testing.T) {
 	}
 }
 
+// A Catalog that names a server again and then drops it has the Service it
+// stood the second time deleted.
+func TestStandJellyfinTakesDownAServiceStoodAgain(t *testing.T) {
+	cluster := newFakeCluster()
+	operator := testOperator(t, cluster)
+
+	for _, named := range []*NamespaceCatalog{housekeepingCatalog(), jellyfinCatalog(), housekeepingCatalog()} {
+		if err := operator.standJellyfin(t.Context(), named); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if cluster.heldService("house", "house-jellyfin") != nil {
+		t.Error("the jellyfin Service still stands")
+	}
+}
+
 // A pod or a Service another writer gave this name is left where it is,
 // because the name label is what says the operator stood it.
 func TestStandJellyfinLeavesObjectsItDidNotStand(t *testing.T) {

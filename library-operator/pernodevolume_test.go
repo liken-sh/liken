@@ -553,7 +553,7 @@ func TestGetStorageClassReadsTheClassByName(t *testing.T) {
 func TestDeletePersistentVolumeAcceptsAnAbsentVolume(t *testing.T) {
 	cluster := newFakeCluster()
 
-	if err := DeletePersistentVolume(t.Context(), testOperator(t, cluster).client, "no-such-volume"); err != nil {
+	if err := DeletePersistentVolume(t.Context(), testOperator(t, cluster).client, "no-such-volume", ""); err != nil {
 		t.Fatalf("err = %v, want an absent volume to read as success", err)
 	}
 }

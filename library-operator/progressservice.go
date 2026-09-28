@@ -27,6 +27,7 @@ var progressGossip = gossipCluster{
 	service:   progressServiceName,
 	port:      progressPort,
 	container: progressContainer,
+	label:     progressLabelValue,
 }
 
 // The progress Service of one namespace, owned by the namespace's one

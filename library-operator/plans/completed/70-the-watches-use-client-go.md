@@ -243,6 +243,80 @@ the backfill `Job`. In the fake API server, the third pass over one
 `Library` and one `Catalog` sent 22 requests before and 21 after. Eight of
 those are the lists the test harness sends in place of the stores.
 
+## Every read from a watch, 2026-09-28
+
+On `liken-1`, a pass still sent a cluster-wide list of the claims, two of
+the volumes, two of the pods, one of the Jobs, and one of the nodes. In a
+sixty-second sample the operator ran 32 passes. Six came from the backstop
+tick. The rest came from reports: every report that differed woke a pass,
+and while an enrich Job filled gaps, its gap counts changed every few
+seconds.
+
+**The watches.** The operator now watches the claims, the volumes, and the
+nodes whole, because a Library names any claim and a bound claim names any
+volume. The node store drops `status.images`, which the operator never
+reads. It watches its own pods, worker `Jobs`, progress member pods,
+`Services`, `EndpointSlices`, people `ConfigMaps`, and trickplay
+`ResourceClaimTemplates` by their labels. The gossip `Services` gain the
+name label so the watch selects them. On the first pass after the upgrade
+the store does not hold them, so the create meets a `409` and the memo
+sends the next pass to the API server, which reads each one and writes the
+label onto it. Two deletes now name the uid of the copy they read: the
+sweep of released volumes, and the heal's forced delete of a stranded copy,
+so a volume or a pod the pass wrote again under the same name is never
+taken.
+
+**The shared core.** `objectcache.go` and `versionmemo.go` are now the code
+bluetooth-, display-, audio-, media-, and equipment-operator share,
+including equipment's order of the two key reads in `currentList` and
+media's `forgetGone`. Four parts differ:
+
+- Every function that sends a request takes a context first, because this
+  operator's `Client` takes one on every request and a pass bounds all of
+  its requests with one deadline.
+- The functions are split across the two files, because the pod build
+  links no client-go, and the writes that note the memo are in both builds.
+- `readStood` reads one object the operator stands by name. A store that
+  holds its first read answers an object it does not hold, and the memo has
+  not noted, as absent, with no request.
+- `currentOrCached` keeps the store's copies of the MetadataProviders when a
+  fresh read of one fails, because the pass reads a failed read of them as
+  no provider at all.
+
+The worker `Jobs` are read through the memo from a whole store, because a
+library Job's name holds the time it was created: a second create of one
+never meets a `409`, and a pass that read a store without the Job it just
+created would create another walk. The memo forgets each Job that is gone.
+
+A `409` on a status write now reads the object again, composes the status
+from the fresh copy, and writes once more in the same pass (`settleStatus`),
+as the other operators do. The per-kind status PUT helpers are gone;
+`replaceStatus` writes all three kinds.
+
+**Report wakes.** A report wakes a pass at once only when it changes a
+decision: a run that starts or ends, a walk that starts or ends, a fact
+whose gap opens or closes, or an oldest attempt that moves. A report that
+changes only a count the status carries wakes nothing, and the next pass
+writes it. A settle window was the other shape. It would still run a pass
+for each burst of count changes, and every status field would still be
+written by the one writer that derives the whole status.
+
+**The tick.** The ten-second tick stays, as a clock for the decisions that
+fall due with no event, and for the report counts above. A pass reads every
+watched object from its store. The comment at `backstopInterval` names the
+reads that are not from a store. The one on every pass is the `Secret` each
+keyed `MetadataProvider` names, because the pass compares its
+`resourceVersion` to decide whether a check is due, and no label selects a
+`Secret` a person names.
+
+**The numbers.** In the fake API server, through the real informers, a
+settled pass over two namespaces, two `Libraries` (one with a render block),
+two `Catalogs`, a delegated `Player`, and a `Person` sent 20 requests before
+and none after (`TestASteadyPassListsNoWatchedCollectionAndWakesNothing`).
+A pass a report wakes reads nothing either, and sends only the writes it
+makes. With a keyed `MetadataProvider`, each pass also sends one `GET` of
+its `Secret`.
+
 ## The drill that is owed
 
 On `liken-1`, after the main session rolls the build:

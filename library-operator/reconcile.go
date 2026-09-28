@@ -85,7 +85,9 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		}
 	}
 
-	return writeLibraryStatus(ctx, o.client, o.versions.libraries, library, deriveLibraryStatus(library, libraryObservation{
+	// The observation is read once. A write that meets a 409 derives the
+	// status again from the fresh copy and this same observation.
+	observation := libraryObservation{
 		bound:             bound,
 		choice:            choice,
 		report:            report,
@@ -95,7 +97,9 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		online:            o.reporters.onlineFor(namespace),
 		operatorNamespace: o.namespace,
 		fault:             o.observeJobFault(ctx, jobs, pods, report, namespace, name, now),
-	}, now))
+	}
+	return writeLibraryStatus(ctx, o.client, o.versions.libraries, library,
+		func(held *Library) LibraryStatus { return deriveLibraryStatus(held, observation, now) })
 }
 
 // HoldLibrary puts the finalizer on a Library that does not carry
@@ -117,7 +121,7 @@ func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
 		finalizers = append(finalizers, libraryFinalizer)
 	}
 	var version string
-	err := o.versions.libraries.send(storeKey(library.Metadata.Namespace, library.Metadata.Name),
+	err := o.versions.libraries.send(storeKey(&library.Metadata),
 		func() (string, error) {
 			var err error
 			version, err = PatchLibraryFinalizers(ctx, o.client, library.Metadata.Namespace,

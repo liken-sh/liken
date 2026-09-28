@@ -16,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 )
@@ -59,16 +58,6 @@ type NodeList struct {
 
 // Nodes are cluster-scoped, so the path carries no namespace.
 const nodesPath = "/api/v1/nodes"
-
-// ListNodes reads every node of the cluster, for the Ready verdict of the
-// machine each durable copy runs on.
-func ListNodes(ctx context.Context, c *Client) (*NodeList, error) {
-	list := &NodeList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, nodesPath, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
 
 // Take down every durable copy on a node that has been NotReady past the
 // grace. The store label is the guard: a Job's pod and a screen pod carry
@@ -129,8 +118,14 @@ func notReadyPastGrace(node *Node, now time.Time) bool {
 func (o *operator) healStoreReplica(ctx context.Context, pod *Pod) error {
 	namespace, name := pod.Metadata.Namespace, pod.Metadata.Name
 
-	if err := ForceDeletePod(ctx, o.client, namespace, name); err != nil {
+	deleted, err := ForceDeletePod(ctx, o.client, namespace, name, pod.Metadata.UID)
+	if err != nil {
 		return err
+	}
+	// A pod under this name that is not the one the pass read is a copy
+	// an earlier pass healed and stood again, and its claim is its own.
+	if !deleted {
+		return nil
 	}
 	o.forgetPod(namespace, name)
 	mounted := storeClaimOf(pod)

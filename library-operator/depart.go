@@ -55,8 +55,9 @@ func (o *operator) depart(ctx context.Context, library *Library, choice catalogC
 	if stage.clear {
 		return o.releaseLibrary(ctx, library, stage.why)
 	}
+	now := time.Now().UTC()
 	return writeLibraryStatus(ctx, o.client, o.versions.libraries, library,
-		departingStatus(library, stage, time.Now().UTC()))
+		func(held *Library) LibraryStatus { return departingStatus(held, stage, now) })
 }
 
 // departureStage reads every release rule before it acts, so a
@@ -161,7 +162,7 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 	}
 	o.clearLibraryTopics(namespace, name)
 
-	err := o.versions.libraries.send(storeKey(namespace, name), func() (string, error) {
+	err := o.versions.libraries.send(storeKey(&library.Metadata), func() (string, error) {
 		return PatchLibraryFinalizers(ctx, o.client, namespace, name,
 			library.Metadata.ResourceVersion,
 			library.Metadata.without(libraryFinalizer, formerLibraryFinalizer))

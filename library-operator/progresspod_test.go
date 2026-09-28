@@ -258,10 +258,10 @@ func TestStandProgressPodsCreateThePodsAndTheStoresClaim(t *testing.T) {
 	}
 }
 
-// The list the pass writes the progress slice from reads the progress
+// The watch the pass writes the progress slice from selects the progress
 // member label alone, so a catalog pod never reaches the progress
 // cluster's peer list.
-func TestListProgressMemberPodsReadsTheProgressLabelAlone(t *testing.T) {
+func TestTheProgressMemberSelectorSelectsTheProgressLabelAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house", "house")
 	operator := testOperator(t, cluster)
@@ -272,7 +272,7 @@ func TestListProgressMemberPodsReadsTheProgressLabelAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list, err := ListProgressMemberPods(t.Context(), operator.client)
+	list, err := operator.watched.readProgressMembers()
 	if err != nil {
 		t.Fatal(err)
 	}

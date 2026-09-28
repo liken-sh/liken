@@ -317,36 +317,31 @@ func podFailureMessage(pod *Pod) string {
 	return "the catalog pod failed"
 }
 
-// writeLibraryStatus writes only a status that differs from the one
-// the Library carries. Without the compare, the backstop tick would be
-// one write per library every ten seconds, and every watcher of the
-// Libraries would receive each one.
+// writeLibraryStatus writes the status compose derives from the
+// Library, and only when it differs from the one the Library carries.
+// Without the compare, the backstop tick would be one write per library
+// every ten seconds, and every watcher of the Libraries would receive
+// each one.
 //
 // The copy the compare reads is current: objectcache.go reads the
 // Library from the API server where the store's copy is older than this
-// operator's own write. The memo notes the version this write produced.
-func writeLibraryStatus(ctx context.Context, c *Client, versions *versionMemo, library *Library, desired LibraryStatus) error {
-	same, err := sameStatus(library.Status, desired)
-	if err != nil || same {
-		return err
-	}
-
-	library.Status = desired
-	key := storeKey(library.Metadata.Namespace, library.Metadata.Name)
-	err = versions.send(key, func() (string, error) {
-		written, err := PutLibraryStatus(ctx, c, library)
-		if err != nil {
-			return "", err
-		}
-		library.Metadata.ResourceVersion = written.Metadata.ResourceVersion
-		return written.Metadata.ResourceVersion, nil
-	})
-	if errors.Is(err, ErrConflict) {
-		// Another writer changed this Library after the copy this pass
-		// read, such as a person's edit. The memo now holds no version,
-		// so the next pass reads the Library from the API server and
-		// derives the status again. An edit to the spec wakes that pass,
-		// and the backstop tick runs it after any other write.
+// operator's own write. A write that another writer's change refused
+// with a 409 reads the Library again, composes the status from the fresh
+// copy, and writes once more (settleStatus).
+func writeLibraryStatus(ctx context.Context, c *Client, versions *versionMemo, library *Library,
+	compose func(*Library) LibraryStatus) error {
+	_, err := settleStatus(ctx, c, versions, libraryPath(library.Metadata.Namespace, library.Metadata.Name), library,
+		func(held *Library) bool {
+			desired := compose(held)
+			if same, err := sameStatus(held.Status, desired); err == nil && same {
+				return false
+			}
+			held.Status = desired
+			return true
+		})
+	// A Library deleted during the pass is the state its departure
+	// ends in, and has no status left to write.
+	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
 	return err

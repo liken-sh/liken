@@ -236,6 +236,9 @@ func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(r.URL.Path, "/metadataproviders/") && strings.HasSuffix(r.URL.Path, "/status"):
 		var written MetadataProvider
 		_ = json.NewDecoder(r.Body).Decode(&written)
+		if !replacesHeld(w, f.providers[written.Metadata.Name], &written.Metadata) {
+			return
+		}
 		f.providers[written.Metadata.Name] = &written
 		_ = json.NewEncoder(w).Encode(written)
 	case strings.Contains(r.URL.Path, "/secrets/"):
@@ -249,22 +252,19 @@ func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/metadataproviders/"):
 		answer(w, f.providers[name])
 	case strings.Contains(r.URL.Path, "/catalogs/") && strings.HasSuffix(r.URL.Path, "/status"):
-		// A status write from an older copy states an older
-		// resourceVersion, and the API server refuses it, as it does a
-		// patch.
 		var written NamespaceCatalog
 		_ = json.NewDecoder(r.Body).Decode(&written)
-		held := f.catalogs[written.Metadata.Name]
-		if held != nil && held.Metadata.ResourceVersion != written.Metadata.ResourceVersion {
-			w.WriteHeader(http.StatusConflict)
+		if !replacesHeld(w, f.catalogs[written.Metadata.Name], &written.Metadata) {
 			return
 		}
-		written.Metadata.ResourceVersion = nextVersion(written.Metadata.ResourceVersion)
 		f.catalogs[written.Metadata.Name] = &written
 		_ = json.NewEncoder(w).Encode(written)
 	case strings.HasSuffix(r.URL.Path, "/status"):
 		var written Library
 		_ = json.NewDecoder(r.Body).Decode(&written)
+		if !replacesHeld(w, f.libraries[written.Metadata.Name], &written.Metadata) {
+			return
+		}
 		f.libraries[written.Metadata.Name] = &written
 		_ = json.NewEncoder(w).Encode(written)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/persistentvolumeclaims"):
@@ -297,6 +297,15 @@ func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
 			list.Items = append(list.Items, *f.pods[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == servicesAllPath:
+		answerSelected(w, r, f.services, func(held *Service) map[string]string { return held.Metadata.Labels })
+	case r.URL.Path == endpointSlicesAllPath:
+		answerSelected(w, r, f.slices, func(held *EndpointSlice) map[string]string { return held.Metadata.Labels })
+	case r.URL.Path == claimTemplatesAllPath:
+		answerSelected(w, r, f.claimTemplates,
+			func(held *ResourceClaimTemplate) map[string]string { return held.Metadata.Labels })
+	case r.URL.Path == configMapsAllPath:
+		answerSelected(w, r, f.configMaps, func(held *ConfigMap) map[string]string { return held.Metadata.Labels })
 	case r.URL.Path == claimsAllPath:
 		list := PersistentVolumeClaimList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.claims) {
@@ -337,6 +346,18 @@ func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
 		f.pods[created.Metadata.Name] = &created
 		_ = json.NewEncoder(w).Encode(created)
 	case r.Method == http.MethodDelete:
+		// A delete that names another pod's uid is refused, as the API
+		// server refuses a failed precondition.
+		var options struct {
+			Preconditions struct {
+				UID string `json:"uid"`
+			} `json:"preconditions"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&options)
+		if held, ok := f.pods[name]; ok && options.Preconditions.UID != "" && options.Preconditions.UID != held.Metadata.UID {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
 		delete(f.pods, name)
 	default:
 		answer(w, f.pods[name])
@@ -423,6 +444,18 @@ func (f *fakeCluster) serveVolume(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 	if r.Method == http.MethodDelete {
+		// A delete that names another volume's uid is refused, as the
+		// API server refuses a failed precondition.
+		var options struct {
+			Preconditions struct {
+				UID string `json:"uid"`
+			} `json:"preconditions"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&options)
+		if options.Preconditions.UID != "" && options.Preconditions.UID != decodeVolume(body).Metadata.UID {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
 		delete(f.volumes, name)
 		return
 	}
@@ -473,6 +506,8 @@ func (f *fakeCluster) serveJob(w http.ResponseWriter, r *http.Request, key strin
 		}
 		var created Job
 		_ = json.NewDecoder(r.Body).Decode(&created)
+		// The API server gives every object it creates a version.
+		created.Metadata.ResourceVersion = "1"
 		f.jobs[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
 		_ = json.NewEncoder(w).Encode(created)
 	case http.MethodDelete:
@@ -509,6 +544,7 @@ func (f *fakeCluster) serveClaimTemplate(w http.ResponseWriter, r *http.Request,
 		}
 		var created ResourceClaimTemplate
 		_ = json.NewDecoder(r.Body).Decode(&created)
+		created.Metadata.ResourceVersion = "1"
 		f.claimTemplates[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
 		_ = json.NewEncoder(w).Encode(created)
 	case http.MethodDelete:
@@ -778,6 +814,26 @@ func (f *fakeCluster) heldPerson(name string) *Person {
 	return f.people[name]
 }
 
+// replacesHeld answers a status write the way the API server does. A
+// write from an older copy states an older resourceVersion and is
+// refused with a 409, as a patch is. One that matches produces the next
+// version. It reports whether the write lands.
+func replacesHeld[T any](w http.ResponseWriter, held *T, written *ObjectMeta) bool {
+	if held != nil {
+		fields, _ := json.Marshal(held)
+		var current struct {
+			Metadata ObjectMeta `json:"metadata"`
+		}
+		_ = json.Unmarshal(fields, &current)
+		if current.Metadata.ResourceVersion != written.ResourceVersion {
+			w.WriteHeader(http.StatusConflict)
+			return false
+		}
+	}
+	written.ResourceVersion = nextVersion(written.ResourceVersion)
+	return true
+}
+
 // The resourceVersion a write produces, which every later conditional
 // write on the object has to state.
 func nextVersion(current string) string {
@@ -1008,6 +1064,21 @@ func (f *fakeCluster) firstRequest(method, kind string) int {
 		}
 	}
 	return -1
+}
+
+// answerSelected answers a list of one kind across every namespace, in
+// key order, with the objects the request's label selector selects.
+func answerSelected[T any](w http.ResponseWriter, r *http.Request, held map[string]*T, labels func(*T) map[string]string) {
+	list := struct {
+		Metadata ListMeta `json:"metadata"`
+		Items    []T      `json:"items"`
+	}{Metadata: ListMeta{ResourceVersion: "1"}, Items: []T{}}
+	for _, key := range sortedNames(held) {
+		if selectsLabels(r.URL.Query().Get("labelSelector"), labels(held[key])) {
+			list.Items = append(list.Items, *held[key])
+		}
+	}
+	_ = json.NewEncoder(w).Encode(list)
 }
 
 func answer[T any](w http.ResponseWriter, held *T) {

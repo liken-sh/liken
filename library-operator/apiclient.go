@@ -288,24 +288,6 @@ func configMapsPath(namespace string) string {
 	return corePrefix + namespace + "/configmaps"
 }
 
-// PutLibraryStatus writes through the status subresource, which is its
-// own write path: this request can never touch a spec. The
-// resourceVersion in the body is what makes the write conditional, so
-// a status written over a Library that changed underneath answers
-// ErrConflict and the next pass reads it again.
-func PutLibraryStatus(ctx context.Context, c *Client, library *Library) (*Library, error) {
-	body, err := json.Marshal(library)
-	if err != nil {
-		return nil, err
-	}
-	written := &Library{}
-	path := libraryPath(library.Metadata.Namespace, library.Metadata.Name) + "/status"
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
-}
-
 // PatchLibraryFinalizers writes a Library's finalizer list and
 // answers with the resourceVersion the write produced, which a
 // caller needs before it writes the same object again in one pass.
@@ -334,22 +316,6 @@ func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, res
 		return "", err
 	}
 	return patched.Metadata.ResourceVersion, nil
-}
-
-// PutCatalogStatus writes through the status subresource, so this
-// request can never touch a spec. The resourceVersion in the body makes
-// the write conditional, the same as PutLibraryStatus.
-func PutCatalogStatus(ctx context.Context, c *Client, catalog *NamespaceCatalog) (*NamespaceCatalog, error) {
-	body, err := json.Marshal(catalog)
-	if err != nil {
-		return nil, err
-	}
-	written := &NamespaceCatalog{}
-	path := catalogPath(catalog.Metadata.Namespace, catalog.Metadata.Name) + "/status"
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
 }
 
 // GetPersistentVolumeClaim reads the claim a Library names, for two
@@ -441,23 +407,36 @@ func CreatePersistentVolume(ctx context.Context, c *Client, volume *PersistentVo
 	return created, nil
 }
 
-// ListPersistentVolumes reads the volumes one label selector names, which
-// is how the sweep finds the volumes this operator wrote. A
-// PersistentVolume is cluster-scoped, so the path carries no namespace.
-func ListPersistentVolumes(ctx context.Context, c *Client, labelSelector string) (*PersistentVolumeList, error) {
-	list := &PersistentVolumeList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, volumesPath+"?"+labelSelector, nil, list); err != nil {
-		return nil, err
+// uidPrecondition is the body of a delete that the API server refuses with
+// a 409 unless the object holds this uid. An empty uid is no precondition,
+// because the API server reads an empty uid as one no object holds.
+func uidPrecondition(uid string) ([]byte, error) {
+	if uid == "" {
+		return nil, nil
 	}
-	return list, nil
+	return json.Marshal(map[string]any{
+		"apiVersion":    "v1",
+		"kind":          "DeleteOptions",
+		"preconditions": map[string]string{"uid": uid},
+	})
 }
 
 // DeletePersistentVolume removes a volume this operator wrote whose claim
 // is gone. A volume that is already absent is success, because two
 // passes may sweep the same volume.
-func DeletePersistentVolume(ctx context.Context, c *Client, name string) error {
-	err := c.RequestJSON(ctx, http.MethodDelete, volumesPath+"/"+name, nil, nil)
-	if errors.Is(err, ErrNotFound) {
+//
+// The delete names the uid of the copy the caller read. The copy can come
+// from a watch's store, and a pass can delete a spent volume and write a
+// fresh one of the same name before the store holds the fresh one. The
+// API server refuses a delete whose uid is not the volume's with a 409,
+// so the delete never takes the fresh volume, and the refusal is success.
+func DeletePersistentVolume(ctx context.Context, c *Client, name, uid string) error {
+	body, err := uidPrecondition(uid)
+	if err != nil {
+		return err
+	}
+	err = c.RequestJSON(ctx, http.MethodDelete, volumesPath+"/"+name, body, nil)
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) {
 		return nil
 	}
 	return err
@@ -514,18 +493,28 @@ func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
 // gone never finishes a graceful delete: it stays Terminating for as long
 // as the node is away, and the claim it mounts stays with it. The heal
 // uses this and nothing else does.
-func ForceDeletePod(ctx context.Context, c *Client, namespace, name string) error {
-	err := c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name+"?gracePeriodSeconds=0", nil, nil)
-	if errors.Is(err, ErrNotFound) {
-		return nil
+//
+// The delete names the uid of the pod the caller read. The copy comes
+// from a watch's store, and the heal stands a new pod of the same name
+// in the pass that deletes the old one, so a later pass can read the old
+// copy before the watch delivers the delete. The API server refuses a
+// delete whose uid is not the pod's with a 409, and the answer is false:
+// the pod under that name is not the one the caller read.
+func ForceDeletePod(ctx context.Context, c *Client, namespace, name, uid string) (bool, error) {
+	body, err := uidPrecondition(uid)
+	if err != nil {
+		return false, err
 	}
-	return err
+	err = c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name+"?gracePeriodSeconds=0", body, nil)
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
-// GetService reads the live catalog Service of one namespace. The
-// read answers the fields the operator compares, and it answers the
-// resourceVersion and the addresses the API server assigned, which
-// the update carries back unchanged.
+// GetService reads one Service by name from the API server. The pass
+// reads the Services it stands from the watch, and through this only
+// where the memo says the watch's copy is not current (objectcache.go).
 func GetService(ctx context.Context, c *Client, namespace, name string) (*Service, error) {
 	service := &Service{}
 	if err := c.RequestJSON(ctx, http.MethodGet, servicesPath(namespace)+"/"+name, nil, service); err != nil {
@@ -558,9 +547,8 @@ func DeleteService(ctx context.Context, c *Client, namespace, name string) error
 	return err
 }
 
-// UpdateService writes the whole Service back. The resourceVersion in
-// the body makes the write conditional, so a Service that changed
-// underneath answers ErrConflict, and the next pass reads it again.
+// GetConfigMap reads one ConfigMap by name. The pass reads the people
+// ConfigMap from the watch instead; a test reads it through this.
 func GetConfigMap(ctx context.Context, c *Client, namespace, name string) (*ConfigMap, error) {
 	configMap := &ConfigMap{}
 	if err := c.RequestJSON(ctx, http.MethodGet, configMapsPath(namespace)+"/"+name, nil, configMap); err != nil {
@@ -594,6 +582,9 @@ func UpdateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*Con
 	return written, nil
 }
 
+// UpdateService writes the whole Service back. The resourceVersion in
+// the body makes the write conditional, so a Service that changed
+// underneath answers ErrConflict, and the next pass reads it again.
 func UpdateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
 	body, err := json.Marshal(service)
 	if err != nil {

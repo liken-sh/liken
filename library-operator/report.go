@@ -8,6 +8,8 @@ package main
 // desk is the only path a report takes to the control plane.
 
 import (
+	"maps"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -96,16 +98,21 @@ func libraryKey(namespace, name string) string {
 	return namespace + "/" + name
 }
 
-// fold records the newest report for a Library and wakes the loop. A
-// report is a whole observation, so the newest one says everything an
-// older one did.
+// fold records the newest report for a Library, and wakes the loop when
+// the report changes what the pass acts on. A report is a whole
+// observation, so the newest one says everything an older one did.
 //
-// A report that differs from the one the desk holds wakes the loop at
-// once, because it is a change worth writing into the resource. A report
-// that repeats the held one wakes nothing: the reporter republishes every
-// library it knows each time the catalog changes, so while one library's
-// Job writes, the reports of the idle libraries arrive again each second
-// with nothing new in them.
+// A report wakes the loop at once when it changes a decision the pass
+// makes (actsOn): a run that starts or ends, a walk that starts or ends,
+// a fact whose gap opens or closes, and an oldest attempt that moves.
+// A report that changes only the counts the pass writes into status, such
+// as the titles or a gap that stays open, wakes nothing. The desk holds
+// it, and the next pass writes it: the backstop tick runs one within ten
+// seconds. While a Job fills gaps, its gap counts change every few
+// seconds, and a pass for each change ran the pass about thirty times a
+// minute. A report that repeats the held one wakes nothing either: the
+// reporter republishes every library it knows each time the catalog
+// changes.
 //
 // It answers with the runs this report ended: a row that carries a finish
 // the desk's report did not. A desk that held no report answers none, because
@@ -116,13 +123,45 @@ func (r *reports) fold(namespace, name string, report libraryReport) []libraryRu
 	before, held := r.latest[key]
 	r.latest[key] = report
 	r.mutex.Unlock()
-	if same, err := sameStatus(before, report); !held || err != nil || !same {
+	if !held || actsOn(before, report) {
 		r.poke()
 	}
 	if !held {
 		return nil
 	}
 	return endedRuns(before.Runs, report.Runs)
+}
+
+// actsOn reports whether a report changes something the pass decides on,
+// and not only a count it writes into status.
+func actsOn(before, after libraryReport) bool {
+	if before.Walking != after.Walking {
+		return true
+	}
+	if !reflect.DeepEqual(before.Runs, after.Runs) {
+		return true
+	}
+	if !maps.Equal(before.OldestAttempts, after.OldestAttempts) {
+		return true
+	}
+	return !maps.Equal(openGaps(before), openGaps(after))
+}
+
+// openGaps is the facts with rows left to fill, counted whole and with
+// their episodes taken out, because the schedule reads a gap both ways
+// (imdbratinggap.go). A count that stays above zero leaves the set as it
+// was.
+func openGaps(report libraryReport) map[string]bool {
+	open := map[string]bool{}
+	for fact, count := range report.Gaps {
+		if count > 0 {
+			open[fact] = true
+		}
+		if count-report.EpisodeGaps[fact] > 0 {
+			open[fact+"/titles"] = true
+		}
+	}
+	return open
 }
 
 // The runs that carry a finish the earlier runs did not, for the same Job. A

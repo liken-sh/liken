@@ -45,6 +45,7 @@ var catalogGossip = gossipCluster{
 	service:   catalogServiceName,
 	port:      catalogPort,
 	container: catalogContainer,
+	label:     catalogLabelValue,
 }
 
 // The two labels the slice carries. The service-name label is how a
@@ -195,9 +196,12 @@ func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, 
 func (o *operator) standGossipEndpoints(ctx context.Context, cluster gossipCluster, namespace string, owners []OwnerReference, members []Pod) error {
 	desired := buildGossipEndpoints(cluster, namespace, owners, members)
 
-	live, err := GetEndpointSlice(ctx, o.client, namespace, cluster.service)
+	live, err := o.watched.readEndpointSlice(ctx, namespace, cluster.service)
+	key := storeKey(&desired.Metadata)
 	if errors.Is(err, ErrNotFound) {
-		_, err := CreateEndpointSlice(ctx, o.client, desired)
+		_, err := written(o.versions.endpointSlices, key, func() (*EndpointSlice, error) {
+			return CreateEndpointSlice(ctx, o.client, desired)
+		})
 		if errors.Is(err, ErrConflict) {
 			return nil
 		}
@@ -211,7 +215,9 @@ func (o *operator) standGossipEndpoints(ctx context.Context, cluster gossipClust
 		return nil
 	}
 	desired.Metadata.ResourceVersion = live.Metadata.ResourceVersion
-	_, err = UpdateEndpointSlice(ctx, o.client, desired)
+	_, err = written(o.versions.endpointSlices, key, func() (*EndpointSlice, error) {
+		return UpdateEndpointSlice(ctx, o.client, desired)
+	})
 	return err
 }
 
@@ -240,10 +246,10 @@ func sameEndpoints(live, desired *EndpointSlice) bool {
 	return true
 }
 
-// GetEndpointSlice reads the live catalog slice of one namespace, for
-// the owners and endpoints it holds now and for the resourceVersion
-// the write is made conditional on. An absent slice is ErrNotFound,
-// which the pass answers by creating one.
+// GetEndpointSlice reads one slice by name from the API server. The pass
+// reads the slices it stands from the watch, and through this only where
+// the memo says the watch's copy is not current (objectcache.go). An
+// absent slice is ErrNotFound, which the pass answers by creating one.
 func GetEndpointSlice(ctx context.Context, c *Client, namespace, name string) (*EndpointSlice, error) {
 	slice := &EndpointSlice{}
 	if err := c.RequestJSON(ctx, http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {

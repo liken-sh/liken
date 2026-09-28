@@ -48,19 +48,20 @@ import (
 // agents and the nodes are read here, because this step alone needs them.
 func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string][]*NamespaceCatalog,
 	members []Pod, jobs []Job, now time.Time) {
-	// A list that fails costs this pass its progress slices and nothing
+	// A read that fails costs this pass its progress slices and nothing
 	// else. The pods stand, and the next pass writes the slices.
-	progressMembers, err := ListProgressMemberPods(ctx, o.client)
+	progressMembers, err := o.watched.readProgressMembers()
+	membersRead := err == nil
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing progress member pods: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the progress member pods: %v\n", err)
 		progressMembers = &PodList{}
 	}
-	// The nodes are read for the heal alone, so a list that fails costs
+	// The nodes are read for the heal alone, so a read that fails costs
 	// this pass its heal and nothing else. The copies stand, and the next
 	// pass reads the nodes again.
-	nodes, err := ListNodes(ctx, o.client)
+	nodes, err := o.watched.readNodes()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing nodes: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the nodes: %v\n", err)
 		nodes = &NodeList{}
 	}
 	// The heal goes before the stand, so a copy freed from a dead node is
@@ -70,7 +71,8 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		catalogs := byNamespace[namespace]
 		if len(catalogs) != 1 {
 			for _, catalog := range catalogs {
-				if err := o.writeCatalogStatus(ctx, catalog, blockedCatalogStatus(catalog, catalogs, now)); err != nil {
+				compose := func(held *NamespaceCatalog) CatalogStatus { return blockedCatalogStatus(held, catalogs, now) }
+				if err := o.writeCatalogStatus(ctx, catalog, compose); err != nil {
 					fmt.Fprintf(os.Stderr, "marking the catalog %s/%s blocked: %v\n",
 						catalog.Metadata.Namespace, catalog.Metadata.Name, err)
 				}
@@ -99,8 +101,13 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		if err := o.standProgressService(ctx, namespace, owners); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the progress service in %s: %v\n", namespace, err)
 		}
-		if err := o.standProgressEndpoints(ctx, namespace, owners, progressMembers.Items); err != nil {
-			fmt.Fprintf(os.Stderr, "standing the progress endpoints in %s: %v\n", namespace, err)
+		// A slice written from a read that failed would hold no peer, and
+		// every progress agent would lose the others, so the pass writes
+		// the slice only from a read that succeeded.
+		if membersRead {
+			if err := o.standProgressEndpoints(ctx, namespace, owners, progressMembers.Items); err != nil {
+				fmt.Fprintf(os.Stderr, "standing the progress endpoints in %s: %v\n", namespace, err)
+			}
 		}
 		// The jellyfin pair stands beside the progress store while
 		// the Catalog names a Jellyfin server, and comes down when it
@@ -121,13 +128,16 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reading the storage classes in %s: %v\n", namespace, err)
 		}
-		status := standingCatalogStatus(catalog, catalogPods, progressPods, members,
-			blocker{reason: reason, message: message}, now)
-		// the Jellyfin half is set here and not built with the rest,
-		// because it is the verdict of the step above and not a
-		// reading of the pods this status reports.
-		status.Jellyfin = backfill
-		if err := o.writeCatalogStatus(ctx, catalog, status); err != nil {
+		compose := func(held *NamespaceCatalog) CatalogStatus {
+			status := standingCatalogStatus(held, catalogPods, progressPods, members,
+				blocker{reason: reason, message: message}, now)
+			// the Jellyfin half is set here and not built with the rest,
+			// because it is the verdict of the step above and not a
+			// reading of the pods this status reports.
+			status.Jellyfin = backfill
+			return status
+		}
+		if err := o.writeCatalogStatus(ctx, catalog, compose); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the catalog status in %s: %v\n", namespace, err)
 		}
 	}
@@ -287,28 +297,26 @@ func catalogMembers(namespace string, pods []Pod) []string {
 	return members
 }
 
-// WriteCatalogStatus writes only a status that differs from the one the
-// Catalog carries, the rule writeLibraryStatus also follows, so a pass that
-// finds nothing changed writes nothing. The memo notes the version the write
-// produced, so the next pass reads the Catalog from the API server until the
-// store holds this write. A conflict means another write got there first,
-// and the memo then sends the next pass to the API server for the Catalog.
-func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCatalog, desired CatalogStatus) error {
-	same, err := sameCatalogStatus(catalog.Status, desired)
-	if err != nil || same {
-		return err
-	}
-	catalog.Status = desired
-	key := storeKey(catalog.Metadata.Namespace, catalog.Metadata.Name)
-	err = o.versions.catalogs.send(key, func() (string, error) {
-		written, err := PutCatalogStatus(ctx, o.client, catalog)
-		if err != nil {
-			return "", err
-		}
-		catalog.Metadata.ResourceVersion = written.Metadata.ResourceVersion
-		return written.Metadata.ResourceVersion, nil
-	})
-	if errors.Is(err, ErrConflict) {
+// WriteCatalogStatus writes the status compose derives from the Catalog,
+// and only when it differs from the one the Catalog carries, the rule
+// writeLibraryStatus also follows, so a pass that finds nothing changed
+// writes nothing. A write that another writer's change refused with a 409
+// reads the Catalog again, composes the status from the fresh copy, and
+// writes once more (settleStatus).
+func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCatalog,
+	compose func(*NamespaceCatalog) CatalogStatus) error {
+	_, err := settleStatus(ctx, o.client, o.versions.catalogs,
+		catalogPath(catalog.Metadata.Namespace, catalog.Metadata.Name), catalog,
+		func(held *NamespaceCatalog) bool {
+			desired := compose(held)
+			if same, err := sameCatalogStatus(held.Status, desired); err == nil && same {
+				return false
+			}
+			held.Status = desired
+			return true
+		})
+	// A Catalog deleted during the pass has no status left to write.
+	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
 	return err

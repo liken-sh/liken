@@ -45,7 +45,7 @@ type storeReads struct {
 }
 
 func (r storeReads) readCatalogs(ctx context.Context) (*CatalogList, error) {
-	items, err := currentList[NamespaceCatalog](ctx, r.client, r.catalogs, keyPath(catalogPath))
+	items, err := currentList[NamespaceCatalog](ctx, r.client, r.catalogs, namespacedPath(catalogPath))
 	return &CatalogList{Items: items}, err
 }
 
@@ -164,7 +164,7 @@ func TestAListReadsTheAPIServerWhereTheStoreCannotAnswer(t *testing.T) {
 			client := testOperator(t, cluster).client
 
 			got, err := currentList[NamespaceCatalog](t.Context(), client,
-				heldObjects{view: view, versions: versions}, keyPath(catalogPath))
+				heldObjects{view: view, versions: versions}, namespacedPath(catalogPath))
 
 			if err != nil {
 				t.Fatal(err)
@@ -198,10 +198,116 @@ func TestAProviderThatCannotBeReadKeepsTheStoresCopies(t *testing.T) {
 	versions := newVersionMemo()
 	versions.note("house/tmdb", "9")
 
-	got := currentOrStored[MetadataProvider](t.Context(), testOperator(t, cluster).client,
-		heldObjects{view: storeHolding(t, *provider), versions: versions}, keyPath(metadataProviderPath))
+	got := currentOrCached[MetadataProvider](t.Context(), testOperator(t, cluster).client,
+		heldObjects{view: storeHolding(t, *provider), versions: versions}, namespacedPath(metadataProviderPath))
 
 	if len(got) != 1 || got[0].Metadata.Name != "tmdb" {
 		t.Errorf("the list = %+v, want the store's copy of tmdb", got)
+	}
+}
+
+// A Service the operator stands is read from the store. Once the store
+// holds its first read, a Service it does not hold and the memo has not
+// noted does not exist, and the read sends nothing. A Service the memo
+// noted, such as one this operator created a moment ago, is read from the
+// API server until the store holds it.
+func TestAStoodObjectIsReadFromTheAPIServerOnlyWhenTheMemoNotedIt(t *testing.T) {
+	service := buildCatalogService("house", nil)
+	service.Metadata.ResourceVersion = "3"
+	cases := []struct {
+		name   string
+		stored []Service
+		noted  string
+		found  bool
+		reads  int
+	}{
+		{name: "a current copy in the store", stored: []Service{*service}, noted: "3", found: true},
+		{name: "no copy and no note", found: false},
+		{name: "no copy and a note of the create", noted: "3", found: true, reads: 1},
+		{name: "an older copy than the operator's write", stored: []Service{*service}, noted: "4", found: true, reads: 1},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			cluster.services["house/catalog"] = service
+			versions := newVersionMemo()
+			if one.noted != "" {
+				versions.note("house/catalog", one.noted)
+			}
+
+			got, err := readStood[Service](t.Context(), testOperator(t, cluster).client,
+				heldObjects{view: storeHolding(t, one.stored...), versions: versions},
+				"house/catalog", servicesPath("house")+"/catalog")
+
+			if found := err == nil && got != nil; found != one.found {
+				t.Errorf("found = %v (err %v), want %v", found, err, one.found)
+			}
+			if got := countObjectReads(cluster.requestLines(), "services"); got != one.reads {
+				t.Errorf("reads of the Service = %d, want %d", got, one.reads)
+			}
+		})
+	}
+}
+
+// jobStoreReads answers the worker Jobs from a store through the
+// operator's memo, the way watch.go does, and every other collection
+// with a list.
+type jobStoreReads struct {
+	listReads
+	jobs heldObjects
+}
+
+func (r jobStoreReads) readWorkerJobs(ctx context.Context) (*JobList, error) {
+	return currentJobs(ctx, r.client, r.jobs)
+}
+
+// A library Job's name holds the time it was created, so a second create
+// never meets a conflict. The store can still lack the walk Job the pass
+// created, as a watch does before it delivers the create or while it is
+// down. The pass lists the Job it created from the memo, and creates no
+// second walk.
+func TestAPassDoesNotCreateAJobTwiceBeforeTheWatchDeliversIt(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	operator := testOperator(t, cluster)
+	operator.watched = jobStoreReads{
+		listReads: listReads{client: operator.client},
+		jobs:      heldObjects{view: storeHolding[Job](t), versions: operator.versions.jobs},
+	}
+
+	operator.pass()
+	operator.pass()
+
+	if got := len(cluster.heldJobs()); got != 1 {
+		t.Errorf("the passes created %d Jobs, want the one walk", got)
+	}
+}
+
+// A Job the pass deleted is left out of the next pass's list while the
+// store still holds it, and the memo forgets it once the store drops it.
+func TestADeletedJobLeavesTheListAndTheMemo(t *testing.T) {
+	cluster := newFakeCluster()
+	job := Job{Metadata: ObjectMeta{Name: "movies-walk-a", Namespace: "house", ResourceVersion: "3",
+		Labels: map[string]string{scannerLabelKey: workerLabelValue}}}
+	operator := testOperator(t, cluster)
+	if err := operator.deleteJob(t.Context(), "house", "movies-walk-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	stale, err := currentJobs(t.Context(), operator.client,
+		heldObjects{view: storeHolding(t, job), versions: operator.versions.jobs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := currentJobs(t.Context(), operator.client,
+		heldObjects{view: storeHolding[Job](t), versions: operator.versions.jobs}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(stale.Items) != 0 {
+		t.Errorf("the list holds %+v, want the deleted Job left out", stale.Items)
+	}
+	if operator.versions.jobs.noted("house/movies-walk-a") {
+		t.Error("the memo still holds the Job the store dropped")
 	}
 }

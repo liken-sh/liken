@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"net/url"
 )
 
 // The pod list the pass would send for the catalog member pods, which a
@@ -63,4 +64,44 @@ func (r listReads) readPlays() (*PlayList, error) {
 
 func (r listReads) readPeople() (*PersonList, error) {
 	return readList[PersonList](r.client, peoplePath)
+}
+
+func (r listReads) readClaims() (*PersistentVolumeClaimList, error) {
+	return readList[PersistentVolumeClaimList](r.client, claimsAllPath)
+}
+
+func (r listReads) readVolumes() (*PersistentVolumeList, error) {
+	return readList[PersistentVolumeList](r.client, volumesPath)
+}
+
+func (r listReads) readStoodPods() (*PodList, error) {
+	return readList[PodList](r.client, podsAllPath+"?labelSelector="+url.QueryEscape(stoodPodsSelector))
+}
+
+func (r listReads) readProgressMembers() (*PodList, error) {
+	return readList[PodList](r.client, podsAllPath+"?labelSelector="+url.QueryEscape(progressMemberSelector))
+}
+
+func (r listReads) readWorkerJobs(ctx context.Context) (*JobList, error) {
+	return readListWith[JobList](ctx, r.client, jobsAllPath+"?labelSelector="+url.QueryEscape(workerJobsSelector))
+}
+
+func (r listReads) readNodes() (*NodeList, error) {
+	return readList[NodeList](r.client, nodesPath)
+}
+
+func (r listReads) readService(ctx context.Context, namespace, name string) (*Service, error) {
+	return GetService(ctx, r.client, namespace, name)
+}
+
+func (r listReads) readEndpointSlice(ctx context.Context, namespace, name string) (*EndpointSlice, error) {
+	return GetEndpointSlice(ctx, r.client, namespace, name)
+}
+
+func (r listReads) readClaimTemplate(ctx context.Context, namespace, name string) (*ResourceClaimTemplate, error) {
+	return GetResourceClaimTemplate(ctx, r.client, namespace, name)
+}
+
+func (r listReads) readConfigMap(ctx context.Context, namespace, name string) (*ConfigMap, error) {
+	return GetConfigMap(ctx, r.client, namespace, name)
 }

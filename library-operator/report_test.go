@@ -149,3 +149,63 @@ func TestAReportThatRepeatsTheHeldOneWakesNoPass(t *testing.T) {
 
 	expectNoReportWake(t, wake)
 }
+
+// A report that changes only a count the pass writes into status wakes no
+// pass: the next pass writes it, and while a Job fills gaps the counts
+// change every few seconds. A report that changes what the pass acts on
+// wakes a pass at once.
+func TestAReportWakesAPassOnlyForAChangeThePassActsOn(t *testing.T) {
+	base := func() libraryReport {
+		report := walkedReport()
+		report.Gaps = map[string]int{factCredits: 5, factRatingIMDb: 5}
+		report.EpisodeGaps = map[string]int{factRatingIMDb: 4}
+		report.Runs = []libraryRun{{Worker: workerScan, Job: "movies-walk-a", Started: testNow}}
+		return report
+	}
+	cases := []struct {
+		name   string
+		change func(*libraryReport)
+		wakes  bool
+	}{
+		{name: "a title count", change: func(r *libraryReport) { r.Titles++ }},
+		{name: "a gap count that stays above zero", change: func(r *libraryReport) { r.Gaps[factCredits] = 4 }},
+		{name: "the tallies", change: func(r *libraryReport) {
+			r.Tallies = []libraryTally{{Worker: workerScan}}
+		}},
+		{name: "a gap that closes", change: func(r *libraryReport) { delete(r.Gaps, factCredits) }, wakes: true},
+		{name: "a gap that opens", change: func(r *libraryReport) { r.Gaps[factTrailer] = 1 }, wakes: true},
+		{name: "episodes that are the whole gap", change: func(r *libraryReport) {
+			r.EpisodeGaps[factRatingIMDb] = 5
+		}, wakes: true},
+		{name: "a run that finishes", change: func(r *libraryReport) { r.Runs[0].Finished = testNow.Add(time.Minute) },
+			wakes: true},
+		{name: "a walk that starts", change: func(r *libraryReport) { r.Walking = true }, wakes: true},
+		{name: "an oldest attempt that moves", change: func(r *libraryReport) {
+			r.OldestAttempts = map[string]time.Time{factCredits: testNow}
+		}, wakes: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			desk, wake := reportDesk(t)
+			desk.fold("house", "movies", base())
+			waitForReportWake(t, wake)
+			changed := base()
+			one.change(&changed)
+
+			desk.fold("house", "movies", changed)
+
+			woke := false
+			select {
+			case <-wake:
+				woke = true
+			default:
+			}
+			if woke != one.wakes {
+				t.Errorf("the report woke a pass: %v, want %v", woke, one.wakes)
+			}
+			if got := desk.latestFor("house", "movies"); got == nil || got.Titles != changed.Titles {
+				t.Errorf("the desk holds %+v, want the newest report", got)
+			}
+		})
+	}
+}

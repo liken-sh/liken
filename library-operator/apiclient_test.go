@@ -297,15 +297,15 @@ func expectRequest(t *testing.T, recorded *recordedRequest, method, path string)
 
 // The status goes through its own subresource, so this request can
 // never touch the spec a person declared.
-func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
+func TestReplaceStatusWritesTheStatusSubresource(t *testing.T) {
 	written := &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house", ResourceVersion: "1200"},
 		Status:   LibraryStatus{Titles: 412, Webhook: "http://library-operator.liken-system.svc/webhook/house/movies"},
 	}
 	client, recorded := recordingAPI(t, written)
 
-	back, err := PutLibraryStatus(t.Context(), client, written)
-	if err != nil {
+	back := *written
+	if err := replaceStatus(t.Context(), client, libraryPath("house", "movies"), &back); err != nil {
 		t.Fatal(err)
 	}
 
@@ -372,10 +372,10 @@ func TestPatchLibraryFinalizersReportsAConflict(t *testing.T) {
 
 // A zero-title report is an answer, so the count goes on the wire as 0
 // rather than being dropped as an empty field.
-func TestPutLibraryStatusWritesAZeroCount(t *testing.T) {
+func TestReplaceStatusWritesAZeroCount(t *testing.T) {
 	client, recorded := recordingAPI(t, &Library{})
 
-	if _, err := PutLibraryStatus(t.Context(), client, &Library{
+	if err := replaceStatus(t.Context(), client, libraryPath("house", "movies"), &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 		Status:   LibraryStatus{Titles: 0, Unidentified: 0},
 	}); err != nil {
@@ -438,7 +438,9 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		name string
 		call func(*Client) error
 	}{
-		{name: "PutLibraryStatus", call: func(c *Client) error { _, err := PutLibraryStatus(t.Context(), c, &Library{}); return err }},
+		{name: "replaceStatus", call: func(c *Client) error {
+			return replaceStatus(t.Context(), c, libraryPath("house", "movies"), &Library{})
+		}},
 		{name: "PatchLibraryFinalizers", call: func(c *Client) error {
 			_, err := PatchLibraryFinalizers(t.Context(), c, "house", "movies", "1", nil)
 			return err
@@ -459,7 +461,6 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 			_, err := PatchPersonFinalizers(t.Context(), c, "person-a", "1", nil)
 			return err
 		}},
-		{name: "ListWorkerJobs", call: func(c *Client) error { _, err := ListWorkerJobs(t.Context(), c); return err }},
 		{name: "CreateJob", call: func(c *Client) error { _, err := CreateJob(t.Context(), c, &Job{}); return err }},
 		{name: "DeleteJob", call: func(c *Client) error { return DeleteJob(t.Context(), c, "house", "movies-cleanup") }},
 		{name: "DeleteCronJob", call: func(c *Client) error { return DeleteCronJob(t.Context(), c, "house", "movies-scan") }},

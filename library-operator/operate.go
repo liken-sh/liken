@@ -38,27 +38,37 @@ const (
 // Player does. media-operator writes the name; this operator only compares it.
 const screenController = "library.liken.sh/media-browser"
 
-// BackstopInterval is how often the loop reconciles with nothing to
-// prompt it. The watches and the bus wake the pass for every change the
-// pass acts on (watch.go names the rules), so the tick covers what they
-// do not:
+// BackstopInterval is the loop's clock. The watches deliver every change
+// to the objects the pass reads (watch.go names the rules), and a report
+// that changes a decision wakes the pass at once (report.go), so the tick
+// finds no change that an event did not already deliver. A pass reads
+// every watched object from its store, so a tick that finds nothing due
+// sends the API server no request for them. It serves these clocks:
 //
-//   - The objects the pass reads with no watch on them: a Job's status, a
-//     claim that binds, a volume, a Service, an EndpointSlice, a provider's
-//     Secret, a StorageClass, a node's Ready condition, and the events
-//     about a pod that has not started. Without the tick, a Library whose
-//     claim binds stays Unbound until some other object changes.
-//   - The decisions that fall due with time and no event: a scan schedule,
-//     the backoff of a failed Job and of a cleanup Job, the grace before a
-//     succeeded Job is deleted, the cadence of a provider check, and the
-//     graces on an unschedulable screen and a NotReady node. Without the
-//     tick, each waits for an unrelated wake.
-//   - A write that conflicted because the watch had not yet delivered an
-//     earlier write, and a conflict with an edit that wakes nothing, such
-//     as a new label on a Library. The next tick reads the fresh copy.
+//   - The decisions that fall due with time and no event: a scan
+//     schedule, the backoff of a failed Job, of a cleanup Job, and of the
+//     Jellyfin backfill, the grace before a succeeded Job is deleted, the
+//     cadence of a provider check, the grace on an unschedulable screen,
+//     and the grace on a NotReady node. Without the tick, each waits for
+//     an unrelated wake.
+//   - The counts of a report that changes no decision, which fold holds
+//     for the next pass instead of waking one.
+//   - A patch that met a conflict: the next tick reads the object again
+//     and patches once more.
 //
-// A pass that finds nothing changed sends only reads, so the tick costs
-// one pass of reads every ten seconds and no writes.
+// A few reads are not from a store, because no watch can select them or
+// they run only when something falls due:
+//
+//   - The Secret each keyed MetadataProvider names, read on every pass,
+//     because the pass compares its resourceVersion to decide whether a
+//     check is due. A person names the Secret, and no label selects it.
+//   - The events about a library Job's pod that has not started, while
+//     it has not started.
+//   - A StorageClass, read by name the first time a pass creates a claim
+//     on it, and the list of StorageClasses on a check of an imdb
+//     provider.
+//   - A claim read by name just before a recovery, a heal, or a
+//     departure deletes it.
 const backstopInterval = 10 * time.Second
 
 // PassTimeout bounds every request one pass makes. The pass owns the
@@ -177,7 +187,7 @@ type operator struct {
 	// version (versionmemo.go says why).
 	versions objectVersions
 
-	// The claims, volumes, and pods the pass in flight listed, which
+	// The claims, volumes, and pods the pass in flight read, which
 	// passreads.go holds the rule for. It is nil between passes, so a caller
 	// outside a pass reads each object by name.
 	reads *passReads
@@ -226,6 +236,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffm
 		backfillStands: map[string]cleanupStand{},
 		failedStands:   map[string]cleanupStand{},
 		legacyRetired:  map[string]bool{},
+
 		perNodeClasses: map[string]bool{},
 		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
@@ -303,12 +314,12 @@ func (o *operator) pass() {
 	// The Jobs and the member pods are read once for the whole
 	// pass, because a Library's status reads both and the catalog step
 	// reads the pods again. The member pods include the pods of every
-	// library Job, because each one runs a catalog agent. A list that fails ends the pass: without the
+	// library Job, because each one runs a catalog agent. A read that fails ends the pass: without the
 	// Jobs the pass cannot tell what is running, and without the pods it
 	// cannot tell whether a namespace's catalog stands.
-	jobs, err := ListWorkerJobs(ctx, o.client)
+	jobs, err := o.watched.readWorkerJobs(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing worker jobs: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the worker jobs: %v\n", err)
 		return
 	}
 	members, err := o.watched.readMemberPods()
@@ -316,9 +327,9 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "reading the catalog member pods: %v\n", err)
 		return
 	}
-	reads, err := readPass(ctx, o.client)
+	reads, err := readPass(o.watched)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing the claims, volumes, and pods the pass stands: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the claims, volumes, and pods the pass stands: %v\n", err)
 		return
 	}
 	o.reads = reads
@@ -421,7 +432,7 @@ func (o *operator) pass() {
 		}
 	}
 
-	// The screen pods come from the pass's one list of the pods it stands,
+	// The screen pods come from the pass's one read of the pods it stands,
 	// so the pass deletes only a pod that stands.
 	screens := reads.screenPods()
 	for _, namespace := range screenNamespaces(players.Items) {
@@ -551,6 +562,23 @@ type collections interface {
 	readMetadataProviders(ctx context.Context) (*MetadataProviderList, error)
 	readPlays() (*PlayList, error)
 	readPeople() (*PersonList, error)
+
+	// The objects the pass stands and the objects it reads to stand them.
+	// The pass reads each collection once when it starts (passreads.go).
+	readClaims() (*PersistentVolumeClaimList, error)
+	readVolumes() (*PersistentVolumeList, error)
+	readStoodPods() (*PodList, error)
+	readProgressMembers() (*PodList, error)
+	readWorkerJobs(ctx context.Context) (*JobList, error)
+	readNodes() (*NodeList, error)
+
+	// The objects of which the pass stands one by name, and writes only
+	// where it differs from the one the pass builds. An absent object is
+	// ErrNotFound.
+	readService(ctx context.Context, namespace, name string) (*Service, error)
+	readEndpointSlice(ctx context.Context, namespace, name string) (*EndpointSlice, error)
+	readConfigMap(ctx context.Context, namespace, name string) (*ConfigMap, error)
+	readClaimTemplate(ctx context.Context, namespace, name string) (*ResourceClaimTemplate, error)
 }
 
 // Poke never blocks, and the wake channel buffers exactly one. A wake

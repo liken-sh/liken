@@ -127,24 +127,21 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 	if verdict.reason == "" {
 		return err
 	}
-	desired := deriveProviderStatus(provider, verdict, now)
-	same, err := sameStatus(provider.Status, desired)
-	if err != nil || same {
-		return err
-	}
-	provider.Status = desired
-	key := storeKey(provider.Metadata.Namespace, provider.Metadata.Name)
-	err = o.versions.providers.send(key, func() (string, error) {
-		written, err := PutMetadataProviderStatus(ctx, o.client, provider)
-		if err != nil {
-			return "", err
-		}
-		return written.Metadata.ResourceVersion, nil
-	})
-	if errors.Is(err, ErrConflict) {
-		// Another writer changed the provider after the copy this pass
-		// read. The memo holds no version now, so the next pass reads the
-		// provider from the API server.
+	// A write that another writer's change refused with a 409 reads the
+	// provider again, derives the status from the fresh copy, and writes
+	// once more (settleStatus).
+	_, err = settleStatus(ctx, o.client, o.versions.providers,
+		metadataProviderPath(provider.Metadata.Namespace, provider.Metadata.Name), provider,
+		func(held *MetadataProvider) bool {
+			desired := deriveProviderStatus(held, verdict, now)
+			if same, err := sameStatus(held.Status, desired); err == nil && same {
+				return false
+			}
+			held.Status = desired
+			return true
+		})
+	// A provider deleted during the pass has no status left to write.
+	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
 	return err

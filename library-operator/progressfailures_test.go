@@ -227,17 +227,6 @@ func TestStandProgressStopsOnTheFailureTheAPIGives(t *testing.T) {
 	}
 }
 
-// A list the API server refuses is the failure the pass reports, so the
-// slices it writes are the ones it could read the members for.
-func TestListProgressMemberPodsAnswersTheFailure(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.broken["GET "+podsAllPath] = http.StatusInternalServerError
-
-	if _, err := ListProgressMemberPods(t.Context(), testOperator(t, cluster).client); err == nil {
-		t.Error("the list hid a refusal")
-	}
-}
-
 // The media topic base is media-operator's own default until this
 // operator's Deployment names another.
 func TestTheMediaTopicBaseFallsBackToTheDefault(t *testing.T) {

@@ -114,11 +114,17 @@ func buildTrickplayTemplate(library *Library) *ResourceClaimTemplate {
 // states a render block and none stands, written again where the block changed,
 // and deleted where the Library states none. A template's spec is immutable, so
 // a changed block is a delete and a create and never a patch.
+//
+// The pass reads the template from the watch of the templates this operator
+// stands, so a Library whose template is as it should be costs the API server
+// no request. The memo notes each create and delete, so a pass that deleted
+// and created the template does not read the older copy the store can still
+// hold, and delete the new one.
 func (o *operator) standTrickplayTemplate(ctx context.Context, library *Library) error {
 	namespace := library.Metadata.Namespace
 	name := trickplayTemplateName(library.Metadata.Name)
 
-	live, err := GetResourceClaimTemplate(ctx, o.client, namespace, name)
+	live, err := o.watched.readClaimTemplate(ctx, namespace, name)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
@@ -128,7 +134,7 @@ func (o *operator) standTrickplayTemplate(ctx context.Context, library *Library)
 		if !stands {
 			return nil
 		}
-		return DeleteResourceClaimTemplate(ctx, o.client, namespace, name)
+		return o.deleteClaimTemplate(ctx, namespace, name)
 	}
 
 	desired := buildTrickplayTemplate(library)
@@ -137,11 +143,13 @@ func (o *operator) standTrickplayTemplate(ctx context.Context, library *Library)
 		if err != nil || same {
 			return err
 		}
-		if err := DeleteResourceClaimTemplate(ctx, o.client, namespace, name); err != nil {
+		if err := o.deleteClaimTemplate(ctx, namespace, name); err != nil {
 			return err
 		}
 	}
-	_, err = CreateResourceClaimTemplate(ctx, o.client, desired)
+	_, err = written(o.versions.claimTemplates, storeKey(&desired.Metadata), func() (*ResourceClaimTemplate, error) {
+		return CreateResourceClaimTemplate(ctx, o.client, desired)
+	})
 	if errors.Is(err, ErrConflict) {
 		// Another pass, or another copy of this operator, created the template
 		// first, which is success.
@@ -166,6 +174,15 @@ func sameTemplateSpec(current, desired ResourceClaimTemplateSpec) (bool, error) 
 }
 
 // The templates of one namespace.
+// deleteClaimTemplate deletes one template and notes that the operator
+// holds no copy of it, so the next read goes to the API server while the
+// watch's store still holds the deleted copy.
+func (o *operator) deleteClaimTemplate(ctx context.Context, namespace, name string) error {
+	return o.versions.claimTemplates.send(storeKey(&ObjectMeta{Namespace: namespace, Name: name}), func() (string, error) {
+		return "", DeleteResourceClaimTemplate(ctx, o.client, namespace, name)
+	})
+}
+
 func claimTemplatesPath(namespace string) string {
 	return "/apis/" + deviceAPIVersion + "/namespaces/" + namespace + "/resourceclaimtemplates"
 }

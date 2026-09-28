@@ -72,6 +72,32 @@ func TestAStrandedCopyLosesItsPodAndItsClaim(t *testing.T) {
 	}
 }
 
+// A later pass can read the copy the heal took from a store that has not
+// dropped it yet, while the pass before it stood a fresh copy under the
+// same name. The delete names the uid it read, so the fresh copy and its
+// claim stay.
+func TestTheHealLeavesAFreshCopyUnderTheSameName(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := seedCatalog(cluster, "house", "house")
+	stale := copyOnNode(cluster, catalog, 0, "nuc-2")
+	stale.Metadata.UID = "stranded-uid"
+	fresh := *stale
+	fresh.Metadata.UID = "fresh-uid"
+	fresh.Spec.NodeName = "nuc-3"
+	cluster.pods[fresh.Metadata.Name] = &fresh
+
+	if err := testOperator(t, cluster).healStoreReplica(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+
+	if held := cluster.heldPod("house-catalog-0"); held == nil || held.Metadata.UID != "fresh-uid" {
+		t.Errorf("the pod under the name is %+v, want the fresh copy", held)
+	}
+	if cluster.heldClaim("house-catalog") == nil {
+		t.Error("the heal took the fresh copy's claim")
+	}
+}
+
 // A copy on a per-node class loses its pod alone. The claim is the
 // store's, every copy mounts it, and it pins the fresh copy to no node.
 func TestAStrandedCopyOnAPerNodeClassKeepsTheStoresClaim(t *testing.T) {

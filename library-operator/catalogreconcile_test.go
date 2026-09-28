@@ -389,10 +389,10 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	catalog := cluster.heldCatalog("house")
 	settled := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house", "house")}, nil, nil, blocker{}, testNow)
 
-	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
+	if err := operator.writeCatalogStatus(t.Context(), catalog, func(*NamespaceCatalog) CatalogStatus { return settled }); err != nil {
 		t.Fatal(err)
 	}
-	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
+	if err := operator.writeCatalogStatus(t.Context(), catalog, func(*NamespaceCatalog) CatalogStatus { return settled }); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "catalogs"); got != 1 {
@@ -400,7 +400,7 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	}
 
 	settled.StorageSize = "9Gi"
-	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
+	if err := operator.writeCatalogStatus(t.Context(), catalog, func(*NamespaceCatalog) CatalogStatus { return settled }); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "catalogs"); got != 2 {
@@ -411,33 +411,44 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	}
 }
 
-// A write another writer got to first is not a failure, and a write the
-// server refuses for any other reason is.
-func TestWriteCatalogStatusReadsAConflictAsSuccessAndReportsAFailure(t *testing.T) {
+// A write from a copy that another writer changed since is refused with a
+// 409. The write reads the Catalog again, composes the status from the
+// fresh copy, and writes once more. A write the server refuses for any
+// other reason is a failure.
+func TestWriteCatalogStatusSettlesAConflictAndReportsAFailure(t *testing.T) {
 	cases := []struct {
-		name    string
-		status  int
-		wantErr bool
+		name      string
+		broken    int
+		wantErr   bool
+		wantPuts  int
+		wantReads int
 	}{
-		{name: "a conflict is success", status: http.StatusConflict},
-		{name: "any other refusal is a failure", status: http.StatusInternalServerError, wantErr: true},
+		{name: "a conflict writes again from the fresh copy", wantPuts: 2, wantReads: 1},
+		{name: "any other refusal is a failure", broken: http.StatusInternalServerError, wantErr: true, wantPuts: 1},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			seedCatalog(cluster, "house", "house")
-			cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/catalogs/house/status"] = testCase.status
-			operator := testOperator(t, cluster)
-			catalog := cluster.heldCatalog("house")
-
-			err := operator.writeCatalogStatus(t.Context(), catalog,
-				standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house", "house")}, nil, nil, blocker{}, testNow))
-
-			if testCase.wantErr && err == nil {
-				t.Fatal("err = nil, want the server's refusal")
+			seedCatalog(cluster, "house", "house").Metadata.ResourceVersion = "7"
+			if testCase.broken != 0 {
+				cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/catalogs/house/status"] = testCase.broken
 			}
-			if !testCase.wantErr && err != nil {
-				t.Fatalf("err = %v, want a conflict to read as success", err)
+			operator := testOperator(t, cluster)
+			older := *cluster.heldCatalog("house")
+			older.Metadata.ResourceVersion = "6"
+
+			err := operator.writeCatalogStatus(t.Context(), &older, func(held *NamespaceCatalog) CatalogStatus {
+				return standingCatalogStatus(held, []*Pod{readyCatalogPod("house", "house")}, nil, nil, blocker{}, testNow)
+			})
+
+			if (err != nil) != testCase.wantErr {
+				t.Fatalf("err = %v, want an error: %v", err, testCase.wantErr)
+			}
+			if got := cluster.countRequests(http.MethodPut, "catalogs"); got != testCase.wantPuts {
+				t.Errorf("status writes = %d, want %d", got, testCase.wantPuts)
+			}
+			if got := countObjectReads(cluster.requestLines(), "catalogs"); got != testCase.wantReads {
+				t.Errorf("reads of the Catalog = %d, want %d", got, testCase.wantReads)
 			}
 		})
 	}

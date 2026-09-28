@@ -207,6 +207,18 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 		{name: "a person's finalizer", wakes: true, change: func(cluster *fakeCluster) {
 			cluster.people["person-a"].Metadata.Finalizers = []string{progressFinalizer}
 		}},
+		{name: "a claim whose phase changes", wakes: true, change: func(cluster *fakeCluster) {
+			cluster.claims["movies"].Status.Phase = "Lost"
+		}},
+		{name: "a worker Job that finishes", wakes: true, change: func(cluster *fakeCluster) {
+			cluster.jobs["house/movies-walk-a"].Status.Succeeded = 1
+		}},
+		{name: "the operator's own write of its Service", wakes: false, change: func(cluster *fakeCluster) {
+			cluster.services["house/catalog"].Spec.PublishNotReadyAddresses = false
+		}},
+		{name: "a Service somebody deleted", wakes: true, change: func(cluster *fakeCluster) {
+			delete(cluster.services, "house/catalog")
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -216,6 +228,9 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 			cluster.pods[member.Metadata.Name] = member
 			seedPlayer(cluster, "den", "house", screenController)
 			cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a"}}
+			cluster.jobs["house/movies-walk-a"] = &Job{Metadata: ObjectMeta{Name: "movies-walk-a", Namespace: "house",
+				Labels: map[string]string{scannerLabelKey: workerLabelValue}}}
+			cluster.services["house/catalog"] = buildCatalogService("house", nil)
 			_, wake := watchedCluster(t, cluster, nil)
 
 			cluster.mutex.Lock()
@@ -370,12 +385,18 @@ func TestTheWatchesDropManagedFields(t *testing.T) {
 	}
 }
 
-// A pass reads the eight watched collections from the informers and
-// sends no list for any of them. A pass that finds nothing changed
-// writes nothing, so its own writes wake no pass after it.
+// A pass reads every watched collection from the informers and sends no
+// list for any of them. A pass that finds nothing changed writes nothing,
+// so its own writes wake no pass after it. The two Catalogs name no
+// Jellyfin server, so the pass sends no read or delete for the backfill
+// Job or the Jellyfin Service, and it reads the trickplay template of the
+// Library with a render block from its watch: a settled pass sends the
+// API server nothing. The same pass sent 20 requests when it listed the claims, the
+// volumes, the pods, the Jobs, and the nodes, and read the Services and
+// the slices by name.
 func TestASteadyPassListsNoWatchedCollectionAndWakesNothing(t *testing.T) {
 	cluster := newFakeCluster()
-	boundHouse(cluster)
+	boundHouse(cluster).Spec.Trickplay.Render = libraryWithRender("gpu.liken.sh", "").Spec.Trickplay.Render
 	boundStudio(cluster)
 	for _, namespace := range []string{"house", "studio"} {
 		pod := readyCatalogPod(namespace, namespace)
@@ -398,15 +419,15 @@ func TestASteadyPassListsNoWatchedCollectionAndWakesNothing(t *testing.T) {
 
 	operator.pass()
 
-	for collection := range watchedKinds {
-		if collection == podsAllPath {
-			continue
-		}
-		if listed := cluster.countRequests(http.MethodGet, strings.TrimPrefix(collection, "/")); listed != 0 {
-			t.Errorf("the pass listed %s %d times, want none", collection, listed)
+	sent := cluster.requestLines()
+	for _, line := range sent {
+		if _, listed := watchedKinds[strings.TrimPrefix(line, http.MethodGet+" ")]; listed {
+			t.Errorf("the pass sent %s, want every watched collection read from its store", line)
 		}
 	}
-	t.Logf("a steady pass sent %d requests", cluster.countRequests("", ""))
+	if len(sent) != 0 {
+		t.Errorf("a steady pass sent %d requests, want none: %v", len(sent), sent)
+	}
 	if wokeWithin(wake, watchQuietSpell) {
 		t.Error("a steady pass woke the next one")
 	}

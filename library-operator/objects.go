@@ -87,8 +87,8 @@ type PersistentVolume struct {
 	Status     PersistentVolumeStatus `json:"status,omitzero"`
 }
 
-// PersistentVolumeList is the volumes one list answers, which is how the
-// sweep reads the volumes this operator wrote.
+// PersistentVolumeList is the volumes one read of the volume watch
+// answers, which is how the pass and the sweep read them.
 type PersistentVolumeList struct {
 	Metadata ListMeta           `json:"metadata"`
 	Items    []PersistentVolume `json:"items"`

@@ -87,9 +87,12 @@ func (o *operator) standPeopleConfigMap(ctx context.Context, namespace string, o
 	if err != nil {
 		return err
 	}
-	live, err := GetConfigMap(ctx, o.client, namespace, peopleConfigMapName)
+	live, err := o.watched.readConfigMap(ctx, namespace, peopleConfigMapName)
+	key := storeKey(&desired.Metadata)
 	if errors.Is(err, ErrNotFound) {
-		_, err := CreateConfigMap(ctx, o.client, desired)
+		_, err := written(o.versions.configMaps, key, func() (*ConfigMap, error) {
+			return CreateConfigMap(ctx, o.client, desired)
+		})
 		if errors.Is(err, ErrConflict) {
 			return nil
 		}
@@ -104,7 +107,9 @@ func (o *operator) standPeopleConfigMap(ctx context.Context, namespace string, o
 	}
 	live.Metadata.OwnerReferences = desired.Metadata.OwnerReferences
 	live.Data = desired.Data
-	if _, err := UpdateConfigMap(ctx, o.client, live); err != nil {
+	if _, err := written(o.versions.configMaps, key, func() (*ConfigMap, error) {
+		return UpdateConfigMap(ctx, o.client, live)
+	}); err != nil {
 		return fmt.Errorf("rewriting the people of %s: %w", namespace, err)
 	}
 	return nil

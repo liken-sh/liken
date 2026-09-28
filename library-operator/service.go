@@ -28,6 +28,9 @@ type gossipCluster struct {
 	service   string
 	port      int32
 	container string
+	// label is the value of scannerLabelKey on the Service, which is how
+	// the operator's watch of the Services it stands selects this one.
+	label string
 }
 
 // The API group the Service belongs to, and the clusterIP value that
@@ -124,6 +127,7 @@ func buildGossipService(cluster gossipCluster, namespace string, owners []OwnerR
 		Metadata: ObjectMeta{
 			Name:            cluster.service,
 			Namespace:       namespace,
+			Labels:          map[string]string{scannerLabelKey: cluster.label},
 			OwnerReferences: owners,
 		},
 		Spec: ServiceSpec{
@@ -158,13 +162,9 @@ func (o *operator) standCatalogService(ctx context.Context, namespace string, ow
 func (o *operator) standGossipService(ctx context.Context, cluster gossipCluster, namespace string, owners []OwnerReference) error {
 	desired := buildGossipService(cluster, namespace, owners)
 
-	live, err := GetService(ctx, o.client, namespace, cluster.service)
+	live, err := o.watched.readService(ctx, namespace, cluster.service)
 	if errors.Is(err, ErrNotFound) {
-		_, err := CreateService(ctx, o.client, desired)
-		if errors.Is(err, ErrConflict) {
-			return nil
-		}
-		return err
+		return o.createService(ctx, desired)
 	}
 	if err != nil {
 		return err
@@ -173,11 +173,36 @@ func (o *operator) standGossipService(ctx context.Context, cluster gossipCluster
 	if sameService(live, desired) {
 		return nil
 	}
+	live.Metadata.Labels = desired.Metadata.Labels
 	live.Metadata.OwnerReferences = desired.Metadata.OwnerReferences
 	live.Spec.PublishNotReadyAddresses = desired.Spec.PublishNotReadyAddresses
 	live.Spec.Selector = desired.Spec.Selector
 	live.Spec.Ports = desired.Spec.Ports
-	_, err = UpdateService(ctx, o.client, live)
+	return o.updateService(ctx, live)
+}
+
+// createService creates a Service and notes the version the API server
+// answered. A conflict means another writer created it first, which is
+// success. The memo then holds no version, so the next pass reads the
+// Service from the API server, and a Service the watch does not select
+// yet, such as one with no label, is read and written anyway.
+func (o *operator) createService(ctx context.Context, service *Service) error {
+	_, err := written(o.versions.services, storeKey(&service.Metadata), func() (*Service, error) {
+		return CreateService(ctx, o.client, service)
+	})
+	if errors.Is(err, ErrConflict) {
+		return nil
+	}
+	return err
+}
+
+// updateService writes a Service back and notes the version the API
+// server answered. A conflict is left to the next pass, which reads the
+// Service from the API server because the memo holds no version.
+func (o *operator) updateService(ctx context.Context, service *Service) error {
+	_, err := written(o.versions.services, storeKey(&service.Metadata), func() (*Service, error) {
+		return UpdateService(ctx, o.client, service)
+	})
 	return err
 }
 
@@ -192,6 +217,9 @@ func (o *operator) standGossipService(ctx context.Context, cluster gossipCluster
 // it again.
 func sameService(live, desired *Service) bool {
 	if !slices.Equal(live.Metadata.OwnerReferences, desired.Metadata.OwnerReferences) {
+		return false
+	}
+	if live.Metadata.Labels[scannerLabelKey] != desired.Metadata.Labels[scannerLabelKey] {
 		return false
 	}
 	if live.Spec.ClusterIP != desired.Spec.ClusterIP {

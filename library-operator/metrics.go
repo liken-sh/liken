@@ -51,6 +51,15 @@ const (
 	kindMetadataProvider = "MetadataProvider"
 	kindPlay             = "Play"
 	kindPerson           = "Person"
+
+	kindClaim         = "PersistentVolumeClaim"
+	kindVolume        = "PersistentVolume"
+	kindJob           = "Job"
+	kindNode          = "Node"
+	kindService       = "Service"
+	kindEndpointSlice = "EndpointSlice"
+	kindConfigMap     = "ConfigMap"
+	kindClaimTemplate = "ResourceClaimTemplate"
 )
 
 // metrics holds every series this operator publishes. A nil *metrics is

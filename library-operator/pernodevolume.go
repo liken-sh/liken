@@ -31,11 +31,6 @@ const (
 	claimLabelKey          = "library.liken.sh/claim"
 )
 
-// The selector the sweep lists with. It names the two label keys and no
-// value, so one request answers every volume this operator wrote, in
-// every namespace.
-const operatorVolumeQuery = "labelSelector=" + claimNamespaceLabelKey + "," + claimLabelKey
-
 // perNodeVolumeName names the volume one claim binds to. A
 // PersistentVolume is cluster-scoped, so the name carries the claim's
 // namespace. The driver's design names the volume handle after the
@@ -160,7 +155,7 @@ func (o *operator) standPerNodeVolume(ctx context.Context, claim *PersistentVolu
 	if !volumeIsSpent(standing) {
 		return nil
 	}
-	if err := DeletePersistentVolume(ctx, o.client, name); err != nil {
+	if err := DeletePersistentVolume(ctx, o.client, name, standing.Metadata.UID); err != nil {
 		return err
 	}
 	return o.rewritePerNodeVolume(ctx, claim)
@@ -227,8 +222,12 @@ func (o *operator) classIsPerNode(ctx context.Context, name string) (bool, error
 // copies the driver holds on each node. The delete takes only a volume
 // that carries both labels with a value, so a volume another writer
 // labeled in part is left where it is.
+//
+// The sweep reads the volumes from the watch's store, which can still hold
+// a volume the pass deleted and wrote again under the same name. The
+// delete names the uid it read, so it never takes the volume written since.
 func (o *operator) sweepReleasedVolumes(ctx context.Context) error {
-	volumes, err := ListPersistentVolumes(ctx, o.client, operatorVolumeQuery)
+	volumes, err := o.watched.readVolumes()
 	if err != nil {
 		return err
 	}
@@ -241,7 +240,7 @@ func (o *operator) sweepReleasedVolumes(ctx context.Context) error {
 		if volume.Status.Phase != volumeReleased {
 			continue
 		}
-		if err := DeletePersistentVolume(ctx, o.client, volume.Metadata.Name); err != nil {
+		if err := DeletePersistentVolume(ctx, o.client, volume.Metadata.Name, volume.Metadata.UID); err != nil {
 			return err
 		}
 	}

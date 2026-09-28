@@ -12,7 +12,6 @@ package main
 
 import (
 	"context"
-	"net/http"
 )
 
 // The two container names a person reads in kubectl logs. They say what
@@ -277,19 +276,8 @@ func mediaTopicBaseOf(stated string) string {
 	return stated
 }
 
-// ProgressMemberQuery narrows a pod list to the pods that hold a
-// progress agent. The equals sign inside the selector is
-// percent-encoded, so the server reads one parameter and not two.
-const progressMemberQuery = "labelSelector=" + progressMemberLabelKey + "%3D" + progressMemberLabelValue
-
-// ListProgressMemberPods reads every pod that holds a progress agent
-// across every namespace, because a Catalog is in whatever namespace
-// its Libraries are. The pass writes each namespace's progress
-// EndpointSlice over the answer.
-func ListProgressMemberPods(ctx context.Context, c *Client) (*PodList, error) {
-	list := &PodList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+progressMemberQuery, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
+// progressMemberSelector selects the pods that hold a progress agent,
+// in every namespace, because a Catalog is in whatever namespace its
+// Libraries are. The pass writes each namespace's progress EndpointSlice
+// over them.
+const progressMemberSelector = progressMemberLabelKey + "=" + progressMemberLabelValue

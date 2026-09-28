@@ -98,7 +98,7 @@ func TestCatalogsByNamespaceGroupAndSort(t *testing.T) {
 
 // The status write goes through the status subresource of the Catalog
 // in its own namespace, and it carries the resourceVersion it read.
-func TestPutCatalogStatusWritesTheStatusSubresource(t *testing.T) {
+func TestReplaceStatusWritesTheCatalogsStatusSubresource(t *testing.T) {
 	client, recorded := recordingAPI(t, NamespaceCatalog{
 		Metadata: ObjectMeta{Name: "house", Namespace: "house", ResourceVersion: "5"},
 	})
@@ -107,8 +107,7 @@ func TestPutCatalogStatusWritesTheStatusSubresource(t *testing.T) {
 		Status:   CatalogStatus{StorageSize: "1Gi"},
 	}
 
-	written, err := PutCatalogStatus(t.Context(), client, catalog)
-	if err != nil {
+	if err := replaceStatus(t.Context(), client, catalogPath("house", "house"), catalog); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,7 +116,7 @@ func TestPutCatalogStatusWritesTheStatusSubresource(t *testing.T) {
 	if !strings.Contains(recorded.body, `"resourceVersion":"4"`) {
 		t.Errorf("body = %s, want the version the read answered", recorded.body)
 	}
-	if written.Metadata.ResourceVersion != "5" {
-		t.Errorf("resourceVersion = %q, want the version the write answered", written.Metadata.ResourceVersion)
+	if catalog.Metadata.ResourceVersion != "5" {
+		t.Errorf("resourceVersion = %q, want the version the write answered", catalog.Metadata.ResourceVersion)
 	}
 }

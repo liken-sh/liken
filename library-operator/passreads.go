@@ -1,27 +1,22 @@
 package main
 
 // A pass stands many claims and pods, and it reads each one first to
-// learn whether it stands. One read by name per object is one request per
-// claim and per pod on every pass, and most passes find everything
-// standing. So a pass lists each collection once when it starts, and every
-// check during the pass reads that list. A pass reads the collections
-// again on every wake, so an answer is one pass old at most, the same age
-// as the Libraries and the Jobs the pass decides on.
+// learn whether it stands. So a pass reads each collection once when it
+// starts, from the watches' stores (watch.go), and every check during
+// the pass reads that copy. A read by name per object, or a list per
+// pass, would cost the API server one request per claim and per pod on
+// every pass, and most passes find everything standing.
 //
-// A write that raced the list is safe. A create of an object the list
-// missed meets a conflict, which every stand reads as success, and the
-// next pass reads the object. An object deleted after the list is created
-// again on the next pass.
+// A write that raced the watch is safe. A create of an object the store
+// does not hold yet meets a conflict, which every stand reads as success,
+// and the next pass reads the object. An object deleted after the read is
+// created again on the next pass.
 
-import (
-	"context"
-	"net/http"
-	"net/url"
-)
+import "context"
 
-// The claims of every namespace. A Library names a claim a person made,
-// which carries no label of this operator's, so the list takes no
-// selector.
+// The claims of every namespace, which the watch of the claims lists and
+// watches. A Library names a claim a person made, which carries no label
+// of this operator's, so the watch takes no selector.
 const claimsAllPath = "/api/v1/persistentvolumeclaims"
 
 // The selector that reaches every pod this operator stands by name: the
@@ -29,16 +24,12 @@ const claimsAllPath = "/api/v1/persistentvolumeclaims"
 // pod of another writer that took one of those names carries no such
 // label, so the pass never sees it, and its create of that name meets a
 // conflict and leaves the pod alone.
-var stoodPodsQuery = "labelSelector=" + url.QueryEscape(scannerLabelKey+" in ("+
-	catalogLabelValue+","+progressLabelValue+","+screenLabelValue+","+jellyfinLabelValue+")")
+const stoodPodsSelector = scannerLabelKey + " in (" +
+	catalogLabelValue + "," + progressLabelValue + "," + screenLabelValue + "," + jellyfinLabelValue + ")"
 
-// The objects one pass read by list, keyed by namespace and name, or by
-// name alone for a volume, which has no namespace. The pods are kept in
-// list order as well, for the screens the pass walks.
-//
-// The sweep of released volumes does not read this list. It deletes by
-// phase, and a pass can delete a spent volume and write a fresh one of the
-// same name, so the sweep lists the volumes again after every write.
+// The objects one pass read, keyed by namespace and name, or by name
+// alone for a volume, which has no namespace. The pods are kept in
+// namespace and name order as well, for the screens the pass walks.
 type passReads struct {
 	claims  map[string]*PersistentVolumeClaim
 	volumes map[string]*PersistentVolume
@@ -46,20 +37,20 @@ type passReads struct {
 	podList []Pod
 }
 
-// readPass lists the three collections. A list that fails ends the pass,
-// because without it the pass cannot tell a claim or a pod that stands from
-// one it must create.
-func readPass(ctx context.Context, c *Client) (*passReads, error) {
-	claims := &PersistentVolumeClaimList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, claimsAllPath, nil, claims); err != nil {
-		return nil, err
-	}
-	volumes, err := ListPersistentVolumes(ctx, c, "")
+// readPass reads the three collections. A read that fails ends the pass,
+// because without it the pass cannot tell a claim or a pod that stands
+// from one it must create.
+func readPass(watched collections) (*passReads, error) {
+	claims, err := watched.readClaims()
 	if err != nil {
 		return nil, err
 	}
-	pods := &PodList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+stoodPodsQuery, nil, pods); err != nil {
+	volumes, err := watched.readVolumes()
+	if err != nil {
+		return nil, err
+	}
+	pods, err := watched.readStoodPods()
+	if err != nil {
 		return nil, err
 	}
 	reads := &passReads{
@@ -82,14 +73,15 @@ func readPass(ctx context.Context, c *Client) (*passReads, error) {
 	return reads, nil
 }
 
-// PersistentVolumeClaimList is the claims one list answers.
+// PersistentVolumeClaimList is the claims one read answers.
 type PersistentVolumeClaimList struct {
 	Metadata ListMeta                `json:"metadata"`
 	Items    []PersistentVolumeClaim `json:"items"`
 }
 
-// readClaim answers one claim from the pass's list, and reads it by name
-// where no pass has listed the claims, which is a caller outside a pass.
+// readClaim answers one claim from the pass's read, and reads it by name
+// from the API server where no pass has read the claims, which is a
+// caller outside a pass.
 // An absent claim is ErrNotFound in both cases.
 func (o *operator) readClaim(ctx context.Context, namespace, name string) (*PersistentVolumeClaim, error) {
 	if o.reads == nil {
@@ -141,7 +133,8 @@ func (o *operator) forgetClaim(namespace, name string) {
 	}
 }
 
-// The screen pods among the pods the pass listed, in list order.
+// The screen pods among the pods the pass read, in namespace and name
+// order.
 func (r *passReads) screenPods() []Pod {
 	var screens []Pod
 	for _, pod := range r.podList {

@@ -197,13 +197,9 @@ func (o *operator) standJellyfinService(ctx context.Context, catalog *NamespaceC
 	desired := buildJellyfinService(catalog)
 	namespace, name := desired.Metadata.Namespace, desired.Metadata.Name
 
-	live, err := GetService(ctx, o.client, namespace, name)
+	live, err := o.watched.readService(ctx, namespace, name)
 	if errors.Is(err, ErrNotFound) {
-		_, err := CreateService(ctx, o.client, desired)
-		if errors.Is(err, ErrConflict) {
-			return nil
-		}
-		return err
+		return o.createService(ctx, desired)
 	}
 	if err != nil {
 		return err
@@ -215,8 +211,7 @@ func (o *operator) standJellyfinService(ctx context.Context, catalog *NamespaceC
 	live.Metadata.OwnerReferences = desired.Metadata.OwnerReferences
 	live.Spec.Selector = desired.Spec.Selector
 	live.Spec.Ports = desired.Spec.Ports
-	_, err = UpdateService(ctx, o.client, live)
-	return err
+	return o.updateService(ctx, live)
 }
 
 // The comparison reads what the operator states and nothing else. The address
@@ -238,7 +233,9 @@ func sameJellyfinService(live, desired *Service) bool {
 
 // retireJellyfin takes down the pair a Catalog no longer asks for. The name
 // label guards both deletes, so an object another writer gave this name is
-// left where it is, the rule retireStoreReplica follows.
+// left where it is, the rule retireStoreReplica follows. The pod and the
+// Service both come from the watches' stores, so a Catalog whose pair is
+// gone costs the API server no request.
 func (o *operator) retireJellyfin(ctx context.Context, catalog *NamespaceCatalog) error {
 	namespace, name := catalog.Metadata.Namespace, jellyfinName(catalog.Metadata.Name)
 
@@ -254,7 +251,7 @@ func (o *operator) retireJellyfin(ctx context.Context, catalog *NamespaceCatalog
 		o.forgetPod(namespace, name)
 	}
 
-	service, err := GetService(ctx, o.client, namespace, name)
+	service, err := o.watched.readService(ctx, namespace, name)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return nil
