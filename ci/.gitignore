@@ -1,0 +1,3 @@
+coverage.out
+# go build writes the program here.
+/ci

@@ -1,0 +1,10 @@
+# The program that reads every package.toml, writes the workflows, and
+# plans and publishes each run. It publishes nothing of its own.
+[package]
+name = "ci"
+license = "MIT"
+
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test"

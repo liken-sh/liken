@@ -1,0 +1,23 @@
+# The theme, the voice rules, and the site tools. Every manual builds
+# with it, and the screens of media-operator and library-operator draw
+# with its liken-iced crate and its fonts. It publishes nothing of its
+# own.
+[package]
+name = "brand"
+license = "MIT"
+
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 20
+
+# liken-iced is the crate that the screens of media-operator and
+# library-operator draw with.
+[[jobs]]
+name = "rust"
+toolchain = "rust"
+dir = "iced"
+run = "make test"
+timeout = 45
+env = { CARGO_INCREMENTAL = "0" }

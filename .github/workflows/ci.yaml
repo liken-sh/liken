@@ -1,104 +1,102 @@
-# This is the gate for every component in the repository. Each
-# component is a top-level directory, and each one has its own jobs
-# here: the same make targets that a workstation runs, the docs build,
-# and a build of every image. No job publishes anything. No job pushes
-# an image, a layer cache, a release, or a site.
+# This file is generated. Do not edit it: edit a component's
+# package.toml or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository. The repository job
+# below fails when this file differs from what the generator writes.
 #
-# The jobs for a component run only when the push changes a file in
-# that component's directory. The filter is the whole directory, so a
-# new file in a component is always inside it. A change to .github/ runs
-# every job, because it changes how every component builds, and so does
-# a change to brand/, because every site, every screen, and the OS's
-# release pages build from it. The changes job below computes the filter once, so
-# the rule is in this file and not in a third-party action.
+# This is the one workflow for every component in the repository. Each
+# component is a directory with a package.toml, and each one has its
+# own workflow, .github/workflows/component-<component>.yaml, which this file
+# calls. A component's call needs the components it depends on, so the
+# run page draws the dependency graph.
 #
-# The graph is written by hand while the components move into the
-# repository. A generator will write this file from each component's
-# own description of its builds and dependencies (plan 69, step 2).
+# The plan job decides what the run does with each component. Its
+# summary on the run page says, for each component, whether its jobs
+# run and why, and what a release tag at this commit would publish.
+#
+#   A push to a branch, a pull request, or a dispatch runs the jobs of
+#   each component whose files changed. It publishes nothing.
+#
+#   A push to main does the same, and it also publishes a development
+#   build of each component whose outputs changed, under a version
+#   such as 2026.10.02-001-dev-017-abcdef01.
+#
+#   A release tag, such as 2026.10.02-001, publishes each component
+#   whose outputs changed since its own newest release, under the
+#   tag's version. A component that did not change keeps its version.
+#
+# A job that needs a skipped job is skipped too, unless its condition
+# says otherwise. So each component's condition says: run when the plan
+# says so, as long as nothing it needs failed.
+#
+# A real publish happens only when the repository variable PUBLISH is
+# true. Without it, main and the tags run every check and push
+# nothing, and the plan job still proves that the workflow can push
+# to every package.
 name: ci
 
 on:
-  # Branches only. A push with no filter also runs for a tag, and a tag
-  # names a commit that a branch push already gated.
   push:
     branches: ['**']
+    # A release tag is the bare version. A glob cannot state the whole
+    # grammar, so the plan job checks the rest. The tags that the
+    # components brought from their own repositories start with the
+    # component's name, and they do not match.
+    tags: ['2*']
   pull_request:
     branches: [main]
-  # A dispatch runs every job, whatever changed.
   workflow_dispatch:
 
-# This runs one job per ref at a time. On a branch or a pull request,
-# a new push supersedes the old run, so there is no reason to let the
-# old run finish. On main, every push gets its own group (the commit
-# SHA), and nothing is cancelled, because each commit on main gets its
-# own verdict.
+# On a branch or a pull request, a new push cancels the run of the old
+# one. Each commit on main and each tag gets its own group and its own
+# verdict, and nothing cancels it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref_type != 'tag' }}
 
 permissions:
   contents: read
 
 jobs:
-  changes:
+  plan:
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    # packages: write lets the plan prove that this workflow can push
+    # to each package. A pull request from a fork gets a read-only
+    # token, and the plan skips the proof.
+    permissions:
+      contents: read
+      packages: write
     outputs:
-      liken: ${{ steps.diff.outputs.liken }}
-      audio-operator: ${{ steps.diff.outputs.audio-operator }}
-      bluetooth-operator: ${{ steps.diff.outputs.bluetooth-operator }}
-      display-operator: ${{ steps.diff.outputs.display-operator }}
-      equipment-operator: ${{ steps.diff.outputs.equipment-operator }}
-      media-operator: ${{ steps.diff.outputs.media-operator }}
-      library-operator: ${{ steps.diff.outputs.library-operator }}
-      people-operator: ${{ steps.diff.outputs.people-operator }}
-      git-csi-driver: ${{ steps.diff.outputs.git-csi-driver }}
-      per-node-csi-driver: ${{ steps.diff.outputs.per-node-csi-driver }}
-      brand: ${{ steps.diff.outputs.brand }}
+      components: ${{ steps.plan.outputs.components }}
     steps:
-      # The diff needs the commit it starts from, and a shallow
-      # checkout has only the one commit it builds.
+      # The plan diffs against the commit before the push and against
+      # each component's release tag, so it needs the history and the
+      # tags.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # A push compares against the commit the branch pointed at
-      # before the push, and a pull request against its base. A new
-      # branch has no earlier commit, and a force push can name one
-      # that no longer exists, so both of those run every job, the
-      # same as a dispatch.
-      - id: diff
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ci/go.mod
+          cache-dependency-path: ci/go.sum
+
+      - id: plan
+        working-directory: ci
         env:
           EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           BEFORE: ${{ github.event.before }}
           BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          case "$EVENT" in
-            push) base="$BEFORE" ;;
-            pull_request) base="$BASE" ;;
-            *) base="" ;;
-          esac
-          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
-            changed="$(git diff --name-only "$base" HEAD)"
-          else
-            changed="*"
-          fi
-          for component in liken audio-operator bluetooth-operator \
-            display-operator equipment-operator media-operator \
-            library-operator people-operator git-csi-driver \
-            per-node-csi-driver brand; do
-            if [ "$changed" = "*" ] \
-              || grep -qE "^($component/|\.github/|brand/)" <<<"$changed"; then
-              echo "$component=true"
-            else
-              echo "$component=false"
-            fi
-          done | tee -a "$GITHUB_OUTPUT"
+          PUBLISH: ${{ vars.PUBLISH }}
+          PROBE: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run . plan -root ..
 
-  # The files at the top of the repository belong to no component:
-  # the plans, the agent files, and this workflow. The root
-  # .pre-commit-config.yaml checks them. The skips name each component,
-  # because each component's hooks run in that component's own jobs.
+  # The files at the top of the repository belong to no component: the
+  # plans, the agent files, and the workflows. The root
+  # .pre-commit-config.yaml checks them, and each component's own
+  # hooks run in that component's jobs.
   repository:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -109,27 +107,24 @@ jobs:
           prek-version: 0.5.2
           extra-args: >-
             --all-files
-            --skip liken/
             --skip audio-operator/
             --skip bluetooth-operator/
+            --skip brand/
+            --skip ci/
             --skip display-operator/
             --skip equipment-operator/
+            --skip git-csi-driver/
             --skip media-operator/
             --skip library-operator/
+            --skip liken/
             --skip people-operator/
-            --skip git-csi-driver/
             --skip per-node-csi-driver/
-            --skip brand/
 
-  # The OS's quality checks are the hooks in liken/.pre-commit-config.yaml,
-  # the same config that runs at commit time on a workstation, so CI and
-  # a workstation use the same definition of "clean". staticcheck and
-  # go-test-coverage are tool directives in liken/go.mod, and the Go
-  # version comes from that file too.
-  liken-checks:
-    name: liken / checks
-    needs: changes
-    if: needs.changes.outputs.liken == 'true'
+  # The graph job proves that the generated workflows are current, and
+  # that each package.toml names every component its code uses. A
+  # dependency that package.toml leaves out fails silently: the
+  # component would not rebuild when the dependency changes.
+  graph:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
@@ -137,949 +132,337 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: liken/go.mod
-          cache-dependency-path: liken/go.sum
+          go-version-file: ci/go.mod
+          cache-dependency-path: '**/go.sum'
 
-      # prek runs the hooks of the liken project only. The action
-      # caches the environments of the remote hooks between runs, and
-      # it runs with --show-diff-on-failure, so a hook that modifies a
-      # file fails with the diff it would make.
-      - uses: j178/prek-action@v2
-        with:
-          prek-version: 0.5.2
-          extra-args: --all-files liken/
+      - name: check the generated workflows
+        working-directory: ci
+        run: go run . generate -root .. -check
 
-  # The docs domain is a nested Go module, so the hooks above never
-  # see it. This job runs its checks and builds the site.
-  liken-docs:
-    name: liken / docs
-    needs: changes
-    if: needs.changes.outputs.liken == 'true'
+      - name: check each package.toml against the code
+        working-directory: ci
+        run: go run . deps -root ..
+
+  audio-operator:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
+    uses: ./.github/workflows/component-audio-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  bluetooth-operator:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
+    uses: ./.github/workflows/component-bluetooth-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  brand:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['brand'].check }}
+    uses: ./.github/workflows/component-brand.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['brand'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['brand'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  ci:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['ci'].check }}
+    uses: ./.github/workflows/component-ci.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['ci'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['ci'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  display-operator:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].check }}
+    uses: ./.github/workflows/component-display-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  equipment-operator:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['equipment-operator'].check }}
+    uses: ./.github/workflows/component-equipment-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  git-csi-driver:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].check }}
+    uses: ./.github/workflows/component-git-csi-driver.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  media-operator:
+    needs: [plan, brand, display-operator]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].check }}
+    uses: ./.github/workflows/component-media-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  library-operator:
+    needs: [plan, brand, display-operator, media-operator]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].check }}
+    uses: ./.github/workflows/component-library-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  liken:
+    needs: [plan, brand]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].check }}
+    uses: ./.github/workflows/component-liken.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['liken'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['liken'].publish }}
+    permissions:
+      contents: read
+      packages: write
+    # The OS publishes to the release channel with the channel's key.
+    secrets: inherit
+
+  people-operator:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].check }}
+    uses: ./.github/workflows/component-people-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  per-node-csi-driver:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].check }}
+    uses: ./.github/workflows/component-per-node-csi-driver.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  # The site is every component's manual in one tree: liken's manual
+  # at the root, and each other component's manual under its prefix,
+  # such as liken.sh/display/. GitHub Pages serves it from this
+  # repository at liken.sh. Every push to main deploys it, because
+  # the coverage report of each component is part of it.
+  #
+  # A component whose jobs did not run in this push has no new
+  # coverage profile, so its report is the one the site serves now.
+  site:
+    needs: [plan, audio-operator, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver]
+    if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: liken
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # Two deploys in quick succession would race, and the check at the
+    # end needs nothing else to change while it runs.
+    concurrency:
+      group: site
     steps:
       - uses: actions/checkout@v7
 
-      # Hugo is a tool dependency of the docs module, so `go tool hugo`
-      # compiles it from the module cache, and the cache paths cover
-      # both go.sum files.
       - uses: actions/setup-go@v6
         with:
-          go-version-file: liken/go.mod
-          cache-dependency-path: |
-            liken/go.sum
-            liken/docs/go.sum
+          go-version-file: liken/docs/go.mod
+          cache-dependency-path: '**/docs/go.sum'
 
-      # setup-go saves its cache only when its key misses, and the key
-      # tracks the go.sum files, so between two bumps the Go build
-      # cache inside the entry never refreshes, and Go trims the
-      # compiled Hugo and crdref objects out of it. This entry saves on
-      # every run, under a key that ends in the commit, and restores
-      # the newest entry for the same docs/go.sum.
-      - uses: actions/cache@v6
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
         with:
-          path: ~/.cache/go-build
-          key: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-
+          name: coverage-audio-operator-go
+          path: audio-operator
 
-      # The make target generates the reference pages first, because
-      # the link check reads them as sources and as targets.
-      - name: test the docs
-        run: make -C docs test
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
+        with:
+          name: coverage-bluetooth-operator-go
+          path: bluetooth-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].check }}
+        with:
+          name: coverage-display-operator-go
+          path: display-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].check }}
+        with:
+          name: coverage-equipment-operator-go
+          path: equipment-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].check }}
+        with:
+          name: coverage-git-csi-driver-go
+          path: git-csi-driver
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check }}
+        with:
+          name: coverage-media-operator-go
+          path: media-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check }}
+        with:
+          name: coverage-media-operator-rust
+          path: media-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check }}
+        with:
+          name: coverage-library-operator-go
+          path: library-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check }}
+        with:
+          name: coverage-library-operator-rust
+          path: library-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['liken'].check }}
+        with:
+          name: coverage-liken-checks
+          path: liken
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].check }}
+        with:
+          name: coverage-people-operator-go
+          path: people-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].check }}
+        with:
+          name: coverage-per-node-csi-driver-go
+          path: per-node-csi-driver
 
       - name: build the site
-        run: make -C docs build
+        run: make site SITE_URL=https://liken.sh
 
-  # The build proves that the tree still assembles an operating system,
-  # and that the operating system still boots to a Ready Kubernetes
-  # node under both firmware types that liken supports. The runner
-  # preparation (toolchain, KVM, vendored-input caches) is the
-  # build-setup action.
-  liken-build:
-    name: liken / build
-    needs: changes
-    if: needs.changes.outputs.liken == 'true'
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/docs
+
+      - uses: actions/deploy-pages@v5
+
+      # The deploy finishing does not mean the public name serves the
+      # new tree yet: Pages is behind a CDN that caches pages for up to
+      # ten minutes. release.txt holds the commit, so the loop waits
+      # until the public name serves this commit's tree.
+      - name: check the served site
+        run: |
+          expected="${{ github.sha }}"
+          for _ in $(seq 1 48); do
+            served="$(curl --fail --silent https://liken.sh/release.txt || true)"
+            if [ "$served" = "$expected" ]; then break; fi
+            sleep 15
+          done
+          [ "$served" = "$expected" ] || {
+            echo "the site still serves ${served:-nothing}, expected $expected"
+            exit 1
+          }
+          fetch() {
+            curl --fail --silent --retry 5 --retry-delay 3 --retry-all-errors "$@"
+          }
+          echo "checking the front page"
+          fetch https://liken.sh/ | grep -q "boots a machine"
+          echo "checking the markdown twin of a page"
+          fetch --head https://liken.sh/docs/guides/install/index.md \
+            | grep -qi "content-type: text/markdown"
+          echo "checking llms.txt"
+          fetch https://liken.sh/llms.txt | grep -q "^# liken"
+          echo "checking the audio-operator manual"
+          fetch https://liken.sh/audio/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the bluetooth-operator manual"
+          fetch https://liken.sh/bluetooth/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the display-operator manual"
+          fetch https://liken.sh/display/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the equipment-operator manual"
+          fetch https://liken.sh/equipment/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the git-csi-driver manual"
+          fetch https://liken.sh/git/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the media-operator manual"
+          fetch https://liken.sh/media/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the library-operator manual"
+          fetch https://liken.sh/library/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the people-operator manual"
+          fetch https://liken.sh/people/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the per-node-csi-driver manual"
+          fetch https://liken.sh/per-node/ > page.html
+          grep -q "<title>" page.html
+
+  # The release record is the GitHub release for the tag: every
+  # component and its version at this tag, whether this tag published
+  # it or an earlier one did.
+  record:
+    needs: [plan, audio-operator, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver]
+    if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
-    # A warm-cache build takes 3 to 6 minutes, and a cold-cache build
-    # takes about 15, so 20 stops a hung run without killing a real
-    # one. A pin bump empties that pin's cache on purpose, so cold
-    # runs are routine, not rare.
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: liken
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      # The build names itself with git describe (liken/version.mk):
-      # the most recent release tag and the distance past it. A shallow
-      # checkout would leave describe unable to see the tags.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/build-setup
-
-      # Every vendored input fetched and verified, the Go programs
-      # compiled, a fresh identity minted, and the bootable image
-      # assembled.
-      - run: make all
-
-      # The UEFI smoke drill (liken/dev-cluster/smoke.sh) installs
-      # node-1 onto a blank disk, boots that disk through OVMF's NVRAM
-      # boot entries, and passes when its node reports Ready over the
-      # cluster's API.
-      - run: make smoke-uefi
-
-      # The same drill under BIOS firmware proves the other boot chain:
-      # MBR boot code, GRUB's core image, its config on the boot home,
-      # and the chosen slot's kernel.
-      - run: make smoke-bios
-
-      # The serial console is the record of the boot, and it is worth
-      # keeping when the drill passes, not only when it fails: a
-      # healthy boot is the baseline for the next unhealthy one.
-      # qemu.log holds the failure when QEMU never reaches a console.
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: liken-node-1-logs
-          path: liken/dev-cluster/guests/node-1/*.log
-          if-no-files-found: ignore
-
-  audio-operator-go:
-    name: audio-operator / go
-    needs: changes
-    if: needs.changes.outputs.audio-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: audio-operator
-    steps:
-      - uses: actions/checkout@v7
-
       - uses: actions/setup-go@v6
         with:
-          go-version-file: audio-operator/go.mod
-          cache-dependency-path: audio-operator/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain. audio-operator/Makefile says why the gate pins a
-      # toolchain, and .testcoverage.yml holds the floor.
-      - run: make test-go
-
-  audio-operator-docs:
-    name: audio-operator / docs
-    needs: changes
-    if: needs.changes.outputs.audio-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: audio-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      # The docs domain is its own Go module, and Hugo is a tool
-      # directive in it, so the Go toolchain is the only build
-      # dependency.
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: audio-operator/docs/go.mod
-          cache-dependency-path: audio-operator/docs/go.sum
-
-      # The same cache entry as liken / docs, for the same reason.
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: audio-operator-docs-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: audio-operator-docs-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-
-
-      # The link check, then the site build.
-      - run: make test-docs
-
-  # The layer cache is in ghcr, as a :buildcache tag beside each image.
-  # This job only reads it, and the packages are public, so it needs
-  # no login.
-  audio-operator-images:
-    name: audio-operator / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.audio-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: audio-operator
-            file: Dockerfile
-          - image: audio-operator-cli
-            file: Dockerfile.cli
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: audio-operator
-          file: audio-operator/${{ matrix.file }}
-          push: false
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  bluetooth-operator-go:
-    name: bluetooth-operator / go
-    needs: changes
-    if: needs.changes.outputs.bluetooth-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: bluetooth-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: bluetooth-operator/go.mod
-          cache-dependency-path: bluetooth-operator/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  bluetooth-operator-docs:
-    name: bluetooth-operator / docs
-    needs: changes
-    if: needs.changes.outputs.bluetooth-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: bluetooth-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: bluetooth-operator/docs/go.mod
-          cache-dependency-path: bluetooth-operator/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: bluetooth-operator-docs-build-${{ runner.os }}-${{ hashFiles('bluetooth-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: bluetooth-operator-docs-build-${{ runner.os }}-${{ hashFiles('bluetooth-operator/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  bluetooth-operator-images:
-    name: bluetooth-operator / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.bluetooth-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: bluetooth-operator
-            file: Dockerfile
-          - image: bluetooth-bondfetch
-            file: bondfetch/Dockerfile
-          - image: bluetoothd
-            file: bluetoothd/Dockerfile
-          - image: bluetooth-operator-cli
-            file: Dockerfile.cli
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: bluetooth-operator
-          file: bluetooth-operator/${{ matrix.file }}
-          push: false
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  display-operator-go:
-    name: display-operator / go
-    needs: changes
-    if: needs.changes.outputs.display-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: display-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: display-operator/go.mod
-          cache-dependency-path: display-operator/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  display-operator-docs:
-    name: display-operator / docs
-    needs: changes
-    if: needs.changes.outputs.display-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: display-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: display-operator/docs/go.mod
-          cache-dependency-path: display-operator/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  # The base images (vulkan, vaapi, ffmpeg, mpv, and weston) are stages
-  # in display-operator's Dockerfile. Step 5 of plan 69 makes each one
-  # a component of its own.
-  display-operator-images:
-    name: display-operator / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.display-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: vulkan
-            file: Dockerfile
-            target: vulkan
-          - image: vaapi
-            file: Dockerfile
-            target: vaapi
-          - image: ffmpeg
-            file: Dockerfile
-            target: ffmpeg
-          - image: mpv
-            file: Dockerfile
-            target: mpv
-          - image: weston
-            file: Dockerfile
-            target: weston
-          - image: display-operator
-            file: Dockerfile
-            target: display-operator
-          - image: display-capture
-            file: Dockerfile
-            target: display-capture
-          - image: display-api
-            file: Dockerfile
-            target: display-api
-          - image: display-operator-cli
-            file: Dockerfile.cli
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: display-operator
-          file: display-operator/${{ matrix.file }}
-          target: ${{ matrix.target }}
-          push: false
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  equipment-operator-go:
-    name: equipment-operator / go
-    needs: changes
-    if: needs.changes.outputs.equipment-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: equipment-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: equipment-operator/go.mod
-          cache-dependency-path: equipment-operator/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  equipment-operator-docs:
-    name: equipment-operator / docs
-    needs: changes
-    if: needs.changes.outputs.equipment-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: equipment-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: equipment-operator/docs/go.mod
-          cache-dependency-path: equipment-operator/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: equipment-operator-docs-build-${{ runner.os }}-${{ hashFiles('equipment-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: equipment-operator-docs-build-${{ runner.os }}-${{ hashFiles('equipment-operator/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  equipment-operator-images:
-    name: equipment-operator / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.equipment-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: equipment-operator
-            file: Dockerfile
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: equipment-operator
-          file: equipment-operator/${{ matrix.file }}
-          push: false
-          build-args: |
-            VERSION=${{ github.sha }}
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  media-operator-go:
-    name: media-operator / go
-    needs: changes
-    if: needs.changes.outputs.media-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: media-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: media-operator/go.mod
-          cache-dependency-path: media-operator/go.sum
-
-      # The tests that cut media run the real ffmpeg.
-      - name: install ffmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  media-operator-docs:
-    name: media-operator / docs
-    needs: changes
-    if: needs.changes.outputs.media-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: media-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: media-operator/docs/go.mod
-          cache-dependency-path: media-operator/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: media-operator-docs-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: media-operator-docs-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  # The Rust workspace (idle, display, media-screen) builds against the
-  # liken-iced crate in brand/iced.
-  media-operator-rust:
-    name: media-operator / rust
-    needs: changes
-    if: needs.changes.outputs.media-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: media-operator
-    env:
-      CARGO_INCREMENTAL: 0
-      WLR_RENDERER: pixman
-    steps:
-      - uses: actions/checkout@v7
-
-      # The screen tests run the programs under cage, a headless
-      # Wayland compositor, on Mesa's software Vulkan driver.
-      - name: install the headless graphics
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
-            libwayland-client0 libxkbcommon0
-
-      # rustup reads the toolchain pin from rust-toolchain.toml.
-      - name: install the toolchain
-        run: rustup show
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: media-operator
-          cache-on-failure: true
-
-      - uses: taiki-e/install-action@v2.87.1
-        with:
-          tool: cargo-llvm-cov
-
-      - run: make test-rust
-
-  # Dockerfile.screen and Dockerfile.player copy the brand crate and fonts
-  # from a second build context named brand, which is brand/.
-  media-operator-images:
-    name: media-operator / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.media-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: media-operator
-            file: Dockerfile
-          - image: media-operator-player
-            file: Dockerfile.player
-          - image: media-operator-idle
-            file: Dockerfile.screen
-            target: idle
-          - image: media-operator-display
-            file: Dockerfile.screen
-            target: display
-          - image: media-operator-api
-            file: Dockerfile.api
-          - image: media-operator-cli
-            file: Dockerfile.cli
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: media-operator
-          file: media-operator/${{ matrix.file }}
-          target: ${{ matrix.target }}
-          push: false
-          build-contexts: brand=brand
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  library-operator-go:
-    name: library-operator / go
-    needs: changes
-    if: needs.changes.outputs.library-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: library-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: library-operator/go.mod
-          cache-dependency-path: library-operator/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  library-operator-docs:
-    name: library-operator / docs
-    needs: changes
-    if: needs.changes.outputs.library-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: library-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: library-operator/docs/go.mod
-          cache-dependency-path: library-operator/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: library-operator-docs-build-${{ runner.os }}-${{ hashFiles('library-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: library-operator-docs-build-${{ runner.os }}-${{ hashFiles('library-operator/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  # The media browser is its own Cargo workspace, and it builds against
-  # the liken-iced crate in brand/iced.
-  library-operator-rust:
-    name: library-operator / rust
-    needs: changes
-    if: needs.changes.outputs.library-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: library-operator/media-browser
-    env:
-      CARGO_INCREMENTAL: 0
-      WLR_RENDERER: pixman
-    steps:
-      - uses: actions/checkout@v7
-
-      # The screen tests run the programs under cage, a headless
-      # Wayland compositor, on Mesa's software Vulkan driver.
-      - name: install the headless graphics
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
-            libwayland-client0 libxkbcommon0
-
-      # rustup reads the toolchain pin from rust-toolchain.toml.
-      - name: install the toolchain
-        run: rustup show
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: library-operator/media-browser
-          cache-on-failure: true
-
-      - uses: taiki-e/install-action@v2.87.1
-        with:
-          tool: cargo-llvm-cov
-
-      - run: make test
-
-  # Each image names its own build context inside library-operator/. The
-  # media browser also copies the brand crate and fonts from a second
-  # build context named brand, which is brand/.
-  library-operator-images:
-    name: library-operator / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.library-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: library-operator
-            context: .
-            file: Dockerfile
-          - image: library-operator-ffmpeg
-            context: .
-            file: Dockerfile.ffmpeg
-          - image: library-operator-media-browser
-            context: media-browser
-            file: media-browser/Dockerfile
-          - image: library-operator-corrosion
-            context: corrosion
-            file: corrosion/Dockerfile
-          - image: library-operator-cli
-            context: .
-            file: Dockerfile.cli
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: library-operator/${{ matrix.context }}
-          file: library-operator/${{ matrix.file }}
-          push: false
-          build-contexts: brand=brand
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  people-operator-go:
-    name: people-operator / go
-    needs: changes
-    if: needs.changes.outputs.people-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: people-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: people-operator/go.mod
-          cache-dependency-path: people-operator/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  people-operator-docs:
-    name: people-operator / docs
-    needs: changes
-    if: needs.changes.outputs.people-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: people-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: people-operator/docs/go.mod
-          cache-dependency-path: people-operator/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: people-operator-docs-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: people-operator-docs-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  people-operator-images:
-    name: people-operator / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.people-operator == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: people-operator
-            file: Dockerfile
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: people-operator
-          file: people-operator/${{ matrix.file }}
-          push: false
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  git-csi-driver-go:
-    name: git-csi-driver / go
-    needs: changes
-    if: needs.changes.outputs.git-csi-driver == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: git-csi-driver
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: git-csi-driver/go.mod
-          cache-dependency-path: git-csi-driver/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  git-csi-driver-docs:
-    name: git-csi-driver / docs
-    needs: changes
-    if: needs.changes.outputs.git-csi-driver == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: git-csi-driver
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: git-csi-driver/docs/go.mod
-          cache-dependency-path: git-csi-driver/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: git-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('git-csi-driver/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: git-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('git-csi-driver/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  git-csi-driver-images:
-    name: git-csi-driver / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.git-csi-driver == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: git-csi-driver
-            file: Dockerfile
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: git-csi-driver
-          file: git-csi-driver/${{ matrix.file }}
-          push: false
-          build-args: |
-            VERSION=${{ github.sha }}
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  per-node-csi-driver-go:
-    name: per-node-csi-driver / go
-    needs: changes
-    if: needs.changes.outputs.per-node-csi-driver == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: per-node-csi-driver
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: per-node-csi-driver/go.mod
-          cache-dependency-path: per-node-csi-driver/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  per-node-csi-driver-docs:
-    name: per-node-csi-driver / docs
-    needs: changes
-    if: needs.changes.outputs.per-node-csi-driver == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: per-node-csi-driver
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: per-node-csi-driver/docs/go.mod
-          cache-dependency-path: per-node-csi-driver/docs/go.sum
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: per-node-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('per-node-csi-driver/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: per-node-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('per-node-csi-driver/docs/go.sum') }}-
-
-      - run: make test-docs
-
-  per-node-csi-driver-images:
-    name: per-node-csi-driver / ${{ matrix.image }}
-    needs: changes
-    if: needs.changes.outputs.per-node-csi-driver == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: per-node-csi-driver
-            file: Dockerfile
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: per-node-csi-driver
-          file: per-node-csi-driver/${{ matrix.file }}
-          push: false
-          build-args: |
-            VERSION=${{ github.sha }}
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-
-  brand-go:
-    name: brand / go
-    needs: changes
-    if: needs.changes.outputs.brand == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: brand
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: brand/go.mod
-          cache-dependency-path: brand/go.sum
-
-      # gofmt, vet, the race tests, and the coverage gate on its pinned
-      # toolchain.
-      - run: make test-go
-
-  # liken-iced is the crate that the screens of media-operator and
-  # library-operator draw with.
-  brand-rust:
-    name: brand / rust
-    needs: changes
-    if: needs.changes.outputs.brand == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: brand/iced
-    env:
-      CARGO_INCREMENTAL: 0
-    steps:
-      - uses: actions/checkout@v7
-
-      # rustup reads the toolchain pin from rust-toolchain.toml.
-      - name: install the toolchain
-        run: rustup show
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: brand/iced
-          cache-on-failure: true
-
-      - uses: taiki-e/install-action@v2.87.1
-        with:
-          tool: cargo-llvm-cov
-
-      - run: make test
+          go-version-file: ci/go.mod
+          cache-dependency-path: ci/go.sum
+
+      - name: write the release record
+        working-directory: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: go run . record -root .. -tag "${{ github.ref_name }}"

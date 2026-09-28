@@ -1,0 +1,47 @@
+# The operator that claims a machine's Bluetooth adapters and pairs devices.
+[package]
+name = "bluetooth-operator"
+license = "MIT"
+
+[docs]
+prefix = "bluetooth"
+
+# gofmt, vet, the race tests, and the coverage gate on its pinned
+# toolchain. The Makefile says why the gate pins a toolchain, and
+# .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 15
+coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+[outputs]
+deploy = "deploy"
+
+[[outputs.images]]
+name = "bluetooth-operator"
+file = "Dockerfile"
+
+[[outputs.images]]
+name = "bluetooth-bondfetch"
+file = "bondfetch/Dockerfile"
+
+[[outputs.images]]
+name = "bluetoothd"
+file = "bluetoothd/Dockerfile"
+
+# The CLI image carries the same version as the operator, so the base
+# binary pulls a CLI that never drifts from the operator it faces. It is
+# built for both architectures.
+[[outputs.images]]
+name = "bluetooth-operator-cli"
+file = "Dockerfile.cli"
+platforms = ["linux/amd64", "linux/arm64"]

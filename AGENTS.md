@@ -4,11 +4,12 @@ The `liken` project is one system, and this repository holds all of
 it. Each top-level directory is one component, named for what it
 ships. `liken/` is the OS. The operators claim a machine's hardware
 and serve its interfaces. The CSI drivers attach storage, and `brand/`
-holds the theme, the voice rules, and the site tools. `liken.sh/`
+holds the theme, the voice rules, and the site tools. `ci/` reads each
+component's `package.toml` and writes the CI workflows. `liken.sh/`
 declares the domain, the release channel, and the organization's
-repositories in Terraform. `plans/` holds
-the plans that cover more than one component, and each component keeps
-its own plans in its own `plans/`. Each component has its own
+repositories in Terraform. `plans/` holds the plans that cover more
+than one component, and each component keeps its own plans in its own
+`plans/`. Each component has its own
 `AGENTS.md` for the work inside it.
 
 Four repositories stay outside: `corrosion`, `plugins`, `log`, and
@@ -114,13 +115,14 @@ takes no commits, and its own work is on the `liken` branch. Treat
 
 ## Releases and development builds
 
-Releases are paused while the components move into this repository,
-under plan 69. `.github/workflows/ci.yaml` runs every component's
-tests, docs checks, and image builds, and it publishes nothing. Do not
-push a tag. Step 2 of plan 69 brings back one release path for every
-component.
+One CalVer tag releases every component whose outputs changed since its
+own previous release, and a push to `main` publishes a development
+build of each component that changed. Each component's `package.toml`
+names its dependencies, its checks, and its outputs, and `ci/` writes
+`.github/workflows/` from those files. Run `make workflows` after you
+change a `package.toml`; CI fails when the workflows differ from what
+the generator writes.
 
-The `releases` skill under `.agents/skills` holds the calendar scheme
-that every component versions on, and the release and development
-build flow that each component used before the move. Load it before
+The `releases` skill under `.agents/skills` holds the calendar scheme,
+what a tag releases, and how to pin a development build. Load it before
 tagging, publishing an image, or pinning a development build.

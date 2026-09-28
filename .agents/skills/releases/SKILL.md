@@ -1,26 +1,20 @@
 ---
 name: releases
-description: How the liken-sh repositories version and release. Covers the CalVer scheme, cutting a release tag in an operator repository, the development image builds on main, and the liken OS channel publish. Use when tagging, publishing an image, pinning a development build, or reasoning about a version across repositories.
+description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, pinning a development build, or reasoning about a component's version.
 ---
 
 # Releases and development builds
 
-**Releases are paused.** The components are moving into one
-repository under plan 69, and no release or development build workflow
-runs. Stop and tell me; do not push a tag. The rest of this skill
-describes the flow from before the move, when each component was its
-own repository. Step 2 of plan 69 replaces it.
+Every component in this repository versions on one calendar scheme,
+and one tag releases all of them. `.github/workflows/ci.yaml` carries
+out every release and every development build. `ci/`, the program
+that writes that workflow from each component's `package.toml`,
+decides what each run publishes.
 
-Every repository in the organization versions on the same calendar
-scheme, with a few exceptions. This skill carries the scheme and the
-release flow for each kind of repository, so a session at the
-organization root can cut or reason about a release without opening
-every repository's own rules.
-
-Read the repository's own `AGENTS.md` first. The operator repositories
-repeat the development build rules there, and the `liken` OS repository
-carries its own `release` skill under `.agents/skills/release`, which
-owns the exact steps for the OS.
+**Publishing needs the repository variable `PUBLISH` set to `true`.**
+Without it, a tag and a push to `main` run every check and push
+nothing. Check it with `gh variable get PUBLISH -R liken-sh/liken`. If
+it is not `true`, stop and tell me; do not push a tag.
 
 ## The version scheme
 
@@ -32,71 +26,122 @@ CalVer, `yyyy.mm.dd-nnn`:
 * The tag is the bare version, with no `v` prefix, and it is
   lightweight, not annotated.
 
-The scheme is the same in the `liken` OS repository and in every
-operator repository. Tags in `liken` before `2026.08.18-002` carry a
-`v` prefix. On a day that has tags in both forms, list both to find the
-highest serial:
-`git tag -l "$(date +%Y.%m.%d)-*" "v$(date +%Y.%m.%d)-*"`.
+The tags that the components brought from their own repositories carry
+the component's name as a prefix, such as
+`display-operator/2026.09.27-001`. They are history: nothing creates a
+prefixed tag now, and the release workflow does not run for one. The
+OS's tags before `2026.08.18-002` carry a `v` prefix.
 
-`corrosion` versions with semver, such as `v1.0.0` or
-`corro-client-v0.2.0-alpha.0`, because it is a general library.
-`brand` and `plugins` publish no tags.
+`corrosion`, outside this repository, versions with semver, because it
+is a general library.
 
-## Operator repositories
+## What a tag releases
 
-This is the flow in `audio-operator`, `bluetooth-operator`,
-`display-operator`, `equipment-operator`, `git-csi-driver`,
-`library-operator`, `media-operator`, `people-operator`, and
-`per-node-csi-driver`. Each repository's `AGENTS.md` states it.
+A pushed tag such as `2026.10.02-001` is a release. For each component
+that publishes, the plan job in `ci.yaml` reads the component's newest
+published release, finds the git tag of that release, and diffs the
+component's paths from there to the tagged commit:
 
-A pushed tag is a release. `release.yaml` builds every image in the
-repository beside the `ci.yaml` run of the same commit, waits for that
-run to pass, and pushes the images under the version tag and under
-`:latest`. The images go to `ghcr.io/liken-sh/<repository>`. The
-workflow refuses a tag that is not `yyyy.mm.dd-nnn` before it builds
-anything.
+* A component whose outputs changed releases under the tag's version.
+  Its checks run, its images build and pass their smoke checks, and
+  its publish job pushes the images and then its deploy artifact.
+* A component that did not change keeps its version. Its pods do not
+  restart.
+* A component with no release yet, or whose release has no git tag
+  here, releases.
 
-A push to `main` is a development build. `release.yaml` derives the
-version from `git describe` of the most recent release tag, plus a
-suffix: `2026.09.03-007-dev-003-abcdef01` is three commits past
-`2026.09.03-007`, at commit `abcdef01`. The suffix sorts after its
-release and before the next one. A development build never moves
-`:latest`, so a cluster that pulls a release keeps pulling releases.
+A component's paths are its own directory and the directories of every
+component its `package.toml` names in `[depends]`, through the whole
+graph. `docs/`, `plans/`, `AGENTS.md`, and `README.md` at the top of a
+component go into no output, so a change there does not release it.
 
-To run a development build, pin the manifests to the full 40-character
-commit sha and the image to the build's version:
+The git tag of a release is the bare version for a release made in this
+repository, or `<component>/<version>` for a release the component made
+in its own repository.
+
+The plan job's summary on the run page lists each component, whether
+it releases, and why. On every push to a branch, the same summary shows
+what a tag at that commit would release, so read it before you tag.
+
+The `record` job writes the GitHub release for the tag: every
+component and its version at that tag, and the OS's catalog entry when
+the tag released the OS.
+
+## Development builds
+
+A push to `main` publishes a development build of each component whose
+outputs changed in the push. The version comes from `git describe` of
+the newest release tag, plus a suffix:
+`2026.10.02-001-dev-017-abcdef01` is 17 commits past
+`2026.10.02-001`, at commit `abcdef01`. The count is for the whole
+repository. The suffix sorts after its release and before the next
+one. A development build never moves `:latest`.
+
+The OS publishes no development builds. The channel holds releases
+only.
+
+## Where the outputs go
+
+* Each image goes to `ghcr.io/liken-sh/<image>`, under the version.
+  A release also moves `:latest`, unless a newer release has it.
+* Each `deploy/` directory goes to
+  `ghcr.io/liken-sh/<component>-deploy` as an OCI artifact, after
+  every image of the component. The artifact's `kustomization.yaml`
+  names the component's images at the same version, so a cluster that
+  follows the artifact moves the manifests and the images in one step.
+* The OS goes to the channel at `https://releases.liken.sh`, through
+  `liken/releases/publish.sh`.
+
+A published version never changes. A rerun of a failed tag pushes only
+what the failed run did not.
+
+## Pin a component
+
+A cluster follows a component through a Flux `OCIRepository` on the
+deploy artifact, with the version as its tag:
 
 ```yaml
-resources:
-  - https://github.com/liken-sh/<repository>//deploy?ref=<full 40-character sha>
-images:
-  - name: ghcr.io/liken-sh/<repository>
-    newTag: 2026.09.03-007-dev-003-abcdef01
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: display-operator
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/liken-sh/display-operator-deploy
+  ref:
+    tag: 2026.10.02-001
 ```
 
-The CI run's step summary prints both lines for a commit. A `git fetch`
-by sha needs all forty characters, so the short sha inside the version
-is not enough for `ref=`.
+A development build pins the same way, with its development version as
+the tag. No pin names a commit sha.
 
 ## The liken OS
 
-The OS releases through `liken`'s own `release` skill, which owns the
-steps. Two facts let a session tell the kinds of build apart:
+The OS is the `liken/` component. The `release` skill under
+`.agents/skills/release` owns the steps of a release session. Two facts
+let a session tell the kinds of build apart:
 
-* A published release runs from serial `001` up. The tag triggers
-  `release.yaml`, which builds, runs the smoke drills, publishes the
-  artifacts and the source mirrors to `https://releases.liken.sh`, and
-  prints the catalog entry: the version and the sha256 of that
-  release's `release.yaml`. Deployments adopt a release from the
-  catalog, so a release session does not touch a cluster.
+* A published release runs from serial `001` up. Its publish job builds
+  the release, runs the UEFI smoke drill, publishes the artifacts and
+  the source mirrors to `https://releases.liken.sh`, and prints the
+  catalog entry: the version and the sha256 of that release's
+  `release.yaml`. Deployments adopt a release from the catalog, so a
+  release session does not touch a cluster.
 * A lab release uses a `-9xx` serial, for example
   `make release VERSION=$(date +%Y.%m.%d)-901`. Serial `000` is the
   working-tree channel the media targets bundle, and published releases
-  run from `001` up, so `-9xx` collides with neither and is
-  recognizable at a glance.
+  run from `001` up, so `-9xx` collides with neither.
+
+A tag releases the OS when any of its paths changed since its previous
+release, whatever the tag was meant for. An OS release reboots every
+machine in a fleet that follows releases.
 
 ## Rules
 
 * The tag is the release act. Everything after it is verification.
-* Do not tag a commit that CI has not proven.
-* Do not retag a release whose workflow failed. Stop and report.
+* Do not tag a commit that CI has not proven on `main`.
+* Push nothing to `main` until the tag's run is green. A new push does
+  not cancel the tag's run, but its development builds race the
+  release's pushes.
+* Do not retag a release whose run failed. Stop and report.

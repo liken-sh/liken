@@ -1,0 +1,233 @@
+# This file is generated from display-operator/package.toml. Do not edit it:
+# edit that file or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository.
+#
+# ci.yaml calls this workflow when a change reaches display-operator. Each
+# check below is a job from package.toml, and it runs the same command
+# that a workstation runs. The images job builds every image and runs
+# its smoke check. The publish job pushes nothing until every other
+# job in this workflow passes.
+name: display-operator
+
+on:
+  workflow_call:
+    inputs:
+      # The version the outputs get: the release tag, a development
+      # version, or empty when the run publishes nothing.
+      version:
+        type: string
+        required: true
+      # none, dev, or release.
+      publish:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  go:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: display-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: display-operator/go.mod
+          cache-dependency-path: display-operator/go.sum
+
+      - run: make test-go
+
+      # The site renders the coverage report from these files.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-display-operator-go
+          path: |
+            display-operator/coverage.out
+          if-no-files-found: error
+          retention-days: 7
+
+  docs:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: display-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: display-operator/docs/go.mod
+          cache-dependency-path: display-operator/docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # follows go.sum, so between two changes to that file the build
+      # cache inside it never refreshes, and Go trims the compiled
+      # Hugo out of it. This entry saves on every run, under a key that
+      # ends in the commit, and restores the newest one for the same
+      # go.sum.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  # The layer cache is on ghcr, as a :buildcache tag beside each image.
+  # Every build reads it. A build that will publish also writes it, so
+  # the publish job's build of the same image finds every layer there.
+  images:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: vulkan
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'vulkan'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: ''
+          - image: vaapi
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'vaapi'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: ''
+          - image: ffmpeg
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'ffmpeg'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: 'display-operator/smoke/ffmpeg.sh'
+          - image: mpv
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'mpv'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: 'display-operator/smoke/mpv.sh'
+          - image: weston
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'weston'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: 'display-operator/smoke/weston.sh'
+          - image: display-operator
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'display-operator'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: ''
+          - image: display-capture
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'display-capture'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: 'display-operator/smoke/display-capture.sh'
+          - image: display-api
+            context: display-operator
+            file: display-operator/Dockerfile
+            target: 'display-api'
+            platforms: linux/amd64
+            load: true
+            build-contexts: ''
+            smoke: ''
+          - image: display-operator-cli
+            context: display-operator
+            file: display-operator/Dockerfile.cli
+            target: ''
+            platforms: linux/amd64,linux/arm64
+            load: false
+            build-contexts: ''
+            smoke: ''
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - if: ${{ inputs.publish != 'none' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # An image for more than one platform cannot load into the
+      # runner's Docker daemon, so only a single-platform image loads,
+      # and only a loaded image has a smoke check.
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          platforms: ${{ matrix.platforms }}
+          build-contexts: ${{ matrix.build-contexts }}
+          build-args: |
+            VERSION=${{ inputs.version || 'check' }}
+          load: ${{ matrix.load }}
+          push: false
+          tags: ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+          cache-to: ${{ inputs.publish != 'none' && format('type=registry,ref=ghcr.io/liken-sh/{0}:buildcache,mode=max', matrix.image) || '' }}
+
+      - name: smoke check
+        if: ${{ matrix.smoke != '' && matrix.load }}
+        run: bash "${{ matrix.smoke }}" "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}"
+
+  publish:
+    needs: [go, docs, images]
+    if: ${{ inputs.publish != 'none' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ci/go.mod
+          cache-dependency-path: ci/go.sum
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: fluxcd/flux2/action@v2.9.5
+        with:
+          version: 2.9.5
+
+      # Each image builds again from the layer cache that the images
+      # job wrote, and pushes. The deploy artifact goes last, because a
+      # cluster follows the deploy artifact, and it must never name an
+      # image that is not pushed yet.
+      - name: publish
+        working-directory: ci
+        run: go run . publish -root .. -component display-operator -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"

@@ -82,12 +82,13 @@ server pointed at it is an exact preview.
 
 ## The deploy path
 
-The site does not publish while the components move into one
-repository, under plan 69 in `plans/` at the repository root. The
-`liken / docs` job in `.github/workflows/ci.yaml` at the root builds
-`dist/site/` and checks it, and it deploys nothing. GitHub Pages
-serves the last tree it received at liken.sh. The site carries the
-test coverage report at `/coverage.html`.
+The site is one tree for every component's manual: this manual at the
+root, and each other component's manual under its prefix, such as
+liken.sh/display/. The `site` job in `.github/workflows/ci.yaml` at
+the repository root builds that tree with `make site` and deploys it to
+GitHub Pages on every push to `main`, which serves it at liken.sh. The
+site carries each component's test coverage report at `coverage.html`
+under its prefix.
 
 The name reaches Pages through DNS: the apex records in
 `liken.sh/terraform.tf`, at the repository root, point liken.sh at

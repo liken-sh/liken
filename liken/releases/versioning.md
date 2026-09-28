@@ -55,12 +55,10 @@ Tags never move, for the same reason.
 
 ## Cutting a release
 
-Releases are paused while the components move into one repository,
-under plan 69 in `plans/` at the repository root. The release workflow
-that the steps below name does not run. Do not push a tag. Step 2 of
-plan 69 brings back a release path for every component.
-
-The git tag is the act of release. Everything else follows from it.
+The git tag is the act of release. The repository has one tag for
+every component, so a tag releases the OS only when the OS changed
+since its previous release; the `releases` skill under `.agents/skills`
+at the repository root says how a tag decides. Everything else follows from it.
 
 1. Pick the next version. Use today's date, and use the serial number
    one past the highest serial already tagged today.
@@ -77,22 +75,23 @@ The git tag is the act of release. Everything else follows from it.
        git push origin 2026.08.18-002
 
 Pushing the tag hands the rest of the process to CI
-(.github/workflows/release.yaml). The workflow rebuilds every liken
-binary under the version stamp, bundles the release, and boots the
-same tree to a Ready node. Only then does it publish the release to
+(.github/workflows/ci.yaml, which calls component-liken.yaml). The
+OS's publish job rebuilds every liken binary under the version stamp,
+bundles the release, and boots the same tree to a Ready node. Only
+then does releases/publish.sh publish the release to
 https://releases.liken.sh/2026.07.11-001/. The digest discipline
 exists to rule out a release that someone assembled on a laptop. The
 run's summary ends with the catalog entry that a deployment commits to
 adopt the release.
 
-The workflow's last step creates the GitHub release for the tag. Do
-not create it by hand: the workflow writes the notes after the
-publish, because only then does the digest exist, and a release page
-that already exists is skipped, notes and all. The page is the
+The workflow's record job creates the GitHub release for the tag. Do
+not create it by hand: the job writes the notes after every publish,
+because only then does the digest exist. The page is the
 announcement, not the distribution. It carries the catalog entry
-ready to paste, and the commit subjects since the last release as
-the changelog; the binaries stay on the channel, where LICENSES.md
-and the source mirror travel with them.
+ready to paste, every component's version at the tag, and the commit
+subjects since the previous tag as the changelog; the binaries stay
+on the channel, where LICENSES.md and the source mirror travel with
+them.
 
 You can build and inspect the same bundle locally,
 without publishing anything:

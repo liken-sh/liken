@@ -37,10 +37,12 @@ Each component has its own `README.md`, `AGENTS.md`, and `Makefile`.
 [`liken.sh/`](liken.sh/) declares the project's public presence in
 Terraform: the liken.sh DNS zone, the release channel, and the
 settings of every repository in the organization.
+[`ci/`](ci/) reads each component's `package.toml`, writes the CI
+workflows from them, and decides what each run builds and publishes.
 [`plans/`](plans/) holds the plans that cover more than one component,
 and each component keeps its own plans in its own `plans/`. Plan 69
 describes how the components came into this repository and how one
-tag will release them. [`AGENTS.md`](AGENTS.md) holds the rules for
+tag releases them. [`AGENTS.md`](AGENTS.md) holds the rules for
 agents that work in the repository, and `.agents/skills` holds their
 skills.
 

@@ -1,0 +1,87 @@
+# The operator that plays media on a machine's screens and speakers.
+[package]
+name = "media-operator"
+license = "MIT"
+
+[depends]
+components = ["brand", "display-operator"]
+
+[docs]
+prefix = "media"
+
+# gofmt, vet, the race tests, and the coverage gate on its pinned
+# toolchain. The Makefile says why the gate pins a toolchain, and
+# .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 20
+coverage = ["coverage.out"]
+# The tests that cut media run the real ffmpeg.
+apt = ["ffmpeg"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+# The Rust workspace: the idle screen, the display, and media-screen.
+# The screen tests run the programs under cage, a headless Wayland
+# compositor, on Mesa's software Vulkan driver.
+[[jobs]]
+name = "rust"
+toolchain = "rust"
+run = "make test-rust"
+timeout = 45
+env = { CARGO_INCREMENTAL = "0", WLR_RENDERER = "pixman" }
+apt = ["cage", "wlr-randr", "mesa-vulkan-drivers", "libvulkan1", "libwayland-client0", "libxkbcommon0"]
+coverage = ["coverage-media-screen.xml", "coverage-idle-screen.xml", "coverage-display.xml"]
+
+[outputs]
+deploy = "deploy"
+
+# The sidecar image is the operator image under a second name. The
+# operator image holds the program's pod build beside the operator's
+# full build, and every sidecar runs the pod build in one of its modes.
+# A repository that needs only the sidecar pins a name that promises
+# nothing about the controller.
+[[outputs.images]]
+name = "media-operator"
+file = "Dockerfile"
+aliases = ["media-operator-sidecar"]
+
+[[outputs.images]]
+name = "media-operator-player"
+file = "Dockerfile.player"
+contexts = { brand = "brand" }
+smoke = "media-operator/smoke/media-operator-player.sh"
+
+[[outputs.images]]
+name = "media-operator-idle"
+file = "Dockerfile.screen"
+target = "idle"
+contexts = { brand = "brand" }
+smoke = "media-operator/smoke/media-operator-idle.sh"
+
+[[outputs.images]]
+name = "media-operator-display"
+file = "Dockerfile.screen"
+target = "display"
+contexts = { brand = "brand" }
+smoke = "media-operator/smoke/media-operator-display.sh"
+
+[[outputs.images]]
+name = "media-operator-api"
+file = "Dockerfile.api"
+smoke = "media-operator/smoke/media-operator-api.sh"
+
+# The CLI image carries the same version as the operator, so the base
+# binary pulls a CLI that never drifts from the operator it faces. It is
+# built for both architectures.
+[[outputs.images]]
+name = "media-operator-cli"
+file = "Dockerfile.cli"
+platforms = ["linux/amd64", "linux/arm64"]

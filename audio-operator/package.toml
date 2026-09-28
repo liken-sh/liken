@@ -1,0 +1,40 @@
+# The operator that claims a machine's sound cards and runs PipeWire on them.
+[package]
+name = "audio-operator"
+license = "MIT"
+
+[docs]
+prefix = "audio"
+
+# gofmt, vet, the race tests, and the coverage gate on its pinned
+# toolchain. The Makefile says why the gate pins a toolchain, and
+# .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 15
+coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+[outputs]
+deploy = "deploy"
+
+[[outputs.images]]
+name = "audio-operator"
+file = "Dockerfile"
+smoke = "audio-operator/smoke/audio-operator.sh"
+
+# The CLI image carries the same version as the operator, so the base
+# binary pulls a CLI that never drifts from the operator it faces. It is
+# built for both architectures.
+[[outputs.images]]
+name = "audio-operator-cli"
+file = "Dockerfile.cli"
+platforms = ["linux/amd64", "linux/arm64"]

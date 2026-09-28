@@ -1,0 +1,153 @@
+# This file is generated from liken/package.toml. Do not edit it:
+# edit that file or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository.
+#
+# ci.yaml calls this workflow when a change reaches liken. Each
+# check below is a job from package.toml, and it runs the same command
+# that a workstation runs.
+name: liken
+
+on:
+  workflow_call:
+    inputs:
+      # The version the outputs get: the release tag, a development
+      # version, or empty when the run publishes nothing.
+      version:
+        type: string
+        required: true
+      # none, dev, or release.
+      publish:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  checks:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: liken
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: liken/go.mod
+          cache-dependency-path: liken/go.sum
+
+      # prek runs the hooks of this component only, with
+      # --show-diff-on-failure, so a hook that changes a file fails
+      # with the change it would make.
+      - uses: j178/prek-action@v2
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files liken/
+
+      # The site renders the coverage report from these files.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-liken-checks
+          path: |
+            liken/coverage.out
+          if-no-files-found: error
+          retention-days: 7
+
+  docs:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: liken/docs
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: liken/docs/go.mod
+          cache-dependency-path: liken/docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # follows go.sum, so between two changes to that file the build
+      # cache inside it never refreshes, and Go trims the compiled
+      # Hugo out of it. This entry saves on every run, under a key that
+      # ends in the commit, and restores the newest one for the same
+      # go.sum.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-
+
+      - run: |
+          make test
+          make build
+
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: liken
+    steps:
+      # The build names itself with git describe, which needs the
+      # history and the tags.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The toolchain, KVM access, and the caches of the vendored
+      # inputs.
+      - uses: ./.github/actions/build-setup
+
+      - run: |
+          make all
+          make smoke-uefi
+          make smoke-bios
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: liken-build-logs
+          path: |
+            liken/dev-cluster/guests/node-1/*.log
+          if-no-files-found: ignore
+
+  publish:
+    needs: [checks, docs, build]
+    if: ${{ inputs.publish != 'none' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    # The channel's key comes from the repository secrets that
+    # liken.sh/terraform.tf keeps delivered.
+    env:
+      RELEASES_ACCESS_KEY: ${{ secrets.RELEASES_ACCESS_KEY }}
+      RELEASES_SECRET_KEY: ${{ secrets.RELEASES_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/build-setup
+
+      # The release build stamps the tag's version into every binary,
+      # so it is a new build, and the smoke drill boots it before a byte
+      # leaves the runner. Releases are immutable, so this is the last
+      # point where a bundle that cannot boot is caught.
+      - name: build and boot the release
+        working-directory: liken
+        run: |
+          make release VERSION="${{ inputs.version }}"
+          make smoke-uefi
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-liken-checks
+          path: liken
+
+      - name: publish to the channel
+        working-directory: liken
+        run: releases/publish.sh "${{ inputs.version }}"

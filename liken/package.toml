@@ -1,0 +1,56 @@
+# The OS. Its version is the repository's release tag, and it publishes
+# to the release channel at releases.liken.sh, not to a registry.
+[package]
+name = "liken"
+license = "MIT"
+
+[depends]
+components = ["brand"]
+
+[docs]
+# liken's manual is the root of the site.
+prefix = ""
+
+# The OS's checks are the hooks in .pre-commit-config.yaml, the same
+# hooks that run at commit time on a workstation: gofmt, vet,
+# staticcheck, the tests, and the coverage gate.
+[[jobs]]
+name = "checks"
+toolchain = "prek"
+coverage = ["coverage.out"]
+
+# The make target generates the reference pages first, because the link
+# check reads them as sources and as targets.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+dir = "docs"
+run = """
+make test
+make build
+"""
+
+# The build proves that the tree still assembles an operating system,
+# and that it boots to a Ready Kubernetes node under both firmware
+# types. The UEFI drill installs node-1 onto a blank disk and boots it
+# through OVMF's boot entries. The BIOS drill proves the other chain:
+# MBR boot code, GRUB's core image, and the chosen slot's kernel. A
+# warm-cache build takes 3 to 6 minutes and a cold one about 15.
+#
+# The serial console is the record of the boot, and it is worth keeping
+# when the drill passes: a healthy boot is the baseline for the next
+# unhealthy one. qemu.log holds the failure when QEMU never reaches a
+# console.
+[[jobs]]
+name = "build"
+toolchain = "os"
+timeout = 20
+run = """
+make all
+make smoke-uefi
+make smoke-bios
+"""
+artifacts = ["dev-cluster/guests/node-1/*.log"]
+
+[outputs]
+channel = true

@@ -1,0 +1,32 @@
+# The operator that controls a room's equipment: receivers, and the TVs
+# on a CEC bus.
+[package]
+name = "equipment-operator"
+license = "MIT"
+
+[docs]
+prefix = "equipment"
+
+# gofmt, vet, the race tests, and the coverage gate on its pinned
+# toolchain. The Makefile says why the gate pins a toolchain, and
+# .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 20
+coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+[outputs]
+deploy = "deploy"
+
+[[outputs.images]]
+name = "equipment-operator"
+file = "Dockerfile"

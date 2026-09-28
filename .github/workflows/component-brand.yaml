@@ -1,0 +1,68 @@
+# This file is generated from brand/package.toml. Do not edit it:
+# edit that file or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository.
+#
+# ci.yaml calls this workflow when a change reaches brand. Each
+# check below is a job from package.toml, and it runs the same command
+# that a workstation runs.
+name: brand
+
+on:
+  workflow_call:
+    inputs:
+      # The version the outputs get: the release tag, a development
+      # version, or empty when the run publishes nothing.
+      version:
+        type: string
+        required: true
+      # none, dev, or release.
+      publish:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  go:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: brand
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: brand/go.mod
+          cache-dependency-path: brand/go.sum
+
+      - run: make test-go
+
+  rust:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: brand/iced
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustup reads the toolchain pin from rust-toolchain.toml.
+      - name: install the toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brand/iced
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make test

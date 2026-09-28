@@ -1,0 +1,32 @@
+# The CSI driver that gives each node its own directory of a volume.
+[package]
+name = "per-node-csi-driver"
+license = "MIT"
+
+[docs]
+prefix = "per-node"
+
+# gofmt, vet, the race tests, and the coverage gate on its pinned
+# toolchain. The Makefile says why the gate pins a toolchain, and
+# .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 15
+coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+[outputs]
+deploy = "deploy"
+
+[[outputs.images]]
+name = "per-node-csi-driver"
+file = "Dockerfile"
+smoke = "per-node-csi-driver/smoke/per-node-csi-driver.sh"

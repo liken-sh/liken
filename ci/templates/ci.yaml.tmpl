@@ -1,0 +1,246 @@
+# This file is generated. Do not edit it: edit a component's
+# package.toml or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository. The repository job
+# below fails when this file differs from what the generator writes.
+#
+# This is the one workflow for every component in the repository. Each
+# component is a directory with a package.toml, and each one has its
+# own workflow, .github/workflows/component-<component>.yaml, which this file
+# calls. A component's call needs the components it depends on, so the
+# run page draws the dependency graph.
+#
+# The plan job decides what the run does with each component. Its
+# summary on the run page says, for each component, whether its jobs
+# run and why, and what a release tag at this commit would publish.
+#
+#   A push to a branch, a pull request, or a dispatch runs the jobs of
+#   each component whose files changed. It publishes nothing.
+#
+#   A push to main does the same, and it also publishes a development
+#   build of each component whose outputs changed, under a version
+#   such as 2026.10.02-001-dev-017-abcdef01.
+#
+#   A release tag, such as 2026.10.02-001, publishes each component
+#   whose outputs changed since its own newest release, under the
+#   tag's version. A component that did not change keeps its version.
+#
+# A job that needs a skipped job is skipped too, unless its condition
+# says otherwise. So each component's condition says: run when the plan
+# says so, as long as nothing it needs failed.
+#
+# A real publish happens only when the repository variable PUBLISH is
+# true. Without it, main and the tags run every check and push
+# nothing, and the plan job still proves that the workflow can push
+# to every package.
+name: ci
+
+on:
+  push:
+    branches: ['**']
+    # A release tag is the bare version. A glob cannot state the whole
+    # grammar, so the plan job checks the rest. The tags that the
+    # components brought from their own repositories start with the
+    # component's name, and they do not match.
+    tags: ['2*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# On a branch or a pull request, a new push cancels the run of the old
+# one. Each commit on main and each tag gets its own group and its own
+# verdict, and nothing cancels it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref_type != 'tag' }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # packages: write lets the plan prove that this workflow can push
+    # to each package. A pull request from a fork gets a read-only
+    # token, and the plan skips the proof.
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      components: ${{ steps.plan.outputs.components }}
+    steps:
+      # The plan diffs against the commit before the push and against
+      # each component's release tag, so it needs the history and the
+      # tags.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ci/go.mod
+          cache-dependency-path: ci/go.sum
+
+      - id: plan
+        working-directory: ci
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PUBLISH: ${{ vars.PUBLISH }}
+          PROBE: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run . plan -root ..
+
+  # The files at the top of the repository belong to no component: the
+  # plans, the agent files, and the workflows. The root
+  # .pre-commit-config.yaml checks them, and each component's own
+  # hooks run in that component's jobs.
+  repository:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: j178/prek-action@v2
+        with:
+          prek-version: 0.5.2
+          extra-args: >-
+            --all-files{% range .Components %}
+            --skip {% .Dir %}/{% end %}
+
+  # The graph job proves that the generated workflows are current, and
+  # that each package.toml names every component its code uses. A
+  # dependency that package.toml leaves out fails silently: the
+  # component would not rebuild when the dependency changes.
+  graph:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ci/go.mod
+          cache-dependency-path: '**/go.sum'
+
+      - name: check the generated workflows
+        working-directory: ci
+        run: go run . generate -root .. -check
+
+      - name: check each package.toml against the code
+        working-directory: ci
+        run: go run . deps -root ..
+{% range .Components %}
+  {% .Name %}:
+    needs: [plan{% range .Needs %}, {% . %}{% end %}]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['{% .Name %}'].check }}
+    uses: ./.github/workflows/component-{% .Name %}.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
+    permissions:
+      contents: read
+      packages: write{% if .Channel %}
+    # The OS publishes to the release channel with the channel's key.
+    secrets: inherit{% end %}
+{% end %}
+  # The site is every component's manual in one tree: liken's manual
+  # at the root, and each other component's manual under its prefix,
+  # such as liken.sh/display/. GitHub Pages serves it from this
+  # repository at liken.sh. Every push to main deploys it, because
+  # the coverage report of each component is part of it.
+  #
+  # A component whose jobs did not run in this push has no new
+  # coverage profile, so its report is the one the site serves now.
+  site:
+    needs: [plan{% range .Components %}, {% .Name %}{% end %}]
+    if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # Two deploys in quick succession would race, and the check at the
+    # end needs nothing else to change while it runs.
+    concurrency:
+      group: site
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: liken/docs/go.mod
+          cache-dependency-path: '**/docs/go.sum'
+{% range .Coverage %}
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['{% .Component %}'].check }}
+        with:
+          name: coverage-{% .Component %}-{% .Job %}
+          path: {% .Dir %}
+{% end %}
+      - name: build the site
+        run: make site SITE_URL=https://liken.sh
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/docs
+
+      - uses: actions/deploy-pages@v5
+
+      # The deploy finishing does not mean the public name serves the
+      # new tree yet: Pages is behind a CDN that caches pages for up to
+      # ten minutes. release.txt holds the commit, so the loop waits
+      # until the public name serves this commit's tree.
+      - name: check the served site
+        run: |
+          expected="${{ github.sha }}"
+          for _ in $(seq 1 48); do
+            served="$(curl --fail --silent https://liken.sh/release.txt || true)"
+            if [ "$served" = "$expected" ]; then break; fi
+            sleep 15
+          done
+          [ "$served" = "$expected" ] || {
+            echo "the site still serves ${served:-nothing}, expected $expected"
+            exit 1
+          }
+          fetch() {
+            curl --fail --silent --retry 5 --retry-delay 3 --retry-all-errors "$@"
+          }
+          echo "checking the front page"
+          fetch https://liken.sh/ | grep -q "boots a machine"
+          echo "checking the markdown twin of a page"
+          fetch --head https://liken.sh/docs/guides/install/index.md \
+            | grep -qi "content-type: text/markdown"
+          echo "checking llms.txt"
+          fetch https://liken.sh/llms.txt | grep -q "^# liken"{% range .Sites %}
+          echo "checking the {% .Component %} manual"
+          fetch https://liken.sh/{% .Prefix %}/ > page.html
+          grep -q "<title>" page.html{% end %}
+
+  # The release record is the GitHub release for the tag: every
+  # component and its version at this tag, whether this tag published
+  # it or an earlier one did.
+  record:
+    needs: [plan{% range .Components %}, {% .Name %}{% end %}]
+    if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ci/go.mod
+          cache-dependency-path: ci/go.sum
+
+      - name: write the release record
+        working-directory: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: go run . record -root .. -tag "${{ github.ref_name }}"

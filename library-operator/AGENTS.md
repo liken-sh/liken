@@ -33,12 +33,15 @@ catalog id through `opaqueID` or `log::opaque`.
 
 ## Releases and development builds
 
-Releases from this directory are paused while the components move into
-one repository, under plan 69 in `plans/` at the repository root.
-`.github/workflows/ci.yaml` at the root runs this directory's tests,
-docs checks, and image builds, and it publishes nothing. Do not push a
-tag. Step 2 of plan 69 brings back the releases and the development
-builds for every component.
+One tag releases every component of the repository whose outputs
+changed, and a push to `main` publishes a development build of each one
+that changed. This directory's `package.toml` names its images, its
+deploy directory, and the components it depends on.
+`.github/workflows/component-library-operator.yaml` at the repository root is
+generated from it; run `make workflows` there after you change it. The
+`releases` skill under `.agents/skills` holds the version scheme and
+the flow. Load it before you tag, publish an image, or pin a
+development build.
 
 The operator derives its companion images from its own pod's image, so
 no other image name needs a version.

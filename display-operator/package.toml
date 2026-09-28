@@ -1,0 +1,81 @@
+# The operator that claims a machine's displays and GPUs. Its Dockerfile
+# also builds the base images that the other screens build on: vulkan,
+# vaapi, ffmpeg, mpv, and weston.
+[package]
+name = "display-operator"
+license = "MIT"
+
+[docs]
+prefix = "display"
+
+# gofmt, vet, the race tests, and the coverage gate on its pinned
+# toolchain. The Makefile says why the gate pins a toolchain, and
+# .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 20
+coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+[outputs]
+deploy = "deploy"
+
+[[outputs.images]]
+name = "vulkan"
+file = "Dockerfile"
+target = "vulkan"
+
+[[outputs.images]]
+name = "vaapi"
+file = "Dockerfile"
+target = "vaapi"
+
+[[outputs.images]]
+name = "ffmpeg"
+file = "Dockerfile"
+target = "ffmpeg"
+smoke = "display-operator/smoke/ffmpeg.sh"
+
+[[outputs.images]]
+name = "mpv"
+file = "Dockerfile"
+target = "mpv"
+smoke = "display-operator/smoke/mpv.sh"
+
+[[outputs.images]]
+name = "weston"
+file = "Dockerfile"
+target = "weston"
+smoke = "display-operator/smoke/weston.sh"
+
+[[outputs.images]]
+name = "display-operator"
+file = "Dockerfile"
+target = "display-operator"
+
+[[outputs.images]]
+name = "display-capture"
+file = "Dockerfile"
+target = "display-capture"
+smoke = "display-operator/smoke/display-capture.sh"
+
+[[outputs.images]]
+name = "display-api"
+file = "Dockerfile"
+target = "display-api"
+
+# The CLI image carries the same version as the operator, so the base
+# binary pulls a CLI that never drifts from the operator it faces. It is
+# built for both architectures.
+[[outputs.images]]
+name = "display-operator-cli"
+file = "Dockerfile.cli"
+platforms = ["linux/amd64", "linux/arm64"]
