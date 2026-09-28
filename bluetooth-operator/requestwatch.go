@@ -23,22 +23,24 @@ import (
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // watchPairingRequests wakes the loop while a request needs attention.
 // The channel closes when the context ends. The store it answers holds
 // every request, and the pass reads it in place of the API server
 // (objectcache.go).
-func watchPairingRequests(ctx context.Context, client dynamic.Interface, now func() time.Time) (<-chan struct{}, storeView) {
+func watchPairingRequests(ctx context.Context, client dynamic.Interface, now func() time.Time) (<-chan struct{}, informer.View) {
 	wake := make(chan struct{}, 1)
 	watcher := &requestWatcher{now: now, wake: wake, held: map[string]PairingRequest{}}
-	requests := newCollectionWatch(client, pairingRequestResource, "", "", watcher.handler())
+	requests := informer.Start(ctx, client, informer.Source{Resource: pairingRequestResource}, informer.Options{Handler: watcher.handler()})
 	go func() {
 		defer close(wake)
 		defer watcher.stop()
-		requests.run(ctx, nil)
+		<-requests.Done()
 	}()
-	return wake, requests.view()
+	return wake, requests.View()
 }
 
 // requestWatcher holds the requests the watch reported, and the clock
@@ -67,9 +69,9 @@ func (w *requestWatcher) handler() cache.ResourceEventHandler {
 
 // apply takes one change from the watch.
 func (w *requestWatcher) apply(object any, deleted bool) {
-	request, err := convert[PairingRequest](object)
+	request, err := informer.Convert[PairingRequest](object)
 	if err != nil {
-		reportUnconverted("the PairingRequests", err)
+		informer.Report("the PairingRequests", err)
 		w.forget(object, deleted)
 		return
 	}

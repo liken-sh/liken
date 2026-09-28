@@ -1,10 +1,10 @@
 package main
 
-// These tests run the handlers of the three watches through client-go's
-// real reflector, against a scripted API server. The reflector's own
-// loop is upstream's to test; what these tests prove is that each
-// change the API server sends reaches this operator's handlers, and
-// that an object that does not convert is reported.
+// This file holds the scripted API server that the tests of the
+// watches run client-go's real reflector against. The reflector's own
+// loop is upstream's to test, and the shared informer package tests
+// the copy it keeps. What the tests of this operator prove is that each
+// change the API server sends reaches this operator's handlers.
 
 import (
 	"encoding/json"
@@ -20,7 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
 )
 
 // holdOpen, as the last line of a script, keeps the stream open until
@@ -244,38 +243,5 @@ func wokeWithin(wakes <-chan struct{}, within time.Duration) bool {
 		return true
 	case <-time.After(within):
 		return false
-	}
-}
-
-// An object that does not convert to the operator's struct is an
-// error that names the object, and a handler logs it. A tombstone, which
-// the informer hands a handler for an object deleted while the watch
-// was down, converts as the object it holds.
-func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
-	good := Peripheral{APIVersion: pairingAPI, Kind: peripheralKind, Metadata: ObjectMeta{Name: "a0-ab-51-33-b7-12", Generation: 2}}
-	mistyped := asObject(t, good)
-	if err := unstructured.SetNestedField(mistyped.Object, "two", "metadata", "generation"); err != nil {
-		t.Fatal(err)
-	}
-	cases := []struct {
-		name    string
-		object  any
-		wantErr string
-	}{
-		{name: "an object", object: asObject(t, good)},
-		{name: "a tombstone", object: cache.DeletedFinalStateUnknown{Key: good.Metadata.Name, Obj: asObject(t, good)}},
-		{name: "a field of the wrong type", object: mistyped, wantErr: "Peripheral a0-ab-51-33-b7-12 does not convert"},
-		{name: "something that is not an object", object: "a0-ab-51-33-b7-12", wantErr: "not an object"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := convert[Peripheral](c.object)
-			if c.wantErr == "" && (err != nil || got.Metadata.Generation != 2) {
-				t.Fatalf("convert = %+v, %v; want generation 2 and no error", got.Metadata, err)
-			}
-			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
-				t.Fatalf("convert error = %v, want one that says %q", err, c.wantErr)
-			}
-		})
 	}
 }

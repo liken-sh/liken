@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 const (
@@ -94,7 +95,7 @@ func run() error {
 	}
 	fmt.Printf("bondfetch: %s is the adapter at %s\n", adapter.Name, adapter.Address)
 
-	client, err := inClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		return err
 	}
@@ -109,10 +110,10 @@ func run() error {
 // second, so a device that is in both takes the copy the operator
 // keeps current. The operator does not delete the older object, so
 // both can be there for as long as a person leaves them.
-func materialize(api *apiClient, namespace string, adapter bonds.Address, root string) error {
-	var list bonds.SecretList
+func materialize(api *apiclient.Client, namespace string, adapter bonds.Address, root string) error {
 	path := bonds.SecretsPath(namespace) + "?labelSelector=" + url.QueryEscape(bonds.AdapterSelector(adapter))
-	if err := api.get(path, &list); err != nil {
+	list, err := apiclient.Get[bonds.SecretList](api, path)
+	if err != nil {
 		return fmt.Errorf("listing the bonds for %s: %w", adapter, err)
 	}
 

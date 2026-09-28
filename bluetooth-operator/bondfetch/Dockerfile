@@ -17,7 +17,14 @@ WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.
 COPY go.mod go.sum ./
+# go.mod replaces the shared kubernetes module with ../kubernetes, and
+# the build takes that directory as a second build context named
+# kubernetes. It lands at /kubernetes, the same place relative to /src
+# that kubernetes/ has relative to this component. bondfetch reads the
+# API server through its apiclient package.
+COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
+COPY --from=kubernetes . /kubernetes/
 COPY bonds/ ./bonds/
 COPY bondfetch/ ./bondfetch/
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a

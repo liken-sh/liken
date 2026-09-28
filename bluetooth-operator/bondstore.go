@@ -60,9 +60,12 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 const (
@@ -96,7 +99,7 @@ type adapterAddressReader func() (bonds.Address, error)
 
 // bondStore keeps each bond's Secret in step with the bonds on disk.
 type bondStore struct {
-	client    *Client
+	client    *apiclient.Client
 	namespace string
 	root      string
 
@@ -117,13 +120,13 @@ type bondStore struct {
 	// answers its store. It runs once, when the store first learns the
 	// radio, because the radio is fixed from then on. A store with no
 	// watch reads every Secret from the API server.
-	watchSecrets func(adapter bonds.Address) storeView
+	watchSecrets func(adapter bonds.Address) informer.View
 
 	// secrets is the watch's store, which persist reads in place of the
 	// API server, and secretVersions the memo of the copies this store
 	// wrote or read (objectcache.go).
-	secrets        storeView
-	secretVersions *versionMemo
+	secrets        informer.View
+	secretVersions *memo.Versions
 
 	// reportedLegacy records that the operator has already named the
 	// older per-adapter Secret. The migration leaves that object alone,
@@ -189,7 +192,7 @@ func (s *bondStore) learn(address bonds.Address) {
 	s.adapter = address
 	if s.watchSecrets != nil {
 		s.secrets = s.watchSecrets(address)
-		s.secretVersions = newVersionMemo()
+		s.secretVersions = memo.New()
 	}
 }
 
@@ -214,7 +217,7 @@ func (s *bondStore) restore(readAdapter adapterAddressReader) {
 		}
 		s.learn(address)
 	}
-	list, err := get[bonds.SecretList](s.client, byAdapter(bonds.SecretsPath(s.namespace), s.adapter.Key()))
+	list, err := apiclient.Get[bonds.SecretList](s.client, byAdapter(bonds.SecretsPath(s.namespace), s.adapter.Key()))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing the stored bonds for the relays: %v\n", err)
 		return
@@ -244,7 +247,7 @@ func (s *bondStore) persistBond(device bonds.Address, files bonds.Files, owner O
 	// has not delivered yet, is compared and not created twice.
 	key := s.namespace + "/" + name
 	current, err := s.readBond(key, path)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return s.create(device, files, snapshot, owner)
 	}
 	if err != nil {
@@ -255,7 +258,7 @@ func (s *bondStore) persistBond(device bonds.Address, files bonds.Files, owner O
 		return true
 	}
 	err = s.update(current, device, files, snapshot, owner)
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		// The copy from the store was older than the API server's, such
 		// as one from before this operator's own last write. The fresh
 		// copy is compared, and written once more when it still differs.
@@ -277,7 +280,7 @@ func (s *bondStore) persistBond(device bonds.Address, files bonds.Files, owner O
 // readBond answers one bond's Secret: the store's copy when it holds a
 // current one, and the API server's copy when it does not.
 func (s *bondStore) readBond(key, path string) (*bonds.Secret, error) {
-	if held, ok := cachedCopy[bonds.Secret](s.secrets, key); ok && s.secretVersions.current(key, held.Metadata.ResourceVersion) {
+	if held, ok := informer.Cached[bonds.Secret](s.secrets, key); ok && s.secretVersions.Current(key, held.Metadata.ResourceVersion) {
 		return held, nil
 	}
 	return s.fetchBond(key, path)
@@ -287,9 +290,9 @@ func (s *bondStore) readBond(key, path string) (*bonds.Secret, error) {
 // version.
 func (s *bondStore) fetchBond(key, path string) (*bonds.Secret, error) {
 	var fresh *bonds.Secret
-	err := s.secretVersions.send(key, func() (string, error) {
+	err := s.secretVersions.Send(key, func() (string, error) {
 		var err error
-		if fresh, err = get[bonds.Secret](s.client, path); err != nil {
+		if fresh, err = apiclient.Get[bonds.Secret](s.client, path); err != nil {
 			return "", err
 		}
 		return fresh.Metadata.ResourceVersion, nil
@@ -313,7 +316,7 @@ func (s *bondStore) create(device bonds.Address, files bonds.Files, snapshot []b
 		fmt.Fprintf(os.Stderr, "creating %s: %v\n", name, err)
 		return false
 	}
-	s.secretVersions.note(s.namespace+"/"+name, created.Metadata.ResourceVersion)
+	s.secretVersions.Note(s.namespace+"/"+name, created.Metadata.ResourceVersion)
 	fmt.Printf("bonds: created %s for the bond with %s\n", name, device)
 	return true
 }
@@ -321,7 +324,7 @@ func (s *bondStore) create(device bonds.Address, files bonds.Files, snapshot []b
 // update replaces one bond's stored files with the ones on disk.
 //
 // The write includes the resourceVersion from the read, so a second
-// writer gets ErrConflict instead of losing the first writer's bond,
+// writer gets apiclient.ErrConflict instead of losing the first writer's bond,
 // and the caller reads the Secret again.
 func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bonds.Files, snapshot []byte, owner OwnerReference) error {
 	name := bonds.BondSecretName(device)
@@ -335,7 +338,7 @@ func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bo
 	if err := s.client.RequestJSON(http.MethodPut, bonds.BondSecretPath(s.namespace, device), body, written); err != nil {
 		return err
 	}
-	s.secretVersions.note(s.namespace+"/"+name, written.Metadata.ResourceVersion)
+	s.secretVersions.Note(s.namespace+"/"+name, written.Metadata.ResourceVersion)
 	fmt.Printf("bonds: wrote %s\n", name)
 	return nil
 }
@@ -352,11 +355,11 @@ func (s *bondStore) reportLegacySecret() {
 	if s.reportedLegacy {
 		return
 	}
-	_, err := get[bonds.Secret](s.client, bonds.SecretPath(s.namespace, s.adapter))
+	_, err := apiclient.Get[bonds.Secret](s.client, bonds.SecretPath(s.namespace, s.adapter))
 	if err != nil {
 		// An absent Secret is the ordinary state, and any other failure
 		// is reported by the reads that matter.
-		s.reportedLegacy = errors.Is(err, ErrNotFound)
+		s.reportedLegacy = errors.Is(err, apiclient.ErrNotFound)
 		return
 	}
 	s.reportedLegacy = true
@@ -388,8 +391,7 @@ func bondOwner(owner OwnerReference) bonds.Owner {
 // same selection restore lists. A Secret that does not convert is
 // logged when the pass reads it, and the pass reads that one from the
 // API server.
-func watchBondSecrets(ctx context.Context, client dynamic.Interface, namespace string, adapter bonds.Address) storeView {
-	secrets := newCollectionWatch(client, secretResource, namespace, adapterSelector(adapter.Key()), cache.ResourceEventHandlerFuncs{})
-	go secrets.run(ctx, nil)
-	return secrets.view()
+func watchBondSecrets(ctx context.Context, client dynamic.Interface, namespace string, adapter bonds.Address) informer.View {
+	source := informer.Source{Resource: secretResource, Namespace: namespace, LabelSelector: adapterSelector(adapter.Key())}
+	return informer.Start(ctx, client, source, informer.Options{}).View()
 }

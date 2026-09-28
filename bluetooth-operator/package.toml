@@ -3,6 +3,9 @@
 name = "bluetooth-operator"
 license = "MIT"
 
+[depends]
+components = ["kubernetes"]
+
 [docs]
 prefix = "bluetooth"
 
@@ -26,17 +29,23 @@ run = "make test-docs"
 [outputs]
 deploy = "deploy"
 
+# Every image that builds from this module's go.mod takes the shared
+# kubernetes module as a build context, because go.mod replaces it with
+# ../kubernetes.
 [[outputs.images]]
 name = "bluetooth-operator"
 file = "Dockerfile"
+contexts = { kubernetes = "kubernetes" }
 
 [[outputs.images]]
 name = "bluetooth-bondfetch"
 file = "bondfetch/Dockerfile"
+contexts = { kubernetes = "kubernetes" }
 
 [[outputs.images]]
 name = "bluetoothd"
 file = "bluetoothd/Dockerfile"
+contexts = { kubernetes = "kubernetes" }
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is
@@ -45,3 +54,4 @@ file = "bluetoothd/Dockerfile"
 name = "bluetooth-operator-cli"
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
+contexts = { kubernetes = "kubernetes" }

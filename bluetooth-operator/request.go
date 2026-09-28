@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // reconcileRequests runs every open window aimed at this radio, and
@@ -66,13 +68,13 @@ func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, 
 // listRequests answers every PairingRequest, from the store once it
 // holds its first read.
 func (i *inventory) listRequests() ([]PairingRequest, error) {
-	if i.cache.requests.view.ready() {
-		return currentList[PairingRequest](i.client, i.cache.requests, func(key string) string {
+	if i.cache.requests.View.Ready() {
+		return informer.CurrentList[PairingRequest](i.client, i.cache.requests, func(key string) string {
 			namespace, name, _ := strings.Cut(key, "/")
 			return pairingRequestPath(namespace, name)
 		})
 	}
-	list, err := get[PairingRequestList](i.client, fromCache(pairingRequestsPath()))
+	list, err := apiclient.Get[PairingRequestList](i.client, fromCache(pairingRequestsPath()))
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +282,7 @@ func (i *inventory) collectRequest(request *PairingRequest, pass *inventoryPass)
 		pass.ok = false
 		return
 	}
-	i.cache.requests.versions.note(requestKey(*request), "")
+	i.cache.requests.Versions.Note(requestKey(*request), "")
 	fmt.Printf("request %s/%s: collected %s after it finished\n",
 		request.Metadata.Namespace, request.Metadata.Name, ttl)
 }
@@ -339,7 +341,7 @@ func (i *inventory) writeRequestStatus(request *PairingRequest, status PairingRe
 		return true
 	}
 	path := pairingRequestPath(request.Metadata.Namespace, request.Metadata.Name)
-	if _, err := settleStatus(i.client, i.cache.requests.versions, path, request, apply); err != nil && !errors.Is(err, ErrNotFound) {
+	if _, err := informer.SettleStatus(i.client, i.cache.requests.Versions, path, request, apply); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		// A request somebody deleted needs no status.
 		fmt.Fprintf(os.Stderr, "writing the status of %s/%s: %v\n",
 			request.Metadata.Namespace, request.Metadata.Name, err)

@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // reconcilePeripherals makes the Peripherals under one Adapter agree
@@ -92,10 +94,10 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 // listPeripherals answers the Peripherals of one radio, from the store
 // once the watch for that radio holds its first read.
 func (i *inventory) listPeripherals(adapterKey string) ([]Peripheral, error) {
-	if held := i.cache.peripheralsOf(adapterKey); held.view.ready() {
-		return currentList[Peripheral](i.client, held, peripheralPath)
+	if held := i.cache.peripheralsOf(adapterKey); held.View.Ready() {
+		return informer.CurrentList[Peripheral](i.client, held, peripheralPath)
 	}
-	list, err := get[PeripheralList](i.client, byAdapter(peripheralsPath(), adapterKey))
+	list, err := apiclient.Get[PeripheralList](i.client, byAdapter(peripheralsPath(), adapterKey))
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,7 @@ func (i *inventory) createPeripheral(adapter *Adapter, device deviceState, reque
 	// is gone. Garbage collection would then take the new Peripheral and
 	// start its unpair. A new Peripheral is rare, so its owner is read
 	// from the API server.
-	owner, err := readFresh[Adapter](i.client, i.cache.adapters.versions, adapter.Metadata.Name, adapterPath(adapter.Metadata.Name))
+	owner, err := informer.ReadFresh[Adapter](i.client, i.cache.adapters.Versions, adapter.Metadata.Name, adapterPath(adapter.Metadata.Name))
 	if err != nil {
 		return nil, fmt.Errorf("reading the Adapter that owns the bond: %w", err)
 	}
@@ -140,13 +142,13 @@ func (i *inventory) createPeripheral(adapter *Adapter, device deviceState, reque
 		Spec: PeripheralSpec{Trusted: &trusted},
 	}
 	created, err := createObject(i.client, peripheralsPath(), peripheral)
-	if err == ErrConflict {
-		return readFresh[Peripheral](i.client, i.cache.peripheralVersions, name, peripheralPath(name))
+	if err == apiclient.ErrConflict {
+		return informer.ReadFresh[Peripheral](i.client, i.cache.peripheralVersions, name, peripheralPath(name))
 	}
 	if err != nil {
 		return nil, err
 	}
-	i.cache.peripheralVersions.note(name, created.Metadata.ResourceVersion)
+	i.cache.peripheralVersions.Note(name, created.Metadata.ResourceVersion)
 	// pairedAt is when the operator first observed the bond. For a bond it
 	// made itself that is the pairing; for one it adopted it is the
 	// adoption, because bluetoothd's own storage records no time.
@@ -228,8 +230,8 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 		held.APIVersion, held.Kind = pairingAPI, peripheralKind
 		return true
 	}
-	wrote, err := settleStatus(i.client, i.cache.peripheralVersions, peripheralPath(name), peripheral, apply)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	wrote, err := informer.SettleStatus(i.client, i.cache.peripheralVersions, peripheralPath(name), peripheral, apply)
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		// A Peripheral that is gone needs no status. Its delete event
 		// wakes the pass that adopts the bond again.
 		fmt.Fprintf(os.Stderr, "writing the status of %s: %v\n", name, err)

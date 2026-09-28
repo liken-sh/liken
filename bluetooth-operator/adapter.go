@@ -29,14 +29,16 @@ import (
 	"os"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // ensureAdapter makes the Adapter object agree with the radio this pod
 // holds, and returns the object that owns every Peripheral.
 func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 	name := state.Address.Key()
-	adapter, err := readOne[Adapter](i.client, i.cache.adapters, name, adapterPath(name))
-	if errors.Is(err, ErrNotFound) {
+	adapter, err := informer.ReadOne[Adapter](i.client, i.cache.adapters, name, adapterPath(name))
+	if errors.Is(err, apiclient.ErrNotFound) {
 		adapter, err = i.createAdapter(state)
 	}
 	if err != nil {
@@ -50,11 +52,11 @@ func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 	}
 
 	err = i.settleAdapter(adapter, state)
-	if stale(err) {
+	if apiclient.Stale(err) {
 		// Another writer changed the object since the copy, or removed
 		// it. The fresh copy is settled once more.
-		adapter, err = readFresh[Adapter](i.client, i.cache.adapters.versions, name, adapterPath(name))
-		if errors.Is(err, ErrNotFound) {
+		adapter, err = informer.ReadFresh[Adapter](i.client, i.cache.adapters.Versions, name, adapterPath(name))
+		if errors.Is(err, apiclient.ErrNotFound) {
 			adapter, err = i.createAdapter(state)
 		}
 		if err != nil {
@@ -89,7 +91,7 @@ func (i *inventory) settleAdapter(adapter *Adapter, state adapterState) error {
 		if err != nil {
 			return fmt.Errorf("holding %s against deletion: %w", name, err)
 		}
-		i.cache.adapters.versions.note(name, version)
+		i.cache.adapters.Versions.Note(name, version)
 		adapter.Metadata.Finalizers = adapter.Metadata.with(adapterFinalizer)
 		adapter.Metadata.ResourceVersion = version
 	}
@@ -118,15 +120,15 @@ func (i *inventory) createAdapter(state adapterState) (*Adapter, error) {
 			Finalizers: []string{adapterFinalizer},
 		},
 	})
-	if err == ErrConflict {
+	if err == apiclient.ErrConflict {
 		// Another writer created it between the read and this write, so
 		// read it again. Nothing more is needed.
-		return readFresh[Adapter](i.client, i.cache.adapters.versions, name, adapterPath(name))
+		return informer.ReadFresh[Adapter](i.client, i.cache.adapters.Versions, name, adapterPath(name))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("creating the Adapter for %s: %w", state.Address, err)
 	}
-	i.cache.adapters.versions.note(name, adapter.Metadata.ResourceVersion)
+	i.cache.adapters.Versions.Note(name, adapter.Metadata.ResourceVersion)
 	fmt.Printf("adapter: created %s for the radio at %s\n", name, state.Address)
 	return adapter, nil
 }
@@ -195,10 +197,10 @@ func (i *inventory) releaseDepartedAdapters(present bonds.Address) {
 // listAdapters answers every Adapter in the cluster, from the store
 // once it holds its first read.
 func (i *inventory) listAdapters() ([]Adapter, error) {
-	if i.cache.adapters.view.ready() {
-		return currentList[Adapter](i.client, i.cache.adapters, adapterPath)
+	if i.cache.adapters.View.Ready() {
+		return informer.CurrentList[Adapter](i.client, i.cache.adapters, adapterPath)
 	}
-	list, err := get[AdapterList](i.client, adaptersPath())
+	list, err := apiclient.Get[AdapterList](i.client, adaptersPath())
 	if err != nil {
 		return nil, err
 	}
@@ -227,8 +229,8 @@ func (i *inventory) releaseAdapter(adapter Adapter, present bonds.Address) (bool
 	name := adapter.Metadata.Name
 	path := adapterPath(name)
 	version, err := patchFinalizers(i.client, path, adapter.Metadata.ResourceVersion, adapter.Metadata.without(adapterFinalizer))
-	if errors.Is(err, ErrConflict) {
-		current, readErr := readFresh[Adapter](i.client, i.cache.adapters.versions, name, path)
+	if errors.Is(err, apiclient.ErrConflict) {
+		current, readErr := informer.ReadFresh[Adapter](i.client, i.cache.adapters.Versions, name, path)
 		if readErr != nil {
 			err = readErr
 		} else if !i.departed(*current, present) {
@@ -237,13 +239,13 @@ func (i *inventory) releaseAdapter(adapter Adapter, present bonds.Address) (bool
 			version, err = patchFinalizers(i.client, path, current.Metadata.ResourceVersion, current.Metadata.without(adapterFinalizer))
 		}
 	}
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	i.cache.adapters.versions.note(name, version)
+	i.cache.adapters.Versions.Note(name, version)
 	return true, nil
 }
 
@@ -278,9 +280,9 @@ func (i *inventory) writeAdapterStatus(adapter *Adapter, status AdapterStatus) e
 	}
 	adapter.Status = status
 	adapter.APIVersion, adapter.Kind = pairingAPI, adapterKind
-	if err := replaceStatus(i.client, adapterPath(adapter.Metadata.Name), adapter); err != nil {
+	if err := apiclient.ReplaceStatus(i.client, adapterPath(adapter.Metadata.Name), adapter); err != nil {
 		return fmt.Errorf("writing the status of %s: %w", adapter.Metadata.Name, err)
 	}
-	i.cache.adapters.versions.note(adapter.Metadata.Name, adapter.Metadata.ResourceVersion)
+	i.cache.adapters.Versions.Note(adapter.Metadata.Name, adapter.Metadata.ResourceVersion)
 	return nil
 }

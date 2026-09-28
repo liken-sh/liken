@@ -23,6 +23,7 @@ import (
 	"os"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // pairedSetReader returns the controllers bluetoothd holds.
@@ -36,7 +37,7 @@ type pairedSetReader func() (map[string]controller, error)
 // device objects out of the tree, and this record is then the only
 // account of which controllers the slice offers.
 type publisher struct {
-	client   *Client
+	client   *apiclient.Client
 	nodeName string
 	owner    OwnerReference
 	known    map[string]controller

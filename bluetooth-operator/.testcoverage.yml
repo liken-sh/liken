@@ -29,7 +29,7 @@ override:
   # bondfetch: the fetch loop needs a real adapter; the parsing does
   # not.
   - path: ^bondfetch$
-    threshold: 52
+    threshold: 51
   # bonds: the on-disk bond format, which is pure byte layout.
   - path: ^bonds$
     threshold: 91

@@ -139,7 +139,7 @@ func TestReconcileWritesAPeripheralStatusOnlyWhenItChanges(t *testing.T) {
 	inventory.reconcile()
 
 	for _, request := range fixture.requests {
-		if request == "PUT "+statusPath(testPeripheralPath()) {
+		if request == "PUT "+testPeripheralPath()+"/status" {
 			t.Fatalf("a steady pass rewrote the status: %v", fixture.requests)
 		}
 	}

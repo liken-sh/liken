@@ -12,12 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // secretStore is the watch's store, holding the Secrets given.
-func secretStore(t *testing.T, secrets map[string]*bonds.Secret) storeView {
+func secretStore(t *testing.T, secrets map[string]*bonds.Secret) informer.View {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	for _, secret := range secrets {
@@ -25,7 +27,7 @@ func secretStore(t *testing.T, secrets map[string]*bonds.Secret) storeView {
 			t.Fatal(err)
 		}
 	}
-	return storeView{store: store, synced: func() bool { return true }}
+	return informer.View{Store: store, Synced: func() bool { return true }}
 }
 
 // storedBondAt is the test device's bond as the API server holds it,
@@ -143,14 +145,14 @@ func TestTheSecretWatchHoldsTheRadiosBonds(t *testing.T) {
 	view := watchBondSecrets(ctx, watcher, "liken-system", testAdapterAddress(t))
 
 	deadline := time.After(5 * time.Second)
-	for !view.ready() {
+	for !view.Ready() {
 		select {
 		case <-deadline:
 			t.Fatal("the Secret watch never finished its first read")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	held, ok := cachedCopy[bonds.Secret](view, "liken-system/bluetooth-bond-a0-ab-51-33-b7-12")
+	held, ok := informer.Cached[bonds.Secret](view, "liken-system/bluetooth-bond-a0-ab-51-33-b7-12")
 	if !ok || !held.Tree()[testAddress(t, testDevice)].Equal(oneBond) {
 		t.Fatalf("the store answered %+v, %t; want the bond", held, ok)
 	}

@@ -34,6 +34,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // followUpDelay is how soon the loop runs again while the pass has
@@ -45,7 +46,7 @@ const followUpDelay = 2 * time.Second
 // inventory reconciles the Adapter, its Peripherals, and the
 // PairingRequests aimed at it.
 type inventory struct {
-	client    *Client
+	client    *apiclient.Client
 	radio     radio
 	nodeName  string
 	namespace string
@@ -97,7 +98,7 @@ type inventory struct {
 	metrics *metrics
 }
 
-func newInventory(client *Client, radio radio, held *relays, nodeName, namespace string, readings *metrics) *inventory {
+func newInventory(client *apiclient.Client, radio radio, held *relays, nodeName, namespace string, readings *metrics) *inventory {
 	i := &inventory{
 		client:    client,
 		radio:     radio,

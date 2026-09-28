@@ -48,6 +48,9 @@ import (
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // editWatch holds the two watches and the channel that wakes the loop.
@@ -69,7 +72,7 @@ type editWatch struct {
 
 	// adapters and peripherals are the two watches' stores, which the
 	// pass reads in place of the API server (objectcache.go).
-	adapters    storeView
+	adapters    informer.View
 	peripherals followedView
 }
 
@@ -83,10 +86,10 @@ func watchEdits(ctx context.Context, client dynamic.Interface, nodeName string) 
 		moved:    make(chan struct{}, 1),
 	}
 	handler := editHandler[Adapter]{what: "the Adapters", wake: w.signal, mark: w.adapterMark}
-	adapters := newCollectionWatch(client, adapterResource, "", "", handler.handler())
-	w.adapters = adapters.view()
+	adapters := informer.Start(ctx, client, informer.Source{Resource: adapterResource}, informer.Options{Handler: handler.handler(), Synced: w.signal})
+	w.adapters = adapters.View()
 	var group sync.WaitGroup
-	group.Go(func() { adapters.run(ctx, w.signal) })
+	group.Go(func() { <-adapters.Done() })
 	group.Go(func() { w.followPeripherals(ctx, client) })
 	go func() {
 		group.Wait()
@@ -100,12 +103,12 @@ func (w *editWatch) wakes() <-chan struct{} { return w.wake }
 
 // cache answers the stores the pass reads, together with the store of
 // the PairingRequests, which another watch keeps.
-func (w *editWatch) cache(requests storeView) objectCache {
+func (w *editWatch) cache(requests informer.View) objectCache {
 	return objectCache{
-		adapters:           heldObjects{view: w.adapters, versions: newVersionMemo()},
-		requests:           heldObjects{view: requests, versions: newVersionMemo()},
+		adapters:           informer.Held{View: w.adapters, Versions: memo.New()},
+		requests:           informer.Held{View: requests, Versions: memo.New()},
 		peripherals:        &w.peripherals,
-		peripheralVersions: newVersionMemo(),
+		peripheralVersions: memo.New(),
 	}
 }
 
@@ -164,22 +167,18 @@ func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interf
 		// The old store stops following its radio once its informer
 		// stops, so the pass reads no store for any radio until the new
 		// one is set.
-		w.peripherals.set("", storeView{})
+		w.peripherals.set("", informer.View{})
 		stop()
 		watching = key
 		watchCtx, cancel := context.WithCancel(ctx)
-		done := make(chan struct{})
+		handler := editHandler[Peripheral]{what: "the Peripherals of " + key, wake: w.signal, mark: peripheralMark}
+		source := informer.Source{Resource: peripheralResource, LabelSelector: adapterSelector(key)}
+		peripherals := informer.Start(watchCtx, client, source, informer.Options{Handler: handler.handler(), Synced: w.signal})
 		stop = func() {
 			cancel()
-			<-done
+			<-peripherals.Done()
 		}
-		handler := editHandler[Peripheral]{what: "the Peripherals of " + key, wake: w.signal, mark: peripheralMark}
-		peripherals := newCollectionWatch(client, peripheralResource, "", adapterSelector(key), handler.handler())
-		w.peripherals.set(key, peripherals.view())
-		go func() {
-			defer close(done)
-			peripherals.run(watchCtx, w.signal)
-		}()
+		w.peripherals.set(key, peripherals.View())
 	}
 }
 
@@ -240,9 +239,9 @@ func (h editHandler[T]) handler() cache.ResourceEventHandler {
 
 // added takes a new object, and wakes the loop when it is this pod's.
 func (h editHandler[T]) added(object any) {
-	item, err := convert[T](object)
+	item, err := informer.Convert[T](object)
 	if err != nil {
-		reportUnconverted(h.what, err)
+		informer.Report(h.what, err)
 		return
 	}
 	if _, ours := h.mark(item); ours {
@@ -255,9 +254,9 @@ func (h editHandler[T]) added(object any) {
 // and then nothing says whose it was, so the removal wakes the loop.
 // One extra pass costs less than a missed unpair.
 func (h editHandler[T]) removed(object any) {
-	item, err := convert[T](object)
+	item, err := informer.Convert[T](object)
 	if err != nil {
-		reportUnconverted(h.what, err)
+		informer.Report(h.what, err)
 		h.wake()
 		return
 	}
@@ -270,15 +269,15 @@ func (h editHandler[T]) removed(object any) {
 // to the mark wakes the loop, so this operator's own status write does
 // not.
 func (h editHandler[T]) updated(before, after any) {
-	item, err := convert[T](after)
+	item, err := informer.Convert[T](after)
 	if err != nil {
-		reportUnconverted(h.what, err)
+		informer.Report(h.what, err)
 		return
 	}
 	mark, ours := h.mark(item)
 	// A held copy that does not convert was logged when it arrived.
 	// Nothing says what it held, so the change counts as an edit.
-	old, err := convert[T](before)
+	old, err := informer.Convert[T](before)
 	was, _ := h.mark(old)
 	if ours && (err != nil || was != mark) {
 		h.wake()

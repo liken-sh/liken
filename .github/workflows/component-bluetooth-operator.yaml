@@ -102,7 +102,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: 'kubernetes=kubernetes'
             smoke: ''
           - image: bluetooth-bondfetch
             context: bluetooth-operator
@@ -110,7 +110,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: 'kubernetes=kubernetes'
             smoke: ''
           - image: bluetoothd
             context: bluetooth-operator
@@ -118,7 +118,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: 'kubernetes=kubernetes'
             smoke: ''
           - image: bluetooth-operator-cli
             context: bluetooth-operator
@@ -126,7 +126,7 @@ jobs:
             target: ''
             platforms: linux/amd64,linux/arm64
             load: false
-            build-contexts: ''
+            build-contexts: 'kubernetes=kubernetes'
             smoke: ''
     steps:
       - uses: actions/checkout@v7

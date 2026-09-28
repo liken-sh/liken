@@ -13,13 +13,16 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // storeOf is a store that holds the fixture's objects of one kind as
 // they are now, the way a watch's store holds them once the watch has
 // delivered every write. The store holds copies, so a later write to
 // the fixture leaves the store older than the API server.
-func storeOf(t *testing.T, fixture *apiFixture, kind string) storeView {
+func storeOf(t *testing.T, fixture *apiFixture, kind string) informer.View {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	for _, path := range sortedPaths(fixture.objects) {
@@ -39,7 +42,7 @@ func storeOf(t *testing.T, fixture *apiFixture, kind string) storeView {
 			t.Fatal(err)
 		}
 	}
-	return storeView{store: store, synced: func() bool { return true }}
+	return informer.View{Store: store, Synced: func() bool { return true }}
 }
 
 // cacheOf is the three stores of an inventory, holding what the
@@ -51,8 +54,8 @@ func cacheOf(t *testing.T, fixture *apiFixture, radio string) objectCache {
 	peripherals := &followedView{}
 	peripherals.set(radio, storeOf(t, fixture, peripheralKind))
 	return objectCache{
-		adapters:    heldObjects{view: storeOf(t, fixture, adapterKind)},
-		requests:    heldObjects{view: storeOf(t, fixture, pairingRequestKind)},
+		adapters:    informer.Held{View: storeOf(t, fixture, adapterKind)},
+		requests:    informer.Held{View: storeOf(t, fixture, pairingRequestKind)},
 		peripherals: peripherals,
 	}
 }
@@ -264,7 +267,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	radio := testRadio(t, seenDevice(t, testDevice, "DualSense Wireless Controller"))
 	inventory := testInventory(t, fixture, radio)
 	inventory.cache = cacheOf(t, fixture, testAdapterName)
-	inventory.cache.requests.versions = newVersionMemo()
+	inventory.cache.requests.Versions = memo.New()
 	inventory.reconcile()
 	if request := read[PairingRequest](t, fixture, testRequestPath()); request.Status.Phase != phasePaired {
 		t.Fatalf("the first pass left the request %q", request.Status.Phase)
@@ -277,49 +280,5 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 		if strings.HasPrefix(call, "OpenWindow") {
 			t.Fatalf("the pass opened the window again for a paired request: %v", radio.calls)
 		}
-	}
-}
-
-// arrivingStore is a store whose informer takes one object just after
-// the first read of its keys, the way the watch event of a create
-// lands while a pass lists.
-type arrivingStore struct {
-	cache.Store
-	arriving *unstructured.Unstructured
-}
-
-func (s *arrivingStore) ListKeys() []string {
-	keys := s.Store.ListKeys()
-	if s.arriving != nil {
-		_ = s.Store.Add(s.arriving)
-		s.arriving = nil
-	}
-	return keys
-}
-
-// A list from a whole store answers an Adapter the operator created,
-// even when the watch event of the create reaches the store during the
-// list. The inventory pass reads the list to decide whether its radio's
-// Adapter exists, and a list that left it out would make the pass
-// create the Adapter again.
-func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
-	fixture := newAPIFixture()
-	client := testClient(t, fixture.handler(t))
-	created := asObject(t, Adapter{Metadata: ObjectMeta{Name: testAdapterName, ResourceVersion: "5"}})
-	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: created}
-	versions := newVersionMemo()
-	versions.note(testAdapterName, "5")
-	view := storeView{store: store, synced: func() bool { return true }, whole: true}
-
-	list, err := currentList[Adapter](client, heldObjects{view: view, versions: versions}, adapterPath)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 {
-		t.Errorf("the list holds %d Adapters, want 1", len(list))
-	}
-	if reads := sent(fixture, http.MethodGet); len(reads) != 0 {
-		t.Errorf("the list sent %d reads, want none: %v", len(reads), reads)
 	}
 }

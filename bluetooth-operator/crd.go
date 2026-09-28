@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 const (
@@ -410,11 +411,6 @@ func pairingRequestPath(namespace, name string) string {
 	return pairingBase + "/namespaces/" + namespace + "/pairingrequests/" + name
 }
 
-// statusPath names the status subresource of an object. A write there
-// changes status and nothing else, so an operator that writes status
-// cannot overwrite a spec a person edited in the same moment.
-func statusPath(path string) string { return path + "/status" }
-
 // byAdapter narrows a list to the objects that belong to one radio. The
 // Peripherals and the bond Secrets both have the adapter's address as a
 // label, because a label is selectable and a name is not, and this
@@ -454,7 +450,7 @@ func fromCache(path string) string {
 // createObject posts a new object to its collection and returns what
 // the server stored. The stored copy includes the UID that an owner
 // reference needs.
-func createObject[T any](c *Client, collection string, object *T) (*T, error) {
+func createObject[T any](c *apiclient.Client, collection string, object *T) (*T, error) {
 	body, err := json.Marshal(object)
 	if err != nil {
 		return nil, err
@@ -466,32 +462,12 @@ func createObject[T any](c *Client, collection string, object *T) (*T, error) {
 	return created, nil
 }
 
-// replaceStatus writes one object's status. The write sends the whole
-// object, because that is what the subresource takes, and the server
-// keeps only the status half of it.
-//
-// Every caller states the object's apiVersion and kind before it calls
-// this. An object read out of a list does not always have them, and
-// the API server refuses a write that includes neither.
-//
-// The server's copy of the object is decoded back over the caller's,
-// for the reason patchFinalizers returns a version: a write produces a
-// new resourceVersion, and the server refuses a second write in the
-// same pass that still states the old one.
-func replaceStatus[T any](c *Client, path string, object *T) error {
-	body, err := json.Marshal(object)
-	if err != nil {
-		return err
-	}
-	return c.RequestJSON(http.MethodPut, statusPath(path), body, object)
-}
-
 // deleteObject removes one object. An object that is already gone
 // counts as success, because every caller here needs the object to be
 // absent, not a report on one delete call.
-func deleteObject(c *Client, path string) error {
+func deleteObject(c *apiclient.Client, path string) error {
 	err := c.RequestJSON(http.MethodDelete, path, nil, nil)
-	if err == ErrNotFound {
+	if err == apiclient.ErrNotFound {
 		return nil
 	}
 	return err
@@ -514,7 +490,7 @@ const mergePatchType = "application/merge-patch+json"
 // it produces a new resourceVersion, and the server would refuse a
 // second write in the same pass that still stated the version from
 // before the patch.
-func patchFinalizers(c *Client, path, resourceVersion string, finalizers []string) (string, error) {
+func patchFinalizers(c *apiclient.Client, path, resourceVersion string, finalizers []string) (string, error) {
 	patch := map[string]any{
 		"metadata": map[string]any{
 			"resourceVersion": resourceVersion,
@@ -528,7 +504,7 @@ func patchFinalizers(c *Client, path, resourceVersion string, finalizers []strin
 	var patched struct {
 		Metadata ObjectMeta `json:"metadata"`
 	}
-	if err := c.RequestWithType(http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
+	if err := c.Request(http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
 		return "", err
 	}
 	return patched.Metadata.ResourceVersion, nil

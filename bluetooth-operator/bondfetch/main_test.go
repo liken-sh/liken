@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The two files one paired controller has: the link key in its
@@ -24,7 +25,7 @@ var testFiles = bonds.Files{Info: []byte(testInfo), Cache: []byte(testCache)}
 
 // testAPI points a client at a test server, with a credentials
 // directory the test owns.
-func testAPI(t *testing.T, handler http.Handler) *apiClient {
+func testAPI(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -33,7 +34,7 @@ func testAPI(t *testing.T, handler http.Handler) *apiClient {
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return newAPIClient(server.URL, server.Client(), credentials)
+	return apiclient.New(server.URL, server.Client(), credentials)
 }
 
 // storedBonds serves one Secret for each bond, out of the collection

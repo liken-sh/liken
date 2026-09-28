@@ -29,6 +29,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // DriverName identifies this operator as a DRA driver. A driver name
@@ -183,9 +185,9 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 // and nothing else has to run for that to happen.
 //
 // The write includes the resourceVersion from the read, so a
-// conflicting writer gets ErrConflict instead of losing its change.
+// conflicting writer gets apiclient.ErrConflict instead of losing its change.
 // The next pass reads again and writes again.
-func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
+func EnsureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
 	name := sliceName(nodeName)
 	path := ResourceSlicesPath + "/" + name
 
@@ -195,8 +197,8 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 	// slice of one node, and the grant (deploy/rbac.yaml) keeps every
 	// other driver's inventory out of this operator's reach. One read
 	// for each pass is the cost of that.
-	current, err := get[ResourceSlice](c, path)
-	if err == ErrNotFound {
+	current, err := apiclient.Get[ResourceSlice](c, path)
+	if err == apiclient.ErrNotFound {
 		if len(devices) == 0 {
 			return nil
 		}
@@ -273,9 +275,9 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 // consumer holds a prepared claim, and a delete on the way out would
 // strand that consumer. A person who uninstalls the operator for good
 // deletes the slice by name, and the README says so.
-func DeleteResourceSlice(c *Client, nodeName string) error {
+func DeleteResourceSlice(c *apiclient.Client, nodeName string) error {
 	err := c.RequestJSON(http.MethodDelete, ResourceSlicesPath+"/"+sliceName(nodeName), nil, nil)
-	if err == ErrNotFound {
+	if err == apiclient.ErrNotFound {
 		return nil
 	}
 	return err
@@ -296,8 +298,8 @@ type nodeObject struct {
 
 // NodeOwner reads this operator's node and builds the owner reference
 // for its slice.
-func NodeOwner(c *Client, nodeName string) (OwnerReference, error) {
-	node, err := get[nodeObject](c, "/api/v1/nodes/"+nodeName)
+func NodeOwner(c *apiclient.Client, nodeName string) (OwnerReference, error) {
+	node, err := apiclient.Get[nodeObject](c, "/api/v1/nodes/"+nodeName)
 	if err != nil {
 		return OwnerReference{}, err
 	}

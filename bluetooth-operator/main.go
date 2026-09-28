@@ -39,6 +39,8 @@ import (
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 const (
@@ -139,11 +141,11 @@ func main() {
 	// has no retry logic of its own, because the kubelet already
 	// provides it: a pod that exits nonzero restarts with backoff, and
 	// the failure shows in kubectl instead of hiding in a log.
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
-	watcher, err := inClusterWatcher()
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}
@@ -207,7 +209,7 @@ func main() {
 	held.metrics = readings
 	publish := &publisher{client: client, nodeName: nodeName, owner: owner, relays: held}
 	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot(), relays: held,
-		watchSecrets: func(adapter bonds.Address) storeView { return watchBondSecrets(ctx, watcher, namespace, adapter) }}
+		watchSecrets: func(adapter bonds.Address) informer.View { return watchBondSecrets(ctx, watcher, namespace, adapter) }}
 	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace, readings)
 	// The pass reads the objects the watches hold from their stores
 	// (objectcache.go).

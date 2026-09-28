@@ -46,6 +46,8 @@ import (
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The kubelet's plugin directories. The registry is where the kubelet
@@ -62,7 +64,7 @@ var (
 // the relay the reconcile loop keeps.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
-	client *Client
+	client *apiclient.Client
 	relays *relays
 }
 
@@ -98,7 +100,7 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 // registration. The function removes stale sockets from a previous
 // pod first, because a bind to an orphaned socket file fails even
 // when nothing is listening on it.
-func serveDRAPlugin(ctx context.Context, client *Client, held *relays) error {
+func serveDRAPlugin(ctx context.Context, client *apiclient.Client, held *relays) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
 	}
@@ -327,7 +329,7 @@ type AllocatedDevice struct {
 
 // GetResourceClaim reads one claim. Claims are namespaced, because a
 // claim belongs to the workload that created it.
-func GetResourceClaim(c *Client, namespace, name string) (*ResourceClaim, error) {
+func GetResourceClaim(c *apiclient.Client, namespace, name string) (*ResourceClaim, error) {
 	path := "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
 	claim := &ResourceClaim{}
 	if err := c.RequestJSON(http.MethodGet, path, nil, claim); err != nil {

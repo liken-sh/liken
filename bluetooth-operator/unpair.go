@@ -31,6 +31,8 @@ import (
 	"os"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // unpair advances one Peripheral's teardown by at most one step.
@@ -42,8 +44,8 @@ func (i *inventory) unpair(peripheral *Peripheral, address bonds.Address, device
 	// teardown from that copy would retire a device again that no
 	// Peripheral names. A teardown lasts a few passes, so the read
 	// costs one request on each of them.
-	current, err := readFresh[Peripheral](i.client, i.cache.peripheralVersions, name, peripheralPath(name))
-	if errors.Is(err, ErrNotFound) {
+	current, err := informer.ReadFresh[Peripheral](i.client, i.cache.peripheralVersions, name, peripheralPath(name))
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return
 	}
 	if err != nil {
@@ -119,7 +121,7 @@ func (i *inventory) unpair(peripheral *Peripheral, address bonds.Address, device
 		pass.ok = false
 		return
 	}
-	i.cache.peripheralVersions.note(name, version)
+	i.cache.peripheralVersions.Note(name, version)
 	delete(i.retired, address)
 	delete(i.retiring, address)
 	// The object is gone the moment the last finalizer lifts, so its

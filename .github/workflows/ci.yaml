@@ -108,13 +108,13 @@ jobs:
           extra-args: >-
             --all-files
             --skip audio-operator/
+            --skip kubernetes/
             --skip bluetooth-operator/
             --skip brand/
             --skip ci/
             --skip display-operator/
             --skip equipment-operator/
             --skip git-csi-driver/
-            --skip kubernetes/
             --skip media-operator/
             --skip library-operator/
             --skip liken/
@@ -156,8 +156,19 @@ jobs:
       contents: read
       packages: write
 
-  bluetooth-operator:
+  kubernetes:
     needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['kubernetes'].check }}
+    uses: ./.github/workflows/component-kubernetes.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].publish }}
+    permissions:
+      contents: read
+      packages: write
+
+  bluetooth-operator:
+    needs: [plan, kubernetes]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
@@ -218,17 +229,6 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
-    permissions:
-      contents: read
-      packages: write
-
-  kubernetes:
-    needs: [plan]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['kubernetes'].check }}
-    uses: ./.github/workflows/component-kubernetes.yaml
-    with:
-      version: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].publish }}
     permissions:
       contents: read
       packages: write
@@ -310,7 +310,7 @@ jobs:
   # A component whose jobs did not run in this push has no new
   # coverage profile, so its report is the one the site serves now.
   site:
-    needs: [plan, audio-operator, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, kubernetes, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
+    needs: [plan, audio-operator, kubernetes, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -469,7 +469,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, audio-operator, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, kubernetes, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
+    needs: [plan, audio-operator, kubernetes, bluetooth-operator, brand, ci, display-operator, equipment-operator, git-csi-driver, media-operator, library-operator, liken, people-operator, per-node-csi-driver, redirect]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

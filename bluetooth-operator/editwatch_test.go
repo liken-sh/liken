@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 func peripheralAt(generation int64, deleting bool) Peripheral {
@@ -283,23 +285,23 @@ func TestTheEditWatchesFillTheStoresThePassReads(t *testing.T) {
 	peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[" + encode(t, peripheralAt(1, false)) + "]"})
 	watch := runEditWatch(t, editServers(t, adapters, peripherals))
 	watch.follow(testAdapterName)
-	stores := watch.cache(storeView{})
+	stores := watch.cache(informer.View{})
 
 	deadline := time.After(5 * time.Second)
-	for !stores.adapters.view.ready() || !stores.peripherals.of(testAdapterName).ready() {
+	for !stores.adapters.View.Ready() || !stores.peripherals.of(testAdapterName).Ready() {
 		select {
 		case <-deadline:
 			t.Fatal("the stores never held their first reads")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	if held := cachedList[Adapter](stores.adapters.view); len(held) != 1 || held[0].Metadata.Name != testAdapterName {
+	if held := informer.CachedList[Adapter](stores.adapters.View); len(held) != 1 || held[0].Metadata.Name != testAdapterName {
 		t.Errorf("the Adapter store holds %+v", held)
 	}
-	if held := cachedList[Peripheral](stores.peripherals.of(testAdapterName)); len(held) != 1 {
+	if held := informer.CachedList[Peripheral](stores.peripherals.of(testAdapterName)); len(held) != 1 {
 		t.Errorf("the Peripheral store holds %+v", held)
 	}
-	if stores.peripherals.of("00-1a-7d-da-71-13").ready() {
+	if stores.peripherals.of("00-1a-7d-da-71-13").Ready() {
 		t.Error("the Peripheral store answered for a radio the watch does not follow")
 	}
 }

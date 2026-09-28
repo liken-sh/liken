@@ -163,6 +163,11 @@ RUN set -eux; \
 FROM golang:1.26.5-bookworm AS entrypoint
 WORKDIR /src
 COPY go.mod go.sum ./
+# go.mod replaces the shared kubernetes module with ../kubernetes, so
+# the module graph reads its go.mod from the second build context named
+# kubernetes. The entrypoint imports none of its packages, so the
+# module file is all it needs.
+COPY --from=kubernetes go.mod /kubernetes/
 RUN go mod download
 COPY bluetoothd/*.go ./bluetoothd/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-bluetoothd ./bluetoothd
