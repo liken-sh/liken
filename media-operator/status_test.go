@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 func statusTestPlay() *Play {
@@ -424,7 +426,7 @@ func TestASecondConflictIsReported(t *testing.T) {
 	api.stored.Metadata.ResourceVersion = "13"
 
 	err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, statusTestPlay(), PlayStatus{Phase: phaseRunning})
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("err = %v, want %v", err, ErrConflict)
+	if !errors.Is(err, apiclient.ErrConflict) {
+		t.Fatalf("err = %v, want %v", err, apiclient.ErrConflict)
 	}
 }

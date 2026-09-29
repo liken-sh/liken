@@ -9,6 +9,10 @@ package main
 import (
 	"encoding/json"
 	"sync"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // publishedStatuses records the payload the operator last published on
@@ -453,9 +457,9 @@ func playTitle(play *Play) string {
 // each copy the API server answers, so the next pass composes the
 // remembered screen and Sinks from a copy at least as new as this write.
 // A nil memo notes nothing.
-func writePlayerStatus(c *Client, versions *versionMemo, player *Player, desired PlayerStatus) error {
+func writePlayerStatus(c *apiclient.Client, versions *memo.Versions, player *Player, desired PlayerStatus) error {
 	var compared error
-	_, err := settleStatus(c, versions, playerPath(player.Metadata.Namespace, player.Metadata.Name), player,
+	_, err := informer.SettleStatus(c, versions, playerPath(player.Metadata.Namespace, player.Metadata.Name), player,
 		func(held *Player) bool {
 			same, err := samePlayerStatus(held.Status, desired)
 			if err != nil {

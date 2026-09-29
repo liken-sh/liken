@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
@@ -235,7 +236,7 @@ func TestAChangeToAPlayWakesThePass(t *testing.T) {
 	synced := make(chan struct{})
 
 	runWatch(t, server, collectionWatch{resource: playResource, handler: wakeOnChange(wake),
-		synced: func(cache.Store) { close(synced) }})
+		synced: func(informer.View) { close(synced) }})
 	mustMatch(t, closedWithin(synced, watchTimeout), true)
 	<-wake
 
@@ -330,7 +331,7 @@ func TestThePodsWatchSelectsTheOperatorsOwnPods(t *testing.T) {
 	synced := make(chan struct{})
 
 	runWatch(t, server, collectionWatch{resource: podResource, labels: ownPodsSelector,
-		handler: podRule.handler(wake), synced: func(cache.Store) { close(synced) }})
+		handler: podRule.handler(wake), synced: func(informer.View) { close(synced) }})
 	mustMatch(t, closedWithin(synced, watchTimeout), true)
 	// The first read holds a running playback pod, which wakes the pass
 	// once.
@@ -353,7 +354,7 @@ func TestAWatchCountsEachReopen(t *testing.T) {
 	synced := make(chan struct{})
 
 	runWatch(t, server, collectionWatch{resource: playResource, reopened: reopened.Done,
-		synced: func(cache.Store) { close(synced) }})
+		synced: func(informer.View) { close(synced) }})
 	mustMatch(t, closedWithin(synced, watchTimeout), true)
 	plays.send(t, "ADDED", housePlay("https://nas/film.mkv"))
 	plays.live <- closeStream
@@ -377,8 +378,8 @@ func servedCluster(t *testing.T, cluster *fakeCluster) *collectionServer {
 		kind     string
 		source   objectSource
 	}{
-		{playResource, "Play", view.plays.view.store},
-		{playerResource, "Player", view.players.view.store},
+		{playResource, "Play", view.plays.View.Store},
+		{playerResource, "Player", view.players.View.Store},
 		{remoteResource, "Remote", view.remotes},
 		{keymapResource, "Keymap", view.keymaps},
 		{preferencesResource, "MediaPreferences", view.preferences},
@@ -494,7 +495,7 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 		"spec":     "garbled",
 	}}
 
-	_, err := convert[Play](object)
+	_, err := informer.Convert[Play](object)
 
 	mustFail(t, err)
 	mustMatch(t, strings.Contains(err.Error(), "Play house/movie does not convert"), true)

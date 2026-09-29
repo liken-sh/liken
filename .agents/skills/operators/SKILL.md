@@ -237,9 +237,9 @@ above.
 **The shared module.** Step 4 of plan 69 moves each operator's copy
 of the client, the watch, and the cache into the Go module
 `kubernetes/` at the top of the repository, one operator at a time.
-`bluetooth-operator`, `audio-operator`, `display-operator`, and
-`equipment-operator` are on it. `media-operator` and
-`library-operator` still carry their own `apiclient.go`, `watch.go`,
+`bluetooth-operator`, `audio-operator`, `display-operator`,
+`equipment-operator`, and `media-operator` are on it.
+`library-operator` still carries its own `apiclient.go`, `watch.go`,
 and `objectcache.go`, and `liken` keeps its own client and informer in
 `liken/kubernetes/`, until the step moves them.
 

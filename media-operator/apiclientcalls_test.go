@@ -7,6 +7,8 @@ package main
 import (
 	"net/http"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // Every read and write this client makes, against a server that fails
@@ -14,41 +16,41 @@ import (
 func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 	cases := []struct {
 		name string
-		call func(c *Client) error
+		call func(c *apiclient.Client) error
 	}{
-		{name: "get a play", call: func(c *Client) error { _, err := GetPlay(c, "house", "movie"); return err }},
-		{name: "delete a play", call: func(c *Client) error { return DeletePlay(c, "house", "movie") }},
-		{name: "get a player", call: func(c *Client) error { _, err := GetPlayer(c, "house", "theater"); return err }},
-		{name: "put a play status", call: func(c *Client) error {
-			return replaceStatus(c, playPath("house", "movie"), &Play{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
+		{name: "get a play", call: func(c *apiclient.Client) error { _, err := GetPlay(c, "house", "movie"); return err }},
+		{name: "delete a play", call: func(c *apiclient.Client) error { return DeletePlay(c, "house", "movie") }},
+		{name: "get a player", call: func(c *apiclient.Client) error { _, err := GetPlayer(c, "house", "theater"); return err }},
+		{name: "put a play status", call: func(c *apiclient.Client) error {
+			return apiclient.ReplaceStatus(c, playPath("house", "movie"), &Play{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
 		}},
-		{name: "put a player status", call: func(c *Client) error {
-			return replaceStatus(c, playerPath("house", "theater"), &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}})
+		{name: "put a player status", call: func(c *apiclient.Client) error {
+			return apiclient.ReplaceStatus(c, playerPath("house", "theater"), &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}})
 		}},
-		{name: "get a remote", call: func(c *Client) error { _, err := GetRemote(c, "house", "wand"); return err }},
-		{name: "put a remote status", call: func(c *Client) error {
+		{name: "get a remote", call: func(c *apiclient.Client) error { _, err := GetRemote(c, "house", "wand"); return err }},
+		{name: "put a remote status", call: func(c *apiclient.Client) error {
 			_, err := PutRemoteStatus(c, &Remote{Metadata: ObjectMeta{Name: "wand", Namespace: "house"}})
 			return err
 		}},
-		{name: "get a claim", call: func(c *Client) error { _, err := GetResourceClaim(c, "house", "movie"); return err }},
-		{name: "create a claim", call: func(c *Client) error {
+		{name: "get a claim", call: func(c *apiclient.Client) error { _, err := GetResourceClaim(c, "house", "movie"); return err }},
+		{name: "create a claim", call: func(c *apiclient.Client) error {
 			_, err := CreateResourceClaim(c, &ResourceClaim{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
 			return err
 		}},
-		{name: "delete a claim", call: func(c *Client) error { return DeleteResourceClaim(c, "house", "movie") }},
-		{name: "get a pod", call: func(c *Client) error { _, err := GetPod(c, "house", "movie"); return err }},
-		{name: "create a pod", call: func(c *Client) error {
+		{name: "delete a claim", call: func(c *apiclient.Client) error { return DeleteResourceClaim(c, "house", "movie") }},
+		{name: "get a pod", call: func(c *apiclient.Client) error { _, err := GetPod(c, "house", "movie"); return err }},
+		{name: "create a pod", call: func(c *apiclient.Client) error {
 			_, err := CreatePod(c, &Pod{Metadata: ObjectMeta{Name: "movie", Namespace: "house"}})
 			return err
 		}},
-		{name: "delete a pod", call: func(c *Client) error { return DeletePod(c, "house", "movie") }},
-		{name: "apply a display override", call: func(c *Client) error {
+		{name: "delete a pod", call: func(c *apiclient.Client) error { return DeletePod(c, "house", "movie") }},
+		{name: "apply a display override", call: func(c *apiclient.Client) error {
 			return ApplyDisplayOverride(c, "panel", nil)
 		}},
-		{name: "apply a receiver session", call: func(c *Client) error {
+		{name: "apply a receiver session", call: func(c *apiclient.Client) error {
 			return ApplyReceiverSession(c, "den-receiver", nil)
 		}},
-		{name: "release a receiver spec session", call: func(c *Client) error {
+		{name: "release a receiver spec session", call: func(c *apiclient.Client) error {
 			return ReleaseReceiverSpecSession(c, "den-receiver")
 		}},
 	}
@@ -67,11 +69,11 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 func TestAnAbsentObjectIsASuccessfulDelete(t *testing.T) {
 	cases := []struct {
 		name string
-		call func(c *Client) error
+		call func(c *apiclient.Client) error
 	}{
-		{name: "a play", call: func(c *Client) error { return DeletePlay(c, "house", "movie") }},
-		{name: "a pod", call: func(c *Client) error { return DeletePod(c, "house", "movie") }},
-		{name: "a claim", call: func(c *Client) error { return DeleteResourceClaim(c, "house", "movie") }},
+		{name: "a play", call: func(c *apiclient.Client) error { return DeletePlay(c, "house", "movie") }},
+		{name: "a pod", call: func(c *apiclient.Client) error { return DeletePod(c, "house", "movie") }},
+		{name: "a claim", call: func(c *apiclient.Client) error { return DeleteResourceClaim(c, "house", "movie") }},
 	}
 	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -121,7 +123,7 @@ func TestAPlayerStatusWritesTheStatusSubresource(t *testing.T) {
 		Status:   PlayerStatus{Activity: "playing", Play: "movie"},
 	}
 
-	mustSucceed(t, replaceStatus(testAPIClient(t, api.handler()), playerPath("house", "theater"), player))
+	mustSucceed(t, apiclient.ReplaceStatus(testAPIClient(t, api.handler()), playerPath("house", "theater"), player))
 	mustMatch(t, player.Metadata.ResourceVersion, "13")
 	mustMatch(t, api.requests[0].Method, http.MethodPut)
 	mustMatch(t, api.requests[0].Path, "/apis/media.liken.sh/v1alpha1/namespaces/house/players/theater/status")

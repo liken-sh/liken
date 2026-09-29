@@ -81,7 +81,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 
 	// The watch has not delivered that write, so the store still holds
 	// the copy the write replaced.
-	media.view.plays.view.store = starting().view().plays.view.store
+	media.view.plays.View.Store = starting().view().plays.View.Store
 	media.pass()
 
 	mustMatchAll(t, activityLines(log), []string{

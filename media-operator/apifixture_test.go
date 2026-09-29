@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The Player every capture test asks about: its namespace and name,
@@ -245,7 +247,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	t.Cleanup(planeServer.Close)
 	display := newSibling(t)
 	audio := newSibling(t)
-	client := NewClient(planeServer.URL, planeServer.Client(), "")
+	client := apiclient.New(planeServer.URL, planeServer.Client(), "")
 	fixture := &apiFixture{plane: plane, display: display, audio: audio}
 	instants := upstreamInstants()
 	fixture.server = &apiServer{

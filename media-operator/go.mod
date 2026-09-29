@@ -18,6 +18,13 @@ require (
 	sigs.k8s.io/yaml v1.6.0
 )
 
+// The client, the watch, and the cache that the operators share. The
+// module is in this repository, and the replace below builds against
+// the copy in the tree, so no version of it is published.
+require github.com/liken-sh/liken/kubernetes v0.0.0
+
+replace github.com/liken-sh/liken/kubernetes => ../kubernetes
+
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/alexflint/go-arg v1.6.0 // indirect

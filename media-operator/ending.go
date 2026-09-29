@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // passSnapshot holds the Plays and the Players the last pass listed. One
@@ -140,7 +142,7 @@ func (o *operator) labelEnding(play *Play) {
 		// would label the new pod and fade a film that plays.
 		held, err := GetPod(o.client, namespace, pod)
 		switch {
-		case errors.Is(err, ErrNotFound) || (err == nil && held.Metadata.UID != uid):
+		case errors.Is(err, apiclient.ErrNotFound) || (err == nil && held.Metadata.UID != uid):
 			o.endingLabeled[key] = uid
 			return
 		case err != nil:
@@ -151,7 +153,7 @@ func (o *operator) labelEnding(play *Play) {
 	}
 	err := PatchPodLabels(o.client, namespace, pod,
 		map[string]string{endingLabelKey: endingLabelValue})
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Fprintf(os.Stderr, "labeling the ending on pod %s/%s: %v\n",
 			namespace, pod, err)
 		return

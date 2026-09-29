@@ -10,6 +10,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The request names are the roles, and they are the names the
@@ -207,15 +209,15 @@ func claimHasSink(claim *ResourceClaim) bool {
 // or another copy of this operator, created the same claim first. The
 // graceful recreate deletes a claim a Player reshaped before it calls
 // this, so ensureClaim never updates a claim in place.
-func ensureClaim(c *Client, claim *ResourceClaim) error {
+func ensureClaim(c *apiclient.Client, claim *ResourceClaim) error {
 	_, err := GetResourceClaim(c, claim.Metadata.Namespace, claim.Metadata.Name)
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
-	if _, err := CreateResourceClaim(c, claim); err != nil && !errors.Is(err, ErrConflict) {
+	if _, err := CreateResourceClaim(c, claim); err != nil && !errors.Is(err, apiclient.ErrConflict) {
 		return err
 	}
 	return nil
@@ -226,7 +228,7 @@ func ensureClaim(c *Client, claim *ResourceClaim) error {
 // diverged, so the recreate creates it.
 func (o *operator) claimDiverged(desired *ResourceClaim) (bool, error) {
 	current, err := GetResourceClaim(o.client, desired.Metadata.Namespace, desired.Metadata.Name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return true, nil
 	}
 	if err != nil {

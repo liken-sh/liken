@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The repeat defaults, applied when a binding sets a repeat block but
@@ -169,7 +171,7 @@ func gatherRemotes(read func(namespace, name string) (*Remote, error), player *P
 	bound := make([]boundRemote, 0, len(entries))
 	for _, entry := range entries {
 		remote, err := read(namespace, entry.Name)
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, apiclient.ErrNotFound) {
 			return nil, fmt.Errorf("the Player %s names the Remote %s, which does not exist in this namespace",
 				player.Metadata.Name, entry.Name)
 		}

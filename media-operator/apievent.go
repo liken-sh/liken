@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The reason and the type `kubectl describe` prints, the component
@@ -90,7 +92,7 @@ func (s *apiServer) recordCapture(e *apiExchange, player *Player, aspect, mediaT
 	}
 }
 
-func CreateEvent(c *Client, event *Event) error {
+func CreateEvent(c *apiclient.Client, event *Event) error {
 	body, err := json.Marshal(event)
 	if err != nil {
 		return err

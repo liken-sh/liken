@@ -4,7 +4,7 @@ name = "media-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "mpv", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "mpv", "vulkan"]
 
 [docs]
 prefix = "media"
@@ -48,15 +48,20 @@ deploy = "deploy"
 # full build, and every sidecar runs the pod build in one of its modes.
 # A repository that needs only the sidecar pins a name that promises
 # nothing about the controller.
+#
+# Every image that builds from this module's go.mod takes the shared
+# kubernetes module as a build context, because go.mod replaces it with
+# ../kubernetes. The screen images build from the Rust workspace alone.
 [[outputs.images]]
 name = "media-operator"
 file = "Dockerfile"
 aliases = ["media-operator-sidecar"]
+contexts = { kubernetes = "kubernetes" }
 
 [[outputs.images]]
 name = "media-operator-player"
 file = "Dockerfile.player"
-contexts = { brand = "brand" }
+contexts = { brand = "brand", kubernetes = "kubernetes" }
 smoke = "media-operator/smoke/media-operator-player.sh"
 
 [[outputs.images]]
@@ -76,6 +81,7 @@ smoke = "media-operator/smoke/media-operator-display.sh"
 [[outputs.images]]
 name = "media-operator-api"
 file = "Dockerfile.api"
+contexts = { kubernetes = "kubernetes" }
 smoke = "media-operator/smoke/media-operator-api.sh"
 
 # The CLI image carries the same version as the operator, so the base
@@ -85,3 +91,4 @@ smoke = "media-operator/smoke/media-operator-api.sh"
 name = "media-operator-cli"
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
+contexts = { kubernetes = "kubernetes" }

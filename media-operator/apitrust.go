@@ -17,6 +17,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -30,7 +31,7 @@ type ConfigMap struct {
 
 func configMapsPath(namespace string) string { return podPrefix + namespace + "/configmaps" }
 
-func GetConfigMap(c *Client, namespace, name string) (*ConfigMap, error) {
+func GetConfigMap(c *apiclient.Client, namespace, name string) (*ConfigMap, error) {
 	configMap := &ConfigMap{}
 	if err := c.RequestJSON(http.MethodGet, configMapsPath(namespace)+"/"+name, nil, configMap); err != nil {
 		return nil, err
@@ -38,7 +39,7 @@ func GetConfigMap(c *Client, namespace, name string) (*ConfigMap, error) {
 	return configMap, nil
 }
 
-func CreateConfigMap(c *Client, configMap *ConfigMap) (*ConfigMap, error) {
+func CreateConfigMap(c *apiclient.Client, configMap *ConfigMap) (*ConfigMap, error) {
 	body, err := json.Marshal(configMap)
 	if err != nil {
 		return nil, err

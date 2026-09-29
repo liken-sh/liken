@@ -13,6 +13,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // derivePlayStatus builds the phase-and-numbers status and stamps
@@ -217,7 +221,7 @@ func playerName(play *Play) string {
 //
 // versions is the memo of the Play store (objectcache.go), which notes
 // each copy the API server answers. A nil memo notes nothing.
-func writePlayStatus(c *Client, versions *versionMemo, play *Play, desired PlayStatus) error {
+func writePlayStatus(c *apiclient.Client, versions *memo.Versions, play *Play, desired PlayStatus) error {
 	_, _, err := writePlayStatusFrom(c, versions, play, desired)
 	return err
 }
@@ -229,10 +233,10 @@ func writePlayStatus(c *Client, versions *versionMemo, play *Play, desired PlayS
 // the one a line and a counter compare against. The copy the caller
 // holds ends as the API server's answer, with its new resourceVersion,
 // so a later write in the same pass does not meet a conflict of its own.
-func writePlayStatusFrom(c *Client, versions *versionMemo, play *Play, desired PlayStatus) (string, bool, error) {
+func writePlayStatusFrom(c *apiclient.Client, versions *memo.Versions, play *Play, desired PlayStatus) (string, bool, error) {
 	was := play.Status.Phase
 	var compared error
-	wrote, err := settleStatus(c, versions, playPath(play.Metadata.Namespace, play.Metadata.Name), play,
+	wrote, err := informer.SettleStatus(c, versions, playPath(play.Metadata.Namespace, play.Metadata.Name), play,
 		func(held *Play) bool {
 			was = held.Status.Phase
 			same, err := sameStatus(held.Status, desired)

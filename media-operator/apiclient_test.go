@@ -10,15 +10,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The credentials are empty, so the client sends no bearer token and
 // reads nothing from disk.
-func testAPIClient(t *testing.T, handler http.Handler) *Client {
+func testAPIClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	return apiclient.New(server.URL, server.Client(), "")
 }
 
 // One recorded request: what the client sent and where.
@@ -86,7 +88,7 @@ func TestAPlayStatusWritesTheStatusSubresource(t *testing.T) {
 		Status:   PlayStatus{Phase: phaseRunning, Position: "0:01:00"},
 	}
 
-	if err := replaceStatus(testAPIClient(t, api.handler()), playPath("house", "movie"), play); err != nil {
+	if err := apiclient.ReplaceStatus(testAPIClient(t, api.handler()), playPath("house", "movie"), play); err != nil {
 		t.Fatal(err)
 	}
 	if len(api.requests) != 1 {
@@ -155,14 +157,14 @@ func TestTheClientNamesTheTwoOrdinaryAnswers(t *testing.T) {
 	client := testAPIClient(t, api.handler())
 
 	t.Run("absent", func(t *testing.T) {
-		if _, err := GetPod(client, "house", "movie-playback"); err != ErrNotFound {
-			t.Fatalf("err = %v, want %v", err, ErrNotFound)
+		if _, err := GetPod(client, "house", "movie-playback"); err != apiclient.ErrNotFound {
+			t.Fatalf("err = %v, want %v", err, apiclient.ErrNotFound)
 		}
 	})
 	t.Run("taken", func(t *testing.T) {
 		_, err := CreatePod(client, &Pod{Metadata: ObjectMeta{Name: "movie-playback", Namespace: "house"}})
-		if err != ErrConflict {
-			t.Fatalf("err = %v, want %v", err, ErrConflict)
+		if err != apiclient.ErrConflict {
+			t.Fatalf("err = %v, want %v", err, apiclient.ErrConflict)
 		}
 	})
 }
@@ -178,7 +180,7 @@ func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("a 500 answer produced no error")
 	}
-	if err == ErrNotFound || err == ErrConflict {
+	if err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		t.Fatalf("err = %v", err)
 	}
 }

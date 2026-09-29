@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -76,7 +78,7 @@ const certificateReview = time.Hour
 // latch, and the serving certificate under its own lock, because the
 // keeper replaces it while requests are being served.
 type apiServer struct {
-	client   *Client
+	client   *apiclient.Client
 	auth     *authorizer
 	upstream *upstreamClient
 	metrics  *apiMetrics
@@ -274,7 +276,7 @@ func writeReport(line string) { fmt.Fprintln(os.Stderr, line) }
 // which the process cannot listen without; then the readiness latch
 // and the listener.
 func runAPI() {
-	client, err := InClusterClient()
+	client, err := inClusterClient()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "in-cluster config: %v\n", err)
 		os.Exit(1)
@@ -289,7 +291,7 @@ func runAPI() {
 
 	// The watches read through client-go's dynamic client, with the same
 	// ServiceAccount the API client reads with.
-	watcher, err := inClusterWatcher()
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "in-cluster config for the watches: %v\n", err)
 		os.Exit(1)

@@ -27,6 +27,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The names of the two objects, and the one DNS name the leaf serves,
@@ -73,7 +75,7 @@ type Secret struct {
 
 func secretsPath(namespace string) string { return podPrefix + namespace + "/secrets" }
 
-func GetSecret(c *Client, namespace, name string) (*Secret, error) {
+func GetSecret(c *apiclient.Client, namespace, name string) (*Secret, error) {
 	secret := &Secret{}
 	if err := c.RequestJSON(http.MethodGet, secretsPath(namespace)+"/"+name, nil, secret); err != nil {
 		return nil, err
@@ -81,7 +83,7 @@ func GetSecret(c *Client, namespace, name string) (*Secret, error) {
 	return secret, nil
 }
 
-func CreateSecret(c *Client, secret *Secret) (*Secret, error) {
+func CreateSecret(c *apiclient.Client, secret *Secret) (*Secret, error) {
 	body, err := json.Marshal(secret)
 	if err != nil {
 		return nil, err
@@ -95,7 +97,7 @@ func CreateSecret(c *Client, secret *Secret) (*Secret, error) {
 
 // UpdateSecret writes the whole object back, so a re-minted leaf lands
 // beside the CA that is already there and the CA is never lost.
-func UpdateSecret(c *Client, secret *Secret) (*Secret, error) {
+func UpdateSecret(c *apiclient.Client, secret *Secret) (*Secret, error) {
 	body, err := json.Marshal(secret)
 	if err != nil {
 		return nil, err
@@ -112,7 +114,7 @@ func UpdateSecret(c *Client, secret *Secret) (*Secret, error) {
 // start, publishes the CA, and afterwards answers the pair it finds,
 // re-minting the leaf as it nears its end.
 type certificateKeeper struct {
-	client    *Client
+	client    *apiclient.Client
 	namespace string
 	// The clock is a field so a test drives a leaf to the end of its
 	// life without waiting a year.
@@ -122,7 +124,7 @@ type certificateKeeper struct {
 	notAfter time.Time
 }
 
-func newCertificateKeeper(client *Client, namespace string) *certificateKeeper {
+func newCertificateKeeper(client *apiclient.Client, namespace string) *certificateKeeper {
 	return &certificateKeeper{client: client, namespace: namespace, now: time.Now}
 }
 
@@ -165,7 +167,7 @@ func (k *certificateKeeper) pair() (*Secret, error) {
 	if err == nil {
 		return secret, nil
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		return nil, fmt.Errorf("reading secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
 	}
 
@@ -174,7 +176,7 @@ func (k *certificateKeeper) pair() (*Secret, error) {
 		return nil, err
 	}
 	created, err := CreateSecret(k.client, minted)
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		won, err := GetSecret(k.client, k.namespace, apiTLSSecretName)
 		if err != nil {
 			return nil, fmt.Errorf("reading secret %s/%s after a conflict: %w", k.namespace, apiTLSSecretName, err)
@@ -223,7 +225,7 @@ func (k *certificateKeeper) publish(caPEM []byte) error {
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		return fmt.Errorf("reading configmap %s/%s: %w", k.namespace, apiCAConfigMapName, err)
 	}
 
@@ -233,7 +235,7 @@ func (k *certificateKeeper) publish(caPEM []byte) error {
 		Metadata:   ObjectMeta{Name: apiCAConfigMapName, Namespace: k.namespace},
 		Data:       map[string]string{apiCACertKey: string(caPEM)},
 	})
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		return nil
 	}
 	if err != nil {

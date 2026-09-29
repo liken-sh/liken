@@ -14,7 +14,11 @@ package main
 // every pass in that window reads the old remote set off the terminating
 // pod, sends another delete, and meets the 409.
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+)
 
 // replace deletes the run's pod, and its claim when the claim itself
 // diverged, and creates the new pod at the film's place when the name is
@@ -38,7 +42,7 @@ func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resol
 	}
 	o.replacements[runKey(namespace, name)] = reason
 	_, err := GetPod(o.client, namespace, podName(name))
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return o.finishReplacement(play, claim, resolved, prefs, remotes, reason)
 	}
 	return nil, err
@@ -51,8 +55,8 @@ func (o *operator) finishReplacement(play *Play, claim *ResourceClaim, resolved 
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	held, err := GetResourceClaim(o.client, claim.Metadata.Namespace, claim.Metadata.Name)
 	switch {
-	case errors.Is(err, ErrNotFound):
-		if _, err := CreateResourceClaim(o.client, claim); err != nil && !errors.Is(err, ErrConflict) {
+	case errors.Is(err, apiclient.ErrNotFound):
+		if _, err := CreateResourceClaim(o.client, claim); err != nil && !errors.Is(err, apiclient.ErrConflict) {
 			return nil, err
 		}
 	case err != nil:

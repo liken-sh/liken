@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -45,9 +46,9 @@ type changeRule[T any] struct {
 func (r changeRule[T]) handler(wake chan<- struct{}) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(object any) {
-			item, err := convert[T](object)
+			item, err := informer.Convert[T](object)
 			if err != nil {
-				reportUnconverted(r.what, err)
+				informer.Report(r.what, err)
 				return
 			}
 			if r.matters(item) && (r.added == nil || r.added(item)) {
@@ -55,14 +56,14 @@ func (r changeRule[T]) handler(wake chan<- struct{}) cache.ResourceEventHandler 
 			}
 		},
 		UpdateFunc: func(before, after any) {
-			item, err := convert[T](after)
+			item, err := informer.Convert[T](after)
 			if err != nil {
-				reportUnconverted(r.what, err)
+				informer.Report(r.what, err)
 				return
 			}
 			// A held copy that does not convert was reported when it
 			// arrived. Nothing says what it held, so the change counts.
-			old, err := convert[T](before)
+			old, err := informer.Convert[T](before)
 			if err != nil {
 				if r.matters(item) {
 					poke(wake)
@@ -77,9 +78,9 @@ func (r changeRule[T]) handler(wake chan<- struct{}) cache.ResourceEventHandler 
 		// nothing says whose object it was, and one extra pass costs less
 		// than a change the pass never reads.
 		DeleteFunc: func(object any) {
-			item, err := convert[T](object)
+			item, err := informer.Convert[T](object)
 			if err != nil {
-				reportUnconverted(r.what, err)
+				informer.Report(r.what, err)
 				poke(wake)
 				return
 			}

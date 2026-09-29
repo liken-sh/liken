@@ -3,6 +3,8 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // The two sinks the fixture Player plays through. The first is a wired
@@ -180,7 +182,7 @@ func TestAPassKeepsThePlayerMemoryItWroteOverAnOlderCopy(t *testing.T) {
 	// through, and the watch has not delivered the Player write.
 	delete(cluster.plays, "movie")
 	delete(cluster.pods, podName("movie"))
-	media.view.players.view.store = runningCluster(twoSinkPlayer()).view().players.view.store
+	media.view.players.View.Store = runningCluster(twoSinkPlayer()).view().players.View.Store
 	media.pass()
 
 	if got := cluster.players["theater"].Status.Sinks; !reflect.DeepEqual(got, want) {
@@ -201,7 +203,7 @@ func TestAPlayerStatusWriteAfterASpecEditLandsOnTheFreshCopy(t *testing.T) {
 	cluster.players["theater"] = edited
 	desired := PlayerStatus{Activity: playerIdle, Sinks: []PlayerSinkStatus{{Request: audioRequestPrefix + "0", Name: testWiredSink}}}
 
-	mustSucceed(t, writePlayerStatus(testAPIClient(t, cluster.handler(t)), newVersionMemo(), read, desired))
+	mustSucceed(t, writePlayerStatus(testAPIClient(t, cluster.handler(t)), memo.New(), read, desired))
 
 	mustMatch(t, reflect.DeepEqual(cluster.players["theater"].Status, desired), true)
 	mustMatch(t, cluster.players["theater"].Spec.Zone, "den")

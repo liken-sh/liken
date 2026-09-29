@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // apiAudience is the audience every accepted token carries. A token
@@ -132,14 +134,14 @@ type SubjectAccessReviewStatus struct {
 // authorizer answers both questions for every request. One authorizer instance
 // owns the verdict cache for the life of the process, so every request shares it.
 type authorizer struct {
-	client *Client
+	client *apiclient.Client
 	// The clock is a field so a test drives the cache's window
 	// without waiting a minute.
 	now   func() time.Time
 	cache *verdictCache
 }
 
-func newAuthorizer(client *Client) *authorizer {
+func newAuthorizer(client *apiclient.Client) *authorizer {
 	return &authorizer{
 		client: client,
 		now:    time.Now,

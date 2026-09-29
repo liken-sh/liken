@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -100,12 +101,12 @@ func TestTheViewConvertsAPlayersDeviceParameters(t *testing.T) {
 	mustMatch(t, string(player.Spec.Display.Parameters.Values), `{"brightness":80}`)
 }
 
-// An object the view does not hold answers ErrNotFound, the answer the
+// An object the view does not hold answers apiclient.ErrNotFound, the answer the
 // API client gives, so a caller treats the two the same.
 func TestAnObjectTheViewDoesNotHoldIsNotFound(t *testing.T) {
 	_, err := newFakeCluster().view().ResourceClaim("house", "movie-devices")
 
-	mustMatch(t, errors.Is(err, ErrNotFound), true)
+	mustMatch(t, errors.Is(err, apiclient.ErrNotFound), true)
 }
 
 // An object that does not convert fails the read of its whole

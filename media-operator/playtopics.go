@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The finalizer this operator holds on every Play. It keeps the Play until
@@ -38,7 +40,7 @@ func (o *operator) holdPlay(play *Play) {
 	if err != nil {
 		// A conflict and an absent Play are both states the next pass reads
 		// again, so neither is reported here.
-		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrNotFound) {
+		if !errors.Is(err, apiclient.ErrConflict) && !errors.Is(err, apiclient.ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "holding play %s/%s: %v\n", namespace, name, err)
 		}
 		return
@@ -67,7 +69,7 @@ func (o *operator) releasePlay(play *Play) {
 		fmt.Fprintf(os.Stderr, "deleting the pod of play %s/%s: %v\n", namespace, name, err)
 		return
 	}
-	if _, err := GetPod(o.client, namespace, podName(name)); !errors.Is(err, ErrNotFound) {
+	if _, err := GetPod(o.client, namespace, podName(name)); !errors.Is(err, apiclient.ErrNotFound) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reading the pod of play %s/%s: %v\n", namespace, name, err)
 		}
@@ -88,7 +90,7 @@ func (o *operator) releasePlay(play *Play) {
 		return
 	}
 	if _, err := o.patchPlayFinalizers(play, play.Metadata.without(playFinalizer)); err != nil {
-		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrNotFound) {
+		if !errors.Is(err, apiclient.ErrConflict) && !errors.Is(err, apiclient.ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "releasing play %s/%s: %v\n", namespace, name, err)
 		}
 		return
@@ -137,7 +139,7 @@ func (o *operator) reclaimPlays(live map[string]bool) {
 func (o *operator) patchPlayFinalizers(play *Play, finalizers []string) (string, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	var version string
-	err := o.view.plays.versions.send(playKey(play), func() (string, error) {
+	err := o.view.plays.Versions.Send(playKey(play), func() (string, error) {
 		var err error
 		version, err = PatchPlayFinalizers(o.client, namespace, name, play.Metadata.ResourceVersion, finalizers)
 		return version, err
@@ -150,7 +152,7 @@ func (o *operator) patchPlayFinalizers(play *Play, finalizers []string) (string,
 // finalizer keeps is there with its deletion mark, and a Play the
 // delete removed is absent, whatever the store still holds.
 func (o *operator) deletePlay(namespace, name string) error {
-	return o.view.plays.versions.send(namespace+"/"+name, func() (string, error) {
+	return o.view.plays.Versions.Send(namespace+"/"+name, func() (string, error) {
 		return "", DeletePlay(o.client, namespace, name)
 	})
 }

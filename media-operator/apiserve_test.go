@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 func TestASettingFallsBackToItsDefault(t *testing.T) {
@@ -98,7 +100,7 @@ func serverListed(t *testing.T, body []byte) string {
 // clears it.
 func TestAnApiServerThatWillNotAnswerIsAServiceUnavailable(t *testing.T) {
 	fixture := newAPIFixture(t)
-	fixture.server.client = NewClient("http://127.0.0.1:1", http.DefaultClient, "")
+	fixture.server.client = apiclient.New("http://127.0.0.1:1", http.DefaultClient, "")
 
 	recorder := fixture.get(playerPathFor("screen.png"))
 
@@ -160,8 +162,8 @@ func TestReadinessLatchesOnAnAnsweringApiServer(t *testing.T) {
 	answering := httptest.NewServer(plane.handler())
 	defer answering.Close()
 
-	mustMatch(t, reviewsAnswer(newAuthorizer(NewClient(answering.URL, answering.Client(), ""))), true)
-	mustMatch(t, reviewsAnswer(newAuthorizer(NewClient("http://127.0.0.1:1", http.DefaultClient, ""))), false)
+	mustMatch(t, reviewsAnswer(newAuthorizer(apiclient.New(answering.URL, answering.Client(), ""))), true)
+	mustMatch(t, reviewsAnswer(newAuthorizer(apiclient.New("http://127.0.0.1:1", http.DefaultClient, ""))), false)
 }
 
 // A sibling is reached only through an anchor the trust store holds:

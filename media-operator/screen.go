@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The group the display-operator serves. A Display is
@@ -432,7 +434,7 @@ func (o *operator) screenCondition(player *Player, key string, lookup *screens, 
 	display, err := lookup.displayFor(monitor)
 	var condition PlayerCondition
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, apiclient.ErrNotFound):
 		condition = PlayerCondition{
 			Status:  conditionUnknown,
 			Reason:  screenReasonNoDisplay,
@@ -498,7 +500,7 @@ func (o *operator) retainPanels(live map[string]bool) {
 			// lift it refuses has already landed. Every other failure
 			// keeps the entry, because the block still stands.
 			err := ApplyDisplayOverride(o.client, override.monitor, nil)
-			if err != nil && !errors.Is(err, ErrNotFound) {
+			if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 				o.panelFault(key, fmt.Sprintf("lifting the override on display %s: %v",
 					override.monitor, err))
 				continue

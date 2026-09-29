@@ -32,6 +32,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
@@ -78,12 +80,21 @@ const clusterSyncWait = time.Minute
 type watchedCollection struct {
 	kind  string
 	watch collectionWatch
-	into  func(cache.Store)
+	into  func(informer.View)
 }
 
 // keepIn keeps a store in one field of the view.
-func keepIn(field *objectSource) func(cache.Store) {
-	return func(store cache.Store) { *field = store }
+func keepIn(field *objectSource) func(informer.View) {
+	return func(view informer.View) { *field = view.Store }
+}
+
+// keepWhole keeps a store that holds its whole kind in one field of the
+// view, with a memo of the copies this operator wrote or read.
+func keepWhole(field *informer.Held) func(informer.View) {
+	return func(view informer.View) {
+		view.Whole = true
+		*field = informer.Held{View: view, Versions: memo.New()}
+	}
 }
 
 // watchCluster starts one informer for each collection the pass reads,
@@ -98,12 +109,8 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 	collections := []watchedCollection{
 		// The Play and Player watches take every object of their kind,
 		// so each store holds the whole collection.
-		{kindPlay, collectionWatch{resource: playResource, handler: wakes}, func(store cache.Store) {
-			view.plays = heldObjects{view: storeView{store: store, whole: true}, versions: newVersionMemo()}
-		}},
-		{kindPlayer, collectionWatch{resource: playerResource, handler: wakes}, func(store cache.Store) {
-			view.players = heldObjects{view: storeView{store: store, whole: true}, versions: newVersionMemo()}
-		}},
+		{kindPlay, collectionWatch{resource: playResource, handler: wakes}, keepWhole(&view.plays)},
+		{kindPlayer, collectionWatch{resource: playerResource, handler: wakes}, keepWhole(&view.players)},
 		{kindRemote, collectionWatch{resource: remoteResource, handler: wakes}, keepIn(&view.remotes)},
 		{kindKeymap, collectionWatch{resource: keymapResource, handler: wakes}, keepIn(&view.keymaps)},
 		{kindMediaPreferences, collectionWatch{resource: preferencesResource, handler: wakes}, keepIn(&view.preferences)},
@@ -119,15 +126,15 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 			handler: receiverRule.handler(wake)}, keepIn(&view.receivers)},
 	}
 	type read struct {
-		kind  string
-		into  func(cache.Store)
-		store cache.Store
+		kind string
+		into func(informer.View)
+		view informer.View
 	}
 	reads := make(chan read, len(collections))
 	for _, each := range collections {
 		watch := each.watch
 		watch.reopened = watchRestartFunc(metrics, each.kind)
-		watch.synced = func(store cache.Store) { reads <- read{each.kind, each.into, store} }
+		watch.synced = func(view informer.View) { reads <- read{each.kind, each.into, view} }
 		go watchCollection(ctx, client, watch)
 	}
 
@@ -138,7 +145,7 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 	for len(pending) > 0 {
 		select {
 		case done := <-reads:
-			done.into(done.store)
+			done.into(done.view)
 			delete(pending, done.kind)
 		case <-wait.Done():
 			return nil, fmt.Errorf("these collections were not read: %s: %w", sortedKinds(pending), wait.Err())

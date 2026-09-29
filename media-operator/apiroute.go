@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The base every route of this domain is under, the one template
@@ -377,7 +379,7 @@ func quotedWords(words string) string {
 // exist is a 404, and an API server that will not answer is a 503.
 func (e *apiExchange) player() (*Player, bool) {
 	player, err := GetPlayer(e.server.client, e.namespace, e.name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		e.fail(aboutBlank, http.StatusNotFound, "",
 			"no Player "+e.namespace+"/"+e.name)
 		return nil, false

@@ -19,6 +19,8 @@ import (
 	"errors"
 	"hash/fnv"
 	"strconv"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // templateHashAnnotation carries the hash of the spec the operator built.
@@ -115,7 +117,7 @@ type claimRead struct {
 // it returns a read that found nothing.
 func (o *operator) readClaim(namespace, name string) (claimRead, error) {
 	claim, err := o.view.ResourceClaim(namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return claimRead{read: true}, nil
 	}
 	if err != nil {
@@ -224,7 +226,7 @@ func (o *operator) viewStanding(want standing, known claimRead) (standingObjects
 		found.claim = known.claim
 	}
 	pod, err := o.view.Pod(want.namespace, want.podName)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return found, err
 	}
 	found.pod = pod
@@ -236,13 +238,13 @@ func (o *operator) liveStanding(want standing) (standingObjects, error) {
 	var found standingObjects
 	if want.claimName != "" {
 		claim, err := GetResourceClaim(o.client, want.namespace, want.claimName)
-		if err != nil && !errors.Is(err, ErrNotFound) {
+		if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 			return found, err
 		}
 		found.claim = claim
 	}
 	pod, err := GetPod(o.client, want.namespace, want.podName)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return found, err
 	}
 	found.pod = pod
@@ -340,13 +342,13 @@ func (o *operator) settleStanding(want standing, live standingObjects) error {
 	}
 
 	if want.claim != nil && !claimStands {
-		if _, err := CreateResourceClaim(o.client, want.claim); err != nil && !errors.Is(err, ErrConflict) {
+		if _, err := CreateResourceClaim(o.client, want.claim); err != nil && !errors.Is(err, apiclient.ErrConflict) {
 			return err
 		}
 		logLine(o.log, "%s: created claim %s", want.subject, want.claimName)
 	}
 	if want.pod != nil && !podStands {
-		if _, err := CreatePod(o.client, want.pod); err != nil && !errors.Is(err, ErrConflict) {
+		if _, err := CreatePod(o.client, want.pod); err != nil && !errors.Is(err, apiclient.ErrConflict) {
 			return err
 		}
 		logLine(o.log, "%s: created pod %s", want.subject, want.podName)

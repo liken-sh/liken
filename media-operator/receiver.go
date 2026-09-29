@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The group the equipment operator serves. A Receiver is cluster-
@@ -389,14 +391,14 @@ func (o *operator) releaseSpecSession(key string, receiver *Receiver, statusHold
 func (o *operator) liftSession(name string) bool {
 	if !o.specReleased[name] {
 		err := ReleaseReceiverSpecSession(o.client, name)
-		if err != nil && !errors.Is(err, ErrNotFound) {
+		if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "releasing spec.session on receiver %s: %v\n", name, err)
 			return false
 		}
 		o.specReleased[name] = true
 	}
 	err := ApplyReceiverSession(o.client, name, nil)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Fprintf(os.Stderr, "lifting the session on receiver %s: %v\n", name, err)
 		return false
 	}

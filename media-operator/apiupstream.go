@@ -232,3 +232,16 @@ func upstreamCodecs(contentType string) string {
 	}
 	return strings.TrimSpace(parameters["codecs"])
 }
+
+// maxDrain bounds the read in drain. Past this size, the connection is
+// the cheaper thing to lose.
+const maxDrain = 4 << 20
+
+// drain reads whatever is left in a body, then closes it. Go returns a
+// connection to its pool only when the body reaches EOF, so an early
+// close costs a fresh connection and TLS handshake, and reaches the
+// server as a hang-up on a request it answered.
+func drain(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
+	_ = body.Close()
+}

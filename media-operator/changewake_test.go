@@ -8,6 +8,7 @@ package main
 import (
 	"testing"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -202,7 +203,7 @@ func TestADisplayWakesThePassThroughTheReflector(t *testing.T) {
 	wake := make(chan struct{}, 1)
 	synced := make(chan struct{})
 	runWatch(t, server, collectionWatch{resource: displayResource, handler: displayRule.handler(wake),
-		synced: func(cache.Store) { close(synced) }})
+		synced: func(informer.View) { close(synced) }})
 	mustMatch(t, closedWithin(synced, watchTimeout), true)
 	<-wake
 

@@ -17,6 +17,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
@@ -46,9 +47,9 @@ func watchNamed[T any](ctx context.Context, client dynamic.Interface, resource s
 	namespace, name, what string, seen func(held *T), synced chan<- struct{}) {
 	var mu sync.Mutex
 	take := func(object any) {
-		held, err := convert[T](object)
+		held, err := informer.Convert[T](object)
 		if err != nil {
-			reportUnconverted(what, err)
+			informer.Report(what, err)
 			return
 		}
 		mu.Lock()
@@ -69,9 +70,9 @@ func watchNamed[T any](ctx context.Context, client dynamic.Interface, resource s
 			UpdateFunc: func(_, object any) { take(object) },
 			DeleteFunc: func(any) { gone() },
 		},
-		synced: func(store cache.Store) {
+		synced: func(view informer.View) {
 			mu.Lock()
-			if len(store.ListKeys()) == 0 {
+			if len(view.Store.ListKeys()) == 0 {
 				seen(nil)
 			}
 			mu.Unlock()

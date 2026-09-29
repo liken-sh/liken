@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The downward API sets these two, so the operator can read the pod
@@ -41,7 +43,7 @@ type companionImages struct {
 // cluster with no downward API can still run it. Otherwise it reads
 // its own pod and derives the rest from the operator container's
 // image.
-func resolveImages(client *Client) (companionImages, error) {
+func resolveImages(client *apiclient.Client) (companionImages, error) {
 	stated := companionImages{
 		player:  os.Getenv(playerImageVariable),
 		idle:    os.Getenv(idleImageVariable),
@@ -100,7 +102,7 @@ func resolveImages(client *Client) (companionImages, error) {
 // API server no longer holds, or an image named by digest instead of
 // a tag all answer the empty string, because metrics are secondary to
 // the reconcile loop and never worth failing startup over.
-func operatorVersion(client *Client) string {
+func operatorVersion(client *apiclient.Client) string {
 	return containerVersion(client, operatorContainerName)
 }
 
@@ -110,7 +112,7 @@ func operatorVersion(client *Client) string {
 // release reports the same one. A pod the role cannot read, a container
 // the pod does not hold, and an image with no tag all answer the empty
 // string, for the same reason operatorVersion does.
-func containerVersion(client *Client, container string) string {
+func containerVersion(client *apiclient.Client, container string) string {
 	name, namespace := os.Getenv(podNameVariable), os.Getenv(podNamespaceVariable)
 	if name == "" || namespace == "" {
 		return ""

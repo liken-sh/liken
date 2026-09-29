@@ -301,7 +301,7 @@ jobs:
       packages: write
 
   media-operator:
-    needs: [plan, brand, ffmpeg, mpv, vulkan]
+    needs: [plan, brand, ffmpeg, kubernetes, mpv, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].check }}
     uses: ./.github/workflows/component-media-operator.yaml
     with:

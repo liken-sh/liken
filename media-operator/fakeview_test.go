@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/tools/cache"
@@ -131,19 +133,21 @@ func clusterPath(collection string) func(string, string) string {
 // call, so it follows every change a test or a write makes.
 func (f *fakeCluster) view() *clusterView {
 	return &clusterView{
-		plays: heldObjects{
-			view: storeView{
-				store: fakeStore[Play]{source: fakeSource[Play]{f, valuesOf(f.plays), playsPath, playPath}},
-				whole: true,
+		plays: informer.Held{
+			View: informer.View{
+				Store:  fakeStore[Play]{source: fakeSource[Play]{f, valuesOf(f.plays), playsPath, playPath}},
+				Synced: func() bool { return true },
+				Whole:  true,
 			},
-			versions: newVersionMemo(),
+			Versions: memo.New(),
 		},
-		players: heldObjects{
-			view: storeView{
-				store: fakeStore[Player]{source: fakeSource[Player]{f, valuesOf(f.players), playersPath, playerPath}},
-				whole: true,
+		players: informer.Held{
+			View: informer.View{
+				Store:  fakeStore[Player]{source: fakeSource[Player]{f, valuesOf(f.players), playersPath, playerPath}},
+				Synced: func() bool { return true },
+				Whole:  true,
 			},
-			versions: newVersionMemo(),
+			Versions: memo.New(),
 		},
 		remotes:     fakeSource[Remote]{f, valuesOf(f.remotes), remotesAllPath, remotePath},
 		keymaps:     fakeSource[Keymap]{f, valuesOf(f.keymaps), keymapsPath, clusterPath(keymapsPath)},

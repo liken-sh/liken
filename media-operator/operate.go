@@ -24,6 +24,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The operator's own environment: four image overrides, the broker,
@@ -129,7 +132,7 @@ type operator struct {
 	// client sends every write, and every read that must include this
 	// operator's own last write. view answers every other read, from
 	// the watches. clusterview.go says which read goes where.
-	client *Client
+	client *apiclient.Client
 	view   *clusterView
 	image  string
 	// idleImage is the client an idle container runs where no tier
@@ -348,7 +351,7 @@ func operate() {
 	playerVerbose := os.Getenv(playerVerboseVariable)
 	metricsAddress := os.Getenv(metricsAddressVariable)
 
-	client, err := InClusterClient()
+	client, err := inClusterClient()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "in-cluster config: %v\n", err)
 		os.Exit(1)
@@ -474,7 +477,7 @@ func operate() {
 	// with no pass. Either way out of a failed wait releases the Lease
 	// first, so a waiting copy takes it on its next read instead of
 	// after the Lease's duration.
-	watcher, err := inClusterWatcher()
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "in-cluster config for the watches: %v\n", err)
 		leader.stepDown(quiet)
@@ -539,7 +542,7 @@ func (o *operator) pass() {
 		namespace, name := plays[index].Metadata.Namespace, plays[index].Metadata.Name
 		pod, err := o.view.Pod(namespace, podName(name))
 		switch {
-		case errors.Is(err, ErrNotFound):
+		case errors.Is(err, apiclient.ErrNotFound):
 			o.reports.observe(namespace, name, nil)
 		case err == nil:
 			o.reports.observe(namespace, name, pod)
@@ -580,7 +583,7 @@ func (o *operator) pass() {
 	// and a read that fails skips the tier this pass.
 	defaults, err := o.view.MediaPreferences(mediaPreferencesName)
 	if err != nil {
-		if !errors.Is(err, ErrNotFound) {
+		if !errors.Is(err, apiclient.ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "reading media preferences: %v\n", err)
 		}
 		defaults = nil
@@ -911,7 +914,7 @@ func (o *operator) retire(play *Play) error {
 	}
 	status := play.Status
 	status.FinishedAt = finished.UTC().Format(time.RFC3339)
-	return writePlayStatus(o.client, o.view.plays.versions, play, status)
+	return writePlayStatus(o.client, o.view.plays.Versions, play, status)
 }
 
 // supersededPlays names every unfinished Play that a newer Play on the
@@ -1176,7 +1179,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		published[topic] = true
 		desired.Activity, desired.Play = derived.Activity, derived.Play
 		playerCounts[[2]string{player.Spec.Zone, playerMetricState(player.Metadata.Namespace, desired, plays)}]++
-		if err := writePlayerStatus(o.client, o.view.players.versions, player, desired); err != nil {
+		if err := writePlayerStatus(o.client, o.view.players.Versions, player, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
@@ -1402,7 +1405,7 @@ func (o *operator) reconcileRemotes(remotes []Remote, claims map[string]claimRea
 // Player's status writers: an unchanged status is not written, and a
 // conflict earns one retry. The operator watches Remotes, so a needless
 // write would wake the loop that just wrote it, a pass per pass forever.
-func writeRemoteStatus(c *Client, remote *Remote, desired RemoteStatus) error {
+func writeRemoteStatus(c *apiclient.Client, remote *Remote, desired RemoteStatus) error {
 	same, err := sameRemoteStatus(remote.Status, desired)
 	if err != nil {
 		return err
@@ -1413,7 +1416,7 @@ func writeRemoteStatus(c *Client, remote *Remote, desired RemoteStatus) error {
 
 	remote.Status = desired
 	_, err = PutRemoteStatus(c, remote)
-	if !errors.Is(err, ErrConflict) {
+	if !errors.Is(err, apiclient.ErrConflict) {
 		return err
 	}
 
@@ -1515,7 +1518,7 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 	}
 
 	player, err := reads.player(namespace, playerName(play))
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		if !live {
 			return errReadLive
 		}
@@ -1551,7 +1554,7 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 			}
 		} else {
 			_, err := GetPod(o.client, namespace, podName(name))
-			if errors.Is(err, ErrNotFound) {
+			if errors.Is(err, apiclient.ErrNotFound) {
 				return o.writePlay(play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
 			}
 			if err != nil {
@@ -1622,7 +1625,7 @@ func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 		time.Since(o.positionWrites[key]) < positionWriteInterval {
 		return nil
 	}
-	was, wrote, err := writePlayStatusFrom(o.client, o.view.plays.versions, play, desired)
+	was, wrote, err := writePlayStatusFrom(o.client, o.view.plays.Versions, play, desired)
 	if err != nil {
 		return err
 	}
@@ -1672,7 +1675,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	// on, so it reads the pod from the API server and acts on that read.
 	// clusterview.go says why.
 	running, err := GetPod(o.client, namespace, podName(name))
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		if reason, owed := o.replacements[key]; owed {
 			pod, err := o.finishReplacement(play, claim, resolved, prefs, remotes, reason)
 			return pod, false, err
@@ -1835,7 +1838,7 @@ func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resoluti
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	created, err := CreatePod(o.client, o.resources.apply(buildPod(play, claim, resolved, o.image, o.sidecarImage,
 		o.displayImage, o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)))
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}
 	if err != nil {

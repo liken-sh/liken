@@ -353,6 +353,9 @@ target "media-operator" {
   context    = "media-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+  }
   args = {
     VERSION = VERSION
   }
@@ -367,6 +370,7 @@ target "media-operator-player" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "kubernetes" = "kubernetes"
     "mpv" = "target:mpv"
   }
   args = {
@@ -417,6 +421,7 @@ target "media-operator-api" {
   platforms  = ["linux/amd64"]
   contexts = {
     "ffmpeg" = "target:ffmpeg"
+    "kubernetes" = "kubernetes"
   }
   args = {
     VERSION = VERSION
@@ -430,6 +435,9 @@ target "media-operator-cli" {
   context    = "media-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64", "linux/arm64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+  }
   args = {
     VERSION = VERSION
   }

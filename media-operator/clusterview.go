@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -42,8 +44,8 @@ type objectSource interface {
 
 // clusterView holds one source per collection a pass reads.
 type clusterView struct {
-	plays       heldObjects
-	players     heldObjects
+	plays       informer.Held
+	players     informer.Held
 	remotes     objectSource
 	keymaps     objectSource
 	preferences objectSource
@@ -80,7 +82,7 @@ func listOf[T any](source objectSource) ([]T, error) {
 	})
 	out := make([]T, 0, len(objects))
 	for _, object := range objects {
-		converted, err := convert[T](object)
+		converted, err := informer.Convert[T](object)
 		if err != nil {
 			return nil, err
 		}
@@ -89,18 +91,18 @@ func listOf[T any](source objectSource) ([]T, error) {
 	return out, nil
 }
 
-// oneOf converts one object by its key, and answers ErrNotFound for an
-// object the source does not hold, the answer the API client gives, so
-// a caller treats the two the same.
+// oneOf converts one object by its key, and answers
+// apiclient.ErrNotFound for an object the source does not hold, the
+// answer the API client gives, so a caller treats the two the same.
 func oneOf[T any](source objectSource, key string) (*T, error) {
 	item, exists, err := source.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return nil, ErrNotFound
+		return nil, apiclient.ErrNotFound
 	}
-	converted, err := convert[T](item)
+	converted, err := informer.Convert[T](item)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // audioDriver is the audio operator's DRA driver name, the driver an
@@ -38,7 +40,7 @@ func (o *operator) reconcileSinks(player *Player, play string) []PlayerSinkStatu
 	}
 	claim, err := o.view.ResourceClaim(player.Metadata.Namespace, claimName(play))
 	if err != nil {
-		if !errors.Is(err, ErrNotFound) {
+		if !errors.Is(err, apiclient.ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "reading the playback claim of player %s/%s: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
