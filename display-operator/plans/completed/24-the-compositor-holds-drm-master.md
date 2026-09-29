@@ -252,4 +252,3 @@ this change, on the testbed machine that has a connected panel.
 
 From the close of the debug pod's file to a compositor that drew,
 18 s passed.
-
