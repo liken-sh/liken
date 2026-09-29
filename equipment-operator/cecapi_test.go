@@ -82,6 +82,10 @@ type cecAPI struct {
 	// is not ready answers, and entryThrottles counts those answers.
 	throttlingEntries bool
 	entryThrottles    int
+	// createdUnseen names a CECBus that a read of the one object answers
+	// 404 for, the way a bus a person creates a moment after the read
+	// looks to the reader.
+	createdUnseen string
 	// reads counts each GET that is not a watch, a list or a read of
 	// one object, by path, and watches counts the watches by path.
 	reads   map[string]int
@@ -335,11 +339,18 @@ func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
 		a.serveDisplay(w, strings.TrimPrefix(path, displaysPath+"/"))
 	case path == cecBusesPath && r.URL.Query().Get("watch") == "true":
 		a.serveWatch(w, r)
+	case r.Method == http.MethodPost && path == cecBusesPath:
+		a.create(w, r)
 	case path == cecBusesPath:
 		a.serveList(w)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, cecBusesPath+"/"):
 		a.mutex.Lock()
-		a.serveStored(w, cecBusesPath, strings.TrimPrefix(path, cecBusesPath+"/"))
+		name := strings.TrimPrefix(path, cecBusesPath+"/")
+		if name == a.createdUnseen {
+			w.WriteHeader(http.StatusNotFound)
+		} else {
+			a.serveStored(w, cecBusesPath, name)
+		}
 		a.mutex.Unlock()
 	case r.Method == http.MethodPatch && strings.HasSuffix(path, "/status"):
 		a.applyStatus(w, r, strings.TrimSuffix(strings.TrimPrefix(path, cecBusesPath+"/"), "/status"))
@@ -436,6 +447,23 @@ func (a *cecAPI) forget(watcher *fakeWatcher) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.watchers = slices.DeleteFunc(a.watchers, func(one *fakeWatcher) bool { return one == watcher })
+}
+
+// create answers a POST the way the API server does: a name that exists
+// answers 409 and changes nothing.
+func (a *cecAPI) create(w http.ResponseWriter, r *http.Request) {
+	var body CECBus
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	if _, held := a.buses[body.Metadata.Name]; held {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	body.Metadata.Generation = 1
+	a.buses[body.Metadata.Name] = &body
+	a.changed()
+	a.serveStored(w, cecBusesPath, body.Metadata.Name)
 }
 
 func (a *cecAPI) applySpec(w http.ResponseWriter, r *http.Request, name string) {

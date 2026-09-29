@@ -161,6 +161,29 @@ func TestABusOfTheMachinesNameThatAListMissedIsLeftAlone(t *testing.T) {
 	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
 }
 
+// A person can create a bus of the machine's name after the pass read
+// that no such bus exists. The pass creates its own bus only where no
+// bus of the name exists, so it leaves the person's bus alone.
+func TestABusCreatedAfterTheReadIsLeftAlone(t *testing.T) {
+	t.Parallel()
+	api := startCECAPI(t)
+	api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
+	api.mutex.Lock()
+	api.createdUnseen = "node-1"
+	api.mutex.Unlock()
+	_, device := usbAdapter(cecRoom())
+	node, err := newCECNode(api.client, "node-1", device)
+	mustSucceed(t, err)
+
+	chosen := node.choose(&CECBusList{})
+
+	if chosen != nil {
+		t.Errorf("chose %s", chosen.Metadata.Name)
+	}
+	bus, _ := api.bus("node-1")
+	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+}
+
 // A machine that a bus stops naming removes its entry from that bus.
 func TestAMachineThatLeavesABusRemovesItsEntry(t *testing.T) {
 	t.Parallel()

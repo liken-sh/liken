@@ -125,20 +125,29 @@ func ApplyCECBusDerived(c *Client, bus string, devices []CECDevice, conditions [
 // CECBus the node workload made, which names the protocol it found.
 const discoveredCECLabelValue = "cec"
 
-// ApplyDiscoveredCECBus creates, or keeps, the CECBus a node workload
-// makes for an adapter no CECBus names. It is in Listen, so the new
-// adapter sends nothing until a person allows it, and it carries the
-// discovered label, so the node workload deletes only its own objects.
-func ApplyDiscoveredCECBus(c *Client, name, machine string) error {
-	body := struct {
-		APIVersion string     `json:"apiVersion"`
-		Kind       string     `json:"kind"`
-		Metadata   ObjectMeta `json:"metadata"`
-		Spec       CECBusSpec `json:"spec"`
-	}{Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: machine}}}}
-	body.APIVersion, body.Kind, body.Metadata = cecBusApply(name)
-	body.Metadata.Labels = map[string]string{discoveredLabel: discoveredCECLabelValue}
-	return applyCECBus(c, name, cecBusPath(name), cecFieldManager(machine), body)
+// CreateDiscoveredCECBus creates the CECBus a node workload makes for
+// an adapter no CECBus names. It is in Listen, so the new adapter sends
+// nothing until a person allows it, and it carries the discovered
+// label, so the node workload deletes only its own objects. It is a
+// create and not an apply: the API server answers a create of a name
+// that exists with apiclient.ErrConflict and changes nothing, so a bus a
+// person created under the name, however recently, stays the person's.
+// A forced apply would take that bus over.
+func CreateDiscoveredCECBus(c *Client, name, machine string) error {
+	encoded, err := json.Marshal(CECBus{
+		APIVersion: equipmentAPIVersion,
+		Kind:       "CECBus",
+		Metadata:   ObjectMeta{Name: name, Labels: map[string]string{discoveredLabel: discoveredCECLabelValue}},
+		Spec:       CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: machine}}},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = memo.Written[CECBus](c.versions.cecBuses, name, func() (*CECBus, error) {
+		answer := &CECBus{}
+		return answer, c.RequestJSON(http.MethodPost, cecBusesPath+"?fieldManager="+cecFieldManager(machine), encoded, answer)
+	})
+	return err
 }
 
 // DeleteCECBus removes one CECBus. A name that is already gone is not
