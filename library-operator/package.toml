@@ -5,7 +5,7 @@ name = "library-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "kubernetes", "media-operator", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "media-screen", "vulkan"]
 
 [docs]
 prefix = "library"
@@ -68,7 +68,7 @@ smoke = "library-operator/smoke/library-operator-ffmpeg.sh"
 name = "library-operator-media-browser"
 context = "media-browser"
 file = "media-browser/Dockerfile"
-contexts = { brand = "brand", media-operator = "media-operator" }
+contexts = { brand = "brand", media-screen = "media-screen" }
 smoke = "library-operator/smoke/library-operator-media-browser.sh"
 
 [[outputs.images]]

@@ -29,6 +29,9 @@ Each top-level directory is one component, named for what it ships:
 - [`library-operator/`](library-operator/) declares media libraries,
   keeps a catalog of what they hold, and puts a media browser on the
   screens.
+- [`media-screen/`](media-screen/) is the Rust crate that holds the
+  bus rules of a screen client. The idle screen and the media browser
+  both link it.
 - [`people-operator/`](people-operator/) defines the `Person` resource.
 - [`git-csi-driver/`](git-csi-driver/) mounts git repositories as
   volumes.

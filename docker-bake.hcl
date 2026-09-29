@@ -59,6 +59,11 @@ group "default" {
     "display-operator-cli",
     "equipment-operator",
     "git-csi-driver",
+    "library-operator",
+    "library-operator-ffmpeg",
+    "library-operator-media-browser",
+    "library-operator-corrosion",
+    "library-operator-cli",
     "mpv",
     "media-operator",
     "media-operator-player",
@@ -66,11 +71,6 @@ group "default" {
     "media-operator-display",
     "media-operator-api",
     "media-operator-cli",
-    "library-operator",
-    "library-operator-ffmpeg",
-    "library-operator-media-browser",
-    "library-operator-corrosion",
-    "library-operator-cli",
     "people-operator",
     "per-node-csi-driver",
   ]
@@ -330,6 +330,81 @@ target "git-csi-driver" {
   cache-to   = CACHE_WRITE == "git-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache,mode=max,ignore-error=true"] : []
 }
 
+target "library-operator" {
+  context    = "library-operator"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/library-operator:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "library-operator-ffmpeg" {
+  context    = "library-operator"
+  dockerfile = "Dockerfile.ffmpeg"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "ffmpeg" = "target:ffmpeg"
+    "kubernetes" = "kubernetes"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/library-operator-ffmpeg:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "library-operator-media-browser" {
+  context    = "library-operator/media-browser"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "brand" = "brand"
+    "media-screen" = "media-screen"
+    "vulkan" = "target:vulkan"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/library-operator-media-browser:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-media-browser" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "library-operator-corrosion" {
+  context    = "library-operator/corrosion"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/library-operator-corrosion:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-corrosion" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "library-operator-cli" {
+  context    = "library-operator"
+  dockerfile = "Dockerfile.cli"
+  platforms  = ["linux/amd64", "linux/arm64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/library-operator-cli:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache,mode=max,ignore-error=true"] : []
+}
+
 target "mpv" {
   context    = "mpv"
   dockerfile = "Dockerfile"
@@ -388,6 +463,7 @@ target "media-operator-idle" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "media-screen" = "media-screen"
     "vulkan" = "target:vulkan"
   }
   args = {
@@ -405,6 +481,7 @@ target "media-operator-display" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "media-screen" = "media-screen"
     "vulkan" = "target:vulkan"
   }
   args = {
@@ -444,81 +521,6 @@ target "media-operator-cli" {
   tags       = ["ghcr.io/liken-sh/media-operator-cli:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache"]
   cache-to   = CACHE_WRITE == "media-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "library-operator" {
-  context    = "library-operator"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/library-operator:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache"]
-  cache-to   = CACHE_WRITE == "library-operator" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "library-operator-ffmpeg" {
-  context    = "library-operator"
-  dockerfile = "Dockerfile.ffmpeg"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "ffmpeg" = "target:ffmpeg"
-    "kubernetes" = "kubernetes"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/library-operator-ffmpeg:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache"]
-  cache-to   = CACHE_WRITE == "library-operator-ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "library-operator-media-browser" {
-  context    = "library-operator/media-browser"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "brand" = "brand"
-    "media-operator" = "media-operator"
-    "vulkan" = "target:vulkan"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/library-operator-media-browser:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache"]
-  cache-to   = CACHE_WRITE == "library-operator-media-browser" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "library-operator-corrosion" {
-  context    = "library-operator/corrosion"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/library-operator-corrosion:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache"]
-  cache-to   = CACHE_WRITE == "library-operator-corrosion" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "library-operator-cli" {
-  context    = "library-operator"
-  dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64", "linux/arm64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/library-operator-cli:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache"]
-  cache-to   = CACHE_WRITE == "library-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "people-operator" {

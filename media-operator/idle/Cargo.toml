@@ -73,10 +73,10 @@ image = { version = "=0.25.10", default-features = false, features = [
 ], optional = true }
 # media-screen is the bus half of this client: the timers, the focus
 # gate, the shade, the volume step, the cycle request, and the panel
-# desire. It is a crate of its own because the library layer's media
-# browser draws a different screen on the same rules, and takes this
-# crate from a release tag of this repository.
-media-screen = { path = "../media-screen" }
+# desire. It is a component of its own, at the top of the repository,
+# because library-operator's media browser draws a different screen on
+# the same rules.
+media-screen = { path = "../../media-screen" }
 # serde derives the readers this client holds of its own, and serde_json
 # writes the measurements file.
 serde = { workspace = true }

@@ -9,30 +9,32 @@
 FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS deps
 WORKDIR /src
 
-# The three Rust crates are one cargo workspace, so the build copies the
+# The two Rust crates are one cargo workspace, so the build copies the
 # workspace manifest, the lock file, and the toolchain pin, then every member
 # manifest. liken-iced is a path dependency in brand/, which the build takes
 # as a second build context named brand and copies to /brand, the same place
-# relative to /src that brand/ has relative to this component. The stub build
-# below needs only its manifest, so the manifest and its lock file arrive
-# here and the crate's sources arrive after that layer. A source edit in
-# either one then reuses the cached dependency layer.
+# relative to /src that brand/ has relative to this component. media-screen
+# is a path dependency at the top of the repository, which the build takes
+# as a third build context named media-screen and copies to /media-screen,
+# the same way. The stub build below needs only their manifests, so the
+# manifests arrive here and the crates' sources arrive after that layer. A
+# source edit in either one then reuses the cached dependency layer.
 #
 # The dependencies are almost all of the build, and they change only when the
 # lock file changes.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY idle/Cargo.toml idle/
-COPY media-screen/Cargo.toml media-screen/
 COPY display/Cargo.toml display/
 COPY --from=brand iced/Cargo.toml iced/Cargo.lock /brand/iced/
+COPY --from=media-screen Cargo.toml /media-screen/
 
-# A stub library and a stub binary for each workspace member, and a stub
-# library for liken-iced, give cargo something to compile the dependencies
-# against. That build is the layer the image cache keeps.
-RUN mkdir -p idle/src media-screen/src display/src /brand/iced/src \
+# A stub library and a stub binary for each workspace member, and stub
+# libraries for liken-iced and media-screen, give cargo something to compile
+# the dependencies against. That build is the layer the image cache keeps.
+RUN mkdir -p idle/src display/src /brand/iced/src /media-screen/src \
     && echo 'fn main() {}' > idle/src/main.rs \
     && : > idle/src/lib.rs \
-    && : > media-screen/src/lib.rs \
+    && : > /media-screen/src/lib.rs \
     && echo 'fn main() {}' > display/src/main.rs \
     && : > display/src/lib.rs \
     && : > /brand/iced/src/lib.rs
@@ -64,13 +66,13 @@ COPY --from=brand liken.svg liken.css /brand/
 COPY --from=brand fonts/ /brand/fonts/
 
 FROM deps AS build-idle
-COPY media-screen/src/ media-screen/src/
+COPY --from=media-screen src/ /media-screen/src/
 COPY idle/src/ idle/src/
 # The touch marks all three crates' own sources newer than the stub build, so
 # cargo compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    touch idle/src/main.rs idle/src/lib.rs media-screen/src/lib.rs \
+    touch idle/src/main.rs idle/src/lib.rs /media-screen/src/lib.rs \
         /brand/iced/src/*.rs \
     && cargo build --release --locked --no-default-features -p idle-screen
 
@@ -101,8 +103,9 @@ RUN apt-get update \
 # none of.
 #
 # The build context is media-operator/, the way every other image takes it,
-# so the build reaches every crate. The brand context brings brand/, which
-# the client reads its mark and its palette from.
+# so the build reaches both crates of the workspace. The brand context
+# brings brand/, which the client reads its mark and its palette from, and
+# the media-screen context brings the bus half the client links.
 #
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD
 # drivers, and the Wayland and keyboard libraries winit opens by name, on

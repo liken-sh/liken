@@ -1,0 +1,18 @@
+# These checks run before every commit, through prek. The gate is the
+# same `make` target CI runs, so a commit that passes here passes there.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+  - repo: local
+    hooks:
+      - id: test-rust
+        name: rust checks and coverage gate
+        entry: make test
+        language: system
+        files: \.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^Makefile$
+        pass_filenames: false

@@ -2017,7 +2017,6 @@ name = "media-screen"
 version = "0.1.0"
 dependencies = [
  "metrics",
- "metrics-util",
  "rumqttc",
  "serde",
  "serde_json",

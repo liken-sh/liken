@@ -4,7 +4,7 @@ name = "media-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "kubernetes", "mpv", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "vulkan"]
 
 [docs]
 prefix = "media"
@@ -28,7 +28,7 @@ toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The Rust workspace: the idle screen, the display, and media-screen.
+# The Rust workspace: the idle screen and the display.
 # The screen tests run the programs under cage, a headless Wayland
 # compositor, on Mesa's software Vulkan driver.
 [[jobs]]
@@ -38,7 +38,7 @@ run = "make test-rust"
 timeout = 45
 env = { CARGO_INCREMENTAL = "0", WLR_RENDERER = "pixman" }
 apt = ["cage", "wlr-randr", "mesa-vulkan-drivers", "libvulkan1", "libwayland-client0", "libxkbcommon0"]
-coverage = ["coverage-media-screen.xml", "coverage-idle-screen.xml", "coverage-display.xml"]
+coverage = ["coverage-idle-screen.xml", "coverage-display.xml"]
 
 # The hooks in .pre-commit-config.yaml, less the ones that the jobs
 # above run.
@@ -75,14 +75,14 @@ smoke = "media-operator/smoke/media-operator-player.sh"
 name = "media-operator-idle"
 file = "Dockerfile.screen"
 target = "idle"
-contexts = { brand = "brand" }
+contexts = { brand = "brand", media-screen = "media-screen" }
 smoke = "media-operator/smoke/media-operator-idle.sh"
 
 [[outputs.images]]
 name = "media-operator-display"
 file = "Dockerfile.screen"
 target = "display"
-contexts = { brand = "brand" }
+contexts = { brand = "brand", media-screen = "media-screen" }
 smoke = "media-operator/smoke/media-operator-display.sh"
 
 [[outputs.images]]

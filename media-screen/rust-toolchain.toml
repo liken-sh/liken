@@ -1,0 +1,6 @@
+# The pin makes a workstation, the image build, and CI compile with the same
+# rustc. The components are what the gates run: clippy, rustfmt, and the
+# LLVM tools that cargo-llvm-cov measures coverage with.
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "llvm-tools", "rustfmt"]

@@ -1,0 +1,88 @@
+# This file is generated from media-screen/package.toml. Do not edit it:
+# edit that file or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository.
+#
+# ci.yaml calls this workflow when a change reaches media-screen. Each
+# check below is a job from package.toml, and it runs the same command
+# that a workstation runs.
+#
+# The plan names the jobs that read the change, and
+# only those run. A run that publishes runs all of them.
+name: media-screen
+
+on:
+  workflow_call:
+    inputs:
+      # The version the outputs get: the release tag, a development
+      # version, a pinned component's own tag, or empty when the run
+      # publishes nothing.
+      version:
+        type: string
+        required: true
+      # none, dev, or release.
+      publish:
+        type: string
+        required: true
+      # The names of the jobs that run, as a JSON list.
+      jobs:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  rust:
+    if: ${{ contains(fromJSON(inputs.jobs), 'rust') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: media-screen
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustup reads the toolchain pin from rust-toolchain.toml.
+      - name: install the toolchain
+        run: rustup show
+
+      # The key holds the component, so a workspace never restores
+      # another component's target directory. Only a push to main
+      # saves, so a branch never writes an entry that pushes one of
+      # main's out of the repository's 10 GB.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: media-screen
+          key: media-screen
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make test
+
+  prek:
+    if: ${{ contains(fromJSON(inputs.jobs), 'prek') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: media-screen
+    steps:
+      - uses: actions/checkout@v7
+
+      # prek runs the hooks of this component only, with
+      # --show-diff-on-failure, so a hook that changes a file fails
+      # with the change it would make. SKIP leaves out the hooks
+      # that another job of this workflow runs.
+      - uses: j178/prek-action@v2
+        env:
+          SKIP: test-rust
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files media-screen/

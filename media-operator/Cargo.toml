@@ -1,16 +1,17 @@
-# The Rust half of this repository is one cargo workspace with three
-# members: media-screen, the bus half every screen client shares, idle,
-# the client this project ships, and display, the display a playback pod
-# draws over the film. One workspace means one lock file, one toolchain
-# pin, and one target tree, so a build resolves one set of versions and
-# the image build caches one dependency layer.
+# The Rust half of this component is one cargo workspace with two
+# members: idle, the client this project ships, and display, the display
+# a playback pod draws over the film. One workspace means one lock file,
+# one toolchain pin, and one target tree, so a build resolves one set of
+# versions and the image build caches one dependency layer. idle links
+# media-screen, the bus half every screen client shares, by path from
+# the top of the repository.
 [workspace]
 resolver = "3"
-members = ["display", "idle", "media-screen"]
+members = ["display", "idle"]
 
-# The three crates the members take. The versions are exact and stated
-# once here, so the client and the library that reads the bus for it
-# resolve the same rumqttc and the same serde.
+# The crates the members take. The versions are exact, and they are the
+# same as media-screen's own, so the client and the library that reads
+# the bus for it resolve the same rumqttc and the same serde.
 #
 # rumqttc speaks plain TCP to the broker, so its default features are off and
 # no TLS stack enters either build.

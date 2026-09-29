@@ -1,0 +1,20 @@
+# The bus half of a screen client, as a Rust library. media-operator's
+# idle screen and library-operator's media browser link it by path, so
+# each one lists it in [depends]. It publishes nothing of its own.
+[package]
+name = "media-screen"
+license = "MIT"
+
+[[jobs]]
+name = "rust"
+toolchain = "rust"
+run = "make test"
+timeout = 20
+env = { CARGO_INCREMENTAL = "0" }
+
+# The hooks in .pre-commit-config.yaml, less the ones that the jobs
+# above run.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+skip = ["test-rust"]

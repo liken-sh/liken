@@ -12,7 +12,6 @@
 # coverage-report` draws from it. CI writes them on every run and
 # reads them once; they never belong to the tree.
 /coverage.out
-/coverage-media-screen.xml
 /coverage-idle-screen.xml
 /coverage-display.xml
 /coverage.html

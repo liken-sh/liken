@@ -193,7 +193,6 @@ jobs:
         with:
           name: coverage-media-operator-rust
           path: |
-            media-operator/coverage-media-screen.xml
             media-operator/coverage-idle-screen.xml
             media-operator/coverage-display.xml
           if-no-files-found: error

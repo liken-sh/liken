@@ -156,10 +156,11 @@ jobs:
             --skip display-operator/
             --skip equipment-operator/
             --skip git-csi-driver/
-            --skip mpv/
-            --skip media-operator/
+            --skip media-screen/
             --skip library-operator/
             --skip liken/
+            --skip mpv/
+            --skip media-operator/
             --skip people-operator/
             --skip per-node-csi-driver/
 
@@ -359,34 +360,20 @@ jobs:
       contents: read
       packages: write
 
-  mpv:
-    needs: [plan, ffmpeg, vulkan]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['mpv'].check }}
-    uses: ./.github/workflows/component-mpv.yaml
+  media-screen:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-screen'].check }}
+    uses: ./.github/workflows/component-media-screen.yaml
     with:
-      version: ${{ fromJSON(needs.plan.outputs.components)['mpv'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
-      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].jobs) }}
-      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].images) }}
-    permissions:
-      contents: read
-      packages: write
-
-  media-operator:
-    needs: [plan, brand, ffmpeg, kubernetes, mpv, vulkan]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].check }}
-    uses: ./.github/workflows/component-media-operator.yaml
-    with:
-      version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
-      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].jobs) }}
-      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].images) }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-screen'].jobs) }}
     permissions:
       contents: read
       packages: write
 
   library-operator:
-    needs: [plan, brand, ffmpeg, kubernetes, media-operator, vulkan]
+    needs: [plan, brand, ffmpeg, kubernetes, media-screen, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].check }}
     uses: ./.github/workflows/component-library-operator.yaml
     with:
@@ -411,6 +398,32 @@ jobs:
       packages: write
     # The OS publishes to the release channel with the channel's key.
     secrets: inherit
+
+  mpv:
+    needs: [plan, ffmpeg, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['mpv'].check }}
+    uses: ./.github/workflows/component-mpv.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['mpv'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  media-operator:
+    needs: [plan, brand, ffmpeg, kubernetes, media-screen, mpv, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].check }}
+    uses: ./.github/workflows/component-media-operator.yaml
+    with:
+      version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
 
   people-operator:
     needs: [plan]
@@ -447,7 +460,7 @@ jobs:
   # A job that did not run in this push has no new coverage profile,
   # so its report is the one the site serves now.
   site:
-    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, mpv, media-operator, library-operator, liken, people-operator, per-node-csi-driver]
+    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -517,18 +530,6 @@ jobs:
           path: git-csi-driver
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'go') }}
-        with:
-          name: coverage-media-operator-go
-          path: media-operator
-
-      - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'rust') }}
-        with:
-          name: coverage-media-operator-rust
-          path: media-operator
-
-      - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check && contains(fromJSON(needs.plan.outputs.components)['library-operator'].jobs, 'go') }}
         with:
           name: coverage-library-operator-go
@@ -545,6 +546,18 @@ jobs:
         with:
           name: coverage-liken-checks
           path: liken
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'go') }}
+        with:
+          name: coverage-media-operator-go
+          path: media-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'rust') }}
+        with:
+          name: coverage-media-operator-rust
+          path: media-operator
 
       - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].check && contains(fromJSON(needs.plan.outputs.components)['people-operator'].jobs, 'go') }}
@@ -615,11 +628,11 @@ jobs:
           echo "checking the git-csi-driver manual"
           fetch https://liken.sh/git/ > page.html
           grep -q "<title>" page.html
-          echo "checking the media-operator manual"
-          fetch https://liken.sh/media/ > page.html
-          grep -q "<title>" page.html
           echo "checking the library-operator manual"
           fetch https://liken.sh/library/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the media-operator manual"
+          fetch https://liken.sh/media/ > page.html
           grep -q "<title>" page.html
           echo "checking the people-operator manual"
           fetch https://liken.sh/people/ > page.html
@@ -632,7 +645,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, mpv, media-operator, library-operator, liken, people-operator, per-node-csi-driver]
+    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

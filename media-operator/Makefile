@@ -61,9 +61,9 @@ test-go:
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
 
-# The Rust half is a cargo workspace with three members: the media-screen
-# library, the idle screen that draws with it, and the display a playback
-# pod draws over the film.
+# The Rust half is a cargo workspace with two members: the idle screen,
+# which draws with the media-screen library at the top of the
+# repository, and the display a playback pod draws over the film.
 #
 # The Rust checks: the format, the lints, and the tests under a coverage
 # gate. cargo-llvm-cov runs the tests itself and measures every line they
@@ -73,17 +73,15 @@ test-go:
 # the frame loop and the graphics setup count too. That test needs cage,
 # wlr-randr, and a Vulkan device, and Mesa's lavapipe is enough of one.
 #
-# The three crates share a lock file and a target tree, so one invocation
-# covers them all. Each crate keeps a floor of its own, because they earn
-# different numbers: media-screen is rules plus one thread over a socket,
-# the idle screen carries a window, and the display's own window half
-# needs a compositor no unit test has.
+# The two crates share a lock file and a target tree. Each crate keeps a
+# floor of its own, because they earn different numbers: the idle screen
+# carries a window, and the display's own window half needs a compositor
+# no unit test has. media-screen's own gate runs in its own directory.
 
 # The floor on line coverage, as a percentage, one per crate. CI enforces the
 # same numbers through this file. Raise one when the tests earn it; never
 # lower it.
 IDLE_COVERAGE_FLOOR := 95
-SCREEN_COVERAGE_FLOOR := 99
 DISPLAY_COVERAGE_FLOOR := 90
 
 .PHONY: test-rust
@@ -94,27 +92,18 @@ test-rust:
 # too. The pass is the library and the binary alone, because the test
 # targets reach the flags and the measurements the feature carries.
 	cargo clippy -p idle-screen --no-default-features --lib --bins -- -D warnings
-# The three gates share one instrumented target tree, and the idle test
-# binary links media-screen, so its profiles count media-screen lines
-# the idle tests never reach. Each gate starts from no profiles, so it
-# measures its own tests alone. The first gate also starts from no
-# objects: llvm-cov reads every test binary left in the target tree,
-# and the idle binaries from an earlier run carry a second copy of
-# media-screen that the media-screen tests never run, which reads as
-# half the crate uncovered.
+# The two gates share one instrumented target tree. Each gate starts
+# from no profiles, so it measures its own tests alone, and the first
+# gate also starts from no objects, so no test binary of an earlier run
+# counts.
 #
 # Each gate is followed by a report of the same run, as a Cobertura
 # file at the workspace root. `cargo llvm-cov report` reads the
 # profiles the gate wrote, so it must run before the next clean
 # deletes them. A report after every gate would measure one crate
-# under another's tests. The three files are inputs to
+# under another's tests. The two files are inputs to
 # `make coverage-report`, which draws the page the site publishes.
 	cargo llvm-cov clean --workspace
-	cargo llvm-cov -p media-screen --all-targets \
-		--fail-under-lines $(SCREEN_COVERAGE_FLOOR)
-	cargo llvm-cov report -p media-screen \
-		--cobertura --output-path coverage-media-screen.xml
-	cargo llvm-cov clean --workspace --profraw-only
 	cargo llvm-cov -p idle-screen --all-targets \
 		--fail-under-lines $(IDLE_COVERAGE_FLOOR)
 	cargo llvm-cov report -p idle-screen \
@@ -153,13 +142,12 @@ test-docs:
 # the docs module the way Hugo and crdref are, so it runs from docs/
 # and needs nothing installed. -root names the tree the inputs
 # describe, which is this directory.
-COVERAGE_INPUTS := coverage.out coverage-media-screen.xml coverage-idle-screen.xml \
-	coverage-display.xml
+COVERAGE_INPUTS := coverage.out coverage-idle-screen.xml coverage-display.xml
 
 .PHONY: coverage-report
 coverage-report:
 	cd docs && go tool coverage -title media-operator -root .. \
-		-label Go -label "Rust (media-screen)" -label "Rust (idle-screen)" \
+		-label Go -label "Rust (idle-screen)" \
 		-label "Rust (media-display)" \
 		-out ../coverage.html \
 		$(addprefix ../,$(COVERAGE_INPUTS))

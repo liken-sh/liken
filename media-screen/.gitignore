@@ -1,0 +1,2 @@
+# The Rust build tree. It never belongs to the tree.
+/target/
