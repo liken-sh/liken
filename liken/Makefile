@@ -696,8 +696,17 @@ COVERAGE_TOOLCHAIN := go1.26.7
 # lists such packages, and test-go fails on the first one.
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
+# init is PID 1 and sits in the boot archive, so every byte it links
+# costs every boot. It links no net/http, because nothing in the boot
+# speaks HTTP, and nothing of the shared kubernetes module, which brings
+# net/http and client-go. It reads the machine and cluster packages,
+# which answer the module's metadata type with no import of it
+# (api.Meta). This list finds each import that breaks the rule.
+INIT_HEAVY := go list -deps ./init | grep -E '^(net/http|github\.com/liken-sh/liken/kubernetes)(/|$$)'
+
 test-go:
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
+	test -z "$$($(INIT_HEAVY))" || { echo 'init links net/http or the shared kubernetes module:'; $(INIT_HEAVY); exit 1; }
 	go vet ./...
 	go tool staticcheck ./...
 	go test ./...
