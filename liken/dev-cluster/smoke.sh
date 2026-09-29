@@ -6,7 +6,7 @@
 # firmware. The argument picks the firmware dialect: `smoke.sh uefi`
 # runs the drill under OVMF, and `smoke.sh bios` runs it under
 # SeaBIOS. CI runs both (`make smoke-uefi` and `make smoke-bios` from
-# the repo root).
+# liken/).
 #
 # The drill has two steps. In step one, the machine installs itself:
 # it boots the install image through -kernel, with QEMU as the
@@ -132,7 +132,7 @@ HOLD_DEADLINE="${HOLD_DEADLINE:-180}"
 
 for f in "$K3S" "$KUBECONFIG_FILE" "$INSTALL_CPIO"; do
     [[ -e "$f" ]] || {
-        echo "$drill: missing $f — run \`make $drill\` from the repo root," >&2
+        echo "$drill: missing $f. Run \`make $drill\` from liken/," >&2
         echo "which builds the artifacts and mints the kubeconfig first" >&2
         exit 1
     }

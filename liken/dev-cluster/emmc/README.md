@@ -45,7 +45,7 @@ comments explain both.
 
 ## How it runs
 
-`make smoke-emmc` from the repo root builds this deployment's install
+`make smoke-emmc` from `liken/` builds this deployment's install
 image and runs the drill: it installs `node-1` onto a blank card,
 then boots the installed card under OVMF and waits for the node to
 report Ready over the cluster's API. Ready is the same verdict the

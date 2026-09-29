@@ -1,6 +1,6 @@
-# The docs domain builds the manual for per-node.liken.sh, with the
-# same `make build` every operator repository runs, so the docs
-# workflows stay one pattern.
+# The docs domain builds the manual for per-node.liken.sh, with the same
+# `make build` every manual runs, so the root Makefile and CI build each
+# manual one way.
 HUGO := go tool hugo
 
 SKILLS := go tool skills
@@ -17,9 +17,10 @@ test:
 	go test ./...
 
 # The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand repository
+# one SKILL.md per guide, with the generator the brand component
 # publishes (its README says what the output holds). The output is
-# committed, and the root test-docs target fails when it is stale.
+# committed, and the test-docs target in ../Makefile fails when it is
+# stale.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

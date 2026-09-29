@@ -45,7 +45,7 @@ make -C dev-cluster install NODE=node-1 FIRMWARE=bios \
     CONSOLE=file:guests/node-1/install-console.log
 ```
 
-Use `make -C dev-cluster` here on purpose. The root `make install`
+Use `make -C dev-cluster` here on purpose. `make install` in `liken/`
 rebuilds `dev-cluster/image/install.cpio` from the working tree first,
 which is the current build, not the old one.
 
@@ -55,7 +55,7 @@ and a half minutes, one reboot at a time.
 
 ## The lab channel at a chosen version
 
-The root Makefile bundles the working tree into a release-shaped
+`liken/Makefile` bundles the working tree into a release-shaped
 channel under `dev-cluster/image/channel/<version>/`. `LAB_VERSION`
 names that version and defaults to today's date with serial `000`.
 Override it on the command line to build the lab channel at a version
@@ -85,7 +85,7 @@ build a broken bundle. Build one:
 make release VERSION=$(date +%Y.%m.%d)-902 FAULT=panic
 ```
 
-Run this from the repo root. The root target builds the vendored
+Run this from `liken/`. Its target builds the vendored
 inputs the bundle needs before it hands off to `releases/Makefile`, and
 `FAULT` reaches the sub-make on its own.
 

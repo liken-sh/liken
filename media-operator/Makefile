@@ -1,9 +1,9 @@
-# The root Makefile names the checks a change must pass, and delegates
-# each one to the domain that owns it. `make test` runs every check CI
-# runs, in the same commands, so a change that passes here passes
-# there. The Go operator is the module at the root and the Rust crates
-# are the workspace at the root, so their checks are here; the docs are
-# their own domain with their own Makefile.
+# This Makefile names the checks a change must pass, and delegates each
+# one to the domain that owns it. `make test` runs every check CI runs,
+# in the same commands, so a change that passes here passes there. The
+# Go module and the Rust workspace are both in this directory, so their
+# checks are here; the docs are their own domain with their own
+# Makefile.
 #
 # The coverage floors are the one number each gate enforces: the Go
 # floor is in .testcoverage.yml, and the three Rust floors are below.
@@ -138,7 +138,7 @@ test-docs:
 # separate acts: the gate says pass or fail, and the report says
 # where the lines are.
 #
-# The tool is the brand repository's, pinned as a tool dependency of
+# The tool is the brand component's, pinned as a tool dependency of
 # the docs module the way Hugo and crdref are, so it runs from docs/
 # and needs nothing installed. -root names the tree the inputs
 # describe, which is this directory.

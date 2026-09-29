@@ -33,7 +33,7 @@ all: build
 # Each page opens with a hand-written preamble that the schema cannot
 # hold: how the page relates to the guides. The preamble is beside
 # the generator and passes as the third argument.
-# crdref is pinned from the brand repository as a tool dependency,
+# crdref is pinned from the brand component as a tool dependency,
 # so go.mod versions the generator, and go.mod is the prerequisite
 # that rebuilds a page when the generator changes.
 content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml crdref/machine-preamble.md go.mod
@@ -67,9 +67,10 @@ serve: $(GENERATED)
 	$(HUGO) server --renderToMemory --disableFastRender
 
 # The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand repository
+# one SKILL.md per guide, with the generator the brand component
 # publishes (its README says what the output holds). The output is
-# committed, and the root test-docs target fails when it is stale.
+# committed, and the test-docs target in ../Makefile fails when it is
+# stale.
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 

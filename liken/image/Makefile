@@ -11,7 +11,7 @@
 # are the OS's own artifacts, and they land in this domain's dist/ by
 # default. What makes the system belong to a deployment is the
 # deployment layer (layer.go), loaded as a further initrd by whoever
-# owns the deployment (the root Makefile for the dev cluster, the
+# owns the deployment (liken/Makefile for the dev cluster, the
 # releases domain for a release build). version.mk supplies the
 # version stamp. Both the stamp and the input locations can be
 # overridden, because the releases domain rebuilds these same
@@ -36,7 +36,7 @@ HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 TZDATA_VERSION := $(strip $(file <../tzdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 
-# The prerequisites here mirror the ones the root Makefile's rule
+# The prerequisites here mirror the ones that liken/Makefile's rule
 # declares, from its side of the directory boundary. When either list
 # changes, change the other one to match.
 $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \

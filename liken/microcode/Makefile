@@ -10,7 +10,7 @@
 override VERSION := $(strip $(file <VERSION))
 
 # The AMD half comes from the linux-firmware domain's fetched tree,
-# so the root Makefile orders that domain before this one.
+# so liken/Makefile orders that domain before this one.
 dist/$(VERSION)/microcode.cpio: VERSION fetch.sh
 	./fetch.sh
 

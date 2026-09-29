@@ -37,7 +37,7 @@ and why the interface names hold.
 
 ## How it runs
 
-`make smoke-hardware` from the repo root builds this deployment's own
+`make smoke-hardware` from `liken/` builds this deployment's own
 install image and stick, then runs the parity drill. The drill walks
 the whole first-machine flow, in the order a person walks it: it boots
 the hardware report and checks the proposal that the report writes onto

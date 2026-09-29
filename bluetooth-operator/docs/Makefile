@@ -1,6 +1,6 @@
 # The docs domain builds the manual for bluetooth.liken.sh. The three
 # CRD reference pages are generated, never edited: crdref, the
-# generator the brand repository publishes, renders each page from
+# generator the brand component publishes, renders each page from
 # its schema in deploy/crds.yaml and a hand-written preamble that
 # opens it. The schema descriptions become the field tables, so a
 # schema edit is a manual edit. The three CRDs travel in one manifest
@@ -31,9 +31,10 @@ test:
 	go test ./...
 
 # The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand repository
+# one SKILL.md per guide, with the generator the brand component
 # publishes (its README says what the output holds). The output is
-# committed, and the root test-docs target fails when it is stale.
+# committed, and the test-docs target in ../Makefile fails when it is
+# stale.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

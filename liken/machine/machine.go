@@ -79,7 +79,7 @@ const (
 // build process stamps this value using -ldflags -X. When the
 // releases domain builds the binary, the value is a release name. For
 // a development build, the value is the git-described commit
-// (version.mk at the repo root explains this mechanism). This value
+// (liken/version.mk explains this mechanism). This value
 // reaches the cluster as status.version.liken. The operator compares
 // this value against the Cluster's spec.version target to determine
 // whether this machine needs an upgrade.

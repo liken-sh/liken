@@ -1,9 +1,9 @@
 # The docs domain builds the manual for audio.liken.sh, with the
-# same `make build` every operator repository runs, so the docs
-# workflows stay one pattern. The build generates two reference
-# pages, for the Sink and Source CRDs, through crdref, and the route
+# same `make build` every manual runs, so the root Makefile and CI
+# build each manual one way. The build generates two reference pages,
+# for the Sink and Source CRDs, through crdref, and the route
 # reference from the API's own OpenAPI document, through apiref. Both
-# generators come from the brand repository, pinned as tools of this
+# generators come from the brand component, pinned as tools of this
 # module the way Hugo is.
 HUGO := go tool hugo
 CRDREF := go tool crdref
@@ -12,7 +12,7 @@ APIREF := go tool apiref
 REFERENCE := content/docs/reference
 
 # The OpenAPI document is committed, under the static tree the site
-# publishes it from. `make openapi` in the repository root is the one
+# publishes it from. `make openapi` in audio-operator/ is the one
 # command that rewrites it, from the router table.
 OPENAPI := static/v1/audio/openapi.json
 
@@ -37,9 +37,10 @@ test: $(GENERATED)
 	go test ./...
 
 # The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand repository
+# one SKILL.md per guide, with the generator the brand component
 # publishes (its README says what the output holds). The output is
-# committed, and the root test-docs target fails when it is stale.
+# committed, and the test-docs target in ../Makefile fails when it is
+# stale.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

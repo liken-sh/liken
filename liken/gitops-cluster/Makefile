@@ -19,7 +19,7 @@
 #     lab exists to run do not fit the 1 GB envelope. Proving that
 #     envelope stays the dev cluster's job.
 #
-# Run everything from the repo root (`make run-gitops`,
+# Run everything from liken/ (`make run-gitops`,
 # `make install-gitops`), which builds the artifacts first.
 NODE ?= node-1
 BOOT ?= disk
@@ -66,7 +66,7 @@ guests/$(NODE)/OVMF_VARS.fd:
 	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
 
 # The leader forwards the API to the host on 17443, one above the
-# dev cluster's 16443. `make kubeconfig-gitops` at the root passes
+# dev cluster's 16443. `make kubeconfig-gitops` in liken/ passes
 # this port as -server, since the cluster's own endpoint is on the
 # lab's segment and unreachable from the host.
 ifeq ($(NODE),node-1)

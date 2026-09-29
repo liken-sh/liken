@@ -11,7 +11,7 @@ bare rock.
 The icon is a patch of that lichen, drawn as the polygonal plates
 (*[areoles](https://en.wikipedia.org/wiki/Crustose_lichen)*) that a
 crustose lichen cracks into as it grows. The
-[brand repository](https://github.com/liken-sh/brand) explains the
+[brand component](../brand/) explains the
 design and the biology behind it.
 
 `liken` is a small operating system that boots a machine directly into
@@ -52,7 +52,7 @@ runs in a container.
   each commit. The cluster makes its own deploy key, so no private
   material leaves the cluster. [The GitOps
   guide](https://liken.sh/docs/guides/gitops/) gives the steps, and
-  [plans/completed/14-gitops-from-first-boot.md](plans/completed/14-gitops-from-first-boot.md)
+  [plans/completed/14-gitops-from-first-boot.md](../plans/completed/14-gitops-from-first-boot.md)
   records the design.
 
 ## How this repository is written
@@ -74,7 +74,7 @@ not do that. It keeps the goal, which is a repository that explains
 itself, and it uses ordinary files that run as they are.
 
 An explanation that is too big for a comment goes in a markdown
-document beside the thing it describes. [`plans/`](plans/) contains the
+document beside the thing it describes. [`plans/`](../plans/) contains the
 design overview and one document for each milestone.
 
 ## Prior art
@@ -112,7 +112,7 @@ once, then upgraded from the channel with every release.
 [GETTING-STARTED.md](GETTING-STARTED.md) describes the path from a
 release to a running cluster of your own.
 
-The milestones in [plans/](plans/) record the progress of the project.
+The milestones in [plans/](../plans/) record the progress of the project.
 The QEMU lab proved most of them, from a bare PID 1 to a five-node HA
 cluster. The release channel was proved where it runs, published by
 CI and polled by real machines. Later milestones added
@@ -130,11 +130,11 @@ a physical machine can prove.
 
 The plans directory has three parts:
 
-* [`plans/completed/`](plans/completed/) contains the milestones that are
+* [`plans/completed/`](../plans/completed/) contains the milestones that are
   built.
-* [`plans/rejected/`](plans/rejected/) contains a milestone that was built
+* [`plans/rejected/`](../plans/rejected/) contains a milestone that was built
   and then removed.
-* The markdown files in [`plans/`](plans/) are the design overview and
+* The markdown files in [`plans/`](../plans/) are the design overview and
   the proposals that are not built.
 
 ## License

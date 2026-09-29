@@ -14,7 +14,7 @@ import (
 // The real CRDs must generate without error, and their well-known
 // sections must appear. The golden test pins the format; this test
 // pins the generator to the schemas it exists for.
-// The golden test is beside crdref in the brand repository. crdref
+// The golden test is beside crdref in the brand component. crdref
 // is a program, not an importable package, so this test runs the
 // pinned tool the way the Makefile rules do.
 func TestGenerateHandlesTheRealCRDs(t *testing.T) {

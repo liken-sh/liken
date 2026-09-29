@@ -1,8 +1,8 @@
-# The root Makefile names the checks a change must pass, and delegates
-# each one to the domain that owns it. `make test` runs every check CI
-# runs, in the same commands, so a change that passes here passes
-# there. The Go operator is the module at the root, so its checks are
-# here; the docs are their own domain with their own Makefile.
+# This Makefile names the checks a change must pass, and delegates each
+# one to the domain that owns it. `make test` runs every check CI runs,
+# in the same commands, so a change that passes here passes there. The
+# Go operator is the module in this directory, so its checks are here;
+# the docs are their own domain with their own Makefile.
 #
 # The coverage floors are the one number each gate enforces: the Go
 # floor is in .testcoverage.yml. CI reads the same file, so a floor

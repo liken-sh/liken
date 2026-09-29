@@ -1,8 +1,8 @@
-# The root Makefile names the checks a change must pass, and delegates
-# each one to the domain that owns it. `make test` runs every check CI
-# runs, in the same commands, so a change that passes here passes
-# there. The Go module is at the root, so its checks are here. The
-# docs are their own domain with their own Makefile.
+# This Makefile names the checks a change must pass, and delegates each
+# one to the domain that owns it. `make test` runs every check CI runs,
+# in the same commands, so a change that passes here passes there. The
+# Go module is in this directory, so its checks are here. The docs are
+# their own domain with their own Makefile.
 #
 # The coverage floor is the one number the gate enforces, in
 # .testcoverage.yml. CI reads the same file, so the floor moves in one

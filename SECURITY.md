@@ -18,7 +18,7 @@ channel at https://releases.liken.sh is also in scope, because machines
 trust what they download from it.
 
 A vulnerability in a component that liken redistributes (the kernel,
-k3s, GRUB, and the rest that [`licensing/NOTICES.md`](licensing/NOTICES.md)
+k3s, GRUB, and the rest that [`liken/licensing/NOTICES.md`](liken/licensing/NOTICES.md)
 lists) belongs to that component's own project. Report it there. But if
 liken pins a version with a known fix available, that pin is a liken
 problem, and a report here is welcome.

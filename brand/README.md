@@ -1,6 +1,6 @@
 # liken brand
 
-This repository is the brand domain of
+This directory is the brand component of
 [liken](https://github.com/liken-sh/liken): the mark, the shared
 stylesheet, the Hugo theme, and the voice rules. Every `liken` site
 uses the theme, and every word those sites publish follows the

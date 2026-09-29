@@ -1,6 +1,6 @@
 # The docs domain builds the manual for media.liken.sh. Five of the
 # reference pages are generated, never edited: crdref, the generator
-# the brand repository publishes, renders each page from its CRD
+# the brand component publishes, renders each page from its CRD
 # schema in deploy/, a hand-written preamble that opens the page, and
 # a hand-written postamble that carries its bus sections. The schema
 # descriptions become the field tables, so a schema edit is a manual
@@ -15,7 +15,7 @@ APIREF := go tool apiref
 
 REFERENCE := content/docs/reference
 
-# The OpenAPI document is committed at the repository root, where the
+# The OpenAPI document is committed at the top of media-operator/, where the
 # program embeds it. `go generate ./...` is the one command that
 # rewrites it, from the router.
 OPENAPI := ../openapi.json
@@ -44,9 +44,10 @@ test: $(GENERATED)
 	go test ./...
 
 # The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand repository
+# one SKILL.md per guide, with the generator the brand component
 # publishes (its README says what the output holds). The output is
-# committed, and the root test-docs target fails when it is stale.
+# committed, and the test-docs target in ../Makefile fails when it is
+# stale.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

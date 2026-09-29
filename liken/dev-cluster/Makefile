@@ -66,8 +66,8 @@
 # these deadlines even when the machine is busy.
 #
 # The OS artifacts come from other domains' work; this Makefile only
-# points at them. The root Makefile is the orchestrator that makes
-# sure they exist before boot. Run `make run` from the repo root.
+# points at them. liken/Makefile is the orchestrator that makes sure
+# they exist before boot. Run `make run` from liken/.
 NODE ?= node-1
 MEM_disk := 1024
 MEM_kernel := 4096
@@ -657,7 +657,7 @@ reset-nvram:
 # cluster's API instead of a person reading the console. This is what
 # CI runs. One script runs both drills, and the argument picks the
 # firmware dialect; smoke.sh explains the whole arrangement. Run the
-# drills from the repo root (`make smoke-uefi`, `make smoke-bios`),
+# drills from liken/ (`make smoke-uefi`, `make smoke-bios`),
 # which first builds the artifacts and creates the kubeconfig that
 # the drill needs.
 smoke-uefi:

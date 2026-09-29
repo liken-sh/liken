@@ -1,8 +1,8 @@
-# The root Makefile names the checks a change must pass, and delegates
-# each one to the domain that owns it. `make test` runs every check CI
-# runs, in the same commands, so a change that passes here passes
-# there. The Go operator is the module at the root, so its checks are
-# here; the docs are their own domain with their own Makefile.
+# This Makefile names the checks a change must pass, and delegates each
+# one to the domain that owns it. `make test` runs every check CI runs,
+# in the same commands, so a change that passes here passes there. The
+# Go operator is the module in this directory, so its checks are here;
+# the docs are their own domain with their own Makefile.
 #
 # The coverage floors are the one number each gate enforces: the Go
 # floor is in .testcoverage.yml. CI reads the same file, so a floor
@@ -62,9 +62,9 @@ test-docs:
 # report says where the holes are, and a failing gate must not wait
 # on a page.
 #
-# coverage is the report tool the brand repository publishes, pinned
+# coverage is the report tool the brand component publishes, pinned
 # as a tool of the docs module beside Hugo and crdref, so the command
-# runs from docs/ and names the repository root with -root.
+# runs from docs/ and names this directory with -root.
 .PHONY: coverage-report
 coverage-report: coverage.out
 	cd docs && go tool coverage \

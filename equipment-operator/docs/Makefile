@@ -1,6 +1,6 @@
 # The docs domain builds the manual for equipment.liken.sh. The
 # reference pages for the three resources are generated, never edited:
-# crdref, the generator the brand repository publishes, renders each
+# crdref, the generator the brand component publishes, renders each
 # one from its CRD in deploy/, so a schema edit is a manual edit.
 # GENERATED lists those pages, and each rule names go.mod as an input,
 # so a generator bump regenerates them.
@@ -34,9 +34,10 @@ $(REFERENCE)/televisions.md: ../deploy/televisions-crd.yaml go.mod
 	$(CRDREF) -title Television -weight 16 $< $@
 
 # The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand repository
+# one SKILL.md per guide, with the generator the brand component
 # publishes (its README says what the output holds). The output is
-# committed, and the root test-docs target fails when it is stale.
+# committed, and the test-docs target in ../Makefile fails when it is
+# stale.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

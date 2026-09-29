@@ -40,7 +40,7 @@ The fix is not a return to semver.
 
 The serial number 000 never names a published release. The lab uses
 serial 000 for the release-shaped channel that it bundles from the
-working tree, using the root Makefile's media targets. This stand-in
+working tree, using the media targets of `liken/Makefile`. This stand-in
 version is recognizable at a glance, and it sorts below any real
 release cut on the same day.
 

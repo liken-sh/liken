@@ -102,8 +102,8 @@ act as delegating the zone.
 from. CI reads it back over https://liken.sh/release.txt to prove
 that the deploy landed.
 
-The coverage report is not built here. `make coverage-report` at the
-repository root renders it from the profile `make test-go` writes,
+The coverage report is not built here. `make coverage-report` in
+`liken/` renders it from the profile `make test-go` writes,
 and the publish job copies the file into `dist/site/`. So a local
 `make -C docs build` produces the site without it, and the footer
 link that the theme adds leads nowhere until CI publishes.

@@ -11,7 +11,7 @@
 # The structure follows the repo's rule to organize by domain. Each
 # domain directory (kernel/, k3s/, init/, image/, and so on) has its
 # own Makefile. That Makefile owns its rules, and you can run it
-# alone with `make -C <domain>`. This root Makefile names the
+# alone with `make -C <domain>`. This Makefile names the
 # artifacts that the domains exchange, and it delegates the work of
 # producing them.
 
@@ -21,7 +21,7 @@
 # the stamp file that lets Make track the version.
 include version.mk
 
-# Version pins name the vendored artifacts. The root Makefile reads
+# Version pins name the vendored artifacts. This Makefile reads
 # these pins too, because downstream rules (the image build, QEMU)
 # depend on the real files that the pins name, not on phony targets.
 KERNEL_VERSION := $(strip $(file <kernel/VERSION))
@@ -290,7 +290,7 @@ cli: cli/dist/liken
 # hashes already exists.
 #
 # An identity belongs to a deployment, not to the OS. So the toolkit
-# takes the output directory as an argument, and this root Makefile
+# takes the output directory as an argument, and this Makefile
 # points that argument at the repo's own deployment, the same way the
 # image build gets the dev cluster's manifests. The keys are
 # gitignored, and the artifacts carry no version. If you lose or
@@ -409,7 +409,7 @@ $(IMAGE_DIR)/initrd.cpio: $(MICROCODE_DIST)/microcode.cpio $(BOOT_ARCHIVE) $(SYS
 # A guest reboot resets the VM in place. So the console shows a
 # staged spec or a release upgrade applied end to end, with the
 # shutdown and the next boot in one continuous log. As with every
-# target here, the root Makefile only makes sure the artifacts exist,
+# target here, this Makefile only makes sure the artifacts exist,
 # in order, before it hands off to dev-cluster's own Makefile.
 run: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio
 	$(MAKE) -C dev-cluster run
@@ -628,7 +628,7 @@ install-gitops: $(GITOPS_IMAGE_DIR)/install.cpio
 # release webserver lays it out. The releases Makefile explains the
 # shape.
 #
-# The root Makefile's contribution is the vendored inputs. A release
+# This Makefile's contribution is the vendored inputs. A release
 # rebuilds init, the operators, and the image, but the kernel, k3s,
 # and the other vendored artifacts are pinned by their own domains
 # and shared by every release. A release contains no deployment and
@@ -680,7 +680,7 @@ test: test-go test-docs
 # how they are chosen. The profile itself is gitignored.
 COVERAGE_TOOLCHAIN := go1.26.7
 
-# The repo's programs are one Go module (see go.mod at the root). So
+# liken's programs are one Go module (see liken/go.mod). So
 # every check is a single invocation of ./.... This covers Go files in
 # any domain directory, present or future, without listing them. The
 # one exception is docs/, a nested module that exists to keep Hugo's

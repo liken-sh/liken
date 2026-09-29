@@ -6,7 +6,7 @@ description: Runs, upgrades, breaks, and inspects liken's dev cluster, the QEMU 
 # Dev-cluster drills
 
 The dev cluster is the deployment liken develops against. Break it
-freely. It carries no work worth keeping, and
+freely. Every command and path in this skill is relative to `liken/`. It carries no work worth keeping, and
 `make -C dev-cluster clean` puts every guest back to blank disks.
 
 Longer flows live beside this file:
@@ -43,7 +43,7 @@ boot or 4096 on a `BOOT=kernel` boot.
 
 ## Reach the cluster
 
-Mint the admin credential once, from the repo root:
+Mint the admin credential once, from `liken/`:
 
 ```bash
 make kubeconfig
@@ -87,7 +87,7 @@ record of a boot that failed before the console produced anything.
 
 ## Start and stop guests
 
-Start a guest from the repo root, so make builds the artifacts first:
+Start a guest from `liken/`, so make builds the artifacts first:
 
 ```bash
 make run NODE=node-1
@@ -243,7 +243,7 @@ promotes it.
 
 ## Fleet hygiene
 
-**Install a machine.** Run this from the repo root, once per node,
+**Install a machine.** Run this from `liken/`, once per node,
 before its first disk boot:
 
 ```bash
@@ -392,7 +392,7 @@ applies sysctls live and reboots nothing.
 * **`make` inside `dev-cluster/` does not rebuild the OS image.**
   `make -C dev-cluster install` and `make -C dev-cluster run` boot
   whatever `image/install.cpio` already holds. A stale file drills the
-  wrong spec, silently. Build from the repo root, or through
+  wrong spec, silently. Build from `liken/`, or through
   `make smoke-uefi` / `make smoke-bios` / `make smoke-hardware`.
 * **The smoke drills factory-reset `node-1`.** `smoke.sh` starts with
   `rm -rf guests/node-1`. All three drills use `node-1`, so a UEFI

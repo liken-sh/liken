@@ -3,9 +3,7 @@
 # Report what this domain pins, and what IANA has released now.
 #
 # IANA serves the current release name, and nothing else, at one path.
-# Comparing two short strings costs one request and needs no token,
-# which is why the weekly workflow reads this script rather than
-# keeping its own copy of the rule.
+# Comparing two short strings costs one request and needs no token.
 #
 # The second pin is the image the zone files compile in. Two other
 # domains pin the same image, and a bump here does not touch them.
