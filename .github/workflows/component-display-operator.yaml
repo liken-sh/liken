@@ -13,7 +13,8 @@ on:
   workflow_call:
     inputs:
       # The version the outputs get: the release tag, a development
-      # version, or empty when the run publishes nothing.
+      # version, a pinned component's own tag, or empty when the run
+      # publishes nothing.
       version:
         type: string
         required: true
@@ -80,14 +81,21 @@ jobs:
 
       - run: make test-docs
 
+  # Each image builds through docker-bake.hcl at the top of the
+  # repository, as the target of the same name. A Dockerfile that
+  # builds on a base of the repository, as in FROM mpv, gets that base's
+  # target as a named context, so the base builds at this commit, from
+  # its layer cache when nothing in it changed.
+  #
   # The layer cache is on ghcr, as a :buildcache tag beside each image.
   # Every build reads it. Every push to main and every run that
-  # publishes also writes it, so the next build finds each layer that did
-  # not change, and the publish job's build of the same image finds every
-  # layer there. A push to another branch only reads it, so a topic
-  # branch cannot replace main's cache. The write ignores an error: a
-  # cache that cannot be written makes the next build slower, and it
-  # never fails this one.
+  # publishes also writes the cache of the image this job builds, and
+  # never the cache of a base under it, so the next build finds each
+  # layer that did not change, and the publish job's build of the same
+  # image finds every layer there. A push to another branch only reads
+  # it, so a topic branch cannot replace main's cache. The write ignores
+  # an error: a cache that cannot be written makes the next build
+  # slower, and it never fails this one.
   images:
     name: ${{ matrix.image }}
     runs-on: ubuntu-26.04
@@ -97,76 +105,31 @@ jobs:
       matrix:
         include:
           - image: vulkan
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'vulkan'
-            platforms: linux/amd64
             load: true
-            build-contexts: ""
             smoke: ''
           - image: vaapi
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'vaapi'
-            platforms: linux/amd64
             load: true
-            build-contexts: ""
             smoke: ''
           - image: ffmpeg
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'ffmpeg'
-            platforms: linux/amd64
             load: true
-            build-contexts: ""
             smoke: 'display-operator/smoke/ffmpeg.sh'
           - image: mpv
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'mpv'
-            platforms: linux/amd64
             load: true
-            build-contexts: ""
             smoke: 'display-operator/smoke/mpv.sh'
           - image: weston
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'weston'
-            platforms: linux/amd64
             load: true
-            build-contexts: ""
             smoke: 'display-operator/smoke/weston.sh'
           - image: display-operator
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'display-operator'
-            platforms: linux/amd64
             load: true
-            build-contexts: "kubernetes=kubernetes"
             smoke: ''
           - image: display-capture
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'display-capture'
-            platforms: linux/amd64
             load: true
-            build-contexts: "kubernetes=kubernetes"
             smoke: 'display-operator/smoke/display-capture.sh'
           - image: display-api
-            context: display-operator
-            file: display-operator/Dockerfile
-            target: 'display-api'
-            platforms: linux/amd64
             load: true
-            build-contexts: "kubernetes=kubernetes"
             smoke: ''
           - image: display-operator-cli
-            context: display-operator
-            file: display-operator/Dockerfile.cli
-            target: ''
-            platforms: linux/amd64,linux/arm64
             load: false
-            build-contexts: "kubernetes=kubernetes"
             smoke: ''
     steps:
       - uses: actions/checkout@v7
@@ -182,21 +145,19 @@ jobs:
 
       # An image for more than one platform cannot load into the
       # runner's Docker daemon, so only a single-platform image loads,
-      # and only a loaded image has a smoke check.
-      - uses: docker/build-push-action@v6
+      # and only a loaded image has a smoke check. The build reads the
+      # bake file from the checkout, so a named context reaches the
+      # directories of the repository.
+      - uses: docker/bake-action@v7
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          target: ${{ matrix.target }}
-          platforms: ${{ matrix.platforms }}
-          build-contexts: ${{ matrix.build-contexts }}
-          build-args: |
-            VERSION=${{ inputs.version || 'check' }}
+          source: .
+          files: docker-bake.hcl
+          targets: ${{ matrix.image }}
           load: ${{ matrix.load }}
           push: false
-          tags: ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}
-          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-          cache-to: ${{ (inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && format('type=registry,ref=ghcr.io/liken-sh/{0}:buildcache,mode=max,ignore-error=true', matrix.image) || '' }}
+          vars: |
+            VERSION=${{ inputs.version || 'check' }}
+            CACHE_WRITE=${{ (inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && matrix.image || '' }}
 
       - name: smoke check
         if: ${{ matrix.smoke != '' && matrix.load }}
@@ -229,10 +190,10 @@ jobs:
         with:
           version: 2.9.5
 
-      # Each image builds again from the layer cache that the images
-      # job wrote, and pushes. The deploy artifact goes last, because a
-      # cluster follows the deploy artifact, and it must never name an
-      # image that is not pushed yet.
+      # Each image builds again through docker-bake.hcl, from the layer
+      # cache that the images job wrote, and pushes. The deploy artifact
+      # goes last, because a cluster follows the deploy artifact, and it
+      # must never name an image that is not pushed yet.
       - name: publish
         working-directory: ci
         run: go run . publish -root .. -component display-operator -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"

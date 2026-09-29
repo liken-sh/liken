@@ -11,7 +11,8 @@ on:
   workflow_call:
     inputs:
       # The version the outputs get: the release tag, a development
-      # version, or empty when the run publishes nothing.
+      # version, a pinned component's own tag, or empty when the run
+      # publishes nothing.
       version:
         type: string
         required: true

@@ -24,6 +24,14 @@
 #   whose outputs changed since its own newest release, under the
 #   tag's version. A component that did not change keeps its version.
 #
+# A pinned component, such as a base image, states its own version and
+# revision, and it publishes under the tag <version>-<revision>, such
+# as 20260928-1. Its jobs run, and a push to main or a release tag
+# publishes it, when that tag is not published yet. The published
+# image carries the hash of its recipe as a label, and the plan fails
+# when the tree's recipe differs from the published one: the recipe
+# changed, and the revision did not.
+#
 # A job that needs a skipped job is skipped too, unless its condition
 # says otherwise. So each component's condition says: run when the plan
 # says so, as long as nothing it needs failed.

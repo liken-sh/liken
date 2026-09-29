@@ -5,7 +5,7 @@
 // component's images and deploy artifact, and writes the release
 // record.
 //
-//	go run ./ci generate [-check]   write the workflows, or check them
+//	go run ./ci generate [-check]   write the workflows and the bake file, or check them
 //	go run ./ci plan                decide what this workflow run does
 //	go run ./ci deps                check each [depends] against the code
 //	go run ./ci publish ...         push one component's outputs
@@ -87,7 +87,7 @@ func (w World) run(args []string) error {
 		if err != nil {
 			return err
 		}
-		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit}
+		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit, Components: components}
 		return p.Publish(c, *version, *mode)
 	case "record":
 		return w.record(*root, components, *tag)
@@ -113,6 +113,9 @@ func generate(root string, components map[string]*Component, check bool, stdout 
 	if err != nil {
 		return err
 	}
+	if files[bakeFile], err = Bake(root, components); err != nil {
+		return err
+	}
 	if !check {
 		return WriteWorkflows(root, files)
 	}
@@ -121,9 +124,9 @@ func generate(root string, components map[string]*Component, check bool, stdout 
 		return err
 	}
 	if len(differ) > 0 {
-		return fmt.Errorf("these workflows differ from what the generator writes; run `make workflows`: %s", strings.Join(differ, ", "))
+		return fmt.Errorf("these files differ from what the generator writes; run `make workflows`: %s", strings.Join(differ, ", "))
 	}
-	fmt.Fprintln(stdout, "every generated workflow is current")
+	fmt.Fprintln(stdout, "every generated workflow and the bake file are current")
 	return nil
 }
 

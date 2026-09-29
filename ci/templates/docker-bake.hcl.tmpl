@@ -1,0 +1,52 @@
+# This file is generated from every package.toml and the Dockerfiles
+# they name. Do not edit it: edit those files or the template in
+# ci/templates/, then run `make workflows` at the top of the
+# repository.
+#
+# Each image of the repository is one target here, named for the
+# image. A Dockerfile that builds on another image of the repository
+# names that image bare, as in FROM mpv, and the target's contexts map
+# the name to the other image's target. So a consumer always builds on
+# the base of the same commit, and never on a published tag:
+#
+#   docker buildx bake media-operator-player --load
+#
+# builds mpv and every base under it first, from the layer cache on
+# ghcr.io for each layer that did not change.
+
+# VERSION is the version a tracked image carries: the release tag, a
+# development version, or "check" for a build that publishes nothing.
+# A pinned image carries its own version from package.toml instead.
+variable "VERSION" {
+  default = "check"
+}
+
+# CACHE_WRITE names the one target whose layer cache this build writes
+# to ghcr.io. CI sets it on main and in a run that publishes, and a
+# build of a consumer never writes the cache of the bases under it.
+variable "CACHE_WRITE" {
+  default = ""
+}
+
+group "default" {
+  targets = [{% range .Targets %}
+    "{% .Name %}",{% end %}
+  ]
+}
+{% range .Targets %}
+target "{% .Name %}" {
+  context    = "{% .Context %}"
+  dockerfile = "{% .Dockerfile %}"{% if .Target %}
+  target     = "{% .Target %}"{% end %}
+  platforms  = [{% range $i, $p := .Platforms %}{% if $i %}, {% end %}"{% $p %}"{% end %}]{% if .Contexts %}
+  contexts = {{% range .Contexts %}
+    "{% .Name %}" = "{% .Value %}"{% end %}
+  }{% end %}
+  args = {
+    VERSION = {% if .Pinned %}"{% .Version %}"{% else %}VERSION{% end %}
+  }
+  tags       = [{% range $i, $tag := .Tags %}{% if $i %}, {% end %}"{% $tag %}"{% end %}]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache"]
+  cache-to   = CACHE_WRITE == "{% .Name %}" ? ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache,mode=max,ignore-error=true"] : []
+}
+{% end %}

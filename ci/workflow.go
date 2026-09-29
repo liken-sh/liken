@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -124,8 +123,7 @@ type jobData struct {
 
 type imageData struct {
 	Image
-	ContextPath, FilePath, PlatformList, BuildContexts string
-	Load                                               bool
+	Load bool
 }
 
 func componentData(c *Component) (map[string]any, error) {
@@ -155,27 +153,7 @@ func componentData(c *Component) (map[string]any, error) {
 	}
 	var images []imageData
 	for _, image := range c.Outputs.Images {
-		d := imageData{Image: image}
-		d.ContextPath = path.Join(c.Dir, image.Context)
-		file := image.File
-		if file == "" {
-			file = "Dockerfile"
-		}
-		d.FilePath = path.Join(c.Dir, file)
-		platforms := image.Platforms
-		if len(platforms) == 0 {
-			platforms = []string{"linux/amd64"}
-		}
-		d.PlatformList = strings.Join(platforms, ",")
-		d.Load = len(platforms) == 1
-		var contexts []string
-		for _, name := range slices.Sorted(maps.Keys(image.Contexts)) {
-			contexts = append(contexts, name+"="+image.Contexts[name])
-		}
-		// build-push-action reads one named context per line, and the
-		// matrix holds the list as one YAML string with escaped newlines.
-		d.BuildContexts = strings.Join(contexts, `\n`)
-		images = append(images, d)
+		images = append(images, imageData{Image: image, Load: len(image.Platforms) <= 1})
 	}
 	if len(images) > 0 {
 		needs = append(needs, "images")

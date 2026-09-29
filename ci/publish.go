@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,9 @@ type Publisher struct {
 	Run      Runner
 	// Commit is the full sha that the outputs are built from.
 	Commit string
+	// Components is every component, because a pinned component's
+	// recipe covers the tags of its dependencies.
+	Components map[string]*Component
 }
 
 // Publish pushes the component's outputs under the version: every
@@ -53,7 +57,14 @@ type Publisher struct {
 //
 // A release also moves each :latest tag, unless a newer release
 // already has it. A development build never moves :latest.
+//
+// A pinned component publishes its own tag in either mode, with its
+// recipe hash as a label, and never moves :latest: every consumer
+// builds on the base in the tree, so nothing follows a moving tag.
 func (p Publisher) Publish(c *Component, version, mode string) error {
+	if c.Pinned() {
+		return p.pinned(c, version, mode)
+	}
 	switch mode {
 	case publishRelease:
 		if err := CheckReleaseTag(version); err != nil {
@@ -70,7 +81,7 @@ func (p Publisher) Publish(c *Component, version, mode string) error {
 		return fmt.Errorf("%s publishes to the release channel through its own workflow", c.Name())
 	}
 	for _, image := range c.Outputs.Images {
-		if err := p.image(c, image, version, mode); err != nil {
+		if err := p.image(c, image, version, mode, nil); err != nil {
 			return err
 		}
 	}
@@ -80,9 +91,34 @@ func (p Publisher) Publish(c *Component, version, mode string) error {
 	return nil
 }
 
+func (p Publisher) pinned(c *Component, version, mode string) error {
+	if mode != publishDev && mode != publishRelease {
+		return fmt.Errorf("the publish mode %q is not dev or release", mode)
+	}
+	if version != c.PinnedTag() {
+		return fmt.Errorf("%s is pinned at %s, not %s", c.Name(), c.PinnedTag(), version)
+	}
+	recipe, err := Recipe(p.Root, p.Components, c)
+	if err != nil {
+		return err
+	}
+	for _, image := range c.Outputs.Images {
+		if err := p.image(c, image, version, mode, map[string]string{recipeLabel: recipe}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func ref(name, tag string) string { return "ghcr.io/liken-sh/" + name + ":" + tag }
 
-func (p Publisher) image(c *Component, image Image, version, mode string) error {
+// image builds and pushes one image through the bake file, so an
+// image that builds on another image of the repository builds on the
+// one at this commit. The bake file gives the target its context, its
+// platforms, and its layer cache. Only the target that the command
+// names is pushed; a base that the build needs builds with it and
+// stays in the builder.
+func (p Publisher) image(c *Component, image Image, version, mode string, labels map[string]string) error {
 	tags, err := p.Registry.Tags(image.Name)
 	if err != nil {
 		return err
@@ -90,34 +126,30 @@ func (p Publisher) image(c *Component, image Image, version, mode string) error 
 	if slices.Contains(tags, version) {
 		fmt.Printf("%s is already published; a published version never changes\n", ref(image.Name, version))
 	} else {
-		args := []string{"buildx", "build", "--push",
-			"--file", filepath.Join(c.Dir, orDefault(image.File, "Dockerfile")),
-			"--build-arg", "VERSION=" + version,
-			"--cache-from", "type=registry,ref=" + ref(image.Name, "buildcache"),
-			"--label", "org.opencontainers.image.source=" + source,
-			"--label", "org.opencontainers.image.revision=" + p.Commit,
-			"--label", "org.opencontainers.image.version=" + version,
+		target := image.Name
+		set := func(key, value string) []string { return []string{"--set", target + "." + key + "=" + value} }
+		args := []string{"buildx", "bake", "--file", bakeFile, "--push"}
+		if !c.Pinned() {
+			args = append(args, set("args.VERSION", version)...)
 		}
-		platforms := image.Platforms
-		if len(platforms) == 0 {
-			platforms = []string{"linux/amd64"}
+		all := map[string]string{
+			"org.opencontainers.image.source":   source,
+			"org.opencontainers.image.revision": p.Commit,
+			"org.opencontainers.image.version":  version,
 		}
-		args = append(args, "--platform", strings.Join(platforms, ","))
-		if image.Target != "" {
-			args = append(args, "--target", image.Target)
-		}
-		for _, name := range sortedKeys(image.Contexts) {
-			args = append(args, "--build-context", name+"="+image.Contexts[name])
+		maps.Copy(all, labels)
+		for _, key := range sortedKeys(all) {
+			args = append(args, set("labels."+key, all[key])...)
 		}
 		for _, name := range append([]string{image.Name}, image.Aliases...) {
-			args = append(args, "--tag", ref(name, version))
+			args = append(args, set("tags", ref(name, version))...)
 		}
-		args = append(args, filepath.Join(c.Dir, image.Context))
+		args = append(args, target)
 		if err := p.Run(p.Root, "docker", args...); err != nil {
 			return fmt.Errorf("pushing %s: %w", ref(image.Name, version), err)
 		}
 	}
-	if mode != publishRelease || version < NewestRelease(tags) {
+	if mode != publishRelease || c.Pinned() || version < NewestRelease(tags) {
 		return nil
 	}
 	for _, name := range append([]string{image.Name}, image.Aliases...) {

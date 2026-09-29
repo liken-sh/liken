@@ -142,9 +142,9 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"      - run: make test-go\n",
 		"      - run: |\n          make test\n          make build\n",
 		"name: coverage-app-go",
-		"platforms: linux/amd64,linux/arm64\n            load: false",
+		"- image: app-cli\n            load: false",
 		"smoke: 'app/smoke/app.sh'",
-		`build-contexts: "brand=brand\nmedia=media"`,
+		"targets: ${{ matrix.image }}",
 		"fluxcd/flux2/action@v2.9.5",
 		"go run . publish -root .. -component app",
 	} {

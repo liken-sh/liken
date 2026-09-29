@@ -2,14 +2,16 @@
 # Makefile builds and tests that component; this file only runs them
 # together.
 #
-#   make workflows  write .github/workflows/ from every package.toml
+#   make workflows  write .github/workflows/ and docker-bake.hcl from
+#                   every package.toml
 #   make docs       build every manual into dist/docs/, for a preview
 #   make preview    build them, then serve dist/docs/ at localhost
 #   make site       build the site that liken.sh serves, into dist/docs/
 
 # The generator reads each component's package.toml and writes the
-# root workflow and one workflow for each component. CI fails when the
-# committed workflows differ from what it writes.
+# root workflow, one workflow for each component, and the bake file
+# that builds every image. CI fails when the committed files differ
+# from what it writes.
 .PHONY: workflows
 workflows:
 	cd ci && go run . generate -root ..
