@@ -288,15 +288,28 @@ func TestARequestNeedsAServiceAccountToken(t *testing.T) {
 	}
 }
 
-// A patch of an object that is gone answers ErrNotFound, with the path
-// in its text, so a log line names the object.
-func TestPatchJSONNamesAnObjectThatIsGone(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	err := PatchJSON(client, "/api/v1/nodes/node-9", []byte(`{}`))
-	if !errors.Is(err, apiclient.ErrNotFound) || !strings.Contains(err.Error(), "/api/v1/nodes/node-9") {
-		t.Errorf("err = %v, want ErrNotFound that names the path", err)
+// A patch of an object that is gone, or that conflicts, answers the
+// shared client's error with the path in its text, so a log line names
+// the object.
+func TestPatchJSONNamesTheObjectItFailedOn(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{"an object that is gone", http.StatusNotFound, apiclient.ErrNotFound},
+		{"a conflict", http.StatusConflict, apiclient.ErrConflict},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(c.status)
+			}))
+			err := PatchJSON(client, "/api/v1/nodes/node-9", []byte(`{}`))
+			if !errors.Is(err, c.want) || !strings.Contains(err.Error(), "PATCH /api/v1/nodes/node-9") {
+				t.Errorf("err = %v, want %v that names the path", err, c.want)
+			}
+		})
 	}
 }
 

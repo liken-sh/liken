@@ -131,12 +131,16 @@ var RetryPause = func() {
 // specific fields it changes, such as a cordon flag or an
 // annotation, and does not need to check the rest of the object.
 //
-// A patch of an object that does not exist answers
-// apiclient.ErrNotFound, wrapped with the path, so a log line names
-// the object.
+// The shared client answers a 404 and a 409 as bare errors, with no
+// path, because most callers handle them as states. A patch of an
+// object that does not exist, or one that conflicts, such as a taints
+// patch that states the version it read, answers apiclient.ErrNotFound
+// or apiclient.ErrConflict wrapped with the path, so a log line names
+// the object. Every other failure already carries the method, the path,
+// and the API server's own text.
 func PatchJSON(c *apiclient.Client, path string, patch []byte) error {
 	err := c.Request(http.MethodPatch, path, "application/merge-patch+json", patch, nil)
-	if errors.Is(err, apiclient.ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) || errors.Is(err, apiclient.ErrConflict) {
 		return fmt.Errorf("PATCH %s: %w", path, err)
 	}
 	return err
