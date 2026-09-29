@@ -176,3 +176,23 @@ func TestTheMemoForgetsOneObject(t *testing.T) {
 		t.Error("a nil memo noted a key")
 	}
 }
+
+// ForgetAt drops a record only at the version it holds. A record of a
+// newer write, or of a failed request, stays.
+func TestTheMemoForgetsARecordAtItsVersion(t *testing.T) {
+	versions := New()
+	versions.Note("a", "7")
+	versions.Note("b", "")
+
+	versions.ForgetAt("a", "6")
+	versions.ForgetAt("b", "")
+	if !versions.Noted("a") || !versions.Noted("b") {
+		t.Fatal("ForgetAt dropped a record at another version")
+	}
+	versions.ForgetAt("a", "7")
+	if versions.Noted("a") {
+		t.Error("ForgetAt kept a record at its own version")
+	}
+	var none *Versions
+	none.ForgetAt("a", "7")
+}

@@ -27,7 +27,8 @@ that adds it names the operator. The hooks of that kind now are:
   `Client.WithWaitContext`, for `equipment-operator`.
 - `apiclient.InClusterOptions.Server` and `Timeout`,
   `Client.WithWriteGuard`, `informer.InClusterAt`, `Options.Indexers`,
-  and the alias `memo.Meta`, for `liken`'s two operators.
+  `memo.Versions.ForgetAt`, and the alias `memo.Meta`, for `liken`'s
+  two operators.
 
 The code the hook runs, such as the transform itself, stays in the
 operator.

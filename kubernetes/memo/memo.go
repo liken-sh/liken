@@ -178,3 +178,23 @@ func (m *Versions) Noted(key string) bool {
 	_, noted := m.seen[key]
 	return noted
 }
+
+// ForgetAt drops the record of one object when the record holds this
+// version, and keeps any other record. A caller passes the version of
+// the copy a store holds: once the store holds the version the memo
+// noted, every later copy the store holds is newer, so the record
+// guards nothing. Without it, each later write from another writer
+// makes the store's copy differ from the record, and costs one read
+// from the API server. The check and the delete are one step, so a
+// write that notes a newer version in the meantime keeps its record.
+func (m *Versions) ForgetAt(key, version string) {
+	if m == nil || version == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if seen, noted := m.seen[key]; noted && seen == version {
+		delete(m.seen, key)
+		delete(m.requests, key)
+	}
+}

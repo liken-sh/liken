@@ -89,7 +89,8 @@ func TestAReadyStoreAnswersAbsenceWithNoRequest(t *testing.T) {
 
 // A store's copy at another version than the memo noted is read from
 // the API server once. After that read, the memo holds the API
-// server's version, and a store that holds it answers again. This is
+// server's version, and a store that holds it answers again, and from
+// then on answers each later version with no request. This is
 // the case of a copy older than the operator's own write, and the case
 // of a copy that another writer's later change reached first.
 func TestACopyAtAnotherVersionIsReadOnce(t *testing.T) {
@@ -119,6 +120,15 @@ func TestACopyAtAnotherVersionIsReadOnce(t *testing.T) {
 			}
 			if got, err := read(t, client, held, "a"); err != nil || got.Metadata.ResourceVersion != c.server {
 				t.Errorf("read after the store caught up = %+v, %v; want the store's copy", got, err)
+			}
+			// Another writer's later change reaches the store. The memo
+			// dropped its record once the store held the noted version,
+			// so the store answers with no request.
+			if err := view.Store.Update(asObject(t, newThing("a", "20", 1))); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := read(t, client, held, "a"); err != nil || got.Metadata.ResourceVersion != "20" {
+				t.Errorf("read after another writer's change = %+v, %v; want the store's copy", got, err)
 			}
 			if sent := api.sent(); !slices.Equal(sent, []string{"GET /things/a"}) {
 				t.Errorf("the reads sent %q, want one read of a", sent)
@@ -161,5 +171,22 @@ func TestAStoreThatIsNotReadyReadsTheAPIServer(t *testing.T) {
 	}
 	if sent := api.sent(); !slices.Equal(sent, []string{"GET /things/a", "GET /things/b"}) {
 		t.Errorf("the reads sent %q, want a read of each", sent)
+	}
+}
+
+// Settle keeps a record while the store's copy is at another version,
+// and does nothing for a store that is not ready.
+func TestSettleKeepsARecordTheStoreDoesNotHold(t *testing.T) {
+	versions := memo.New()
+	versions.Note("a", "8")
+	versions.Note("b", "3")
+	view := readyStore(t, asObject(t, newThing("a", "7", 1)))
+
+	Settle(informer.Held{View: view, Versions: versions}, "a", "b")
+	Settle(informer.Held{Versions: versions}, "a")
+	Settle(informer.Held{View: view}, "a")
+
+	if !versions.Noted("a") || !versions.Noted("b") {
+		t.Error("Settle dropped a record the store does not hold")
 	}
 }

@@ -124,7 +124,8 @@ func LabelIndex(label string) cache.IndexFunc {
 // memo of its writes (the shared memo package). The store's copy
 // answers when it is at the version of the operator's last write or
 // read, and the API server answers otherwise, once, and then the store
-// answers again.
+// answers again. When the store holds the noted version, the memo
+// drops its record (Settle).
 //
 // A ready store that holds no such object, and whose memo holds no
 // record of it, answers apiclient.ErrNotFound with no request. An
@@ -142,5 +143,28 @@ func ReadOne[T any, P informer.Object[T]](c *apiclient.Client, held informer.Hel
 	if errors.Is(err, apiclient.ErrNotFound) {
 		held.Versions.Forget(key)
 	}
+	Settle(held, key)
 	return found, err
+}
+
+// Settle drops the memo's record of each key whose copy in a ready
+// store is at the version the memo noted. From then on the store holds
+// this operator's write, and each later copy is newer, so the record
+// guards nothing. A record that stayed would make each later write from
+// another writer, such as a machine operator's status write to a
+// Machine the cluster operator granted a turn, cost one read from the
+// API server.
+func Settle(held informer.Held, keys ...string) {
+	if held.Versions == nil || !held.View.Ready() {
+		return
+	}
+	for _, key := range keys {
+		object, exists, err := held.View.Store.GetByKey(key)
+		if err != nil || !exists {
+			continue
+		}
+		if item, ok := object.(*unstructured.Unstructured); ok {
+			held.Versions.ForgetAt(key, item.GetResourceVersion())
+		}
+	}
 }

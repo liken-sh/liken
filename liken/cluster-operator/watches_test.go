@@ -350,3 +350,66 @@ func TestAFailedWriteCostsOneReadOfThatMachine(t *testing.T) {
 		})
 	}
 }
+
+// awaitMachineCopy waits until the Machines' copy holds the version of
+// one Machine that the API server holds.
+func awaitMachineCopy(t *testing.T, api *fakeapi.Server, r *fleetReader, name string) {
+	t.Helper()
+	want := api.ResourceVersion(kubernetes.MachinesPath, name)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		m, _, ok := watch.Get[machine.Machine](r.machineCopy.View(), name)
+		if ok && m.Metadata.ResourceVersion == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the copy never held %s at %s", name, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Once the copy holds this program's own write, the memo drops its
+// record, so a later write from another writer, such as the machine's
+// own status write, costs the next list no read.
+func TestAWriteFromAnotherWriterAfterADeliveredGrantCostsNoRead(t *testing.T) {
+	fake := newFleetAPI(time.Now())
+	client, watcher := fleetClients(t, fake)
+	wakes := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
+	awaitFleetCopies(t, r, wakes)
+	granted, err := kubernetes.GetMachine(client, "node-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := granted.Status
+	status.Conditions = []api.Condition{{Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows"}}
+	if err := r.publishStatus(granted, &status); err != nil {
+		t.Fatal(err)
+	}
+	awaitMachineCopy(t, fake, r, "node-2")
+	if _, err := r.machines(); err != nil {
+		t.Fatal(err)
+	}
+
+	own, err := kubernetes.GetMachine(client, "node-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status = own.Status
+	status.Phase = api.PhaseUpdating
+	if _, err := kubernetes.PublishStatus(client, own, &status); err != nil {
+		t.Fatal(err)
+	}
+	awaitMachineCopy(t, fake, r, "node-2")
+	fake.Forget()
+
+	if _, err := r.machines(); err != nil {
+		t.Fatal(err)
+	}
+	if sent := fake.Requests(); len(sent) != 0 {
+		t.Errorf("a list after another writer's change sent %q, want nothing", sent)
+	}
+}

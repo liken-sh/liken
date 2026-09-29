@@ -205,7 +205,7 @@ func (r *fleetReader) machines() ([]machine.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	forgetGone(held, machines)
+	settleMemo(held, machines)
 	return machines, nil
 }
 
@@ -213,15 +213,22 @@ func machinePath(name string) string { return kubernetes.MachinesPath + "/" + na
 
 func clusterPath(name string) string { return kubernetes.ClustersPath + "/" + name }
 
-// forgetGone drops the memo's record of each object that the list left
+// settleMemo drops the memo's record of each object that the list left
 // out and the store no longer holds: a Machine somebody deleted, whose
-// record would otherwise stay for the life of the process.
-func forgetGone[T any, P informer.Object[T]](held informer.Held, items []T) {
+// record would otherwise stay for the life of the process. It also
+// drops the record of each object whose copy in the store is at the
+// noted version (watch.Settle), so a later write from another writer
+// costs no read.
+func settleMemo[T any, P informer.Object[T]](held informer.Held, items []T) {
 	listed := make(map[string]bool, len(items))
+	keys := make([]string, 0, len(items))
 	for i := range items {
-		listed[informer.Key(P(&items[i]).GetObjectMeta())] = true
+		key := informer.Key(P(&items[i]).GetObjectMeta())
+		listed[key] = true
+		keys = append(keys, key)
 	}
 	held.Versions.ForgetGone(held.View.Store, listed)
+	watch.Settle(held, keys...)
 }
 
 // publishStatus writes a Machine's status, and notes the version the
@@ -255,7 +262,7 @@ func (r *fleetReader) clusters() ([]cluster.Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	forgetGone(held, clusters)
+	settleMemo(held, clusters)
 	return clusters, nil
 }
 
