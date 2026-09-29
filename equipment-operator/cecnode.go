@@ -237,12 +237,14 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 func (n *cecNode) run(ctx context.Context) error {
 	n.logOpened()
 	loop, cancel := context.WithCancel(ctx)
-	// Every request of the loop ends when the loop does, and so does the
-	// client's wait after a 429. A heartbeat that meets an API server
-	// that is not ready then holds neither the next heartbeat nor a
-	// SIGTERM for the client's ten seconds. The client is bound before
-	// anything the loop starts reads it.
-	n.client = n.client.withContext(loop)
+	// The client's wait after a 429 ends when the loop does, so a
+	// heartbeat that meets an API server that is not ready holds a
+	// SIGTERM for no more than the request itself. A request already sent
+	// runs to its answer: a heartbeat cut at the SIGTERM could still land
+	// after the Stopped entry, and a verdict write cut then would be lost
+	// and its CEC command sent again. The client is bound before anything
+	// the loop starts reads it.
+	n.client = n.client.withWaits(loop)
 	var started sync.WaitGroup
 	started.Go(func() {
 		if err := cec.Read(loop, n.device, n.heard, n.adapterChanged); err != nil {

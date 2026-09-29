@@ -82,6 +82,46 @@ func TestAStopEndsAWriteThatWaitsOutA429(t *testing.T) {
 	}
 }
 
+// A SIGTERM lets a write already sent run to its answer, so the
+// Stopped entry is the last write and no heartbeat lands after it.
+func TestAStopLetsAWriteInFlightLandBeforeTheStoppedEntry(t *testing.T) {
+	shorten(t, &cecReportInterval, 20*time.Millisecond)
+	api := startCECAPI(t)
+	_, cancel, done := joinedNode(t, api, cecRoom())
+	release := make(chan struct{})
+	arrived := make(chan struct{}, 64)
+	stoppedEntry := make(chan struct{}, 1)
+	api.mutex.Lock()
+	api.holdingEntries, api.heldEntry, api.stoppedEntry = release, arrived, stoppedEntry
+	api.mutex.Unlock()
+	select {
+	case <-arrived:
+	case <-time.After(testTimeout):
+		t.Fatal("no heartbeat reached the API server")
+	}
+
+	cancel()
+	// A workload that cut the heartbeat writes its Stopped entry while
+	// the API server still holds the heartbeat. The server answers the
+	// heartbeat once the Stopped entry arrives, or after a bound that
+	// ends the wait of a workload that waits for its answer.
+	select {
+	case <-stoppedEntry:
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(testTimeout):
+		t.Fatal("the node workload did not stop")
+	}
+	api.holds.Wait()
+	entry, held := api.entry("den", "node-1")
+	mustMatch(t, held, true)
+	mustMatch(t, entry.State, AdapterStopped)
+}
+
 func TestTheEntryIsWrittenOnASteadyInterval(t *testing.T) {
 	shorten(t, &cecReportInterval, 20*time.Millisecond)
 	api := startCECAPI(t)

@@ -82,6 +82,17 @@ type cecAPI struct {
 	// is not ready answers, and entryThrottles counts those answers.
 	throttlingEntries bool
 	entryThrottles    int
+	// holdingEntries, while it is not nil, holds each node workload's
+	// entry write that is not a Stopped entry until the channel closes,
+	// and heldEntry receives one value as each such write arrives, the
+	// way an API server that is slow to answer holds a write.
+	holdingEntries chan struct{}
+	heldEntry      chan struct{}
+	// holds counts the held entry writes that have not finished, and
+	// stoppedEntry, while it is not nil, receives one value when a
+	// Stopped entry arrives.
+	holds        sync.WaitGroup
+	stoppedEntry chan struct{}
 	// createdUnseen names a CECBus that a read of the one object answers
 	// 404 for, the way a bus a person creates a moment after the read
 	// looks to the reader.
@@ -486,6 +497,22 @@ func (a *cecAPI) applyStatus(w http.ResponseWriter, r *http.Request, name string
 	var body CECBus
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	manager := r.URL.Query().Get("fieldManager")
+	a.mutex.Lock()
+	holding, arrived, stoppedEntry := a.holdingEntries, a.heldEntry, a.stoppedEntry
+	a.mutex.Unlock()
+	stopped := len(body.Status.Adapters) == 1 && body.Status.Adapters[0].State == AdapterStopped
+	if stopped && stoppedEntry != nil {
+		select {
+		case stoppedEntry <- struct{}{}:
+		default:
+		}
+	}
+	if holding != nil && strings.HasPrefix(manager, "equipment-operator-cec-") && !stopped {
+		a.holds.Add(1)
+		defer a.holds.Done()
+		arrived <- struct{}{}
+		<-holding
+	}
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	bus, held := a.buses[name]
