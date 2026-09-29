@@ -80,9 +80,10 @@ func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T
 // The Deployment and the node workload each start with a list, and a
 // 429 there is a wait, not an exit. A 429 that asks for eleven seconds
 // is more than the client waits, so the client answers it at once, and
-// the starting list asks again after startRetry.
+// the starting list asks again after the wait the 429 asked for.
 func TestTheStartingListsWaitOutA429(t *testing.T) {
 	shorten(t, &startRetry, time.Millisecond)
+	shorten(t, &retryAfterUnit, time.Millisecond)
 	cases := []struct {
 		name   string
 		busy   int
@@ -112,5 +113,26 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 
 			mustSucceed(t, node.run(ctx))
 		})
+	}
+}
+
+// A starting list that meets a 429 longer than the client waits asks
+// again only after the wait the API server asked for, and not once a
+// second with a log line each time.
+func TestAStartingListWaitsWhatTheAPIServerAskedFor(t *testing.T) {
+	shorten(t, &startRetry, time.Millisecond)
+	shorten(t, &retryAfterUnit, 10*time.Millisecond)
+	api := &busyAPI{busy: 2, header: "11", body: initializingBody}
+	client := testAPIClient(t, http.HandlerFunc(api.handle))
+	began := time.Now()
+
+	err := untilAnswered(t.Context(), func() error {
+		_, err := ListCECBuses(client)
+		return err
+	})
+
+	mustSucceed(t, err)
+	if took := time.Since(began); took < 2*11*retryAfterUnit {
+		t.Errorf("the list asked again after %s, want at least %s", took, 2*11*retryAfterUnit)
 	}
 }

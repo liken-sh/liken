@@ -96,10 +96,14 @@ func (c *Client) withWaits(ctx context.Context) *Client {
 	return &Client{Client: c.Client.WithWaitContext(ctx), access: c.access}
 }
 
-// startRetry is the wait between two tries of a starting list that met
-// a 429 longer than the client waits. It is a variable so a test holds
-// it short.
+// startRetry is the shortest wait between two tries of a starting list
+// that met a 429 longer than the client waits. It is a variable so a
+// test holds it short.
 var startRetry = time.Second
+
+// retryAfterUnit is one second of the wait a 429 asks for. It is a
+// variable so a test waits milliseconds.
+var retryAfterUnit = time.Second
 
 // untilAnswered makes a starting call until it answers something other
 // than a 429, or ctx ends. The API server answers 429 while it starts
@@ -107,19 +111,21 @@ var startRetry = time.Second
 // into the same answer. So an operator's wait for the API server loops
 // on its context, and any other failure, such as a missing grant, is
 // the caller's to report at once. The client bound to ctx has already
-// waited out each 429 up to its limit, so the loop waits startRetry
-// only against a 429 that asked for more than that.
+// waited out each 429 up to its limit, so the loop meets only a 429
+// that asked for more than that, and it waits what that 429 asked for,
+// and at least startRetry.
 func untilAnswered(ctx context.Context, call func() error) error {
 	for {
 		err := call()
 		if !errors.Is(err, apiclient.ErrThrottled) {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "%v; asking again in %s\n", err, startRetry)
+		wait := max(startRetry, time.Duration(apiclient.RetryAfterSeconds(err))*retryAfterUnit)
+		fmt.Fprintf(os.Stderr, "%v; asking again in %s\n", err, wait)
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(startRetry):
+		case <-time.After(wait):
 		}
 	}
 }

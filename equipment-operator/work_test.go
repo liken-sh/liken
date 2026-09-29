@@ -50,19 +50,11 @@ func TestAShutdownEndsTheWaitOfAWriteThatMetA429(t *testing.T) {
 		defer close(stopped)
 		operator.run(ctx)
 	}()
-	deadline := time.Now().Add(testTimeout)
-	for {
+	waitFor(t, func() bool {
 		api.mutex.Lock()
-		throttled := api.statusThrottles > 0
-		api.mutex.Unlock()
-		if throttled {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no status write met the 429")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		defer api.mutex.Unlock()
+		return api.statusThrottles > 0
+	})
 	began := time.Now()
 
 	cancel()
