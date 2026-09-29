@@ -154,6 +154,12 @@ func ReadOne[T any, P informer.Object[T]](c *apiclient.Client, held informer.Hel
 // another writer, such as a machine operator's status write to a
 // Machine the cluster operator granted a turn, cost one read from the
 // API server.
+//
+// Settle, like the Forget in ReadOne, drops the memo's request lock of
+// the key (memo.Versions.Forget says what that allows). Each of liken's
+// operators sends its writes of an object and reads it from the one
+// goroutine of its pass loop, so no request about the key runs while
+// Settle forgets it.
 func Settle(held informer.Held, keys ...string) {
 	if held.Versions == nil || !held.View.Ready() {
 		return

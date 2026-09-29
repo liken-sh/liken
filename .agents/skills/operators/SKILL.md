@@ -326,7 +326,11 @@ it.
   the pass reads that list (`library-operator/watch.go`, `items`). A watch that fails for
   another reason, such as a refused connection while the API server
   restarts, leaves the store ready, so the operator keeps its local
-  work going from the store.
+  work going from the store. `liken`'s operators set
+  `informer.Options.UnreadyOnWatchError` on every watch, so any failed
+  watch stops the store until the API server accepts a watch again: a
+  machine must not stage a rollout or reboot from a store that missed
+  the writes made while its reflector waited out a backoff.
   `ReadOne` reads an object the store does not hold from the API
   server. A copy that does not convert is read from the API server
   too, so a list leaves out no object. `liken`'s watches each select

@@ -154,6 +154,13 @@ func (m *Versions) ForgetGone(store KeyGetter, listed map[string]bool) {
 // object by name from a store forgets it once the API server answers
 // 404, so the next read of the name answers from the store and sends
 // nothing.
+//
+// Forget and ForgetAt also drop the object's request lock (Send). A
+// Send that holds the lock at that moment runs to its end and notes its
+// answer, but a Send that starts after the forget takes a new lock, so
+// the two can run at once and note their answers out of order. An
+// operator that sends requests about one object from more than one
+// goroutine forgets the object only while none of them runs.
 func (m *Versions) Forget(key string) {
 	if m == nil {
 		return

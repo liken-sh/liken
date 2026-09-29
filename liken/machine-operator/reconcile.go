@@ -302,8 +302,10 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// purposes: the NodeHealthy condition, demotion cleanup, and the
 	// cordon state the drain works through. The read can fail
 	// without being a problem, because during a demotion the Node is
-	// deleted and not yet re-registered. A pass where the read fails
-	// simply skips all three, and the next pass settles them.
+	// deleted and not yet re-registered, and while the API server is
+	// down the Node's copy does not answer (watches.go). A pass where
+	// the read fails simply skips all three, and the next pass
+	// settles them.
 	node, nodeErr := r.node(m.Metadata.Name)
 
 	// The device inventory converges on the same cadence as
