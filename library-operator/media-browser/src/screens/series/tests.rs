@@ -8,8 +8,11 @@ mod pickup;
 mod resume;
 mod seasons;
 mod serials;
+mod update;
 
 use super::*;
+use crate::catalog::Selection;
+use crate::screens::Screen;
 use serials::*;
 
 #[test]

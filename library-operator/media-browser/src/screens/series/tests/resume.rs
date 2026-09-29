@@ -5,6 +5,7 @@
 use super::super::*;
 use super::serials::{SERIES, Serials};
 use crate::catalog::Progress;
+use crate::catalog::Selection;
 use crate::screens::InFranchise;
 use crate::views::Card;
 

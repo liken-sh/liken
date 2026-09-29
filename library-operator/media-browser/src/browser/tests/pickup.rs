@@ -1,9 +1,9 @@
 // Pick up here from the browser's side: one retained mark that lists the
-// earlier episodes, published before the play request, and the same play
-// request Play publishes.
+// earlier episodes and the later ones it clears, published before the play
+// request, and the same play request Play publishes.
 
 use super::*;
-use crate::bus::mark::Episode as Listed;
+use crate::bus::mark::{Episode as Listed, TitleMark};
 
 // The branch the operator names on a screen pod for the namespace's plays,
 // and the second every press of these cases lands in.
@@ -91,8 +91,8 @@ fn pick_up_here_publishes_one_retained_list_of_the_earlier_episodes_and_then_the
             "people": [WATCHER],
             "aliases": {"tvdb": "8001"},
             "episodes": [
-                {"season": 1, "episode": 1, "position": 2760, "duration": 2760},
-                {"season": 1, "episode": 2, "position": 2760, "duration": 2760},
+                {"mark": "watched", "season": 1, "episode": 1, "position": 2760, "duration": 2760},
+                {"mark": "watched", "season": 1, "episode": 2, "position": 2760, "duration": 2760},
             ],
             "at": NOW,
         })
@@ -120,8 +120,54 @@ fn pick_up_here_asks_for_the_same_play_as_play() {
     assert!(picked.loading.is_some());
 }
 
+// The play of the third episode of the first season, which every press of
+// these cases asks for after its mark.
+fn the_third() -> Box<Step> {
+    Box::new(Step::Play {
+        library: SERIALS.into(),
+        selection: Selection::Episode {
+            series: SERIAL.into(),
+            season: 1,
+            episode: 3,
+        },
+        start: None,
+        next: None,
+    })
+}
+
+// A press that clears later episodes carries them in the same one message
+// as the earlier ones it marks watched, each with its own mark.
+#[test]
+fn a_list_that_clears_later_episodes_publishes_them_in_the_same_mark() {
+    let (mut browser, bus) = on_the_third_episode();
+    let listed = |episode, mark| Listed {
+        season: 1,
+        episode,
+        duration: 2_760,
+        mark,
+    };
+
+    browser.take(Step::PickUp {
+        library: SERIALS.into(),
+        series: SERIAL.into(),
+        episodes: vec![listed(2, TitleMark::Watched), listed(4, TitleMark::Cleared)],
+        play: the_third(),
+    });
+
+    let (_, message, retained) = the_mark(&bus);
+    assert!(retained);
+    assert_eq!(
+        message["episodes"],
+        serde_json::json!([
+            {"mark": "watched", "season": 1, "episode": 2, "position": 2760, "duration": 2760},
+            {"mark": "cleared", "season": 1, "episode": 4, "position": 0, "duration": 2760},
+        ])
+    );
+    assert_eq!(requests(&bus).len(), 1);
+}
+
 // A list with nothing in it has nothing to mark. The page never asks for
-// one, because the button shows only where an earlier episode is left.
+// one, because the button shows only where the press changes an episode.
 #[test]
 fn an_empty_list_publishes_no_mark_and_still_plays() {
     let (mut browser, bus) = on_the_third_episode();
@@ -130,16 +176,7 @@ fn an_empty_list_publishes_no_mark_and_still_plays() {
         library: SERIALS.into(),
         series: SERIAL.into(),
         episodes: Vec::<Listed>::new(),
-        play: Box::new(Step::Play {
-            library: SERIALS.into(),
-            selection: Selection::Episode {
-                series: SERIAL.into(),
-                season: 1,
-                episode: 3,
-            },
-            start: None,
-            next: None,
-        }),
+        play: the_third(),
     });
 
     assert!(topics(&bus).iter().all(|topic| !topic.starts_with(PLAYS)));

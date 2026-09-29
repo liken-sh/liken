@@ -105,15 +105,17 @@ pub enum Step {
         /// time where none does. Zero where neither holds one.
         duration: i64,
     },
-    /// Mark these episodes of one series watched for everyone at the
-    /// screen, then take the play. Pick up here on an episode's row asks
-    /// for it, so the marks are published before the play is requested.
+    /// Mark the earlier episodes of one series watched and clear the later
+    /// ones, for everyone at the screen, then take the play. Pick up here on
+    /// an episode's row asks for it, so the marks are published before the
+    /// play is requested.
     PickUp {
         /// The library the series is in.
         library: String,
         /// The series' id, whose aliases every episode's row takes.
         series: String,
-        /// The earlier episodes the press marks, in series order.
+        /// The episodes the press marks, in series order, each with its own
+        /// mark: watched before the picked episode, cleared after it.
         episodes: Vec<crate::bus::mark::Episode>,
         /// The play of the picked episode, the step Play asks for.
         play: Box<Step>,

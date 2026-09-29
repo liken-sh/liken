@@ -100,12 +100,20 @@ const EPISODE_ITEM: &str = "(SELECT episodes.id FROM episodes \
 // of the item's `primary` `video` files. `item` is one of the two
 // constants above and never a caller's word, so no string from outside
 // reaches the query text.
+//
+// The lookup names the item index. The read runs it once for each play, and
+// SQLite, left to itself, answers MIN(path) by walking the library's files
+// in path order until one belongs to the item, which is most of the library
+// for each play. On a series library of 27,000 files, the episode read of a
+// series with a play on each of 157 episodes takes 1.1 s on a workstation
+// that way, and 5 ms through the index.
 fn credits(item: &'static str) -> String {
     format!(
         "(SELECT group_concat(IFNULL(marks.start_ms, '') || ':' || IFNULL(marks.end_ms, ''), ',') \
           FROM marks \
           WHERE marks.library = works.library AND marks.kind = 'credits' \
-            AND marks.path = (SELECT MIN(files.path) FROM file_items \
+            AND marks.path = (SELECT MIN(files.path) \
+                              FROM file_items INDEXED BY file_items_library_item \
                               JOIN files ON files.library = file_items.library \
                                         AND files.path = file_items.path \
                               WHERE file_items.library = works.library \

@@ -95,22 +95,28 @@ pub fn payload(
     Value::Object(message).to_string().into_bytes()
 }
 
-/// One episode of a mark that names several: its numbers, and the duration
-/// the mark states for it, in seconds.
+/// One episode of a mark that names several: its numbers, the duration the
+/// mark states for it, in seconds, and which of the two marks it takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Episode {
     pub season: i64,
     pub episode: i64,
     pub duration: i64,
+    pub mark: TitleMark,
 }
 
 /// A mark on several episodes of one series as bytes, which Pick up here
 /// publishes. It is one message for the whole press, so one press is one
 /// retained topic, and every row it writes carries the same `at`. The
 /// aliases are the series', and each entry of `episodes` states its own
-/// numbers, position, and duration in place of the single mark's.
+/// mark, numbers, position, and duration in place of the single mark's.
+/// The press marks the earlier episodes watched and clears the later ones,
+/// so one message carries both marks.
+///
+/// The message's own `mark` is the mark of an entry that states none. Every
+/// entry here states its own, and the message says `watched`, the mark of
+/// the press's earlier episodes.
 pub fn list_payload(
-    mark: TitleMark,
     player: &str,
     people: &[String],
     aliases: &BTreeMap<String, String>,
@@ -121,15 +127,16 @@ pub fn list_payload(
         .iter()
         .map(|episode| {
             serde_json::json!({
+                "mark": episode.mark.word(),
                 "season": episode.season,
                 "episode": episode.episode,
-                "position": mark.position(episode.duration),
+                "position": episode.mark.position(episode.duration),
                 "duration": episode.duration,
             })
         })
         .collect::<Vec<_>>();
     serde_json::json!({
-        "mark": mark.word(),
+        "mark": TitleMark::Watched.word(),
         "player": player,
         "people": people,
         "aliases": aliases,
@@ -145,22 +152,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_list_mark_names_the_series_once_and_each_episode_in_the_list() {
+    fn a_list_mark_names_the_series_once_and_each_episode_with_its_own_mark() {
         let people = ["person-a".to_string()];
         let episodes = [
             Episode {
                 season: 1,
                 episode: 4,
                 duration: 2_700,
+                mark: TitleMark::Watched,
             },
             Episode {
                 season: 2,
                 episode: 1,
                 duration: 2_760,
+                mark: TitleMark::Cleared,
             },
         ];
         let message: Value = serde_json::from_slice(&list_payload(
-            TitleMark::Watched,
             "den",
             &people,
             &episode().aliases,
@@ -177,8 +185,8 @@ mod tests {
                 "people": ["person-a"],
                 "aliases": {"tvdb": "8001"},
                 "episodes": [
-                    {"season": 1, "episode": 4, "position": 2700, "duration": 2700},
-                    {"season": 2, "episode": 1, "position": 2760, "duration": 2760},
+                    {"mark": "watched", "season": 1, "episode": 4, "position": 2700, "duration": 2700},
+                    {"mark": "cleared", "season": 2, "episode": 1, "position": 0, "duration": 2760},
                 ],
                 "at": 1759140000,
             })

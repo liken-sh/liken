@@ -11,7 +11,7 @@ use crate::catalog::{Played, Progress, Resume};
 
 // The progress store's own schema, the one file every agent of the progress
 // cluster loads, so a schema change tests the reads against itself.
-const PROGRESS_SCHEMA: &str = concat!(
+pub(super) const PROGRESS_SCHEMA: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../corrosion/progress-schema/progress.sql"
 );

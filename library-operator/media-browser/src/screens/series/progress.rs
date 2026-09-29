@@ -6,14 +6,67 @@ use super::{Focus, Series, Still};
 use crate::catalog::progress::thread;
 use crate::catalog::{Progress, Resume, Source};
 use crate::screens::InFranchise;
-use crate::screens::movie::row;
+use crate::screens::movie::{row, watch};
+
+// The button or mark of an open episode's row that holds focus, kept by
+// what it does and not by its place, because a new read of the progress
+// can add or remove the buttons and marks before it.
+#[derive(Clone, Copy)]
+enum Held {
+    Button(row::Button),
+    Mark(watch::Mark),
+}
+
+impl Held {
+    fn of(page: &Series) -> Option<Self> {
+        match page.focus {
+            Focus::Episode(index, button) => page
+                .stills
+                .get(index)
+                .and_then(|_| page.episode_row(index).get(button).copied())
+                .map(Self::Button),
+            Focus::EpisodeMark(index, mark) => page
+                .stills
+                .get(index)
+                .and_then(|still| watch::marks(still.progress.as_ref()).get(mark).copied())
+                .map(Self::Mark),
+            _ => None,
+        }
+    }
+
+    // Focus on the same button or mark of the same episode's row. Where
+    // the new progress removed a button, focus moves to the row's first
+    // button, which plays the episode, and not to whichever button took
+    // its place, which could be Pick up here. A removed mark leaves focus
+    // on the mark at the same place, which `Series::hold` clamps.
+    fn restore(self, page: &mut Series) {
+        match (self, page.focus) {
+            (Self::Button(held), Focus::Episode(index, _)) => {
+                let at = page.episode_row(index).iter().position(|it| *it == held);
+                page.focus = Focus::Episode(index, at.unwrap_or(0));
+            }
+            (Self::Mark(held), Focus::EpisodeMark(index, mark)) => {
+                let marks = watch::marks(page.stills[index].progress.as_ref());
+                page.focus = Focus::EpisodeMark(
+                    index,
+                    marks.iter().position(|it| *it == held).unwrap_or(mark),
+                );
+            }
+            _ => {}
+        }
+    }
+}
 
 /// Read how far these people reached in each episode of the series, and
 /// hang each row on the still it names. Focus lands on the episode to watch
-/// next, unless the way into the page already named an episode. The browser
-/// calls it at every open and at every re-read, because only the browser
-/// holds the audience.
+/// next, unless the way into the page already named an episode. Focus
+/// lands once. Every later read keeps the person's focus, the open row, and
+/// the scroll that follows focus, and moves focus only where the new
+/// progress removed the button or mark it was on. The browser calls it at
+/// every open and at every re-read, because only the browser holds the
+/// audience.
 pub fn read(page: &mut Series, source: &mut dyn Source, people: &[String]) {
+    let held = Held::of(page);
     let rows = source.episode_progress(&page.library, &page.id, people);
     for still in &mut page.stills {
         still.progress = None;
@@ -27,15 +80,19 @@ pub fn read(page: &mut Series, source: &mut dyn Source, people: &[String]) {
             still.progress = Some(row);
         }
     }
-    if !page.placed {
+    page.reach = super::pickup::Reach::of(&page.stills);
+    if !page.placed && !page.landed {
         let plays = source.plays_of(&page.library, &page.id, people);
         let next = next_episode(&page.stills, &plays, page.via.as_ref());
         page.focus = Focus::Still(next);
         page.refoot(source);
     }
-    // The open episode's row and marks change with its progress, so a
-    // focus on a button or a mark the read took away moves to one the
-    // episode still offers.
+    page.landed = true;
+    if let Some(held) = held {
+        held.restore(page);
+    }
+    // A focus on a button or a mark the read took away moves to the
+    // nearest one the episode still offers.
     page.focus = page.hold(page.focus);
 }
 

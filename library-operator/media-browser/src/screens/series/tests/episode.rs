@@ -5,6 +5,7 @@
 use super::super::*;
 use super::serials::{SERIES, Serials};
 use crate::catalog::Progress;
+use crate::catalog::Selection;
 use crate::screens::TitleMark;
 
 // The one `Person` these cases record their plays against. The name is

@@ -1,9 +1,9 @@
 // An episode's own row on the series page: the buttons that play the
 // episode or pick up the series from it, the marks on the status line
 // under the row, and what a press on either asks the browser for.
+// `pickup.rs` holds which episodes Pick up here marks.
 
 use super::{Focus, Series, Still, progress};
-use crate::bus::mark;
 use crate::catalog::{Selection, Source};
 use crate::focus;
 use crate::screens::movie::{marked_duration, row, watch};
@@ -132,7 +132,7 @@ impl Series {
             row::Button::PickUp => Step::PickUp {
                 library: self.library.clone(),
                 series: self.id.clone(),
-                episodes: self.earlier(index),
+                episodes: self.picked_up(index),
                 play: Box::new(play),
             },
             _ => play,
@@ -142,45 +142,14 @@ impl Series {
     /// The row of one episode: Play, or Resume and Start over while the
     /// audience is in the middle of it, as a movie's page draws them with
     /// no trailer, because an episode holds none. Pick up here follows
-    /// where a press of it would mark an earlier episode, and not where it
-    /// would do no more than Play.
+    /// where a press of it would mark an earlier episode or clear a later
+    /// one, and not where it would do no more than Play.
     pub fn episode_row(&self, index: usize) -> Vec<row::Button> {
-        let mut buttons = row::of(self.stills[index].progress.as_ref(), false);
-        if !self.earlier(index).is_empty() {
+        let still = &self.stills[index];
+        let mut buttons = row::of(still.progress.as_ref(), false);
+        if self.reach.changes(still) {
             buttons.push(row::Button::PickUp);
         }
         buttons
-    }
-
-    /// The episodes Pick up here on this episode marks watched: every
-    /// episode before it in series order, across seasons, that the
-    /// audience has not finished, a partly watched one included. Specials,
-    /// season 0, stand outside that order, so a press marks none of them
-    /// and a special's row marks nothing. An episode with no duration is
-    /// left out, because the store reads a position as finished only
-    /// against a duration, the rule a single watched mark follows.
-    pub fn earlier(&self, index: usize) -> Vec<mark::Episode> {
-        let picked = &self.stills[index];
-        if picked.season == 0 {
-            return Vec::new();
-        }
-        self.stills
-            .iter()
-            .filter(|still| {
-                still.season > 0 && (still.season, still.episode) < (picked.season, picked.episode)
-            })
-            .filter(|still| {
-                !still
-                    .progress
-                    .as_ref()
-                    .is_some_and(|played| played.finished)
-            })
-            .map(|still| mark::Episode {
-                season: still.season,
-                episode: still.episode,
-                duration: marked_duration(still.progress.as_ref(), still.duration),
-            })
-            .filter(|episode| episode.duration > 0)
-            .collect()
     }
 }

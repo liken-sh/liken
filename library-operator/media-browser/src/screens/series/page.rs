@@ -5,20 +5,24 @@
 // no divider draws over the header.
 //
 // The backdrop and the scrim under this layer cover the header alone, so
-// the wall draws on the black ground and no art sits over art.
+// the wall draws on the black ground and no art sits over art. The page's
+// view, at the end of this file, stacks the backdrop, this layer, and the
+// loading state's layer.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
-use iced_winit::core::{Point, Rectangle, Theme, mouse};
+use iced_winit::core::{Element, Point, Rectangle, Theme, mouse};
 
 use super::super::franchise::strips::Place;
 use super::layout::{self, Layout};
 use super::{COLUMNS, Focus, Series, row, seasons, watch};
 use crate::art::Art;
 use crate::look;
+use crate::views::curtain::{Curtain, Head, Layer};
+use crate::views::layers;
 use crate::views::stack::Stack;
 use crate::views::{
     area, buttons, card, curtain, divider, header, people, rail, ratings, strip, text, wall,
@@ -406,6 +410,67 @@ impl<A: Art> Page<'_, A> {
             Point::new(beside.x, beside.y + buttons::HEIGHT),
             column.min(region.x + region.width - beside.x),
         );
+    }
+}
+
+// The page as the browser draws it: the backdrop, this front layer, and the
+// loading state's layer over both.
+impl Series {
+    /// The view: the backdrop behind the header, the scrim over it, the
+    /// header and the wall over both, and the departing art of the
+    /// loading state over all three while that state runs. The dim of the
+    /// room and the curtain's front are the frame's own layers over this
+    /// one.
+    pub fn view<'a, A: Art>(
+        &'a self,
+        store: &'a RefCell<A>,
+        curtain: Option<Curtain>,
+        held: bool,
+    ) -> Element<'a, Infallible, Theme, Renderer> {
+        layers::Page {
+            library: &self.library,
+            art: &self.backdrop,
+            store,
+            ground: layers::Ground::Below(layout::head()),
+            front: Page {
+                series: self,
+                store,
+                lifted: curtain.is_some(),
+                held,
+            },
+            over: curtain.map(|curtain| self.curtain(store, curtain)),
+        }
+        .view()
+    }
+
+    /// The curtain's front layer, which the frame draws over the dim.
+    pub fn front<'a, A: Art>(
+        &'a self,
+        store: &'a RefCell<A>,
+        curtain: Curtain,
+    ) -> Element<'a, Infallible, Theme, Renderer> {
+        layers::front(self.curtain(store, curtain))
+    }
+
+    // The loading state's layer for this page. Both the departing art
+    // under the dim and the logo over it are drawn from it, so the two
+    // read the same title, art, and clock.
+    fn curtain<'a, A: Art>(&'a self, store: &'a RefCell<A>, curtain: Curtain) -> Layer<'a, A> {
+        Layer {
+            library: &self.library,
+            art: &self.backdrop,
+            logo: &self.logo,
+            name: &self.title,
+            store,
+            head: self,
+            curtain,
+        }
+    }
+}
+
+impl Head for Series {
+    fn head(&self, bounds: Rectangle) -> Rectangle {
+        head(bounds)
     }
 }
 

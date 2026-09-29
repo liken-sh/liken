@@ -9,9 +9,9 @@ package main
 // The role writes each mark as one whole row, the way it writes an outside
 // play, and the row is the mark's own, named after it. A mark that lists
 // several episodes, which Pick up here publishes, writes one such row for
-// each episode. A mark delivered again finds its rows already recorded at
-// its time and writes nothing, so a redelivery never changes a row that
-// stands.
+// each episode, watched or cleared as the entry states. A mark delivered
+// again finds its rows already recorded at its time and writes nothing, so
+// a redelivery never changes a row that stands.
 //
 // Something must clear each retained mark, or the broker holds every mark
 // ever pressed. The role clears a mark once it has recorded it and the
@@ -20,6 +20,7 @@ package main
 // mark to Jellyfin, so that role reads a mark it missed while it was down.
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -47,9 +48,9 @@ func (p *progress) recordMark(ctx context.Context, name string, payload []byte) 
 		p.bus.Publish(topic, nil, true)
 		return
 	}
-	if mark.Mark != markWatched && mark.Mark != markCleared {
+	if unknown, found := mark.unknownMark(); found {
 		p.logf("the mark %s names %q, which is neither %s nor %s, and the role cleared it",
-			name, mark.Mark, markWatched, markCleared)
+			name, unknown, markWatched, markCleared)
 		p.bus.Publish(topic, nil, true)
 		return
 	}
@@ -81,8 +82,9 @@ func (p *progress) recordMark(ctx context.Context, name string, payload []byte) 
 	switch {
 	case len(mark.Episodes) > 0:
 		first, last := works[0], works[len(works)-1]
-		p.logf("recorded the mark %s as %s on %d episodes, s%de%d to s%de%d, for %d people, pressed at %s",
-			name, mark.Mark, len(works), first.season, first.episode, last.season, last.episode,
+		watched := countWatched(works)
+		p.logf("recorded the mark %s on %d episodes, %d watched and %d cleared, s%de%d to s%de%d, for %d people, pressed at %s",
+			name, len(works), watched, len(works)-watched, first.season, first.episode, last.season, last.episode,
 			len(mark.People), pressed)
 	default:
 		p.logf("recorded the mark %s as %s at %d of %d for %d people, pressed at %s",
@@ -107,31 +109,42 @@ func markClearIn(at int64, now time.Time) time.Duration {
 	return max(time.Unix(at, 0).Add(markRetention).Sub(now), 0)
 }
 
-// One row a mark writes: the row's name in the store, and the work's
-// numbers and positions.
+// One row a mark writes: the row's name in the store, which of the two
+// marks it is, and the work's numbers and positions.
 type markedWork struct {
 	row                string
+	mark               string
 	season, episode    int
 	position, duration int
 }
 
 // works lists the rows one mark writes. A mark on one work is one row under
 // the mark's own name. A list is one row for each episode, named after the
-// mark and the episode's numbers.
+// mark and the episode's numbers, with the entry's own mark, or the
+// message's where the entry states none.
 //
 // Every row of a list is recorded at the same press, and the thread rule
 // breaks a tie in recorded time on the row's name. The numbers take four
-// digits each, so the names sort in series order and the thread stands on
-// the last episode of the list.
+// digits each, so the names sort in series order. A cleared row stands at
+// position 0, which the thread rule reads as not started, so its name adds
+// "cleared" before the numbers and sorts before every watched row. The
+// thread stands on the last watched episode of the list, and never on a
+// later episode the press cleared.
 func (m titleMark) works(name string) []markedWork {
 	if len(m.Episodes) == 0 {
-		return []markedWork{{row: name, season: m.Season, episode: m.Episode,
+		return []markedWork{{row: name, mark: m.Mark, season: m.Season, episode: m.Episode,
 			position: m.Position, duration: m.Duration}}
 	}
 	works := make([]markedWork, len(m.Episodes))
 	for at, episode := range m.Episodes {
+		mark := cmp.Or(episode.Mark, m.Mark)
+		row := fmt.Sprintf("%s-s%04de%04d", name, episode.Season, episode.Episode)
+		if mark == markCleared {
+			row = fmt.Sprintf("%s-cleared-s%04de%04d", name, episode.Season, episode.Episode)
+		}
 		works[at] = markedWork{
-			row:      fmt.Sprintf("%s-s%04de%04d", name, episode.Season, episode.Episode),
+			row:      row,
+			mark:     mark,
 			season:   episode.Season,
 			episode:  episode.Episode,
 			position: episode.Position,
@@ -139,4 +152,33 @@ func (m titleMark) works(name string) []markedWork {
 		}
 	}
 	return works
+}
+
+// unknownMark answers the first mark the message or one of its entries
+// names that is neither watched nor cleared. Such a message is no mark,
+// because a role cannot tell what its rows would hold.
+func (m titleMark) unknownMark() (string, bool) {
+	marks := []string{m.Mark}
+	for _, episode := range m.Episodes {
+		if episode.Mark != "" {
+			marks = append(marks, episode.Mark)
+		}
+	}
+	for _, mark := range marks {
+		if mark != markWatched && mark != markCleared {
+			return mark, true
+		}
+	}
+	return "", false
+}
+
+// countWatched counts the rows of a mark that are watched.
+func countWatched(works []markedWork) int {
+	count := 0
+	for _, work := range works {
+		if work.mark == markWatched {
+			count++
+		}
+	}
+	return count
 }

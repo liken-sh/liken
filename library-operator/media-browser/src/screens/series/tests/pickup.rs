@@ -1,11 +1,12 @@
 // Pick up here on an episode's row: where the row offers it, which
-// episodes a press marks watched, and that the press plays the episode the
-// way Play does.
+// episodes a press marks watched and which it clears, and that the press
+// plays the episode the way Play does.
 
 use super::super::*;
 use super::serials::{SERIES, Serials};
-use crate::bus::mark;
+use crate::bus::mark::{self, TitleMark};
 use crate::catalog::Progress;
+use crate::catalog::Selection;
 use crate::screens::upnext;
 
 // The one `Person` these cases record their plays against. The name is
@@ -61,8 +62,13 @@ fn with_specials(progress: Vec<Progress>) -> Serials {
     }
 }
 
+// An episode the audience cleared, which the store holds at position 0.
+fn cleared(numbers: (i64, i64)) -> Progress {
+    reached(numbers, 0, RUNTIME)
+}
+
 #[test]
-fn the_row_offers_pick_up_here_only_where_an_earlier_episode_is_not_finished() {
+fn the_row_offers_pick_up_here_only_where_the_press_would_change_an_episode() {
     let cases = [
         ("the first episode", vec![], (1, 1), vec!["Play"]),
         (
@@ -101,7 +107,47 @@ fn the_row_offers_pick_up_here_only_where_an_earlier_episode_is_not_finished() {
             (1, 3),
             vec!["Resume", "Start over", "Pick up here"],
         ),
+        (
+            "the first episode, a later one finished",
+            vec![finished((3, 2))],
+            (1, 1),
+            vec!["Play", "Pick up here"],
+        ),
+        (
+            "the first episode, a later one partly watched",
+            vec![reached((2, 1), 690, RUNTIME)],
+            (1, 1),
+            vec!["Play", "Pick up here"],
+        ),
+        (
+            "the first episode, a later one cleared",
+            vec![cleared((2, 1))],
+            (1, 1),
+            vec!["Play"],
+        ),
+        (
+            "the last episode, every earlier one finished",
+            (1..=5)
+                .map(|episode| finished((1, episode)))
+                .chain((1..=3).map(|episode| finished((2, episode))))
+                .chain((1..=5).map(|episode| finished((3, episode))))
+                .collect(),
+            (3, 6),
+            vec!["Play"],
+        ),
         ("a special", vec![], (0, 2), vec!["Play"]),
+        (
+            "a special, a later one finished",
+            vec![finished((1, 2))],
+            (0, 1),
+            vec!["Play"],
+        ),
+        (
+            "the third, only a special started",
+            vec![finished((1, 1)), finished((1, 2)), finished((0, 2))],
+            (1, 3),
+            vec!["Play"],
+        ),
     ];
     for (name, progress, numbers, want) in cases {
         let (page, _) = row_of(with_specials(progress), numbers);
@@ -111,9 +157,11 @@ fn the_row_offers_pick_up_here_only_where_an_earlier_episode_is_not_finished() {
 
 #[test]
 fn an_earlier_episode_with_no_duration_is_not_one_the_press_can_mark() {
-    let (mut page, _) = row_of(Serials::default(), (1, 3));
-    page.stills[0].duration = 0;
-    page.stills[1].duration = 0;
+    let source = Serials {
+        untimed: vec![(1, 1), (1, 2)],
+        ..Serials::default()
+    };
+    let (page, _) = row_of(source, (1, 3));
 
     assert_eq!(words(&page), ["Play"]);
 }
@@ -136,6 +184,14 @@ fn listed(numbers: (i64, i64), duration: i64) -> mark::Episode {
         season: numbers.0,
         episode: numbers.1,
         duration,
+        mark: TitleMark::Watched,
+    }
+}
+
+fn unlisted(numbers: (i64, i64), duration: i64) -> mark::Episode {
+    mark::Episode {
+        mark: TitleMark::Cleared,
+        ..listed(numbers, duration)
     }
 }
 
@@ -166,6 +222,37 @@ fn a_press_marks_every_earlier_episode_across_seasons_they_have_not_finished() {
             listed((1, 4), RUNTIME),
             listed((1, 5), RUNTIME),
             listed((2, 1), RUNTIME),
+        ]
+    );
+}
+
+// Every later episode the audience started or finished is cleared, as a
+// Clear progress mark on its row would clear it. A later episode they never
+// started, or already cleared, holds nothing to clear, and a special is in
+// no order, so the press lists none of them.
+#[test]
+fn a_press_clears_every_later_episode_they_started_or_finished() {
+    let source = with_specials(vec![
+        finished((1, 1)),
+        finished((1, 2)),
+        reached((1, 4), 690, 2_700),
+        finished((2, 2)),
+        cleared((3, 1)),
+        finished((3, 6)),
+        finished((0, 1)),
+    ]);
+    let (mut page, mut source) = row_of(source, (1, 3));
+
+    let Step::PickUp { episodes, .. } = press(&mut page, &mut source, "Pick up here") else {
+        panic!("the press asks for no mark and play");
+    };
+
+    assert_eq!(
+        episodes,
+        [
+            unlisted((1, 4), 2_700),
+            unlisted((2, 2), RUNTIME),
+            unlisted((3, 6), RUNTIME),
         ]
     );
 }

@@ -14,6 +14,12 @@ arrival on an episode's row from a home card, which "Arrival on an
 episode's row" below describes. Not built: the drill under "How it is
 proved".
 
+Revised on 2026-09-29, after a test on a real screen: a press also
+clears every later episode the audience started, as "Later episodes"
+below describes, and each entry of the list states its own mark. The
+same test found the series page slow on a series of 164 episodes; "A
+long series" below gives the cause, the fix, and the measurements.
+
 ## The problem
 
 A person who watched the first seasons of a series somewhere else, or
@@ -51,9 +57,52 @@ also skips an episode with no duration, the same way a single watched
 mark does: the store reads a position as finished only against a
 duration.
 
-The button shows only when the press marks at least one episode. On the
-first episode, or when every earlier episode is already finished, the
-press would do no more than Play, so the row does not show it.
+The button shows only when the press changes at least one episode: an
+earlier episode is left to mark watched, or a later episode holds
+progress to clear. Where neither holds, the press would do no more than
+Play, so the row does not show it.
+
+### Later episodes
+
+A press also makes every later episode unwatched. "Later" means every
+episode after the picked one in series order, across seasons, and
+specials stay outside that order as before. Each later episode the
+audience started or finished takes a cleared mark, the one Clear
+progress on its row would send, at position 0. A later episode the
+audience never started, or already cleared, holds no progress for them
+and takes no entry, so a press on the first episode of a long series
+writes a row only for the episodes the audience reached.
+
+Leaving those episodes out changes nothing any reader shows, compared
+with a cleared row for every later episode:
+
+- **The episode rows and the wall's bars** read the newest row of each
+  episode. An episode with no row and an episode whose newest row is at
+  position 0 both draw no bar, the status "Not started", Play, and the
+  Mark watched mark alone.
+- **Continue watching** follows the thread rule over every row of the
+  series. Every row of a press is recorded at `at`, and the thread
+  stands on the last of them by name (see "One message for the whole
+  press"). A cleared row for an unstarted episode would sort among the
+  other cleared rows and never become the standing play, so it would
+  not change the offer.
+- **An audience of several people** reads an episode as started only
+  where every person has a play of it. An episode that one person
+  started and the other did not reads as not started, and takes no
+  entry, which is also where the row offers no Clear progress mark. A
+  press clears what the page shows, as pressing Clear progress on each
+  row would.
+- **Jellyfin** takes a write only for the listed episodes. It keeps
+  progress on a later episode the store does not hold, where a cleared
+  entry for every later episode would reset it. That is the same result
+  as pressing Clear progress on each row, because the row offers the
+  mark only where the store holds progress.
+
+The button's rule uses two bounds of the page's progress: the first
+episode a watched mark would change, and the last episode the audience
+started. Both are read once with the progress, so the test on each frame
+and each press compares the picked episode's numbers with two numbers
+and walks no list. The press builds its list when it is pressed.
 
 ### Its icon
 
@@ -67,14 +116,20 @@ stroke, caps, and joins as every other glyph in `views/icon.rs`.
 
 The press publishes one mark that names every episode it covers, on the
 same topic and in the same retained form as a single mark. The payload
-adds a list, `episodes`, and each entry states one episode's `season`,
-`episode`, `position`, and `duration`. The series' aliases, the people,
-the `Player`, and `at` are stated once, for the whole list.
+adds a list, `episodes`, and each entry states one episode's `mark`,
+`season`, `episode`, `position`, and `duration`. The series' aliases,
+the people, the `Player`, and `at` are stated once, for the whole list.
+An entry that states no `mark` takes the message's, so a list the first
+build published, with no mark on its entries, reads the same. The
+browser states the mark on every entry, and `watched` on the message.
+A message whose mark, or whose entry's mark, is neither of the two is no
+mark, and the progress role clears it.
 
-The progress role writes one row for each entry, named
-`{name}-s{season}e{episode}` with each number in four digits, all
-recorded at `at`. The jellyfin role writes each entry to each person at
-the screen. The sent record stays one record for the whole mark.
+The progress role writes one row for each entry, all recorded at `at`.
+A watched row is named `{name}-s{season}e{episode}` with each number in
+four digits, and a cleared row `{name}-cleared-s{season}e{episode}`. The
+jellyfin role writes each entry to each person at the screen with the
+entry's own mark. The sent record stays one record for the whole mark.
 
 Each guarantee of the mark in plan 72 holds for the list, entry by
 entry:
@@ -104,18 +159,36 @@ path each, looping over one entry or many.
 
 The rows' names order them. The thread rule breaks a tie in recorded
 time on the play's name, and every row of one press has the same `at`.
-Four-digit numbers make the names sort in series order, so the thread
-stands on the last earlier episode, which is finished, and offers the
-episode the person picked up. The play of that episode is recorded after
-the press and takes the thread from there.
+Four-digit numbers make the watched names sort in series order, so the
+thread stands on the last earlier episode the press marked, which is
+finished, and offers the episode after it. The play of the picked
+episode is recorded after the press and takes the thread from there.
+
+A cleared row stands at position 0, and the thread rule offers nothing
+for a thread that stands unfinished at 0. So a cleared row must never
+be the standing play. The later episodes a press clears are after every
+episode it marks watched, and with the watched scheme their names would
+sort last and take the thread. "cleared" sorts before the `s` of every
+watched name, so every cleared row of a press sorts before its watched
+rows, and the thread stands on the last watched one.
+
+Two windows are left, both before the play of the picked episode
+records its first position. A press that marks no earlier episode, and
+clears later ones, leaves the thread on a cleared row, and the series
+leaves Continue watching until the play records, as it would after
+Clear progress on each row. A press whose last marked episode is not
+the one just before the picked one, because that one was finished
+already, offers the episode after the last marked one until the play
+records.
 
 ### Fewer writes to Jellyfin
 
 Jellyfin has no endpoint that writes several items' user data at once,
 so a list of 149 episodes is still up to 149 reads and 149 writes for
 each person. The jellyfin role writes no item that Jellyfin already
-holds as played with no resume position, because a watched mark would
-change nothing there but the date. A person who watched the earlier
+holds as played with no resume position, where the entry is watched,
+because a watched mark would change nothing there but the date. A
+cleared entry always writes, as a single cleared mark does. A person who watched the earlier
 seasons in Jellyfin costs reads and no writes. The role writes one log
 line for the whole list for each person, with the counts, and not a
 line for each episode.
@@ -139,6 +212,52 @@ store or the catalog changes under it, keeps the record.
 The rule applies to the home page alone. A search hit or a wall of
 episodes opens the page on the still, as before, because the person
 chose the episode from a wall.
+
+### A long series
+
+On a real screen, the series page of a series of 164 episodes in 11
+seasons was slow after Pick up here. The frame is not the cause. The
+browser's own histogram on that screen put 1,138 of 1,155 frames under
+16.7 ms and none over 250 ms. A headless run of the release build on a
+workstation drew a frame of the page in 1.8 ms at the median with 164
+episodes and 2.1 ms with 492, before the fix and after it.
+
+The cause is two reads of the catalog that SQLite planned as a walk of
+every file of the library, in path order:
+
+- **The credits of each play.** Every progress read carries the credits
+  marks of each play's main file, found by `MIN(files.path)` over the
+  item's files. SQLite answered it by walking the library's files in
+  path order until one belonged to the item. That is one walk for each
+  play, and one Pick up here on a long series raises the plays of the
+  series from a few to one for each episode. The series page runs the
+  read when it opens and on every progress change, and the home page
+  runs it for Continue watching.
+- **The foot's files.** The foot under the wall follows focus, and
+  reads the focused episode's files on every move across the wall.
+  `ORDER BY files.path` made the same walk.
+
+Both reads now name the index on `file_items (library, item)`, as the
+art read already did, and a test of each read fails when that index is
+missing.
+
+Measured on a workstation with a release build, against a catalog built
+to the sizes of the cluster's catalog (27,000 files in the series
+library, 22,700 aliases) and a progress store with a play on 157 of the
+164 episodes for one person:
+
+| Work | Before | After |
+|---|---|---|
+| The progress read of the series page, on open and on every progress change | 1,792 ms | 4.5 ms |
+| A move across the wall | 8.9 ms | 0.015 ms |
+| A move across an episode's row | 0.29 µs | 0.03 µs |
+| The row's buttons, which each frame reads | 0.28 µs | 0.02 µs |
+| A re-read of the page on a catalog change | 11.8 ms | 3.6 ms |
+| The home page's read | 842 ms | 7.4 ms |
+
+On a series of 492 episodes with 480 plays, the progress read took
+5,592 ms before and 11.6 ms after. The screen's machine is slower than
+the workstation, so each of these took longer there.
 
 ## Set aside
 
@@ -170,10 +289,9 @@ many episodes, and the rows would no longer say what they hold.
 These two items of the open problem stay open:
 
 - **Clearing a whole series**, to take it off Continue watching or to
-  start it again from the first episode. The list form carries a
-  cleared mark as well as a watched one, so the bus needs no change,
-  but the page needs a place for the button and a rule for which
-  episodes it clears.
+  start it again from the first episode. Each entry of the list states
+  its own mark, so the bus needs no change, but the page needs a place
+  for the button and a rule for which episodes it clears.
 - **The series' place in one view**, such as how far through the series
   the audience is, drawn on the series page or on its card.
 
@@ -201,20 +319,29 @@ Also left out:
 ## How it is proved
 
 - Browser tests: the button shows on an episode with an earlier
-  unfinished episode and hides on the first episode, on a special, and
-  where every earlier episode is finished; a press marks the earlier
-  episodes across seasons, skips specials, finished episodes, and
-  episodes with no duration, and marks a partly watched one; the press
-  asks for the same play as Play; the browser publishes one retained
-  list mark and then the play request.
+  unfinished episode or a later started one, and hides on the first
+  episode with no later one started, on a special, and where every
+  earlier episode is finished and no later one started; a press marks
+  the earlier episodes across seasons, skips specials, finished
+  episodes, and episodes with no duration, and marks a partly watched
+  one; a press clears every later episode started or finished, and
+  skips a later one never started or already cleared; the press asks
+  for the same play as Play; the browser publishes one retained list
+  mark, with a mark on each entry, and then the play request.
 - Progress role tests: a list mark writes one row for each entry, named
-  in series order and recorded at `at`; a list delivered again after a
-  forget changes no row; a list whose write failed halfway writes the
-  rest on the next delivery.
+  in series order and recorded at `at`; a cleared entry writes its row
+  at position 0 under a name that sorts before every watched name; an
+  entry with no mark takes the message's; an entry with an unknown mark
+  makes the message no mark; a list delivered again after a forget
+  changes no row; a list whose write failed halfway writes the rest on
+  the next delivery.
 - Jellyfin role tests, against the fake Jellyfin server: a list mark
-  writes each episode for each person, skips an episode Jellyfin
-  already holds as played, leaves one sent record, and a pass that
-  failed partway writes only the rest on the next pass.
+  writes each episode for each person with its own mark, skips a
+  watched episode Jellyfin already holds as played, leaves one sent
+  record, and a pass that failed partway writes only the rest on the
+  next pass.
+- Catalog read tests: the progress reads and the foot's files read fail
+  when the item index is missing, so each read goes through it.
 - Browser tests for the arrival: a continue-watching card for an
   episode the audience stopped inside opens on the row with focus on
   Resume, one they have not started on Play, a recently added episode
@@ -225,4 +352,6 @@ Also left out:
   watched nowhere, press Pick up here on the first episode of the third
   season; see the earlier episodes drawn watched on a second screen,
   played in Jellyfin, and the picked episode on Continue watching after
-  the play stops.
+  the play stops. Then press Pick up here on the first episode of the
+  second season, and see the third season drawn not started and
+  unplayed in Jellyfin.

@@ -2,13 +2,15 @@ package main
 
 // What these tests prove. A mark that lists several episodes, which Pick up
 // here publishes, reaches Jellyfin as one write for each episode and each
-// person, and leaves one sent record. An item Jellyfin already holds as
-// played takes no write from a watched mark. A pass that failed on one
-// episode sends the mark again, and the episodes that landed are left
-// alone.
+// person, each with its own mark, and leaves one sent record. An item
+// Jellyfin already holds as played takes no write from a watched entry, and
+// a cleared entry writes over it. A pass that
+// failed on one episode sends the mark again, and the episodes that landed
+// are left alone.
 
 import (
 	"encoding/json"
+	"maps"
 	"testing"
 )
 
@@ -82,7 +84,8 @@ func TestAListMarkWritesEveryEpisodeForEveryPerson(t *testing.T) {
 // A watched mark leaves an item Jellyfin already holds as played with no
 // resume position, because the write would change only the date. An item
 // played with a resume position, a person rewatching it in Jellyfin, takes
-// the write. A cleared mark writes over a played item.
+// the write. A cleared mark writes over a played item and over one in the
+// middle.
 func TestAWatchedMarkSkipsAnItemJellyfinHoldsAsPlayed(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -95,6 +98,8 @@ func TestAWatchedMarkSkipsAnItemJellyfinHoldsAsPlayed(t *testing.T) {
 			held: jellyfinUserData{Played: true, PlaybackPositionTicks: 9_000_000_000}, writes: 1},
 		{name: "not played", mark: markWatched, held: jellyfinUserData{}, writes: 1},
 		{name: "played, and the mark clears it", mark: markCleared, held: jellyfinUserData{Played: true}, writes: 1},
+		{name: "in the middle, and the mark clears it", mark: markCleared,
+			held: jellyfinUserData{PlaybackPositionTicks: 9_000_000_000}, writes: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fake := jellyfinFixture()
@@ -155,6 +160,35 @@ func TestAListThatFailedPartwayWritesOnlyTheRestOnTheNextPass(t *testing.T) {
 	}
 	if message, _ := messages.only(t); message.topic != sentTopic("mark-living-room-1") {
 		t.Errorf("message = %+v, want the record once every episode landed", message)
+	}
+}
+
+// A list that clears its later episodes writes each of them unplayed at the
+// start, in the same pass as the watched ones.
+func TestAListWritesEachEpisodeWithItsOwnMark(t *testing.T) {
+	fake := seasonFixture()
+	fake.userData = map[string]jellyfinUserData{"user-a/item-series-3-5": {Played: true}}
+	role, _, _ := standJellyfinRole(t, fake)
+	mark := titleMark{}
+	_ = json.Unmarshal(jellyfinListMark(t, []string{"person-a"}), &mark)
+	mark.Episodes[2] = markedEpisode{Mark: markCleared, Season: 3, Episode: 5, Duration: 2760}
+	payload, _ := json.Marshal(mark)
+
+	role.onMessage(markTopic("mark-living-room-1"), payload)
+	markPass(t, role)
+
+	got := map[string]bool{}
+	for _, write := range fake.writes {
+		got[write.item] = write.data.Played && write.data.PlaybackPositionTicks == jellyfinTicks(2760)
+	}
+	want := map[string]bool{"item-series-3-3": true, "item-series-3-4": true, "item-series-3-5": false}
+	if len(fake.writes) != 3 || !maps.Equal(got, want) {
+		t.Errorf("writes = %+v, want the first two played and the third unplayed", fake.writes)
+	}
+	for _, write := range fake.writes {
+		if write.item == "item-series-3-5" && write.data.PlaybackPositionTicks != 0 {
+			t.Errorf("write = %+v, want the cleared episode at the start", write)
+		}
 	}
 }
 

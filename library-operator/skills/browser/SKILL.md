@@ -181,16 +181,20 @@ the row puts focus on the marks, down from the marks returns to the
 still, and back closes the row.
 
 Pick up here follows the playback buttons on an episode's row. It marks
-every earlier episode of the series watched, for the people at the
-screen, and plays the episode from the beginning, as Play does, with
-the same next episode after it. The earlier episodes are every episode
-before this one in season and episode order, across seasons. The press
-marks the ones the people at the screen have not finished, a partly
-watched one included, and leaves the specials of season 0 alone. The
-row shows the button only where one earlier episode is still to mark,
-so the first episode, a special, and an episode whose earlier episodes
-are all finished do not show it. Its glyph is a bar with a triangle
-that points away from it.
+every earlier episode of the series watched and clears every later
+episode, for the people at the screen, and plays the episode from the
+beginning, as Play does, with the same next episode after it. The
+earlier episodes are every episode before this one in season and
+episode order, across seasons, and the later episodes are every episode
+after it. The press marks the earlier ones the people at the screen
+have not finished, a partly watched one included. It clears the later
+ones they started or finished, as Clear progress on each row would, and
+leaves the later ones they never started. It leaves the specials of
+season 0 alone. The row shows the button only where the press changes
+at least one episode: an earlier one is still to mark, or a later one
+holds progress. So a special does not show it, and neither does an
+episode with every earlier episode finished and no later one started.
+Its glyph is a bar with a triangle that points away from it.
 A person's page shows their credits and their biography.
 A franchise's page draws its story order as one lane, with a line per
 universe beside it. Over the first row of each era it draws a heading,
@@ -229,11 +233,14 @@ opens. A film's card opens the film's page, and an episode's card
 opens the series' page with that episode's row open.
 
 Pick up here on an episode's row, in [section 5](#5-the-screens), marks
-every earlier episode watched in one press. The browser publishes one
-mark that lists those episodes, and the progress role writes a row for
-each of them. An earlier episode with no duration in the audience's
-play or in the catalog is left out, as a single watched mark on it
-sends nothing.
+every earlier episode watched and clears every later one in one press.
+The browser publishes one mark that lists those episodes, each with its
+own mark, and the progress role writes a row for each of them. An
+earlier episode with no duration in the audience's play or in the
+catalog is left out, as a single watched mark on it sends nothing. A
+later episode the press cleared never takes the series'
+continue-watching card from the episodes the press marked watched, or
+from the play of the picked episode.
 
 The browser does not write the progress store. It publishes the mark
 on the bus, retained, and the progress role writes it as one play at

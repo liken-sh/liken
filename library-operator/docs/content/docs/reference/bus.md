@@ -420,31 +420,43 @@ A mark that names one work carries no `episodes` field.
 
 ### A list of episodes
 
-Pick up here marks every earlier episode of a series watched in one
-press. The browser publishes one mark for the whole press, on the same
-topic and retained the same way, and the mark lists the episodes in
-`episodes`. The series' aliases, the people, the `Player`, and `at` are
-stated once. The mark carries no `season`, `episode`, `position`, or
-`duration` of its own: each entry of the list states its own.
+Pick up here marks every earlier episode of a series watched and clears
+every later episode the people at the screen started, in one press. The
+browser publishes one mark for the whole press, on the same topic and
+retained the same way, and the mark lists the episodes in `episodes`.
+The series' aliases, the people, the `Player`, and `at` are stated once.
+The mark carries no `season`, `episode`, `position`, or `duration` of
+its own: each entry of the list states its own.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `episodes` | list of objects | The episodes the mark covers, in series order. Each entry has `season`, `episode`, `position`, and `duration`, with the meaning each field has on a mark of one work. |
+| `episodes` | list of objects | The episodes the mark covers, in series order. Each entry has `mark`, `season`, `episode`, `position`, and `duration`, with the meaning each field has on a mark of one work. |
 
-The progress role writes one row for each entry, named
+An entry's `mark` is `watched` or `cleared`, and an entry with no
+`mark` takes the message's. The browser states `mark` on every entry,
+and states `watched` on the message. A message whose `mark`, or whose
+entry's `mark`, is neither of the two is no mark: the progress role
+clears it and records nothing.
+
+The progress role writes one row for each entry. A watched row is named
 `{name}-s{season}e{episode}` with each number in four digits, as in
-`mark-living-room-1759140000-s0001e0004`. Every row is recorded at `at`.
-The browser breaks a tie in recorded time on the row's name, and the
-four digits make the names sort in series order, so the browser reads
-the last episode of the list as the newest. The role writes each row
-only when the store holds no row of that name recorded at `at` or
+`mark-living-room-1759140000-s0001e0004`. A cleared row is named
+`{name}-cleared-s{season}e{episode}`, as in
+`mark-living-room-1759140000-cleared-s0003e0002`. Every row is recorded
+at `at`. The browser breaks a tie in recorded time on the row's name.
+The four digits make the watched names sort in series order, and every
+cleared name sorts before every watched name, so the browser reads the
+last watched episode of the list as the newest, and never a later
+episode the press cleared. A cleared row stands at position 0, and a
+thread that stood on it would offer nothing. The role writes each
+row only when the store holds no row of that name recorded at `at` or
 later, so a list delivered again writes only the rows that are missing.
 It clears the topic once, as it clears a mark of one work.
 
-The jellyfin role writes each entry to each person at the screen, and
-publishes one [sent mark](#a-sent-mark) for the whole list once every
-entry has landed. An entry Jellyfin does not hold is done with no
-write.
+The jellyfin role writes each entry to each person at the screen, with
+the entry's own mark, and publishes one [sent mark](#a-sent-mark) for
+the whole list once every entry has landed. An entry Jellyfin does not
+hold is done with no write.
 
 The press publishes one message, and not one mark for each episode,
 because each mark's name takes the second of its press. The browser
@@ -459,8 +471,9 @@ those marks until that time had passed.
       "people": ["ada"],
       "aliases": {"tvdb": "1000002"},
       "episodes": [
-        {"season": 1, "episode": 4, "position": 2760, "duration": 2760},
-        {"season": 2, "episode": 1, "position": 2700, "duration": 2700}
+        {"mark": "watched", "season": 1, "episode": 4, "position": 2760, "duration": 2760},
+        {"mark": "watched", "season": 2, "episode": 1, "position": 2700, "duration": 2700},
+        {"mark": "cleared", "season": 3, "episode": 2, "position": 0, "duration": 2760}
       ],
       "at": 1759140000
     }

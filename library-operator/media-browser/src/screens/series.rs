@@ -7,25 +7,19 @@
 
 mod episode;
 mod layout;
+mod moves;
 mod page;
+mod pickup;
 pub mod progress;
 mod seasons;
 
-use std::cell::RefCell;
-use std::convert::Infallible;
-
-use iced_wgpu::Renderer;
-use iced_winit::core::{Element, Rectangle, Theme};
-
-use super::franchise::strips::{self, Move, Place, Strips};
-use super::movie::{franchise_press, marked_duration, row, watch};
-use super::{InFranchise, Screen, Step, facts, foot, person, stripes};
-use crate::art::Art;
+use super::franchise::strips::{Place, Strips};
+use super::movie::{marked_duration, row, watch};
+use super::{InFranchise, Step, facts, foot, stripes};
 use crate::catalog::draw::Date;
-use crate::catalog::{Progress, Selection, SeriesDetails, Source};
-use crate::focus::{self, Run};
-use crate::views::curtain::{Curtain, Head, Layer};
-use crate::views::{Card, layers, rail, ratings};
+use crate::catalog::{Progress, SeriesDetails, Source};
+use crate::focus::Run;
+use crate::views::{Card, rail, ratings};
 
 /// How many stills a row of the episode wall holds. A still is wider
 /// than a poster, so the wall holds fewer across.
@@ -186,12 +180,19 @@ pub struct Series {
     /// The bars of the rail beside the wall, one per season or per range
     /// of seasons, and none on a series of four seasons or fewer.
     pub bars: Vec<rail::Bar>,
+    /// Where a press of Pick up here changes an episode, read with the
+    /// progress so an episode's row reads it and not the whole wall.
+    reach: pickup::Reach,
     /// The still the wall last held, which a left press on the rail
     /// returns to.
     entered: usize,
     /// Whether the way into the page named the episode focus is on, so the
     /// progress read leaves focus where that way put it.
     placed: bool,
+    // Whether the first progress read chose where focus lands. Later reads
+    // keep the person's focus, so a play ticking on another screen does not
+    // close the row they have open.
+    landed: bool,
     // Whether the episode's row open now is the one the page opened on,
     // from a home card that named the episode. The person never saw the
     // wall, so back from that row leaves the page and does not close the
@@ -247,6 +248,7 @@ impl Series {
         let (stills, seasons) =
             seasons::wall_of(source.episodes(library, id), &Date::today().iso());
         let bars = seasons::bars(&seasons, layout::rail_region());
+        let reach = pickup::Reach::of(&stills);
         Some(Self {
             library: library.to_string(),
             id: id.to_string(),
@@ -265,8 +267,10 @@ impl Series {
             seasons,
             stills,
             bars,
+            reach,
             entered: 0,
             placed: false,
+            landed: false,
             arrived: false,
             via: None,
             focus: Focus::Still(0),
@@ -292,6 +296,7 @@ impl Series {
             return;
         };
         fresh.placed = true;
+        fresh.landed = true;
         fresh.arrived = self.arrived;
         fresh.entered = self.entered.min(fresh.stills.len().saturating_sub(1));
         fresh.via = self.via.clone();
@@ -431,222 +436,6 @@ impl Series {
             true => Step::Still,
             false => step,
         }
-    }
-
-    // One press while the button row holds focus. The row is beside the
-    // header's text column, over the first row of stills. Up moves no
-    // focus, so the press reaches the browser's strip. Down and left
-    // return to the still the wall last held, or to the block under the
-    // wall where the series has no episodes.
-    fn on_button(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
-        match key {
-            "enter" => match self.buttons().get(index) {
-                // A trailer is in no order, so it offers nothing after it.
-                Some(row::Button::Trailer) => Step::Play {
-                    library: self.library.clone(),
-                    selection: Selection::Trailer {
-                        id: self.id.clone(),
-                    },
-                    start: None,
-                    next: None,
-                },
-                _ => Step::Stay,
-            },
-            "up" => Step::Still,
-            "down" | "left" => {
-                self.focus = match self.stills.is_empty() {
-                    true => self.under_wall(0),
-                    false => Focus::Still(self.entered.min(self.stills.len() - 1)),
-                };
-                self.refoot(source);
-                Step::Stay
-            }
-            _ => {
-                self.focus = Focus::Buttons(focus::row(index, self.buttons().len(), key));
-                Step::Stay
-            }
-        }
-    }
-
-    fn on_still(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
-        if key != "enter" {
-            self.entered = index;
-            self.focus = match key {
-                "right" => match seasons::onto(self, index) {
-                    Some(bar) => Focus::Rail(bar),
-                    None => self.moved(index, key),
-                },
-                _ => self.moved(index, key),
-            };
-            self.refoot(source);
-            return Step::Stay;
-        }
-        // Select opens the episode's row, which holds the buttons a movie's
-        // page holds, so an episode resumes, starts over, and takes a mark
-        // the way a film does.
-        if index < self.stills.len() {
-            self.focus = Focus::Episode(index, 0);
-        }
-        Step::Stay
-    }
-
-    // Where one press inside the wall lands: a still, or the rung under
-    // the wall where down leaves the last row.
-    fn moved(&self, index: usize, key: &str) -> Focus {
-        let runs: Vec<Run> = self.seasons.iter().map(|season| season.run).collect();
-        let moved = focus::sectioned(index, &runs, COLUMNS, key);
-        match (key, moved == index) {
-            ("down", true) => self.under_wall(moved),
-            ("up", true) => self.over_wall(moved),
-            _ => Focus::Still(moved),
-        }
-    }
-
-    // The rung over the first row of stills: the button row where the
-    // series holds a trailer, and the still itself where it holds none.
-    fn over_wall(&self, index: usize) -> Focus {
-        match self.trailer {
-            true => Focus::Buttons(0),
-            false => Focus::Still(index),
-        }
-    }
-
-    // One press while a bar of the rail holds focus. The foot is read
-    // again because a left or a select puts focus back on a still.
-    fn on_rail(&mut self, bar: usize, key: &str, source: &mut dyn Source) -> Step {
-        self.focus = seasons::key(self, bar, key);
-        self.refoot(source);
-        Step::Stay
-    }
-
-    // The rung under the last row of stills: the first franchise strip,
-    // then the first stripe, and the still itself where the page holds
-    // neither.
-    fn under_wall(&self, index: usize) -> Focus {
-        if let Some((strip, place)) = self.franchises.first() {
-            return Focus::Franchise(strip, place);
-        }
-        match self.stripes.first() {
-            Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-            None => Focus::Still(index),
-        }
-    }
-
-    // The rung over the first stripe: the last franchise strip, and the
-    // wall's last still where the page holds none.
-    fn over_stripes(&self, rung: stripes::Rung) -> Focus {
-        if let Some((strip, place)) = self.franchises.last() {
-            return Focus::Franchise(strip, place);
-        }
-        match self.stills.len() {
-            0 => Focus::Stripe(rung.0, rung.1),
-            count => Focus::Still(count - 1),
-        }
-    }
-
-    // One press on a franchise strip. A select on the heading opens the
-    // franchise's page, and a select on a member opens that member's, the
-    // way it does from a film's page.
-    fn on_franchise(&mut self, rung: strips::Rung, key: &str, source: &mut dyn Source) -> Step {
-        if key == "enter" {
-            return franchise_press(&self.franchises, rung, source);
-        }
-        self.focus = match self.franchises.key(rung, key) {
-            Move::To((strip, place)) => Focus::Franchise(strip, place),
-            Move::Above => match self.stills.len() {
-                0 => Focus::Franchise(rung.0, rung.1),
-                count => Focus::Still(count - 1),
-            },
-            Move::Below => match self.stripes.first() {
-                Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-                None => Focus::Franchise(rung.0, rung.1),
-            },
-        };
-        self.refoot(source);
-        Step::Stay
-    }
-
-    // One press on a stripe. Select opens the person's page, and a
-    // name the credits could not resolve opens nothing.
-    fn on_stripe(&mut self, rung: stripes::Rung, key: &str, source: &mut dyn Source) -> Step {
-        if key == "enter" {
-            let Some(face) = self.stripes.face(rung) else {
-                return Step::Stay;
-            };
-            if face.contributor.is_empty() {
-                return Step::Stay;
-            }
-            return match person::Person::open(&self.library, &face.contributor, source) {
-                Some(page) => Step::Open(Screen::Person(Box::new(page))),
-                None => Step::Stay,
-            };
-        }
-        self.focus = match self.stripes.key(rung, key) {
-            Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-            // Up from the first stripe returns to the last franchise
-            // strip, then to the wall's last row, and stays where the
-            // series holds neither.
-            None => self.over_stripes(rung),
-        };
-        self.refoot(source);
-        Step::Stay
-    }
-
-    /// The view: the backdrop behind the header, the scrim over it, the
-    /// header and the wall over both, and the departing art of the
-    /// loading state over all three while that state runs. The dim of the
-    /// room and the curtain's front are the frame's own layers over this
-    /// one.
-    pub fn view<'a, A: Art>(
-        &'a self,
-        store: &'a RefCell<A>,
-        curtain: Option<Curtain>,
-        held: bool,
-    ) -> Element<'a, Infallible, Theme, Renderer> {
-        layers::Page {
-            library: &self.library,
-            art: &self.backdrop,
-            store,
-            ground: layers::Ground::Below(layout::head()),
-            front: page::Page {
-                series: self,
-                store,
-                lifted: curtain.is_some(),
-                held,
-            },
-            over: curtain.map(|curtain| self.curtain(store, curtain)),
-        }
-        .view()
-    }
-
-    /// The curtain's front layer, which the frame draws over the dim.
-    pub fn front<'a, A: Art>(
-        &'a self,
-        store: &'a RefCell<A>,
-        curtain: Curtain,
-    ) -> Element<'a, Infallible, Theme, Renderer> {
-        layers::front(self.curtain(store, curtain))
-    }
-
-    // The loading state's layer for this page. Both the departing art
-    // under the dim and the logo over it are drawn from it, so the two
-    // read the same title, art, and clock.
-    fn curtain<'a, A: Art>(&'a self, store: &'a RefCell<A>, curtain: Curtain) -> Layer<'a, A> {
-        Layer {
-            library: &self.library,
-            art: &self.backdrop,
-            logo: &self.logo,
-            name: &self.title,
-            store,
-            head: self,
-            curtain,
-        }
-    }
-}
-
-impl Head for Series {
-    fn head(&self, bounds: Rectangle) -> Rectangle {
-        page::head(bounds)
     }
 }
 

@@ -150,19 +150,21 @@ type titleMark struct {
 	// time, so the mark stands over every play recorded before it.
 	At int64 `json:"at"`
 	// Several episodes of one series, which Pick up here marks in one
-	// press. The aliases are the series', and the mark states no season,
-	// episode, position, or duration of its own. Empty for a mark on one
-	// work.
+	// press: the earlier episodes watched and the later ones cleared. The
+	// aliases are the series', and the mark states no season, episode,
+	// position, or duration of its own. Empty for a mark on one work.
 	Episodes []markedEpisode `json:"episodes,omitempty"`
 }
 
-// One episode of a mark that names several: its numbers, and the position
-// and duration the mark states for it, in seconds.
+// One episode of a mark that names several: its own mark, its numbers, and
+// the position and duration the mark states for it, in seconds. An entry
+// that states no mark takes the message's.
 type markedEpisode struct {
-	Season   int `json:"season"`
-	Episode  int `json:"episode"`
-	Position int `json:"position"`
-	Duration int `json:"duration"`
+	Mark     string `json:"mark,omitempty"`
+	Season   int    `json:"season"`
+	Episode  int    `json:"episode"`
+	Position int    `json:"position"`
+	Duration int    `json:"duration"`
 }
 
 // playFinal is a Play's last status, read off the API by the operator

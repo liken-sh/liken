@@ -3,7 +3,7 @@ use crate::catalog::franchise::{Entry, Held, SERIES as SERIES_KIND};
 use crate::catalog::{Answer, Episode};
 use crate::catalog::{
     Change, Credit, CreditSlot, Credits, FileFacts, Franchise, GenreEntry, LibraryEntry,
-    Membership, MovieDetails, MovieSet, Person, PlayItem, Query, SeriesDetails,
+    Membership, MovieDetails, MovieSet, Person, PlayItem, Query, Selection, SeriesDetails,
 };
 use crate::harness::Waker;
 
@@ -40,6 +40,9 @@ pub struct Serials {
     // and the people the last read of it named.
     pub progress: Vec<crate::catalog::Progress>,
     pub watching: Vec<String>,
+    // The episodes, by season and episode, the catalog holds no running
+    // time for.
+    pub untimed: Vec<(i64, i64)>,
 }
 
 impl Serials {
@@ -172,6 +175,7 @@ impl Source for Serials {
             return Vec::new();
         }
         let undated = self.undated;
+        let untimed = self.untimed.clone();
         let specials = (0, self.specials);
         std::iter::once(specials)
             .chain(
@@ -181,6 +185,7 @@ impl Source for Serials {
                     .map(|(index, count)| (index as i64 + 1, count)),
             )
             .flat_map(|(season, count)| {
+                let untimed = untimed.clone();
                 (1..=count).map(move |episode| Episode {
                     id: format!("episode:{season}:{episode}"),
                     season,
@@ -190,7 +195,10 @@ impl Source for Serials {
                         true => String::new(),
                         false => format!("{}-03-0{episode}", 2003 + season),
                     },
-                    duration: 2_760,
+                    duration: match untimed.contains(&(season, episode)) {
+                        true => 0,
+                        false => 2_760,
+                    },
                     plot: format!("The plot of S{season} E{episode}."),
                     art: format!("s{season}e{episode}.jpg"),
                 })

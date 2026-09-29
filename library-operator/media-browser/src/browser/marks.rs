@@ -85,11 +85,11 @@ impl<S: Source, A: Art> Browser<S, A> {
         ));
     }
 
-    // Publish one mark on the earlier episodes Pick up here names, as one
-    // retained message for the whole press. One message keeps the press to
-    // one topic and one `at`: a mark for each episode would move each one
-    // to a second of its own, and the last would stand in the future over
-    // the play the same press starts.
+    // Publish the marks Pick up here names, the earlier episodes watched and
+    // the later ones cleared, as one retained message for the whole press.
+    // One message keeps the press to one topic and one `at`: a mark for each
+    // episode would move each one to a second of its own, and the last would
+    // stand in the future over the play the same press starts.
     pub(super) fn request_pick_up(
         &mut self,
         library: &str,
@@ -97,20 +97,21 @@ impl<S: Source, A: Art> Browser<S, A> {
         episodes: &[mark::Episode],
     ) {
         let people = self.audience.current(self.clock).to_vec();
-        let asked = format!(
-            "mark {} episodes of {} in {library} watched for {}",
-            episodes.len(),
+        let watched = episodes
+            .iter()
+            .filter(|episode| episode.mark == TitleMark::Watched)
+            .count();
+        let counts = format!(
+            "{} of {} watched and clear {}",
+            lines::count(watched, "episode"),
             opaque(series),
-            lines::people(&people)
+            episodes.len() - watched
         );
-        self.did(format!(
-            "marked {} episodes of {} watched",
-            episodes.len(),
-            opaque(series)
-        ));
+        let asked = format!("mark {counts} in {library} for {}", lines::people(&people));
+        self.did(format!("marked {counts}"));
         let Some(first) = episodes.first() else {
             self.log.line(format!(
-                "{asked}: sent nothing, because no earlier episode is left to mark"
+                "{asked}: sent nothing, because no episode is left to mark"
             ));
             return;
         };
@@ -129,14 +130,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         };
         self.publish_mark(
             &topic,
-            mark::list_payload(
-                TitleMark::Watched,
-                &self.marks.player,
-                &people,
-                &identity.aliases,
-                episodes,
-                at,
-            ),
+            mark::list_payload(&self.marks.player, &people, &identity.aliases, episodes, at),
         );
         let last = episodes[episodes.len() - 1];
         self.log.line(format!(

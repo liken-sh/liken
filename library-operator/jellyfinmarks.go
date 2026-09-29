@@ -5,8 +5,8 @@ package main
 // progress role records, and the jellyfin role writes it to each person's
 // user data: watched as played at the end of the work, cleared as unplayed
 // at the start. A mark that lists several episodes, which Pick up here
-// publishes, is one write for each episode, and one sent record for the
-// whole list.
+// publishes, is one write for each episode with that entry's own mark, and
+// one sent record for the whole list.
 //
 // The broker delivers each mark again on every subscription until the
 // progress role clears it, a day after the press. A second send of an old
@@ -83,7 +83,11 @@ func (m *jellyfinMarks) receive(name string, payload []byte) {
 		return
 	}
 	mark := titleMark{}
-	if err := json.Unmarshal(payload, &mark); err != nil || (mark.Mark != markWatched && mark.Mark != markCleared) {
+	if err := json.Unmarshal(payload, &mark); err != nil {
+		m.logf("the mark %s reads as no mark, and the role sends nothing for it", name)
+		return
+	}
+	if _, unknown := mark.unknownMark(); unknown {
 		m.logf("the mark %s reads as no mark, and the role sends nothing for it", name)
 		return
 	}
@@ -250,14 +254,17 @@ type jellyfinMarkTally struct {
 }
 
 // write sends one item of a mark for one person, and answers false only
-// where a read or a write failed.
+// where a read or a write failed. The item's own entry says which mark it
+// takes, because a list marks its earlier episodes watched and clears its
+// later ones.
 //
 // Before it writes, the role reads what Jellyfin holds. A last played date
 // at or after the press is a newer play or toggle in Jellyfin, or this
 // mark's own write, and the role leaves it. An item played with no resume
 // position is already what a watched mark would write, less the date, so
-// the role leaves that too, and a person who watched the earlier seasons
-// of a series in Jellyfin costs a list no writes.
+// the role leaves that too, and a person who watched the earlier seasons of
+// a series in Jellyfin costs a list no writes. A cleared mark always
+// writes, so the item's date moves to the press.
 func (m *jellyfinMarks) write(ctx context.Context, name string, mark titleMark, to jellyfinMarkWrite, tally *jellyfinMarkTally) bool {
 	work := to.target.work
 	named := workNamed(mark.Aliases, work.season, work.episode)
@@ -273,14 +280,15 @@ func (m *jellyfinMarks) write(ctx context.Context, name string, mark titleMark, 
 			named, to.person, strings.TrimSpace(held.LastPlayedDate), name)
 		return true
 	}
-	if mark.Mark == markWatched && held.Played && held.PlaybackPositionTicks == 0 {
+	if work.mark == markWatched && held.Played && held.PlaybackPositionTicks == 0 {
 		tally.played++
 		m.quietf(to.quiet, "jellyfin holds %s as played by person %s, and the mark %s changes nothing there",
 			named, to.person, name)
 		return true
 	}
 
-	played := mark.Mark == markWatched
+	played := work.mark == markWatched
+
 	pressed := time.Unix(mark.At, 0).UTC()
 	data := jellyfinUserDataUpdate{
 		PlaybackPositionTicks: jellyfinTicks(work.position),
@@ -296,7 +304,7 @@ func (m *jellyfinMarks) write(ctx context.Context, name string, mark titleMark, 
 	m.out.echoes.remember(to.user, item, work.position)
 	tally.written++
 	m.quietf(to.quiet, "wrote the mark %s of %s to jellyfin for person %s: item %s, user %s, %s at %s, pressed at %s",
-		name, named, to.person, item, to.user, mark.Mark, positionText(work.position), pressed.Format(time.RFC3339))
+		name, named, to.person, item, to.user, work.mark, positionText(work.position), pressed.Format(time.RFC3339))
 	return true
 }
 

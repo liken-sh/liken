@@ -8,6 +8,10 @@ use crate::catalog::FileFacts;
 
 /// Every file of one item, in path order, so a title with two encodings
 /// draws its lines in the same order on every read.
+// The foot follows focus, so this read runs on every move across a series'
+// wall. It names the item index, because SQLite, left to itself, answers
+// the path order by walking every file of the library in that order and
+// keeping the item's few.
 pub fn files(
     connection: &Connection,
     library: &str,
@@ -17,7 +21,8 @@ pub fn files(
                       files.audio_codec, files.width, files.height, files.size_bytes, \
                       files.language \
                FROM files \
-               JOIN file_items ON file_items.library = files.library \
+               JOIN file_items INDEXED BY file_items_library_item \
+               ON file_items.library = files.library \
                AND file_items.path = files.path \
                WHERE file_items.library = ? AND file_items.item = ? \
                ORDER BY files.path";
