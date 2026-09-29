@@ -84,6 +84,18 @@ func (g Git) HasCommit(rev string) bool {
 	return err == nil
 }
 
+// IsAncestor is true when the first commit is an ancestor of the
+// second one, or the same commit.
+func (g Git) IsAncestor(ancestor, rev string) bool {
+	_, err := g.run("merge-base", "--is-ancestor", ancestor, rev)
+	return err == nil
+}
+
+// MergeBase is the best common ancestor of two revisions.
+func (g Git) MergeBase(a, b string) (string, error) {
+	return g.run("merge-base", a, b)
+}
+
 // HasTag is true when the tag exists.
 func (g Git) HasTag(tag string) bool {
 	_, err := g.run("rev-parse", "--verify", "--quiet", "refs/tags/"+tag)

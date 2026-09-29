@@ -233,3 +233,37 @@ func TestTheOSVersionsComeFromTheChannelAndADeployArtifactFallsBackToItsImage(t 
 		}
 	}
 }
+
+func TestThePlanOnMainComparesWithTheNewestGreenRun(t *testing.T) {
+	cases := []struct {
+		name, want string
+		status     int
+	}{
+		{"a green run", "the newest main run that passed", http.StatusOK},
+		{"an API that refuses", "The newest main run that passed is unknown", http.StatusForbidden},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := planFixture(t)
+			green := r.run("rev-parse", "HEAD")
+			r.write("operator/main.go", "package main // changed\n")
+			before := r.commit("change the operator")
+			r.write("liken/init/main.go", "package main\n")
+			r.commit("change the OS")
+			w := newWorld(t, &fakeRegistry{})
+			summary := filepath.Join(t.TempDir(), "summary")
+			w.env = map[string]string{
+				"EVENT": "push", "REF": "refs/heads/main", "BEFORE": before, "GITHUB_STEP_SUMMARY": summary,
+				"GITHUB_TOKEN": "token", "GITHUB_REPOSITORY": "liken-sh/liken",
+				"GITHUB_API_URL": actionsAPI(t, c.status, `{"workflow_runs":[{"head_sha":"`+green+`"}]}`),
+			}
+			if err := w.run([]string{"plan", "-root", r.git.Dir}); err != nil {
+				t.Fatal(err)
+			}
+			text, _ := os.ReadFile(summary)
+			if !strings.Contains(string(text), c.want) {
+				t.Errorf("the summary lacks %q:\n%s", c.want, text)
+			}
+		})
+	}
+}

@@ -19,6 +19,12 @@ type Event struct {
 	Base string
 	// Head is the commit the run builds.
 	Head string
+	// Verified is the head of the newest run on main that passed, or ""
+	// when it is unknown.
+	Verified string
+	// MainRef names main in the checkout, such as origin/main, for the
+	// merge base of a branch that has no earlier commit to compare with.
+	MainRef string
 	// Publishing is true when the repository allows real publishes.
 	// Without it, a push to main and a release tag run every check
 	// and push nothing.
@@ -194,22 +200,13 @@ func (p Planner) sinceRelease(c *Component, head string, d *Decision) error {
 // gate plans a push to a branch, a pull request, or a dispatch. The
 // jobs of every component whose check paths changed run. A push to
 // main also publishes a development build of each component whose
-// outputs changed in the push.
+// outputs changed since its newest published version, and runs its jobs
+// first.
 func (p Planner) gate(e Event) (map[string]Decision, error) {
-	var base string
-	switch e.Name {
-	case "push":
-		base = e.Before
-	case "pull_request":
-		base = e.Base
-	}
-	var diff Diff
-	all := !p.Git.HasCommit(base)
-	if !all {
-		var err error
-		if diff, err = p.Git.ReadDiff(p.Components, base, e.Head); err != nil {
-			return nil, err
-		}
+	list, all := p.Comparisons(e)
+	diff, err := p.readDiffs(list, e.Head)
+	if err != nil {
+		return nil, err
 	}
 	var dev string
 	if e.Main() {
@@ -231,8 +228,8 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 	for _, c := range sortedComponents(p.Components) {
 		d := Decision{Publish: publishNone, Version: dev}
 		switch {
-		case all:
-			d.Check, d.Reason = true, "every job runs: "+allReason(e)
+		case all != "":
+			d.Check, d.Reason = true, "every job runs: "+all
 			d.Changed, d.Why = true, d.Reason
 		default:
 			var file string
@@ -248,20 +245,19 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 		}
 		// The OS publishes only releases: a machine installs from the
 		// channel, and the channel holds releases.
-		if e.Main() && e.Publishing && d.Changed && c.HasOutputs() && !c.Outputs.Channel {
+		devBuild := e.Main() && c.HasOutputs() && !c.Outputs.Channel
+		if devBuild && e.Publishing && !c.Pinned() && !d.Changed {
+			if err := p.sincePublished(c, e.Head, &d); err != nil {
+				return nil, fmt.Errorf("%s: %w", c.Name(), err)
+			}
+			if d.Changed && !d.Check {
+				d.Check, d.Reason = true, "publishes: "+d.Why
+			}
+		}
+		if devBuild && e.Publishing && d.Changed {
 			d.Publish = publishDev
 		}
 		decisions[c.Name()] = d
 	}
 	return decisions, nil
-}
-
-func allReason(e Event) string {
-	switch e.Name {
-	case "workflow_dispatch":
-		return "a dispatch runs everything"
-	case "pull_request":
-		return "the pull request's base is missing"
-	}
-	return "the push has no earlier commit to compare with"
 }

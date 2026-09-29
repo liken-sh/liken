@@ -14,11 +14,14 @@
 # run and why, and what a release tag at this commit would publish.
 #
 #   A push to a branch, a pull request, or a dispatch runs the jobs of
-#   each component whose files changed. It publishes nothing.
+#   each component whose files changed. It publishes nothing. A push
+#   diffs with the commit before it, and a new branch, a force push,
+#   or a pull request diffs with its merge base with main.
 #
-#   A push to main does the same, and it also publishes a development
-#   build of each component whose outputs changed, under a version
-#   such as 2026.10.02-001-dev-017-abcdef01.
+#   A push to main also diffs with the newest main run that passed. It
+#   publishes a development build of each component whose outputs
+#   changed since its newest published version, under a version such
+#   as 2026.10.02-001-dev-017-abcdef01.
 #
 #   A release tag, such as 2026.10.02-001, publishes each component
 #   whose outputs changed since its own newest release, under the
@@ -70,10 +73,13 @@ jobs:
     timeout-minutes: 10
     # packages: write lets the plan prove that this workflow can push
     # to each package. A pull request from a fork gets a read-only
-    # token, and the plan skips the proof.
+    # token, and the plan skips the proof. actions: read lets a push to
+    # main find the newest main run that passed: the plan diffs with it
+    # too, so a change that a failed run did not verify runs again.
     permissions:
       contents: read
       packages: write
+      actions: read
     outputs:
       components: ${{ steps.plan.outputs.components }}
     steps:

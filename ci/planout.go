@@ -17,14 +17,25 @@ func (w World) plan(root string, components map[string]*Component) error {
 		Before:     w.Getenv("BEFORE"),
 		Base:       w.Getenv("BASE"),
 		Head:       "HEAD",
+		MainRef:    "origin/main",
 		Publishing: w.Getenv("PUBLISH") == "true",
+	}
+	var notes []string
+	if e.Main() {
+		runs := Runs{API: orDefault(w.Getenv("GITHUB_API_URL"), "https://api.github.com"), Repository: w.Getenv("GITHUB_REPOSITORY"),
+			Token: w.Getenv("GITHUB_TOKEN"), Client: w.Published.Client}
+		verified, err := runs.NewestGreen("ci.yaml")
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("The newest main run that passed is unknown, so the plan compares with the commit before the push alone: %v", err))
+		}
+		e.Verified = verified
 	}
 	git := Git{Dir: root}
 	recipes, err := Recipes(root, components)
 	if err != nil {
 		return err
 	}
-	planner := Planner{Components: components, Git: git, Versions: w.Published.Versions,
+	planner := Planner{Components: components, Git: git, Versions: onceEach(w.Published.Versions),
 		Recipes: recipes, PublishedRecipe: w.Published.Recipe}
 	decisions, err := planner.Plan(e)
 	if err != nil {
@@ -47,7 +58,16 @@ func (w World) plan(root string, components map[string]*Component) error {
 	}
 
 	var summary strings.Builder
-	writeSummary(&summary, e, components, decisions, candidates, probed, refused)
+	if e.Tag() == "" {
+		list, all := planner.Comparisons(e)
+		for _, c := range list {
+			notes = append(notes, fmt.Sprintf("The plan compares with `%s`, %s.", c.Commit, c.Why))
+		}
+		if all != "" {
+			notes = append(notes, "Every job runs: "+all+".")
+		}
+	}
+	writeSummary(&summary, e, components, decisions, candidates, notes, probed, refused)
 	fmt.Fprint(w.Stdout, summary.String())
 	if path := w.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
 		if err := appendFile(path, summary.String()); err != nil {
@@ -87,8 +107,11 @@ func probe(registry Registry, components map[string]*Component) []string {
 	return refused
 }
 
-func writeSummary(b *strings.Builder, e Event, components map[string]*Component, decisions, candidates map[string]Decision, probed bool, refused []string) {
+func writeSummary(b *strings.Builder, e Event, components map[string]*Component, decisions, candidates map[string]Decision, notes []string, probed bool, refused []string) {
 	b.WriteString("## The plan\n\n")
+	for _, note := range notes {
+		b.WriteString(note + "\n\n")
+	}
 	if !e.Publishing {
 		b.WriteString("Publishing is off: the repository variable `PUBLISH` is not `true`, so this run pushes nothing.\n\n")
 	}
@@ -150,6 +173,22 @@ func outputsOf(c *Component) []string {
 		names = append(names, "`"+pkg+"`")
 	}
 	return names
+}
+
+// onceEach asks for each component's versions once, because the plan
+// and the dry run of a release both read them.
+func onceEach(versions VersionsFunc) VersionsFunc {
+	seen := map[string][]string{}
+	return func(c *Component) ([]string, error) {
+		if v, ok := seen[c.Name()]; ok {
+			return v, nil
+		}
+		v, err := versions(c)
+		if err == nil {
+			seen[c.Name()] = v
+		}
+		return v, err
+	}
 }
 
 func appendFile(path, text string) error {
