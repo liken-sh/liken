@@ -20,6 +20,12 @@ on:
       stage:
         type: string
         required: true
+      # true when the check stage also runs the publish job in its dry
+      # mode, because the code of the publish changed: it builds what a
+      # publish would push, and it pushes nothing.
+      dryrun:
+        type: boolean
+        required: true
       # The version the outputs get: the release tag, a development
       # version, a pinned component's own tag, or empty when the run
       # publishes nothing.

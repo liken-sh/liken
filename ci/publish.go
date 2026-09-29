@@ -58,7 +58,12 @@ type Publisher struct {
 // A release also moves each :latest tag, unless a newer release
 // already has it. A development build never moves :latest.
 //
-// A pinned component publishes its own tag in either mode, with its
+// A dry run builds each image as a publish would, with the same
+// arguments, labels, and tags, and stamps the deploy artifact, but it
+// pushes nothing and moves no tag. It proves the publish code on a
+// change to it, before a release needs it.
+//
+// A pinned component publishes its own tag in any mode, with its
 // recipe hash as a label, and never moves :latest: every consumer
 // builds on the base in the tree, so nothing follows a moving tag.
 func (p Publisher) Publish(c *Component, version, mode string) error {
@@ -74,8 +79,12 @@ func (p Publisher) Publish(c *Component, version, mode string) error {
 		if !devVersion.MatchString(version) {
 			return fmt.Errorf("%q is not a development version", version)
 		}
+	case publishDry:
+		if !devVersion.MatchString(version) && CheckReleaseTag(version) != nil {
+			return fmt.Errorf("%q is not a version that a publish takes", version)
+		}
 	default:
-		return fmt.Errorf("the publish mode %q is not dev or release", mode)
+		return fmt.Errorf("the publish mode %q is not dev, release, or dry", mode)
 	}
 	if c.Outputs.Channel {
 		return fmt.Errorf("%s publishes to the release channel through its own workflow", c.Name())
@@ -92,8 +101,8 @@ func (p Publisher) Publish(c *Component, version, mode string) error {
 }
 
 func (p Publisher) pinned(c *Component, version, mode string) error {
-	if mode != publishDev && mode != publishRelease {
-		return fmt.Errorf("the publish mode %q is not dev or release", mode)
+	if mode != publishDev && mode != publishRelease && mode != publishDry {
+		return fmt.Errorf("the publish mode %q is not dev, release, or dry", mode)
 	}
 	if version != c.PinnedTag() {
 		return fmt.Errorf("%s is pinned at %s, not %s", c.Name(), c.PinnedTag(), version)
@@ -123,12 +132,16 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 	if err != nil {
 		return err
 	}
-	if slices.Contains(tags, version) {
+	dry := mode == publishDry
+	if slices.Contains(tags, version) && !dry {
 		fmt.Printf("%s is already published; a published version never changes\n", ref(image.Name, version))
 	} else {
 		target := image.Name
 		set := func(key, value string) []string { return []string{"--set", target + "." + key + "=" + value} }
-		args := []string{"buildx", "bake", "--file", bakeFile, "--push"}
+		args := []string{"buildx", "bake", "--file", bakeFile}
+		if !dry {
+			args = append(args, "--push")
+		}
 		if !c.Pinned() {
 			args = append(args, set("args.VERSION", version)...)
 		}
@@ -168,7 +181,7 @@ func (p Publisher) deploy(c *Component, version, mode string) error {
 		return err
 	}
 	artifact := "oci://" + ref(pkg, version)
-	if slices.Contains(tags, version) {
+	if slices.Contains(tags, version) && mode != publishDry {
 		fmt.Printf("%s is already published; a published version never changes\n", artifact)
 	} else {
 		dir, err := os.MkdirTemp("", pkg)
@@ -181,6 +194,10 @@ func (p Publisher) deploy(c *Component, version, mode string) error {
 		}
 		if err := StampImages(dir, c, version); err != nil {
 			return err
+		}
+		if mode == publishDry {
+			fmt.Printf("a publish would push %s from %s\n", artifact, dir)
+			return nil
 		}
 		if err := p.Run(p.Root, "flux", "push", "artifact", artifact,
 			"--path", dir,

@@ -195,3 +195,83 @@ func TestAFileMovedBetweenComponentsRunsBoth(t *testing.T) {
 		t.Errorf("the checks that run: %v", got)
 	}
 }
+
+// operatorWorkflow is a component workflow with a check job and a
+// publish job.
+func operatorWorkflow(check, publish string) string {
+	return "# generated\nname: operator\njobs:\n  go:\n    runs-on: " + check + "\n  publish:\n    runs-on: " + publish + "\n"
+}
+
+// A change to the code that publishes runs a dry run of the publish in
+// the check stage, so broken publish code fails before a release needs
+// it.
+func TestAChangeToThePublishCodeRunsADryRunOfThePublish(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(r *repo)
+		dry  []string
+	}{
+		{"the publish job of a component's workflow", func(r *repo) {
+			r.write(".github/workflows/component-operator.yaml", operatorWorkflow("ubuntu", "ubuntu-next"))
+		}, []string{"operator"}},
+		{"another job of a component's workflow", func(r *repo) {
+			r.write(".github/workflows/component-operator.yaml", operatorWorkflow("ubuntu-next", "ubuntu"))
+		}, nil},
+		{"a component's publish call in the root workflow", func(r *repo) {
+			r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu")+"  operator-publish:\n    uses: ./.github/workflows/component-operator.yaml\n    with:\n      stage: other\n")
+		}, []string{"operator"}},
+		{"the publisher in ci, for every component that publishes through it", func(r *repo) {
+			r.write(publishCode, "package main // changed\n")
+		}, []string{"base", "operator"}},
+		{"another file of ci", func(r *repo) {
+			r.write("ci/plan.go", "package main // changed\n")
+		}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r, _ := generatedFixture(t)
+			r.write(".github/workflows/component-operator.yaml", operatorWorkflow("ubuntu", "ubuntu"))
+			r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu")+"  operator-publish:\n    uses: ./.github/workflows/component-operator.yaml\n    with:\n      stage: publish\n")
+			r.write("ci/package.toml", "[package]\nname = \"ci\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n")
+			r.write(publishCode, "package main\n")
+			r.write("ci/plan.go", "package main\n")
+			before := r.commit("the publish code")
+			c.edit(r)
+			r.commit("the change")
+			decisions := planPush(t, r, before)
+			var dry []string
+			for _, name := range []string{"base", "brand", "ci", "liken", "operator"} {
+				d := decisions[name]
+				if d.DryRun {
+					dry = append(dry, name)
+					if !d.Check || d.Publish != publishNone || !devVersion.MatchString(d.Version) && name != "liken" {
+						t.Errorf("%s: %+v", name, d)
+					}
+				}
+			}
+			if !reflect.DeepEqual(dry, c.dry) {
+				t.Errorf("the dry runs: %v, want %v", dry, c.dry)
+			}
+		})
+	}
+}
+
+// A run that publishes a component runs its publish for real, so it
+// runs no dry run of it.
+func TestARunThatPublishesRunsNoDryRun(t *testing.T) {
+	r := planFixture(t)
+	before := r.run("rev-parse", "HEAD")
+	r.write("operator/main.go", "package main // changed\n")
+	r.write(publishCode, "package main // changed\n")
+	r.commit("change the operator and the publisher")
+	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := decisions["operator"]; d.Publish != publishDev || d.DryRun {
+		t.Errorf("operator: %+v", d)
+	}
+	if d := decisions["base"]; d.Publish != publishNone || !d.DryRun {
+		t.Errorf("base: %+v", d)
+	}
+}

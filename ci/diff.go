@@ -26,6 +26,10 @@ type Diff struct {
 	// that changed: its own generated workflow, its call in the root
 	// workflow, or a local action that its workflow uses.
 	Workflows map[string]string
+	// Publishes maps each component whose publish code changed to the
+	// file that changed: the publish job of its workflow, or its publish
+	// call in the root workflow.
+	Publishes map[string]string
 	// Targets holds each image whose target in the bake file changed.
 	Targets map[string]bool
 	// SharedBake is true when the bake file changed outside its
@@ -45,7 +49,7 @@ var componentWorkflow = regexp.MustCompile(`^\.github/workflows/component-(.+)\.
 // runs each component whose workflow uses any local action, because
 // one action can use another.
 func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, error) {
-	d := Diff{Workflows: map[string]string{}, Targets: map[string]bool{}}
+	d := Diff{Workflows: map[string]string{}, Publishes: map[string]string{}, Targets: map[string]bool{}}
 	files, err := g.Changed(from, to)
 	if err != nil {
 		return d, err
@@ -61,6 +65,13 @@ func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, 
 			name := componentWorkflow.FindStringSubmatch(file)[1]
 			if _, ok := components[name]; ok {
 				d.Workflows[name] = file
+				changed, err := g.jobChanged(from, to, file, "publish")
+				if err != nil {
+					return d, err
+				}
+				if changed {
+					d.Publishes[name] = file
+				}
 			}
 		case strings.HasPrefix(file, ".github/actions/"):
 			action = file
@@ -106,10 +117,29 @@ func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string,
 		for _, job := range []string{name, name + "-publish"} {
 			if calls[0] == nil || calls[1] == nil || !bytes.Equal(calls[0][job], calls[1][job]) {
 				d.Workflows[name] = rootWorkflowFile
+				if job != name {
+					d.Publishes[name] = rootWorkflowFile
+				}
 			}
 		}
 	}
 	return nil
+}
+
+// jobChanged is true when the job of a workflow differs between the two
+// commits, or when the workflow does not parse at either one.
+func (g Git) jobChanged(from, to, file, job string) (bool, error) {
+	var jobs [2]map[string][]byte
+	for i, rev := range []string{from, to} {
+		text, found, err := g.Show(rev, file)
+		if err != nil {
+			return false, err
+		}
+		if found {
+			jobs[i] = workflowCalls(text)
+		}
+	}
+	return jobs[0] == nil || jobs[1] == nil || !bytes.Equal(jobs[0][job], jobs[1][job]), nil
 }
 
 // workflowCalls maps each job of a workflow to its text, or returns nil

@@ -227,3 +227,41 @@ func TestAPinnedComponentPublishesOnlyItsOwnTag(t *testing.T) {
 		}
 	}
 }
+
+// A dry run builds each image the way a publish would, with the same
+// tags and labels, and stamps the deploy artifact, but it pushes
+// nothing and moves no tag, even for a version that is published.
+func TestADryRunBuildsWhatAPublishWouldAndPushesNothing(t *testing.T) {
+	p, rec, c := publishFixture(t, map[string][]string{"operator": {"2026.10.02-001-dev-017-abcdef01"}})
+	if err := p.Publish(c, "2026.10.02-001-dev-017-abcdef01", publishDry); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.commands) != 2 {
+		t.Fatalf("commands:\n%s", strings.Join(rec.commands, "\n"))
+	}
+	for i, target := range []string{"operator", "operator-cli"} {
+		command := rec.commands[i]
+		if !strings.HasPrefix(command, "docker buildx bake --file docker-bake.hcl --set "+target+".args.VERSION=2026.10.02-001-dev-017-abcdef01") ||
+			!strings.HasSuffix(command, " "+target) || strings.Contains(command, "--push") {
+			t.Errorf("the build of %s: %s", target, command)
+		}
+	}
+}
+
+func TestADryRunRefusesAVersionOfTheWrongShape(t *testing.T) {
+	p, _, c := publishFixture(t, nil)
+	if err := p.Publish(c, "check", publishDry); err == nil {
+		t.Error("a dry run took a version that no publish takes")
+	}
+}
+
+func TestADryRunOfAPinnedComponentBuildsItsTagAndPushesNothing(t *testing.T) {
+	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260928-1"}})
+	if err := p.Publish(components["base"], "20260928-1", publishDry); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.commands) != 1 || strings.Contains(rec.commands[0], "--push") ||
+		!strings.Contains(rec.commands[0], "--set base.labels.sh.liken.recipe=sha256:") {
+		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
+	}
+}

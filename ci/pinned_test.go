@@ -99,7 +99,7 @@ func TestAPinnedTagThatIsNotPublishedBuildsAndPublishes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if d := decisions["base"]; !d.Check || d.Publish != c.publish || d.Version != "20260928-1" || d.Reason != "builds: 20260928-1 is not published yet" {
+			if d := decisions["base"]; !d.Check || d.Publish != c.publish || d.Version != "20260928-1" || !strings.HasPrefix(d.Reason, "builds: 20260928-1 is not published yet") {
 				t.Errorf("base: %+v", d)
 			}
 			if d := decisions["tool"]; d.Publish != publishNone || d.Version != "20260928-1" {

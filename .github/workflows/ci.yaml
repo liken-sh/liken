@@ -228,6 +228,7 @@ jobs:
     uses: ./.github/workflows/component-kubernetes.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs) }}
@@ -241,6 +242,7 @@ jobs:
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['audio-operator'].jobs) }}
@@ -255,6 +257,7 @@ jobs:
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
       jobs: '[]'
@@ -269,6 +272,7 @@ jobs:
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].jobs) }}
@@ -283,6 +287,7 @@ jobs:
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
       jobs: '[]'
@@ -297,6 +302,7 @@ jobs:
     uses: ./.github/workflows/component-brand.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['brand'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['brand'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['brand'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['brand'].jobs) }}
@@ -310,6 +316,7 @@ jobs:
     uses: ./.github/workflows/component-ci.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['ci'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['ci'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['ci'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ci'].jobs) }}
@@ -323,6 +330,7 @@ jobs:
     uses: ./.github/workflows/component-vulkan.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vulkan'].jobs) }}
@@ -337,6 +345,7 @@ jobs:
     uses: ./.github/workflows/component-vulkan.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].publish }}
       jobs: '[]'
@@ -351,6 +360,7 @@ jobs:
     uses: ./.github/workflows/component-vaapi.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vaapi'].jobs) }}
@@ -365,6 +375,7 @@ jobs:
     uses: ./.github/workflows/component-vaapi.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].publish }}
       jobs: '[]'
@@ -379,6 +390,7 @@ jobs:
     uses: ./.github/workflows/component-ffmpeg.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ffmpeg'].jobs) }}
@@ -393,6 +405,7 @@ jobs:
     uses: ./.github/workflows/component-ffmpeg.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].publish }}
       jobs: '[]'
@@ -407,6 +420,7 @@ jobs:
     uses: ./.github/workflows/component-weston.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['weston'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].jobs) }}
@@ -421,6 +435,7 @@ jobs:
     uses: ./.github/workflows/component-weston.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
       jobs: '[]'
@@ -435,6 +450,7 @@ jobs:
     uses: ./.github/workflows/component-display-operator.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['display-operator'].jobs) }}
@@ -449,6 +465,7 @@ jobs:
     uses: ./.github/workflows/component-display-operator.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
       jobs: '[]'
@@ -463,6 +480,7 @@ jobs:
     uses: ./.github/workflows/component-equipment-operator.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['equipment-operator'].jobs) }}
@@ -477,6 +495,7 @@ jobs:
     uses: ./.github/workflows/component-equipment-operator.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
       jobs: '[]'
@@ -491,6 +510,7 @@ jobs:
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['git-csi-driver'].jobs) }}
@@ -505,6 +525,7 @@ jobs:
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
       jobs: '[]'
@@ -519,6 +540,7 @@ jobs:
     uses: ./.github/workflows/component-media-screen.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-screen'].jobs) }}
@@ -532,6 +554,7 @@ jobs:
     uses: ./.github/workflows/component-library-operator.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['library-operator'].jobs) }}
@@ -546,6 +569,7 @@ jobs:
     uses: ./.github/workflows/component-library-operator.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
       jobs: '[]'
@@ -560,6 +584,7 @@ jobs:
     uses: ./.github/workflows/component-liken.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['liken'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['liken'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['liken'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['liken'].jobs) }}
@@ -573,6 +598,7 @@ jobs:
     uses: ./.github/workflows/component-liken.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['liken'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['liken'].publish }}
       jobs: '[]'
@@ -588,6 +614,7 @@ jobs:
     uses: ./.github/workflows/component-mpv.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['mpv'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['mpv'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].jobs) }}
@@ -602,6 +629,7 @@ jobs:
     uses: ./.github/workflows/component-mpv.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['mpv'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
       jobs: '[]'
@@ -616,6 +644,7 @@ jobs:
     uses: ./.github/workflows/component-media-operator.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].jobs) }}
@@ -630,6 +659,7 @@ jobs:
     uses: ./.github/workflows/component-media-operator.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
       jobs: '[]'
@@ -644,6 +674,7 @@ jobs:
     uses: ./.github/workflows/component-people-operator.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].jobs) }}
@@ -658,6 +689,7 @@ jobs:
     uses: ./.github/workflows/component-people-operator.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
       jobs: '[]'
@@ -672,6 +704,7 @@ jobs:
     uses: ./.github/workflows/component-per-node-csi-driver.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].jobs) }}
@@ -686,6 +719,7 @@ jobs:
     uses: ./.github/workflows/component-per-node-csi-driver.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
       jobs: '[]'

@@ -152,6 +152,7 @@ jobs:
     uses: ./.github/workflows/component-{% .Name %}.yaml
     with:
       stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].dryrun }}
       version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].jobs) }}{% if .Images %}
@@ -166,6 +167,7 @@ jobs:
     uses: ./.github/workflows/component-{% .Name %}.yaml
     with:
       stage: publish
+      dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
       jobs: '[]'{% if .Images %}

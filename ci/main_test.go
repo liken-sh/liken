@@ -145,7 +145,7 @@ func TestThePlanWritesItsDecisionsAndItsDryRun(t *testing.T) {
 		!reflect.DeepEqual(d.Images, []ImageRun{{Image: "operator", Load: true}}) {
 		t.Errorf("operator: %+v", d)
 	}
-	if !strings.Contains(output, `"base":{"check":false,"publish":"none","version":"","jobs":[],"images":[]}`) {
+	if !strings.Contains(output, `"base":{"check":false,"publish":"none","version":"","jobs":[],"images":[],"dryrun":false}`) {
 		t.Errorf("a component that runs nothing lacks empty lists: %s", output)
 	}
 	for _, want := range []string{

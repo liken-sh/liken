@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -53,7 +54,13 @@ const (
 	publishNone    = "none"
 	publishDev     = "dev"
 	publishRelease = "release"
+	// publishDry builds what a publish would push, and pushes nothing.
+	publishDry = "dry"
 )
+
+// publishCode is the file that holds the code of every component's
+// publish, other than the OS's.
+const publishCode = "ci/publish.go"
 
 // A Decision is what the run does with one component.
 type Decision struct {
@@ -76,6 +83,9 @@ type Decision struct {
 	// is true.
 	Jobs   []string   `json:"jobs"`
 	Images []ImageRun `json:"images"`
+	// DryRun is true when the check stage runs the publish job in its
+	// dry mode: its code changed, and the run does not publish.
+	DryRun bool `json:"dryrun"`
 }
 
 // VersionsFunc lists the published versions of a component.
@@ -268,6 +278,9 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 		if d.Check {
 			p.selectJobs(c, &d, sel, all != "")
 		}
+		if err := p.dryRun(c, &d, diff, all != "", e.Head); err != nil {
+			return nil, err
+		}
 		decisions[c.Name()] = d
 	}
 	return decisions, nil
@@ -289,4 +302,37 @@ func (p Planner) selectJobs(c *Component, d *Decision, sel selector, all bool) {
 	if len(d.Jobs) == 0 && len(d.Images) == 0 {
 		d.Check, d.Reason = false, "no job or image reads the change; "+d.Reason
 	}
+}
+
+// dryRun runs the component's publish job in its dry mode when the
+// code of that publish changed and the run does not publish the
+// component, and when the run has no commit to compare with. A dry run
+// of a tracked component takes a development version, so the publish
+// sees a version of the shape it sees on main.
+func (p Planner) dryRun(c *Component, d *Decision, diff Diff, all bool, head string) error {
+	changed := diff.Publishes[c.Name()]
+	if slices.Contains(diff.Files, publishCode) && !c.Outputs.Channel {
+		changed = publishCode
+	}
+	if all {
+		changed = "every job runs"
+	}
+	if changed == "" || d.Publish != publishNone || !c.HasOutputs() {
+		return nil
+	}
+	d.DryRun, d.Check = true, true
+	d.Reason += "; a dry run of the publish, because of " + changed
+	if d.Version != "" || c.Outputs.Channel {
+		return nil
+	}
+	commit, err := p.Git.Commit(head)
+	if err != nil {
+		return err
+	}
+	tag, count, err := p.Git.Describe(commit)
+	if err != nil {
+		return err
+	}
+	d.Version = DevVersion(tag, count, commit)
+	return nil
 }

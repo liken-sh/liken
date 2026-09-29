@@ -22,6 +22,12 @@ on:
       stage:
         type: string
         required: true
+      # true when the check stage also runs the publish job in its dry
+      # mode, because the code of the publish changed: it builds what a
+      # publish would push, and it pushes nothing.
+      dryrun:
+        type: boolean
+        required: true
       # The version the outputs get: the release tag, a development
       # version, a pinned component's own tag, or empty when the run
       # publishes nothing.
@@ -206,7 +212,7 @@ jobs:
           if-no-files-found: ignore
 
   publish:
-    if: ${{ inputs.stage == 'publish' }}
+    if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
     timeout-minutes: 40
     # The channel's key comes from the repository secrets that
@@ -226,18 +232,32 @@ jobs:
       # so it is a new build, and the smoke drill boots it before a byte
       # leaves the runner. Releases are immutable, so this is the last
       # point where a bundle that cannot boot is caught.
+      #
+      # A dry run builds under today's date and serial 000, the serial
+      # of the lab's bundle, which no publish ever carries.
       - name: build and boot the release
         working-directory: liken
         run: |
-          make release VERSION="${{ inputs.version }}"
+          version="${{ inputs.version }}"
+          if [ "${{ inputs.dryrun }}" = true ]; then version="$(date -u +%Y.%m.%d)-000"; fi
+          make release VERSION="$version"
           make smoke-uefi
 
-      - uses: actions/download-artifact@v8
+      # A dry run has no channel key, so it uploads nothing, and it
+      # checks only that the script parses.
+      - name: check the publish script
+        if: ${{ inputs.dryrun }}
+        working-directory: liken
+        run: bash -n releases/publish.sh
+
+      - if: ${{ !inputs.dryrun }}
+        uses: actions/download-artifact@v8
         with:
           name: coverage-liken-checks
           path: liken
 
       - name: publish to the channel
+        if: ${{ !inputs.dryrun }}
         working-directory: liken
         run: releases/publish.sh "${{ inputs.version }}"
 

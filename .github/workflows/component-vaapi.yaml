@@ -23,6 +23,12 @@ on:
       stage:
         type: string
         required: true
+      # true when the check stage also runs the publish job in its dry
+      # mode, because the code of the publish changed: it builds what a
+      # publish would push, and it pushes nothing.
+      dryrun:
+        type: boolean
+        required: true
       # The version the outputs get: the release tag, a development
       # version, a pinned component's own tag, or empty when the run
       # publishes nothing.
@@ -137,7 +143,7 @@ jobs:
         run: bash "${{ matrix.smoke }}" "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}"
 
   publish:
-    if: ${{ inputs.stage == 'publish' }}
+    if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -171,7 +177,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      # A dry run pushes nothing, so it needs no login.
+      - if: ${{ !inputs.dryrun }}
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -183,7 +191,7 @@ jobs:
       # must never name an image that is not pushed yet.
       - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component vaapi -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"
+        run: go run . publish -root .. -component vaapi -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6

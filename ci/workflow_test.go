@@ -407,7 +407,54 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 		t.Errorf("app's publish call is %v", publish)
 	}
 	component := workflowJobs(t, files[".github/workflows/component-app.yaml"])
-	if needs, ok := component["publish"]["needs"]; ok || component["publish"]["if"] != "${{ inputs.stage == 'publish' }}" {
+	if needs, ok := component["publish"]["needs"]; ok || component["publish"]["if"] != "${{ inputs.stage == 'publish' || inputs.dryrun }}" {
 		t.Errorf("the publish job needs %v, if %v", needs, component["publish"]["if"])
+	}
+}
+
+// The check stage runs the publish job in its dry mode when the plan
+// asks for a dry run. The dry run logs in to nothing, and the OS's dry
+// run builds and boots a release under the lab's serial and uploads
+// nothing.
+func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\n",
+		"os/package.toml":  "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := workflowJobs(t, files[".github/workflows/ci.yaml"])
+	if with := calls["app"]["with"].(map[string]any); with["dryrun"] != "${{ fromJSON(needs.plan.outputs.components)['app'].dryrun }}" {
+		t.Errorf("the check call passes dryrun %v", with["dryrun"])
+	}
+	if with := calls["app-publish"]["with"].(map[string]any); with["dryrun"] != false {
+		t.Errorf("the publish call passes dryrun %v", with["dryrun"])
+	}
+	app := string(files[".github/workflows/component-app.yaml"])
+	for _, want := range []string{
+		"  publish:\n    if: ${{ inputs.stage == 'publish' || inputs.dryrun }}\n",
+		"      - if: ${{ !inputs.dryrun }}\n        uses: docker/login-action@v3",
+		`-mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"`,
+	} {
+		if !strings.Contains(app, want) {
+			t.Errorf("the app's workflow lacks %q", want)
+		}
+	}
+	os := string(files[".github/workflows/component-os.yaml"])
+	for _, want := range []string{
+		`if [ "${{ inputs.dryrun }}" = true ]; then version="$(date -u +%Y.%m.%d)-000"; fi`,
+		"      - if: ${{ !inputs.dryrun }}\n        uses: actions/download-artifact@v8",
+		"      - name: publish to the channel\n        if: ${{ !inputs.dryrun }}\n",
+		"      - name: check the publish script\n        if: ${{ inputs.dryrun }}\n",
+	} {
+		if !strings.Contains(os, want) {
+			t.Errorf("the OS's workflow lacks %q", want)
+		}
 	}
 }

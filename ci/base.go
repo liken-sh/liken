@@ -78,7 +78,7 @@ func (p Planner) Comparisons(e Event) ([]comparison, string) {
 // readDiffs reads the diff with each commit and joins them: a component
 // runs when any one of them reaches it.
 func (p Planner) readDiffs(list []comparison, head string) (Diff, error) {
-	joined := Diff{Workflows: map[string]string{}, Targets: map[string]bool{}}
+	joined := Diff{Workflows: map[string]string{}, Publishes: map[string]string{}, Targets: map[string]bool{}}
 	for _, c := range list {
 		d, err := p.Git.ReadDiff(p.Components, c.Commit, head)
 		if err != nil {
@@ -87,6 +87,9 @@ func (p Planner) readDiffs(list []comparison, head string) (Diff, error) {
 		joined.Files = append(joined.Files, d.Files...)
 		for k, v := range d.Workflows {
 			joined.Workflows[k] = v
+		}
+		for k, v := range d.Publishes {
+			joined.Publishes[k] = v
 		}
 		for k := range d.Targets {
 			joined.Targets[k] = true
