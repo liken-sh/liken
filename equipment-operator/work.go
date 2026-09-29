@@ -38,13 +38,15 @@ func goWork(ctx context.Context, work func()) {
 }
 
 // workStopWait bounds the wait for the counted goroutines at a
-// shutdown. Each one ends on its context. A Receiver unit's wait after a
-// 429 ends with its context too (withWaits), so the wait here is for a
-// write already sent. Such a write ends within the shared client's
-// request timeout, 30 seconds, which is longer than this wait: a write
-// that the API server holds past it makes serve answer
-// errStillWriting, and the process leaves its Lease to expire. It is a variable so a
-// test holds it short.
+// shutdown. Each one ends on its context, and a Receiver unit's wait
+// after a 429 ends with that context too (withWaits). What is left is a
+// goroutine that is sending a request: one sent before the context
+// ended, or one a goroutine sends before it reads that its context
+// ended. Such a request ends within the shared client's request
+// timeout, 30 seconds, which is longer than this wait. A request that
+// the API server holds past this wait makes serve answer
+// errStillWriting, and the process leaves its Lease to expire. It is a
+// variable so a test holds it short.
 var workStopWait = 5 * time.Second
 
 // errStillWriting says that a goroutine that can write did not stop

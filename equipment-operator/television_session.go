@@ -59,15 +59,15 @@ var (
 // client waits for at most ten seconds, and stop ends the wait sooner.
 // An event whose writes still fail is held in retries and tried again
 // on each later pass, so a refusal delays a TV's session and never
-// drops it.
+// drops it. After stop, a list or a write sends nothing.
 type televisionSessions struct {
 	client *Client
 	// televisions holds the Television watch's store, which list reads.
 	televisions *watchStore
-	// ctx bounds the waits for a 429, and stop ends it, so a stop never
-	// waits for an API server that is not ready. A request already sent
-	// runs to its answer, because the Deployment releases its Lease after
-	// its last write (work.go).
+	// ctx is the sessions' life, and stop ends it. After it ends, a list
+	// or a write sends nothing, and a wait for a 429 ends at once. A
+	// request already sent runs to its answer, because the Deployment
+	// releases its Lease after its last write (work.go).
 	ctx    context.Context
 	cancel context.CancelFunc
 	mutex  sync.Mutex
@@ -131,18 +131,25 @@ func (t *televisionSessions) retry() {
 }
 
 // list reads the Televisions, and waits out a 429 for up to the shared
-// client's ten seconds, or until stop. A session event reads the
-// status.session it wrote on the event before, and the store can hold
-// the copy from before that write until the write's own event arrives,
-// so the read replaces such a copy with the API server's
-// (objectcache.go).
+// client's ten seconds, or until stop. After stop it sends nothing and
+// answers the stop. A session event reads the status.session it wrote
+// on the event before, and the store can hold the copy from before that
+// write until the write's own event arrives, so the read replaces such
+// a copy with the API server's (objectcache.go).
 func (t *televisionSessions) list() (*TelevisionList, error) {
+	if err := t.ctx.Err(); err != nil {
+		return nil, err
+	}
 	return readTelevisions(t.client.withWaits(t.ctx), t.televisions)
 }
 
 // apply writes one Television's status.session, and waits out a 429
-// for up to the shared client's ten seconds, or until stop.
+// for up to the shared client's ten seconds, or until stop. After stop
+// it sends nothing and answers the stop.
 func (t *televisionSessions) apply(name string, session *TelevisionSession) error {
+	if err := t.ctx.Err(); err != nil {
+		return err
+	}
 	return ApplyTelevisionSession(t.client.withWaits(t.ctx), name, session)
 }
 
@@ -497,8 +504,11 @@ func (t *televisionSessions) remove(player string) bool {
 }
 
 // stop drops every removal that waits, at operator shutdown. It ends
-// the waits for a 429 before it takes the mutex, because a write that
-// waits holds the mutex.
+// the sessions' context before it takes the mutex, because a write that
+// waits holds the mutex. A write that waits out a 429 then stops
+// waiting, and every later list and write sends nothing, so stop waits
+// for at most the one request already sent, which the shared client's
+// request timeout bounds.
 func (t *televisionSessions) stop() {
 	if t == nil {
 		return

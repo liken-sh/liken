@@ -6,6 +6,8 @@ package main
 // try could not write is written on a later pass.
 
 import (
+	"context"
+	"errors"
 	"testing"
 )
 
@@ -61,4 +63,23 @@ func TestARefusedSessionWriteIsWrittenOnALaterPass(t *testing.T) {
 
 	television, _ := api.television("lounge")
 	mustDeepEqual(t, television.Status.Session, adoptedSession)
+}
+
+// A stop ends the sessions' requests: a list or a write after stop
+// sends nothing and answers the stop, so a lift whose timer fires at a
+// shutdown writes nothing after the Deployment gave up its Lease.
+func TestNoSessionRequestLeavesAfterStop(t *testing.T) {
+	t.Parallel()
+	api := &cannedAPI{}
+	sessions := newTelevisionSessions(testAPIClient(t, api.handler()))
+
+	sessions.stop()
+
+	if _, err := sessions.list(); !errors.Is(err, context.Canceled) {
+		t.Errorf("list after stop answered %v, want the stop", err)
+	}
+	if err := sessions.apply("lounge", adoptedSession); !errors.Is(err, context.Canceled) {
+		t.Errorf("apply after stop answered %v, want the stop", err)
+	}
+	mustMatch(t, api.sent(), 0)
 }
