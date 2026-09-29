@@ -12,7 +12,7 @@ func TestTheRecordGivesEachComponentItsVersionAtTheTag(t *testing.T) {
 		"app":  {"2026.09.27-001", "2026.10.02-001", "2026.10.03-001", "2026.10.02-001-dev-001-abcdef01"},
 		"base": {"2026.09.20-001", "latest"},
 	}
-	entries, err := Record(components, func(c *Component) ([]string, error) { return published[c.Name()], nil }, "2026.10.02-001")
+	entries, err := Record(components, func(c *Component) ([]string, error) { return published[c.Name()], nil }, nil, "2026.10.02-001", "")
 	if err != nil {
 		t.Fatal(err)
 	}

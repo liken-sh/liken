@@ -12,21 +12,51 @@ type RecordEntry struct {
 	// Released is true when this tag published the version.
 	Released bool `yaml:"released"`
 	// Pinned is true for a pinned component, whose version is the tag
-	// in its package.toml at the release's commit.
-	Pinned bool `yaml:"pinned"`
+	// in its package.toml at the release's commit. Published is true
+	// when that tag is on ghcr, and Released when the image under it
+	// was built from the tag's commit.
+	Pinned    bool `yaml:"pinned"`
+	Published bool `yaml:"published"`
+}
+
+// PinnedCommitFunc reads the commit that a pinned component's
+// published tag was built from, from the image's
+// org.opencontainers.image.revision label. published is false when the
+// tag is not on ghcr.
+type PinnedCommitFunc func(*Component) (commit string, published bool, err error)
+
+// PinnedCommit reads the revision label of the component's first
+// image at its pinned tag.
+func (p Published) PinnedCommit(c *Component) (string, bool, error) {
+	labels, err := p.Registry.Labels(c.Outputs.Images[0].Name, c.PinnedTag())
+	if err != nil || labels == nil {
+		return "", false, err
+	}
+	return labels["org.opencontainers.image.revision"], true, nil
 }
 
 // Record lists every component that publishes, with its version at
 // the tag: the newest release at or before the tag. A component that
-// did not change keeps the version an earlier tag gave it.
-func Record(components map[string]*Component, versions VersionsFunc, tag string) ([]RecordEntry, error) {
+// did not change keeps the version an earlier tag gave it. A pinned
+// component's version is its tag at the commit, and the entry says
+// whether the image under that tag was built from the commit.
+//
+// A push to main publishes a new pinned tag before the release tag
+// does, from the same commit, so "built from this tag's commit" is
+// what the record can prove, not which run pushed it.
+func Record(components map[string]*Component, versions VersionsFunc, pinned PinnedCommitFunc, tag, commit string) ([]RecordEntry, error) {
 	var entries []RecordEntry
 	for _, c := range sortedComponents(components) {
 		if !c.HasOutputs() {
 			continue
 		}
 		if c.Pinned() {
-			entries = append(entries, RecordEntry{Component: c.Name(), Version: c.PinnedTag(), Pinned: true})
+			built, published, err := pinned(c)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", c.Name(), err)
+			}
+			entries = append(entries, RecordEntry{Component: c.Name(), Version: c.PinnedTag(), Pinned: true,
+				Published: published, Released: published && built == commit})
 			continue
 		}
 		published, err := versions(c)
@@ -53,7 +83,14 @@ func RecordNotes(tag string, entries []RecordEntry, catalogDigest string, change
 	for _, e := range entries {
 		version, note := e.Version, "unchanged"
 		if e.Pinned {
-			note = "pinned"
+			switch {
+			case !e.Published:
+				note = "pinned, not published yet"
+			case e.Released:
+				note = "pinned, built from this tag's commit"
+			default:
+				note = "pinned, unchanged"
+			}
 		} else if version == "" {
 			version, note = "none", "not published yet"
 		} else if e.Released {

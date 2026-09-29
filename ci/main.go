@@ -151,7 +151,12 @@ func (w World) record(root string, components map[string]*Component, tag string)
 		return err
 	}
 	p := w.Published
-	entries, err := Record(components, p.Versions, tag)
+	git := Git{Dir: root}
+	commit, err := git.Commit(tag)
+	if err != nil {
+		return err
+	}
+	entries, err := Record(components, p.Versions, p.PinnedCommit, tag, commit)
 	if err != nil {
 		return err
 	}
@@ -165,7 +170,6 @@ func (w World) record(root string, components map[string]*Component, tag string)
 			digest = r.Digest
 		}
 	}
-	git := Git{Dir: root}
 	var changes []string
 	previous, _, err := git.Describe(tag + "^")
 	subjects, logErr := "", error(nil)

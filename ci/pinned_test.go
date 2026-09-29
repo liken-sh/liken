@@ -123,15 +123,28 @@ func TestARecipeThatChangedWithNoNewRevisionFailsThePlan(t *testing.T) {
 	}
 }
 
-func TestTheRecordNamesEachPinnedTag(t *testing.T) {
+func TestTheRecordSaysWhatHappenedToEachPinnedTag(t *testing.T) {
 	r := pinnedFixture(t)
+	r.write("app/package.toml", "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 4\n[[outputs.images]]\nname = \"app\"\n")
+	r.write("app/Dockerfile", "FROM scratch\n")
+	r.commit("add a pinned app")
 	p := r.pinnedPlanner(nil, nil)
-	entries, err := Record(p.Components, p.Versions, "2026.10.02-001")
+	built := map[string]string{"tool": "the tag's commit", "base": "an earlier commit"}
+	pinned := func(c *Component) (string, bool, error) {
+		commit, ok := built[c.Name()]
+		return commit, ok, nil
+	}
+	entries, err := Record(p.Components, p.Versions, pinned, "2026.10.02-001", "the tag's commit")
 	if err != nil {
 		t.Fatal(err)
 	}
 	notes := RecordNotes("2026.10.02-001", entries, "", nil)
-	for _, want := range []string{"| `base` | `20260928-1` | pinned |", "| `operator` | `2026.09.28-001` | unchanged |"} {
+	for _, want := range []string{
+		"| `tool` | `20260928-1` | pinned, built from this tag's commit |",
+		"| `base` | `20260928-1` | pinned, unchanged |",
+		"| `app` | `20260928-4` | pinned, not published yet |",
+		"| `operator` | `2026.09.28-001` | unchanged |",
+	} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("the notes lack %q:\n%s", want, notes)
 		}
