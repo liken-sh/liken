@@ -876,7 +876,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player resolves no stream at all."
+            "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -985,7 +985,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player resolves no stream at all."
+            "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1105,7 +1105,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player resolves no stream at all."
+            "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1214,7 +1214,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player resolves no stream at all."
+            "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1334,7 +1334,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player resolves no stream at all."
+            "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1443,7 +1443,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player resolves no stream at all."
+            "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."

@@ -118,8 +118,8 @@ func recordingFFmpeg(t *testing.T, arguments string) string {
 
 // Every answer a sibling can give, and the status, problem type, and
 // detail the client of this API reads instead: a 400 and a 404 relay
-// the upstream's own problem, a 503 relays its Retry-After, and an
-// answer that is not a problem document is 502.
+// the upstream's own problem, a 409 relays as away, a 503 relays its
+// Retry-After, and an answer that is not a problem document is 502.
 func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 	rows := []struct {
 		name        string
@@ -152,6 +152,12 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 			detail: "the output is being captured", relayed: "9",
 		},
 		{
+			name: "a screen with no panel", status: http.StatusConflict,
+			contentType: problemContentType,
+			body:        `{"type":"https://display.liken.sh/problems/no-panel","title":"No panel","status":409,"detail":"no panel on HDMI-A-1"}`,
+			want:        http.StatusConflict, kind: problemAway, detail: "no panel on HDMI-A-1",
+		},
+		{
 			name: "a compositor that denied the capture", status: http.StatusInternalServerError,
 			contentType: problemContentType,
 			body:        `{"type":"https://display.liken.sh/problems/capture-denied","title":"Denied","status":500,"detail":"unauthorized"}`,
@@ -179,9 +185,7 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 			mustMatch(t, document.Type, row.kind)
 			mustMatch(t, document.Detail, row.detail)
 			mustMatch(t, strings.HasPrefix(document.Upstream, fixture.display.server.URL), true)
-			if row.relayed != "" {
-				mustMatch(t, recorder.Header().Get("Retry-After"), row.relayed)
-			}
+			mustMatch(t, recorder.Header().Get("Retry-After"), row.relayed)
 		})
 	}
 }

@@ -310,7 +310,8 @@ func openAPIResponses(template string) map[string]openAPIResponse {
 				"and one audio track per Sink in spec.sinks order.",
 		}
 		responses["307"] = openAPIResponse{Description: "The stream's route, returned when this Player resolves exactly one stream."}
-		responses["409"] = openAPIResponse{Description: "The Player resolves no stream at all."}
+		responses["409"] = openAPIResponse{Description: "The Player resolves no stream at all, " +
+			"or an upstream reports its Display, Sink, or Source away."}
 	}
 	responses["400"] = openAPIResponse{Description: "A query the grammar refuses, or an upstream 400."}
 	responses["404"] = openAPIResponse{Description: "No Player of that name, or an upstream 404."}

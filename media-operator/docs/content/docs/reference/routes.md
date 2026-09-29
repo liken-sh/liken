@@ -413,7 +413,7 @@ The Player's screen and sound in one stream, in the format chosen by Accept.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player resolves no stream at all. |
+| 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -448,7 +448,7 @@ The Player's screen and sound in one stream, in the format chosen by Accept. The
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player resolves no stream at all. |
+| 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -493,7 +493,7 @@ The Player's screen and sound in one stream, as video/matroska.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player resolves no stream at all. |
+| 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -528,7 +528,7 @@ The Player's screen and sound in one stream, as video/matroska. The headers alon
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player resolves no stream at all. |
+| 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -573,7 +573,7 @@ The Player's screen and sound in one stream, as video/mp4.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player resolves no stream at all. |
+| 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -608,7 +608,7 @@ The Player's screen and sound in one stream, as video/mp4. The headers alone, wi
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player resolves no stream at all. |
+| 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |

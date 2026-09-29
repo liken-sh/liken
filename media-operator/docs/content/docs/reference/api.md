@@ -280,7 +280,7 @@ request id, which the API's log line also has.
 | 404 | no such `Player`, or an upstream 404 | an `upstream` member when relayed |
 | 405 | a method other than GET, HEAD, or OPTIONS | `Allow` |
 | 406 | `Accept` excludes the extension's type, or nothing offered is acceptable | an `acceptable` member |
-| 409 | no `status.screen`, or no running `Play` for an audio aspect | a `detail` that says what to do |
+| 409 | no `status.screen`, no running `Play` for an audio aspect, or an upstream 409 on a composed stream | a `detail` that says what to do, and an `upstream` member when relayed |
 | 502 | an upstream answer that is not HTTP or not a problem document | type `upstream-failed` |
 | 503 | an upstream 503, a refused connection, or this API's own composition limit | `Retry-After: 5`, or the upstream's own value relayed |
 | 504 | upstream headers take more than 10 s plus `begin` | |
@@ -301,7 +301,7 @@ The problem types are shared with the display and audio APIs.
 | `https://liken.sh/problems/not-acceptable` | nothing the route serves is acceptable | 406 |
 | `https://liken.sh/problems/capture-busy` | an upstream capture is busy, or this API is composing all it can at once | 503 |
 | `https://liken.sh/problems/upstream-failed` | an upstream answered something this API cannot relay | 502 |
-| `https://liken.sh/problems/away` | a sibling API reports the object away. A client meets it after a redirect | 409 |
+| `https://liken.sh/problems/away` | a sibling API reports the object away, for example a `Display` with no panel on its connector. A client meets the sibling's own problem after a redirect, and this type on a composed stream, with the sibling's `detail` | 409 |
 
 ## Discovery
 

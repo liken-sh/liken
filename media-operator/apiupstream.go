@@ -159,8 +159,13 @@ func (u *upstreamClient) lateFault(name, target string, headerTimeout time.Durat
 
 // relayFault maps a sibling's status to this API's own: a 400 and a
 // 404 relay as themselves with the upstream's problem as the detail,
-// a 503 relays as capture-busy with the upstream's Retry-After, and
-// any other status is a 502. An answer that is not a problem document
+// a 409 relays as away, a 503 relays as capture-busy with the
+// upstream's Retry-After, and any other status is a 502.
+//
+// A sibling answers 409 only for an object that is away: a Display
+// with no panel on its connector, or a Sink or Source with no node.
+// No retry clears it, so the relay carries no Retry-After, and the
+// sibling's detail says what a person does about it. An answer that is not a problem document
 // is a 502 whatever its status, because this API cannot say what it
 // means and must not pass it off as its own.
 func relayFault(response *http.Response, target string) *upstreamFault {
@@ -181,6 +186,12 @@ func relayFault(response *http.Response, target string) *upstreamFault {
 		return &upstreamFault{
 			status: http.StatusNotFound, kind: aboutBlank,
 			detail: detail, upstream: target,
+		}
+	case response.StatusCode == http.StatusConflict:
+		return &upstreamFault{
+			status: http.StatusConflict, kind: problemAway,
+			title: "The upstream object is away", detail: detail,
+			upstream: target,
 		}
 	case response.StatusCode == http.StatusServiceUnavailable:
 		after := response.Header.Get("Retry-After")
