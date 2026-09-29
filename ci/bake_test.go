@@ -34,8 +34,14 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
     VERSION = "20260928"
   }
   tags       = ["ghcr.io/liken-sh/base:20260928-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/base:buildcache"]
-  cache-to   = CACHE_WRITE == "base" ? ["type=registry,ref=ghcr.io/liken-sh/base:buildcache,mode=max,ignore-error=true"] : []
+  cache-from = concat(
+    ["type=registry,ref=ghcr.io/liken-sh/base:buildcache"],
+    GHA_CACHE != "" ? ["type=gha,scope=base"] : [],
+  )
+  cache-to = concat(
+    CACHE_WRITE == "base" ? ["type=registry,ref=ghcr.io/liken-sh/base:buildcache,mode=max,ignore-error=true"] : [],
+    GHA_CACHE == "base" ? ["type=gha,scope=base,mode=max,ignore-error=true"] : [],
+  )
 }`,
 		`target "app" {
   context    = "app"

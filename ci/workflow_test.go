@@ -145,6 +145,7 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"- image: app-cli\n            load: false",
 		"smoke: 'app/smoke/app.sh'",
 		"targets: ${{ matrix.image }}",
+		"GHA_CACHE=${{ matrix.image }}",
 		"fluxcd/flux2/action@v2.9.5",
 		"go run . publish -root .. -component app",
 	} {
