@@ -19,7 +19,9 @@ published.
   a `409`. It imports nothing from `k8s.io` either, so the pod build of
   `library-operator` can link it.
 - `informer` watches a collection through client-go's reflector and
-  keeps a copy of it, and answers a pass's reads from that copy. It
+  keeps a copy of it, and answers a pass's reads from that copy. A
+  watch can read a kind that another operator defines, and that the
+  cluster does not serve, as an empty collection until it arrives. It
   links only `tools/cache`, `dynamic`, and `rest` from client-go.
 
 The `operators` skill in `.agents/skills` at the top of the repository

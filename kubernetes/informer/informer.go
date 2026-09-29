@@ -24,6 +24,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,8 +91,20 @@ type Options struct {
 	// first one it accepted. The API server ends a watch on its own
 	// schedule, so a low rate is normal, and a high rate says the stream
 	// breaks faster than the watch can use it. A refused watch opened
-	// nothing, so it does not count.
+	// nothing, so it does not count, and neither does the quiet stream
+	// of an absent collection.
 	Reopened func()
+
+	// Absent, when it is not nil, names the refusals that mean the
+	// collection is not there to watch, such as the 404 of a kind whose
+	// definition another operator installs. The copy then holds an empty
+	// collection, and the watch finds the collection when it arrives
+	// (absent.go).
+	Absent func(error) bool
+
+	// AbsentRecheck is how long the watch of an absent collection waits
+	// before it asks the API server again. Zero means five minutes.
+	AbsentRecheck time.Duration
 }
 
 // Collection is the copy of one watched collection.
@@ -138,14 +151,21 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 		list.FieldSelector = source.FieldSelector
 	}
 	var opened atomic.Int64
+	absent := options.absence()
 	lister := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, list metav1.ListOptions) (runtime.Object, error) {
 			scope(&list)
-			return collection.List(ctx, list)
+			return absent.list(collection.List(ctx, list))
 		},
 		WatchFuncWithContext: func(ctx context.Context, list metav1.ListOptions) (watch.Interface, error) {
 			scope(&list)
 			stream, err := collection.Watch(ctx, list)
+			if quiet, ok := absent.watch(ctx, list, err); ok {
+				// The quiet stream stands in for an accepted watch of an
+				// empty collection, so the empty copy answers a pass.
+				c.noteWatch(nil)
+				return quiet, nil
+			}
 			c.noteWatch(err)
 			// The first accepted watch is the streaming list of the first
 			// read, or the watch after a plain list.
