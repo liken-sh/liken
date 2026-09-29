@@ -286,7 +286,7 @@ spec:
           # every process on the cluster network this port, and the
           # binary carries it as the default of its --metrics-address
           # argument. This entry names the port, so a PodMonitor
-          # selects it by name (monitoring/podmonitors.yaml). This
+          # selects it by name (deploy/monitoring/podmonitors.yaml). This
           # pod has its own port space, so it shares the number with
           # no other pod on the node. To turn the listener off, add
           # `args: ["--metrics-address="]` to this container.

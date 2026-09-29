@@ -100,6 +100,13 @@ type Outputs struct {
 	// Channel is true for a component that publishes to the release
 	// channel at releases.liken.sh.
 	Channel bool `toml:"channel"`
+	// Exclude names paths, relative to the component, that no output
+	// is built from, in addition to the paths in notOutputs that every
+	// component leaves out. A change to one runs the component's jobs,
+	// but it does not release the component or reach its dependents.
+	// A path that ends in a slash is a directory and covers every file
+	// under it. Any other path is one file.
+	Exclude []string `toml:"exclude"`
 }
 
 // An Image is one image on ghcr.io/liken-sh.
@@ -230,6 +237,9 @@ func (c *Component) validate(path string) error {
 	if err := c.validatePin(path); err != nil {
 		return err
 	}
+	if err := c.validateExclude(path); err != nil {
+		return err
+	}
 	jobs := map[string]bool{}
 	for _, job := range c.Jobs {
 		if job.Name == "" || (job.Run == "") != (job.Toolchain == "prek") {
@@ -295,6 +305,28 @@ func (c *Component) validatePin(path string) error {
 		return fmt.Errorf("%s: the tag %q looks like a release version; write a date as YYYYMMDD", path, c.PinnedTag())
 	case len(c.Outputs.Images) == 0 || c.Outputs.Deploy != "" || c.Outputs.Channel:
 		return fmt.Errorf("%s: a pinned component publishes images, and nothing else", path)
+	}
+	return nil
+}
+
+// validateExclude checks that each excluded path is a file or a
+// directory in the component, in the form that a changed path has
+// relative to the component. A path in any other form matches no
+// changed file, and the component would release on every change to
+// the files it means to leave out.
+func (c *Component) validateExclude(path string) error {
+	for _, excluded := range c.Outputs.Exclude {
+		name := strings.TrimSuffix(excluded, "/")
+		if !filepath.IsLocal(name) || filepath.ToSlash(filepath.Clean(name)) != name {
+			return fmt.Errorf("%s: the excluded path %q must be a path inside the component, with no . or .. in it", path, excluded)
+		}
+		info, err := os.Stat(filepath.Join(filepath.Dir(path), name))
+		if err != nil {
+			return fmt.Errorf("%s: the excluded path %q does not exist", path, excluded)
+		}
+		if info.IsDir() != strings.HasSuffix(excluded, "/") {
+			return fmt.Errorf("%s: an excluded directory ends in a slash, and an excluded file does not: %q", path, excluded)
+		}
 	}
 	return nil
 }

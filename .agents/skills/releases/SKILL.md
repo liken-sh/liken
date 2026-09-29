@@ -52,8 +52,12 @@ component's paths from there to the tagged commit:
 
 A component's paths are its own directory and the directories of every
 component its `package.toml` names in `[depends]`, through the whole
-graph. `docs/`, `plans/`, `AGENTS.md`, and `README.md` at the top of a
-component go into no output, so a change there does not release it.
+graph. `docs/`, `plans/`, `AGENTS.md`, `README.md`, `skills/`, and
+`smoke/` at the top of a component go into no output, and neither do
+Go tests or `testdata/`. A change there does not release the
+component. A component's `package.toml` can name more such paths in
+`exclude` under `[outputs]`: `liken` names `deploy/monitoring/`,
+because a fleet fetches it by git and the channel holds no part of it.
 
 The git tag of a release is the bare version for a release made in this
 repository, or `<component>/<version>` for a release the component made

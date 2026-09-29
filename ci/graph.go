@@ -30,19 +30,22 @@ func Closure(components map[string]*Component, name string) []string {
 }
 
 // notOutputs are the paths at the top of a component that no output
-// is built from: the manual, the plans, the agent and reader notes, and
-// the smoke checks, which test an image and do not go into it. A change
-// to them runs the component's own jobs, and it does not give the
-// component a new version.
-var notOutputs = []string{"docs/", "plans/", "AGENTS.md", "README.md", "smoke/"}
+// is built from: the manual, the plans, the agent and reader notes, the
+// skills, and the smoke checks, which test an image and do not go into
+// it. A manual generates its skills from its guides, and the repository
+// keeps them for agents to read. brand's skills/ is the generator, and
+// only the manuals run it. A change to these paths runs the
+// component's own jobs, and it does not give the component a new
+// version.
+var notOutputs = []string{"docs/", "plans/", "AGENTS.md", "README.md", "skills/", "smoke/"}
 
-// isNotOutput is true for a path, relative to its component, that no
-// output is built from: a path in notOutputs, a Go test file, or a
-// file under a testdata directory at any depth. Go compiles a test
-// file and reads test data only for the tests of its own package, so
-// neither one goes into a binary.
-func isNotOutput(rest string) bool {
-	for _, prefix := range notOutputs {
+// isNotOutput is true for a path, relative to the component, that no
+// output is built from: a path in notOutputs or in the component's
+// excluded paths, a Go test file, or a file under a testdata directory
+// at any depth. Go compiles a test file and reads test data only for
+// the tests of its own package, so neither one goes into a binary.
+func (c *Component) isNotOutput(rest string) bool {
+	for _, prefix := range slices.Concat(notOutputs, c.Outputs.Exclude) {
 		if strings.HasSuffix(prefix, "/") && strings.HasPrefix(rest, prefix) || rest == prefix {
 			return true
 		}
@@ -50,11 +53,11 @@ func isNotOutput(rest string) bool {
 	return strings.HasSuffix(rest, "_test.go") || slices.Contains(strings.Split(path.Dir(rest), "/"), "testdata")
 }
 
-// outputFile names the first changed file under dir that an output is
-// built from, or "".
-func outputFile(dir string, files []string) string {
+// outputFile names the first changed file of the component that an
+// output is built from, or "".
+func outputFile(c *Component, files []string) string {
 	for _, file := range files {
-		if rest, ok := strings.CutPrefix(file, dir+"/"); ok && !isNotOutput(rest) {
+		if rest, ok := strings.CutPrefix(file, c.Dir+"/"); ok && !c.isNotOutput(rest) {
 			return file
 		}
 	}
@@ -63,11 +66,11 @@ func outputFile(dir string, files []string) string {
 
 // ReleaseChanged is true when a change goes into the component's
 // outputs: a file in the directory of a component in its closure,
-// except the paths in notOutputs, or the bake target of an image in
-// its closure.
+// except the paths that no output is built from, or the bake target of
+// an image in its closure.
 func ReleaseChanged(components map[string]*Component, name string, d Diff) (bool, string) {
 	for _, n := range Closure(components, name) {
-		what := outputFile(components[n].Dir, d.Files)
+		what := outputFile(components[n], d.Files)
 		if what == "" {
 			what = targetChanged(components[n], d)
 		}
@@ -106,7 +109,7 @@ func CheckChanged(components map[string]*Component, name string, d Diff) (bool, 
 	}
 	for _, n := range Closure(components, name) {
 		dep := components[n]
-		if file := outputFile(dep.Dir, d.Files); file != "" {
+		if file := outputFile(dep, d.Files); file != "" {
 			return true, file
 		}
 		if brand := components["brand"]; brand != nil && dep.Docs != nil {

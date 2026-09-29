@@ -13,12 +13,13 @@
 # kustomization of its own. An owner adds one line beside the base:
 #
 #   components:
-#     - https://github.com/liken-sh/liken//liken/monitoring?ref=2026.09.29-002
+#     - https://github.com/liken-sh/liken//liken/deploy/monitoring?ref=<version>
 #
-# liken has no deploy base for this component to go beside, because a
-# liken machine applies its own system pods from the image it booted.
-# So this component is at liken/monitoring, with no base, and its
-# PodMonitors select those pods where they already run.
+# The component is at deploy/monitoring, where each operator keeps its
+# own. But liken has no deploy base for it to go beside, and it
+# publishes no deploy artifact, because a liken machine applies its own
+# system pods from the image it booted. So this component has no base,
+# and its PodMonitors select those pods where they already run.
 #
 # An owner on a plain Prometheus, Grafana Alloy, or VictoriaMetrics
 # ignores this component and writes a scrape configuration against

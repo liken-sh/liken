@@ -54,3 +54,8 @@ artifacts = ["dev-cluster/guests/node-1/*.log"]
 
 [outputs]
 channel = true
+# deploy/monitoring is a kustomize Component that a fleet fetches by
+# git at a release tag. Nothing on the channel is built from it, so a
+# change to it does not release the OS. The change reaches fleets with
+# the next release.
+exclude = ["deploy/monitoring/"]

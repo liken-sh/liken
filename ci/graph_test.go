@@ -5,16 +5,17 @@ import (
 	"testing"
 )
 
-// graphFixture is a small repository: an OS that depends on brand, a
-// base image component, and an app that builds on the base and has a
-// manual.
+// graphFixture is a small repository: an OS that depends on brand and
+// declares that no output is built from its monitoring/, a base image
+// component, and an app that builds on the base and has a manual.
 func graphFixture(t *testing.T) map[string]*Component {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"brand/package.toml": "[package]\nname = \"brand\"\n",
-		"base/package.toml":  "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base\"\n",
-		"app/package.toml":   "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
-		"os/package.toml":    "[package]\nname = \"os\"\n[depends]\ncomponents = [\"brand\"]\n[outputs]\nchannel = true\n",
+		"brand/package.toml":               "[package]\nname = \"brand\"\n",
+		"base/package.toml":                "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base\"\n",
+		"app/package.toml":                 "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
+		"os/package.toml":                  "[package]\nname = \"os\"\n[depends]\ncomponents = [\"brand\"]\n[outputs]\nchannel = true\nexclude = [\"monitoring/\"]\n",
+		"os/monitoring/kustomization.yaml": "",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -43,12 +44,15 @@ func TestACheckRunsWhenItsPathsChange(t *testing.T) {
 		{"its own manual", "app", "app/docs/index.md", true},
 		{"its own test", "app", "app/main_test.go", true},
 		{"its own smoke check", "app", "app/smoke/app.sh", true},
+		{"its own skills", "app", "app/skills/install/SKILL.md", true},
+		{"its own path that no output is built from", "os", "os/monitoring/kustomization.yaml", true},
 		{"its dependency's manual", "app", "base/docs/index.md", false},
 		{"its dependency's notes", "app", "base/README.md", false},
 		{"its dependency's plans", "app", "base/plans/01.md", false},
 		{"its dependency's test", "app", "base/pkg/pkg_test.go", false},
 		{"its dependency's test data", "app", "base/pkg/testdata/case.json", false},
 		{"its dependency's smoke check", "app", "base/smoke/base.sh", false},
+		{"its dependency's skills", "app", "base/skills/install/SKILL.md", false},
 		{"its dependency's source", "app", "base/pkg/pkg.go", true},
 		{"a nested README in its dependency, which is source", "app", "base/deploy/README.md", true},
 		{"a file whose name only ends like a test", "app", "base/pkg/contest.go", true},
@@ -78,6 +82,11 @@ func TestAReleaseChangeIsAChangeToAnOutput(t *testing.T) {
 		{"a test", "app", "app/pkg/pkg_test.go", ""},
 		{"test data", "app", "app/pkg/testdata/case.json", ""},
 		{"its smoke check", "app", "app/smoke/app.sh", ""},
+		{"its skills", "app", "app/skills/install/SKILL.md", ""},
+		{"its dependency's skills", "app", "base/skills/install/SKILL.md", ""},
+		{"a path its package.toml excludes", "os", "os/monitoring/kustomization.yaml", ""},
+		{"the same path in a component that does not exclude it", "app", "app/monitoring/podmonitor.yaml", "changed: app/monitoring/podmonitor.yaml"},
+		{"an excluded directory's name as a file", "os", "os/monitoring.yaml", "changed: os/monitoring.yaml"},
 		{"a nested smoke directory is source", "app", "app/cmd/smoke/main.go", "changed: app/cmd/smoke/main.go"},
 		{"its dependency's test", "app", "base/pkg/pkg_test.go", ""},
 		{"brand, which it does not depend on", "app", "brand/liken.css", ""},

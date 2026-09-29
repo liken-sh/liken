@@ -110,6 +110,16 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 		"a job named images": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"images\"\ntoolchain = \"go\"\nrun = \"m\"\n", "belong to the outputs"},
 		"two images of one name": {"[package]\nname = \"a\"\n[[outputs.images]]\nname = \"a\"\n[[outputs.images]]\nname = \"b\"\naliases = [\"a\"]\n",
 			"two images are named"},
+		"an excluded path that does not exist": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"monitoring/\"]\n",
+			"the excluded path \"monitoring/\" does not exist"},
+		"an absolute excluded path": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"/etc/\"]\n",
+			"a path inside the component"},
+		"an excluded path outside the component": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"../a/package.toml\"]\n",
+			"a path inside the component"},
+		"an excluded path that is not clean": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"./package.toml\"]\n",
+			"a path inside the component"},
+		"an excluded file named as a directory": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"package.toml/\"]\n",
+			"an excluded directory ends in a slash"},
 		"a missing dependency": {"[package]\nname = \"a\"\n[depends]\ncomponents = [\"z\"]\n", "which is not a component"},
 	}
 	for name, c := range cases {
@@ -142,5 +152,22 @@ func TestTwoDirectoriesCannotNameOneComponent(t *testing.T) {
 	_, err := LoadComponents(root)
 	if err == nil || !strings.Contains(err.Error(), "both name the component") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// A deploy/ directory is where a component keeps its manifests, but
+// only the deploy key publishes them. liken keeps its monitoring
+// component in deploy/ and publishes to the channel alone.
+func TestADeployDirectoryWithNoDeployKeyPublishesNoArtifact(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"os/package.toml":                         "[package]\nname = \"os\"\n[outputs]\nchannel = true\nexclude = [\"deploy/monitoring/\"]\n",
+		"os/deploy/monitoring/kustomization.yaml": "",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := components["os"].Packages(); len(got) != 0 {
+		t.Errorf("packages %v", got)
 	}
 }

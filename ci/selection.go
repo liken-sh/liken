@@ -55,7 +55,7 @@ func (s selector) Select(c *Component) ([]string, []ImageRun) {
 	code, theme := false, false
 	for _, n := range Closure(s.components, c.Name()) {
 		dep := s.components[n]
-		if n == c.Name() && s.changedUnder(dep.Dir) || n != c.Name() && outputFile(dep.Dir, s.diff.Files) != "" {
+		if n == c.Name() && s.changedUnder(dep.Dir) || n != c.Name() && outputFile(dep, s.diff.Files) != "" {
 			code = true
 		}
 		if brand := s.components["brand"]; brand != nil && dep.Docs != nil && s.changedUnder(brand.Dir) {
@@ -167,7 +167,7 @@ func (s selector) contextChanged(dir, ignorePath string) bool {
 		if !ok {
 			continue
 		}
-		if owner := s.components[ownerOf(s.components, file)]; owner != nil && isNotOutput(strings.TrimPrefix(file, owner.Dir+"/")) {
+		if owner := s.components[ownerOf(s.components, file)]; owner != nil && owner.isNotOutput(strings.TrimPrefix(file, owner.Dir+"/")) {
 			continue
 		}
 		if skip, err := ignore.MatchesOrParentMatches(rest); err != nil || !skip {

@@ -311,7 +311,7 @@ spec:
           # carries the number as the default of its
           # --metrics-address argument, and this entry names the port
           # so a PodMonitor can select it by name rather than by
-          # number (monitoring/podmonitors.yaml). This pod runs on
+          # number (deploy/monitoring/podmonitors.yaml). This pod runs on
           # the host network, so this port is the machine's port:
           # nothing else on a liken node may hold 9200. To turn the
           # listener off, and give the port back, add
