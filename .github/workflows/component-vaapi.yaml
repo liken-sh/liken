@@ -5,16 +5,24 @@
 # ci.yaml calls this workflow when a change reaches vaapi. Each
 # check below is a job from package.toml, and it runs the same command
 # that a workstation runs. The images job builds each image and runs
-# its smoke check. The publish job pushes nothing until every other
-# job in this workflow passes.
+# its smoke check.
 #
 # The plan names the jobs and the images that read the change, and
-# only those run. A run that publishes runs all of them.
+# only those run. A run that publishes runs all of them. ci.yaml calls
+# this workflow a second time for the publish job, after every check
+# here and in this component's closure passed.
 name: vaapi
 
 on:
   workflow_call:
     inputs:
+      # check runs the jobs and the images that the plan names. publish
+      # runs the publish job alone: ci.yaml calls this workflow a second
+      # time for it, after the checks of every component in this one's
+      # closure pass.
+      stage:
+        type: string
+        required: true
       # The version the outputs get: the release tag, a development
       # version, a pinned component's own tag, or empty when the run
       # publishes nothing.
@@ -41,7 +49,7 @@ permissions:
 
 jobs:
   prek:
-    if: ${{ contains(fromJSON(inputs.jobs), 'prek') }}
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
@@ -86,7 +94,7 @@ jobs:
   # with whether it is pinned, whether it loads, and its smoke check.
   images:
     name: ${{ matrix.image }}
-    if: ${{ inputs.images != '[]' }}
+    if: ${{ inputs.stage == 'check' && inputs.images != '[]' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     strategy:
@@ -129,8 +137,7 @@ jobs:
         run: bash "${{ matrix.smoke }}" "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}"
 
   publish:
-    needs: [prek, images]
-    if: ${{ inputs.publish != 'none' }}
+    if: ${{ inputs.stage == 'publish' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:

@@ -7,12 +7,21 @@
 # that a workstation runs.
 #
 # The plan names the jobs that read the change, and
-# only those run. A run that publishes runs all of them.
+# only those run. A run that publishes runs all of them. ci.yaml calls
+# this workflow a second time for the publish job, after every check
+# here and in this component's closure passed.
 name: liken
 
 on:
   workflow_call:
     inputs:
+      # check runs the jobs and the images that the plan names. publish
+      # runs the publish job alone: ci.yaml calls this workflow a second
+      # time for it, after the checks of every component in this one's
+      # closure pass.
+      stage:
+        type: string
+        required: true
       # The version the outputs get: the release tag, a development
       # version, a pinned component's own tag, or empty when the run
       # publishes nothing.
@@ -34,7 +43,7 @@ permissions:
 
 jobs:
   checks:
-    if: ${{ contains(fromJSON(inputs.jobs), 'checks') }}
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'checks') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
@@ -88,7 +97,7 @@ jobs:
           retention-days: 7
 
   docs:
-    if: ${{ contains(fromJSON(inputs.jobs), 'docs') }}
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'docs') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
@@ -146,7 +155,7 @@ jobs:
           key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
   build:
-    if: ${{ contains(fromJSON(inputs.jobs), 'build') }}
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'build') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     defaults:
@@ -186,8 +195,7 @@ jobs:
           if-no-files-found: ignore
 
   publish:
-    needs: [checks, docs, build]
-    if: ${{ inputs.publish != 'none' }}
+    if: ${{ inputs.stage == 'publish' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 40
     # The channel's key comes from the repository secrets that

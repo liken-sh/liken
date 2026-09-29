@@ -6,8 +6,15 @@
 # This is the one workflow for every component in the repository. Each
 # component is a directory with a package.toml, and each one has its
 # own workflow, .github/workflows/component-<component>.yaml, which this file
-# calls. A component's call needs the components it depends on, so the
-# run page draws the dependency graph.
+# calls twice: once for its checks and once for its publish.
+#
+# A component's checks need only the pinned components it depends on:
+# its images build on those bases, from the layers that the bases' own
+# jobs write to the cache a moment before. It builds every other
+# dependency from source at the same commit, so its checks start at
+# once. Its publish needs its own checks and the checks of every
+# component in its closure, so a component never publishes when a
+# dependency failed.
 #
 # The plan job decides what the run does with each component. Its
 # summary on the run page says, for each component, whether its jobs
@@ -36,7 +43,7 @@
 # changed, and the revision did not.
 #
 # A job that needs a skipped job is skipped too, unless its condition
-# says otherwise. So each component's condition says: run when the plan
+# says otherwise. So each call's condition says: run when the plan
 # says so, as long as nothing it needs failed.
 #
 # A real publish happens only when the repository variable PUBLISH is
@@ -144,16 +151,31 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['{% .Name %}'].check }}
     uses: ./.github/workflows/component-{% .Name %}.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].jobs) }}{% if .Images %}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].images) }}{% end %}
     permissions:
       contents: read
+      packages: write
+{% if .Publishes %}
+  {% .Name %}-publish:
+    needs: [plan, {% .Name %}{% range .PublishNeeds %}, {% . %}{% end %}]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish != 'none' }}
+    uses: ./.github/workflows/component-{% .Name %}.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
+      jobs: '[]'{% if .Images %}
+      images: '[]'{% end %}
+    permissions:
+      contents: read
       packages: write{% if .Channel %}
     # The OS publishes to the release channel with the channel's key.
     secrets: inherit{% end %}
-{% end %}
+{% end %}{% end %}
   # The site is every component's manual in one tree: liken's manual
   # at the root, and each other component's manual under its prefix,
   # such as liken.sh/display/. GitHub Pages serves it from this
@@ -163,7 +185,7 @@ jobs:
   # A job that did not run in this push has no new coverage profile,
   # so its report is the one the site serves now.
   site:
-    needs: [plan{% range .Components %}, {% .Name %}{% end %}]
+    needs: [plan{% range .Components %}, {% .Name %}{% if .Publishes %}, {% .Name %}-publish{% end %}{% end %}]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -228,7 +250,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan{% range .Components %}, {% .Name %}{% end %}]
+    needs: [plan{% range .Components %}, {% .Name %}{% if .Publishes %}, {% .Name %}-publish{% end %}{% end %}]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

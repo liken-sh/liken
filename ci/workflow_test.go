@@ -72,11 +72,11 @@ func TestTheRootWorkflowCallsEachComponentAfterItsDependencies(t *testing.T) {
 	if app["uses"] != "./.github/workflows/component-app.yaml" {
 		t.Errorf("app uses %v", app["uses"])
 	}
-	if needs := app["needs"]; !reflect.DeepEqual(needs, []any{"plan", "base"}) {
-		t.Errorf("app needs %v", needs)
+	if _, ok := jobs["os-publish"]["secrets"]; !ok {
+		t.Error("the OS's publish call does not pass the secrets")
 	}
-	if _, ok := jobs["os"]["secrets"]; !ok {
-		t.Error("the OS's call does not pass the secrets")
+	if _, ok := jobs["os"]["secrets"]; ok {
+		t.Error("the OS's checks get the secrets")
 	}
 	for name, images := range map[string]bool{"base": true, "app": false} {
 		with := jobs[name]["with"].(map[string]any)
@@ -142,17 +142,14 @@ platforms = ["linux/amd64", "linux/arm64"]
 			t.Errorf("no %s job", name)
 		}
 	}
-	if needs := jobs["publish"]["needs"]; !reflect.DeepEqual(needs, []any{"go", "docs", "images"}) {
-		t.Errorf("publish needs %v", needs)
-	}
 	for _, want := range []string{
 		"go-version-file: app/docs/go.mod",
 		"sudo apt-get install -y --no-install-recommends ffmpeg",
 		"      - run: make test-go\n",
 		"      - run: |\n          make test\n          make build\n",
 		"name: coverage-app-go",
-		"  go:\n    if: ${{ contains(fromJSON(inputs.jobs), 'go') }}\n",
-		"  images:\n    name: ${{ matrix.image }}\n    if: ${{ inputs.images != '[]' }}\n",
+		"  go:\n    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'go') }}\n",
+		"  images:\n    name: ${{ matrix.image }}\n    if: ${{ inputs.stage == 'check' && inputs.images != '[]' }}\n",
 		"include: ${{ fromJSON(inputs.images) }}",
 		"targets: ${{ matrix.image }}",
 		"BRANCH_CACHE=${{ matrix.image }}",
@@ -358,5 +355,53 @@ func TestOnlyAPrekJobSkipsHooks(t *testing.T) {
 	})
 	if _, err := LoadComponents(root); err == nil || !strings.Contains(err.Error(), "only a prek job") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// A component's checks wait only for the pinned bases it builds on,
+// whose layers its images read from the cache that the bases' jobs
+// write. Its publish waits for the checks of every component in its
+// closure, so it never publishes on a dependency that failed.
+func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"lib/package.toml":  "[package]\nname = \"lib\"\n",
+		"app/package.toml":  "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"top/package.toml":  "[package]\nname = \"top\"\n[depends]\ncomponents = [\"app\"]\n[outputs]\ndeploy = \"deploy\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
+	cases := map[string][]any{
+		"app":          {"plan", "base"},
+		"top":          {"plan"},
+		"lib":          {"plan"},
+		"base-publish": {"plan", "base"},
+		"app-publish":  {"plan", "app", "base", "lib"},
+		"top-publish":  {"plan", "top", "app", "base", "lib"},
+	}
+	for name, needs := range cases {
+		if got := jobs[name]["needs"]; !reflect.DeepEqual(got, needs) {
+			t.Errorf("%s needs %v, want %v", name, got, needs)
+		}
+	}
+	if _, ok := jobs["lib-publish"]; ok {
+		t.Error("a component with no outputs has a publish call")
+	}
+	publish := jobs["app-publish"]
+	if publish["uses"] != "./.github/workflows/component-app.yaml" ||
+		publish["if"] != "${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['app'].publish != 'none' }}" ||
+		publish["with"].(map[string]any)["stage"] != "publish" || jobs["app"]["with"].(map[string]any)["stage"] != "check" {
+		t.Errorf("app's publish call is %v", publish)
+	}
+	component := workflowJobs(t, files[".github/workflows/component-app.yaml"])
+	if needs, ok := component["publish"]["needs"]; ok || component["publish"]["if"] != "${{ inputs.stage == 'publish' }}" {
+		t.Errorf("the publish job needs %v, if %v", needs, component["publish"]["if"])
 	}
 }

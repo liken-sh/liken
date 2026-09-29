@@ -6,8 +6,15 @@
 # This is the one workflow for every component in the repository. Each
 # component is a directory with a package.toml, and each one has its
 # own workflow, .github/workflows/component-<component>.yaml, which this file
-# calls. A component's call needs the components it depends on, so the
-# run page draws the dependency graph.
+# calls twice: once for its checks and once for its publish.
+#
+# A component's checks need only the pinned components it depends on:
+# its images build on those bases, from the layers that the bases' own
+# jobs write to the cache a moment before. It builds every other
+# dependency from source at the same commit, so its checks start at
+# once. Its publish needs its own checks and the checks of every
+# component in its closure, so a component never publishes when a
+# dependency failed.
 #
 # The plan job decides what the run does with each component. Its
 # summary on the run page says, for each component, whether its jobs
@@ -36,7 +43,7 @@
 # changed, and the revision did not.
 #
 # A job that needs a skipped job is skipped too, unless its condition
-# says otherwise. So each component's condition says: run when the plan
+# says otherwise. So each call's condition says: run when the plan
 # says so, as long as nothing it needs failed.
 #
 # A real publish happens only when the repository variable PUBLISH is
@@ -212,6 +219,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['kubernetes'].check }}
     uses: ./.github/workflows/component-kubernetes.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs) }}
@@ -220,10 +228,11 @@ jobs:
       packages: write
 
   audio-operator:
-    needs: [plan, kubernetes]
+    needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['audio-operator'].jobs) }}
@@ -232,15 +241,44 @@ jobs:
       contents: read
       packages: write
 
+  audio-operator-publish:
+    needs: [plan, audio-operator, kubernetes]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-audio-operator.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   bluetooth-operator:
-    needs: [plan, kubernetes]
+    needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  bluetooth-operator-publish:
+    needs: [plan, bluetooth-operator, kubernetes]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-bluetooth-operator.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -250,6 +288,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['brand'].check }}
     uses: ./.github/workflows/component-brand.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['brand'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['brand'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['brand'].jobs) }}
@@ -262,6 +301,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['ci'].check }}
     uses: ./.github/workflows/component-ci.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['ci'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['ci'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ci'].jobs) }}
@@ -274,10 +314,25 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vulkan'].check }}
     uses: ./.github/workflows/component-vulkan.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vulkan'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vulkan'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  vulkan-publish:
+    needs: [plan, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vulkan'].publish != 'none' }}
+    uses: ./.github/workflows/component-vulkan.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -287,10 +342,25 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vaapi'].check }}
     uses: ./.github/workflows/component-vaapi.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vaapi'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vaapi'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  vaapi-publish:
+    needs: [plan, vaapi, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vaapi'].publish != 'none' }}
+    uses: ./.github/workflows/component-vaapi.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -300,10 +370,25 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['ffmpeg'].check }}
     uses: ./.github/workflows/component-ffmpeg.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ffmpeg'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ffmpeg'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  ffmpeg-publish:
+    needs: [plan, ffmpeg, vaapi, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['ffmpeg'].publish != 'none' }}
+    uses: ./.github/workflows/component-ffmpeg.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -313,6 +398,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].check }}
     uses: ./.github/workflows/component-weston.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].jobs) }}
@@ -321,11 +407,26 @@ jobs:
       contents: read
       packages: write
 
+  weston-publish:
+    needs: [plan, weston, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].publish != 'none' }}
+    uses: ./.github/workflows/component-weston.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   display-operator:
-    needs: [plan, ffmpeg, kubernetes, weston]
+    needs: [plan, ffmpeg, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].check }}
     uses: ./.github/workflows/component-display-operator.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['display-operator'].jobs) }}
@@ -334,15 +435,44 @@ jobs:
       contents: read
       packages: write
 
+  display-operator-publish:
+    needs: [plan, display-operator, ffmpeg, kubernetes, vaapi, vulkan, weston]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-display-operator.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   equipment-operator:
-    needs: [plan, kubernetes]
+    needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['equipment-operator'].check }}
     uses: ./.github/workflows/component-equipment-operator.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['equipment-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['equipment-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  equipment-operator-publish:
+    needs: [plan, equipment-operator, kubernetes]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['equipment-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-equipment-operator.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -352,10 +482,25 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].check }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['git-csi-driver'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['git-csi-driver'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  git-csi-driver-publish:
+    needs: [plan, git-csi-driver]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish != 'none' }}
+    uses: ./.github/workflows/component-git-csi-driver.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -365,6 +510,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-screen'].check }}
     uses: ./.github/workflows/component-media-screen.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-screen'].jobs) }}
@@ -373,10 +519,11 @@ jobs:
       packages: write
 
   library-operator:
-    needs: [plan, brand, ffmpeg, kubernetes, media-screen, vulkan]
+    needs: [plan, ffmpeg, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].check }}
     uses: ./.github/workflows/component-library-operator.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['library-operator'].jobs) }}
@@ -385,14 +532,42 @@ jobs:
       contents: read
       packages: write
 
+  library-operator-publish:
+    needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, vaapi, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-library-operator.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   liken:
-    needs: [plan, brand]
+    needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].check }}
     uses: ./.github/workflows/component-liken.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['liken'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['liken'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['liken'].jobs) }}
+    permissions:
+      contents: read
+      packages: write
+
+  liken-publish:
+    needs: [plan, liken, brand]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].publish != 'none' }}
+    uses: ./.github/workflows/component-liken.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['liken'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['liken'].publish }}
+      jobs: '[]'
     permissions:
       contents: read
       packages: write
@@ -404,6 +579,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['mpv'].check }}
     uses: ./.github/workflows/component-mpv.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['mpv'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].jobs) }}
@@ -412,15 +588,44 @@ jobs:
       contents: read
       packages: write
 
+  mpv-publish:
+    needs: [plan, mpv, ffmpeg, vaapi, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['mpv'].publish != 'none' }}
+    uses: ./.github/workflows/component-mpv.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['mpv'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   media-operator:
-    needs: [plan, brand, ffmpeg, kubernetes, media-screen, mpv, vulkan]
+    needs: [plan, ffmpeg, mpv, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].check }}
     uses: ./.github/workflows/component-media-operator.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  media-operator-publish:
+    needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, vaapi, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-media-operator.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -430,10 +635,25 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].check }}
     uses: ./.github/workflows/component-people-operator.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  people-operator-publish:
+    needs: [plan, people-operator]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-people-operator.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -443,10 +663,25 @@ jobs:
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].check }}
     uses: ./.github/workflows/component-per-node-csi-driver.yaml
     with:
+      stage: check
       version: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  per-node-csi-driver-publish:
+    needs: [plan, per-node-csi-driver]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish != 'none' }}
+    uses: ./.github/workflows/component-per-node-csi-driver.yaml
+    with:
+      stage: publish
+      version: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -460,7 +695,7 @@ jobs:
   # A job that did not run in this push has no new coverage profile,
   # so its report is the one the site serves now.
   site:
-    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, kubernetes, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -645,7 +880,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, kubernetes, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

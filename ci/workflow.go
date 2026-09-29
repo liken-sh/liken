@@ -71,9 +71,15 @@ func render(name string, data any) ([]byte, error) {
 }
 
 type rootComponent struct {
-	Name, Dir       string
-	Needs           []string
-	Channel, Images bool
+	Name, Dir string
+	// Needs are the pinned components that the component depends on:
+	// its images build on their targets, from the layers their jobs
+	// write to the cache, so its checks start after theirs.
+	Needs []string
+	// PublishNeeds are the other components of its closure, whose
+	// checks must pass before it publishes.
+	PublishNeeds               []string
+	Channel, Images, Publishes bool
 }
 
 type coverageDownload struct{ Component, Job, Dir string }
@@ -85,12 +91,20 @@ func rootData(components map[string]*Component) map[string]any {
 	var coverage []coverageDownload
 	var sites []site
 	for _, c := range dependencyOrder(components) {
+		var needs []string
+		for _, dep := range slices.Sorted(slices.Values(c.Depends.Components)) {
+			if components[dep].Pinned() {
+				needs = append(needs, dep)
+			}
+		}
 		list = append(list, rootComponent{
-			Name:    c.Name(),
-			Dir:     c.Dir,
-			Needs:   slices.Sorted(slices.Values(c.Depends.Components)),
-			Channel: c.Outputs.Channel,
-			Images:  len(c.Outputs.Images) > 0,
+			Name:         c.Name(),
+			Dir:          c.Dir,
+			Needs:        needs,
+			PublishNeeds: slices.DeleteFunc(Closure(components, c.Name()), func(n string) bool { return n == c.Name() }),
+			Channel:      c.Outputs.Channel,
+			Images:       len(c.Outputs.Images) > 0,
+			Publishes:    c.HasOutputs(),
 		})
 		for _, job := range c.Jobs {
 			if len(job.Coverage) > 0 {
@@ -146,7 +160,6 @@ func componentData(root string, c *Component) (map[string]any, error) {
 		return nil, fmt.Errorf("%s has hooks in .pre-commit-config.yaml and no prek job to run them in CI", c.Name())
 	}
 	var jobs []jobData
-	var needs []string
 	for _, job := range c.Jobs {
 		d := jobData{Job: job, Component: c.Name(), WorkDir: path.Join(c.Dir, job.Dir),
 			ModuleDir: path.Join(c.Dir, orDefault(job.Module, job.Dir))}
@@ -174,12 +187,8 @@ func componentData(root string, c *Component) (map[string]any, error) {
 		}
 		d.Artifacts = artifacts
 		jobs = append(jobs, d)
-		needs = append(needs, job.Name)
 	}
 	images := c.Outputs.Images
-	if len(images) > 0 {
-		needs = append(needs, "images")
-	}
 	imageTimeout, publishTimeout := 45, 30
 	if c.Outputs.Channel {
 		publishTimeout = 40
@@ -193,7 +202,6 @@ func componentData(root string, c *Component) (map[string]any, error) {
 		"Publishes":      c.HasOutputs(),
 		"Channel":        c.Outputs.Channel,
 		"Deploy":         c.Outputs.Deploy,
-		"NeedsList":      strings.Join(needs, ", "),
 		"PublishTimeout": publishTimeout,
 	}, nil
 }
