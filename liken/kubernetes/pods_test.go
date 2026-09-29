@@ -33,6 +33,16 @@ func TestCompletedReadsThePhase(t *testing.T) {
 	}
 }
 
+func TestTerminatingReadsTheDeletionMark(t *testing.T) {
+	leaving := Pod{Metadata: PodMetadata{DeletionTimestamp: "2026-09-29T06:40:41Z"}}
+	if !leaving.Terminating() {
+		t.Error("a pod with a deletion mark is terminating")
+	}
+	if (&Pod{}).Terminating() {
+		t.Error("a pod with no deletion mark is not")
+	}
+}
+
 func TestIsDaemonReadsOwnership(t *testing.T) {
 	daemon := Pod{Metadata: PodMetadata{
 		OwnerReferences: []OwnerReference{{Kind: "DaemonSet"}},

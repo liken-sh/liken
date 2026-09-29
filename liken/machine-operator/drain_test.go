@@ -37,6 +37,12 @@ func mirror(p *kubernetes.Pod) {
 	p.Metadata.Annotations = map[string]string{mirrorPodAnnotation: "true"}
 }
 
+// terminating marks a pod that an earlier pass already evicted and
+// that is still shutting down.
+func terminating(p *kubernetes.Pod) {
+	p.Metadata.DeletionTimestamp = "2026-07-06T11:59:30Z"
+}
+
 func completed(p *kubernetes.Pod) {
 	p.Status.Phase = "Succeeded"
 }
@@ -191,6 +197,30 @@ func TestDrainEvictsADriverOnceNoClaimHolderRemains(t *testing.T) {
 		pod("web", "default"))
 	if evicted(step) != "web display-operator" {
 		t.Errorf("nothing holds a claim, so the driver goes too: %s", evicted(step))
+	}
+}
+
+func TestDrainWaitsForATerminatingPodWithoutAskingAgain(t *testing.T) {
+	step := draining(pod("web", "default", terminating), pod("api", "default"))
+	if evicted(step) != "api" {
+		t.Errorf("only the pod that is not yet leaving is asked: %s", evicted(step))
+	}
+	if step.remaining != 2 {
+		t.Errorf("the terminating pod still has to move: %d", step.remaining)
+	}
+}
+
+func TestDrainHoldsADriverWhileItsClaimHolderTerminates(t *testing.T) {
+	// The kubelet unprepares the claim while the holder terminates, so
+	// the driver must stay until the holder is gone from the listing.
+	step := draining(
+		pod("display-operator", "displays", servesDRA),
+		pod("movie-lg", "media", holdsAClaim, terminating))
+	if evicted(step) != "" {
+		t.Errorf("the holder is already leaving and the driver waits: %s", evicted(step))
+	}
+	if step.clear {
+		t.Error("two pods still run here")
 	}
 }
 

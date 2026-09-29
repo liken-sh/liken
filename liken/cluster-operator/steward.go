@@ -85,6 +85,10 @@ func daemonSetPodsPath(name string) string {
 // release whose manifests are actually applied. An empty string,
 // meaning no annotation or no DaemonSet, means there is no release
 // to refresh toward.
+//
+// A pod that is already terminating is not evicted again. It stays in
+// the pod copy until the kubelet stops it, and each sweep in that time
+// would otherwise evict it once more.
 func decideRefresh(dsVersion string, machines []machine.Machine, pods []kubernetes.Pod) []kubernetes.Pod {
 	if dsVersion == "" {
 		return nil
@@ -95,6 +99,9 @@ func decideRefresh(dsVersion string, machines []machine.Machine, pods []kubernet
 	}
 	var refresh []kubernetes.Pod
 	for _, p := range pods {
+		if p.Terminating() {
+			continue // an earlier sweep evicted it, and the DaemonSet recreates it once it is gone
+		}
 		osVersion, known := running[p.Spec.NodeName]
 		if !known || osVersion != dsVersion {
 			continue // the machine is not yet running what the manifests shipped

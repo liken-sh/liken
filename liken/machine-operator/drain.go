@@ -165,18 +165,27 @@ func holdsResourceClaim(p kubernetes.Pod) bool {
 // this operator, which no drain evicts. So a driver pod's own claim
 // has no pod to wait for, and the first phase would only make the
 // pod wait for itself.
+//
+// A pod that is already terminating is not asked again, because an
+// earlier pass asked it and the API server accepted. It still counts
+// as a claim holder, because the kubelet unprepares its claim while it
+// terminates, and the driver must stay until that call is done.
 func drainOrder(evictable []kubernetes.Pod) []kubernetes.Pod {
 	var first, drivers []kubernetes.Pod
 	holders := 0
 	for _, p := range evictable {
 		if servesDRAPlugin(p) {
-			drivers = append(drivers, p)
+			if !p.Terminating() {
+				drivers = append(drivers, p)
+			}
 			continue
 		}
 		if holdsResourceClaim(p) {
 			holders++
 		}
-		first = append(first, p)
+		if !p.Terminating() {
+			first = append(first, p)
+		}
 	}
 	if holders > 0 {
 		return first

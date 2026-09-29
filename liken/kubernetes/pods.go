@@ -13,10 +13,11 @@ import (
 )
 
 type PodMetadata struct {
-	Name            string            `json:"name"`
-	Namespace       string            `json:"namespace"`
-	Annotations     map[string]string `json:"annotations"`
-	OwnerReferences []OwnerReference  `json:"ownerReferences"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace"`
+	Annotations       map[string]string `json:"annotations"`
+	OwnerReferences   []OwnerReference  `json:"ownerReferences"`
+	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 }
 
 // HostPathVolume is a directory or file the pod takes from the
@@ -82,6 +83,15 @@ type Pod struct {
 // do not count them.
 func (p *Pod) Completed() bool {
 	return p.Status.Phase == "Succeeded" || p.Status.Phase == "Failed"
+}
+
+// Terminating reports whether the pod is already leaving: somebody
+// deleted or evicted it, and the kubelet is still stopping it. The pod
+// stays in every listing until the kubelet finishes, so a pass that
+// asks each listed pod to leave must skip this one, or it asks again
+// on every pass until the pod is gone.
+func (p *Pod) Terminating() bool {
+	return p.Metadata.DeletionTimestamp != ""
 }
 
 // IsDaemon reports whether a DaemonSet owns the pod. Drains skip

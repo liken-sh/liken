@@ -96,6 +96,18 @@ func TestStewardDoesNothingWithoutAVersionedDaemonSet(t *testing.T) {
 	}
 }
 
+func TestStewardLeavesATerminatingPodAlone(t *testing.T) {
+	// An earlier sweep already evicted this pod, and it is still
+	// shutting down. The sweeps that run before it leaves the pod copy
+	// must not evict it again.
+	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
+	pod := operatorPod("op-1", "node-1", "0.1.0")
+	pod.Metadata.DeletionTimestamp = "2026-09-29T06:40:41Z"
+	if refresh := decideRefresh("0.2.2", machines, []kubernetes.Pod{pod}); len(refresh) != 0 {
+		t.Fatalf("expected no refreshes, got %v", refreshNames(refresh))
+	}
+}
+
 func TestStewardIgnoresPodsOnUnknownMachines(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pods := []kubernetes.Pod{operatorPod("op-x", "node-9", "0.1.0")}
