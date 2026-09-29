@@ -6,6 +6,7 @@
 // and focus skips it.
 
 pub mod banner;
+mod layers;
 mod layout;
 mod page;
 mod recent;
@@ -17,9 +18,10 @@ use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
 use iced_widget::{Stack, canvas};
-use iced_winit::core::{Element, Length, Rectangle, Theme, mouse};
+use iced_winit::core::{Element, Length, Rectangle, Theme};
 
 use self::banner::Banner;
+use self::layers::{Ground, Program};
 use self::layout::Layout;
 pub use self::page::{Page, read, read_row};
 use self::rows::{GENRE, LIBRARY, rows};
@@ -28,7 +30,7 @@ use super::{Screen, Step, slots};
 use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
-use crate::views::{self, area, band, strip};
+use crate::views::{area, band};
 
 // The band's heading on the home page is the word "Home" and not the
 // namespace, because a namespace is a cluster's word and the person on
@@ -348,126 +350,6 @@ impl Home {
         let offset = layout.scroll(self, bounds.height, viewport);
         let clip = area(0.0, band::HEIGHT, bounds.width, viewport);
         (layout, offset, clip)
-    }
-}
-
-// The under layer: the banner's backdrop and its scrim, clipped under
-// the band.
-struct Ground<'a, A> {
-    home: &'a Home,
-    store: &'a RefCell<A>,
-}
-
-impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, A> {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry<Renderer>> {
-        let home = self.home;
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let (layout, offset, clip) = home.placed(bounds);
-        frame.with_clip(clip, |frame| {
-            let store = &mut *self.store.borrow_mut();
-            for (index, block) in home.blocks.iter().enumerate() {
-                let Block::Banner(banner) = block else {
-                    continue;
-                };
-                let Some(title) = banner.focused() else {
-                    continue;
-                };
-                let Some(region) = layout.region(home, index, offset, bounds) else {
-                    continue;
-                };
-                views::banner::backdrop(frame, store, &title.item.library, &title.backdrop, region);
-            }
-        });
-        vec![frame.into_geometry()]
-    }
-}
-
-// The middle layer: the rows, on one frame.
-struct Program<'a, A> {
-    home: &'a Home,
-    store: &'a RefCell<A>,
-    // Whether the page holds focus, or the browser's strip over it does.
-    held: bool,
-}
-
-impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry<Renderer>> {
-        let home = self.home;
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let (layout, offset, clip) = home.placed(bounds);
-        frame.with_clip(clip, |frame| {
-            let store = &mut *self.store.borrow_mut();
-            for (index, block) in home.blocks.iter().enumerate() {
-                let Some(region) = layout.region(home, index, offset, bounds) else {
-                    continue;
-                };
-                if region.y + region.height < band::HEIGHT || region.y > bounds.height {
-                    continue;
-                }
-                let focused = self.held && home.focus == index;
-                match block {
-                    Block::Banner(banner) => {
-                        let Some(title) = banner.focused() else {
-                            continue;
-                        };
-                        views::banner::draw(
-                            frame,
-                            store,
-                            &views::banner::Banner {
-                                library: &title.item.library,
-                                logo: &title.logo,
-                                name: &title.name,
-                                facts: &title.facts,
-                                genres: &title.genres,
-                                ratings: &title.ratings,
-                                tagline: &title.tagline,
-                                count: banner.titles.len(),
-                                current: banner.focus,
-                                focused,
-                                region,
-                            },
-                        );
-                    }
-                    Block::Strip(strip) => strip::draw(
-                        frame,
-                        store,
-                        &strip::Strip {
-                            headed: false,
-                            letters: &strip.letters,
-                            circled: focused && strip.rung,
-                            members: &strip.items,
-                            current: None,
-                            focus: (focused && !strip.rung).then_some(strip.focus),
-                            kept: Some(strip.focus),
-                            heading: &strip.heading,
-                            library: "",
-                            last: strip.last.as_ref().map(Last::view),
-                            lines: strip.lines,
-                            region,
-                        },
-                    ),
-                }
-            }
-        });
-        vec![frame.into_geometry()]
     }
 }
 

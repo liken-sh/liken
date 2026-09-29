@@ -233,6 +233,7 @@ impl Series {
             .position(|still| still.season == season && still.episode == episode)
         {
             page.focus = Focus::Still(index);
+            page.entered = index;
             page.placed = true;
         }
         page.refoot(source);
@@ -292,6 +293,7 @@ impl Series {
         };
         fresh.placed = true;
         fresh.arrived = self.arrived;
+        fresh.entered = self.entered.min(fresh.stills.len().saturating_sub(1));
         fresh.via = self.via.clone();
         let focus = self.focus;
         *self = fresh;

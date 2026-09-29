@@ -127,9 +127,13 @@ A home card that names one episode opens the series' page with that
 episode's row already open, and focus on its first button, Resume or
 Play. The continue-watching row, the recently added row, and the banner
 all open an episode this way, so the play is one press from the card.
-Back from that row returns to the home page in one press, because the
-wall under it was never on the screen. Once focus leaves the row for
-the wall, back closes a row as it does on any series page. A card that
+Behind the row, the wall stands at that episode's season, with the
+episode's still selected and scrolled into view, as if the person had
+moved to the still and pressed select. Down from the row reaches the
+marks, and down again lands on that still. Back from that row returns
+to the home page in one press, because the wall under it was never on
+the screen. Once focus leaves the row for the wall, back closes a row as
+it does on any series page. A card that
 names a series and no episode opens the page on its wall.
 
 A play that stands at position 0 is not started. The row draws no card
