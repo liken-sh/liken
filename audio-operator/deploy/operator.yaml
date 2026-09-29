@@ -150,13 +150,16 @@ spec:
             - name: XDG_RUNTIME_DIR
               value: /var/run/audio.liken.sh
           # The readiness fact is a client connection, not a file that
-          # exists. pw-dump connects to the socket, waits for the
-          # whole graph, and prints it, so a probe that passes is a
-          # PipeWire that answers the same call the operator makes.
-          # The image holds no shell, so the probe names the binary.
+          # exists. The check runs pw-dump, which connects to the
+          # socket and waits for the whole graph, so a probe that
+          # passes is a PipeWire that answers the same call the
+          # operator makes. The check discards the graph, which is
+          # larger than the output the kubelet keeps of a probe.
+          # graphprobe.go says why. The image holds no shell, so the
+          # probe names the operator's binary.
           startupProbe:
             exec:
-              command: ["/usr/bin/pw-dump"]
+              command: ["/usr/local/bin/audio-operator", "graph-answers"]
             periodSeconds: 2
             failureThreshold: 30
             timeoutSeconds: 10

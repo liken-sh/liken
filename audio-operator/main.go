@@ -102,9 +102,10 @@ const (
 // own binary, the operator container runs with no argument, and the
 // capture container passes capture and serves the taps.
 //
-// The WirePlumber container runs the image once more, as its own
-// probe: the same binary is already there, so the endpoints check
-// needs no second image and no shell.
+// The WirePlumber and PipeWire containers run the image once more,
+// each as its own probe: the same binary is already there, so the
+// endpoints check and the graph check need no second image and no
+// shell.
 //
 // The audio-api Deployment runs the same image with the api argument,
 // so the cluster runs one binary at one version for the whole
@@ -117,6 +118,9 @@ func main() {
 			return
 		case endpointsMode:
 			endpointsRegistered()
+			return
+		case graphMode:
+			graphProbe()
 			return
 		case captureMode:
 			capture()
