@@ -93,6 +93,11 @@ func keepClientAnchors(ctx context.Context, watcher dynamic.Interface, anchors *
 	report func(string), synced chan<- struct{}) {
 	subject := "configmap " + clientCANamespace + "/" + clientCAConfigMap
 	authority := informer.One{Resource: configMapResource, Namespace: clientCANamespace, Name: clientCAConfigMap, What: subject}
+	// A caller that does not wait for the first read passes no channel.
+	var firstRead func()
+	if synced != nil {
+		firstRead = func() { close(synced) }
+	}
 	<-informer.WatchOne(ctx, watcher, authority, func(configMap *ConfigMap) {
 		if configMap == nil {
 			report(subject + " is absent; media-api verifies client certificates against the authority it read last")
@@ -101,7 +106,7 @@ func keepClientAnchors(ctx context.Context, watcher dynamic.Interface, anchors *
 		if err := anchors.take(configMap); err != nil {
 			report(fmt.Sprintf("reading %s: %v", subject, err))
 		}
-	}, func() { close(synced) }).Done()
+	}, firstRead).Done()
 }
 
 // certificateCaller reads the caller out of a connection that carries

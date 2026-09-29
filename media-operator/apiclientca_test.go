@@ -298,6 +298,32 @@ func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	}
 }
 
+// A caller that waits for no first read passes no channel, and the
+// watch still follows the ConfigMap.
+func TestTheClientAnchorsFollowTheConfigMapWithNoSyncedChannel(t *testing.T) {
+	first, second := newClientAuthority(t), newClientAuthority(t)
+	api := newCoreAPI()
+	publishAuthority(t, api, string(first.certPEM))
+	anchors := &clientAnchors{}
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		stop()
+		<-done
+	})
+	watcher := testWatcher(t, api.handler())
+	go func() {
+		defer close(done)
+		keepClientAnchors(ctx, watcher, anchors, (&reportedLines{}).report, nil)
+	}()
+
+	until(t, "the anchors never took up the authority", func() bool { return verifiesAgainst(t, anchors, first) })
+	api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(string(second.certPEM), "8"))
+	until(t, "the anchors never took up the rotated authority", func() bool {
+		return verifiesAgainst(t, anchors, second)
+	})
+}
+
 // A ConfigMap the API cannot read leaves an empty pool behind, because
 // the API still answers every token caller.
 func TestAConfigMapThisAPICannotReadLeavesAnEmptyPool(t *testing.T) {
