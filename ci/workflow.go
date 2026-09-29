@@ -127,7 +127,7 @@ type jobData struct {
 
 type imageData struct {
 	Image
-	Load bool
+	Load, Pinned bool
 }
 
 func componentData(root string, c *Component) (map[string]any, error) {
@@ -164,7 +164,7 @@ func componentData(root string, c *Component) (map[string]any, error) {
 	}
 	var images []imageData
 	for _, image := range c.Outputs.Images {
-		images = append(images, imageData{Image: image, Load: len(image.Platforms) <= 1})
+		images = append(images, imageData{Image: image, Load: len(image.Platforms) <= 1, Pinned: c.Pinned()})
 	}
 	if len(images) > 0 {
 		needs = append(needs, "images")

@@ -28,14 +28,16 @@ variable "CACHE_WRITE" {
   default = ""
 }
 
-# GHA_CACHE names the one target whose layers this build writes to the
-# GitHub Actions cache, and any value also reads every target's layers
-# from there. CI sets it in each images job on every run, branches too.
-# A base's job runs before its consumers' jobs, so a consumer on a
-# branch builds a new base revision from the layers that the base's
-# job wrote, where ghcr.io has no cache of it yet. Only the Actions
-# runtime can reach that cache, so a workstation leaves it empty.
-variable "GHA_CACHE" {
+# BRANCH_CACHE names the one target whose layers a build off main
+# writes to the branch cache on ghcr.io, and only a pinned base writes
+# one. A base's job runs before its consumers' jobs, so a consumer on a
+# branch that raises a base's revision builds the base from the layers
+# that the base's job wrote, where :buildcache has none of them yet.
+# The branch cache's tag is :buildcache-<version>-<revision>, the
+# revision that the branch builds: two branches that build different
+# revisions write different tags, and a published revision's layers
+# are in :buildcache from then on. Every build reads both tags.
+variable "BRANCH_CACHE" {
   default = ""
 }
 
@@ -57,13 +59,11 @@ target "{% .Name %}" {
     VERSION = {% if .Pinned %}"{% .Version %}"{% else %}VERSION{% end %}
   }
   tags       = [{% range $i, $tag := .Tags %}{% if $i %}, {% end %}"{% $tag %}"{% end %}]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope={% .Name %}"] : [],
-  )
+{% if .Pinned %}  cache-from = ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache", "type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache-{% .Tag %}"]
   cache-to = concat(
     CACHE_WRITE == "{% .Name %}" ? ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "{% .Name %}" ? ["type=gha,scope={% .Name %},mode=max,ignore-error=true"] : [],
-  )
+    BRANCH_CACHE == "{% .Name %}" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache-{% .Tag %},mode=max,ignore-error=true"] : [],
+  ){% else %}  cache-from = ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache"]
+  cache-to   = CACHE_WRITE == "{% .Name %}" ? ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache,mode=max,ignore-error=true"] : []{% end %}
 }
 {% end %}

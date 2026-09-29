@@ -28,14 +28,16 @@ variable "CACHE_WRITE" {
   default = ""
 }
 
-# GHA_CACHE names the one target whose layers this build writes to the
-# GitHub Actions cache, and any value also reads every target's layers
-# from there. CI sets it in each images job on every run, branches too.
-# A base's job runs before its consumers' jobs, so a consumer on a
-# branch builds a new base revision from the layers that the base's
-# job wrote, where ghcr.io has no cache of it yet. Only the Actions
-# runtime can reach that cache, so a workstation leaves it empty.
-variable "GHA_CACHE" {
+# BRANCH_CACHE names the one target whose layers a build off main
+# writes to the branch cache on ghcr.io, and only a pinned base writes
+# one. A base's job runs before its consumers' jobs, so a consumer on a
+# branch that raises a base's revision builds the base from the layers
+# that the base's job wrote, where :buildcache has none of them yet.
+# The branch cache's tag is :buildcache-<version>-<revision>, the
+# revision that the branch builds: two branches that build different
+# revisions write different tags, and a published revision's layers
+# are in :buildcache from then on. Every build reads both tags.
+variable "BRANCH_CACHE" {
   default = ""
 }
 
@@ -85,14 +87,8 @@ target "audio-operator" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/audio-operator:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=audio-operator"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "audio-operator" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "audio-operator" ? ["type=gha,scope=audio-operator,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "audio-operator" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "audio-operator-cli" {
@@ -106,14 +102,8 @@ target "audio-operator-cli" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/audio-operator-cli:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=audio-operator-cli"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "audio-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "audio-operator-cli" ? ["type=gha,scope=audio-operator-cli,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "audio-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "bluetooth-operator" {
@@ -127,14 +117,8 @@ target "bluetooth-operator" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/bluetooth-operator:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=bluetooth-operator"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "bluetooth-operator" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "bluetooth-operator" ? ["type=gha,scope=bluetooth-operator,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetooth-operator" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "bluetooth-bondfetch" {
@@ -148,14 +132,8 @@ target "bluetooth-bondfetch" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/bluetooth-bondfetch:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=bluetooth-bondfetch"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "bluetooth-bondfetch" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "bluetooth-bondfetch" ? ["type=gha,scope=bluetooth-bondfetch,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetooth-bondfetch" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "bluetoothd" {
@@ -169,14 +147,8 @@ target "bluetoothd" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/bluetoothd:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=bluetoothd"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "bluetoothd" ? ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "bluetoothd" ? ["type=gha,scope=bluetoothd,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetoothd" ? ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "bluetooth-operator-cli" {
@@ -190,14 +162,8 @@ target "bluetooth-operator-cli" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/bluetooth-operator-cli:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=bluetooth-operator-cli"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "bluetooth-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "bluetooth-operator-cli" ? ["type=gha,scope=bluetooth-operator-cli,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetooth-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "vulkan" {
@@ -208,13 +174,10 @@ target "vulkan" {
     VERSION = "20260928"
   }
   tags       = ["ghcr.io/liken-sh/vulkan:20260928-1"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=vulkan"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20260928-1"]
   cache-to = concat(
     CACHE_WRITE == "vulkan" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "vulkan" ? ["type=gha,scope=vulkan,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20260928-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -230,13 +193,10 @@ target "vaapi" {
     VERSION = "20260928"
   }
   tags       = ["ghcr.io/liken-sh/vaapi:20260928-1"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=vaapi"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20260928-1"]
   cache-to = concat(
     CACHE_WRITE == "vaapi" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "vaapi" ? ["type=gha,scope=vaapi,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20260928-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -252,13 +212,10 @@ target "ffmpeg" {
     VERSION = "20260928"
   }
   tags       = ["ghcr.io/liken-sh/ffmpeg:20260928-1"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=ffmpeg"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20260928-1"]
   cache-to = concat(
     CACHE_WRITE == "ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "ffmpeg" ? ["type=gha,scope=ffmpeg,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20260928-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -274,13 +231,10 @@ target "weston" {
     VERSION = "20260928"
   }
   tags       = ["ghcr.io/liken-sh/weston:20260928-1"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=weston"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-1"]
   cache-to = concat(
     CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "weston" ? ["type=gha,scope=weston,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -297,14 +251,8 @@ target "display-operator" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/display-operator:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=display-operator"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "display-operator" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "display-operator" ? ["type=gha,scope=display-operator,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "display-operator" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "display-capture" {
@@ -320,14 +268,8 @@ target "display-capture" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/display-capture:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=display-capture"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "display-capture" ? ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "display-capture" ? ["type=gha,scope=display-capture,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache"]
+  cache-to   = CACHE_WRITE == "display-capture" ? ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "display-api" {
@@ -342,14 +284,8 @@ target "display-api" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/display-api:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=display-api"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "display-api" ? ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "display-api" ? ["type=gha,scope=display-api,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache"]
+  cache-to   = CACHE_WRITE == "display-api" ? ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "display-operator-cli" {
@@ -363,14 +299,8 @@ target "display-operator-cli" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/display-operator-cli:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=display-operator-cli"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "display-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "display-operator-cli" ? ["type=gha,scope=display-operator-cli,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "display-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "equipment-operator" {
@@ -381,14 +311,8 @@ target "equipment-operator" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/equipment-operator:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=equipment-operator"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "equipment-operator" ? ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "equipment-operator" ? ["type=gha,scope=equipment-operator,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "equipment-operator" ? ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "git-csi-driver" {
@@ -399,14 +323,8 @@ target "git-csi-driver" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/git-csi-driver:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=git-csi-driver"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "git-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "git-csi-driver" ? ["type=gha,scope=git-csi-driver,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache"]
+  cache-to   = CACHE_WRITE == "git-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "mpv" {
@@ -421,13 +339,10 @@ target "mpv" {
     VERSION = "20260928"
   }
   tags       = ["ghcr.io/liken-sh/mpv:20260928-1"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=mpv"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20260928-1"]
   cache-to = concat(
     CACHE_WRITE == "mpv" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "mpv" ? ["type=gha,scope=mpv,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20260928-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -439,14 +354,8 @@ target "media-operator" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/media-operator:${VERSION}", "ghcr.io/liken-sh/media-operator-sidecar:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/media-operator:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=media-operator"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "media-operator" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "media-operator" ? ["type=gha,scope=media-operator,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "media-operator" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "media-operator-player" {
@@ -461,14 +370,8 @@ target "media-operator-player" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/media-operator-player:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=media-operator-player"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "media-operator-player" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "media-operator-player" ? ["type=gha,scope=media-operator-player,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache"]
+  cache-to   = CACHE_WRITE == "media-operator-player" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "media-operator-idle" {
@@ -484,14 +387,8 @@ target "media-operator-idle" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/media-operator-idle:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=media-operator-idle"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "media-operator-idle" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "media-operator-idle" ? ["type=gha,scope=media-operator-idle,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache"]
+  cache-to   = CACHE_WRITE == "media-operator-idle" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "media-operator-display" {
@@ -507,14 +404,8 @@ target "media-operator-display" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/media-operator-display:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=media-operator-display"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "media-operator-display" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "media-operator-display" ? ["type=gha,scope=media-operator-display,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache"]
+  cache-to   = CACHE_WRITE == "media-operator-display" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "media-operator-api" {
@@ -528,14 +419,8 @@ target "media-operator-api" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/media-operator-api:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=media-operator-api"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "media-operator-api" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "media-operator-api" ? ["type=gha,scope=media-operator-api,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache"]
+  cache-to   = CACHE_WRITE == "media-operator-api" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "media-operator-cli" {
@@ -546,14 +431,8 @@ target "media-operator-cli" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/media-operator-cli:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=media-operator-cli"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "media-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "media-operator-cli" ? ["type=gha,scope=media-operator-cli,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "media-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "library-operator" {
@@ -564,14 +443,8 @@ target "library-operator" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/library-operator:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=library-operator"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "library-operator" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "library-operator" ? ["type=gha,scope=library-operator,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "library-operator-ffmpeg" {
@@ -585,14 +458,8 @@ target "library-operator-ffmpeg" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/library-operator-ffmpeg:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=library-operator-ffmpeg"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "library-operator-ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "library-operator-ffmpeg" ? ["type=gha,scope=library-operator-ffmpeg,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "library-operator-media-browser" {
@@ -608,14 +475,8 @@ target "library-operator-media-browser" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/library-operator-media-browser:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=library-operator-media-browser"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "library-operator-media-browser" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "library-operator-media-browser" ? ["type=gha,scope=library-operator-media-browser,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-media-browser" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "library-operator-corrosion" {
@@ -626,14 +487,8 @@ target "library-operator-corrosion" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/library-operator-corrosion:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=library-operator-corrosion"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "library-operator-corrosion" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "library-operator-corrosion" ? ["type=gha,scope=library-operator-corrosion,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-corrosion" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "library-operator-cli" {
@@ -644,14 +499,8 @@ target "library-operator-cli" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/library-operator-cli:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=library-operator-cli"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "library-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "library-operator-cli" ? ["type=gha,scope=library-operator-cli,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "people-operator" {
@@ -662,14 +511,8 @@ target "people-operator" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/people-operator:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/people-operator:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=people-operator"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "people-operator" ? ["type=registry,ref=ghcr.io/liken-sh/people-operator:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "people-operator" ? ["type=gha,scope=people-operator,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/people-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "people-operator" ? ["type=registry,ref=ghcr.io/liken-sh/people-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "per-node-csi-driver" {
@@ -680,12 +523,6 @@ target "per-node-csi-driver" {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/per-node-csi-driver:${VERSION}"]
-  cache-from = concat(
-    ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache"],
-    GHA_CACHE != "" ? ["type=gha,scope=per-node-csi-driver"] : [],
-  )
-  cache-to = concat(
-    CACHE_WRITE == "per-node-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache,mode=max,ignore-error=true"] : [],
-    GHA_CACHE == "per-node-csi-driver" ? ["type=gha,scope=per-node-csi-driver,mode=max,ignore-error=true"] : [],
-  )
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache"]
+  cache-to   = CACHE_WRITE == "per-node-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache,mode=max,ignore-error=true"] : []
 }

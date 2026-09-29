@@ -989,12 +989,16 @@ how any vendored domain gets its bytes.
    checks them after `apt-get update`. The file is in the `vulkan`
    recipe, so the date and the package lists are bound together.
 
-   Every images job also writes its image's layers to the GitHub
-   Actions cache under the image's name, on every branch, and every
-   build reads that cache. A consumer's job runs after its bases'
-   jobs, so on a branch that raises a base's revision the consumer
-   builds the base from the layers that the base's job wrote, not from
-   snapshot.debian.org again.
+   Off main, a pinned base's images job also writes its layers to
+   ghcr as the tag `:buildcache-<version>-<revision>`, and every build
+   reads that tag beside `:buildcache`. A consumer's job runs after
+   its bases' jobs, so on a branch that raises a base's revision the
+   consumer builds the base from the layers that the base's job wrote,
+   not from snapshot.debian.org again. The tag names the revision, so
+   two branches that build different revisions do not overwrite each
+   other, and there is one such tag for each revision that a branch
+   built. The GitHub Actions cache is not used: it holds 10 GB for the
+   whole repository, and the Go, Rust, and OS input caches fill it.
 
    `ci generate` also writes `docker-bake.hcl`, with one target for
    each image. The generator reads each Dockerfile's `FROM` and

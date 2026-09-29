@@ -142,10 +142,11 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"      - run: make test-go\n",
 		"      - run: |\n          make test\n          make build\n",
 		"name: coverage-app-go",
-		"- image: app-cli\n            load: false",
+		"- image: app-cli\n            pinned: false\n            load: false",
 		"smoke: 'app/smoke/app.sh'",
 		"targets: ${{ matrix.image }}",
-		"GHA_CACHE=${{ matrix.image }}",
+		"BRANCH_CACHE=${{ matrix.image }}",
+		"- image: app\n            pinned: false",
 		"fluxcd/flux2/action@v2.9.5",
 		"go run . publish -root .. -component app",
 	} {
@@ -190,5 +191,25 @@ func TestAHooksJobSetsUpGoOnlyForAGoModule(t *testing.T) {
 				t.Errorf("setup-go in the %s workflow is %v:\n%s", name, !wants, text)
 			}
 		})
+	}
+}
+
+func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(files[".github/workflows/component-base.yaml"])
+	for _, want := range []string{"- image: base\n            pinned: true", "|| matrix.pinned }}\n        uses: docker/login-action@v3"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the workflow lacks %q:\n%s", want, text)
+		}
 	}
 }

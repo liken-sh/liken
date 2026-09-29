@@ -95,14 +95,15 @@ jobs:
   # image finds every layer there. A push to another branch only reads
   # it, so a topic branch cannot replace main's cache.
   #
-  # Every run, on any branch, also writes the image's layers to the
-  # GitHub Actions cache under the image's name, and every build reads
-  # that cache too. A consumer's job runs after its bases' jobs, so on a
-  # branch that raises a base's revision, the consumer builds the base
-  # from the layers that the base's own job wrote a moment before,
-  # instead of from snapshot.debian.org. Each write ignores an error: a
-  # cache that cannot be written makes the next build slower, and it
-  # never fails this one.
+  # Off main, a pinned base's job also writes its layers to ghcr, as a
+  # :buildcache-<version>-<revision> tag beside the image, and every
+  # build reads that tag too. A consumer's job runs after its bases'
+  # jobs, so on a branch that raises a base's revision, the consumer
+  # builds the base from the layers that the base's own job wrote a
+  # moment before, instead of from snapshot.debian.org. The bake file
+  # decides which target writes. Each write ignores an error: a cache
+  # that cannot be written makes the next build slower, and it never
+  # fails this one.
   images:
     name: ${{ matrix.image }}
     runs-on: ubuntu-26.04
@@ -112,15 +113,19 @@ jobs:
       matrix:
         include:
           - image: bluetooth-operator
+            pinned: false
             load: true
             smoke: ''
           - image: bluetooth-bondfetch
+            pinned: false
             load: true
             smoke: ''
           - image: bluetoothd
+            pinned: false
             load: true
             smoke: ''
           - image: bluetooth-operator-cli
+            pinned: false
             load: false
             smoke: ''
     steps:
@@ -128,7 +133,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - if: ${{ inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+      # A pinned base writes its branch cache on every branch, so its job
+      # logs in on every branch too.
+      - if: ${{ inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || matrix.pinned }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -150,7 +157,7 @@ jobs:
           vars: |
             VERSION=${{ inputs.version || 'check' }}
             CACHE_WRITE=${{ (inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && matrix.image || '' }}
-            GHA_CACHE=${{ matrix.image }}
+            BRANCH_CACHE=${{ matrix.image }}
 
       - name: smoke check
         if: ${{ matrix.smoke != '' && matrix.load }}

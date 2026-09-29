@@ -21,9 +21,13 @@ type bakeContext struct{ Name, Value string }
 
 type bakeTarget struct {
 	Name, Context, Dockerfile, Target, Version string
-	Pinned                                     bool
-	Platforms, Tags                            []string
-	Contexts                                   []bakeContext
+	// Tag is a pinned image's own tag, <version>-<revision>, which also
+	// names its branch cache.
+	Tag       string
+	Pinned    bool
+	Platforms []string
+	Tags      []string
+	Contexts  []bakeContext
 }
 
 // Bake renders the bake file: one target for each image, named for the
@@ -79,6 +83,7 @@ func newBakeTarget(root string, c *Component, image Image, producer map[string]s
 	tag := "${VERSION}"
 	if c.Pinned() {
 		tag = c.PinnedTag()
+		t.Tag = tag
 	}
 	for _, name := range append([]string{image.Name}, image.Aliases...) {
 		t.Tags = append(t.Tags, ref(name, tag))
