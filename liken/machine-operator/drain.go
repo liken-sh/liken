@@ -67,6 +67,13 @@ const (
 // a DaemonSet pod). It also excludes mirror pods, because the
 // kubelet recreates those from disk, and pods that have already run
 // to completion.
+//
+// A completed pod also stops counting as a claim holder, and that is
+// safe for its DRA driver. The kubelet unprepares a pod's claims after
+// its containers stop and before it reports a terminal phase, and its
+// status manager holds the phase back while the DRA manager still
+// holds a claim for the pod. So a pod that the listing shows as
+// Succeeded or Failed needs no unprepare call from its driver.
 func evictablePods(pods []kubernetes.Pod) []kubernetes.Pod {
 	var evictable []kubernetes.Pod
 	for _, p := range pods {
@@ -167,9 +174,11 @@ func holdsResourceClaim(p kubernetes.Pod) bool {
 // pod wait for itself.
 //
 // A pod that is already terminating is not asked again, because an
-// earlier pass asked it and the API server accepted. It still counts
-// as a claim holder, because the kubelet unprepares its claim while it
-// terminates, and the driver must stay until that call is done.
+// earlier pass asked it and the API server accepted. This holds for a
+// driver pod too. A terminating claim holder still counts as a holder
+// until it completes or leaves the listing, because the kubelet
+// unprepares its claim while it terminates, and the driver must stay
+// until that call is done.
 func drainOrder(evictable []kubernetes.Pod) []kubernetes.Pod {
 	var first, drivers []kubernetes.Pod
 	holders := 0

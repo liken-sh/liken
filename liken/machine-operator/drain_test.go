@@ -224,6 +224,17 @@ func TestDrainHoldsADriverWhileItsClaimHolderTerminates(t *testing.T) {
 	}
 }
 
+// The kubelet reports a terminal phase only after it unprepares the
+// pod's claims, so a completed holder keeps no driver on the node.
+func TestDrainEvictsADriverOnceItsClaimHolderCompleted(t *testing.T) {
+	step := draining(
+		pod("display-operator", "displays", servesDRA),
+		pod("movie-lg", "media", holdsAClaim, terminating, completed))
+	if evicted(step) != "display-operator" {
+		t.Errorf("the holder's claim is unprepared, so the driver goes: %s", evicted(step))
+	}
+}
+
 func TestDrainEvictsADriverThatHoldsItsOwnClaimWithTheDrivers(t *testing.T) {
 	// The device operators claim raw hardware from liken.sh, whose
 	// driver is this operator, and no drain evicts it. So a driver
