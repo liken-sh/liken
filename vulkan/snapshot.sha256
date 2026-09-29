@@ -1,0 +1,7 @@
+# The sha256 of each InRelease file of the snapshot that the bases
+# install from, by its name under /var/lib/apt/lists. snapshot.sh checks
+# them after apt-get update. A new snapshot date needs new lines here:
+# the names carry the date, so a date with no lines fails the build.
+0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675  snapshot.debian.org_archive_debian_20260928T000000Z_dists_trixie_InRelease
+7cd46ce7f2715c3cac9cd2f2f09cabd11c6ae6523fdb7edcae995bbbd7373b8d  snapshot.debian.org_archive_debian_20260928T000000Z_dists_trixie-updates_InRelease
+974badfa038d7d59e94f553381fd4c661ca7f9417540e27b44494f051e039197  snapshot.debian.org_archive_debian-security_20260928T000000Z_dists_trixie-security_InRelease

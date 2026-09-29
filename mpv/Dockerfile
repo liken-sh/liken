@@ -11,13 +11,12 @@ FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee
 ARG VERSION
 # snapshot.sh and closure.sh come from the vulkan directory, the build
 # context named builder.
-COPY --from=builder snapshot.sh /
+COPY --from=builder snapshot.sh snapshot.sha256 /
 # libspa-0.2-modules carries the SPA plugins that mpv's PipeWire output
 # loads by name. pipewire-bin is here for one file,
 # /usr/share/pipewire/client.conf. fontconfig-config carries the
 # configuration that libass reads.
 RUN sh /snapshot.sh "$VERSION" \
-    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         mpv \

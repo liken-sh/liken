@@ -23,9 +23,8 @@
 # two libudev types it names.
 FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS shim
 ARG VERSION
-COPY --from=builder snapshot.sh /
+COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
-    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -43,9 +42,8 @@ RUN gcc -Wall -Wextra -Werror -shared -fPIC \
 # pkg-config gives only the include paths here.
 FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS layout
 ARG VERSION
-COPY --from=builder snapshot.sh /
+COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
-    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         gcc libc6-dev pkg-config \
@@ -61,7 +59,7 @@ RUN gcc -Wall -Wextra -Werror -shared -fPIC \
 # reading again.
 FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS closure
 ARG VERSION
-COPY --from=builder snapshot.sh /
+COPY --from=builder snapshot.sh snapshot.sha256 /
 # libgl1-mesa-dri is what the GL renderer builds its EGL device from.
 # Without it weston falls back to the pixman renderer, which advertises
 # zwp_linux_dmabuf_v1 at version 3 and leaves mpv on software paths.
@@ -75,7 +73,6 @@ COPY --from=builder snapshot.sh /
 # or the operator is the part that is wrong when a monitor publishes no
 # control attribute.
 RUN sh /snapshot.sh "$VERSION" \
-    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         weston \

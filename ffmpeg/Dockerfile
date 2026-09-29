@@ -11,9 +11,8 @@ FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee
 ARG VERSION
 # snapshot.sh and closure.sh come from the vulkan directory, the build
 # context named builder.
-COPY --from=builder snapshot.sh /
+COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
-    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
