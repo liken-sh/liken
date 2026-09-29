@@ -32,7 +32,3 @@ skip = ["test-go", "test-docs"]
 
 [outputs]
 deploy = "deploy"
-
-[[outputs.images]]
-name = "people-operator"
-file = "Dockerfile"

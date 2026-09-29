@@ -16,7 +16,7 @@ name: {% .Name %}
 on:
   workflow_call:
     inputs:
-      # check runs the jobs and the images that the plan names. publish
+      # check runs the jobs{% if .Images %} and the images{% end %} that the plan names. publish
       # runs the publish job alone: ci.yaml calls this workflow a second
       # time for it, after the checks of every component in this one's
       # closure pass.
@@ -275,9 +275,9 @@ jobs:{% range .Jobs %}
         if: ${{ !inputs.dryrun }}
         working-directory: {% .Dir %}
         run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% else %}
-{% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}
+{% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% if .Images %}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3{% end %}
 
       # A dry run pushes nothing, so it needs no login.
       - if: ${{ !inputs.dryrun }}
@@ -291,11 +291,13 @@ jobs:{% range .Jobs %}
         with:
           version: 2.9.5{% end %}
 
-      # Each image builds again through docker-bake.hcl, from the layer
-      # cache that the images job wrote, and pushes. The deploy artifact
+{% if .Images %}      # Each image builds again through docker-bake.hcl, from the layer
+      # cache that the images job wrote, and pushes.{% if .Deploy %} The deploy artifact
       # goes last, because a cluster follows the deploy artifact, and it
-      # must never name an image that is not pushed yet.
-      - name: publish
+      # must never name an image that is not pushed yet.{% end %}
+{% else %}      # The component builds no image, so the deploy artifact pushes
+      # alone.
+{% end %}      - name: publish
         working-directory: ci
         run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% end %}
 {% end %}

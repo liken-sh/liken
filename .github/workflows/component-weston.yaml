@@ -186,9 +186,7 @@ jobs:
           password: ${{ github.token }}
 
       # Each image builds again through docker-bake.hcl, from the layer
-      # cache that the images job wrote, and pushes. The deploy artifact
-      # goes last, because a cluster follows the deploy artifact, and it
-      # must never name an image that is not pushed yet.
+      # cache that the images job wrote, and pushes.
       - name: publish
         working-directory: ci
         run: go run . publish -root .. -component weston -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"

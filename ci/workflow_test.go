@@ -458,3 +458,37 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 		}
 	}
 }
+
+func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
+		"crd/package.toml":      "[package]\nname = \"crd\"\n[outputs]\ndeploy = \"deploy\"\n",
+		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]string{
+		"operator": {"docker/setup-buildx-action@v3", "docker/login-action@v3", "fluxcd/flux2/action@v2.9.5"},
+		"crd":      {"docker/login-action@v3", "fluxcd/flux2/action@v2.9.5"},
+		"base":     {"docker/setup-buildx-action@v3", "docker/login-action@v3"},
+	}
+	for name, want := range cases {
+		publish := workflowJobs(t, files[".github/workflows/component-"+name+".yaml"])["publish"]
+		var got []string
+		for _, step := range publish["steps"].([]any) {
+			uses, _ := step.(map[string]any)["uses"].(string)
+			if strings.HasPrefix(uses, "docker/") || strings.HasPrefix(uses, "fluxcd/") {
+				got = append(got, uses)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s's publish job sets up %v, want %v", name, got, want)
+		}
+	}
+}

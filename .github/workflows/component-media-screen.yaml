@@ -13,7 +13,7 @@ name: media-screen
 on:
   workflow_call:
     inputs:
-      # check runs the jobs and the images that the plan names. publish
+      # check runs the jobs that the plan names. publish
       # runs the publish job alone: ci.yaml calls this workflow a second
       # time for it, after the checks of every component in this one's
       # closure pass.

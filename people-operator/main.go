@@ -1,4 +1,4 @@
-// This repository ships a CRD and no controller. The module exists
+// people-operator ships a CRD and no controller. The module exists
 // so `make test` can prove the CRD's shape.
 package main
 

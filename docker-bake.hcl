@@ -71,7 +71,6 @@ group "default" {
     "media-operator-display",
     "media-operator-api",
     "media-operator-cli",
-    "people-operator",
     "per-node-csi-driver",
   ]
 }
@@ -521,18 +520,6 @@ target "media-operator-cli" {
   tags       = ["ghcr.io/liken-sh/media-operator-cli:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache"]
   cache-to   = CACHE_WRITE == "media-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "people-operator" {
-  context    = "people-operator"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/people-operator:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/people-operator:buildcache"]
-  cache-to   = CACHE_WRITE == "people-operator" ? ["type=registry,ref=ghcr.io/liken-sh/people-operator:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "per-node-csi-driver" {

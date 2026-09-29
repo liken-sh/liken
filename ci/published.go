@@ -25,7 +25,7 @@ type Published struct {
 // artifact is, because the artifact goes last, after every image. A
 // component published before the deploy artifacts existed has only
 // images, so the first image stands in until the artifact has a
-// release.
+// release. A component that builds no image has only the artifact.
 func (p Published) Versions(c *Component) ([]string, error) {
 	if c.Outputs.Channel {
 		releases, err := p.channelReleases()

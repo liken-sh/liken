@@ -678,7 +678,6 @@ jobs:
       version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].jobs) }}
-      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -693,7 +692,6 @@ jobs:
       version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
       jobs: '[]'
-      images: '[]'
     permissions:
       contents: read
       packages: write
