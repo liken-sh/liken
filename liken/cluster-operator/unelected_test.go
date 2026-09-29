@@ -59,6 +59,13 @@ func TestALeaseThatAnswersAgainIsTaken(t *testing.T) {
 	case <-time.After(3 * testLeaseTiming.duration):
 		t.Fatal("the copy never took the Lease once it answered")
 	}
+	// OnStartedLeading starts the lead before it ends the mode, so
+	// mayWrite allows a write at each moment between the two. The test
+	// waits out that moment.
+	deadline := time.Now().Add(testLeaseTiming.duration)
+	for (copy.gauge.Load() || copy.unelected.Load()) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if copy.gauge.Load() || copy.unelected.Load() || server.holder() != copy.identity {
 		t.Errorf("gauge = %v, unelected = %v, holder = %q; want the mode over and the Lease held",
 			copy.gauge.Load(), copy.unelected.Load(), server.holder())
