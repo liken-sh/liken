@@ -285,9 +285,8 @@ resource "linode_instance_config" "redirects" {
 # that name go to the archived repository's Pages site, and the host
 # cannot get its certificate. A name redirects once its CNAME leaves
 # that set. A name with no record and no entry in redirect_names
-# reaches the host too. Caddy sends every plain HTTP request to HTTPS,
-# and the TLS handshake for that name fails, because Caddy has no
-# certificate for it.
+# reaches the host too. It gets a 404 over plain HTTP, and its TLS
+# handshake fails over HTTPS, because Caddy has no certificate for it.
 
 # The instance has one IPv4 address, its public one, because it has no
 # private interface. one() fails the plan if the set ever holds a
