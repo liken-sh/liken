@@ -83,12 +83,9 @@ func main() {
 	}
 
 	// Nothing below runs until this copy holds the Lease, and every
-	// write asks the election first (mayWrite in leader.go), again
-	// before each send after a 429. A SIGTERM ends the wait after a
-	// 429, so a throttled sweep does not hold back the release of the
-	// Lease, and a write already sent still runs to its answer.
+	// write asks the election first (mayWrite in leader.go).
 	leader := lead(stop, newUnelectedGauge(operatorMetrics))
-	client = client.WithWriteGuard(leader.mayWrite).WithWaitContext(stop)
+	client = client.WithWriteGuard(leader.mayWrite)
 
 	// The watches start with the lead, so a copy that has never acted
 	// holds no copy of the fleet and opens no stream (watches.go names each watch and

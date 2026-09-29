@@ -30,10 +30,12 @@ package kubernetes
 // client sends the same requests directly.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -67,13 +69,32 @@ const (
 // has a better address to use: its own loopback address, where a dead
 // remote server can never strand a connection. The credentials stay
 // the same in both cases.
+//
+// The client answers a 429 at once, with no wait. Each operator's loop
+// runs again within ten seconds, and that loop is its retry. A pass
+// that waited out a 429 would stretch past what the timing below
+// assumes: the heartbeat Lease that a pass renews carries the time the
+// pass started, and a Lost verdict or a reboot grant is written from
+// what the sweep read when it started.
 func InClusterClient(server string) (*apiclient.Client, error) {
-	return apiclient.InCluster(apiclient.InClusterOptions{
+	c, err := apiclient.InCluster(apiclient.InClusterOptions{
 		ServiceAccountDir: serviceAccountDir,
 		Server:            server,
 		Timeout:           requestTimeout,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return c.WithWaitContext(noWait), nil
 }
+
+// noWait is a context that has already ended, for a client whose wait
+// after a 429 must end at once.
+var noWait = func() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}()
 
 // requestTimeout bounds one request of an in-cluster client, from the
 // dial to the last byte of the answer. The shared client's timeouts
@@ -134,4 +155,13 @@ func List[T any](c *apiclient.Client, path string) ([]T, error) {
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+// Unreachable reports whether a request failed before any API server
+// answered it: the dial failed, or the connection went silent until a
+// timeout. An error that carries an HTTP status is an answer, and it is
+// not this kind.
+func Unreachable(err error) bool {
+	var transport *url.Error
+	return errors.As(err, &transport)
 }

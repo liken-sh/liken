@@ -6,7 +6,6 @@ package kubernetes
 // OS's own pods after an upgrade.
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
@@ -120,9 +119,8 @@ func ListPodsOnNode(c *apiclient.Client, nodeName string) ([]Pod, error) {
 // request to wait: the budget stays short until another pod becomes
 // ready, which takes longer than the shared client waits. So the
 // eviction goes out on a client whose wait after a 429 has already
-// ended, and the refusal reaches the caller at once. A drain that
-// waited ten seconds on each pod that a budget holds would hold its
-// pass, and the heartbeat that the pass renews, for that long.
+// ended, whatever client the caller holds, and the refusal reaches the
+// caller at once.
 func EvictPod(c *apiclient.Client, p Pod) error {
 	c = c.WithWaitContext(noWait)
 	body, err := json.Marshal(map[string]any{
@@ -136,11 +134,3 @@ func EvictPod(c *apiclient.Client, p Pod) error {
 	path := "/api/v1/namespaces/" + p.Metadata.Namespace + "/pods/" + p.Metadata.Name + "/eviction"
 	return c.RequestJSON(http.MethodPost, path, body, nil)
 }
-
-// noWait is a context that has already ended, for a client whose wait
-// after a 429 must end at once (EvictPod).
-var noWait = func() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	return ctx
-}()

@@ -2,7 +2,7 @@ package kubernetes
 
 // A client for the operator's workstation, built from the admin
 // kubeconfig that the identity package computes. The in-cluster
-// client (apiclient.go) authenticates with a ServiceAccount bearer
+// client (InClusterClient) authenticates with a ServiceAccount bearer
 // token that kubelet mounts and refreshes. A workstation has no
 // kubelet and no token. Its kubeconfig embeds a client certificate
 // instead, and the TLS handshake itself carries the identity: the
@@ -49,8 +49,8 @@ type kubeconfigFile struct {
 // KubeconfigClient builds a client from a kubeconfig file. The
 // client trusts only the embedded CA, not the system trust store,
 // so it accepts only the cluster's own API server. The timeouts
-// match the in-cluster client's reasoning (apiclient.go): every one
-// of them limits a server that stops responding without sending any
+// match the in-cluster client's reasoning (the shared module's
+// kubernetes/apiclient/client.go): every one of them limits a server that stops responding without sending any
 // signal.
 func KubeconfigClient(path string) (*apiclient.Client, error) {
 	raw, err := os.ReadFile(path)

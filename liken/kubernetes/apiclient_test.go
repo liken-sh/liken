@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
@@ -317,5 +318,50 @@ func TestListCarriesTheServersRefusal(t *testing.T) {
 	}
 	if _, err := ListHeartbeats(client); err == nil {
 		t.Error("and so is a refused heartbeat sweep")
+	}
+}
+
+// An operator's client answers a 429 at once, with one request, because
+// the operator's own loop is its retry.
+func TestInClusterClientAnswersA429AtOnce(t *testing.T) {
+	var sent atomic.Int64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent.Add(1)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(server.Close)
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": string(ca)})
+	client, err := InClusterClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	_, err = GetMachine(client, "node-1")
+
+	if !errors.Is(err, apiclient.ErrThrottled) || sent.Load() != 1 || time.Since(started) > 500*time.Millisecond {
+		t.Errorf("err = %v after %d requests and %s, want the 429 at once", err, sent.Load(), time.Since(started))
+	}
+}
+
+// A request that no API server answered is unreachable. An answer with
+// a status is not, and neither is no error.
+func TestUnreachableSeparatesNoAnswerFromAnAnswer(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	down := apiclient.New(closed.URL, http.DefaultClient, "")
+	refusing := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "machines.liken.sh is forbidden", http.StatusForbidden)
+	}))
+	absent := testClient(t, http.NotFoundHandler())
+
+	_, downErr := GetMachine(down, "node-1")
+	_, refusedErr := GetMachine(refusing, "node-1")
+	_, absentErr := GetMachine(absent, "node-1")
+	if !Unreachable(downErr) || Unreachable(refusedErr) || Unreachable(absentErr) || Unreachable(nil) {
+		t.Errorf("Unreachable = %v, %v, %v, %v; want only the server that is down",
+			Unreachable(downErr), Unreachable(refusedErr), Unreachable(absentErr), Unreachable(nil))
 	}
 }

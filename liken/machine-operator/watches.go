@@ -109,8 +109,11 @@ type reader struct {
 	// (kubernetes/memo). The watch delivers a write a moment after the
 	// API server answers it, so without the memo the next pass could
 	// start from a copy older than the status it just wrote. The pass
-	// writes no other watched kind through a version, so no other kind
-	// has a memo.
+	// also writes its Node's taints and its ResourceSlice with the
+	// version it read, and a copy older than its own write ends in a
+	// 409 that the next pass repairs, so neither kind has a memo. Its
+	// other Node writes are merge patches that a second pass sends
+	// again with no harm.
 	machineVersions *memo.Versions
 }
 

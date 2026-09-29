@@ -234,6 +234,16 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 // progress on the same condition.
 func gateThroughDrain(c *apiclient.Client, node *nodeObject, conv convergence, now time.Time) convergence {
 	pods, err := kubernetes.ListPodsOnNode(c, node.Metadata.Name)
+	if kubernetes.Unreachable(err) {
+		// The Node came from the watch's store, which keeps answering
+		// while the API server is down. A drain cannot move a pod then,
+		// and a hold would last as long as the outage, which a reboot
+		// into the staged change can be the cure for. So the reboot
+		// goes ahead with no drain, the same as when the Node read
+		// fails (disruptions.gate).
+		fmt.Printf("listing pods for the drain: %v; the API server cannot be reached, so the reboot goes ahead with no drain\n", err)
+		return conv
+	}
 	if err != nil {
 		fmt.Printf("listing pods for the drain: %v\n", err)
 		return holdForDrain(conv, "listing this node's pods failed; retrying")

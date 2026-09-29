@@ -114,7 +114,9 @@ type disruptions struct {
 // emptied before the intent is written, so workloads move to other
 // nodes instead of being killed by the reboot. A pass whose Node
 // read failed skips the drain, because during a demotion there is
-// no Node to cordon, and the reboot must still happen.
+// no Node to cordon, and the reboot must still happen. A drain that
+// cannot reach the API server lets the reboot go ahead too
+// (gateThroughDrain).
 func (d *disruptions) gate(c *apiclient.Client, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
 	conv.requestRestart = conv.requestRestart && !d.rebooting
 	if conv.requestReboot && t == turnGranted && nodeErr == nil {

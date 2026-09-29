@@ -6,10 +6,12 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
@@ -291,6 +293,20 @@ func TestGateThroughDrainHoldsWhenPodsCannotBeListed(t *testing.T) {
 	}
 	if conv.condition.Reason != "Draining" {
 		t.Errorf("got %+v", conv.condition)
+	}
+}
+
+// A drain whose API server cannot be reached lets the granted reboot go
+// ahead, the same as a pass whose Node read failed. The Node came from
+// the watch's store, which keeps answering while the API server is
+// down, and no pod can move until it returns.
+func TestGateThroughDrainLetsTheRebootGoWhenTheAPIServerIsUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	client := apiclient.New(server.URL, http.DefaultClient, "")
+	conv := gateThroughDrain(client, drainNode(true, true, drainNow.Format(time.RFC3339)), rebootingConvergence(), drainNow)
+	if !conv.requestReboot {
+		t.Errorf("the reboot held at %+v, want it to go ahead", conv.condition)
 	}
 }
 
