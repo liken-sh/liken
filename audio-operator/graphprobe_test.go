@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubProbeDump puts a pw-dump on the path that prints a graph larger
@@ -48,5 +49,25 @@ func TestGraphAnswersReportsTheFailureWithoutTheGraph(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), `"id"`) {
 		t.Error("the probe's report holds the graph pw-dump printed")
+	}
+}
+
+// A pw-dump that hangs is stopped at the bound, and the report says
+// so in its own words, not as the signal that stopped it.
+func TestGraphAnswersReportsAPWDumpThatHangs(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\nexec sleep 30\n"
+	if err := os.WriteFile(filepath.Join(dir, "pw-dump"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := graphAnswers(ctx)
+
+	want := "pw-dump did not finish in " + graphProbeTimeout.String()
+	if err == nil || err.Error() != want {
+		t.Errorf("the probe's report = %v, want %q", err, want)
 	}
 }

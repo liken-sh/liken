@@ -55,8 +55,20 @@ func graphAnswers(ctx context.Context) error {
 	// The context's kill bounds the exec, and WaitDelay bounds the
 	// wait after the kill, the same way readGraph bounds its pw-dump.
 	command.WaitDelay = time.Second
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("running pw-dump: %w: %s", err, strings.TrimSpace(stderr.String()))
+	err := command.Run()
+	if err == nil {
+		return nil
 	}
-	return nil
+	// A pw-dump that hangs ends by the kill, and "signal: killed" would
+	// hide that the bound stopped it. The bound is the cause, so the
+	// report names it.
+	if ctx.Err() != nil {
+		err = fmt.Errorf("pw-dump did not finish in %s", graphProbeTimeout)
+	} else {
+		err = fmt.Errorf("running pw-dump: %w", err)
+	}
+	if words := strings.TrimSpace(stderr.String()); words != "" {
+		return fmt.Errorf("%w: %s", err, words)
+	}
+	return err
 }
