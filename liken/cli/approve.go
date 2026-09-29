@@ -99,7 +99,7 @@ func approveReboot(args []string, out io.Writer) error {
 	}
 	short := fmt.Sprintf("%.12s", choice.Hash)
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, machine.ApproveDisruptionAnnotation, short)
-	if err := c.PatchJSON(kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
+	if err := kubernetes.PatchJSON(c, kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "\napproved: %s=%s\n", machine.ApproveDisruptionAnnotation, short)

@@ -16,6 +16,8 @@ package kubernetes
 import (
 	"net/url"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // PluginLabel is the label a workload carries to declare that it ships
@@ -75,7 +77,7 @@ var pluginWorkloadKinds = []string{"deployments", "daemonsets", "statefulsets"}
 // keeps one workload per domain. The label selector names only the
 // key, so a workload with any value for it is returned. The collection
 // with no namespace segment spans every namespace.
-func ListPluginWorkloads(c *Client) ([]Workload, error) {
+func ListPluginWorkloads(c *apiclient.Client) ([]Workload, error) {
 	var all []Workload
 	for _, kind := range pluginWorkloadKinds {
 		path := "/apis/apps/v1/" + kind + "?labelSelector=" + url.QueryEscape(PluginLabel)

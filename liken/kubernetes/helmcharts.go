@@ -14,7 +14,11 @@ package kubernetes
 // charts before the helm feature may stop
 // (machine-operator/retraction.go).
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+)
 
 // HelmChartsPath names the collection, across all namespaces. A chart
 // is namespaced, and the ones k3s creates for its own components live
@@ -40,9 +44,9 @@ type HelmChart struct {
 // holds no charts. So a missing kind returns no charts and no error.
 // Every other failure stays an error, because a failed read must
 // never reach a caller as an empty cluster.
-func ListHelmCharts(c *Client) ([]HelmChart, error) {
+func ListHelmCharts(c *apiclient.Client) ([]HelmChart, error) {
 	charts, err := List[HelmChart](c, HelmChartsPath)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, nil
 	}
 	return charts, err

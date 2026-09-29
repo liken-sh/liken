@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -255,7 +256,7 @@ func TestNameListStopsCounting(t *testing.T) {
 // collectionServer answers one list URL with the objects given, and
 // answers 404 everywhere else, the way an API server answers for a
 // kind it does not serve.
-func collectionServer(t *testing.T, path string, objects ...map[string]any) *kubernetes.Client {
+func collectionServer(t *testing.T, path string, objects ...map[string]any) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != path {
@@ -276,13 +277,13 @@ func namedObject(namespace, name string, spec map[string]any) map[string]any {
 func TestEvaluatePreconditionNamesTheObjectsThatRemain(t *testing.T) {
 	cases := map[string]struct {
 		precondition cluster.Precondition
-		client       func(t *testing.T) *kubernetes.Client
+		client       func(t *testing.T) *apiclient.Client
 		holds        bool
 		names        string
 	}{
 		"a chart still installed keeps helm running": {
 			precondition: cluster.NoHelmCharts,
-			client: func(t *testing.T) *kubernetes.Client {
+			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, kubernetes.HelmChartsPath,
 					namedObject("kube-system", "traefik", nil))
 			},
@@ -290,14 +291,14 @@ func TestEvaluatePreconditionNamesTheObjectsThatRemain(t *testing.T) {
 		},
 		"no charts left releases helm": {
 			precondition: cluster.NoHelmCharts,
-			client: func(t *testing.T) *kubernetes.Client {
+			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, kubernetes.HelmChartsPath)
 			},
 			holds: true,
 		},
 		"a LoadBalancer Service keeps servicelb running": {
 			precondition: cluster.NoLoadBalancerServices,
-			client: func(t *testing.T) *kubernetes.Client {
+			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, "/api/v1/services",
 					namedObject("default", "whoami", map[string]any{"type": "LoadBalancer"}))
 			},
@@ -305,7 +306,7 @@ func TestEvaluatePreconditionNamesTheObjectsThatRemain(t *testing.T) {
 		},
 		"ordinary Services release servicelb": {
 			precondition: cluster.NoLoadBalancerServices,
-			client: func(t *testing.T) *kubernetes.Client {
+			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, "/api/v1/services",
 					namedObject("default", "kubernetes", map[string]any{"type": "ClusterIP"}))
 			},

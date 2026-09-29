@@ -9,14 +9,15 @@ package kubernetes
 import (
 	"encoding/json"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/cluster"
 )
 
-func GetCluster(c *Client, name string) (*cluster.Cluster, error) {
-	return get[cluster.Cluster](c, ClustersPath+"/"+name)
+func GetCluster(c *apiclient.Client, name string) (*cluster.Cluster, error) {
+	return apiclient.Get[cluster.Cluster](c, ClustersPath+"/"+name)
 }
 
-func ListClusters(c *Client) ([]cluster.Cluster, error) {
+func ListClusters(c *apiclient.Client) ([]cluster.Cluster, error) {
 	return List[cluster.Cluster](c, ClustersPath)
 }
 
@@ -32,7 +33,7 @@ func ListClusters(c *Client) ([]cluster.Cluster, error) {
 // its next pass and tries again. This pattern is optimistic
 // concurrency, the same contract that PublishStatus uses for
 // Machines, and it answers the written resourceVersion the same way.
-func PublishClusterStatus(c *Client, clusterDoc *cluster.Cluster) (string, error) {
+func PublishClusterStatus(c *apiclient.Client, clusterDoc *cluster.Cluster) (string, error) {
 	body, err := json.Marshal(clusterDoc)
 	if err != nil {
 		return "", err

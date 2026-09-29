@@ -47,6 +47,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
 )
@@ -141,7 +142,7 @@ func withFeature(doc *cluster.Cluster, slug string, cfg *cluster.FeatureConfig) 
 // cluster. Every precondition is a count of objects that only the
 // feature's own controller can finish removing, so an unsatisfied
 // precondition always carries the names of those objects.
-func evaluatePrecondition(c *kubernetes.Client, p cluster.Precondition) (bool, string, error) {
+func evaluatePrecondition(c *apiclient.Client, p cluster.Precondition) (bool, string, error) {
 	switch p {
 	case cluster.NoHelmCharts:
 		charts, err := kubernetes.ListHelmCharts(c)

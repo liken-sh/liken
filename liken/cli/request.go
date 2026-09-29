@@ -75,7 +75,7 @@ func requestReboot(args []string, out io.Writer) error {
 	}
 	short := fmt.Sprintf("%.12s", bootID)
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, machine.RequestRebootAnnotation, short)
-	if err := c.PatchJSON(kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
+	if err := kubernetes.PatchJSON(c, kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
 		return err
 	}
 	fmt.Fprint(out, renderRequest(m, fs.Arg(0), short))

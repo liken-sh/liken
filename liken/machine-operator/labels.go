@@ -27,6 +27,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
 )
@@ -106,11 +107,11 @@ func decideNodeLabels(desired map[string]string, node *nodeObject) labelStep {
 // carryOutNodeLabels applies the step's patch. It downgrades the
 // condition when the API server refuses the patch. The next pass
 // reads the Node again, builds the step again, and patches again.
-func carryOutNodeLabels(c *kubernetes.Client, name string, step labelStep) api.Condition {
+func carryOutNodeLabels(c *apiclient.Client, name string, step labelStep) api.Condition {
 	if step.patch == nil {
 		return step.condition
 	}
-	if err := c.PatchJSON(nodesPath+"/"+name, step.patch); err != nil {
+	if err := kubernetes.PatchJSON(c, nodesPath+"/"+name, step.patch); err != nil {
 		return api.Condition{Type: "NodeLabelsApplied", Status: api.ConditionFalse, Reason: "ApplyFailed",
 			Message: fmt.Sprintf("patching the Node's labels: %v", err)}
 	}

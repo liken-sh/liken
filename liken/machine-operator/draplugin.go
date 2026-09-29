@@ -46,6 +46,7 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/hardware"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
@@ -65,7 +66,7 @@ var (
 // the claim and from sysfs.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
-	client *kubernetes.Client
+	client *apiclient.Client
 }
 
 // draRegistrar answers the kubelet's plugin-watcher handshake.
@@ -102,7 +103,7 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 // sees the registration. The function removes stale sockets from a
 // previous operator first. A bind to an orphaned socket file fails
 // even when nothing is listening on it.
-func serveDRAPlugin(ctx context.Context, client *kubernetes.Client) error {
+func serveDRAPlugin(ctx context.Context, client *apiclient.Client) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
 	}

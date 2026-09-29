@@ -19,6 +19,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"sigs.k8s.io/yaml"
 )
 
@@ -51,7 +52,7 @@ type kubeconfigFile struct {
 // match the in-cluster client's reasoning (apiclient.go): every one
 // of them limits a server that stops responding without sending any
 // signal.
-func KubeconfigClient(path string) (*Client, error) {
+func KubeconfigClient(path string) (*apiclient.Client, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -79,7 +80,7 @@ func KubeconfigClient(path string) (*Client, error) {
 		return nil, fmt.Errorf("%s carries no certificate authority", path)
 	}
 
-	return NewClient(clusterEntry.Server, &http.Client{
+	return apiclient.New(clusterEntry.Server, &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				RootCAs:      roots,

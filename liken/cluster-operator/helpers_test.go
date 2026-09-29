@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 )
@@ -52,7 +52,7 @@ func scrapeHandler(t *testing.T, handler http.Handler) string {
 // testClient wires a client to a test server. The client has a
 // credentials directory holding a token, the same way kubelet would
 // mount one.
-func testClient(t *testing.T, handler http.Handler) *kubernetes.Client {
+func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -61,5 +61,5 @@ func testClient(t *testing.T, handler http.Handler) *kubernetes.Client {
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return kubernetes.NewClient(server.URL, server.Client(), credentials)
+	return apiclient.New(server.URL, server.Client(), credentials)
 }

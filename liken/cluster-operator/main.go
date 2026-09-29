@@ -34,6 +34,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/informer"
@@ -71,7 +72,7 @@ func main() {
 	// the same crash-only method the machine operator uses: kubelet
 	// restarts the pod with backoff, and the failure shows in
 	// `kubectl get pods`.
-	client, err := kubernetes.InClusterClient()
+	client, err := kubernetes.InClusterClient("")
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
@@ -81,9 +82,12 @@ func main() {
 	}
 
 	// Nothing below runs until this copy holds the Lease, and every
-	// write asks the election first (mayWrite in leader.go).
+	// write asks the election first (mayWrite in leader.go), again
+	// before each send after a 429. A SIGTERM ends the wait after a
+	// 429, so a throttled sweep does not hold back the release of the
+	// Lease, and a write already sent still runs to its answer.
 	leader := lead(stop, newUnelectedGauge(operatorMetrics))
-	client.GuardWrites(leader.mayWrite)
+	client = client.WithWriteGuard(leader.mayWrite).WithWaitContext(stop)
 
 	// The watches start with the lead, so a copy that has never acted
 	// holds no copy of the fleet and opens no stream (watches.go names each watch and
@@ -179,7 +183,7 @@ func awaitCluster(reads *fleetReader, wakes <-chan struct{}, stop context.Contex
 	defer retry.Stop()
 	for {
 		clusters, err := reads.clusters()
-		if err != nil && !errors.Is(err, kubernetes.ErrNotFound) {
+		if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 			fmt.Printf("listing clusters: %v\n", err)
 		}
 		if len(clusters) > 0 {

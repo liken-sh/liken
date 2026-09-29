@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -114,7 +115,7 @@ type disruptions struct {
 // nodes instead of being killed by the reboot. A pass whose Node
 // read failed skips the drain, because during a demotion there is
 // no Node to cordon, and the reboot must still happen.
-func (d *disruptions) gate(c *kubernetes.Client, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
+func (d *disruptions) gate(c *apiclient.Client, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
 	conv.requestRestart = conv.requestRestart && !d.rebooting
 	if conv.requestReboot && t == turnGranted && nodeErr == nil {
 		conv = gateThroughDrain(c, node, conv, now)
@@ -458,7 +459,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		// cordons the operator set itself: decideUncordon leaves a
 		// person's cordon in place.
 		if !disr.rebooting && !disr.draining && decideUncordon(node) {
-			if err := c.PatchJSON(nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
+			if err := kubernetes.PatchJSON(c, nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
 				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
 			} else {
 				fmt.Printf("uncordoned %s; its reboot is complete\n", node.Metadata.Name)
@@ -568,7 +569,7 @@ func publishOwnStatus(r *reader, m *machine.Machine, status *machine.MachineStat
 	}
 
 	err = r.publishStatus(m, status)
-	if !errors.Is(err, kubernetes.ErrConflict) {
+	if !errors.Is(err, apiclient.ErrConflict) {
 		return err
 	}
 	// This read goes to the API server, not to the watch's copy. It

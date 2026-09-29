@@ -34,6 +34,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // ResourceSlicesPath names the URL where the DRA inventory lives.
@@ -134,7 +136,7 @@ type DeviceAttribute struct {
 // writes what differs (WriteResourceSlice). A caller that already
 // holds a copy of the slice, from a watch, calls WriteResourceSlice
 // with that copy and sends no read.
-func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
+func EnsureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
 	current, err := GetResourceSlice(c, nodeName)
 	if err != nil {
 		return err
@@ -153,9 +155,9 @@ func ResourceSliceName(nodeName string) string {
 
 // GetResourceSlice reads one node's slice. An absent slice returns
 // nil, nil, because a node with no devices has none.
-func GetResourceSlice(c *Client, nodeName string) (*ResourceSlice, error) {
-	current, err := get[ResourceSlice](c, ResourceSlicesPath+"/"+ResourceSliceName(nodeName))
-	if err == ErrNotFound {
+func GetResourceSlice(c *apiclient.Client, nodeName string) (*ResourceSlice, error) {
+	current, err := apiclient.Get[ResourceSlice](c, ResourceSlicesPath+"/"+ResourceSliceName(nodeName))
+	if err == apiclient.ErrNotFound {
 		return nil, nil
 	}
 	return current, err
@@ -180,12 +182,12 @@ func GetResourceSlice(c *Client, nodeName string) (*ResourceSlice, error) {
 // The write carries the resourceVersion of the copy it compared. If a
 // conflicting writer changed the object in the meantime, or the copy
 // from a watch is behind this operator's own last write, this update
-// returns ErrConflict instead of overwriting that change. A create
-// from a copy that says the slice is absent returns ErrConflict too,
+// returns apiclient.ErrConflict instead of overwriting that change. A create
+// from a copy that says the slice is absent returns apiclient.ErrConflict too,
 // when the slice exists. The next pass compares against a newer copy
 // and tries again. This is the ordinary optimistic-concurrency loop,
 // and at a ten-second cadence, it needs no retry logic of its own.
-func WriteResourceSlice(c *Client, nodeName string, current *ResourceSlice, owner OwnerReference, devices []SliceDevice) error {
+func WriteResourceSlice(c *apiclient.Client, nodeName string, current *ResourceSlice, owner OwnerReference, devices []SliceDevice) error {
 	name := ResourceSliceName(nodeName)
 	path := ResourceSlicesPath + "/" + name
 

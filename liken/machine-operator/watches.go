@@ -52,6 +52,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -93,7 +94,7 @@ var watchKinds = []string{machineKind, nodeKind, clusterWatchKind, secretKind, p
 // with no copies at all reads the API server every time, which is what
 // the tests of a pass use.
 type reader struct {
-	client *kubernetes.Client
+	client *apiclient.Client
 
 	machines    *informer.Collection
 	nodes       *informer.Collection
@@ -107,7 +108,7 @@ type reader struct {
 // copies. Each change that needs a pass calls wake. clusterName is
 // empty on a machine with no cluster document, which reads no Cluster
 // and no Secret, so it opens neither watch.
-func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *kubernetes.Client,
+func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	name, clusterName string, wake func(), restarted func(kind string)) *reader {
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
 		return informer.Start(ctx, watcher, source, informer.Options{
@@ -163,7 +164,7 @@ func (r *reader) publishStatus(m *machine.Machine, status *machine.MachineStatus
 	switch {
 	case err == nil:
 		r.machines.Wrote(m.Metadata.Name, version)
-	case !errors.Is(err, kubernetes.ErrConflict):
+	case !errors.Is(err, apiclient.ErrConflict):
 		r.machines.Wrote(m.Metadata.Name, "")
 	}
 	return err
@@ -220,10 +221,10 @@ func (r *reader) resourceSlice(nodeName string) (*kubernetes.ResourceSlice, erro
 }
 
 // orNotFound turns a synced copy's answer into the answer a direct read
-// gives: the object, or kubernetes.ErrNotFound.
+// gives: the object, or apiclient.ErrNotFound.
 func orNotFound[T any](item *T, found bool) (*T, error) {
 	if !found {
-		return nil, kubernetes.ErrNotFound
+		return nil, apiclient.ErrNotFound
 	}
 	return item, nil
 }

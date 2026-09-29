@@ -33,6 +33,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
@@ -144,7 +145,7 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 // write. If the promotion write ran first, a badly-timed power cut
 // could prove a store whose latent unpacks are still dirty, which is
 // the exact false claim this lifecycle exists to prevent.
-func settleImportsLifecycle(c *kubernetes.Client, root, nodeName string, facts *machine.MachineStatus) api.Condition {
+func settleImportsLifecycle(c *apiclient.Client, root, nodeName string, facts *machine.MachineStatus) api.Condition {
 	store := machine.ImportedImagesStore(root)
 	in := importsInputs{}
 	if facts != nil && facts.Boot.ImportsSource == machine.ManifestSourceStaged {

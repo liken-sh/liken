@@ -34,8 +34,8 @@ package main
 import (
 	"fmt"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
-	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -102,7 +102,7 @@ func decideDemotion(role api.Role, nodeLabels map[string]string, rebootPolicy ma
 // first, because deleting the Node kills this pod, so the reboot
 // must already be in progress. Then it deletes the Node, which
 // triggers etcd member removal.
-func carryOutDemotion(c *kubernetes.Client, name string, d demotion) api.Condition {
+func carryOutDemotion(c *apiclient.Client, name string, d demotion) api.Condition {
 	if !d.cleanup {
 		return d.condition
 	}

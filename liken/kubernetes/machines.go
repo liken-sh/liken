@@ -11,14 +11,15 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-func GetMachine(c *Client, name string) (*machine.Machine, error) {
-	return get[machine.Machine](c, MachinesPath+"/"+name)
+func GetMachine(c *apiclient.Client, name string) (*machine.Machine, error) {
+	return apiclient.Get[machine.Machine](c, MachinesPath+"/"+name)
 }
 
-func ListMachines(c *Client) ([]machine.Machine, error) {
+func ListMachines(c *apiclient.Client) ([]machine.Machine, error) {
 	return List[machine.Machine](c, MachinesPath)
 }
 
@@ -37,7 +38,7 @@ func ListMachines(c *Client) ([]machine.Machine, error) {
 // It answers the resourceVersion the API server gave the write. A
 // caller that reads a watch's copy records it, so the copy does not
 // answer until the watch delivers the write (informer.Wrote).
-func PublishStatus(c *Client, m *machine.Machine, status *machine.MachineStatus) (string, error) {
+func PublishStatus(c *apiclient.Client, m *machine.Machine, status *machine.MachineStatus) (string, error) {
 	updated := *m
 	updated.Status = *status
 	body, err := json.Marshal(&updated)
@@ -51,7 +52,7 @@ func PublishStatus(c *Client, m *machine.Machine, status *machine.MachineStatus)
 // resourceVersion of the object the API server stored. An answer with
 // no body carries no version, and the write still succeeded, so the
 // version is empty.
-func putStatus(c *Client, path string, body []byte) (string, error) {
+func putStatus(c *apiclient.Client, path string, body []byte) (string, error) {
 	var written struct {
 		Metadata struct {
 			ResourceVersion string `json:"resourceVersion"`

@@ -137,3 +137,11 @@ tool (
 // brand is a component in this repository, so every consumer builds
 // against the tree beside it and never against a published version.
 replace github.com/liken-sh/brand => ../brand
+
+// The client, the watch, and the cache that liken's operators share
+// with the other operators. The module is in this repository, and the
+// replace below builds against the copy in the tree, so no version of
+// it is published.
+require github.com/liken-sh/liken/kubernetes v0.0.0
+
+replace github.com/liken-sh/liken/kubernetes => ../kubernetes

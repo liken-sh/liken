@@ -15,7 +15,11 @@ package kubernetes
 // Workloads create claims, and the scheduler allocates them. Because
 // of this, these types carry only the fields that the driver reads.
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+)
 
 // ResourceClaim holds the part of the claim that the driver needs:
 // which devices were allocated from which driver's pools.
@@ -51,7 +55,7 @@ type AllocatedDevice struct {
 // belongs to the workload that created it. Because of this, the path
 // carries the namespace, unlike every other resource this package
 // touches.
-func GetResourceClaim(c *Client, namespace, name string) (*ResourceClaim, error) {
+func GetResourceClaim(c *apiclient.Client, namespace, name string) (*ResourceClaim, error) {
 	path := "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
 	claim := &ResourceClaim{}
 	if err := c.RequestJSON(http.MethodGet, path, nil, claim); err != nil {

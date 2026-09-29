@@ -147,11 +147,9 @@ func TestKubeconfigClientAuthenticatesWithItsCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := c.Do(http.MethodGet, "/healthz", "", nil)
-	if err != nil {
+	if err := c.RequestJSON(http.MethodGet, "/healthz", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
 	if sawPeerCN != "admin" {
 		t.Fatalf("the server saw client CN %q, want admin", sawPeerCN)
 	}

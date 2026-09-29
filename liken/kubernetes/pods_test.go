@@ -5,8 +5,12 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"sync/atomic"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 func TestCompletedReadsThePhase(t *testing.T) {
@@ -64,14 +68,20 @@ func TestEvictPodPostsTheEvictionSubresource(t *testing.T) {
 func TestEvictPodCarriesTheServersRefusal(t *testing.T) {
 	// A 429 status is how the Eviction API reports that a
 	// PodDisruptionBudget would be violated. The caller gets an
-	// error, and asks again later.
+	// error at once, with no wait and no second request, and asks
+	// again on a later pass.
+	var sent atomic.Int64
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent.Add(1)
 		http.Error(w, "Cannot evict pod as it would violate the pod's disruption budget.",
 			http.StatusTooManyRequests)
 	}))
 	p := Pod{Metadata: PodMetadata{Name: "web", Namespace: "default"}}
-	if err := EvictPod(client, p); err == nil {
-		t.Error("a refused eviction is an error")
+	if err := EvictPod(client, p); err == nil || !errors.Is(err, apiclient.ErrThrottled) {
+		t.Errorf("err = %v, want the refusal", err)
+	}
+	if sent.Load() != 1 {
+		t.Errorf("the eviction was sent %d times, want once", sent.Load())
 	}
 }
 

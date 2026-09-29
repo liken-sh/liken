@@ -35,6 +35,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"
@@ -163,7 +165,7 @@ func NewHeartbeat(name string) *Heartbeat {
 // names the current Machine after its next renewal.
 //
 // A nil Heartbeat renews nothing, for a pass whose Machine is gone.
-func (h *Heartbeat) Renew(c *Client, owner OwnerReference, now time.Time) {
+func (h *Heartbeat) Renew(c *apiclient.Client, owner OwnerReference, now time.Time) {
 	if h == nil {
 		return
 	}
@@ -175,7 +177,7 @@ func (h *Heartbeat) Renew(c *Client, owner OwnerReference, now time.Time) {
 		return
 	}
 	err := h.write(c, path, owner, now)
-	if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrConflict) || errors.Is(err, apiclient.ErrNotFound) {
 		h.held = nil
 		if !h.read(c, owner, now) {
 			return
@@ -191,15 +193,15 @@ func (h *Heartbeat) Renew(c *Client, owner OwnerReference, now time.Time) {
 // read reads the lease into the held copy, or creates the lease when
 // it does not exist. It answers false when the caller has nothing left
 // to do: the read failed, or the create already renewed the lease.
-func (h *Heartbeat) read(c *Client, owner OwnerReference, now time.Time) bool {
+func (h *Heartbeat) read(c *apiclient.Client, owner OwnerReference, now time.Time) bool {
 	l := &Lease{}
 	err := c.RequestJSON(http.MethodGet, heartbeatDir+"/"+h.name, nil, l)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		// A lease is a struct of strings and ints. Marshaling it cannot fail.
 		body, _ := json.Marshal(newLease(h.name, h.name, owner, HeartbeatStaleAfter, now))
 		created := &Lease{}
 		if err := c.RequestJSON(http.MethodPost, heartbeatDir, body, created); err != nil {
-			if !errors.Is(err, ErrConflict) {
+			if !errors.Is(err, apiclient.ErrConflict) {
 				fmt.Printf("creating the heartbeat lease: %v\n", err)
 			}
 			return false
@@ -217,7 +219,7 @@ func (h *Heartbeat) read(c *Client, owner OwnerReference, now time.Time) bool {
 
 // write sends the renewal from the held copy, and keeps the lease the
 // API server answers with, which carries the new resourceVersion.
-func (h *Heartbeat) write(c *Client, path string, owner OwnerReference, now time.Time) error {
+func (h *Heartbeat) write(c *apiclient.Client, path string, owner OwnerReference, now time.Time) error {
 	renewal := *h.held
 	renewal.Metadata.OwnerReferences = owners(owner)
 	renewal.Spec.HolderIdentity = h.name
@@ -236,7 +238,7 @@ func (h *Heartbeat) write(c *Client, path string, owner OwnerReference, now time
 // ListHeartbeats reads every machine's last renewal for the cluster
 // operator's sweep. One cheap list request yields the fleet's
 // liveness. Renewals says what the answer holds.
-func ListHeartbeats(c *Client) (map[string]time.Time, error) {
+func ListHeartbeats(c *apiclient.Client) (map[string]time.Time, error) {
 	leases, err := List[Lease](c, heartbeatDir)
 	if err != nil {
 		return nil, err

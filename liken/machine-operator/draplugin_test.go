@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,8 +25,6 @@ import (
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
-
-	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 // draFixture builds everything one prepare call touches: a fake
@@ -111,7 +110,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 	draSysfsRoot, cdiDir = sysfs, cdi
 	t.Cleanup(func() { draSysfsRoot, cdiDir = origSysfs, origCDI })
 
-	fixture.plugin = &draPlugin{client: kubernetes.NewClient(server.URL, server.Client(), credentials)}
+	fixture.plugin = &draPlugin{client: apiclient.New(server.URL, server.Client(), credentials)}
 	fixture.cdi = cdi
 	return fixture
 }

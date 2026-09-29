@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
 	"github.com/liken-sh/liken/liken/kubernetes/informer"
@@ -81,7 +82,7 @@ func isolatePass(t *testing.T) {
 
 // passClients builds the operator's client and the watches' dynamic
 // client, both pointed at the fake.
-func passClients(t *testing.T, api *fakeapi.Server) (*kubernetes.Client, dynamic.Interface) {
+func passClients(t *testing.T, api *fakeapi.Server) (*apiclient.Client, dynamic.Interface) {
 	t.Helper()
 	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)
@@ -93,7 +94,7 @@ func passClients(t *testing.T, api *fakeapi.Server) (*kubernetes.Client, dynamic
 	if err != nil {
 		t.Fatal(err)
 	}
-	return kubernetes.NewClient(server.URL, server.Client(), credentials), watcher
+	return apiclient.New(server.URL, server.Client(), credentials), watcher
 }
 
 // awaitCopies waits until every watch of the reader holds its first

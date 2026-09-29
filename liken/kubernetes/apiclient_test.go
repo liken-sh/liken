@@ -7,6 +7,7 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/machine"
@@ -25,7 +27,7 @@ import (
 // testClient connects a Client to a test server. It creates a
 // credentials directory that holds a token, the same way kubelet
 // mounts one.
-func testClient(t *testing.T, handler http.Handler) *Client {
+func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -34,7 +36,7 @@ func testClient(t *testing.T, handler http.Handler) *Client {
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return NewClient(server.URL, server.Client(), credentials)
+	return apiclient.New(server.URL, server.Client(), credentials)
 }
 
 func TestRequestJSONDecodesAndAuthenticates(t *testing.T) {
@@ -62,15 +64,15 @@ func TestRequestJSONDistinguishesTheOrdinaryFailures(t *testing.T) {
 		status int
 		want   error
 	}{
-		{"absent objects are a state, not a failure", http.StatusNotFound, ErrNotFound},
-		{"losing a write race is a state, not a failure", http.StatusConflict, ErrConflict},
+		{"absent objects are a state, not a failure", http.StatusNotFound, apiclient.ErrNotFound},
+		{"losing a write race is a state, not a failure", http.StatusConflict, apiclient.ErrConflict},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(c.status)
 			}))
-			if err := client.RequestJSON(http.MethodGet, "/x", nil, nil); err != c.want {
+			if err := client.RequestJSON(http.MethodGet, "/x", nil, nil); !errors.Is(err, c.want) {
 				t.Errorf("got %v, want %v", err, c.want)
 			}
 		})
@@ -96,7 +98,7 @@ func TestRequestJSONCarriesTheServersWords(t *testing.T) {
 // TCP connections it accepts. Go hands a connection back to its pool
 // only when the response body reaches EOF, so the count is how many
 // bodies the client left unfinished, plus one.
-func countingClient(t *testing.T, handler http.Handler) (*Client, *atomic.Int64) {
+func countingClient(t *testing.T, handler http.Handler) (*apiclient.Client, *atomic.Int64) {
 	t.Helper()
 	connections := &atomic.Int64{}
 	server := httptest.NewUnstartedServer(handler)
@@ -112,7 +114,7 @@ func countingClient(t *testing.T, handler http.Handler) (*Client, *atomic.Int64)
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return NewClient(server.URL, server.Client(), credentials), connections
+	return apiclient.New(server.URL, server.Client(), credentials), connections
 }
 
 func TestEveryRequestLeavesTheConnectionReusable(t *testing.T) {
@@ -125,26 +127,26 @@ func TestEveryRequestLeavesTheConnectionReusable(t *testing.T) {
 	cases := []struct {
 		name   string
 		status int
-		send   func(c *Client) error
+		send   func(c *apiclient.Client) error
 	}{
-		{"a write whose answer the caller does not want", http.StatusOK, func(c *Client) error {
+		{"a write whose answer the caller does not want", http.StatusOK, func(c *apiclient.Client) error {
 			return c.RequestJSON(http.MethodPut, "/x", []byte(`{}`), nil)
 		}},
-		{"a read the caller decodes", http.StatusOK, func(c *Client) error {
+		{"a read the caller decodes", http.StatusOK, func(c *apiclient.Client) error {
 			out := map[string]any{}
 			return c.RequestJSON(http.MethodGet, "/x", nil, &out)
 		}},
-		{"an absent object", http.StatusNotFound, func(c *Client) error {
+		{"an absent object", http.StatusNotFound, func(c *apiclient.Client) error {
 			return c.RequestJSON(http.MethodGet, "/x", nil, nil)
 		}},
-		{"a lost write race", http.StatusConflict, func(c *Client) error {
+		{"a lost write race", http.StatusConflict, func(c *apiclient.Client) error {
 			return c.RequestJSON(http.MethodGet, "/x", nil, nil)
 		}},
-		{"a refusal whose message runs past the excerpt", http.StatusForbidden, func(c *Client) error {
+		{"a refusal whose message runs past the excerpt", http.StatusForbidden, func(c *apiclient.Client) error {
 			return c.RequestJSON(http.MethodGet, "/x", nil, nil)
 		}},
-		{"a merge patch", http.StatusOK, func(c *Client) error {
-			return c.PatchJSON("/x", []byte(`{}`))
+		{"a merge patch", http.StatusOK, func(c *apiclient.Client) error {
+			return PatchJSON(c, "/x", []byte(`{}`))
 		}},
 	}
 	for _, c := range cases {
@@ -186,26 +188,10 @@ func TestInClusterClientNeedsTheEnvironment(t *testing.T) {
 	// is the entire diagnosis.
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
-	if _, err := InClusterClient(); err == nil {
+	if _, err := InClusterClient(""); err == nil {
 		t.Error("no environment means no client")
 	}
 }
-
-// testCA is a self-signed certificate used in place of the cluster's
-// server CA. The client only parses it into a trust pool, so its
-// subject and validity dates do not matter for these tests.
-const testCA = `-----BEGIN CERTIFICATE-----
-MIIBhTCCASugAwIBAgIUOGbmxgO5IBnZ+AdPZ+KxpFp/WSowCgYIKoZIzj0EAwIw
-GDEWMBQGA1UEAwwNbGlrZW4tdGVzdC1jYTAeFw0yNjA3MTAxNDM2NTVaFw0zNjA3
-MDcxNDM2NTVaMBgxFjAUBgNVBAMMDWxpa2VuLXRlc3QtY2EwWTATBgcqhkjOPQIB
-BggqhkjOPQMBBwNCAASaQglZfYXr1EOnBa5GCmRcHF9l09EqXuGMZcXWWI6FKi31
-InZx5N3F4T8uDCyIyXP9s99z5nJpEyGkmer45bmGo1MwUTAdBgNVHQ4EFgQUnxeb
-k5I/ZsgFlDQvQgv02Wa/nwswHwYDVR0jBBgwFoAUnxebk5I/ZsgFlDQvQgv02Wa/
-nwswDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNIADBFAiEA5TQTNngoyPu6
-j58aLfXyXoNxNnxkIFvzXX2zMT55O5gCIESzr4d5khIPY9y/CAS0nry2rvAP5Y5S
-FHJFfRsR8TLD
------END CERTIFICATE-----
-`
 
 // serviceAccount points the serviceAccountDir seam at a directory
 // that holds the given files, the same way kubelet would mount them.
@@ -223,58 +209,93 @@ func serviceAccount(t *testing.T, files map[string]string) {
 	t.Cleanup(func() { serviceAccountDir = previous })
 }
 
+// tlsAPIServer is an API server over TLS that answers each request
+// with the token it carried, and a mounted ServiceAccount that trusts
+// its certificate.
+func tlsAPIServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"metadata": map[string]string{"name": r.Header.Get("Authorization")}})
+	}))
+	t.Cleanup(server.Close)
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": string(ca)})
+	return server
+}
+
 func TestInClusterClientBuildsFromTheEnvironment(t *testing.T) {
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
-	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
-	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": testCA})
-	client, err := InClusterClient()
+	server := tlsAPIServer(t)
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "https://10.43.0.1:443"; client.base != want {
-		t.Errorf("the environment names the endpoint: got %s", client.base)
+	t.Setenv("KUBERNETES_SERVICE_HOST", host)
+	t.Setenv("KUBERNETES_SERVICE_PORT", port)
+	client, err := InClusterClient("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := GetMachine(client, "node-1")
+	if err != nil || m.Metadata.Name != "Bearer test-token" {
+		t.Errorf("GetMachine = %+v, %v; want the server the environment names, with the mounted token", m, err)
 	}
 }
 
-func TestInClusterClientAtPrefersTheGivenEndpoint(t *testing.T) {
+func TestInClusterClientPrefersTheGivenEndpoint(t *testing.T) {
 	// A hostNetwork pod on a server machine reaches the API through
 	// its own loopback address instead of the service VIP. The
-	// credentials stay the same in both cases.
-	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": testCA})
-	client, err := InClusterClientAt("https://127.0.0.1:6443")
+	// credentials stay the same in both cases. The environment here
+	// names an address where nothing answers.
+	server := tlsAPIServer(t)
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	client, err := InClusterClient(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "https://127.0.0.1:6443"; client.base != want {
-		t.Errorf("got %s", client.base)
+	m, err := GetMachine(client, "node-1")
+	if err != nil || m.Metadata.Name != "Bearer test-token" {
+		t.Errorf("GetMachine = %+v, %v; want the given server, with the mounted token", m, err)
 	}
 }
 
-func TestInClusterClientAtNeedsTheMountedCA(t *testing.T) {
+func TestInClusterClientNeedsTheMountedCA(t *testing.T) {
 	serviceAccount(t, map[string]string{"token": "test-token"})
-	if _, err := InClusterClientAt("https://127.0.0.1:6443"); err == nil {
+	if _, err := InClusterClient("https://127.0.0.1:6443"); err == nil {
 		t.Error("a pod without its mounted CA cannot verify the server")
 	}
 }
 
-func TestInClusterClientAtRejectsAnEmptyCA(t *testing.T) {
+func TestInClusterClientRejectsAnEmptyCA(t *testing.T) {
 	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": "not a certificate"})
-	if _, err := InClusterClientAt("https://127.0.0.1:6443"); err == nil {
+	if _, err := InClusterClient("https://127.0.0.1:6443"); err == nil {
 		t.Error("a CA file holding no certificates can trust nothing")
 	}
 }
 
-func TestDoNeedsAServiceAccountToken(t *testing.T) {
+func TestARequestNeedsAServiceAccountToken(t *testing.T) {
 	// The client reads the token from disk again on every request,
 	// because kubelet refreshes it as it nears expiry. A missing
 	// token means a broken pod, and the client reports it as an
 	// error.
-	client := NewClient("http://unreachable", http.DefaultClient, t.TempDir())
-	if _, err := client.Do(http.MethodGet, "/x", "", nil); err == nil {
+	client := apiclient.New("http://unreachable", http.DefaultClient, t.TempDir())
+	if err := client.RequestJSON(http.MethodGet, "/x", nil, nil); err == nil {
 		t.Error("a missing token must fail the request")
 	}
-	if err := client.PatchJSON("/x", []byte(`{}`)); err == nil {
+	if err := PatchJSON(client, "/x", []byte(`{}`)); err == nil {
 		t.Error("a patch cannot go out unauthenticated either")
+	}
+}
+
+// A patch of an object that is gone answers ErrNotFound, with the path
+// in its text, so a log line names the object.
+func TestPatchJSONNamesAnObjectThatIsGone(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	err := PatchJSON(client, "/api/v1/nodes/node-9", []byte(`{}`))
+	if !errors.Is(err, apiclient.ErrNotFound) || !strings.Contains(err.Error(), "/api/v1/nodes/node-9") {
+		t.Errorf("err = %v, want ErrNotFound that names the path", err)
 	}
 }
 
@@ -282,8 +303,8 @@ func TestGetReportsAnAbsentObject(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	if _, err := GetMachine(client, "node-9"); err != ErrNotFound {
-		t.Errorf("an absent object is ErrNotFound: %v", err)
+	if _, err := GetMachine(client, "node-9"); err != apiclient.ErrNotFound {
+		t.Errorf("an absent object is apiclient.ErrNotFound: %v", err)
 	}
 }
 
@@ -296,40 +317,5 @@ func TestListCarriesTheServersRefusal(t *testing.T) {
 	}
 	if _, err := ListHeartbeats(client); err == nil {
 		t.Error("and so is a refused heartbeat sweep")
-	}
-}
-
-// A guarded client asks the guard before every write, and a refusal
-// keeps the write from being sent. Reads are never guarded, so a pass
-// can still observe while its writes wait.
-func TestAGuardRefusesWritesAndNotReads(t *testing.T) {
-	var sent []string
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sent = append(sent, r.Method)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	client.GuardWrites(func() error { return errors.New("the lease is overdue") })
-
-	cases := []struct {
-		method  string
-		refused bool
-	}{
-		{http.MethodGet, false},
-		{http.MethodPut, true},
-		{http.MethodPost, true},
-		{http.MethodPatch, true},
-		{http.MethodDelete, true},
-	}
-	for _, c := range cases {
-		t.Run(c.method, func(t *testing.T) {
-			sent = nil
-			err := client.RequestJSON(c.method, MachinesPath+"/node-1", nil, nil)
-			if c.refused && (err == nil || !strings.Contains(err.Error(), "the lease is overdue") || len(sent) != 0) {
-				t.Errorf("err = %v, sent %q; want a refusal that names the guard's reason and no request", err, sent)
-			}
-			if !c.refused && (err != nil || len(sent) != 1) {
-				t.Errorf("err = %v, sent %q; want the read sent", err, sent)
-			}
-		})
 	}
 }

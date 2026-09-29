@@ -88,7 +88,7 @@ func TestPatchJSONSendsAMergePatch(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		body = string(raw)
 	}))
-	if err := client.PatchJSON("/api/v1/nodes/node-1", []byte(`{"spec":{"unschedulable":true}}`)); err != nil {
+	if err := PatchJSON(client, "/api/v1/nodes/node-1", []byte(`{"spec":{"unschedulable":true}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if contentType != "application/merge-patch+json" {
@@ -103,7 +103,7 @@ func TestPatchJSONCarriesTheServersRefusal(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nodes is forbidden", http.StatusForbidden)
 	}))
-	if err := client.PatchJSON("/api/v1/nodes/node-1", []byte(`{}`)); err == nil {
+	if err := PatchJSON(client, "/api/v1/nodes/node-1", []byte(`{}`)); err == nil {
 		t.Error("a refused patch is an error")
 	}
 }

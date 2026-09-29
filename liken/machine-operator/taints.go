@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
@@ -164,11 +165,11 @@ func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 // often the resourceVersion conflict, and the recovery is the same as
 // for any other failure: the next pass reads the Node's copy again,
 // builds the step again, and patches again.
-func carryOutNodeTaints(c *kubernetes.Client, name string, step taintStep) api.Condition {
+func carryOutNodeTaints(c *apiclient.Client, name string, step taintStep) api.Condition {
 	if step.patch == nil {
 		return step.condition
 	}
-	if err := c.PatchJSON(nodesPath+"/"+name, step.patch); err != nil {
+	if err := kubernetes.PatchJSON(c, nodesPath+"/"+name, step.patch); err != nil {
 		return api.Condition{Type: "NodeTaintsApplied", Status: api.ConditionFalse, Reason: "ApplyFailed",
 			Message: fmt.Sprintf("patching the Node's taints: %v", err)}
 	}

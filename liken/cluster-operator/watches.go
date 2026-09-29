@@ -50,6 +50,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -91,7 +92,7 @@ const appLabel = "app"
 // fleetReader with no copies at all reads the API server every time,
 // which is what the tests of a sweep use.
 type fleetReader struct {
-	client *kubernetes.Client
+	client *apiclient.Client
 
 	machineCopy   *informer.Collection
 	clusterCopy   *informer.Collection
@@ -102,7 +103,7 @@ type fleetReader struct {
 
 // watchFleet opens the watches and returns the reader over their
 // copies. Each change that needs a sweep calls wake.
-func watchFleet(ctx context.Context, watcher dynamic.Interface, client *kubernetes.Client,
+func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	wake func(), restarted func(kind string)) *fleetReader {
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler, indexers cache.Indexers) *informer.Collection {
 		return informer.Start(ctx, watcher, source, informer.Options{
@@ -211,11 +212,11 @@ func recordWrite(held *informer.Collection, key, version string, err error) {
 	switch {
 	case err == nil:
 		held.Wrote(key, version)
-	case errors.Is(err, errNotLeading), errors.Is(err, kubernetes.ErrNotFound):
+	case errors.Is(err, errNotLeading), errors.Is(err, apiclient.ErrNotFound):
 		// The guard sent nothing, and a 404 wrote nothing to an
 		// object that no longer exists, and whose removal the watch
 		// has delivered or will deliver.
-	case !errors.Is(err, kubernetes.ErrConflict):
+	case !errors.Is(err, apiclient.ErrConflict):
 		held.Wrote(key, "")
 	}
 }
@@ -232,7 +233,7 @@ func (r *fleetReader) clusters() ([]cluster.Cluster, error) {
 func (r *fleetReader) cluster(name string) (*cluster.Cluster, error) {
 	if c, found, ok := informer.Get[cluster.Cluster](r.current(r.clusterCopy), name); ok {
 		if !found {
-			return nil, kubernetes.ErrNotFound
+			return nil, apiclient.ErrNotFound
 		}
 		return c, nil
 	}
@@ -267,7 +268,7 @@ func (r *fleetReader) workloads(listPath string) ([]featureWorkload, error) {
 func (r *fleetReader) daemonSet(name string) (*featureWorkload, error) {
 	if ds, found, ok := informer.Get[featureWorkload](r.current(r.daemonSetCopy), "liken-system/"+name); ok {
 		if !found {
-			return nil, kubernetes.ErrNotFound
+			return nil, apiclient.ErrNotFound
 		}
 		return ds, nil
 	}

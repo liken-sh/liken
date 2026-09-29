@@ -20,7 +20,8 @@ all: $(DIST)/liken-machine-operator-image.tar
 
 $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../api/*.go) $(wildcard ../cluster/*.go) \
-		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) \
+		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) $(wildcard ../kubernetes/*/*.go) \
+		$(wildcard ../../kubernetes/*/*.go) ../../kubernetes/go.mod \
 		$(wildcard ../hardware/*.go) $(wildcard ../metrics/*.go) \
 		$(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \

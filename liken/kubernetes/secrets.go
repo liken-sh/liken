@@ -13,6 +13,8 @@ package kubernetes
 import (
 	"errors"
 	"net/http"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // RegistryCredentialsSecretPath names the URL where the fleet's
@@ -40,10 +42,10 @@ type Secret struct {
 // credentials. An absent Secret returns nil, nil. A fleet with
 // anonymous mirrors, or with no registries at all, is a normal
 // state, not an error.
-func GetRegistryCredentialsSecret(c *Client) (*Secret, error) {
+func GetRegistryCredentialsSecret(c *apiclient.Client) (*Secret, error) {
 	secret := &Secret{}
 	err := c.RequestJSON(http.MethodGet, RegistryCredentialsSecretPath, nil, secret)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {

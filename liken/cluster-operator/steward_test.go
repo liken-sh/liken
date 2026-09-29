@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -108,7 +109,7 @@ func TestStewardIgnoresPodsOnUnknownMachines(t *testing.T) {
 // every DaemonSet's pod listing returns one stale pod on node-1, and
 // evictions are recorded. A lookup of a DaemonSet that is not in the
 // map returns a 404.
-func stewardServer(t *testing.T, daemonSets map[string]string, evicted *[]string) *kubernetes.Client {
+func stewardServer(t *testing.T, daemonSets map[string]string, evicted *[]string) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

@@ -1,5 +1,7 @@
 package kubernetes
 
+import "github.com/liken-sh/liken/kubernetes/apiclient"
+
 // This file reads Services for one purpose: to count the Services of
 // type LoadBalancer that the cluster still holds.
 //
@@ -33,7 +35,7 @@ type Service struct {
 // fields the API server indexes, and spec.type is not one of them.
 // The whole collection is cheap to read anyway: a Service is a
 // per-workload object, not a per-pod one.
-func ListLoadBalancerServices(c *Client) ([]Service, error) {
+func ListLoadBalancerServices(c *apiclient.Client) ([]Service, error) {
 	services, err := List[Service](c, "/api/v1/services")
 	if err != nil {
 		return nil, err

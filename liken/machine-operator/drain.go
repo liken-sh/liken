@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
 )
@@ -231,7 +232,7 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 // the node and evicts pods. Until nothing evictable remains, or the
 // deadline passes, it holds the reboot and reports the drain's
 // progress on the same condition.
-func gateThroughDrain(c *kubernetes.Client, node *nodeObject, conv convergence, now time.Time) convergence {
+func gateThroughDrain(c *apiclient.Client, node *nodeObject, conv convergence, now time.Time) convergence {
 	pods, err := kubernetes.ListPodsOnNode(c, node.Metadata.Name)
 	if err != nil {
 		fmt.Printf("listing pods for the drain: %v\n", err)
@@ -239,7 +240,7 @@ func gateThroughDrain(c *kubernetes.Client, node *nodeObject, conv convergence, 
 	}
 	step := decideDrainStep(node, pods, now)
 	if step.patch != nil {
-		if err := c.PatchJSON(nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
+		if err := kubernetes.PatchJSON(c, nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
 			fmt.Printf("cordoning %s: %v\n", node.Metadata.Name, err)
 			return holdForDrain(conv, "cordoning this node failed; retrying")
 		}

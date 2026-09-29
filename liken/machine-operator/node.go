@@ -11,8 +11,8 @@ package main
 import (
 	"net/http"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
-	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 // nodesPath is the core API's home for Node objects: no group, just
@@ -56,7 +56,7 @@ type nodeTaint struct {
 	Effect string `json:"effect"`
 }
 
-func getNode(c *kubernetes.Client, name string) (*nodeObject, error) {
+func getNode(c *apiclient.Client, name string) (*nodeObject, error) {
 	n := &nodeObject{}
 	if err := c.RequestJSON(http.MethodGet, nodesPath+"/"+name, nil, n); err != nil {
 		return nil, err
@@ -64,6 +64,6 @@ func getNode(c *kubernetes.Client, name string) (*nodeObject, error) {
 	return n, nil
 }
 
-func deleteNode(c *kubernetes.Client, name string) error {
+func deleteNode(c *apiclient.Client, name string) error {
 	return c.RequestJSON(http.MethodDelete, nodesPath+"/"+name, nil, nil)
 }

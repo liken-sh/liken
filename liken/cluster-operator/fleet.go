@@ -32,9 +32,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
-	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -236,7 +236,7 @@ func markLost(reads *fleetReader, machines []machine.Machine, lost []string, now
 		// its own status first. That is the exact outcome this write
 		// exists to allow, so the sweep skips this machine. The sweep
 		// never retries a write onto another machine's status.
-		if err := reads.publishStatus(&m, &status); errors.Is(err, kubernetes.ErrConflict) {
+		if err := reads.publishStatus(&m, &status); errors.Is(err, apiclient.ErrConflict) {
 			continue
 		} else if err != nil {
 			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)

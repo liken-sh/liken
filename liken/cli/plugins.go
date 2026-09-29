@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/plugins"
 )
@@ -27,7 +28,7 @@ import (
 // clusterClient resolves the deployment's credential and builds a
 // client for its cluster, the same resolution the other cluster
 // commands use (cluster.go).
-func clusterClient(dir, server string) (*kubernetes.Client, error) {
+func clusterClient(dir, server string) (*apiclient.Client, error) {
 	kubeconfigPath, err := writeKubeconfig(dir, server, io.Discard)
 	if err != nil {
 		return nil, err

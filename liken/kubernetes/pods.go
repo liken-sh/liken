@@ -6,8 +6,11 @@ package kubernetes
 // OS's own pods after an upgrade.
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 type PodMetadata struct {
@@ -102,7 +105,7 @@ func (p *Pod) IsDaemon() bool {
 // network. This is the starting view for a drain: everything that
 // might still need to move off a machine before the machine may
 // reboot.
-func ListPodsOnNode(c *Client, nodeName string) ([]Pod, error) {
+func ListPodsOnNode(c *apiclient.Client, nodeName string) ([]Pod, error) {
 	return List[Pod](c, "/api/v1/pods?fieldSelector=spec.nodeName%3D"+nodeName)
 }
 
@@ -111,7 +114,17 @@ func ListPodsOnNode(c *Client, nodeName string) ([]Pod, error) {
 // deletion. The server refuses the request while removing the pod
 // would violate its PodDisruptionBudget, and the caller then asks
 // again later.
-func EvictPod(c *Client, p Pod) error {
+//
+// The refusal is a 429, the same status that asks a client to wait
+// and send a request again. For an eviction it is a verdict, not a
+// request to wait: the budget stays short until another pod becomes
+// ready, which takes longer than the shared client waits. So the
+// eviction goes out on a client whose wait after a 429 has already
+// ended, and the refusal reaches the caller at once. A drain that
+// waited ten seconds on each pod that a budget holds would hold its
+// pass, and the heartbeat that the pass renews, for that long.
+func EvictPod(c *apiclient.Client, p Pod) error {
+	c = c.WithWaitContext(noWait)
 	body, err := json.Marshal(map[string]any{
 		"apiVersion": "policy/v1",
 		"kind":       "Eviction",
@@ -123,3 +136,11 @@ func EvictPod(c *Client, p Pod) error {
 	path := "/api/v1/namespaces/" + p.Metadata.Namespace + "/pods/" + p.Metadata.Name + "/eviction"
 	return c.RequestJSON(http.MethodPost, path, body, nil)
 }
+
+// noWait is a context that has already ended, for a client whose wait
+// after a 429 must end at once (EvictPod).
+var noWait = func() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}()

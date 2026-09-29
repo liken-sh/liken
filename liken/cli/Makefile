@@ -19,7 +19,8 @@ DIST ?= dist
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../api/*.go) $(wildcard ../cluster/*.go) \
 		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) \
-		$(wildcard ../kubernetes/*.go) $(wildcard ../plugins/*.go) \
+		$(wildcard ../kubernetes/*.go) $(wildcard ../kubernetes/*/*.go) \
+		$(wildcard ../../kubernetes/*/*.go) ../../kubernetes/go.mod $(wildcard ../plugins/*.go) \
 		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \
 		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) \
 		$(wildcard ../releases/*.tmpl) $(LIKEN_VERSION_STAMP)

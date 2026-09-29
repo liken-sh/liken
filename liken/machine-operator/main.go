@@ -39,6 +39,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/informer"
@@ -96,7 +97,7 @@ func main() {
 	// failure is visible in `kubectl get pods` instead of hidden in a
 	// log. This is the crash-only style most Kubernetes components
 	// use.
-	client, err := kubernetes.InClusterClientAt(localAPIEndpoint(clusterDoc, name))
+	client, err := kubernetes.InClusterClient(localAPIEndpoint(clusterDoc, name))
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
@@ -253,7 +254,7 @@ func main() {
 		renewing := heartbeat
 		if fresh, err := objects.machine(name); err == nil {
 			current = fresh
-		} else if errors.Is(err, kubernetes.ErrNotFound) {
+		} else if errors.Is(err, apiclient.ErrNotFound) {
 			renewing = nil
 		}
 		started := time.Now()

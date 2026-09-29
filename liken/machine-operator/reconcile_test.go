@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
@@ -187,7 +188,7 @@ func TestPublishOwnStatusRetriesOnlyOnce(t *testing.T) {
 
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
 	err := publishOwnStatus(&reader{client: client}, m, &machine.MachineStatus{}, nil)
-	if !errors.Is(err, kubernetes.ErrConflict) {
+	if !errors.Is(err, apiclient.ErrConflict) {
 		t.Errorf("the second conflict comes back to the caller: %v", err)
 	}
 	if fake.puts != 2 {

@@ -17,7 +17,7 @@
 // watches any kind with no generated code, and rest for the in-cluster
 // configuration. The typed clientset and the informer factories link a
 // client and an informer for every built-in kind, which doubles the
-// size of a binary. The operators' own kubernetes.Client still sends
+// size of a binary. The shared apiclient.Client still sends
 // every write, and every read that a copy cannot answer.
 //
 // This is a package of its own, apart from the kubernetes package,
@@ -43,9 +43,9 @@ import (
 )
 
 // InCluster builds the dynamic client for the watches from the pod's
-// ServiceAccount, the same credentials kubernetes.InClusterClientAt
+// ServiceAccount, the same credentials kubernetes.InClusterClient
 // reads. base, when it is not empty, replaces the API server address
-// that the environment names, for the reason InClusterClientAt gives:
+// that the environment names, for the reason InClusterClient gives:
 // the machine operator runs on the host's network and has a better
 // address than the Service's virtual IP.
 func InCluster(base string) (dynamic.Interface, error) {

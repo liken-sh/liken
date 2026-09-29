@@ -593,7 +593,7 @@ jobs:
       packages: write
 
   liken-publish:
-    needs: [plan, liken, brand]
+    needs: [plan, liken, brand, kubernetes]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].publish != 'none' }}
     uses: ./.github/workflows/component-liken.yaml
     with:

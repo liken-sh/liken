@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -77,7 +78,7 @@ func newFleetAPI(now time.Time) *fakeapi.Server {
 	})
 }
 
-func fleetClients(t *testing.T, api *fakeapi.Server) (*kubernetes.Client, dynamic.Interface) {
+func fleetClients(t *testing.T, api *fakeapi.Server) (*apiclient.Client, dynamic.Interface) {
 	t.Helper()
 	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)
@@ -89,7 +90,7 @@ func fleetClients(t *testing.T, api *fakeapi.Server) (*kubernetes.Client, dynami
 	if err != nil {
 		t.Fatal(err)
 	}
-	return kubernetes.NewClient(server.URL, server.Client(), credentials), watcher
+	return apiclient.New(server.URL, server.Client(), credentials), watcher
 }
 
 // awaitFleetCopies waits until every watch of the reader holds its
@@ -320,8 +321,8 @@ func TestAWriteThatWroteNothingLeavesTheCopyAnswering(t *testing.T) {
 		err  error
 	}{
 		{"a write the guard refused", fmt.Errorf("PUT not sent: %w", errNotLeading)},
-		{"a write to an object that is gone", kubernetes.ErrNotFound},
-		{"a write that conflicted", kubernetes.ErrConflict},
+		{"a write to an object that is gone", apiclient.ErrNotFound},
+		{"a write that conflicted", apiclient.ErrConflict},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

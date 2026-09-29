@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // serviceList answers a list request with the given Services, in the
 // envelope the API server wraps every collection in.
-func serviceList(t *testing.T, services ...map[string]any) *Client {
+func serviceList(t *testing.T, services ...map[string]any) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{

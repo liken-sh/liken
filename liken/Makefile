@@ -234,11 +234,14 @@ mount: mount/dist/mount
 # header comment explains this difference. The build packages both as
 # hand-assembled OCI images, using image/oci.sh, the recipe that
 # every in-cluster binary shares. Both share the kubernetes package,
-# the raw API client, so both rebuild when that package changes.
+# liken's resources over the raw API client, and the shared module
+# kubernetes/ at the top of the repository, which holds the client,
+# the watch, and the cache. So both rebuild when either one changes.
 machine-operator/dist/liken-machine-operator-image.tar: $(wildcard machine-operator/*.go) \
 		go.mod go.sum image/oci.sh \
 		$(wildcard api/*.go) $(wildcard cluster/*.go) \
-		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(wildcard hardware/*.go) \
+		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(wildcard kubernetes/*/*.go) \
+		$(wildcard ../kubernetes/*/*.go) ../kubernetes/go.mod $(wildcard hardware/*.go) \
 		$(HWDATA_DIST)/pci.ids $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C machine-operator
 
@@ -248,7 +251,8 @@ cluster-operator/dist/liken-cluster-operator-image.tar: flux/VERSION flux/fetch.
 		$(wildcard cluster-operator/*.go) \
 		go.mod go.sum image/oci.sh \
 		$(wildcard api/*.go) $(wildcard cluster/*.go) \
-		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(LIKEN_VERSION_STAMP)
+		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(wildcard kubernetes/*/*.go) \
+		$(wildcard ../kubernetes/*/*.go) ../kubernetes/go.mod $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C cluster-operator
 
 cluster-operator: cluster-operator/dist/liken-cluster-operator-image.tar
@@ -272,6 +276,7 @@ logs: logs/dist/liken-logs-image.tar
 cli/dist/liken: $(wildcard cli/*.go) go.mod go.sum \
 		$(wildcard api/*.go) $(wildcard cluster/*.go) \
 		$(wildcard identity/*.go) $(wildcard machine/*.go) \
+		$(wildcard kubernetes/*.go) $(wildcard ../kubernetes/*/*.go) ../kubernetes/go.mod \
 		$(wildcard image/*.go) $(wildcard releases/*.go) \
 		$(wildcard disks/*.go) $(wildcard scaffold/*.go) \
 		$(wildcard scaffold/*.tmpl) $(LIKEN_VERSION_STAMP)

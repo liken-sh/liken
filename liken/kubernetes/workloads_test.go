@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // pluginWorkload shapes one workload document with the plugin label
@@ -34,7 +36,7 @@ func pluginWorkload(namespace, name, domain, image string) map[string]any {
 
 // workloadServer answers each kind's list request with its own items,
 // keyed by the plural in the request path.
-func workloadServer(t *testing.T, byKind map[string][]map[string]any) *Client {
+func workloadServer(t *testing.T, byKind map[string][]map[string]any) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		items := []map[string]any{}

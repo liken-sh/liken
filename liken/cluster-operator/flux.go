@@ -41,6 +41,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"golang.org/x/crypto/ssh"
@@ -67,7 +68,7 @@ const (
 // the feature, and k3s may not have applied it yet. The sweep's
 // level-triggered loop absorbs that window; nothing here needs to
 // wait or retry.
-func ensureFluxDeployKey(c *kubernetes.Client, clusterDoc *cluster.Cluster) string {
+func ensureFluxDeployKey(c *apiclient.Client, clusterDoc *cluster.Cluster) string {
 	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 		return ""
 	}
@@ -88,13 +89,13 @@ func ensureFluxDeployKey(c *kubernetes.Client, clusterDoc *cluster.Cluster) stri
 			patch, _ := json.Marshal(map[string]any{
 				"stringData": map[string]string{"known_hosts": cfg.KnownHosts},
 			})
-			if err := c.PatchJSON(fluxSecretPath, patch); err != nil {
+			if err := kubernetes.PatchJSON(c, fluxSecretPath, patch); err != nil {
 				fmt.Printf("refreshing the flux known_hosts: %v\n", err)
 			}
 		}
 		return string(secret.Data["identity.pub"])
 	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Printf("reading the flux deploy key: %v\n", err)
 		return ""
 	}
@@ -131,7 +132,7 @@ func ensureFluxDeployKey(c *kubernetes.Client, clusterDoc *cluster.Cluster) stri
 	if err := c.RequestJSON(http.MethodPost, fluxSecretsPath, body, nil); err != nil {
 		// A conflict means another leader's sweep minted first. That
 		// copy's key is the fleet's key; the next pass reads it.
-		if !errors.Is(err, kubernetes.ErrConflict) {
+		if !errors.Is(err, apiclient.ErrConflict) {
 			fmt.Printf("creating the flux deploy key secret: %v\n", err)
 		}
 		return ""
@@ -311,7 +312,7 @@ func (p *engineProbe) TryAsk(now time.Time) bool {
 // planter leaves exactly as it found it: the seed only ever fills
 // absence. Present but broken stays the repository's problem on
 // purpose; liken answers only for gone.
-func ensureFluxEngine(c *kubernetes.Client, clusterDoc *cluster.Cluster, seed []byte, probe *engineProbe, now time.Time) {
+func ensureFluxEngine(c *apiclient.Client, clusterDoc *cluster.Cluster, seed []byte, probe *engineProbe, now time.Time) {
 	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 		return
 	}
@@ -322,7 +323,7 @@ func ensureFluxEngine(c *kubernetes.Client, clusterDoc *cluster.Cluster, seed []
 	if err == nil {
 		return
 	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Printf("probing for the flux engine: %v\n", err)
 		return
 	}
@@ -339,7 +340,7 @@ func ensureFluxEngine(c *kubernetes.Client, clusterDoc *cluster.Cluster, seed []
 			continue
 		}
 		err = c.RequestJSON(http.MethodPost, path, o.body, nil)
-		if errors.Is(err, kubernetes.ErrConflict) {
+		if errors.Is(err, apiclient.ErrConflict) {
 			continue // it already exists; whatever is there stays
 		}
 		if err != nil {

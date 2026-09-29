@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -237,7 +238,7 @@ func declinedFluxTeardown() *api.Condition {
 // is one stage at most; the sweep calls it again within ten seconds,
 // and silence is the converged state. The returned condition reports
 // a refusal, and nil means there is nothing to report.
-func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) *api.Condition {
+func janitorFlux(c *apiclient.Client, clusterDoc *cluster.Cluster) *api.Condition {
 	if clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 		return nil
 	}
@@ -260,7 +261,7 @@ func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) *api.Conditi
 	// command that clears this one.
 	namespace := &featureWorkload{}
 	err := c.RequestJSON(http.MethodGet, fluxNamespacePath, nil, namespace)
-	if errors.Is(err, kubernetes.ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -277,7 +278,7 @@ func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) *api.Conditi
 	deleted := false
 	for _, name := range []string{"source-controller", "kustomize-controller"} {
 		path := "/apis/apps/v1/namespaces/flux-system/deployments/" + name
-		if err := c.RequestJSON(http.MethodGet, path, nil, nil); errors.Is(err, kubernetes.ErrNotFound) {
+		if err := c.RequestJSON(http.MethodGet, path, nil, nil); errors.Is(err, apiclient.ErrNotFound) {
 			continue
 		}
 		if err := c.RequestJSON(http.MethodDelete, path+"?propagationPolicy=Background", nil, nil); err == nil {
@@ -304,7 +305,7 @@ func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) *api.Conditi
 	// this function runs on every sweep, and the converged state is
 	// nothing but 404s.
 	for _, path := range fluxTeardownPaths[:2] {
-		_ = c.PatchJSON(path, []byte(`{"metadata": {"finalizers": null}}`))
+		_ = kubernetes.PatchJSON(c, path, []byte(`{"metadata": {"finalizers": null}}`))
 	}
 	// Each line states why the delete was safe to make, because a
 	// reader who meets these lines in a log is asking exactly that:
@@ -314,7 +315,7 @@ func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) *api.Conditi
 		err := c.RequestJSON(http.MethodDelete, path, nil, nil)
 		if err == nil {
 			fmt.Printf("liken planted this flux and the cluster no longer declares it; the controllers are gone, so no prune can fire; deleted %s\n", path)
-		} else if !errors.Is(err, kubernetes.ErrNotFound) && !errors.Is(err, kubernetes.ErrConflict) {
+		} else if !errors.Is(err, apiclient.ErrNotFound) && !errors.Is(err, apiclient.ErrConflict) {
 			fmt.Printf("flux teardown, deleting %s: %v\n", path, err)
 		}
 	}
