@@ -537,6 +537,26 @@ when the old tags are in the archived repositories.
 A tracked component that did not change gets no new version. Its
 cluster keeps the version it has, so its pods do not restart.
 
+A push, a pull request, and a dispatch run only what reads the
+change:
+
+- A dependency reaches a component only through the files that the
+  dependency's outputs are built from. Its manual, plans, notes, smoke
+  checks, Go tests, and `testdata/` reach no dependent.
+- The generated files hold one part for each component. A change to a
+  component's workflow, to its calls in `ci.yaml`, or to its targets
+  in `docker-bake.hcl` runs that component, and no other.
+- Inside a component, each job runs on any change to the component or
+  to an output of its closure, because a test can read any file of its
+  component. An image runs only when what BuildKit sends it changed:
+  its contexts less their ignore files, its Dockerfile, its bake
+  target, its smoke check, or an image it builds on. A change to
+  `brand/` alone runs the hugo jobs of the manuals.
+- A run that publishes a component runs all of its jobs and images
+  first.
+- A component's checks wait only for the pinned bases its images build
+  on. Its publish waits for the checks of its whole closure.
+
 The dependencies are declared by hand in `[depends]`, and a missing
 entry fails silently: the component does not rebuild, and it keeps
 running an old base. CI checks the declaration against what the
@@ -570,8 +590,10 @@ its version at that tag. At release X, a tracked component's version
 is its newest published version at or before X.
 
 A push to `main` is a development build. It builds each tracked
-component that changed in the push and each component that depends
-on one. The version comes from `git describe` of the newest
+component whose outputs changed since its newest published version,
+and each component that depends on one. A development version names
+its commit, so the diff starts there, and a build that failed to
+publish is published by the next push. The version comes from `git describe` of the newest
 repository tag, with a suffix: `2026.10.02-001-dev-017-abcdef01` is
 17 commits past `2026.10.02-001`, at commit `abcdef01`. The count is
 for the whole repository, not for the component, so it is not
