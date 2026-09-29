@@ -15,7 +15,16 @@ comments included.
 ## What belongs here
 
 A type or a function comes here when two operators need it in the same
-form. Code that only one operator uses stays in that operator.
+form. Code that only one operator uses stays in that operator, with one
+exception: a hook that cannot live outside its package, because it is
+an option of a shared function or it reads a shared type's private
+state. Such a hook comes here even for one operator, and the commit
+that adds it names the operator. The hooks of that kind now are
+`informer.Options.ListFailed` and `Options.Transform`, and
+`memo.Versions.Forget` and `Versions.Noted`, for `library-operator`,
+and `apiclient.ErrThrottled` and `Client.WithWaitContext`, for
+`equipment-operator`. The code the hook runs, such as the transform
+itself, stays in the operator.
 
 `apiclient` and `memo` import nothing from `k8s.io`, because some
 programs must not link client-go at all: the pod build of

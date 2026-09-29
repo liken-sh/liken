@@ -469,6 +469,17 @@ func (c *collection[T]) view() informer.View { return c.watch.View() }
 // and the MetadataProviders are read through informer.CurrentList
 // instead, which reads such an object from the API server, so a pass
 // never reads a Library that is there as one that is gone.
+//
+// items answers from the store even while the API server forbids the
+// watch, which is an exception to the rule of the operators skill.
+// This operator has no read of these collections from the API server:
+// the pass reads the member pods, the Players, the MediaPreferences, the
+// Plays, the people, the claims, the volumes, the stood pods, the
+// progress pods, and the nodes only from their stores. While the watch
+// is forbidden, the reflector lists the collection again after each
+// backoff, up to thirty seconds apart, so the store is at most that old.
+// A read of each collection from the API server on every pass would
+// cost more than the delay it saves.
 func (c *collection[T]) items() ([]T, error) {
 	if !c.read.Load() {
 		c.mu.Lock()

@@ -308,17 +308,24 @@ from the API server. A settled pass then sends the API server no read
 of a watched kind. `kubernetes/informer` holds the reads.
 `kubernetes/memo` holds the memo and the requests whose answers it
 notes (`ReadFresh`, `Written`, and `SettleStatus`), and imports nothing
-from `k8s.io`, so a program that must not link client-go writes
-through it too.
+from `k8s.io`, so a program that must not link client-go can link
+it.
 
 - **The rule.** Read one object with `informer.ReadOne` and a list with
   `informer.CurrentList`. A store answers only when it is ready
   (`informer.View.Ready`): it holds the whole first read, and the API
   server accepted a watch and forbade none since. Before that, and
   after a `401` or a `403` on a watch until the API server accepts one,
-  read and list from the API server. A watch that fails for another reason, such as a
-  refused connection while the API server restarts, leaves the store
-  ready, so the operator keeps its local work going from the store.
+  read and list from the API server. `library-operator` is the one
+  exception: it reads its member pods, Players, MediaPreferences,
+  Plays, people, claims, volumes, stood pods, progress pods, and nodes
+  only from their stores, and has no read of them from the API server.
+  While their watch is forbidden, the reflector lists each again after
+  each backoff, up to thirty seconds apart, and the pass reads that
+  list (`library-operator/watch.go`, `items`). A watch that fails for
+  another reason, such as a refused connection while the API server
+  restarts, leaves the store ready, so the operator keeps its local
+  work going from the store.
   `ReadOne` reads an object the store does not hold from the API
   server. A copy that does not convert is read from the API server
   too, so a list leaves out no object.
@@ -356,9 +363,9 @@ through it too.
   whose UID the store can hold from an object deleted since), and for
   a read once at start, before the watch opens.
 - **The reference files.** `kubernetes/informer/cache.go` and
-  `cache_test.go` (the reads, a list that meets a create, and the
-  status write after a `409`), `kubernetes/memo/memo_test.go` (the
-  memo itself), `bluetooth-operator/objectcache_test.go` (the memo
+  `cache_test.go` (the reads, and a list that meets a create),
+  `kubernetes/memo/requests_test.go` (the status write after a `409`),
+  `kubernetes/memo/memo_test.go` (the memo itself), `bluetooth-operator/objectcache_test.go` (the memo
   across three kinds and a store that follows its selector),
   `display-operator/objectcache.go` (two goroutines that write one
   kind), `audio-operator/endpointwatch.go` (stores scoped by field
