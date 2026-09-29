@@ -46,7 +46,7 @@ jobs:{% range .Jobs %}
       # The toolchain, KVM access, and the caches of the vendored
       # inputs.
       - uses: ./.github/actions/build-setup{% else %}
-      - uses: actions/checkout@v7{% end %}{% if or (eq .Toolchain "go") (eq .Toolchain "hugo") (eq .Toolchain "prek") %}
+      - uses: actions/checkout@v7{% end %}{% if .Go %}
 
       - uses: actions/setup-go@v6
         with:

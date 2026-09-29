@@ -21,7 +21,7 @@ func TestTheWorkflowsAreWrittenAndChecked(t *testing.T) {
 	handWritten := filepath.Join(root, ".github/workflows/cert.yaml")
 	os.WriteFile(handWritten, []byte("name: cert\n"), 0o644)
 
-	files, err := Workflows(components)
+	files, err := Workflows(root, components)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func workflowJobs(t *testing.T, data []byte) map[string]map[string]any {
 }
 
 func TestTheRootWorkflowCallsEachComponentAfterItsDependencies(t *testing.T) {
-	files, err := Workflows(graphFixture(t))
+	files, err := Workflows("", graphFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ platforms = ["linux/amd64", "linux/arm64"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := Workflows(components)
+	files, err := Workflows(root, components)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,32 @@ func TestACoverageFileMustBeAtTheComponentsTop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Workflows(components); err == nil || !strings.Contains(err.Error(), "at the component's top") {
+	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "at the component's top") {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestAHooksJobSetsUpGoOnlyForAGoModule(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"os/package.toml":   "[package]\nname = \"os\"\n[[jobs]]\nname = \"checks\"\ntoolchain = \"prek\"\n",
+		"os/go.mod":         "module os\n",
+		"base/package.toml": "[package]\nname = \"base\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{"os": true, "base": false}
+	for name, wants := range cases {
+		t.Run(name, func(t *testing.T) {
+			text := string(files[".github/workflows/component-"+name+".yaml"])
+			if strings.Contains(text, "actions/setup-go") != wants {
+				t.Errorf("setup-go in the %s workflow is %v:\n%s", name, !wants, text)
+			}
+		})
 	}
 }

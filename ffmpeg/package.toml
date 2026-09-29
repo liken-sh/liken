@@ -7,6 +7,11 @@ version = "20260928"
 revision = 1
 license = "MIT"
 
+# shellcheck and the whitespace checks, from .pre-commit-config.yaml.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+
 # The image builds on vaapi. The build takes the vulkan directory as
 # the context builder, for the scripts that every base on Debian uses.
 [depends]

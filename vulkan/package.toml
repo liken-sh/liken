@@ -9,5 +9,10 @@ version = "20260928"
 revision = 1
 license = "MIT"
 
+# shellcheck and the whitespace checks, from .pre-commit-config.yaml.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+
 [[outputs.images]]
 name = "vulkan"

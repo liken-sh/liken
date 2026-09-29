@@ -28,15 +28,15 @@ var templates = template.Must(template.New("").
 
 // Workflows renders every generated workflow, keyed by its path from
 // the repository root.
-func Workflows(components map[string]*Component) (map[string][]byte, error) {
+func Workflows(root string, components map[string]*Component) (map[string][]byte, error) {
 	files := map[string][]byte{}
-	root, err := render("ci.yaml.tmpl", rootData(components))
+	top, err := render("ci.yaml.tmpl", rootData(components))
 	if err != nil {
 		return nil, err
 	}
-	files[".github/workflows/ci.yaml"] = root
+	files[".github/workflows/ci.yaml"] = top
 	for _, c := range sortedComponents(components) {
-		data, err := componentData(c)
+		data, err := componentData(root, c)
 		if err != nil {
 			return nil, err
 		}
@@ -119,6 +119,10 @@ func dependencyOrder(components map[string]*Component) []*Component {
 type jobData struct {
 	Job
 	Component, WorkDir, ModuleDir string
+	// Go is true when the job sets up Go: a go or hugo job always, and
+	// a prek job when its module directory has a go.mod, because its
+	// hooks then run Go.
+	Go bool
 }
 
 type imageData struct {
@@ -126,7 +130,7 @@ type imageData struct {
 	Load bool
 }
 
-func componentData(c *Component) (map[string]any, error) {
+func componentData(root string, c *Component) (map[string]any, error) {
 	var jobs []jobData
 	var needs []string
 	for _, job := range c.Jobs {
@@ -134,6 +138,13 @@ func componentData(c *Component) (map[string]any, error) {
 			ModuleDir: path.Join(c.Dir, orDefault(job.Module, job.Dir))}
 		if d.Timeout == 0 {
 			d.Timeout = 15
+		}
+		switch job.Toolchain {
+		case "go", "hugo":
+			d.Go = true
+		case "prek":
+			_, err := os.Stat(filepath.Join(root, d.ModuleDir, "go.mod"))
+			d.Go = err == nil
 		}
 		for _, file := range job.Coverage {
 			if strings.Contains(file, "/") {

@@ -109,7 +109,7 @@ func ghcr(token string) Registry {
 }
 
 func generate(root string, components map[string]*Component, check bool, stdout io.Writer) error {
-	files, err := Workflows(components)
+	files, err := Workflows(root, components)
 	if err != nil {
 		return err
 	}
