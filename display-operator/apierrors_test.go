@@ -130,7 +130,7 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			method: http.MethodGet,
 			target: apiRoot + "/displays/HDMI-A-4/screen.png",
 			status: http.StatusConflict,
-			kind:   problemNoPanel,
+			kind:   problemAway,
 			detail: "no panel on HDMI-A-4",
 		},
 		{

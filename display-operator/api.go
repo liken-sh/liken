@@ -344,7 +344,7 @@ func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	}
 	for _, condition := range screen.Status.Conditions {
 		if condition.Type == ConnectedCondition && condition.Status == conditionFalse {
-			return screen, noPanel(condition.Message)
+			return screen, away(condition.Message)
 		}
 	}
 	for _, condition := range screen.Status.Conditions {
@@ -467,7 +467,7 @@ func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiR
 // What the info route answers with: the node's own reading of the
 // screen, or the Display's when the node cannot be asked.
 func (s *apiServer) screenInfo(r *http.Request, screen *Display, down *fault) (screenInfo, *fault) {
-	if down != nil && down.kind == problemNoPanel {
+	if down != nil && down.kind == problemAway {
 		return staticInfo(screen, "panel", "disconnected", down.detail), nil
 	}
 	if down != nil {

@@ -23,20 +23,20 @@ const (
 )
 
 // The eight typed problems this API answers with. no-node,
-// not-acceptable, capture-busy, and upstream-failed are shared with
-// the audio and media APIs. capture-denied, compositor-down,
-// encoder-failed, and no-panel are display's own, because only this
-// domain has a compositor, an encoder, and a panel on a connector.
+// not-acceptable, capture-busy, upstream-failed, and away are shared
+// with the audio and media APIs. capture-denied, compositor-down, and
+// encoder-failed are display's own, because only this domain has a
+// compositor and an encoder.
 const (
 	problemBlank          = "about:blank"
 	problemNoNode         = sharedProblemBase + "no-node"
 	problemNotAcceptable  = sharedProblemBase + "not-acceptable"
 	problemCaptureBusy    = sharedProblemBase + "capture-busy"
 	problemUpstreamFailed = sharedProblemBase + "upstream-failed"
+	problemAway           = sharedProblemBase + "away"
 	problemCaptureDenied  = displayProblemBase + "capture-denied"
 	problemCompositorDown = displayProblemBase + "compositor-down"
 	problemEncoderFailed  = displayProblemBase + "encoder-failed"
-	problemNoPanel        = displayProblemBase + "no-panel"
 )
 
 // Every type this API answers with, for the OpenAPI document's own
@@ -49,10 +49,10 @@ func problemTypes() []string {
 		problemNotAcceptable,
 		problemCaptureBusy,
 		problemUpstreamFailed,
+		problemAway,
 		problemCaptureDenied,
 		problemCompositorDown,
 		problemEncoderFailed,
-		problemNoPanel,
 	}
 }
 
@@ -137,10 +137,10 @@ var problemTitles = map[string]string{
 	problemNotAcceptable:  "No representation of this screen is acceptable",
 	problemCaptureBusy:    "The output is already being captured",
 	problemUpstreamFailed: "The capture sidecar failed",
+	problemAway:           "The screen is away",
 	problemCaptureDenied:  "The compositor denied the capture",
 	problemCompositorDown: "The compositor is not serving this screen",
 	problemEncoderFailed:  "The encoder wrote no picture",
-	problemNoPanel:        "The screen has no panel on its connector",
 }
 
 func faultTitle(kind string, status int) string {
@@ -220,13 +220,15 @@ func unavailable(kind, detail string) *fault {
 	return f
 }
 
-// A screen whose monitor is off its connector is a 409, RFC 9110
-// section 15.5.10: the Display exists, so it is not a 404, and a retry
-// cannot help while the monitor stays unplugged, so it is not a 503
-// with Retry-After. The caller acts on it by connecting the monitor or
-// by asking for another screen.
-func noPanel(detail string) *fault {
-	return newFault(http.StatusConflict, problemNoPanel, detail)
+// A screen whose monitor is off its connector is away, and away is a
+// 409, RFC 9110 section 15.5.10: the Display exists, so it is not a
+// 404, and a retry cannot help while the monitor stays unplugged, so
+// it is not a 503 with Retry-After. The caller acts on it by
+// connecting the monitor or by asking for another screen. The audio
+// API answers the same type for a Sink or a Source with no node, and
+// the media API relays it on a composed stream.
+func away(detail string) *fault {
+	return newFault(http.StatusConflict, problemAway, detail)
 }
 
 func gatewayTimeout(detail string) *fault {

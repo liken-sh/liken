@@ -216,7 +216,7 @@ func responses(route apiRoute) map[string]any {
 		return answers
 	}
 	answers["400"] = problemResponse("A query the grammar refuses.")
-	answers["409"] = problemResponse("The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected.")
+	answers["409"] = problemResponse("The screen has no panel on its connector (away). A retry does not help until the monitor is connected.")
 	answers["500"] = problemResponse("The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed).")
 	answers["502"] = problemResponse("The sidecar answered something that is not HTTP or not a problem document.")
 	answers["504"] = problemResponse("The sidecar sent no headers within the header timeout.")

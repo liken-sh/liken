@@ -36,10 +36,10 @@
               "https://liken.sh/problems/not-acceptable",
               "https://liken.sh/problems/capture-busy",
               "https://liken.sh/problems/upstream-failed",
+              "https://liken.sh/problems/away",
               "https://display.liken.sh/problems/capture-denied",
               "https://display.liken.sh/problems/compositor-down",
-              "https://display.liken.sh/problems/encoder-failed",
-              "https://display.liken.sh/problems/no-panel"
+              "https://display.liken.sh/problems/encoder-failed"
             ],
             "format": "uri",
             "type": "string"
@@ -623,7 +623,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -806,7 +806,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1049,7 +1049,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1208,7 +1208,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1442,7 +1442,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1601,7 +1601,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1844,7 +1844,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -2003,7 +2003,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -2237,7 +2237,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -2396,7 +2396,7 @@
                 }
               }
             },
-            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+            "description": "The screen has no panel on its connector (away). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {

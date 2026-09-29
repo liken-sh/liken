@@ -154,7 +154,7 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 		{
 			name: "a screen with no panel", status: http.StatusConflict,
 			contentType: problemContentType,
-			body:        `{"type":"https://display.liken.sh/problems/no-panel","title":"No panel","status":409,"detail":"no panel on HDMI-A-1"}`,
+			body:        `{"type":"https://liken.sh/problems/away","title":"The screen is away","status":409,"detail":"no panel on HDMI-A-1"}`,
 			want:        http.StatusConflict, kind: problemAway, detail: "no panel on HDMI-A-1",
 		},
 		{

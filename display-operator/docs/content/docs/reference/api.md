@@ -312,22 +312,23 @@ encoder's last lines.
 | `https://liken.sh/problems/not-acceptable` | `Accept` excludes everything the route can serve | 406 |
 | `https://liken.sh/problems/capture-busy` | the output is already being captured | 503 |
 | `https://liken.sh/problems/upstream-failed` | the capture container refused the connection, is absent, or is not ready | 503 |
+| `https://liken.sh/problems/away` | the `Display` has no panel on its connector. `detail` is the `Connected` condition's message | 409 |
 | `https://display.liken.sh/problems/capture-denied` | the compositor denied the capture. `detail` is its `unauthorized` | 500 |
 | `https://display.liken.sh/problems/compositor-down` | the compositor is not serving the screen. `detail` is the `CompositorServing` condition's message | 503 |
 | `https://display.liken.sh/problems/encoder-failed` | the encode produced no picture | 500 |
-| `https://display.liken.sh/problems/no-panel` | the `Display` has no panel on its connector. `detail` is the `Connected` condition's message | 409 |
 
-The first four types are the ones the three capture APIs share. The
-last four are this API's own, because only the display domain has a
-compositor, an encoder, or a panel on a connector. A screen with no
-node and a screen whose compositor is down are both a 503, with
-different types, because you are waiting for different things: the
-scheduler in one case, and the operator starting the compositor again
-in the other. A screen with no panel is a 409 with no `Retry-After`,
-because no wait brings an unplugged monitor back: you connect the
-monitor, or you ask for another screen. An error with no
-type of its own has `type: about:blank` and the status phrase as its
-`title`. The OpenAPI document lists every type.
+The first five types are the ones the three capture APIs share. The
+last three are this API's own, because only the display domain has a
+compositor or an encoder. A screen with no node and a screen whose
+compositor is down are both a 503, with different types, because you
+are waiting for different things: the scheduler in one case, and the
+operator starting the compositor again in the other. A screen with no
+panel is away. It is a 409 with no `Retry-After`, because no wait
+brings an unplugged monitor back: you connect the monitor, or you ask
+for another screen. The audio API answers the same type for a `Sink`
+or a `Source` with no node. An error with no type of its own has
+`type: about:blank` and the status phrase as its `title`. The OpenAPI
+document lists every type.
 
 When `detail` describes a failure on a node, it names the node and
 what went wrong, for example "the capture sidecar on node-2 did not
