@@ -415,15 +415,18 @@ func TestAWriteFromAnotherWriterAfterADeliveredGrantCostsNoRead(t *testing.T) {
 	}
 }
 
-// failingWatches serves a fake API server whose watches fail with a 503
-// once fail is set, the way an API server answers while it restarts.
+// failingWatches serves the watches of a fake API server, and fails
+// each of their requests with a 503 once fail is set, the way an API
+// server answers while it restarts. It fails the reflector's lists as
+// well as its watches: a list that reached the fake after the failed
+// watch would count as a read of the sweep's own.
 type failingWatches struct {
 	api  *fakeapi.Server
 	fail atomic.Bool
 }
 
 func (f *failingWatches) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if f.fail.Load() && r.URL.Query().Get("watch") == "true" {
+	if f.fail.Load() {
 		http.Error(w, "the API server is restarting", http.StatusServiceUnavailable)
 		return
 	}
