@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -40,16 +41,22 @@ type recordedRequest struct {
 }
 
 // A server that answers one canned object per path and records every
-// request it received.
+// request it received. A test reads requests after the call it made
+// has returned. A caller whose context ends can return while the
+// server still takes its request, so a test of such a caller reads
+// the requests through sent, which takes the lock the handler writes
+// under.
 type cannedAPI struct {
 	answers  map[string]any
 	statuses map[string]int
+	mutex    sync.Mutex
 	requests []recordedRequest
 }
 
 func (c *cannedAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		c.mutex.Lock()
 		c.requests = append(c.requests, recordedRequest{
 			Method:      r.Method,
 			Path:        r.URL.Path,
@@ -57,6 +64,7 @@ func (c *cannedAPI) handler() http.Handler {
 			ContentType: r.Header.Get("Content-Type"),
 			Body:        body,
 		})
+		c.mutex.Unlock()
 		key := r.Method + " " + r.URL.Path
 		if status, held := c.statuses[key]; held {
 			w.WriteHeader(status)
@@ -69,6 +77,13 @@ func (c *cannedAPI) handler() http.Handler {
 		}
 		_ = json.NewEncoder(w).Encode(answer)
 	})
+}
+
+// sent answers how many requests the server has taken.
+func (c *cannedAPI) sent() int {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return len(c.requests)
 }
 
 // A Receiver is cluster-scoped, so the collection path carries no

@@ -77,8 +77,8 @@ func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 
 	newCECBusController(testAPIClient(t, api.handler())).run(ctx, testMetrics(t))
 
-	if len(api.requests) < 2 {
-		t.Errorf("the loop listed %d times", len(api.requests))
+	if sent := api.sent(); sent < 2 {
+		t.Errorf("the loop listed %d times", sent)
 	}
 }
 
