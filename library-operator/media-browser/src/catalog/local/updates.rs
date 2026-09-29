@@ -1,8 +1,12 @@
-// One stream per item table follows `/v1/updates/<table>` and folds
-// every event into one changed flag. The stream sends nothing while
-// the catalog is quiet, not even a heartbeat, so a read timeout means
-// idleness, and only EOF or a real error means the stream dropped.
+// One stream per item table follows `/v1/updates/<table>`. A catalog
+// table's events fold into one changed flag. A progress table's events
+// each name a play by the first column of the row's primary key, and the
+// stream keeps the play, so the browser reads the progress of that play's
+// works and nothing else. The stream sends nothing while the store is
+// quiet, not even a heartbeat, so a read timeout means idleness, and only
+// EOF or a real error means the stream dropped.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -30,10 +34,13 @@ const BACKOFF_CEILING: Duration = Duration::from_secs(5);
 // pause too.
 pub(super) struct Shared {
     pub changed: AtomicBool,
-    // The progress store's own flag, apart from the catalog's, because a
-    // film marks this one every second and the browser reads the two on
-    // different terms.
+    // The progress store's own flag, apart from the catalog's. It marks a
+    // change no play names: a progress stream that ended, or an event that
+    // did not parse. The browser then reads every progress it draws.
     pub progressed: AtomicBool,
+    // The plays the progress streams named since the browser last asked,
+    // each with the people a delete on `play_people` took off it.
+    pub touched: Mutex<BTreeMap<String, BTreeSet<String>>>,
     pub wake: Mutex<Option<Waker>>,
     pub stop: AtomicBool,
     pub revision: Mutex<u64>,
@@ -45,6 +52,7 @@ impl Default for Shared {
         Self {
             changed: AtomicBool::new(false),
             progressed: AtomicBool::new(false),
+            touched: Mutex::new(BTreeMap::new()),
             wake: Mutex::new(None),
             stop: AtomicBool::new(false),
             revision: Mutex::new(0),
@@ -102,6 +110,45 @@ impl Shared {
     }
 }
 
+impl Shared {
+    // Keep one play a progress stream named, and the person a delete took
+    // off it, then wake the loop. The play is kept before the waker fires,
+    // so a woken loop always finds it.
+    pub(super) fn touch(&self, play: String, removed: Option<String>) {
+        self.touched
+            .lock()
+            .unwrap_or_else(|held| held.into_inner())
+            .entry(play)
+            .or_default()
+            .extend(removed);
+        let wake = self.wake.lock().unwrap().clone();
+        if let Some(wake) = wake {
+            wake();
+        }
+    }
+
+    // Take every play kept since the last call.
+    pub(super) fn take_touched(&self) -> BTreeMap<String, BTreeSet<String>> {
+        std::mem::take(&mut *self.touched.lock().unwrap_or_else(|held| held.into_inner()))
+    }
+}
+
+// The play one event of a progress table names, and the person a delete
+// on `play_people` took off it. Every progress table leads its primary key
+// with the play. An event that names no play is nothing.
+fn named(table: &str, line: &str) -> Option<(String, Option<String>)> {
+    let event: serde_json::Value = serde_json::from_str(line).ok()?;
+    let notify = event.get("notify")?.as_array()?;
+    let kind = notify.first()?.as_str()?;
+    let key = notify.get(1)?.as_array()?;
+    let play = key.first()?.as_str()?.to_string();
+    let removed = match (table, kind) {
+        ("play_people", "delete") => key.get(1).and_then(|person| person.as_str()),
+        _ => None,
+    };
+    Some((play, removed.map(str::to_string)))
+}
+
 // The thread runs for the life of the source. The backoff resets once
 // a stream answers, so a healthy agent is rejoined at the floor
 // after a single drop.
@@ -114,7 +161,7 @@ pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str, cha
         let url = format!("{base}/v1/updates/{table}");
         let mut backoff = BACKOFF_FLOOR;
         while !shared.stopping() {
-            if stream(&agent, &url, &shared, change) {
+            if stream(&agent, &url, &shared, table, change) {
                 backoff = BACKOFF_FLOOR;
             }
             pause(&shared, backoff);
@@ -127,7 +174,7 @@ pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str, cha
 // and the next stream are gone, and only a full re-read covers them. A
 // failed connect does not mark, because the end that preceded it
 // already did.
-fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, change: Change) -> bool {
+fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, table: &str, change: Change) -> bool {
     let Ok(response) = agent.post(url).call() else {
         return false;
     };
@@ -140,8 +187,9 @@ fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, change: Change) -> bo
         match reader.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {
-                if !line.trim().is_empty() {
-                    shared.mark(change);
+                let event = line.trim();
+                if !event.is_empty() {
+                    fold(shared, table, change, event);
                 }
                 line.clear();
             }
@@ -153,6 +201,21 @@ fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, change: Change) -> bo
     }
     shared.mark(change);
     true
+}
+
+// Fold one event in. A catalog event marks the catalog changed. A
+// progress event keeps the play it names, and one that names no play
+// marks the progress store changed, so the browser reads everything
+// rather than lose the change.
+fn fold(shared: &Shared, table: &str, change: Change, event: &str) {
+    if !change.progress() {
+        shared.mark(change);
+        return;
+    }
+    match named(table, event) {
+        Some((play, removed)) => shared.touch(play, removed),
+        None => shared.mark(change),
+    }
 }
 
 // The pause sleeps on the signal a halt raises, so a dropped source ends

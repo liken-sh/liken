@@ -2,7 +2,7 @@ package main
 
 // What these tests prove: the join of a Play's two messages, the ten
 // second throttle, what the role does with a work or a person Jellyfin
-// does not have, and the watched mark every write carries.
+// does not have, and the played state a write states only past the line.
 
 import (
 	"encoding/json"
@@ -120,9 +120,8 @@ func TestARunningPlayPastTheWatchedLineIsWrittenWatched(t *testing.T) {
 	if len(fake.writes) != 2 {
 		t.Fatalf("writes = %+v, want one for each position", fake.writes)
 	}
-	if fake.writes[0].data.Played || !fake.writes[1].data.Played {
-		t.Errorf("played = %v then %v, want false then true",
-			fake.writes[0].data.Played, fake.writes[1].data.Played)
+	if fake.writes[0].stated || !fake.writes[1].data.Played {
+		t.Errorf("writes = %+v, want no played state and then played", fake.writes)
 	}
 }
 
@@ -147,26 +146,29 @@ func TestACreditsMarkMovesTheLineAPlayIsWrittenWatchedAt(t *testing.T) {
 	if len(fake.writes) != 2 {
 		t.Fatalf("writes = %+v, want one for each position", fake.writes)
 	}
-	if fake.writes[0].data.Played || !fake.writes[1].data.Played {
-		t.Errorf("played = %v then %v, want false then true at the start of the credits",
-			fake.writes[0].data.Played, fake.writes[1].data.Played)
+	if fake.writes[0].stated || !fake.writes[1].data.Played {
+		t.Errorf("writes = %+v, want no played state and then played at the start of the credits",
+			fake.writes)
 	}
 }
 
-// A replay from the start clears the mark. The position alone says
-// whether a person watched the work, and a replay puts it back at the
-// start.
-func TestAReplayFromTheStartClearsTheWatchedMark(t *testing.T) {
+// A replay below the line keeps the mark Jellyfin holds. Each write of the
+// replay moves the position and states no played state, so a person who
+// rewatches ten minutes of a finished film leaves it played in Jellyfin.
+func TestAReplayBelowTheLineKeepsJellyfinsMark(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
 	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 
 	out.final(t.Context(), "play-1", []byte(`{"phase":"Finished","item":0,"position":"2:16:00","duration":"2:16:00"}`))
-	out.status("play-1", []byte(`{"item":0,"position":"0:00:30","duration":"2:16:00"}`))
+	out.status("play-1", []byte(`{"item":0,"position":"0:10:00","duration":"2:16:00"}`))
 	out.tick(t.Context())
 
-	if len(fake.writes) != 2 || !fake.writes[0].data.Played || fake.writes[1].data.Played {
-		t.Errorf("writes = %+v, want the mark set and then cleared", fake.writes)
+	if len(fake.writes) != 2 || fake.writes[1].stated {
+		t.Errorf("writes = %+v, want the replay's write to name no played state", fake.writes)
+	}
+	if held := fake.userData["user-a/item-film"]; !held.Played || held.PlaybackPositionTicks != 6_000_000_000 {
+		t.Errorf("jellyfin holds %+v, want the film played at the replay's position", held)
 	}
 }
 

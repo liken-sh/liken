@@ -13,6 +13,7 @@ mod home;
 mod identity;
 mod keys;
 mod lines;
+mod live;
 mod loading;
 mod marks;
 mod moments;
@@ -44,7 +45,7 @@ use crate::catalog::{
     Answer, Change, Credit, CreditSlot, Credits, Entry, Episode, FileFacts, Fold, Franchise,
     FranchiseEntry, GenreEntry, GenreSort, Held, Identity, InSeries, LibraryEntry, Membership,
     MovieDetails, MovieSet, Order, Person, PlayItem, Played, Presentation, Progress, Query, Resume,
-    SeriesDetails, Slot, Title,
+    SeriesDetails, Slot, Title, Touched,
 };
 use crate::screens::home::Home;
 use crate::screens::movie::Focus;
@@ -73,9 +74,11 @@ const IN_SET: usize = 4;
 struct Fake {
     movies: usize,
     changed: bool,
-    // A change on the progress store alone, which the browser coalesces
-    // rather than reads at once.
+    // A change on the progress store that names no play, which reads every
+    // progress the screen draws again.
     progressed: bool,
+    // The plays the store's stream named since the browser last asked.
+    touched: Vec<Touched>,
     woken: bool,
     calls: Vec<&'static str>,
     // The play list this source answers, and the last choice it was asked
@@ -725,6 +728,10 @@ impl Source for Fake {
             true => Change::Catalog,
             false => Change::of(false, std::mem::take(&mut self.progressed)),
         }
+    }
+
+    fn touched(&mut self) -> Vec<Touched> {
+        std::mem::take(&mut self.touched)
     }
 
     fn wake_by(&mut self, _wake: Waker) {

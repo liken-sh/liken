@@ -53,7 +53,7 @@ pub mod mark;
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
-pub use progress::{Played, Progress, Resume};
+pub use progress::{Played, Progress, Resume, Touched};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
@@ -395,7 +395,9 @@ pub struct Person {
 /// What a source found changed since the browser last asked. The browser
 /// keeps the two stores apart because they change on different terms:
 /// the catalog changes when a scan lands, and the progress store changes
-/// every second a film plays somewhere in the house.
+/// every second a film plays somewhere in the house. A progress change
+/// arrives play by play through [`Source::touched`], so a progress change
+/// here is only one the source cannot name, and it reads everything again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Change {
     #[default]
@@ -422,9 +424,17 @@ impl Change {
         matches!(self, Self::Catalog | Self::Both)
     }
 
-    /// Whether the progress store changed.
+    /// Whether the progress store changed in a way no play names.
     pub fn progress(self) -> bool {
         matches!(self, Self::Progress | Self::Both)
+    }
+
+    /// Both changes: what either one holds.
+    pub fn and(self, other: Self) -> Self {
+        Self::of(
+            self.catalog() || other.catalog(),
+            self.progress() || other.progress(),
+        )
     }
 }
 
@@ -595,8 +605,17 @@ pub trait Source {
         None
     }
 
-    /// What changed since the last call.
+    /// What changed since the last call. A progress change here is one the
+    /// source cannot name play by play, such as a stream that dropped, so
+    /// every progress a screen draws is read again.
     fn changed(&mut self) -> Change;
+
+    /// Every play the progress store changed since the last call, resolved
+    /// to the works and the people it names. A source with no progress
+    /// stream answers nothing.
+    fn touched(&mut self) -> Vec<Touched> {
+        Vec::new()
+    }
 
     /// A second source over the same catalog, for a reader thread of its
     /// own, so a read runs off the frame thread. A source that has no

@@ -1,6 +1,7 @@
 # 72, Marking a title watched or cleared
 
-Designed, not built. A person at the screen can mark a title watched
+Built on 2026-09-29. The drill on a cluster with Jellyfin is still
+owed. A person at the screen can mark a title watched
 or clear its progress from the browser, and the Jellyfin sync carries
 both marks in each direction without a watched flag of its own.
 
@@ -12,6 +13,13 @@ writer sends no mark, a rewatch still sends `Played: false`, the
 finished line still differs between the two sides, and the jellyfin
 role runs no reconcile at start. "The mark as built" below states the
 contract the Jellyfin half builds on.
+
+The Jellyfin half was built later on 2026-09-29. The jellyfin role
+sends each mark to Jellyfin, a play never writes `Played: false`, the
+browser and the outbound writer read one finished rule with the credits
+marks, and the jellyfin role reconciles with Jellyfin each time the
+progress role comes online. "The Jellyfin half as built" below states
+how. The drill under "How it will be proved" has not run.
 
 ## The problem
 
@@ -172,10 +180,98 @@ wall. A continue-watching card gets no key of its own: the four keys
 every remote has already move and select, so the card's actions are on
 the page the card opens.
 
+The screen learns of a recorded mark from its own progress agent. The
+agent's update streams on `plays`, `play_people`, and `play_aliases`
+name each changed play once its row is in the browser's file. The
+browser resolves the play to its works and its people. It then reads
+again only the progress of those works on the screen on top, or the
+continue-watching row alone when the play names everyone in the room.
+
+### The Jellyfin half as built
+
+**Marks reach Jellyfin.** The jellyfin role subscribes to
+`plays/{namespace}/+/mark` and holds each mark until its next
+ten-second pass (`jellyfinmarks.go`). On the pass it writes the mark to
+each person at the screen: watched as `Played: true` with the position
+at the duration, cleared as `Played: false` at 0. Both write the press
+as `LastPlayedDate`. A mark that names nobody, a work Jellyfin does not
+hold, or a person it does not hold is done with no write. A read or a
+write that fails leaves the mark for the next pass. A mark older than
+the 24-hour retention is dropped unsent.
+
+Two checks keep a mark delivered again from overwriting a newer state:
+
+- Before each person's write, the role reads that person's user data
+  for the item (`GET /UserItems/{item}/UserData`). A `LastPlayedDate`
+  at or after `at` is a newer play or toggle in Jellyfin, or the mark's
+  own write, and the role leaves it.
+- Once the mark is done, the role publishes a retained record on
+  `plays/{namespace}/{name}/sent` with the mark's `at`, and it sends no
+  mark it holds a record for. The date check alone was not enough:
+  Jellyfin's `MarkUnplayed` sets `LastPlayedDate` to null, so a watched
+  mark read back after a restart could not tell an unplayed toggle made
+  since from an item nobody played. The role clears the record when the
+  progress role clears the mark, and clears on sight a record whose
+  `at` is past the retention.
+
+The role pushes on the pass, not on arrival, because the bus sends its
+filters in sorted order and the broker delivers the retained marks
+before the retained records on a new subscription. A pass later, every
+record has arrived beside its mark.
+
+One case is not covered. A mark pressed while the jellyfin role is
+down, followed by an unplayed toggle in Jellyfin before the role starts,
+reaches Jellyfin over the toggle. Jellyfin records no date for the
+toggle, and its webhook post was lost, so nothing holds the order.
+
+**A rewatch keeps Jellyfin's mark.** The outbound writer sends a
+`jellyfinUserDataUpdate` whose `Played` is a pointer with `omitempty`.
+It sets `Played: true` when the position passes the finished line and
+leaves the field out otherwise. Jellyfin changes only the fields an
+update names, so a replay below the line moves the position and keeps
+the item played.
+
+**One finished rule.** The browser could read the credits marks from
+its catalog with no schema change. The rule is `watched` and
+`creditsLine` in `watched.go`, and `finished` in
+`media-browser/src/catalog/progress/watched.rs`, a port of the same
+merge. The progress reads in `catalog/local/progress.rs` carry the
+credits marks of each play's primary video file as one column, from
+the `marks` table of the catalog, and each `Progress.finished` is
+computed with them. Both sides test against the one table in
+`media-browser/src/catalog/progress/watched.json`.
+
+**The reconcile at start.** The jellyfin role subscribes to the
+progress role's availability (`progress/{namespace}/availability`).
+Each `online` asks for one reconcile, and the role runs it only once its
+webhook listener is up (`jellyfinreconcile.go`). The trigger is the
+progress role's `online` and not the jellyfin role's own start, because
+an outside play is not retained: a reconcile while the progress role is
+down publishes to nobody. The availability is retained, so the first
+subscription after a start of the jellyfin role delivers it, and a
+start of either role runs one reconcile. The reconcile runs the
+backfill's read with the role's index and publishes every played and
+resumable item as an outside play dated at `LastPlayedDate`.
+
+The backfill `Job` stays. It waits until every durable copy of the
+progress store is ready, which the progress role's `online` does not
+say, and it reports in `status.jellyfin` that a server's whole history
+reached the store once.
+
+An unplayed toggle made while a role is down is still lost. Jellyfin
+lists an unplayed item at position 0 in neither the played nor the
+resumable read, and keeps no date for it.
+
 ## What the design must answer
 
 - Where the one finished rule lives, so the browser, the outbound
   writer, and the thread rule read the same line, credits included.
+
+  Answered: in two ports of one rule, `watched.go` for the outbound
+  writer and `media-browser/src/catalog/progress/watched.rs` for the
+  browser. The thread rule reads `Progress.finished`, which the
+  browser's progress reads compute with the credits marks of the play's
+  file. One table of cases, `watched.json`, tests both.
 - What a mark records as its time. A backfilled item with no
   `LastPlayedDate` is stored at `recorded = 1` and loses to every other
   row; a mark must not lose to an older play.
@@ -187,6 +283,12 @@ the page the card opens.
 - How the reconcile at start avoids an echo: the outbound writer drops
   an inbound position within 1 s of one it wrote in the last 5
   minutes, and the reconcile must not write back what the writer sent.
+
+  Answered: the reconcile writes nothing to Jellyfin. It publishes only
+  outside plays, and the jellyfin role subscribes to none. It also skips
+  an item whose position the role wrote in the last 5 minutes, through
+  the same `jellyfinEchoes` the webhook reads, so the role's own write
+  does not come back as a second row.
 - Whether the two actions need a confirmation on the screen. Clear
   removes a position that the person cannot get back.
 

@@ -37,8 +37,10 @@ mod marks;
 // One press and the line it prints.
 mod press;
 mod reader;
+// The progress store's changes, read for the works a screen draws.
+mod live;
 // The refresh policy: the one place that decides when the browser reads
-// the catalog again.
+// a whole screen again.
 mod refresh;
 // The stack module: the screens a person descended through, and every
 // move across them.
@@ -67,6 +69,10 @@ pub struct Browser<S: Source, A: Art> {
     // reports marks it, whether or not a page covers the home page,
     // because back pops to the home page with no read of its own.
     home_stale: bool,
+    // Whether the continue-watching row is behind the progress store. A
+    // play that names everyone in the room marks it, and the row alone is
+    // read again once the home page is on top.
+    row_stale: bool,
     // The date the home page was read on. The day's draw is seeded by
     // the date, so a page read yesterday is behind today.
     home_date: Date,
@@ -103,7 +109,7 @@ pub struct Browser<S: Source, A: Art> {
     // browser decides neither: it asks for the shade, the crate decides,
     // and the moment comes back here; the bus says in every status
     // whether a film covers the surface. It also holds every change that
-    // waits to be read, and it alone says when a read runs.
+    // waits for a whole screen's read, and it alone says when one runs.
     refresh: Refresh,
     // What the unit was doing in the last status. The browser holds it
     // because the return runs on the move to `Idle` and not on the word
@@ -189,6 +195,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             stack: Vec::new(),
             reader,
             home_stale: false,
+            row_stale: false,
             home_date,
             today: Date::today,
             bus: None,
@@ -670,18 +677,26 @@ impl<S: Source, A: Art> Browser<S, A> {
         self.landed_home()
     }
 
-    // Take the page the reader answered, where one landed. The answer is
-    // whether the home page changed, which is a frame to draw.
+    // Take what the reader answered, where anything landed: a whole page,
+    // or the continue-watching row alone. The answer is whether the home
+    // page changed, which is a frame to draw.
     fn landed_home(&mut self) -> bool {
-        let Some(page) = self.reader.take() else {
-            return false;
-        };
-        self.home_date = page.date;
-        self.home_stale = false;
-        if let screens::Screen::Home(home) = &mut self.home {
-            home.apply(page);
+        let landed = self.reader.take();
+        let changed = !landed.is_empty();
+        for read in landed {
+            let screens::Screen::Home(home) = &mut self.home else {
+                continue;
+            };
+            match read {
+                reader::Landed::Page(page) => {
+                    self.home_date = page.date;
+                    self.home_stale = false;
+                    home.apply(page);
+                }
+                reader::Landed::Row(row) => home.apply_row(row),
+            }
         }
-        true
+        changed
     }
 
     // The browser is on the screen again, whether the film played
@@ -920,13 +935,18 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         let folded = self.drain_bus();
         let delivered = self.store.get_mut().delivered();
         let landed = self.landed_home();
-        // The source names what changed and the policy decides the read.
-        // Nothing else here decides one, so a film's progress rows, which
-        // arrive once a second for two hours, cannot order a full read of
-        // the screen once a second.
+        // The source names what changed. A catalog change, and a progress
+        // change no play names, go through the policy, which reads the whole
+        // screen at once on a shown screen and holds the read on a hidden
+        // one. A play the progress stream names is read for the works the
+        // screen draws and nothing else (`live.rs`), so a film's position,
+        // which moves once a second for two hours, never reads a whole
+        // screen.
         let change = self.source.changed();
-        self.refresh.changed(change, at);
-        if self.refresh.due(at) {
+        self.refresh.changed(change);
+        let touched = self.source.touched();
+        let due = self.refresh.due();
+        if due.catalog() {
             // A change marks the home page behind whether or not a page
             // covers it, because back pops to the home page with no read of
             // its own.
@@ -934,6 +954,8 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             self.reread_top();
             return true;
         }
+        let caught_up = due.progress() && self.progress_again();
+        let live = self.touch(&touched);
         // A home page behind the audience it was read for is asked for
         // here, so a run that names an audience and takes no press still
         // draws the continue-watching row. A read already in flight is left
@@ -942,8 +964,9 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // The policy gates this ask too. It is the second way a read
         // starts, and a hidden screen must start neither.
         let refreshed = self.refresh.shown() && !self.reader.reading() && self.refresh_home();
+        let row = self.refresh.shown() && !self.reader.reading() && self.refresh_row();
         let asked = self.ask();
-        folded || delivered || landed || refreshed || asked
+        folded || delivered || landed || caught_up || live || refreshed || row || asked
     }
 
     // The page's backdrop is decoded at the logical size of the window,
@@ -1073,8 +1096,8 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // floor rate; the volume row, which asks for a frame through each of
     // its fades and names the second it starts to leave through the hold
     // between them; and the clock, which asks for the second the minute
-    // turns. A fifth wakes the loop with no frame: the
-    // second a held read comes due. Nothing under a film schedules a
+    // turns. No read waits for a second of its own: a change wakes the
+    // loop and is read on that pass. Nothing under a film schedules a
     // frame, because those frames would draw a black shade nobody sees.
     fn covered(&self) -> bool {
         self.refresh.covered()
@@ -1086,8 +1109,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         let lights = (drawing && self.lights.is_some()).then_some(at);
         let level = drawing.then(|| self.level.next_frame(at)).flatten();
         let minute = drawing.then_some(self.minute).flatten();
-        let read = self.refresh.next_due();
-        [loading, lights, level, minute, self.rest, read]
+        [loading, lights, level, minute, self.rest]
             .into_iter()
             .flatten()
             .min_by(f64::total_cmp)

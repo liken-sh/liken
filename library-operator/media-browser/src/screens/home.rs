@@ -21,7 +21,7 @@ use iced_winit::core::{Element, Length, Rectangle, Theme, mouse};
 
 use self::banner::Banner;
 use self::layout::Layout;
-pub use self::page::{Page, read};
+pub use self::page::{Page, read, read_row};
 use self::rows::{GENRE, LIBRARY, rows};
 pub use self::rows::{Last, Row, Strip};
 use super::{Step, slots};
@@ -156,6 +156,25 @@ impl Home {
         {
             self.focus = index;
         }
+        self.settle();
+    }
+
+    /// Take a continue-watching row the reader answered alone. The row
+    /// replaces the one the page holds and keeps its focus in range, and
+    /// every other row stays. A page read for an empty audience holds no
+    /// row, and a row read for it is dropped: the page is read whole when
+    /// the audience changes.
+    pub fn apply_row(&mut self, mut fresh: Strip) {
+        let Some(Block::Strip(held)) = self
+            .blocks
+            .iter_mut()
+            .find(|block| block.row() == Row::Continue)
+        else {
+            return;
+        };
+        fresh.focus = held.focus.min(fresh.count().saturating_sub(1));
+        fresh.rung = held.rung;
+        *held = fresh;
         self.settle();
     }
 

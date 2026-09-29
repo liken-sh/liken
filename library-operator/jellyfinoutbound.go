@@ -184,16 +184,27 @@ func (o *jellyfinOutbound) write(ctx context.Context, name string, final bool) {
 		o.logf("jellyfin holds no item for %s", described(held))
 		return
 	}
-	data := jellyfinUserData{
+	data := jellyfinUserDataUpdate{
 		PlaybackPositionTicks: jellyfinTicks(held.position),
-		Played:                watched(held.position, held.duration, held.credits),
 		LastPlayedDate:        o.now().UTC().Format(time.RFC3339),
+	}
+	// A play sets the played state only when it crosses the finished line,
+	// and never clears it. A replay starts below the line, and a write of
+	// Played false would unmark a film the person already finished. Only a
+	// cleared mark writes Played false.
+	finished := watched(held.position, held.duration, held.credits)
+	if finished {
+		data.Played = &finished
+	}
+	state := "played left as it was"
+	if finished {
+		state = "played true"
 	}
 	for _, person := range held.people {
 		user, wrote := o.writeOne(ctx, person, item, held.position, data)
 		if wrote && final {
-			o.logf("wrote the final position %s of %s to jellyfin for person %s: item %s, user %s, played %t",
-				positionText(held.position), described(held), person, item, user, data.Played)
+			o.logf("wrote the final position %s of %s to jellyfin for person %s: item %s, user %s, %s",
+				positionText(held.position), described(held), person, item, user, state)
 		}
 	}
 
@@ -204,7 +215,7 @@ func (o *jellyfinOutbound) write(ctx context.Context, name string, final bool) {
 
 // One person's write, and the position it leaves behind for the echo drop.
 func (o *jellyfinOutbound) writeOne(ctx context.Context, person, item string, position int,
-	data jellyfinUserData) (string, bool) {
+	data jellyfinUserDataUpdate) (string, bool) {
 	user, known := o.index.userFor(ctx, person)
 	if !known {
 		o.logf("jellyfin holds no user named %s", person)

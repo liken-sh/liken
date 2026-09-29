@@ -34,6 +34,9 @@ struct FakeAgent {
     port: u16,
     requests: Arc<Mutex<Vec<String>>>,
     movies: Arc<Mutex<Vec<TcpStream>>>,
+    // Every other stream the agent holds open, by the request line that
+    // opened it.
+    others: Arc<Mutex<Vec<(String, TcpStream)>>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -46,14 +49,16 @@ impl FakeAgent {
         listener.set_nonblocking(true).unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let movies = Arc::new(Mutex::new(Vec::new()));
+        let others = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
         let agent = Self {
             port,
             requests: requests.clone(),
             movies: movies.clone(),
+            others: others.clone(),
             stop: stop.clone(),
         };
-        thread::spawn(move || serve(listener, requests, movies, stop, drop_movies));
+        thread::spawn(move || serve(listener, requests, movies, others, stop, drop_movies));
         agent
     }
 
@@ -70,13 +75,38 @@ impl FakeAgent {
     }
 
     fn send_event(&self) {
-        let payload = format!("{EVENT}\n");
-        let chunk = format!("{:x}\r\n{payload}\r\n", payload.len());
         for stream in self.movies.lock().unwrap().iter_mut() {
-            let _ = stream.write_all(chunk.as_bytes());
-            let _ = stream.flush();
+            send(stream, EVENT);
         }
     }
+
+    // Whether a stream of this table is open.
+    fn streams(&self, table: &str) -> bool {
+        let path = format!("/v1/updates/{table} ");
+        self.others
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(request, _)| request.contains(&path))
+    }
+
+    // Send one event on every open stream of this table.
+    fn send_on(&self, table: &str, event: &str) {
+        let path = format!("/v1/updates/{table} ");
+        for (request, stream) in self.others.lock().unwrap().iter_mut() {
+            if request.contains(&path) {
+                send(stream, event);
+            }
+        }
+    }
+}
+
+// One event as one chunk of the stream's body.
+fn send(stream: &mut TcpStream, event: &str) {
+    let payload = format!("{event}\n");
+    let chunk = format!("{:x}\r\n{payload}\r\n", payload.len());
+    let _ = stream.write_all(chunk.as_bytes());
+    let _ = stream.flush();
 }
 
 impl Drop for FakeAgent {
@@ -89,11 +119,11 @@ fn serve(
     listener: TcpListener,
     requests: Arc<Mutex<Vec<String>>>,
     movies: Arc<Mutex<Vec<TcpStream>>>,
+    others: Arc<Mutex<Vec<(String, TcpStream)>>>,
     stop: Arc<AtomicBool>,
     drop_movies: usize,
 ) {
     let end = Instant::now() + Duration::from_secs(30);
-    let mut held = Vec::new();
     let mut dropped = 0;
     while !stop.load(Ordering::Acquire) && Instant::now() < end {
         match listener.accept() {
@@ -118,7 +148,7 @@ fn serve(
                     }
                     movies.lock().unwrap().push(stream);
                 } else {
-                    held.push(stream);
+                    others.lock().unwrap().push((request, stream));
                 }
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
@@ -236,4 +266,79 @@ fn a_halt_ends_a_pause_at_once() {
     let started = Instant::now();
     super::pause(&shared, DEADLINE);
     assert!(started.elapsed() < DEADLINE / 4);
+}
+
+// Each event as the pinned Corrosion agent writes it for a progress table:
+// the change and the row's primary key, which every progress table leads
+// with the play.
+// The play an event names, and the person a delete took off it.
+type Named<'a> = Option<(&'a str, Option<&'a str>)>;
+
+#[test]
+fn a_progress_event_names_its_play_and_the_person_a_delete_took_off() {
+    let cases: &[(&str, &str, Named)] = &[
+        (
+            "plays",
+            r#"{"notify":["update",["den-1"]]}"#,
+            Some(("den-1", None)),
+        ),
+        (
+            "plays",
+            r#"{"notify":["insert",["den-1"]]}"#,
+            Some(("den-1", None)),
+        ),
+        (
+            "play_people",
+            r#"{"notify":["insert",["den-1","first"]]}"#,
+            Some(("den-1", None)),
+        ),
+        (
+            "play_people",
+            r#"{"notify":["delete",["den-1","first"]]}"#,
+            Some(("den-1", Some("first"))),
+        ),
+        (
+            "play_aliases",
+            r#"{"notify":["delete",["den-1","tmdb"]]}"#,
+            Some(("den-1", None)),
+        ),
+        ("plays", r#"{"error":"the agent failed"}"#, None),
+        ("plays", "not json", None),
+        ("plays", r#"{"notify":["update",[]]}"#, None),
+    ];
+    for (table, event, expected) in cases {
+        let expected =
+            expected.map(|(play, removed)| (play.to_string(), removed.map(str::to_string)));
+        assert_eq!(super::named(table, event), expected, "{table} {event}");
+    }
+}
+
+// A progress stream keeps the play each event names, and a stream that
+// cannot name one marks the whole store changed.
+#[test]
+fn a_progress_event_keeps_its_play_and_wakes_the_loop() {
+    let agent = FakeAgent::start(0);
+    let dir = TempDir::new().unwrap();
+    let store = dir.path().join("progress.db");
+    std::fs::write(&store, b"").unwrap();
+    let mut source = source_against(&agent, &dir).with_progress(store, &agent.base());
+    let (sender, receiver) = mpsc::channel();
+    source.wake_by(Arc::new(move || {
+        let _ = sender.send(());
+    }));
+    assert!(within(DEADLINE, || agent.streams("plays")));
+
+    agent.send_on("plays", r#"{"notify":["update",["den-1"]]}"#);
+    receiver.recv_timeout(DEADLINE).unwrap();
+
+    assert_eq!(
+        source.shared.take_touched().into_keys().collect::<Vec<_>>(),
+        ["den-1"]
+    );
+    assert_eq!(source.changed(), Change::None);
+
+    agent.send_on("plays", r#"{"error":"the agent failed"}"#);
+    receiver.recv_timeout(DEADLINE).unwrap();
+
+    assert_eq!(source.changed(), Change::Progress);
 }

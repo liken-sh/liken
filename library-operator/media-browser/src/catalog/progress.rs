@@ -1,28 +1,15 @@
 // What the progress store answers a screen: where one play reached, the
-// work it names, and the thread rule the continue-watching row walks.
+// work it names, the rule that says a play finished, and the thread rule
+// the continue-watching row walks.
 
 pub mod thread;
+pub mod touched;
+pub mod watched;
+
+pub use touched::Touched;
+pub use watched::{Credits, finished};
 
 use super::draw::Date;
-
-/// The two amounts of a work that may remain when it counts as watched: a
-/// share of its length, and a number of seconds. The rule takes whichever
-/// leaves less time, so the seconds apply only to a work over 100 minutes.
-/// Credits run past the story, so a play that stopped in them counts as
-/// watched.
-pub const WATCHED_PERCENT: i64 = 5;
-pub const WATCHED_SECONDS: i64 = 300;
-
-/// Whether a play reached the end of its work. A work with no duration is
-/// never finished, because nothing says how long it is.
-/// `library-operator`'s `watched.go` states the same rule for the marks
-/// it writes to Jellyfin, and there the file's credits marks move the
-/// line to the start of the credits, merged and placed the way the
-/// up-next card in `media-operator`'s display places them. This rule
-/// reads no mark.
-pub fn finished(position: i64, duration: i64) -> bool {
-    duration > 0 && position >= duration - (duration * WATCHED_PERCENT / 100).min(WATCHED_SECONDS)
-}
 
 /// The position and the duration of one play as a page draws them,
 /// `H:MM:SS / H:MM:SS`. The longer of the two decides whether both carry
@@ -183,42 +170,6 @@ pub fn stamp(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_twenty_two_minute_work_is_finished_with_one_minute_six_left() {
-        assert!(finished(1_320 - 66, 1_320));
-        assert!(!finished(1_320 - 67, 1_320));
-    }
-
-    #[test]
-    fn a_forty_two_minute_work_is_finished_with_two_minutes_six_left() {
-        assert!(finished(2_520 - 126, 2_520));
-        assert!(!finished(2_520 - 127, 2_520));
-    }
-
-    #[test]
-    fn a_hundred_minute_work_is_finished_with_five_minutes_left() {
-        assert!(finished(6_000 - 300, 6_000));
-        assert!(!finished(6_000 - 301, 6_000));
-    }
-
-    #[test]
-    fn a_hundred_and_fifty_minute_work_is_finished_with_five_minutes_left() {
-        assert!(finished(9_000 - 300, 9_000));
-        assert!(!finished(9_000 - 301, 9_000));
-    }
-
-    #[test]
-    fn a_play_that_reached_the_end_is_finished() {
-        assert!(finished(6_000, 6_000));
-        assert!(finished(6_100, 6_000));
-    }
-
-    #[test]
-    fn a_work_with_no_duration_is_never_finished() {
-        assert!(!finished(0, 0));
-        assert!(!finished(600, 0));
-    }
 
     #[test]
     fn a_work_an_hour_or_longer_carries_hours_in_both_numbers() {

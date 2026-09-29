@@ -20,7 +20,7 @@ fn stopped_at(position: Option<i64>) -> (Series, Serials) {
             .map(|position| Progress {
                 position,
                 duration: RUNTIME,
-                finished: crate::catalog::progress::finished(position, RUNTIME),
+                finished: crate::catalog::progress::finished(position, RUNTIME, &[]),
                 recorded: 100,
                 season: 1,
                 episode: 1,

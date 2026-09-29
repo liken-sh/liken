@@ -135,3 +135,39 @@ fn a_measured_run_reads_the_home_page_the_same_way() {
 
     assert!(browser.source.calls.contains(&"pool"));
 }
+
+// A play that names everyone in the room asks the thread for the
+// continue-watching row alone. The row lands on a later pump, and the
+// catalog reads no page for it.
+#[test]
+fn a_row_read_on_the_thread_lands_with_no_page_read() {
+    let mut browser = Browser::new(
+        Fake {
+            movies: 3,
+            threaded: true,
+            continues: super::resume::plays(),
+            ..Fake::default()
+        },
+        NoArt::default(),
+    )
+    .with_audience(
+        vec![crate::audience::Person {
+            name: "first".into(),
+            display_name: "First".into(),
+        }],
+        vec!["first".into()],
+    );
+    browser.pump(1.0);
+    settled(&mut browser);
+    let pages = browser.source.reads.load(Ordering::SeqCst);
+    browser.source.touched = vec![crate::catalog::Touched {
+        works: vec![("screening/films".into(), "movies:1".into())],
+        people: vec!["first".into()],
+    }];
+
+    browser.pump(2.0);
+    settled(&mut browser);
+
+    assert_eq!(browser.source.reads.load(Ordering::SeqCst), pages);
+    assert!(!super::resume::row(&browser).items.is_empty());
+}

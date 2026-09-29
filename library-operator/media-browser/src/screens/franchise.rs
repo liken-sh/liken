@@ -90,6 +90,17 @@ pub struct Franchise {
 }
 
 impl Franchise {
+    /// Whether the franchise holds this work as a member some library has,
+    /// which draws a bar and can hold the room's row.
+    pub fn holds(&self, library: &str, id: &str) -> bool {
+        self.entries.iter().any(|entry| {
+            entry
+                .held
+                .as_ref()
+                .is_some_and(|held| held.library == library && held.id == id)
+        })
+    }
+
     /// Read one franchise's page, or nothing where that `Library` holds no
     /// franchise under that id. Focus lands on the first row, so a press opens
     /// the first entry of the story.

@@ -5,7 +5,7 @@
 use rusqlite::{Connection, Row, ToSql};
 
 use super::collect;
-use crate::catalog::progress::{Played, Progress, Resume, finished};
+use crate::catalog::progress::{Credits, Played, Progress, Resume, finished};
 
 // Which plays a read fetches for the audience. `Every` takes the plays
 // every name is on, which is the thread rule's fetch, so a play with fewer
@@ -81,20 +81,69 @@ fn names(people: &[String]) -> Vec<&dyn ToSql> {
     people.iter().map(|person| person as &dyn ToSql).collect()
 }
 
-// The seven progress columns every read selects, in this order, so one
-// mapping serves every read.
-const COLUMNS: &str = "play, position, duration, ended, recorded, season, episode";
+// The item a movie play names in `file_items`: the movie itself.
+const MOVIE_ITEM: &str = "works.item";
+
+// The item an episode play names in `file_items`: the episode row of the
+// series at the play's season and episode.
+const EPISODE_ITEM: &str = "(SELECT episodes.id FROM episodes \
+                            WHERE episodes.library = works.library \
+                              AND episodes.series = works.item \
+                              AND episodes.season = watched.season \
+                              AND episodes.episode = watched.episode)";
+
+// The credits marks of the main file of one item, as one text column of
+// `start:end` pairs in milliseconds joined by commas, with an empty side
+// for a null edge, or null when the file has none. The finished rule reads
+// the credits, so each read carries them in the same statement as the play.
+// The main file is the one `play.rs` resolves a title to: the least path
+// of the item's `primary` `video` files. `item` is one of the two
+// constants above and never a caller's word, so no string from outside
+// reaches the query text.
+fn credits(item: &'static str) -> String {
+    format!(
+        "(SELECT group_concat(IFNULL(marks.start_ms, '') || ':' || IFNULL(marks.end_ms, ''), ',') \
+          FROM marks \
+          WHERE marks.library = works.library AND marks.kind = 'credits' \
+            AND marks.path = (SELECT MIN(files.path) FROM file_items \
+                              JOIN files ON files.library = file_items.library \
+                                        AND files.path = file_items.path \
+                              WHERE file_items.library = works.library \
+                                AND file_items.item = {item} \
+                                AND files.type = 'video' AND files.role = 'primary'))"
+    )
+}
+
+// The credits column as the finished rule takes it, in seconds. A side that
+// does not parse reads as absent, the way a null edge does.
+fn parsed(column: Option<String>) -> Vec<Credits> {
+    let seconds = |side: &str| side.parse::<i64>().ok().map(|ms| ms as f64 / 1_000.0);
+    column
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|pair| pair.split_once(':'))
+        .map(|(start, end)| Credits {
+            start: seconds(start),
+            end: seconds(end),
+        })
+        .collect()
+}
+
+// The eight progress columns every read selects, in this order, so one
+// mapping serves every read. The last is the credits column above.
+const COLUMNS: &str = "play, position, duration, ended, recorded, season, episode, credits";
 
 fn progress(row: &Row<'_>, at: usize) -> rusqlite::Result<Progress> {
     let position: i64 = row.get(at + 1)?;
     let duration: i64 = row.get(at + 2)?;
     let ended: i64 = row.get(at + 3)?;
+    let credits = parsed(row.get(at + 7)?);
 
     Ok(Progress {
         play: row.get(at)?,
         position,
         duration,
-        finished: finished(position, duration),
+        finished: finished(position, duration, &credits),
         running: ended == 0,
         recorded: row.get(at + 4)?,
         season: row.get(at + 5)?,
@@ -126,7 +175,7 @@ fn every_play(
                   movies.title, movies.released, movies.art, \
                   watched.play, watched.position, watched.duration, watched.ended, \
                   watched.recorded AS recorded, watched.season, watched.episode, \
-                  watched.exact \
+                  {movie_credits}, watched.exact \
            FROM works \
            JOIN watched ON watched.play = works.play \
            JOIN movies ON movies.library = works.library AND movies.id = works.item \
@@ -135,13 +184,16 @@ fn every_play(
            SELECT works.library, 'series', series.id, \
                   series.title, series.released, series.art, \
                   watched.play, watched.position, watched.duration, watched.ended, \
-                  watched.recorded, watched.season, watched.episode, watched.exact \
+                  watched.recorded, watched.season, watched.episode, \
+                  {episode_credits}, watched.exact \
            FROM works \
            JOIN watched ON watched.play = works.play \
            JOIN series ON series.library = works.library AND series.id = works.item \
            WHERE works.kind = 'series' {only}\
          ) ORDER BY recorded DESC, library, id, play",
         works = works(people, Rule::Every),
+        movie_credits = credits(MOVIE_ITEM),
+        episode_credits = credits(EPISODE_ITEM),
     );
 
     let mut params = names(people);
@@ -158,7 +210,7 @@ fn every_play(
             released: row.get(4)?,
             art: row.get(5)?,
             progress: progress(row, 6)?,
-            exact: row.get(13)?,
+            exact: row.get(14)?,
         })
     })
 }
@@ -262,6 +314,7 @@ pub fn episodes(
          ), latest AS (\
            SELECT watched.play, watched.position, watched.duration, watched.ended, \
                   watched.recorded, watched.season, watched.episode, \
+                  {episode_credits} AS credits, \
                   ROW_NUMBER() OVER (PARTITION BY watched.season, watched.episode \
                                      ORDER BY watched.recorded DESC, watched.play) AS newest \
            FROM works JOIN watched ON watched.play = works.play \
@@ -274,6 +327,7 @@ pub fn episodes(
         only = marked(people, "watched.season, watched.episode", "season, episode"),
         library_at = at + 1,
         item_at = at + 2,
+        episode_credits = credits(EPISODE_ITEM),
     );
 
     let mut params = names(people);

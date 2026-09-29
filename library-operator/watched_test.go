@@ -2,34 +2,50 @@ package main
 
 // What these tests prove. How little of a work must be left before a play
 // of it counts as watched, at the boundary second and the second before
-// it.
+// it, and where the file's credits marks move that line.
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
 
+// The cases the media browser's own rule runs against, from the one file
+// both sides read, so a play reads as finished on the screen exactly where
+// the jellyfin role writes it played.
+const watchedCasesFile = "media-browser/src/catalog/progress/watched.json"
+
+// One case of that file: a position, a duration, the credits candidates in
+// seconds, and whether the work counts as watched.
+type watchedCase struct {
+	Name     string        `json:"name"`
+	Position int           `json:"position"`
+	Duration int           `json:"duration"`
+	Credits  []creditsSpan `json:"credits"`
+	Watched  bool          `json:"watched"`
+}
+
+func watchedCases(t *testing.T) []watchedCase {
+	t.Helper()
+	body, err := os.ReadFile(watchedCasesFile)
+	if err != nil {
+		t.Fatalf("reading the shared cases: %v", err)
+	}
+	cases := []watchedCase{}
+	if err := json.Unmarshal(body, &cases); err != nil {
+		t.Fatalf("decoding the shared cases: %v", err)
+	}
+	return cases
+}
+
+// How little of a work must be left before a play of it counts as watched,
+// at the boundary second and the second before it, with and without the
+// file's credits marks.
 func TestWhenAWorkCountsAsWatched(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		position int
-		duration int
-		watched  bool
-	}{
-		{name: "a 22 minute sitcom with 1m06s left", position: 1320 - 66, duration: 1320, watched: true},
-		{name: "a 22 minute sitcom one second before that", position: 1320 - 67, duration: 1320},
-		{name: "a 42 minute drama with 2m06s left", position: 2520 - 126, duration: 2520, watched: true},
-		{name: "a 42 minute drama one second before that", position: 2520 - 127, duration: 2520},
-		{name: "a 100 minute film with 5m00s left", position: 6000 - 300, duration: 6000, watched: true},
-		{name: "a 100 minute film one second before that", position: 6000 - 301, duration: 6000},
-		{name: "a 150 minute film with 5m00s left", position: 9000 - 300, duration: 9000, watched: true},
-		{name: "a 150 minute film one second before that", position: 9000 - 301, duration: 9000},
-		{name: "a film played to the end", position: 6000, duration: 6000, watched: true},
-		{name: "a film played past its stated end", position: 6100, duration: 6000, watched: true},
-		{name: "a film at the start", position: 0, duration: 6000},
-		{name: "a play that carried no duration", position: 0, duration: 0},
-		{name: "a position in a play that carried no duration", position: 600, duration: 0},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := watched(test.position, test.duration, nil); got != test.watched {
-				t.Errorf("watched = %v, want %v", got, test.watched)
+	for _, test := range watchedCases(t) {
+		t.Run(test.Name, func(t *testing.T) {
+			if got := watched(test.Position, test.Duration, test.Credits); got != test.Watched {
+				t.Errorf("watched = %v, want %v", got, test.Watched)
 			}
 		})
 	}
@@ -109,37 +125,3 @@ func TestTheCreditsLineIsTheDisplays(t *testing.T) {
 }
 
 func ptr(value float64) *float64 { return &value }
-
-// Where a credits line is held, the work counts as watched from it, whatever
-// time is left. Where none is, the remaining-time rule applies.
-func TestACreditsLineMovesTheWatchedLine(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		position int
-		duration int
-		credits  []creditsSpan
-		watched  bool
-	}{
-		{name: "a 150 minute film at the start of its 9 minutes of credits",
-			position: 8460, duration: 9000, credits: []creditsSpan{credit(8460, 9000)}, watched: true},
-		{name: "the same film one second before them",
-			position: 8459, duration: 9000, credits: []creditsSpan{credit(8460, 9000)}},
-		{name: "the same film where one early outlier stands beside two good candidates",
-			position: 8000, duration: 9000,
-			credits: []creditsSpan{credit(8460, 9000), credit(8470, 9000), credit(7200, 9000)}},
-		{name: "a 22 minute sitcom whose credits start 30 seconds from the end, at 1m06s left",
-			position: 1320 - 66, duration: 1320, credits: []creditsSpan{credit(1290, noEdge)}},
-		{name: "the same sitcom at the start of its credits",
-			position: 1290, duration: 1320, credits: []creditsSpan{credit(1290, noEdge)}, watched: true},
-		{name: "credits in the first half alone leave the remaining-time rule",
-			position: 9000 - 300, duration: 9000, credits: []creditsSpan{credit(30, 200)}, watched: true},
-		{name: "no duration, whatever the marks",
-			position: 600, duration: 0, credits: []creditsSpan{credit(500, noEdge)}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := watched(test.position, test.duration, test.credits); got != test.watched {
-				t.Errorf("watched = %v, want %v", got, test.watched)
-			}
-		})
-	}
-}

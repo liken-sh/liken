@@ -35,7 +35,7 @@ pub(super) fn reached(
         play: format!("play-{recorded}"),
         position,
         duration,
-        finished: crate::catalog::progress::finished(position, duration),
+        finished: crate::catalog::progress::finished(position, duration, &[]),
         running: false,
         recorded,
         season: numbers.0,

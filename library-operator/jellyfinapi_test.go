@@ -1,6 +1,6 @@
 package main
 
-// What these tests prove. The four calls the role makes reach the paths
+// What these tests prove. The five calls the role makes reach the paths
 // and carry the header Jellyfin reads the API key from. A listing is read
 // one page at a time, and every item reaches the caller once. An answer
 // this client cannot decode to its end is an error, not a short page. An
@@ -9,180 +9,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
-
-// One user-data write, as the fake server read it.
-type fakeJellyfinWrite struct {
-	item string
-	user string
-	data jellyfinUserData
-}
-
-// A Jellyfin that answers the four endpoints from fixture values and
-// records what it was asked. Every test drives the role against one of
-// these, so no test reaches a live server.
-type fakeJellyfin struct {
-	mutex  sync.Mutex
-	users  []jellyfinUser
-	items  []jellyfinItem
-	byID   map[string]jellyfinItem
-	status int
-	// The one listing this server refuses, named by the item types in its
-	// query. A test uses it to drive a build that reads one listing and
-	// fails on the other.
-	refuse string
-	// Whether this server omits the count from a listing answer. A test
-	// uses it to prove that a short page ends the read.
-	countless bool
-	// The largest page this server answers, whatever the query asks for.
-	// A test uses it to make a server that answers a smaller page than
-	// the query asked for.
-	capPage        int
-	listings       int
-	userReads      int
-	seriesReads    int
-	writes         []fakeJellyfinWrite
-	authorizations []string
-	queries        []string
-}
-
-func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
-	f.authorizations = append(f.authorizations, request.Header.Get("Authorization"))
-	f.queries = append(f.queries, request.URL.RequestURI())
-	if f.status != 0 {
-		http.Error(w, "the server refused", f.status)
-		return
-	}
-	switch {
-	case request.URL.Path == "/Users":
-		f.userReads++
-		_ = json.NewEncoder(w).Encode(f.users)
-	case request.URL.Path == "/Items" && request.URL.Query().Get("ids") != "":
-		f.seriesReads++
-		item, held := f.byID[request.URL.Query().Get("ids")]
-		if !held {
-			_ = json.NewEncoder(w).Encode(jellyfinItemList{})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(jellyfinItemList{Items: []jellyfinItem{item}})
-	case request.URL.Path == "/Items":
-		f.listings++
-		f.page(w, request)
-	case strings.HasPrefix(request.URL.Path, "/UserItems/"):
-		data := jellyfinUserData{}
-		_ = json.NewDecoder(request.Body).Decode(&data)
-		f.writes = append(f.writes, fakeJellyfinWrite{
-			item: strings.Split(strings.TrimPrefix(request.URL.Path, "/UserItems/"), "/")[0],
-			user: request.URL.Query().Get("userId"),
-			data: data,
-		})
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		http.Error(w, "no such path", http.StatusNotFound)
-	}
-}
-
-// One listing answer in Jellyfin's shape: the items whose type the query
-// names, cut to the page the query asks for, and the count of every item
-// the query matched.
-func (f *fakeJellyfin) page(w http.ResponseWriter, request *http.Request) {
-	query := request.URL.Query()
-	if f.refuse != "" && query.Get("includeItemTypes") == f.refuse {
-		http.Error(w, "the server refused", http.StatusInternalServerError)
-		return
-	}
-	types := strings.Split(query.Get("includeItemTypes"), ",")
-	matched := []jellyfinItem{}
-	for _, item := range f.items {
-		if slices.Contains(types, item.Type) {
-			matched = append(matched, item)
-		}
-	}
-
-	start, _ := strconv.Atoi(query.Get("startIndex"))
-	limit, _ := strconv.Atoi(query.Get("limit"))
-	if f.capPage > 0 && limit > f.capPage {
-		limit = f.capPage
-	}
-	page := []jellyfinItem{}
-	if start < len(matched) {
-		end := min(start+limit, len(matched))
-		page = matched[start:end]
-	}
-	total := len(matched)
-	if f.countless {
-		total = 0
-	}
-	_ = json.NewEncoder(w).Encode(jellyfinItemList{Items: page, Total: total})
-}
-
-// How many listing requests one build of the index makes: the series
-// listing and the works listing. Every fixture here holds fewer items
-// than one page, so each listing is one request.
-const jellyfinFixtureBuild = 2
-
-// The house this every test works from: two users, two films, a series,
-// and one episode of it.
-func jellyfinFixture() *fakeJellyfin {
-	return &fakeJellyfin{
-		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}, {Name: "person-c", ID: "user-c"}},
-		items: []jellyfinItem{
-			{ID: "item-film", Type: "Movie",
-				ProviderIds: map[string]string{"Tmdb": "1101", "Imdb": "tt9001101", "Tvdb": ""}},
-			{ID: "item-other-film", Type: "Movie", ProviderIds: map[string]string{"Tmdb": "1102"}},
-			{ID: "item-series", Type: "Series",
-				ProviderIds: map[string]string{"Tmdb": "2101", "Tvdb": "3101"}},
-			{ID: "item-series-3-5", Type: "Episode", SeriesID: "item-series",
-				ParentIndexNumber: 3, IndexNumber: 5, ProviderIds: map[string]string{"Tmdb": "999"}},
-		},
-		byID: map[string]jellyfinItem{
-			"item-series": {ID: "item-series", Type: "Series",
-				ProviderIds: map[string]string{"Tmdb": "2101"}},
-		},
-	}
-}
-
-// Stands one fake Jellyfin and hands back a client that reaches it.
-func standJellyfinServer(t *testing.T, fake *fakeJellyfin) *jellyfinAPI {
-	t.Helper()
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
-	return newJellyfinAPI(server.URL+"/", "the-key", server.Client())
-}
-
-// A clock a test moves, so a refresh floor is proven with no sleep.
-type jellyfinClock struct {
-	mutex sync.Mutex
-	at    time.Time
-}
-
-func newJellyfinClock() *jellyfinClock {
-	return &jellyfinClock{at: time.Date(2026, 9, 8, 20, 4, 5, 0, time.UTC)}
-}
-
-func (c *jellyfinClock) now() time.Time {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	return c.at
-}
-
-func (c *jellyfinClock) advance(by time.Duration) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.at = c.at.Add(by)
-}
 
 // Every request names the key, this client, and this device, in the
 // form Jellyfin's own clients send.
@@ -493,18 +327,57 @@ func TestTheClientReadsOneItemByID(t *testing.T) {
 func TestTheClientWritesOnePersonsUserData(t *testing.T) {
 	fake := jellyfinFixture()
 	api := standJellyfinServer(t, fake)
-	data := jellyfinUserData{PlaybackPositionTicks: 42100000000, Played: true, LastPlayedDate: "2026-09-08T20:04:05Z"}
+	played := true
+	data := jellyfinUserDataUpdate{PlaybackPositionTicks: 42100000000, Played: &played,
+		LastPlayedDate: "2026-09-08T20:04:05Z"}
 
 	err := api.writeUserData(t.Context(), "item-film", "user-a", data)
 
 	if err != nil {
 		t.Fatalf("writing the user data: %v", err)
 	}
-	if len(fake.writes) != 1 || fake.writes[0].item != "item-film" || fake.writes[0].user != "user-a" {
-		t.Fatalf("writes = %+v, want one write of the film for person-a", fake.writes)
+	want := fakeJellyfinWrite{item: "item-film", user: "user-a", stated: true, data: jellyfinUserData{
+		PlaybackPositionTicks: 42100000000, Played: true, LastPlayedDate: "2026-09-08T20:04:05Z"}}
+	if len(fake.writes) != 1 || fake.writes[0] != want {
+		t.Errorf("writes = %+v, want %+v", fake.writes, want)
 	}
-	if fake.writes[0].data != data {
-		t.Errorf("data = %+v, want %+v", fake.writes[0].data, data)
+}
+
+// A write with no played state leaves the field out of the body, so
+// Jellyfin keeps the played state it holds.
+func TestAWriteWithNoPlayedStateLeavesTheFieldOut(t *testing.T) {
+	fake := jellyfinFixture()
+	api := standJellyfinServer(t, fake)
+
+	err := api.writeUserData(t.Context(), "item-film", "user-a",
+		jellyfinUserDataUpdate{PlaybackPositionTicks: 6_000_000_000})
+
+	if err != nil {
+		t.Fatalf("writing the user data: %v", err)
+	}
+	if len(fake.writes) != 1 || fake.writes[0].stated {
+		t.Errorf("writes = %+v, want one that names no played state", fake.writes)
+	}
+}
+
+// The read names the item in the path and the user in the query, and
+// answers what Jellyfin holds of that person's progress in that item.
+func TestTheClientReadsOnePersonsUserData(t *testing.T) {
+	fake := jellyfinFixture()
+	fake.userData = map[string]jellyfinUserData{"user-a/item-film": {
+		PlaybackPositionTicks: 42100000000, Played: true, LastPlayedDate: "2026-09-07T10:54:56.0000000Z"}}
+	api := standJellyfinServer(t, fake)
+
+	data, err := api.userData(t.Context(), "item-film", "user-a")
+
+	if err != nil {
+		t.Fatalf("reading the user data: %v", err)
+	}
+	if data != fake.userData["user-a/item-film"] {
+		t.Errorf("data = %+v, want what the server holds", data)
+	}
+	if want := "/UserItems/item-film/UserData?userId=user-a"; fake.queries[0] != want {
+		t.Errorf("query = %q, want %q", fake.queries[0], want)
 	}
 }
 
@@ -542,7 +415,7 @@ func TestAWriteTheServerRefusedIsAnError(t *testing.T) {
 	fake.status = http.StatusForbidden
 	api := standJellyfinServer(t, fake)
 
-	err := api.writeUserData(t.Context(), "item-film", "user-a", jellyfinUserData{})
+	err := api.writeUserData(t.Context(), "item-film", "user-a", jellyfinUserDataUpdate{})
 
 	if err == nil {
 		t.Fatal("the client wrote to a server that refused it")

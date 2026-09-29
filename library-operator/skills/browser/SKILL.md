@@ -185,11 +185,29 @@ the duration of the audience's play of the title where one exists, and
 the catalog's running time where none does. A title with neither
 sends no watched mark, and the browser logs a line that says so.
 
+The screen shows the mark with no press, once the progress role has
+recorded it. Each screen pod's progress agent names every play whose
+row changed as the row arrives, and the browser then reads the
+progress of the titles on its screen again. So every screen of the
+namespace shows a mark pressed on another screen, and a position that
+a `Play` records moves the bars and the continue-watching row the same
+way. A change to a title the screen does not show reads nothing more.
+
 Neither mark deletes a play. The store keeps the earlier plays, but
 the browser reads the newest play of a title, so after a clear the
 screen offers no Resume and draws no position for the title. A later
 play of the title replaces either mark.
 [The library bus](https://liken.sh/library/docs/reference/bus/#a-mark) gives the message.
+
+A play counts as finished when the time left is at or under a twentieth
+of the work, and at or under five minutes, whichever leaves less time.
+Where the credits marks of the title's file place the credits in the
+second half of the work, the play counts as finished from the start of
+those credits instead. The browser reads the marks from its catalog.
+The jellyfin role writes a title played in Jellyfin by the same rule,
+and [Keep progress with Jellyfin](https://liken.sh/library/docs/guides/jellyfin/#3-what-crosses)
+states it in full. Where the `Catalog` names a Jellyfin server, the
+jellyfin role also sends each mark to Jellyfin.
 
 ## 7. Playback
 

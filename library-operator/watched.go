@@ -4,9 +4,14 @@ package main
 // jellyfin role writes that state to a Jellyfin server. The credits half of
 // the rule reads the file's marks the way the up-next card in
 // media-operator's display reads them (display/src/marks.rs), so a work
-// counts as watched where the card rises. media-browser/src/catalog/progress.rs
-// states the remaining-time half alone for what the browser draws, and it
-// reads no mark.
+// counts as watched where the card rises.
+//
+// The media browser states the same rule in
+// media-browser/src/catalog/progress/watched.rs, and reads the credits marks
+// of each play's file from the catalog. So a title reads as finished on the
+// screen exactly where this role writes it played in Jellyfin. Both sides
+// test the rule against the one table in
+// media-browser/src/catalog/progress/watched.json.
 
 import (
 	"slices"

@@ -679,24 +679,3 @@ fn a_film_that_changed_nothing_reads_nothing_when_it_ends() {
 
     assert_eq!(browser.source.calls, Vec::<&str>::new());
 }
-
-// A film writes a progress row a second, whether or not it plays on
-// this screen. A shown browser reads once the rows go quiet, not once
-// per row, and the loop wakes for the second that read comes due.
-#[test]
-fn the_progress_rows_a_film_writes_are_coalesced() {
-    let (mut browser, _bus) = on_bus(3, Vec::new());
-    browser.source.calls.clear();
-
-    for second in 0..5 {
-        browser.source.progressed = true;
-        browser.pump(f64::from(second));
-    }
-
-    assert_eq!(browser.source.calls, Vec::<&str>::new());
-
-    assert_eq!(browser.next_frame(4.0), Some(6.0));
-    browser.pump(7.0);
-
-    assert!(browser.source.calls.contains(&"pool"));
-}

@@ -76,7 +76,7 @@ impl Night {
             play: format!("{}-{}", self.people, self.recorded),
             position: self.position,
             duration: RUNTIME,
-            finished: finished(self.position, RUNTIME),
+            finished: finished(self.position, RUNTIME, &[]),
             recorded: self.recorded,
             season: self.numbers.0,
             episode: self.numbers.1,

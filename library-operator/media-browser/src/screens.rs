@@ -199,6 +199,21 @@ impl Screen {
         }
     }
 
+    /// Whether this screen draws how far someone reached in this work: the
+    /// film or the series of a page, a film slot of a wall, or a held member
+    /// of a franchise. The browser reads a screen's progress again only for
+    /// a change to a work it draws. The home page answers no, because the
+    /// browser reads its continue-watching row on terms of its own.
+    pub fn draws_progress_of(&self, library: &str, item: &str) -> bool {
+        match self {
+            Self::Movie(screen) => screen.library == library && screen.id == item,
+            Self::Series(screen) => screen.library == library && screen.id == item,
+            Self::Wall(screen) => wall::progress::draws(&screen.slots.items, library, item),
+            Self::Franchise(screen) => screen.holds(library, item),
+            Self::Home(_) | Self::Person(_) => false,
+        }
+    }
+
     /// Read how far these people reached in what this screen draws. The
     /// browser calls it at every open and at every re-read, the way it
     /// reads a screen's volume files, because only the browser holds the

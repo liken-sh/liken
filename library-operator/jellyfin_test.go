@@ -115,9 +115,10 @@ func TestNewJellyfinTakesTheStatedAddresses(t *testing.T) {
 	}
 }
 
-// The role reads the sidecar's position on the media tree and the
-// operator's audience and final on this operator's tree, for its own
-// namespace.
+// The role reads the sidecar's position on the media tree, and the
+// operator's audience and final, the browser's marks, its own records of
+// the marks it sent, and the progress role's availability on this
+// operator's tree, for its own namespace.
 func TestTheJellyfinRoleSubscribesToEveryTopicItJoins(t *testing.T) {
 	role, _, _ := standJellyfinRole(t, jellyfinFixture())
 	role.bus = newBus("nowhere", "jellyfin-house", nil, nil, role.onMessage)
@@ -132,13 +133,16 @@ func TestTheJellyfinRoleSubscribesToEveryTopicItJoins(t *testing.T) {
 		mediaPlayStatusFilter(defaultMediaTopicBase, "house"),
 		playAudienceFilter(defaultTopicBase, "house"),
 		playFinalFilter(defaultTopicBase, "house"),
+		playMarkFilter(defaultTopicBase, "house"),
+		playMarkSentFilter(defaultTopicBase, "house"),
+		progressAvailabilityTopic(defaultTopicBase, "house"),
 	} {
 		if !held[filter] {
 			t.Errorf("the role does not subscribe to %q", filter)
 		}
 	}
-	if len(held) != 3 {
-		t.Errorf("filters = %v, want the three it joins", held)
+	if len(held) != 6 {
+		t.Errorf("filters = %v, want the six it reads", held)
 	}
 }
 

@@ -21,7 +21,7 @@ use crate::views::{area, band, card, clip_marked, screen, wall};
 
 // The progress module: the bars the wall's film slots draw, read per
 // library the slots span.
-mod progress;
+pub(crate) mod progress;
 // The rail module: which walls draw one, what its bars say, and how it
 // draws beside the slots.
 mod rail;

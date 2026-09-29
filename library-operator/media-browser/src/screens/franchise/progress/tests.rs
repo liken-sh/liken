@@ -140,7 +140,7 @@ fn a_run_counts_a_finished_episode_whole_and_the_one_in_the_middle_by_its_share(
     let reached = |position: i64| Progress {
         position,
         duration: RUNTIME,
-        finished: crate::catalog::progress::finished(position, RUNTIME),
+        finished: crate::catalog::progress::finished(position, RUNTIME, &[]),
         ..Progress::default()
     };
     let cases = [

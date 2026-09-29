@@ -21,7 +21,7 @@ fn played(season: i64, episode: i64, recorded: i64, position: i64) -> Progress {
     Progress {
         position,
         duration: RUNTIME,
-        finished: crate::catalog::progress::finished(position, RUNTIME),
+        finished: crate::catalog::progress::finished(position, RUNTIME, &[]),
         recorded,
         season,
         episode,

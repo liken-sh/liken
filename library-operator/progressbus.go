@@ -49,6 +49,7 @@ const (
 	playAudienceKind    = "audience"
 	playOutsideKind     = "outside"
 	playMarkKind        = "mark"
+	playMarkSentKind    = "sent"
 	playFinalKind       = "final"
 	playRecordedKind    = "recorded"
 	personForgetKind    = "forget"
@@ -219,6 +220,15 @@ func playMarkTopic(base, namespace, name string) string {
 	return playsBranch(base, namespace) + "/" + name + "/" + playMarkKind
 }
 
+// Carries the jellyfin role's record that it sent one mark to Jellyfin.
+// Retained, so a jellyfin role that restarts while the mark is still on
+// the broker does not send it again over a toggle a person made in
+// Jellyfin since. The jellyfin role publishes it and clears it with the
+// mark.
+func playMarkSentTopic(base, namespace, name string) string {
+	return playsBranch(base, namespace) + "/" + name + "/" + playMarkSentKind
+}
+
 // Carries the last status of an ended Play. Retained; the operator
 // publishes and clears it.
 func playFinalTopic(base, namespace, name string) string {
@@ -258,6 +268,12 @@ func playOutsideFilter(base, namespace string) string {
 // the jellyfin role sends on to Jellyfin.
 func playMarkFilter(base, namespace string) string {
 	return base + "/plays/" + namespace + "/+/" + playMarkKind
+}
+
+// Reaches every record of a sent mark in one namespace, which the jellyfin
+// role reads back when it subscribes.
+func playMarkSentFilter(base, namespace string) string {
+	return base + "/plays/" + namespace + "/+/" + playMarkSentKind
 }
 
 // Carries the operator's request to forget one person, to every

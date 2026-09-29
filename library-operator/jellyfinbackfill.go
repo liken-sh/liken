@@ -71,11 +71,15 @@ type jellyfinBackfill struct {
 	topicBase string
 	api       *jellyfinAPI
 	index     *jellyfinIndex
-	publish   func(topic string, payload []byte, retained bool)
-	pace      time.Duration
-	bus       *Bus
-	ready     chan struct{}
-	log       io.Writer
+	// The positions the jellyfin role wrote in the last minutes, when the
+	// role's reconcile runs this code, and nil in the Job, which writes
+	// nothing.
+	echoes  *jellyfinEchoes
+	publish func(topic string, payload []byte, retained bool)
+	pace    time.Duration
+	bus     *Bus
+	ready   chan struct{}
+	log     io.Writer
 }
 
 // the Job's whole program: read the environment, publish what Jellyfin
@@ -216,6 +220,11 @@ func (b *jellyfinBackfill) carry(ctx context.Context, user jellyfinUser,
 	if !ok {
 		counts.skipped++
 		b.logf("the jellyfin item %s names no provider ids", item.ID)
+		return
+	}
+	// A position the role wrote is its own write read back, and the Play
+	// that made it already holds a row for it.
+	if b.echoes != nil && b.echoes.echoed(user.ID, item.ID, play.Position) {
 		return
 	}
 	payload, _ := json.Marshal(play)

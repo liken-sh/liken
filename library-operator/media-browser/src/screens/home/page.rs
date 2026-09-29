@@ -86,6 +86,15 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String], letters: &[
     }
 }
 
+/// Read the continue-watching row alone, for a change the progress store
+/// made that can add, move, or remove a card. Every other row of the page
+/// stays as it was read, because no progress change moves them.
+pub fn read_row(source: &mut dyn Source, people: &[String], letters: &[String]) -> Strip {
+    let mut strip = Strip::new(Row::Continue);
+    strip.reread(source, 0, &[], people, letters);
+    strip
+}
+
 // The items of the released strip, or nothing until it is read.
 fn released(blocks: &[Block]) -> Vec<Item> {
     blocks

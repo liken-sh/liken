@@ -1,7 +1,8 @@
 package main
 
-// jellyfinapi.go is the client for the four calls the jellyfin role makes:
-// the user list, the item listing, one item, and one person's user data. One
+// jellyfinapi.go is the client for the five calls the jellyfin role makes:
+// the user list, the item listing, one item, and the read and the write of
+// one person's user data. One
 // server API key acts as an administrator, so one client names any user.
 // Every call bounds itself with a context of ten seconds, and every failure
 // is an error the caller logs. A Jellyfin that is down costs the role its
@@ -151,12 +152,24 @@ type jellyfinItemList struct {
 	Total int            `json:"TotalRecordCount"`
 }
 
-// What one user-data write states: where the person reached, whether they
-// finished, and when. Jellyfin holds the position in ticks.
+// What Jellyfin holds of one person's progress in one item: where they
+// reached, whether they finished, and when they last played it. Jellyfin
+// holds the position in ticks, and an item nobody played carries no date.
 type jellyfinUserData struct {
 	PlaybackPositionTicks int64  `json:"PlaybackPositionTicks"`
 	Played                bool   `json:"Played"`
 	LastPlayedDate        string `json:"LastPlayedDate"`
+}
+
+// What one user-data write states. Jellyfin changes only the fields a
+// write names, so a nil Played leaves the played state as it was. A play
+// that stops before the finished line writes its position with no played
+// state, and a person who rewatches part of a finished film keeps it
+// played in Jellyfin.
+type jellyfinUserDataUpdate struct {
+	PlaybackPositionTicks int64  `json:"PlaybackPositionTicks"`
+	Played                *bool  `json:"Played,omitempty"`
+	LastPlayedDate        string `json:"LastPlayedDate,omitempty"`
 }
 
 // The users of the server, with their ids. An administrator key reads them
@@ -325,14 +338,29 @@ func (a *jellyfinAPI) item(ctx context.Context, id string) (jellyfinItem, error)
 	return list.Items[0], nil
 }
 
+// Reads one person's progress in one item. The jellyfin role reads it
+// before it sends a mark, to compare the item's last played date with the
+// time of the mark.
+func (a *jellyfinAPI) userData(ctx context.Context, item, user string) (jellyfinUserData, error) {
+	data := jellyfinUserData{}
+	err := a.get(ctx, jellyfinUserDataPath(item, user), &data)
+	return data, err
+}
+
 // Writes one person's position in one item. The administrator key names the
 // user, so the role needs no credential of that person.
-func (a *jellyfinAPI) writeUserData(ctx context.Context, item, user string, data jellyfinUserData) error {
+func (a *jellyfinAPI) writeUserData(ctx context.Context, item, user string, data jellyfinUserDataUpdate) error {
 	body, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	return a.post(ctx, "/UserItems/"+url.PathEscape(item)+"/UserData?userId="+url.QueryEscape(user), body)
+	return a.post(ctx, jellyfinUserDataPath(item, user), body)
+}
+
+// The one path of a person's user data in one item, which the read and the
+// write share.
+func jellyfinUserDataPath(item, user string) string {
+	return "/UserItems/" + url.PathEscape(item) + "/UserData?userId=" + url.QueryEscape(user)
 }
 
 // One read. The caller's function drives a decoder over the answer. The

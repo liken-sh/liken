@@ -36,6 +36,13 @@ pub fn read(items: &mut [Item], source: &mut dyn Source, people: &[String]) {
     }
 }
 
+/// Whether these slots draw a bar under this film.
+pub fn draws(items: &[Item], library: &str, id: &str) -> bool {
+    items
+        .iter()
+        .any(|item| filmed(item) && item.library == library && item.id == id)
+}
+
 // Whether a slot draws a film, the one kind the map keys.
 fn filmed(item: &Item) -> bool {
     item.kind == MOVIES && item.episode.is_none()

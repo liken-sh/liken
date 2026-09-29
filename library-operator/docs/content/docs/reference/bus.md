@@ -47,9 +47,10 @@ answer is meant to outlive the process that wrote it.
 | `plays/{namespace}/{play}/recorded` | the progress role | the operator | yes | [the recorded mark](#the-recorded-mark) |
 | `plays/{namespace}/{name}/outside` | the jellyfin role | the progress role | no | [an outside play](#an-outside-play) |
 | `plays/{namespace}/{name}/mark` | the media browser | the progress role, the jellyfin role | yes | [a mark](#a-mark) |
+| `plays/{namespace}/{name}/sent` | the jellyfin role | the jellyfin role | yes | [a sent mark](#a-sent-mark) |
 | `people/{person}/forget` | the operator | every namespace's progress role | yes | [the forget request](#the-forget-request) |
 | `people/{person}/forgotten/{namespace}` | the progress role | the operator | yes | [the forgotten answer](#the-forgotten-answer) |
-| `progress/{namespace}/availability` | the progress role | nothing in this project | yes | `online` or `offline` |
+| `progress/{namespace}/availability` | the progress role | the jellyfin role | yes | `online` or `offline` |
 
 The writers are the roles of this operator's pods. The reporter is
 the container beside the standing catalog agent in the namespace's
@@ -66,7 +67,8 @@ a `Person` that no longer exists. The operator clears the library,
 play, and people topics. The progress role clears its own `forgotten`
 answer when it reads an empty `forget`. The media browser clears its
 own audience topic when the answer on it lapses. The progress role
-clears each mark once it has recorded it and the retention has run.
+clears each mark once it has recorded it and the retention has run,
+and the jellyfin role clears its record of a sent mark with the mark.
 
 ## The library report
 
@@ -314,8 +316,9 @@ the row and the mark where the final put them.
 `plays/{namespace}/{name}/outside`
 
 One play that ran outside the cluster, on a Jellyfin server. The
-jellyfin role publishes it from the webhook Jellyfin posts to, and
-from a backfill of the server's history. The progress role records it
+jellyfin role publishes it from the webhook Jellyfin posts to, from the
+reconcile it runs each time the progress role comes online, and from a
+backfill of the server's history. The progress role records it
 beside the cluster's own `Play`s. It is the one message in the tree
 that is not retained: a progress role that was down for one post
 catches the next, and a stop repeats the final position.
@@ -325,8 +328,8 @@ so one person's progress in one item is one row that moves, and a
 rewatch moves it again.
 
 The two ids are Jellyfin Guids, in the spelling its API writes: 32
-hexadecimal digits with no dashes. The webhook and the backfill both
-write that spelling, so the two name one row.
+hexadecimal digits with no dashes. The webhook, the reconcile, and the
+backfill all write that spelling, so the three name one row.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -410,6 +413,28 @@ runs behind it.
       "at": 1759140000
     }
 
+## A sent mark
+
+`plays/{namespace}/{name}/sent`
+
+The jellyfin role's record that it sent one mark to Jellyfin, under the
+mark's own name. The role publishes it retained once the mark's write
+lands for every person Jellyfin holds, and sends no mark whose record it
+reads. A jellyfin role that restarts within the mark's 24 hours reads
+both back, so it does not send the mark again over a toggle a person
+made in Jellyfin since. Jellyfin clears an item's last played date on an
+unplayed toggle, so the date cannot stop a second send alone.
+
+The role clears the record when the progress role clears the mark. A
+record it reads more than 24 hours after `at`, it clears at once,
+because the mark's clear may have arrived while the role was down.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `at` | integer | The `at` of the mark, the Unix time of the press. |
+
+    {"at": 1759140000}
+
 ## The forget request
 
 `people/{person}/forget`
@@ -441,10 +466,15 @@ clears the request and every answer.
 
 `online` while the namespace's progress role runs. The role names this
 topic as its MQTT Last Will with `offline` as the payload, on the same
-terms as the reporter's. Nothing in this project subscribes to it: the
-operator reads the role's marks, and a mark that stops moving is the
-signal it acts on. It is on the bus for a client that folds the store's
-marks and needs to know whether their writer is gone.
+terms as the reporter's. The operator does not read it: it reads the
+role's recorded marks, and a mark that stops moving is the signal it
+acts on. The topic is also on the bus for a client that folds the
+store's marks and needs to know whether their writer is gone.
+
+The jellyfin role reads it. Each `online` starts one reconcile, a read
+of every Jellyfin user's played and resumable items published as
+outside plays, because an outside play is not retained and a progress
+role that was down lost every post Jellyfin made meanwhile.
 
 ## What this operator reads from the media tree
 

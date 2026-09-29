@@ -16,7 +16,8 @@ use crate::catalog::recency::DRAWN;
 use crate::catalog::{
     Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
     LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Played, Progress,
-    Query, Resume, Selection, SeriesDetails, Slot, Sort, Source, TILES, library_name, recency,
+    Query, Resume, Selection, SeriesDetails, Slot, Sort, Source, TILES, Touched, library_name,
+    recency,
 };
 use crate::harness::Waker;
 
@@ -33,6 +34,7 @@ mod progress;
 mod recent;
 mod search;
 mod series;
+mod touched;
 mod updates;
 
 // The file opens read-only because only scanners write, through their
@@ -93,15 +95,16 @@ impl LocalCatalog {
     }
 
     /// The same source with the progress store beside the catalog.
-    /// `updates` is the progress agent's own HTTP API base; a change to its
-    /// two tables marks the same changed flag the catalog's tables do. A
+    /// `updates` is the progress agent's own HTTP API base. A change to any
+    /// of its three tables names the play the row belongs to, and
+    /// [`Source::touched`] answers the works and the people of each play. A
     /// file that is not there yet leaves the progress reads empty.
     pub fn with_progress(mut self, path: PathBuf, updates: &str) -> Self {
         if !path.exists() {
             eprintln!("media-browser: no progress store at {}", path.display());
             return self;
         }
-        for table in ["plays", "play_people"] {
+        for table in ["plays", "play_people", "play_aliases"] {
             updates::follow(
                 self.shared.clone(),
                 updates.to_string(),
@@ -567,6 +570,27 @@ impl Source for LocalCatalog {
             self.shared.changed.swap(false, Ordering::AcqRel),
             self.shared.progressed.swap(false, Ordering::AcqRel),
         )
+    }
+
+    // The plays resolve on the browser's own connection, because the
+    // stream's thread holds none. A resolve that fails marks the progress
+    // store changed, so the browser reads everything it draws instead of
+    // losing the change.
+    fn touched(&mut self) -> Vec<Touched> {
+        if !self.streams || self.store.is_none() {
+            return Vec::new();
+        }
+        let plays = self.shared.take_touched();
+        if plays.is_empty() {
+            return Vec::new();
+        }
+        match self.read_result(|connection| touched::resolve(connection, &plays)) {
+            Ok(touched) => touched,
+            Err(_) => {
+                self.shared.progressed.store(true, Ordering::Release);
+                Vec::new()
+            }
+        }
     }
 
     fn wake_by(&mut self, wake: Waker) {

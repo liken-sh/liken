@@ -19,7 +19,7 @@ fn reached(position: i64, duration: i64, numbers: (i64, i64)) -> Progress {
         play: format!("play-{position}"),
         position,
         duration,
-        finished: crate::catalog::progress::finished(position, duration),
+        finished: crate::catalog::progress::finished(position, duration, &[]),
         recorded: 10,
         season: numbers.0,
         episode: numbers.1,
