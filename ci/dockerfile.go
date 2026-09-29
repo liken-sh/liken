@@ -1,18 +1,23 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
 // A Dockerfile is what one Dockerfile builds from: the images its FROM
-// lines name, and the sources its COPY --from and RUN --mount from=
-// flags name. A name that an earlier stage of the same file declares
-// with AS is the stage, not an image, so neither list holds it.
+// lines name, the sources its COPY --from and RUN --mount from= flags
+// name, and the files its ADD lines fetch from the network. A name that
+// an earlier stage of the same file declares with AS, or a number that
+// counts an earlier stage, is that stage, not an image, so neither list
+// holds it.
 type Dockerfile struct {
 	From    []string
 	Sources []string
+	Remotes []Remote
 	Stages  []Stage
 }
 
@@ -25,6 +30,12 @@ type Stage struct {
 	Sources []string
 }
 
+// A Remote is one source of an ADD line that the build fetches from
+// the network, with the checksum that its --checksum flag states.
+type Remote struct {
+	URL, Checksum string
+}
+
 func readDockerfile(path string) (Dockerfile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -33,15 +44,39 @@ func readDockerfile(path string) (Dockerfile, error) {
 	return parseDockerfile(string(data)), nil
 }
 
+// instructions joins each instruction that a backslash continues onto
+// the next lines into one line. Docker skips a comment line inside an
+// instruction, so the join does too.
+func instructions(text string) []string {
+	var lines []string
+	current := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if current != "" && strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if rest, ok := strings.CutSuffix(strings.TrimRight(line, " \t"), "\\"); ok {
+			current += rest + " "
+			continue
+		}
+		lines = append(lines, current+line)
+		current = ""
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
+}
+
 func parseDockerfile(text string) Dockerfile {
 	var d Dockerfile
 	stages := map[string]bool{}
-	for _, line := range strings.Split(text, "\n") {
+	for _, line := range instructions(text) {
 		fields := strings.Fields(line)
 		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
 			continue
 		}
-		switch strings.ToUpper(fields[0]) {
+		switch instruction := strings.ToUpper(fields[0]); instruction {
 		case "FROM":
 			args := withoutFlags(fields[1:])
 			if len(args) == 0 {
@@ -57,24 +92,60 @@ func parseDockerfile(text string) Dockerfile {
 			}
 			d.Stages = append(d.Stages, stage)
 		case "COPY", "ADD", "RUN":
+			checksum := ""
 			for _, field := range fields[1:] {
 				if !strings.HasPrefix(field, "--") {
 					break
+				}
+				if value, ok := strings.CutPrefix(field, "--checksum="); ok {
+					checksum = value
 				}
 				source := fromFlag(field)
 				if source == "" {
 					continue
 				}
-				if !stages[source] {
+				if !stages[source] && !d.isStageNumber(source) {
 					d.Sources = appendOnce(d.Sources, source)
 				}
 				if n := len(d.Stages); n > 0 {
 					d.Stages[n-1].Sources = appendOnce(d.Stages[n-1].Sources, source)
 				}
 			}
+			if instruction == "ADD" {
+				for _, source := range addSources(fields[1:]) {
+					if strings.Contains(source, "://") || strings.HasPrefix(source, "git@") {
+						d.Remotes = append(d.Remotes, Remote{source, checksum})
+					}
+				}
+			}
 		}
 	}
 	return d
+}
+
+// isStageNumber is true for a number that counts one of the stages
+// before the current one, the way COPY --from=0 names the first stage.
+func (d Dockerfile) isStageNumber(name string) bool {
+	n, err := strconv.Atoi(name)
+	return err == nil && n >= 0 && n < len(d.Stages)-1
+}
+
+// addSources lists the sources of an ADD line: every argument after the
+// flags but the last, which is the destination, in either the plain
+// form or the JSON form.
+func addSources(fields []string) []string {
+	args := withoutFlags(fields)
+	joined := strings.Join(args, " ")
+	if strings.HasPrefix(joined, "[") {
+		var list []string
+		if json.Unmarshal([]byte(joined), &list) == nil {
+			args = list
+		}
+	}
+	if len(args) < 2 {
+		return nil
+	}
+	return args[:len(args)-1]
 }
 
 // Reachable lists the images and sources that the build of the target
@@ -102,6 +173,8 @@ func (d Dockerfile) Reachable(target string) []string {
 		seen[i] = true
 		for _, name := range append([]string{d.Stages[i].From}, d.Stages[i].Sources...) {
 			if j, ok := byName[name]; ok && j < i {
+				visit(j)
+			} else if j, err := strconv.Atoi(name); err == nil && j >= 0 && j < i {
 				visit(j)
 			} else {
 				names = appendOnce(names, name)

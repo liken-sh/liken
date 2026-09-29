@@ -256,7 +256,9 @@ func (c *Component) validate(path string) error {
 }
 
 // pinnedVersion is the grammar of a pinned version: the characters of
-// an image tag, starting with a letter or a digit.
+// an image tag, starting with a letter or a digit, less the hyphen. A
+// tag can hold a hyphen, but the version leaves it out, so that the
+// last hyphen of <version>-<revision> always starts the revision.
 var pinnedVersion = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._]*$`)
 
 // calendarDate is the start of a release version, yyyy.mm.dd.
@@ -282,7 +284,7 @@ func (c *Component) validatePin(path string) error {
 	case revision < 1:
 		return fmt.Errorf("%s: a pinned component needs a revision of 1 or more", path)
 	case !pinnedVersion.MatchString(version):
-		return fmt.Errorf("%s: the version %q has a character that an image tag cannot hold", path, version)
+		return fmt.Errorf("%s: a version may hold only letters, digits, dots, and underscores, so that the tag <version>-<revision> reads one way, and %q does not", path, version)
 	case calendarDate.MatchString(version):
 		return fmt.Errorf("%s: the tag %q looks like a release version; write a date as YYYYMMDD", path, c.PinnedTag())
 	case len(c.Outputs.Images) == 0 || c.Outputs.Deploy != "" || c.Outputs.Channel:

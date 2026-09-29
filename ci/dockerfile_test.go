@@ -76,3 +76,32 @@ COPY --from=build /x /x
 		})
 	}
 }
+
+func TestAnInstructionContinuesOverLines(t *testing.T) {
+	d := parseDockerfile("FROM \\\n  debian@sha256:aaa \\\n  AS build\n" +
+		"RUN --mount=type=bind,from=busybox:1,target=/b \\\n# a comment inside the instruction\n  true\n" +
+		"COPY \\\n  --from=vulkan / /\n")
+	if !reflect.DeepEqual(d.From, []string{"debian@sha256:aaa"}) || !reflect.DeepEqual(d.Sources, []string{"busybox:1", "vulkan"}) ||
+		d.Stages[0].Name != "build" {
+		t.Errorf("from %v, sources %v, stages %+v", d.From, d.Sources, d.Stages)
+	}
+}
+
+func TestANumberNamesAStage(t *testing.T) {
+	d := parseDockerfile("FROM golang AS build\nFROM weston\nCOPY --from=0 /x /x\nCOPY --from=7 /y /y\n")
+	if !reflect.DeepEqual(d.Sources, []string{"7"}) {
+		t.Errorf("sources %v", d.Sources)
+	}
+	if got := d.Reachable(""); !reflect.DeepEqual(got, []string{"weston", "golang", "7"}) {
+		t.Errorf("reachable %v", got)
+	}
+}
+
+func TestAnAddFromTheNetworkIsARemoteSource(t *testing.T) {
+	d := parseDockerfile("FROM scratch\nADD --checksum=sha256:abc https://example.com/x.tar.gz /\n" +
+		"ADD git@github.com:x/y.git /src\nADD --chown=1:1 local.tar other.tar /\nADD [\"https://example.com/z\", \"/z\"]\n")
+	want := []Remote{{"https://example.com/x.tar.gz", "sha256:abc"}, {"git@github.com:x/y.git", ""}, {"https://example.com/z", ""}}
+	if !reflect.DeepEqual(d.Remotes, want) {
+		t.Errorf("remotes %+v", d.Remotes)
+	}
+}

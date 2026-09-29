@@ -6,11 +6,16 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // bakeFile is the path of the generated bake file, from the repository
 // root. Every image builds through it, on a workstation and in CI.
 const bakeFile = "docker-bake.hcl"
+
+// defaultPlatforms are the platforms of an image whose package.toml
+// names none.
+var defaultPlatforms = []string{"linux/amd64"}
 
 type bakeContext struct{ Name, Value string }
 
@@ -66,7 +71,7 @@ func newBakeTarget(root string, c *Component, image Image, producer map[string]s
 		Platforms:  image.Platforms,
 	}
 	if len(t.Platforms) == 0 {
-		t.Platforms = []string{"linux/amd64"}
+		t.Platforms = defaultPlatforms
 	}
 	for _, name := range slices.Sorted(maps.Keys(contexts)) {
 		t.Contexts = append(t.Contexts, bakeContext{name, contexts[name]})
@@ -79,4 +84,20 @@ func newBakeTarget(root string, c *Component, image Image, producer map[string]s
 		t.Tags = append(t.Tags, ref(name, tag))
 	}
 	return t, nil
+}
+
+// settings lists what the target's build reads from the bake file,
+// with no tag and no cache: the recipe of a pinned image covers these,
+// and the tags and the cache change no byte of the image.
+func (t bakeTarget) settings() string {
+	var contexts []string
+	for _, c := range t.Contexts {
+		contexts = append(contexts, c.Name+"="+c.Value)
+	}
+	version := "VERSION"
+	if t.Pinned {
+		version = t.Version
+	}
+	return fmt.Sprintf("%s context=%s dockerfile=%s target=%s platforms=%s contexts=%s VERSION=%s",
+		t.Name, t.Context, t.Dockerfile, t.Target, strings.Join(t.Platforms, ","), strings.Join(contexts, ","), version)
 }
