@@ -162,6 +162,26 @@ platforms = ["linux/amd64", "linux/arm64"]
 	}
 }
 
+// A component workflow's name must differ from the root workflow's, or a
+// component named ci gives two workflows one name, and `gh run list
+// --workflow ci` cannot tell them apart.
+func TestAComponentWorkflowIsNamedApartFromTheRootWorkflow(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"ci/package.toml": "[package]\nname = \"ci\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(files[".github/workflows/component-ci.yaml"]); !strings.Contains(text, "\nname: component-ci\n") {
+		t.Errorf("the ci component's workflow is not named component-ci:\n%s", text)
+	}
+}
+
 func TestACoverageFileMustBeAtTheComponentsTop(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"m\"\ncoverage = [\"sub/coverage.out\"]\n",

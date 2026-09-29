@@ -11,7 +11,11 @@
 # only those run. A run that publishes runs all of them. ci.yaml calls
 # this workflow a second time for the publish job, after every check
 # here and in this component's closure passed.
-name: ffmpeg
+#
+# The name carries the component- prefix because the ci component would
+# otherwise share the name ci with the root workflow, and a lookup by
+# name could not tell the two apart.
+name: component-ffmpeg
 
 on:
   workflow_call:
