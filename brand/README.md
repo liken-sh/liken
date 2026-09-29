@@ -201,8 +201,8 @@ upgrade path.
 The consumers read the file two ways. The Hugo theme inlines the
 committed copy in `assets/`. The release channel's pages read the
 original through the `brand` Go package, because a Go program can
-only embed files from its own module. The file at the root of this
-repository is the only original.
+only embed files from its own module. `brand/liken.css` is the only
+original.
 
 ## The coverage report
 
@@ -218,7 +218,7 @@ go tool coverage -title "media-operator" -label Go -label Rust \
 
 An input is a Go coverage profile (`go test -coverprofile`) or a
 Cobertura report (`cargo llvm-cov --cobertura`). The program reads
-the format from the content, so a repository names its files what it
+the format from the content, so a component names its files what it
 likes, and one page reports coverage for a program in each language.
 Go counts statements, and its total is the number `go-test-coverage` reports,
 so the page and the coverage gate agree. Cobertura counts lines. The

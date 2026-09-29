@@ -1,5 +1,5 @@
 # The build needs the module files and the Go sources. Everything else
-# is documentation, manifests, or the site.
+# is documentation, manifests, the site, or the lab.
 deploy
 docs
 lab

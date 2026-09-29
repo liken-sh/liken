@@ -6,8 +6,12 @@ description: Runs, upgrades, breaks, and inspects liken's dev cluster, the QEMU 
 # Dev-cluster drills
 
 The dev cluster is the deployment liken develops against. Break it
-freely. Every command and path in this skill is relative to `liken/`. It carries no work worth keeping, and
+freely. It carries no work worth keeping, and
 `make -C dev-cluster clean` puts every guest back to blank disks.
+
+Run every command in this skill from `liken/`. Every path in it is
+relative to `liken/` unless the text names another base. A path that
+starts with `/`, such as `/run/liken/`, is on a guest.
 
 Longer flows live beside this file:
 
@@ -69,8 +73,8 @@ cli/dist/liken kubectl -server https://127.0.0.1:16443 dev-cluster get machines
 
 `make run` sends the guest's serial console to `stdio`, which is the
 running task's own output. It does **not** write a file. Grepping
-`guests/<node>/console.log` after a plain `make run` reads a stale log
-from some earlier drill.
+`dev-cluster/guests/<node>/console.log` after a plain `make run`
+reads a stale log from some earlier drill.
 
 To keep a console, name the file:
 
@@ -78,12 +82,13 @@ To keep a console, name the file:
 make run NODE=node-2 CONSOLE=file:guests/node-2/console.log
 ```
 
-`smoke.sh` always writes files. It keeps one pair per boot under
-`dev-cluster/guests/node-1/`: `console.log` and `qemu.log` for the disk
-boot, `install-console.log` and `install-qemu.log` for the install, and
-`report-console.log` and `report-qemu.log` for the hardware report. The
-console file is the machine's own output. The QEMU file is the only
-record of a boot that failed before the console produced anything.
+`dev-cluster/smoke.sh` always writes files. It keeps one pair per boot
+under `dev-cluster/guests/node-1/`: `console.log` and `qemu.log` for
+the disk boot, `install-console.log` and `install-qemu.log` for the
+install, and `report-console.log` and `report-qemu.log` for the
+hardware report. The console file is the machine's own output. The
+QEMU file is the only record of a boot that failed before the console
+produced anything.
 
 ## Start and stop guests
 
@@ -276,8 +281,8 @@ make run NODE=node-4
 cluster's identity, not the disk's. Wiping `node-1` re-founds the whole
 cluster.
 
-`make -C dev-cluster clean` deletes `guests/` entirely. That is a
-factory reset of all five machines, not one.
+`make -C dev-cluster clean` deletes `dev-cluster/guests/` entirely.
+That is a factory reset of all five machines, not one.
 
 **A machine heals back to `spec.version`.** The operator compares the
 running version against the target on every 10-second pass, so a
@@ -391,12 +396,13 @@ applies sysctls live and reboots nothing.
 
 * **`make` inside `dev-cluster/` does not rebuild the OS image.**
   `make -C dev-cluster install` and `make -C dev-cluster run` boot
-  whatever `image/install.cpio` already holds. A stale file drills the
-  wrong spec, silently. Build from `liken/`, or through
+  whatever `dev-cluster/image/install.cpio` already holds. A stale
+  file drills the wrong spec, silently. Build from `liken/`, or through
   `make smoke-uefi` / `make smoke-bios` / `make smoke-hardware`.
-* **The smoke drills factory-reset `node-1`.** `smoke.sh` starts with
-  `rm -rf guests/node-1`. All three drills use `node-1`, so a UEFI
-  smoke wipes a BIOS-installed disk and the reverse. Never run a smoke
+* **The smoke drills factory-reset `node-1`.** `dev-cluster/smoke.sh`
+  starts with `rm -rf guests/node-1`, in `dev-cluster/`. All three
+  drills use `node-1`, so a UEFI smoke wipes a BIOS-installed disk and
+  the reverse. Never run a smoke
   drill while poking `node-1` by hand.
 * **A guest that outlives its drill holds the qcow2 write locks** and
   stays on the multicast cluster segment. The next boot then fails to

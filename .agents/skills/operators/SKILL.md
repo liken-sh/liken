@@ -226,8 +226,8 @@ its source, and a loop of the operator's own around the informer each
 break a guard.
 
 **The migration order.** `bluetooth-operator` is done, and it is the
-reference port (plan 09). The other operators follow one repository at
-a time. `per-node-csi-driver` already runs a client-go informer, and
+reference port (plan 09). The other operators follow one operator at a
+time. `per-node-csi-driver` already runs a client-go informer, and
 `git-csi-driver` already links client-go's typed clientset under its
 hand-written loop. Each port measures its binary, its image, and the
 idle RSS of its watches before and after, and records them in a plan.

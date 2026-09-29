@@ -2,10 +2,18 @@
 # reference page is generated, never edited: crdref, the generator
 # the brand component publishes, renders it from deploy/people-crd.yaml,
 # so a schema edit is a manual edit. GENERATED lists that page, and
-# the rule names go.mod as an input, so a generator bump regenerates
-# it.
+# the rule names the generator's sources as inputs, so a change to the
+# generator regenerates it.
 HUGO := go tool hugo
 CRDREF := go tool crdref
+
+# crdref comes from brand/ through the replace directive in go.mod, so
+# an edit to its sources never changes go.mod. Each generated page
+# names those sources as inputs, and go.mod for the generator's own
+# dependencies, so an edit to either one regenerates the page.
+BRAND := ../../brand
+CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
+	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
 
 REFERENCE := content/docs/reference
 
@@ -24,7 +32,7 @@ build: $(GENERATED)
 test: $(GENERATED)
 	go test ./...
 
-$(REFERENCE)/people.md: ../deploy/people-crd.yaml go.mod
+$(REFERENCE)/people.md: ../deploy/people-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Person -weight 10 $< $@
 
 # The skills target emits every guide as an Agent Skill into ../skills,

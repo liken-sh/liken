@@ -26,6 +26,14 @@ GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
 SKILLS := go tool skills
 BASE := https://liken.sh
 
+# crdref comes from brand/ through the replace directive in go.mod, so
+# an edit to its sources never changes go.mod. Each generated page
+# names those sources as inputs, and go.mod for the generator's own
+# dependencies, so an edit to either one regenerates the page.
+BRAND := ../../brand
+CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
+	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
+
 .PHONY: all build generate serve skills test clean
 
 all: build
@@ -33,13 +41,12 @@ all: build
 # Each page opens with a hand-written preamble that the schema cannot
 # hold: how the page relates to the guides. The preamble is beside
 # the generator and passes as the third argument.
-# crdref is pinned from the brand component as a tool dependency,
-# so go.mod versions the generator, and go.mod is the prerequisite
-# that rebuilds a page when the generator changes.
-content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml crdref/machine-preamble.md go.mod
+# crdref is a tool of this module, and each rule lists its sources
+# as prerequisites, so a change to the generator rebuilds the page.
+content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml crdref/machine-preamble.md $(CRDREF_SOURCES)
 	go tool crdref $< $@ crdref/machine-preamble.md
 
-content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref/cluster-preamble.md go.mod
+content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref/cluster-preamble.md $(CRDREF_SOURCES)
 	go tool crdref $< $@ crdref/cluster-preamble.md
 
 generate: $(GENERATED)

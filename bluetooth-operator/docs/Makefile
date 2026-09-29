@@ -4,11 +4,20 @@
 # its schema in deploy/crds.yaml and a hand-written preamble that
 # opens it. The schema descriptions become the field tables, so a
 # schema edit is a manual edit. The three CRDs travel in one manifest
-# file, so each rule selects its kind. go.mod pins the generator the
-# way it pins Hugo, as a tool directive, and each rule lists go.mod
-# as an input, so a generator bump regenerates every page.
+# file, so each rule selects its kind. go.mod names the generator as
+# a tool, the way it names Hugo, and each rule lists the generator's
+# sources as inputs, so a change to the generator regenerates every
+# page.
 HUGO := go tool hugo
 CRDREF := go tool crdref
+
+# crdref comes from brand/ through the replace directive in go.mod, so
+# an edit to its sources never changes go.mod. Each generated page
+# names those sources as inputs, and go.mod for the generator's own
+# dependencies, so an edit to either one regenerates the page.
+BRAND := ../../brand
+CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
+	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
 
 REFERENCE := content/docs/reference
 
@@ -39,11 +48,11 @@ test:
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
-$(REFERENCE)/adapters.md: ../deploy/crds.yaml crdref/adapter-preamble.md go.mod
+$(REFERENCE)/adapters.md: ../deploy/crds.yaml crdref/adapter-preamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -kind Adapter -weight 10 $< $@ crdref/adapter-preamble.md
 
-$(REFERENCE)/peripherals.md: ../deploy/crds.yaml crdref/peripheral-preamble.md go.mod
+$(REFERENCE)/peripherals.md: ../deploy/crds.yaml crdref/peripheral-preamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -kind Peripheral -weight 15 $< $@ crdref/peripheral-preamble.md
 
-$(REFERENCE)/pairingrequests.md: ../deploy/crds.yaml crdref/pairingrequest-preamble.md go.mod
+$(REFERENCE)/pairingrequests.md: ../deploy/crds.yaml crdref/pairingrequest-preamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -kind PairingRequest -weight 20 $< $@ crdref/pairingrequest-preamble.md

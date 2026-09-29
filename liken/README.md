@@ -55,13 +55,13 @@ runs in a container.
   [plans/completed/14-gitops-from-first-boot.md](../plans/completed/14-gitops-from-first-boot.md)
   records the design.
 
-## How this repository is written
+## How liken is written
 
 liken is written to be read. The comments in the shell scripts, the
 manifests, and the Go code do more than say what a line does. They
 teach the domain: why the kernel does not mount `/proc` on its own, why
 `k3s` needs cgroups, and why an initramfs is a cpio archive. A person
-who reads the repository from top to bottom learns how a Linux system
+who reads `liken/` from top to bottom learns how a Linux system
 boots, and how Kubernetes takes control after that.
 
 This is why files here contain more commentary than the same files
@@ -139,10 +139,10 @@ The plans directory has three parts:
 
 ## License
 
-Everything in this repository is `liken`'s own work, under the MIT
-license. The build fetches the kernel, `k3s`, and the other vendored
-components at build time. The repository never commits them, so it
-contains no third-party code.
+Everything in `liken/` is `liken`'s own work, under the MIT license.
+The build fetches the kernel, `k3s`, and the other vendored components
+at build time. `liken/` never commits them, so it contains no
+third-party code.
 
 A built release does redistribute those components, each under its own
 license. Every release bundles a `LICENSES.md` file that names each

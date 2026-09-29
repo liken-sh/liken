@@ -3,11 +3,21 @@
 # manual one way. The build generates a reference page for each CRD, the
 # Display and the Layout, through crdref, and the route reference from
 # the API's own OpenAPI document, through apiref. Both generators come
-# from the brand component, pinned as tools of this module the way Hugo
-# is.
+# from the brand component, as tools of this module the way Hugo is.
 HUGO := go tool hugo
 CRDREF := go tool crdref
 APIREF := go tool apiref
+
+# crdref and apiref come from brand/ through the replace directive in
+# go.mod, so an edit to their sources never changes go.mod. Each
+# generated page names its generator's sources as inputs, and go.mod
+# for the generator's own dependencies, so an edit to either one
+# regenerates the page.
+BRAND := ../../brand
+CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
+	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
+APIREF_SOURCES := go.mod $(BRAND)/go.mod \
+	$(filter-out %_test.go,$(wildcard $(BRAND)/apiref/*.go $(BRAND)/linkcheck/*.go))
 
 REFERENCE := content/docs/reference
 OPENAPI := $(REFERENCE)/openapi.json
@@ -47,7 +57,7 @@ test: $(GENERATED)
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
-$(REFERENCE)/displays.md: ../deploy/displays.yaml crdref/displays-preamble.md crdref/displays-postamble.md go.mod
+$(REFERENCE)/displays.md: ../deploy/displays.yaml crdref/displays-preamble.md crdref/displays-postamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -title Displays -weight 20 -postamble crdref/displays-postamble.md $< $@ crdref/displays-preamble.md
 
 # The API's description is generated from the router itself, by the
@@ -60,11 +70,11 @@ $(OPENAPI): $(wildcard ../*.go) ../go.mod
 # per route, with its parameters, its answers, and the fields they
 # carry. The hand-written API page beside it holds the narrative,
 # which no document can generate.
-$(REFERENCE)/routes.md: $(OPENAPI) apiref/routes-preamble.md apiref/routes-postamble.md go.mod
+$(REFERENCE)/routes.md: $(OPENAPI) apiref/routes-preamble.md apiref/routes-postamble.md $(APIREF_SOURCES)
 	$(APIREF) -title Routes -weight 55 -postamble apiref/routes-postamble.md $< $@ apiref/routes-preamble.md
 
 # The Layout page carries no postamble: every rule a reader needs is
 # in the schema's own descriptions, and the guide holds the worked
 # example.
-$(REFERENCE)/layouts.md: ../deploy/layouts.yaml crdref/layouts-preamble.md go.mod
+$(REFERENCE)/layouts.md: ../deploy/layouts.yaml crdref/layouts-preamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -title Layouts -weight 30 $< $@ crdref/layouts-preamble.md

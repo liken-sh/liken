@@ -2,10 +2,18 @@
 # reference pages are generated, never edited: crdref, the generator
 # the brand component publishes, renders one page from each CRD
 # schema in deploy/, so a schema edit is a manual edit. GENERATED
-# lists those pages, and each rule names go.mod as an input, so a
-# generator bump regenerates every page.
+# lists those pages, and each rule names the generator's sources as
+# inputs, so a change to the generator regenerates every page.
 HUGO := go tool hugo
 CRDREF := go tool crdref
+
+# crdref comes from brand/ through the replace directive in go.mod, so
+# an edit to its sources never changes go.mod. Each generated page
+# names those sources as inputs, and go.mod for the generator's own
+# dependencies, so an edit to either one regenerates the page.
+BRAND := ../../brand
+CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
+	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
 
 REFERENCE := content/docs/reference
 
@@ -32,11 +40,11 @@ test: $(GENERATED)
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
-$(REFERENCE)/libraries.md: ../deploy/libraries-crd.yaml crdref/libraries-preamble.md crdref/libraries-postamble.md go.mod
+$(REFERENCE)/libraries.md: ../deploy/libraries-crd.yaml crdref/libraries-preamble.md crdref/libraries-postamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -title Libraries -weight 10 -postamble crdref/libraries-postamble.md $< $@ crdref/libraries-preamble.md
 
-$(REFERENCE)/catalogs.md: ../deploy/catalogs-crd.yaml crdref/catalogs-preamble.md go.mod
+$(REFERENCE)/catalogs.md: ../deploy/catalogs-crd.yaml crdref/catalogs-preamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -title Catalogs -weight 20 $< $@ crdref/catalogs-preamble.md
 
-$(REFERENCE)/metadataproviders.md: ../deploy/metadataproviders-crd.yaml crdref/metadataproviders-preamble.md go.mod
+$(REFERENCE)/metadataproviders.md: ../deploy/metadataproviders-crd.yaml crdref/metadataproviders-preamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -title "Metadata providers" -weight 30 $< $@ crdref/metadataproviders-preamble.md

@@ -1,15 +1,15 @@
 # Working on liken
 
-`liken` is a public OS distribution. Its repositories are documents as
+`liken` is a public OS distribution. Its source files are documents as
 much as they are code, so write everything here for a reader.
 
 ## This is a literate project
 
-This repository has very little ordinary program code. It is mostly
+This directory has very little ordinary program code. It is mostly
 shell scripts, configuration, manifests, and build automation, and these
 files are the documentation. Write them in a literate style, with
 comments that give instruction, explanation, and commentary. A reader who
-reads the repository from top to bottom should learn how a Linux system
+reads `liken/` from top to bottom should learn how a Linux system
 boots and how Kubernetes takes control after that.
 
 The voice rules for everything the project publishes are in `brand/`,
@@ -17,8 +17,8 @@ the brand component at the top of the repository:
 
 @../brand/voice.md
 
-The comment rules there say to teach the domain, not the syntax. In this
-repository, the domain is how a system boots. Do not explain what
+The comment rules there say to teach the domain, not the syntax. In
+`liken/`, the domain is how a system boots. Do not explain what
 `mkdir -p` does. Explain why the kernel does not mount `/proc` on its
 own, why k3s needs cgroups, and why an initramfs is a cpio archive.
 

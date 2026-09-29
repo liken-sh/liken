@@ -1,7 +1,9 @@
+# This file ignores the build files at the top of liken/, which belong
+# to no one domain. Everything else gitignored in liken/ is ignored by
+# its own domain's file.
+
 # The coverage profile go test writes for the pre-commit gate. It
-# lives at the top of liken/ because it profiles the whole module;
-# everything else gitignored in liken/ is ignored by its own domain's
-# file.
+# lives at the top of liken/ because it profiles the whole module.
 coverage.out
 # The report `make coverage-report` renders from that profile. CI
 # builds its own copy and publishes it; a workstation's copy is a
