@@ -16,13 +16,20 @@ import (
 // undefined answers 404 to every request until the collection's
 // definition arrives, the way the API server answers for a kind it
 // does not serve, and then hands each request to the collection.
+// plainWatches counts the watches it refused that ask for no initial
+// events.
 type undefined struct {
-	defined    atomic.Bool
-	collection http.Handler
+	defined      atomic.Bool
+	collection   http.Handler
+	plainWatches atomic.Int64
 }
 
 func (u *undefined) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !u.defined.Load() {
+		query := r.URL.Query()
+		if query.Get("watch") == "true" && query.Get("sendInitialEvents") == "" {
+			u.plainWatches.Add(1)
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -42,8 +49,9 @@ func undefinedWatcher(t *testing.T, server *undefined) dynamic.Interface {
 }
 
 // A collection whose definition is absent reads as an empty copy that
-// answers a pass, and the quiet stream counts as no watch opened again.
-// When the definition arrives, the copy holds its objects.
+// answers a pass. The quiet stream asks the API server nothing, and
+// counts as no watch opened again. When the definition arrives, the
+// copy holds its objects.
 func TestAnAbsentCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
 	server := &undefined{collection: newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}})}
 	var reopened atomic.Int64
@@ -55,6 +63,9 @@ func TestAnAbsentCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
 	eventually(t, "the absent collection syncs", c.View().Ready)
 	if held := CachedList[thing](c.View()); len(held) != 0 {
 		t.Errorf("the copy of an absent collection holds %+v", held)
+	}
+	if server.plainWatches.Load() != 0 {
+		t.Errorf("the watch of an absent collection sent %d plain watches", server.plainWatches.Load())
 	}
 
 	server.defined.Store(true)

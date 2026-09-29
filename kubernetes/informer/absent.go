@@ -10,11 +10,18 @@ package informer
 // event until the recheck is due, and then a 410 Gone. The reflector
 // then reads the collection again, which finds it once it exists. The
 // 410 makes that read a list, which answers a resourceVersion to watch
-// from. A stream that closed with no event would make the reflector
-// watch from the empty version of the empty list, and a watch from no
-// version reports no object deleted before it opened. Without the quiet
-// stream, the reflector would back off, list again, and log a failure
-// about every 30 seconds for as long as the definition is missing.
+// from. Without the quiet stream, the reflector would back off, list
+// again, and log a failure about every 30 seconds for as long as the
+// definition is missing.
+//
+// The quiet stream asks the API server nothing. The API server answers
+// every list with a resourceVersion, so a plain watch from the empty
+// version follows only the empty list that stands in for an absent
+// collection. A watch from no version starts at the present, and the
+// API server sends it no object deleted before it opened. If the
+// definition arrived between the list and the watch, such a watch would
+// be accepted, and the reflector would resume it from no version, so an
+// object deleted while no watch was open would stay in the copy.
 
 import (
 	"context"
@@ -63,13 +70,13 @@ func (a absence) list(items runtime.Object, err error) (runtime.Object, error) {
 	return items, err
 }
 
-// watch answers the quiet stream for a watch the API server refused
-// because the collection is absent. The reflector's first read is a
-// streaming list, which is a watch that asks for the initial events.
-// Its refusal stays a refusal, so the reflector falls back to the list
-// above, which answers the empty collection.
-func (a absence) watch(ctx context.Context, request metav1.ListOptions, err error) (watch.Interface, bool) {
-	if !a.is(err) || request.SendInitialEvents != nil {
+// watch answers the quiet stream in place of the watch that follows
+// the empty list of an absent collection: a plain watch from no
+// version. The reflector's first read is a streaming list, which is a
+// watch that asks for the initial events. It goes to the API server,
+// and its refusal makes the reflector fall back to the list above.
+func (a absence) watch(ctx context.Context, request metav1.ListOptions) (watch.Interface, bool) {
+	if a.refused == nil || request.ResourceVersion != "" || request.SendInitialEvents != nil {
 		return nil, false
 	}
 	return quietWatch(ctx, a.recheck), true

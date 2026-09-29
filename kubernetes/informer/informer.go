@@ -159,13 +159,15 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 		},
 		WatchFuncWithContext: func(ctx context.Context, list metav1.ListOptions) (watch.Interface, error) {
 			scope(&list)
-			stream, err := collection.Watch(ctx, list)
-			if quiet, ok := absent.watch(ctx, list, err); ok {
+			if quiet, ok := absent.watch(ctx, list); ok {
 				// The quiet stream stands in for an accepted watch of an
-				// empty collection, so the empty copy answers a pass.
+				// empty collection, so the empty copy answers a pass. It
+				// is no watch the API server accepted, so Reopened does
+				// not count it.
 				c.noteWatch(nil)
 				return quiet, nil
 			}
+			stream, err := collection.Watch(ctx, list)
 			c.noteWatch(err)
 			// The first accepted watch is the streaming list of the first
 			// read, or the watch after a plain list.
