@@ -230,9 +230,9 @@ reference port (plan 09). The other operators follow one repository at
 a time. `per-node-csi-driver` already runs a client-go informer, and
 `git-csi-driver` already links client-go's typed clientset under its
 hand-written loop. Each port measures its binary, its image, and the
-idle RSS of its watches before and after, and records them in a plan. Until a
-repository moves, its hand-written loop must still pass every scenario
-above.
+idle RSS of its watches before and after, and records them in a plan.
+Until an operator moves, its hand-written loop must still pass every
+scenario above.
 
 **The shared module.** Step 4 of plan 69 moves each operator's copy
 of the client, the watch, and the cache into the Go module
