@@ -242,3 +242,76 @@ func TestTheSiteTakesCoverageOnlyFromAJobThatRan(t *testing.T) {
 		t.Errorf("the site's download lacks %q", want)
 	}
 }
+
+// Only a push to main writes the Actions cache, so a branch never
+// pushes one of main's entries out, and the manuals that share a go.sum
+// share one Hugo build cache.
+func TestOnlyMainSavesTheCaches(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml": `[package]
+name = "app"
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test"
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make docs"
+[[jobs]]
+name = "rust"
+toolchain = "rust"
+dir = "ui"
+run = "make test"
+`,
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(files[".github/workflows/component-app.yaml"])
+	for _, want := range []string{
+		"          cache: false\n",
+		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('app/go.sum') }}",
+		"key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('app/docs/go.sum') }}",
+		"key: hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-${{ github.sha }}",
+		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
+		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
+		"          key: app\n          save-if: ${{ github.ref == 'refs/heads/main' }}\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the workflow lacks %q", want)
+		}
+	}
+	for _, unwanted := range []string{"cache-dependency-path", "uses: actions/cache@"} {
+		if strings.Contains(text+string(files[".github/workflows/ci.yaml"]), unwanted) {
+			t.Errorf("a workflow holds %q, which saves on every branch", unwanted)
+		}
+	}
+}
+
+// The OS's build sets up Go in the build-setup action, which cannot save
+// after the build, so the job saves the action's cache itself.
+func TestTheOSBuildSavesItsGoCacheOnMain(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"os/package.toml": "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(files[".github/workflows/component-os.yaml"])
+	save := "      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-cache-hit != 'true' }}\n        uses: actions/cache/save@v6"
+	if strings.Count(text, "id: build-setup\n        uses: ./.github/actions/build-setup") != 2 || strings.Count(text, save) != 2 {
+		t.Errorf("the build and the publish do not both save the action's Go cache:\n%s", text)
+	}
+}

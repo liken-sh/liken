@@ -58,25 +58,23 @@ jobs:{% range .Jobs %}
 
       # The toolchain, KVM access, and the caches of the vendored
       # inputs.
-      - uses: ./.github/actions/build-setup{% else %}
+      - id: build-setup
+        uses: ./.github/actions/build-setup{% else %}
       - uses: actions/checkout@v7{% end %}{% if .Go %}
+{% template "go-restore" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: {% .ModuleDir %}/go.mod
-          cache-dependency-path: {% .ModuleDir %}/go.sum{% end %}{% if eq .Toolchain "hugo" %}
-
-      # setup-go saves its cache only when its key misses, and the key
-      # follows go.sum, so between two changes to that file the build
-      # cache inside it never refreshes, and Go trims the compiled
-      # Hugo out of it. This entry saves on every run, under a key that
-      # ends in the commit, and restores the newest one for the same
-      # go.sum.
-      - uses: actions/cache@v6
+      # A saved cache never changes, and Go trims a build cache entry
+      # that no build used for five days, so a build cache saved once
+      # would lose the compiled Hugo. This entry's key ends in the
+      # commit: each push to main saves a new one, and every run
+      # restores the newest one for the same go.sum. Every manual with
+      # the same go.sum shares the entry.
+      - id: hugo-cache
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: {% .Component %}-{% .Name %}-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-${{ github.sha }}
-          restore-keys: {% .Component %}-{% .Name %}-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-{% end %}{% if .Apt %}
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-${{ github.sha }}
+          restore-keys: hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-{% end %}{% if .Apt %}
 
       - name: install {% join .Apt ", " %}
         run: |
@@ -87,9 +85,15 @@ jobs:{% range .Jobs %}
       - name: install the toolchain
         run: rustup show
 
+      # The key holds the component, so a workspace never restores
+      # another component's target directory. Only a push to main
+      # saves, so a branch never writes an entry that pushes one of
+      # main's out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: {% .WorkDir %}
+          key: {% .Component %}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
       - uses: taiki-e/install-action@v2.87.1
@@ -107,7 +111,13 @@ jobs:{% range .Jobs %}
       - run: {% .Run %}{% else %}
 
       - run: |{% range $lines %}
-          {% . %}{% end %}{% end %}{% end %}{% if .Coverage %}
+          {% . %}{% end %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.hugo-cache.outputs.cache-primary-key }}{% end %}{% if .Coverage %}
 
       # The site renders the coverage report from these files.
       - uses: actions/upload-artifact@v7
@@ -211,7 +221,8 @@ jobs:{% range .Jobs %}
         with:
           fetch-depth: 0{% if .Channel %}
 
-      - uses: ./.github/actions/build-setup
+      - id: build-setup
+        uses: ./.github/actions/build-setup
 
       # The release build stamps the tag's version into every binary,
       # so it is a new build, and the smoke drill boots it before a byte
@@ -230,12 +241,8 @@ jobs:{% range .Jobs %}
 
       - name: publish to the channel
         working-directory: {% .Dir %}
-        run: releases/publish.sh "${{ inputs.version }}"{% else %}
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: ci/go.mod
-          cache-dependency-path: ci/go.sum
+        run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% else %}
+{% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" true) %}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -255,5 +262,5 @@ jobs:{% range .Jobs %}
       # must never name an image that is not pushed yet.
       - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"{% end %}
+        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" true) %}{% end %}
 {% end %}

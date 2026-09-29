@@ -23,8 +23,19 @@ var templates = template.Must(template.New("").
 	Funcs(template.FuncMap{
 		"join":  strings.Join,
 		"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+		"goCache": func(mod, sum string, build bool) goCache {
+			return goCache{Mod: mod, Sum: sum, Build: build}
+		},
 	}).
 	ParseFS(templateFiles, "templates/*.tmpl"))
+
+// goCache is the data of the go-restore and go-save templates: the
+// go.mod that names the Go version, the go.sum files that key the
+// cache, and whether the cache holds the build cache too.
+type goCache struct {
+	Mod, Sum string
+	Build    bool
+}
 
 // Workflows renders every generated workflow, keyed by its path from
 // the repository root.

@@ -50,10 +50,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: media-operator/go.mod
-          cache-dependency-path: media-operator/go.sum
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # media-operator/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('media-operator/go.sum') }}
 
       - name: install ffmpeg
         run: |
@@ -61,6 +75,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg
 
       - run: make test-go
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       # The site renders the coverage report from these files.
       - uses: actions/upload-artifact@v7
@@ -81,24 +103,51 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: media-operator/docs/go.mod
-          cache-dependency-path: media-operator/docs/go.sum
+          cache: false
 
-      # setup-go saves its cache only when its key misses, and the key
-      # follows go.sum, so between two changes to that file the build
-      # cache inside it never refreshes, and Go trims the compiled
-      # Hugo out of it. This entry saves on every run, under a key that
-      # ends in the commit, and restores the newest one for the same
-      # go.sum.
-      - uses: actions/cache@v6
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules, and its key follows
+      # media-operator/docs/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('media-operator/docs/go.sum') }}
+
+      # A saved cache never changes, and Go trims a build cache entry
+      # that no build used for five days, so a build cache saved once
+      # would lose the compiled Hugo. This entry's key ends in the
+      # commit: each push to main saves a new one, and every run
+      # restores the newest one for the same go.sum. Every manual with
+      # the same go.sum shares the entry.
+      - id: hugo-cache
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: media-operator-docs-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: media-operator-docs-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: hugo-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-
 
       - run: make test-docs
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
   rust:
     if: ${{ contains(fromJSON(inputs.jobs), 'rust') }}
@@ -122,9 +171,15 @@ jobs:
       - name: install the toolchain
         run: rustup show
 
+      # The key holds the component, so a workspace never restores
+      # another component's target directory. Only a push to main
+      # saves, so a branch never writes an entry that pushes one of
+      # main's out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: media-operator
+          key: media-operator
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
       - uses: taiki-e/install-action@v2.87.1
@@ -224,10 +279,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: ci/go.mod
-          cache-dependency-path: ci/go.sum
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # ci/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('ci/go.sum') }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -248,3 +317,11 @@ jobs:
       - name: publish
         working-directory: ci
         run: go run . publish -root .. -component media-operator -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}

@@ -7,12 +7,35 @@
 name: build setup
 description: Toolchain, KVM access, and vendored-input caches for building liken
 
+# A composite action has no step that runs after the job's own steps, so
+# the job saves the Go cache itself, with these outputs.
+outputs:
+  go-cache-key:
+    description: The key of the Go cache, for the job's save step
+    value: ${{ steps.go-cache.outputs.cache-primary-key }}
+  go-cache-hit:
+    description: Whether the Go cache's key matched exactly
+    value: ${{ steps.go-cache.outputs.cache-hit }}
+
 runs:
   using: composite
   steps:
-    - uses: actions/setup-go@v6
+    - id: setup-go
+      uses: actions/setup-go@v6
       with:
         go-version-file: liken/go.mod
+        cache: false
+
+    # Every run restores the Go cache, and only a push to main saves it,
+    # so a branch never writes an entry that pushes one of main's out of
+    # the repository's 10 GB.
+    - id: go-cache
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('liken/go.sum') }}
 
     # The fetch scripts document their own host requirements, and the
     # runner image already has most of them (curl, tar, ar, zstd,

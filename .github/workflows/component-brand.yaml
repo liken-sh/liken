@@ -43,12 +43,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: brand/go.mod
-          cache-dependency-path: brand/go.sum
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # brand/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('brand/go.sum') }}
 
       - run: make test-go
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   rust:
     if: ${{ contains(fromJSON(inputs.jobs), 'rust') }}
@@ -66,9 +88,15 @@ jobs:
       - name: install the toolchain
         run: rustup show
 
+      # The key holds the component, so a workspace never restores
+      # another component's target directory. Only a push to main
+      # saves, so a branch never writes an entry that pushes one of
+      # main's out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: brand/iced
+          key: brand
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
       - uses: taiki-e/install-action@v2.87.1

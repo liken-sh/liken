@@ -43,12 +43,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: kubernetes/go.mod
-          cache-dependency-path: kubernetes/go.sum
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # kubernetes/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('kubernetes/go.sum') }}
 
       - run: make test
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       # The site renders the coverage report from these files.
       - uses: actions/upload-artifact@v7

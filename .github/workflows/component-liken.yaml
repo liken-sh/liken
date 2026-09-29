@@ -43,10 +43,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: liken/go.mod
-          cache-dependency-path: liken/go.sum
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # liken/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('liken/go.sum') }}
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
@@ -55,6 +69,14 @@ jobs:
         with:
           prek-version: 0.5.2
           extra-args: --all-files liken/
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       # The site renders the coverage report from these files.
       - uses: actions/upload-artifact@v7
@@ -75,26 +97,53 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: liken/docs/go.mod
-          cache-dependency-path: liken/docs/go.sum
+          cache: false
 
-      # setup-go saves its cache only when its key misses, and the key
-      # follows go.sum, so between two changes to that file the build
-      # cache inside it never refreshes, and Go trims the compiled
-      # Hugo out of it. This entry saves on every run, under a key that
-      # ends in the commit, and restores the newest one for the same
-      # go.sum.
-      - uses: actions/cache@v6
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules, and its key follows
+      # liken/docs/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('liken/docs/go.sum') }}
+
+      # A saved cache never changes, and Go trims a build cache entry
+      # that no build used for five days, so a build cache saved once
+      # would lose the compiled Hugo. This entry's key ends in the
+      # commit: each push to main saves a new one, and every run
+      # restores the newest one for the same go.sum. Every manual with
+      # the same go.sum shares the entry.
+      - id: hugo-cache
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: liken-docs-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: hugo-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-
 
       - run: |
           make test
           make build
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
   build:
     if: ${{ contains(fromJSON(inputs.jobs), 'build') }}
@@ -112,12 +161,21 @@ jobs:
 
       # The toolchain, KVM access, and the caches of the vendored
       # inputs.
-      - uses: ./.github/actions/build-setup
+      - id: build-setup
+        uses: ./.github/actions/build-setup
 
       - run: |
           make all
           make smoke-uefi
           make smoke-bios
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.build-setup.outputs.go-cache-key }}
 
       - uses: actions/upload-artifact@v7
         if: always()
@@ -142,7 +200,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/build-setup
+      - id: build-setup
+        uses: ./.github/actions/build-setup
 
       # The release build stamps the tag's version into every binary,
       # so it is a new build, and the smoke drill boots it before a byte
@@ -162,3 +221,11 @@ jobs:
       - name: publish to the channel
         working-directory: liken
         run: releases/publish.sh "${{ inputs.version }}"
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.build-setup.outputs.go-cache-key }}

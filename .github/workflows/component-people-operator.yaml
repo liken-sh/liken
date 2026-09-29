@@ -50,12 +50,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: people-operator/go.mod
-          cache-dependency-path: people-operator/go.sum
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # people-operator/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('people-operator/go.sum') }}
 
       - run: make test-go
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       # The site renders the coverage report from these files.
       - uses: actions/upload-artifact@v7
@@ -76,24 +98,51 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: people-operator/docs/go.mod
-          cache-dependency-path: people-operator/docs/go.sum
+          cache: false
 
-      # setup-go saves its cache only when its key misses, and the key
-      # follows go.sum, so between two changes to that file the build
-      # cache inside it never refreshes, and Go trims the compiled
-      # Hugo out of it. This entry saves on every run, under a key that
-      # ends in the commit, and restores the newest one for the same
-      # go.sum.
-      - uses: actions/cache@v6
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules, and its key follows
+      # people-operator/docs/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('people-operator/docs/go.sum') }}
+
+      # A saved cache never changes, and Go trims a build cache entry
+      # that no build used for five days, so a build cache saved once
+      # would lose the compiled Hugo. This entry's key ends in the
+      # commit: each push to main saves a new one, and every run
+      # restores the newest one for the same go.sum. Every manual with
+      # the same go.sum shares the entry.
+      - id: hugo-cache
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: people-operator-docs-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: people-operator-docs-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: hugo-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-
 
       - run: make test-docs
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
   # Each image builds through docker-bake.hcl at the top of the
   # repository, as the target of the same name. A Dockerfile that
@@ -175,10 +224,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: ci/go.mod
-          cache-dependency-path: ci/go.sum
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # ci/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('ci/go.sum') }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -199,3 +262,11 @@ jobs:
       - name: publish
         working-directory: ci
         run: go run . publish -root .. -component people-operator -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
