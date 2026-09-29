@@ -268,3 +268,38 @@ func TestAPullRequestRunsWhatItChanged(t *testing.T) {
 		}
 	}
 }
+
+func TestAPushToMainRunsWhatReadsAChangeAndPublishesOnlyAChangedOutput(t *testing.T) {
+	cases := []struct {
+		name     string
+		file     string
+		base     Decision
+		operator Decision
+	}{
+		{"the base's manual runs the base alone", "base/docs/index.md",
+			Decision{Check: true, Publish: publishNone}, Decision{Check: false, Publish: publishNone}},
+		{"the base's test runs the base alone", "base/pkg/pkg_test.go",
+			Decision{Check: true, Publish: publishNone}, Decision{Check: false, Publish: publishNone}},
+		{"the base's source runs and publishes both", "base/pkg/pkg.go",
+			Decision{Check: true, Publish: publishDev}, Decision{Check: true, Publish: publishDev}},
+		{"the operator's smoke check runs it and publishes nothing", "operator/smoke/operator.sh",
+			Decision{Check: false, Publish: publishNone}, Decision{Check: true, Publish: publishNone}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := planFixture(t)
+			before := r.run("rev-parse", "HEAD")
+			r.write(c.file, "changed\n")
+			r.commit("the change")
+			decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range map[string]Decision{"base": c.base, "operator": c.operator} {
+				if d := decisions[name]; d.Check != want.Check || d.Publish != want.Publish {
+					t.Errorf("%s: %+v, want check %v publish %s", name, d, want.Check, want.Publish)
+				}
+			}
+		})
+	}
+}

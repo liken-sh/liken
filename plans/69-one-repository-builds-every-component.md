@@ -914,7 +914,9 @@ how any vendored domain gets its bytes.
    `kustomization.yaml` names the component's images at the
    artifact's own version, so a cluster pins only the
    `OCIRepository`'s tag. The path diff leaves out `docs/`, `plans/`,
-   `AGENTS.md`, and `README.md` at a component's top. The OS takes
+   `AGENTS.md`, `README.md`, and `smoke/` at a component's top, and
+   every Go test file and `testdata/` directory. A change to them runs
+   the component's own jobs, and no dependent's. The OS takes
    `brand` into its channel index pages, so a change to `brand`
    releases the OS.
 
