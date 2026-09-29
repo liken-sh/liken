@@ -25,7 +25,7 @@ func absentReceivers(t *testing.T) (*collectionServer, *clusterView) {
 	optionalRecheck = testRecheck
 	t.Cleanup(func() { optionalRecheck = recheckWas })
 	server := servedCluster(t, newFakeCluster())
-	server.collections[collectionPathOf(receiverResource)].status = http.StatusNotFound
+	server.collections[collectionPath(receiverResource)].status = http.StatusNotFound
 	return server, watchedView(t, server, make(chan struct{}, 1))
 }
 

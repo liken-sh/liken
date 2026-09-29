@@ -3,7 +3,9 @@ package main
 // The view is what a pass reads the cluster through. Each collection
 // in it is the store of one informer (clusterwatch.go), which the watch
 // keeps current, so a pass that finds everything as it wants it sends
-// the API server no request at all.
+// the API server no request at all. While the API server forbids a
+// collection's watch, the view reads that collection from the API
+// server instead (watchedsource.go).
 //
 // A read here can be a moment behind the API server: the informer
 // takes a change a few milliseconds after the API server writes it.
@@ -34,11 +36,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// objectSource is the part of an informer's store the view reads: every
-// object, and one object by its key, namespace/name or name.
-// cache.Store has both methods.
+// objectSource is what the view reads of one collection: every object,
+// and one object by its key, namespace/name or name. A watch's store
+// answers both while it is ready, and the API server answers them
+// otherwise (watchedsource.go).
 type objectSource interface {
-	List() []any
+	List() ([]any, error)
 	GetByKey(key string) (item any, exists bool, err error)
 }
 
@@ -65,7 +68,10 @@ type clusterView struct {
 // as which Play on a unit runs, does not change from one pass to the
 // next.
 func listOf[T any](source objectSource) ([]T, error) {
-	items := source.List()
+	items, err := source.List()
+	if err != nil {
+		return nil, err
+	}
 	objects := make([]*unstructured.Unstructured, 0, len(items))
 	for _, item := range items {
 		object, ok := item.(*unstructured.Unstructured)

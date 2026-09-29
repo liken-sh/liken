@@ -11,11 +11,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -39,6 +41,10 @@ type servedCollection struct {
 	// The next watch from a version sends them first, and a watch with
 	// no version drops them, the way the API server does.
 	missed []string
+	// forbidWatch answers every watch with 403 and still answers a list
+	// and a read of one object, the way the API server answers under
+	// RBAC that grants list and get and not watch.
+	forbidWatch bool
 }
 
 // collectionServer answers client-go's reads and watches of each
@@ -69,17 +75,8 @@ func (s *collectionServer) serve(t *testing.T, resource schema.GroupVersionResou
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.collections[collectionPathOf(resource)] = collection
+	s.collections[collectionPath(resource)] = collection
 	return collection
-}
-
-// collectionPathOf is the path the dynamic client reads a collection
-// in every namespace from.
-func collectionPathOf(resource schema.GroupVersionResource) string {
-	if resource.Group == "" {
-		return "/api/" + resource.Version + "/" + resource.Resource
-	}
-	return "/apis/" + resource.Group + "/" + resource.Version + "/" + resource.Resource
 }
 
 // stamped encodes an object with its collection's apiVersion and kind,
@@ -110,11 +107,15 @@ func (s *collectionServer) handler() http.Handler {
 		collection, held := s.collections[r.URL.Path]
 		s.mu.Unlock()
 		if !held {
-			http.NotFound(w, r)
+			s.serveObject(w, r)
 			return
 		}
 		if collection.status != 0 {
 			w.WriteHeader(collection.status)
+			return
+		}
+		if collection.forbidWatch && r.URL.Query().Get("watch") == "true" {
+			w.WriteHeader(http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -168,13 +169,42 @@ func (s *collectionServer) handler() http.Handler {
 	})
 }
 
+// serveObject answers a read of one object, at its namespaced path or
+// at its cluster-scoped path, from the collection that holds it.
+func (s *collectionServer) serveObject(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for path, collection := range s.collections {
+		if collection.status != 0 {
+			continue
+		}
+		for _, item := range collection.items {
+			var object unstructured.Unstructured
+			if object.UnmarshalJSON(item) != nil {
+				continue
+			}
+			resource := resourceOf(collection.apiVersion, strings.TrimPrefix(path[strings.LastIndex(path, "/"):], "/"))
+			key := object.GetName()
+			if object.GetNamespace() != "" {
+				key = object.GetNamespace() + "/" + key
+			}
+			if objectPath(resource, key) == r.URL.Path {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(item)
+				return
+			}
+		}
+	}
+	http.NotFound(w, r)
+}
+
 // requested answers each request the server took for one collection.
 func (s *collectionServer) requested(resource schema.GroupVersionResource) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var found []string
 	for _, request := range s.requests {
-		if strings.HasPrefix(request, collectionPathOf(resource)+"?") {
+		if strings.HasPrefix(request, collectionPath(resource)+"?") {
 			found = append(found, request)
 		}
 	}
@@ -373,25 +403,30 @@ func servedCluster(t *testing.T, cluster *fakeCluster) *collectionServer {
 	t.Helper()
 	server := newCollectionServer()
 	view := cluster.view()
+	listed := func(source objectSource) []any {
+		items, err := source.List()
+		mustSucceed(t, err)
+		return items
+	}
 	collections := []struct {
 		resource schema.GroupVersionResource
 		kind     string
-		source   objectSource
+		items    []any
 	}{
-		{playResource, "Play", view.plays.View.Store},
-		{playerResource, "Player", view.players.View.Store},
-		{remoteResource, "Remote", view.remotes},
-		{keymapResource, "Keymap", view.keymaps},
-		{preferencesResource, "MediaPreferences", view.preferences},
-		{peripheralResource, "Peripheral", view.peripherals},
-		{podResource, "Pod", view.pods},
-		{claimResource, "ResourceClaim", view.claims},
-		{sliceResource, "ResourceSlice", view.slices},
-		{displayResource, "Display", view.displays},
-		{receiverResource, "Receiver", view.receivers},
+		{playResource, "Play", view.plays.View.Store.List()},
+		{playerResource, "Player", view.players.View.Store.List()},
+		{remoteResource, "Remote", listed(view.remotes)},
+		{keymapResource, "Keymap", listed(view.keymaps)},
+		{preferencesResource, "MediaPreferences", listed(view.preferences)},
+		{peripheralResource, "Peripheral", listed(view.peripherals)},
+		{podResource, "Pod", listed(view.pods)},
+		{claimResource, "ResourceClaim", listed(view.claims)},
+		{sliceResource, "ResourceSlice", listed(view.slices)},
+		{displayResource, "Display", listed(view.displays)},
+		{receiverResource, "Receiver", listed(view.receivers)},
 	}
 	for _, each := range collections {
-		server.serve(t, each.resource, each.kind, each.source.List()...)
+		server.serve(t, each.resource, each.kind, each.items...)
 	}
 	return server
 }
@@ -404,9 +439,18 @@ func watchedView(t *testing.T, server *collectionServer, wake chan struct{}) *cl
 	t.Cleanup(stop)
 	wait, cancel := context.WithTimeout(ctx, watchTimeout)
 	defer cancel()
-	view, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), wake, nil)
+	view, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), viewClient(t, server), wake, nil)
 	mustSucceed(t, err)
 	return view
+}
+
+// viewClient is the operator's own client, pointed at the server the
+// watches read, for the reads the view sends the API server.
+func viewClient(t *testing.T, server *collectionServer) *apiclient.Client {
+	t.Helper()
+	listening := httptest.NewServer(server.handler())
+	t.Cleanup(listening.Close)
+	return apiclient.New(listening.URL, listening.Client(), "")
 }
 
 // settledHouse is a cluster the operator has already settled: a Player
@@ -474,13 +518,13 @@ func TestASettledPassSendsTheAPIServerNothing(t *testing.T) {
 // resource is missing.
 func TestTheFirstReadNamesACollectionItCannotRead(t *testing.T) {
 	server := servedCluster(t, newFakeCluster())
-	server.collections[collectionPathOf(peripheralResource)].status = http.StatusForbidden
+	server.collections[collectionPath(peripheralResource)].status = http.StatusForbidden
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	wait, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	_, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), make(chan struct{}, 1), nil)
+	_, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), viewClient(t, server), make(chan struct{}, 1), nil)
 
 	mustFail(t, err)
 	mustMatch(t, strings.Contains(err.Error(), "not read: "+kindPeripheral+":"), true)

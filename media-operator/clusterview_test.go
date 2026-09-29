@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -23,7 +24,11 @@ func TestTheViewReadsAnInformersStore(t *testing.T) {
 	mustSucceed(t, pods.Add(asObject(t, housePlaybackPod())))
 	displays := cache.NewStore(cache.DeletionHandlingMetaNamespaceKeyFunc)
 	mustSucceed(t, displays.Add(asObject(t, litDisplay())))
-	view := &clusterView{pods: pods, displays: displays}
+	ready := func() bool { return true }
+	view := &clusterView{
+		pods:     watchedSource{view: informer.View{Store: pods, Synced: ready}},
+		displays: watchedSource{view: informer.View{Store: displays, Synced: ready}},
+	}
 
 	pod, err := view.Pod("house", "movie-playback")
 	mustSucceed(t, err)

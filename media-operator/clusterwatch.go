@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -80,18 +81,19 @@ const clusterSyncWait = time.Minute
 type watchedCollection struct {
 	kind  string
 	watch collectionWatch
-	into  func(informer.View)
+	into  func(watchedSource)
 }
 
-// keepIn keeps a store in one field of the view.
-func keepIn(field *objectSource) func(informer.View) {
-	return func(view informer.View) { *field = view.Store }
+// keepIn keeps a collection in one field of the view.
+func keepIn(field *objectSource) func(watchedSource) {
+	return func(source watchedSource) { *field = source }
 }
 
 // keepWhole keeps a store that holds its whole kind in one field of the
 // view, with a memo of the copies this operator wrote or read.
-func keepWhole(field *informer.Held) func(informer.View) {
-	return func(view informer.View) {
+func keepWhole(field *informer.Held) func(watchedSource) {
+	return func(source watchedSource) {
+		view := source.view
 		view.Whole = true
 		*field = informer.Held{View: view, Versions: memo.New()}
 	}
@@ -101,9 +103,10 @@ func keepWhole(field *informer.Held) func(informer.View) {
 // and answers the view once every informer has read its collection.
 // The informers run until ctx ends. wait bounds the wait for the first
 // reads: when it ends first, watchCluster answers an error that names
-// each collection still unread.
-func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan<- struct{},
-	metrics *mediaMetrics) (*clusterView, error) {
+// each collection still unread. reader reads a collection from the API
+// server while the API server forbids its watch (watchedsource.go).
+func watchCluster(ctx, wait context.Context, client dynamic.Interface, reader *apiclient.Client,
+	wake chan<- struct{}, metrics *mediaMetrics) (*clusterView, error) {
 	view := &clusterView{}
 	wakes := wakeOnChange(wake)
 	collections := []watchedCollection{
@@ -126,15 +129,18 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 			handler: receiverRule.handler(wake)}, keepIn(&view.receivers)},
 	}
 	type read struct {
-		kind string
-		into func(informer.View)
-		view informer.View
+		kind   string
+		into   func(watchedSource)
+		source watchedSource
 	}
 	reads := make(chan read, len(collections))
 	for _, each := range collections {
 		watch := each.watch
 		watch.reopened = watchRestartFunc(metrics, each.kind)
-		watch.synced = func(view informer.View) { reads <- read{each.kind, each.into, view} }
+		watch.synced = func(view informer.View) {
+			source := watchedSource{view: view, client: reader, resource: watch.resource, labels: watch.labels}
+			reads <- read{each.kind, each.into, source}
+		}
 		go watchCollection(ctx, client, watch)
 	}
 
@@ -145,7 +151,7 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 	for len(pending) > 0 {
 		select {
 		case done := <-reads:
-			done.into(done.view)
+			done.into(done.source)
 			delete(pending, done.kind)
 		case <-wait.Done():
 			return nil, fmt.Errorf("these collections were not read: %s: %w", sortedKinds(pending), wait.Err())

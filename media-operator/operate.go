@@ -486,7 +486,7 @@ func operate() {
 	watching, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
 	firstRead, cancelFirstRead := context.WithTimeout(stop, clusterSyncWait)
-	media.view, err = watchCluster(watching, firstRead, watcher, wake, metrics)
+	media.view, err = watchCluster(watching, firstRead, watcher, media.client, wake, metrics)
 	cancelFirstRead()
 	if err != nil {
 		if stop.Err() != nil {

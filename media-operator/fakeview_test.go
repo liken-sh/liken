@@ -33,7 +33,7 @@ type fakeSource[T any] struct {
 	object     func(namespace, name string) string
 }
 
-func (s fakeSource[T]) List() []any {
+func (s fakeSource[T]) List() ([]any, error) {
 	var items []any
 	for _, object := range s.objects() {
 		item := asUnstructured(object)
@@ -45,7 +45,7 @@ func (s fakeSource[T]) List() []any {
 		}
 		items = append(items, item)
 	}
-	return items
+	return items, nil
 }
 
 // fakeStore is a fakeSource in the shape of client-go's cache.Store, for
@@ -56,13 +56,17 @@ type fakeStore[T any] struct {
 	source fakeSource[T]
 }
 
-func (s fakeStore[T]) List() []any { return s.source.List() }
+func (s fakeStore[T]) List() []any {
+	items, _ := s.source.List()
+	return items
+}
 
 func (s fakeStore[T]) GetByKey(key string) (any, bool, error) { return s.source.GetByKey(key) }
 
 func (s fakeStore[T]) ListKeys() []string {
 	var keys []string
-	for _, item := range s.source.List() {
+	items, _ := s.source.List()
+	for _, item := range items {
 		key, _ := cache.MetaNamespaceKeyFunc(item)
 		keys = append(keys, key)
 	}
