@@ -1,9 +1,7 @@
 # The organization's repositories, as infrastructure. Each repository's
 # public face carries settings that this file declares in one place: the
 # description, the website link, the topic tags, and the Pages site that
-# serves its manual. Before this file, each was set by hand in eight
-# separate settings pages, and a new repository started from none of
-# them. Now a new repository is one entry in the map below.
+# serves its manual. A new repository is one entry in the map below.
 #
 # The resources create a repository that is new to the map, and nothing
 # here deletes one. The repositories that predate this file were
@@ -116,6 +114,21 @@ locals {
       cname       = null
       topics      = []
     }
+    plugins = {
+      description = "The catalog of liken's Agent Skills for Claude Code"
+      cname       = null
+      homepage    = "https://liken.sh"
+      topics      = []
+    }
+    # A fork keeps its issues on the upstream project, so this one has
+    # none of its own.
+    corrosion = {
+      description = "liken's shallow fork of Corrosion: the ghcr image and a short stack of upstream-bound changes"
+      cname       = null
+      homepage    = "https://superfly.github.io/corrosion/"
+      topics      = []
+      has_issues  = false
+    }
   }
 }
 
@@ -136,7 +149,7 @@ resource "github_repository" "repositories" {
 
   # The settings every repository shares, stated so an apply never
   # writes a provider default over a value someone chose.
-  has_issues                  = true
+  has_issues                  = lookup(each.value, "has_issues", true)
   has_projects                = false
   has_wiki                    = false
   has_discussions             = false
