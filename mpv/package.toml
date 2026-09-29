@@ -1,0 +1,19 @@
+# The ffmpeg image plus mpv and every library and data file it opens by
+# name.
+[package]
+name = "mpv"
+# The date of the snapshot.debian.org archive that the build installs
+# from, as YYYYMMDD. Every base on Debian uses the same date.
+version = "20260928"
+revision = 1
+license = "MIT"
+
+# The image builds on ffmpeg. The build takes the vulkan directory as
+# the context builder, for the scripts that every base on Debian uses.
+[depends]
+components = ["ffmpeg", "vulkan"]
+
+[[outputs.images]]
+name = "mpv"
+contexts = { builder = "vulkan" }
+smoke = "mpv/smoke/mpv.sh"

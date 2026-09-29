@@ -1,0 +1,21 @@
+# The vulkan image plus the Weston compositor, every library it loads,
+# and liken's two modules for it: the hotplug shim and the layout
+# controller.
+[package]
+name = "weston"
+# The date of the snapshot.debian.org archive that the build installs
+# from, as YYYYMMDD. Every base on Debian uses the same date.
+version = "20260928"
+revision = 1
+license = "MIT"
+
+# The image builds on vulkan, and the build takes the vulkan directory
+# as the context builder, for the scripts that every base on Debian
+# uses.
+[depends]
+components = ["vulkan"]
+
+[[outputs.images]]
+name = "weston"
+contexts = { builder = "vulkan" }
+smoke = "weston/smoke/weston.sh"

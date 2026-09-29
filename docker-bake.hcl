@@ -39,7 +39,6 @@ group "default" {
     "vulkan",
     "vaapi",
     "ffmpeg",
-    "mpv",
     "weston",
     "display-operator",
     "display-capture",
@@ -47,6 +46,7 @@ group "default" {
     "display-operator-cli",
     "equipment-operator",
     "git-csi-driver",
+    "mpv",
     "media-operator",
     "media-operator-player",
     "media-operator-idle",
@@ -154,66 +154,61 @@ target "bluetooth-operator-cli" {
 }
 
 target "vulkan" {
-  context    = "display-operator"
+  context    = "vulkan"
   dockerfile = "Dockerfile"
-  target     = "vulkan"
   platforms  = ["linux/amd64"]
   args = {
-    VERSION = VERSION
+    VERSION = "20260928"
   }
-  tags       = ["ghcr.io/liken-sh/vulkan:${VERSION}"]
+  tags       = ["ghcr.io/liken-sh/vulkan:20260928-1"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache"]
   cache-to   = CACHE_WRITE == "vulkan" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "vaapi" {
-  context    = "display-operator"
+  context    = "vaapi"
   dockerfile = "Dockerfile"
-  target     = "vaapi"
   platforms  = ["linux/amd64"]
-  args = {
-    VERSION = VERSION
+  contexts = {
+    "builder" = "vulkan"
+    "vulkan" = "target:vulkan"
   }
-  tags       = ["ghcr.io/liken-sh/vaapi:${VERSION}"]
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/vaapi:20260928-1"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache"]
   cache-to   = CACHE_WRITE == "vaapi" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "ffmpeg" {
-  context    = "display-operator"
+  context    = "ffmpeg"
   dockerfile = "Dockerfile"
-  target     = "ffmpeg"
   platforms  = ["linux/amd64"]
-  args = {
-    VERSION = VERSION
+  contexts = {
+    "builder" = "vulkan"
+    "vaapi" = "target:vaapi"
   }
-  tags       = ["ghcr.io/liken-sh/ffmpeg:${VERSION}"]
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/ffmpeg:20260928-1"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache"]
   cache-to   = CACHE_WRITE == "ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max,ignore-error=true"] : []
 }
 
-target "mpv" {
-  context    = "display-operator"
-  dockerfile = "Dockerfile"
-  target     = "mpv"
-  platforms  = ["linux/amd64"]
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/mpv:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache"]
-  cache-to   = CACHE_WRITE == "mpv" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache,mode=max,ignore-error=true"] : []
-}
-
 target "weston" {
-  context    = "display-operator"
+  context    = "weston"
   dockerfile = "Dockerfile"
-  target     = "weston"
   platforms  = ["linux/amd64"]
-  args = {
-    VERSION = VERSION
+  contexts = {
+    "builder" = "vulkan"
+    "vulkan" = "target:vulkan"
   }
-  tags       = ["ghcr.io/liken-sh/weston:${VERSION}"]
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/weston:20260928-1"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache"]
   cache-to   = CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : []
 }
@@ -225,6 +220,7 @@ target "display-operator" {
   platforms  = ["linux/amd64"]
   contexts = {
     "kubernetes" = "kubernetes"
+    "weston" = "target:weston"
   }
   args = {
     VERSION = VERSION
@@ -240,6 +236,7 @@ target "display-capture" {
   target     = "display-capture"
   platforms  = ["linux/amd64"]
   contexts = {
+    "ffmpeg" = "target:ffmpeg"
     "kubernetes" = "kubernetes"
   }
   args = {
@@ -305,6 +302,22 @@ target "git-csi-driver" {
   cache-to   = CACHE_WRITE == "git-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache,mode=max,ignore-error=true"] : []
 }
 
+target "mpv" {
+  context    = "mpv"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "builder" = "vulkan"
+    "ffmpeg" = "target:ffmpeg"
+  }
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/mpv:20260928-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache"]
+  cache-to   = CACHE_WRITE == "mpv" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache,mode=max,ignore-error=true"] : []
+}
+
 target "media-operator" {
   context    = "media-operator"
   dockerfile = "Dockerfile"
@@ -323,6 +336,7 @@ target "media-operator-player" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "mpv" = "target:mpv"
   }
   args = {
     VERSION = VERSION
@@ -339,6 +353,7 @@ target "media-operator-idle" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "vulkan" = "target:vulkan"
   }
   args = {
     VERSION = VERSION
@@ -355,6 +370,7 @@ target "media-operator-display" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "vulkan" = "target:vulkan"
   }
   args = {
     VERSION = VERSION
@@ -368,6 +384,9 @@ target "media-operator-api" {
   context    = "media-operator"
   dockerfile = "Dockerfile.api"
   platforms  = ["linux/amd64"]
+  contexts = {
+    "ffmpeg" = "target:ffmpeg"
+  }
   args = {
     VERSION = VERSION
   }
@@ -404,6 +423,9 @@ target "library-operator-ffmpeg" {
   context    = "library-operator"
   dockerfile = "Dockerfile.ffmpeg"
   platforms  = ["linux/amd64"]
+  contexts = {
+    "ffmpeg" = "target:ffmpeg"
+  }
   args = {
     VERSION = VERSION
   }
@@ -419,6 +441,7 @@ target "library-operator-media-browser" {
   contexts = {
     "brand" = "brand"
     "media-operator" = "media-operator"
+    "vulkan" = "target:vulkan"
   }
   args = {
     VERSION = VERSION

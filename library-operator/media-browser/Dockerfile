@@ -5,11 +5,6 @@
 # directory, and brand/ and media-operator/ arrive as named build
 # contexts for the two path crates below.
 
-# The runtime base of the last stage. An argument a FROM line reads has
-# to be declared before the first stage, so it is here and not beside
-# the stage that uses it.
-ARG VULKAN_BASE=ghcr.io/liken-sh/vulkan:2026.09.08-001
-
 FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS build
 WORKDIR /src
 
@@ -86,15 +81,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD
 # drivers, and the Wayland and keyboard libraries the toolkit opens by
-# name, on scratch. The display operator builds it beside the compositor,
+# name, on scratch. The compositor's image builds on the same Vulkan tree,
 # so the client and the compositor run one Mesa, and a node that runs
 # both holds the drivers once. The base carries the zoneinfo database
 # too, because Rust's standard library has no time zones.
 #
-# The tag pins the base to one release of the display operator. The
-# argument is declared at the top of the file, and a workstation may set
-# it to a base it built itself.
-FROM ${VULKAN_BASE}
+# The bake file at the top of the repository gives this build the vulkan
+# image of the same commit as the named context vulkan.
+FROM vulkan
 
 COPY --from=build /src/target/release/media-browser /media-browser
 

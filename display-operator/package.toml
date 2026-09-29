@@ -1,12 +1,11 @@
-# The operator that claims a machine's displays and GPUs. Its Dockerfile
-# also builds the base images that the other screens build on: vulkan,
-# vaapi, ffmpeg, mpv, and weston.
+# The operator that claims a machine's displays and GPUs. Its images
+# build on the weston and ffmpeg base images.
 [package]
 name = "display-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes"]
+components = ["ffmpeg", "kubernetes", "weston"]
 
 [docs]
 prefix = "display"
@@ -31,38 +30,9 @@ run = "make test-docs"
 [outputs]
 deploy = "deploy"
 
-[[outputs.images]]
-name = "vulkan"
-file = "Dockerfile"
-target = "vulkan"
-
-[[outputs.images]]
-name = "vaapi"
-file = "Dockerfile"
-target = "vaapi"
-
-[[outputs.images]]
-name = "ffmpeg"
-file = "Dockerfile"
-target = "ffmpeg"
-smoke = "display-operator/smoke/ffmpeg.sh"
-
-[[outputs.images]]
-name = "mpv"
-file = "Dockerfile"
-target = "mpv"
-smoke = "display-operator/smoke/mpv.sh"
-
-[[outputs.images]]
-name = "weston"
-file = "Dockerfile"
-target = "weston"
-smoke = "display-operator/smoke/weston.sh"
-
-# The three images that carry the operator's binary run the build
-# stage, which takes the shared kubernetes module as a build context,
-# because go.mod replaces it with ../kubernetes. The base images above
-# skip that stage and need no context.
+# The three images of the Dockerfile run its build stage, which takes
+# the shared kubernetes module as a build context, because go.mod
+# replaces it with ../kubernetes.
 [[outputs.images]]
 name = "display-operator"
 file = "Dockerfile"

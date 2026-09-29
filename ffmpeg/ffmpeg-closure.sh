@@ -8,6 +8,9 @@
 # file the directories after it already hold.
 set -eu
 
+# closure.sh is in the vulkan directory, the lowest base, and the
+# Dockerfile copies it beside this script.
+# shellcheck source=../vulkan/closure.sh
 . "$(dirname "$0")/closure.sh"
 
 out=$1

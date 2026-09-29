@@ -5,7 +5,7 @@ name = "library-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "display-operator", "media-operator"]
+components = ["brand", "ffmpeg", "media-operator", "vulkan"]
 
 [docs]
 prefix = "library"

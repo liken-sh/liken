@@ -1,15 +1,9 @@
-# The player image: the display operator's mpv image, the brand's fonts,
+# The player image: the mpv base image, the brand's fonts,
 # and the pod build of the program, the same /media-operator-pod the
 # operator image carries. In this image the binary runs as the player
 # shim alone; every sidecar mode runs on the sidecar
 # image. The operator's own image cannot serve here, because it is one
 # static binary on scratch and mpv needs a video and audio stack under it.
-
-# The runtime base of the last stage. An argument a FROM line reads has
-# to be declared before the first stage, so it is here and not beside
-# the stage that uses it. The tag pins one release of the display
-# operator, and a workstation sets the argument to a base it built.
-ARG MPV_BASE=ghcr.io/liken-sh/mpv:2026.09.11-002
 
 # The build stage repeats the operator image's pod build, so every image
 # that carries the pod build carries the same one, built from the same
@@ -48,11 +42,13 @@ RUN apt-get update \
 # The runtime is liken's mpv image: mpv, the PipeWire client modules and
 # SPA plugins it opens by name, and the fontconfig configuration libass
 # reads, on the ffmpeg, VA-API, and Vulkan trees under it, on scratch.
-# The display operator builds it beside the compositor, so a node that
-# runs both holds one libva and one Mesa. No font package is installed
-# for the brand's own family: its two OTF files arrive below as files,
-# and libass resolves the family through fontconfig.
-FROM ${MPV_BASE}
+# The compositor's image builds on the same Vulkan tree, so a node that
+# runs both holds one Mesa. The bake file at the top of the repository
+# gives this build the mpv image of the same commit as the named
+# context mpv. No font package is installed for the brand's own family:
+# its two OTF files arrive below as files, and libass resolves the
+# family through fontconfig.
+FROM mpv
 
 COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
 

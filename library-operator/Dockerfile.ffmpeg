@@ -4,12 +4,6 @@
 # container of the trickplay Job take this image, and every other container
 # takes the operator's own.
 
-# The runtime base of the last stage. An argument a FROM line reads has to be
-# declared before the first stage, so it is here and not beside the stage that
-# uses it. The display operator builds the base, so a node that runs both holds
-# one copy of the drivers.
-ARG FFMPEG_BASE=ghcr.io/liken-sh/ffmpeg:2026.09.11-001
-
 FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
@@ -23,7 +17,11 @@ COPY *.go ./
 # program without the operator, which no container of this image runs.
 RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
 
-FROM ${FFMPEG_BASE}
+# The bake file at the top of the repository gives this build the ffmpeg
+# image of the same commit as the named context ffmpeg. display-operator's
+# capture container builds on the same image, so a node that runs both holds
+# one copy of the drivers.
+FROM ffmpeg
 COPY --from=build /library-operator-pod /library-operator-pod
 # A scratch image carries no trust store, and every TLS call fails without
 # one. The bundle is the build stage's own Debian set.

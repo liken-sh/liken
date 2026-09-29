@@ -1,13 +1,13 @@
-# This file is generated from display-operator/package.toml. Do not edit it:
+# This file is generated from mpv/package.toml. Do not edit it:
 # edit that file or the templates in ci/templates/, then run
 # `make workflows` at the top of the repository.
 #
-# ci.yaml calls this workflow when a change reaches display-operator. Each
+# ci.yaml calls this workflow when a change reaches mpv. Each
 # check below is a job from package.toml, and it runs the same command
 # that a workstation runs. The images job builds every image and runs
 # its smoke check. The publish job pushes nothing until every other
 # job in this workflow passes.
-name: display-operator
+name: mpv
 
 on:
   workflow_call:
@@ -28,59 +28,6 @@ permissions:
   packages: write
 
 jobs:
-  go:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: display-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: display-operator/go.mod
-          cache-dependency-path: display-operator/go.sum
-
-      - run: make test-go
-
-      # The site renders the coverage report from these files.
-      - uses: actions/upload-artifact@v7
-        with:
-          name: coverage-display-operator-go
-          path: |
-            display-operator/coverage.out
-          if-no-files-found: error
-          retention-days: 7
-
-  docs:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: display-operator
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: display-operator/docs/go.mod
-          cache-dependency-path: display-operator/docs/go.sum
-
-      # setup-go saves its cache only when its key misses, and the key
-      # follows go.sum, so between two changes to that file the build
-      # cache inside it never refreshes, and Go trims the compiled
-      # Hugo out of it. This entry saves on every run, under a key that
-      # ends in the commit, and restores the newest one for the same
-      # go.sum.
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/go-build
-          key: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-
-
-      - run: make test-docs
-
   # Each image builds through docker-bake.hcl at the top of the
   # repository, as the target of the same name. A Dockerfile that
   # builds on a base of the repository, as in FROM mpv, gets that base's
@@ -104,18 +51,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: display-operator
+          - image: mpv
             load: true
-            smoke: ''
-          - image: display-capture
-            load: true
-            smoke: 'display-operator/smoke/display-capture.sh'
-          - image: display-api
-            load: true
-            smoke: ''
-          - image: display-operator-cli
-            load: false
-            smoke: ''
+            smoke: 'mpv/smoke/mpv.sh'
     steps:
       - uses: actions/checkout@v7
 
@@ -149,7 +87,7 @@ jobs:
         run: bash "${{ matrix.smoke }}" "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}"
 
   publish:
-    needs: [go, docs, images]
+    needs: [images]
     if: ${{ inputs.publish != 'none' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -171,14 +109,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: fluxcd/flux2/action@v2.9.5
-        with:
-          version: 2.9.5
-
       # Each image builds again through docker-bake.hcl, from the layer
       # cache that the images job wrote, and pushes. The deploy artifact
       # goes last, because a cluster follows the deploy artifact, and it
       # must never name an image that is not pushed yet.
       - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component display-operator -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"
+        run: go run . publish -root .. -component mpv -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"

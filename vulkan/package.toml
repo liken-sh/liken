@@ -1,0 +1,13 @@
+# The Vulkan loader, the Intel and AMD drivers, and the client libraries
+# a Wayland program opens, on nothing else. It is the lowest base image,
+# and its directory holds the scripts that every base on Debian uses.
+[package]
+name = "vulkan"
+# The date of the snapshot.debian.org archive that the build installs
+# from, as YYYYMMDD. Every base on Debian uses the same date.
+version = "20260928"
+revision = 1
+license = "MIT"
+
+[[outputs.images]]
+name = "vulkan"

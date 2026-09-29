@@ -1,0 +1,13 @@
+# The build reads the Dockerfile and the files it copies. Everything
+# else here is documentation, checks, and configuration. Docker leaves
+# it out of the build context, and so the recipe hash leaves it out,
+# and a change to it needs no new revision.
+README.md
+LICENSE
+package.toml
+.pre-commit-config.yaml
+smoke/
+# The layout module's own check runs weston and test clients on a
+# workstation, outside the image.
+layout/smoke.sh
+layout/smoke_client.py

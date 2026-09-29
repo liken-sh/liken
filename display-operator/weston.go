@@ -54,8 +54,9 @@ import (
 
 // hotplugShim is the path of the preload library in the image. The
 // library moves the compositor's hotplug subscription from udevd's
-// netlink group to the kernel's netlink group. The comment in
-// hotplug/udev-kernel-group.c explains why.
+// netlink group to the kernel's netlink group. The weston base image
+// builds it, and the comment in weston/hotplug/udev-kernel-group.c at
+// the top of the repository explains why.
 const hotplugShim = "/usr/lib/liken/udev-kernel-group.so"
 
 // westonBinary is weston's own path in the image, in full because
