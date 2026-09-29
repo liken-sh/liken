@@ -19,16 +19,28 @@ func newRepo(t *testing.T, files map[string]string) *repo {
 	t.Helper()
 	r := &repo{t: t, git: Git{Dir: writeTree(t, files)}}
 	r.run("init", "--quiet", "--initial-branch=main")
-	r.run("config", "user.email", "test@example.com")
-	r.run("config", "user.name", "test")
 	r.commit("the first commit")
 	return r
+}
+
+// testGit is the environment of a test's git commands, on top of
+// gitEnv, which drops every GIT_* variable that a hook sets. The test
+// reads no configuration of the machine's, and it names the author in
+// the environment, so it writes no configuration either.
+var testGit = []string{
+	"GIT_CONFIG_GLOBAL=/dev/null",
+	"GIT_CONFIG_NOSYSTEM=1",
+	"GIT_AUTHOR_NAME=test",
+	"GIT_AUTHOR_EMAIL=test@example.com",
+	"GIT_COMMITTER_NAME=test",
+	"GIT_COMMITTER_EMAIL=test@example.com",
 }
 
 func (r *repo) run(args ...string) string {
 	r.t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.git.Dir
+	cmd.Env = gitEnv(testGit...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		r.t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)

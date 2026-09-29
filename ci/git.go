@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -14,6 +15,7 @@ type Git struct {
 func (g Git) run(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = g.Dir
+	cmd.Env = gitEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
@@ -22,6 +24,24 @@ func (g Git) run(args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// gitEnv is this process's environment without its GIT_* variables,
+// plus the extra variables. git runs a hook with GIT_DIR and
+// GIT_INDEX_FILE set for the repository that runs the hook, and those
+// variables win over the directory a command runs in. A git command
+// that inherits them reads and writes that repository, not the one in
+// Dir: a test run from a pre-commit hook would commit its fixtures into
+// the repository under commit and set its core.worktree. Without the
+// variables, git finds the repository from Dir alone.
+func gitEnv(extra ...string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, extra...)
 }
 
 // Changed lists the files that differ between two commits.
