@@ -71,19 +71,31 @@ jobs:
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache, and its key follows
-      # liken/go.sum. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # job, which holds most of what the job needs. Each job
-      # has entries of its own: a job that builds less would save an
-      # entry that the other job then restores whole and never saves.
+      # holds the Go modules and the build cache. Its key follows the hash
+      # of these files:
+      #
+      #   liken/go.sum
+      #   liken/Makefile
+      #   liken/package.toml
+      #   liken/.pre-commit-config.yaml
+      #
+      # A saved entry never changes. The files after go.sum choose what
+      # the job compiles and with which flags, so an entry keyed on
+      # go.sum alone would keep the build from before a flag such as
+      # -race changed, and each run would compile it again.
+      #
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same job,
+      # which holds most of what the job needs. Each job has entries of
+      # its own: a job that builds less would save an entry that the
+      # other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/package.toml', 'liken/.pre-commit-config.yaml') }}
           restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-
 
       - run: make test-go
@@ -124,19 +136,31 @@ jobs:
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache, and its key follows
-      # liken/go.sum. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # job, which holds most of what the job needs. Each job
-      # has entries of its own: a job that builds less would save an
-      # entry that the other job then restores whole and never saves.
+      # holds the Go modules and the build cache. Its key follows the hash
+      # of these files:
+      #
+      #   liken/go.sum
+      #   liken/Makefile
+      #   liken/package.toml
+      #   liken/.pre-commit-config.yaml
+      #
+      # A saved entry never changes. The files after go.sum choose what
+      # the job compiles and with which flags, so an entry keyed on
+      # go.sum alone would keep the build from before a flag such as
+      # -race changed, and each run would compile it again.
+      #
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same job,
+      # which holds most of what the job needs. Each job has entries of
+      # its own: a job that builds less would save an entry that the
+      # other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/package.toml', 'liken/.pre-commit-config.yaml') }}
           restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-
 
       # prek runs the hooks of this component only, with
@@ -174,10 +198,14 @@ jobs:
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules, and its key follows
-      # liken/docs/go.sum. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # family, which holds most of what the job needs.
+      # holds the Go modules. Its key follows the hash
+      # of these files:
+      #
+      #   liken/docs/go.sum
+      #
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same family,
+      # which holds most of what the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:

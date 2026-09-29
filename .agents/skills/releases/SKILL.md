@@ -54,10 +54,12 @@ component's paths from there to the tagged commit:
 
 A component's paths are its own directory and the directories of every
 component its `package.toml` names in `[depends]`, through the whole
-graph. `docs/`, `plans/`, `AGENTS.md`, `README.md`, `skills/`, and
-`smoke/` at the top of a component go into no output, and neither do
-Go tests or `testdata/`. A change there does not release the
-component. A component's `package.toml` can name more such paths in
+graph. `docs/`, `plans/`, `AGENTS.md`, `README.md`, `skills/`,
+`smoke/`, `.pre-commit-config.yaml`, `.testcoverage.yml`, and
+`.gitignore` at the top of a component go into no output, and neither
+do Go tests or `testdata/`. A change there does not release the
+component. A `.dockerignore` is an input: it decides what an image's
+build receives. A component's `package.toml` can name more such paths in
 `exclude` under `[outputs]`: `liken` names `deploy/monitoring/`,
 because a fleet fetches it by git and the channel holds no part of it.
 A change under `plans/` also runs none of the component's jobs,

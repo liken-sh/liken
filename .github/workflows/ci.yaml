@@ -127,12 +127,16 @@ jobs:
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache, and its key follows
-      # ci/go.sum. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # job, which holds most of what the job needs. Each job
-      # has entries of its own: a job that builds less would save an
-      # entry that the other job then restores whole and never saves.
+      # holds the Go modules and the build cache. Its key follows the hash
+      # of these files:
+      #
+      #   ci/go.sum
+      #
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same job,
+      # which holds most of what the job needs. Each job has entries of
+      # its own: a job that builds less would save an entry that the
+      # other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
@@ -216,10 +220,14 @@ jobs:
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules, and its key follows
-      # **/go.sum. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # family, which holds most of what the job needs.
+      # holds the Go modules. Its key follows the hash
+      # of these files:
+      #
+      #   **/go.sum
+      #
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same family,
+      # which holds most of what the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
@@ -783,10 +791,14 @@ jobs:
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules, and its key follows
-      # **/docs/go.sum. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # family, which holds most of what the job needs.
+      # holds the Go modules. Its key follows the hash
+      # of these files:
+      #
+      #   **/docs/go.sum
+      #
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same family,
+      # which holds most of what the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
@@ -973,12 +985,16 @@ jobs:
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache, and its key follows
-      # ci/go.sum. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # job, which holds most of what the job needs. Each job
-      # has entries of its own: a job that builds less would save an
-      # entry that the other job then restores whole and never saves.
+      # holds the Go modules and the build cache. Its key follows the hash
+      # of these files:
+      #
+      #   ci/go.sum
+      #
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same job,
+      # which holds most of what the job needs. Each job has entries of
+      # its own: a job that builds less would save an entry that the
+      # other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:

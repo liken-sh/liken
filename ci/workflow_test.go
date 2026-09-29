@@ -296,7 +296,7 @@ run = "make test"
 		"          cache: false\n",
 		// Each job has a build cache of its own: a job that builds less
 		// must not save the entry that another job then restores whole.
-		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum') }}\n" +
+		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n" +
 			"          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-\n",
 		// Every manual reads the same modules, so the manuals share one.
 		"key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('app/docs/go.sum') }}\n" +
@@ -314,6 +314,35 @@ run = "make test"
 	for _, unwanted := range []string{"cache-dependency-path", "uses: actions/cache@"} {
 		if strings.Contains(text+string(files[".github/workflows/ci.yaml"]), unwanted) {
 			t.Errorf("a workflow holds %q, which saves on every branch", unwanted)
+		}
+	}
+}
+
+// A saved cache entry never changes, so a build cache keyed on go.sum
+// alone keeps what its job compiled when go.sum last changed. A job's
+// key follows the files that choose what it compiles and with which
+// flags too: its go.sum, the Makefile where it runs, and the
+// component's package.toml and hooks.
+func TestABuildCacheFollowsWhatChoosesTheBuild(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\ndir = \"svc\"\nrun = \"make test\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
+		"app/go.mod":       "module app\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(files[".github/workflows/component-app.yaml"])
+	for _, want := range []string{
+		"${{ github.job }}-${{ hashFiles('app/svc/go.sum', 'app/svc/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n",
+		"${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the workflow lacks the key %q:\n%s", want, text)
 		}
 	}
 }

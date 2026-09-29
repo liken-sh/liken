@@ -8,19 +8,28 @@
       # Every run restores the Go cache, and only a push to main saves
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules{% if .Build %} and the build cache{% end %}, and its key follows
-      # {% .Sum %}. When no entry has that key, as on a branch that
-      # changes the file, the restore takes the newest entry of the same
-      # {% if .Build %}job{% else %}family{% end %}, which holds most of what the job needs.{% if .Build %} Each job
-      # has entries of its own: a job that builds less would save an
-      # entry that the other job then restores whole and never saves.{% end %}
+      # holds the Go modules{% if .Build %} and the build cache{% end %}. Its key follows the hash
+      # of these files:
+      #{% range .Keys %}
+      #   {% . %}{% end %}
+      #{% if gt (len .Keys) 1 %}
+      # A saved entry never changes. The files after go.sum choose what
+      # the job compiles and with which flags, so an entry keyed on
+      # go.sum alone would keep the build from before a flag such as
+      # -race changed, and each run would compile it again.
+      #{% end %}
+      # When no entry has that key, as on a branch that changes one of
+      # them, the restore takes the newest entry of the same {% if .Build %}job{% else %}family{% end %},
+      # which holds most of what the job needs.{% if .Build %} Each job has entries of
+      # its own: a job that builds less would save an entry that the
+      # other job then restores whole and never saves.{% end %}
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod{% if .Build %}
             ~/.cache/go-build{% end %}
-          key: go-{% if .Build %}build{% else %}modules{% end %}-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-{% if .Build %}${{ github.job }}-{% end %}${{ hashFiles('{% .Sum %}') }}
+          key: go-{% if .Build %}build{% else %}modules{% end %}-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-{% if .Build %}${{ github.job }}-{% end %}${{ {% .HashFiles %} }}
           restore-keys: go-{% if .Build %}build{% else %}modules{% end %}-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-{% if .Build %}${{ github.job }}-{% end %}{% end %}
 {% define "go-save" %}
 

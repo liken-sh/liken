@@ -46,10 +46,14 @@ const plansDir = "plans/"
 // skills, and the smoke checks, which test an image and do not go into
 // it. A manual generates its skills from its guides, and the repository
 // keeps them for agents to read. brand's skills/ is the generator, and
-// only the manuals run it. A change to these paths does not give the
-// component a new version. A change to any of them except plans/
-// still runs the component's own jobs.
-var notOutputs = []string{"docs/", plansDir, "AGENTS.md", "README.md", "skills/", "smoke/"}
+// only the manuals run it. The hooks, the coverage floor, and the git
+// ignore file configure checks and git, and no build reads them. A
+// .dockerignore is not in the list: it decides what an image's build
+// context sends, so it shapes the image. A change to these paths does
+// not give the component a new version. A change to any of them except
+// plans/ still runs the component's own jobs.
+var notOutputs = []string{"docs/", plansDir, "AGENTS.md", "README.md", "skills/", "smoke/",
+	".pre-commit-config.yaml", ".testcoverage.yml", ".gitignore"}
 
 // isNotOutput is true for a path, relative to the component, that no
 // output is built from: a path in notOutputs or in the component's

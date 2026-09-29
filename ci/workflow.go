@@ -24,18 +24,28 @@ var templates = template.Must(template.New("").
 		"join":  strings.Join,
 		"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 		"goCache": func(mod, sum, family string, build bool) goCache {
-			return goCache{Mod: mod, Sum: sum, Family: family, Build: build}
+			return goCache{Mod: mod, Keys: []string{sum}, Family: family, Build: build}
 		},
 	}).
 	ParseFS(templateFiles, "templates/*.tmpl"))
 
 // goCache is the data of the go-restore and go-save templates: the
-// go.mod that names the Go version, the go.sum files that key the
+// go.mod that names the Go version, the files whose hash keys the
 // cache, the family whose entries a restore falls back to, and whether
 // the cache holds the build cache too.
 type goCache struct {
-	Mod, Sum, Family string
-	Build            bool
+	Mod, Family string
+	Keys        []string
+	Build       bool
+}
+
+// HashFiles is the GitHub expression that hashes the key files.
+func (g goCache) HashFiles() string {
+	quoted := make([]string, len(g.Keys))
+	for i, file := range g.Keys {
+		quoted[i] = "'" + file + "'"
+	}
+	return "hashFiles(" + strings.Join(quoted, ", ") + ")"
 }
 
 // Workflows renders every generated workflow, keyed by its path from
@@ -150,6 +160,8 @@ type jobData struct {
 	// a prek job when its module directory has a go.mod, because its
 	// hooks then run Go.
 	Go bool
+	// Cache is the job's Go cache, when Go is true.
+	Cache goCache
 }
 
 func componentData(root string, c *Component) (map[string]any, error) {
@@ -174,6 +186,7 @@ func componentData(root string, c *Component) (map[string]any, error) {
 			_, err := os.Stat(filepath.Join(root, d.ModuleDir, "go.mod"))
 			d.Go = err == nil
 		}
+		d.Cache = jobCache(c, d)
 		for _, file := range job.Coverage {
 			if strings.Contains(file, "/") {
 				return nil, fmt.Errorf("%s: job %s: a coverage file must be at the component's top, not %q", c.Name(), job.Name, file)
@@ -205,6 +218,31 @@ func componentData(root string, c *Component) (map[string]any, error) {
 		"Deploy":         c.Outputs.Deploy,
 		"PublishTimeout": publishTimeout,
 	}, nil
+}
+
+// jobCache is the Go cache of one job. Every manual reads the same
+// modules, so the hugo jobs share one entry of modules, keyed on go.sum.
+//
+// Any other job keeps a build cache of its own. A saved entry never
+// changes, and a restore that hits its key saves nothing, so an entry
+// keyed on go.sum alone keeps what the job compiled when go.sum last
+// changed. A job whose flags changed after that, such as a test run
+// that adds -race, then compiles every dependency again on each run.
+// So the key follows the files that choose what the job compiles and
+// with which flags: the Makefile where the job runs, the component's
+// package.toml, which holds the job's command, and its hooks, which a
+// prek job runs.
+func jobCache(c *Component, d jobData) goCache {
+	sum := path.Join(d.ModuleDir, "go.sum")
+	if d.Toolchain == "hugo" {
+		return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Keys: []string{sum}, Family: "manuals"}
+	}
+	return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Family: d.ModuleDir, Build: true, Keys: []string{
+		sum,
+		path.Join(d.WorkDir, "Makefile"),
+		path.Join(c.Dir, "package.toml"),
+		path.Join(c.Dir, ".pre-commit-config.yaml"),
+	}}
 }
 
 // WriteWorkflows writes the generated workflows under root, and

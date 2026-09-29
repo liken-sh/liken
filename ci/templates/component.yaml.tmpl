@@ -81,7 +81,7 @@ jobs:{% range .Jobs %}
       - id: build-setup
         uses: ./.github/actions/build-setup{% else %}
       - uses: actions/checkout@v7{% end %}{% if .Go %}
-{% template "go-restore" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (or (and (eq .Toolchain "hugo") "manuals") .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
+{% template "go-restore" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
       # A saved cache never changes, and Go trims a build cache entry
       # that no build used for five days, so a build cache saved once
@@ -137,7 +137,7 @@ jobs:{% range .Jobs %}
       - run: {% .Run %}{% else %}
 
       - run: |{% range $lines %}
-          {% . %}{% end %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (or (and (eq .Toolchain "hugo") "manuals") .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
+          {% . %}{% end %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
