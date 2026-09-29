@@ -121,9 +121,26 @@ One CalVer tag releases every component whose outputs changed since its
 own previous release, and a push to `main` publishes a development
 build of each component that changed. Each component's `package.toml`
 names its dependencies, its checks, and its outputs, and `ci/` writes
-`.github/workflows/` from those files. Run `make workflows` after you
-change a `package.toml`; CI fails when the workflows differ from what
-the generator writes.
+`.github/workflows/` and `docker-bake.hcl` from those files and from
+the `FROM` lines of each Dockerfile. Run `make workflows` after you
+change a `package.toml` or a `FROM` line; CI fails when the generated
+files differ from what the generator writes.
+
+Every image builds through `docker-bake.hcl`, on a workstation and in
+CI, as the target of the same name:
+`docker buildx bake media-operator-player --load` at the top of the
+repository. A Dockerfile that builds on a base image of the repository
+names it bare, as in `FROM mpv`, and the bake file builds that base
+from its own directory at the same commit. No Dockerfile names a
+published tag of a base.
+
+The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
+pinned components: each states a version, the date of the Debian
+snapshot it installs from, and a revision, and publishes under the tag
+`<version>-<revision>`. A change to a base's recipe needs a new
+revision, and so does each pinned component that builds on it. CI fails
+when a recipe changed with no new revision. The `bump-components`
+skill under `.agents/skills` holds the procedure.
 
 The `releases` skill under `.agents/skills` holds the calendar scheme,
 what a tag releases, and how to pin a development build. Load it before

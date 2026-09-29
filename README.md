@@ -14,8 +14,12 @@ Each top-level directory is one component, named for what it ships:
   `bluetooth.liken.sh`.
 - [`display-operator/`](display-operator/) runs the Weston compositor
   and publishes each monitor output as a device under
-  `display.liken.sh`. Its Dockerfile also builds the base images
-  `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`.
+  `display.liken.sh`.
+- [`vulkan/`](vulkan/), [`vaapi/`](vaapi/), [`ffmpeg/`](ffmpeg/),
+  [`mpv/`](mpv/), and [`weston/`](weston/) are the base images that
+  the operators' screens, players, and compositor build on. Each one
+  is a library closure on `scratch`, built from the Debian packages of
+  one snapshot date.
 - [`equipment-operator/`](equipment-operator/) drives the A/V equipment
   at the far end of a machine's cable: receivers over the network, and
   televisions over CEC.

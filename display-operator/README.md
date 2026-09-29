@@ -72,33 +72,23 @@ of is documented in `liken`'s repository, in
 
     go build ./...
     go test ./...
-    docker build --target vulkan -t vulkan .
-    docker build --target vaapi -t vaapi .
-    docker build --target ffmpeg -t ffmpeg .
-    docker build --target mpv -t mpv .
-    docker build --target weston -t weston .
-    docker build --target display-operator -t display-operator .
-    docker build --target display-capture -t display-capture .
-    docker build --target display-api -t display-api .
 
-One `Dockerfile` builds eight images. Seven are built on the one
-under them, and the API's is built on nothing.
-`ghcr.io/liken-sh/vulkan` is the Vulkan loader, the Intel and AMD
-drivers, and the client libraries a Wayland program opens, on nothing
-else. It is the base image for every Vulkan client liken ships.
-`ghcr.io/liken-sh/vaapi` is that image plus the VA-API loader and the
-Intel media driver, and `ghcr.io/liken-sh/ffmpeg` is that plus ffmpeg
-and ffprobe, for a program that decodes video on the node's GPU.
-`ghcr.io/liken-sh/mpv` is that plus mpv and every library and data
-file it opens by name, and the media operator's player builds on it.
-`ghcr.io/liken-sh/weston` is the vulkan image plus the compositor and
-every library it loads. `ghcr.io/liken-sh/display-operator` is that
-image plus the operator's static binary, and it is the image the
-`DaemonSet` runs. `ghcr.io/liken-sh/display-capture` is the ffmpeg
-image plus the same binary, and the pod's capture container runs it.
-`ghcr.io/liken-sh/display-api` is that binary on `scratch`, and the
-`display-api` `Deployment` runs it. The EDID
-fixtures in `testdata` are read off real monitors with
+The images build through the bake file at the top of the repository,
+from the top of the repository:
+
+    docker buildx bake display-operator display-capture display-api --load
+
+One `Dockerfile` builds three images, each with the operator's static
+binary. `ghcr.io/liken-sh/display-operator` is the
+[`weston`](../weston/) base image plus the binary, and it is the image
+the `DaemonSet` runs. `ghcr.io/liken-sh/display-capture` is the
+[`ffmpeg`](../ffmpeg/) base image plus the same binary, and the pod's
+capture container runs it. `ghcr.io/liken-sh/display-api` is that
+binary on `scratch`, and the `display-api` `Deployment` runs it. The
+Dockerfile names each base bare, as in `FROM weston`, and the bake
+file builds it from its own directory at the same commit.
+
+The EDID fixtures in `testdata` are read off real monitors with
 `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`.
 
 ## License

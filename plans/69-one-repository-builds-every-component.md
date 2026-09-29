@@ -941,6 +941,50 @@ how any vendored domain gets its bytes.
    `weston` pinned components, and make their consumers build
    `FROM` the tree.
 
+   Built 2026-09-28. Each base has its own directory at the top, with
+   a `package.toml`, a `Dockerfile`, a `README.md`, and its closure
+   script, and `display-operator` is a consumer like the others. The
+   bases are not source builds yet. Each one installs Debian packages
+   and ships their library closure on `scratch`, as the stages in
+   `display-operator`'s Dockerfile did. So a base's version is not an
+   upstream version: it is the date of the snapshot.debian.org archive
+   that the build installs from, as `YYYYMMDD`, and the tag is
+   `<version>-<revision>`, such as `20260928-1`. Every base starts
+   `FROM debian:trixie-slim` by digest, installs from that one
+   snapshot, and upgrades the image's own packages to it. The five
+   bases share one date and one digest, so a library that two of them
+   hold is the same file. The sources name `http`: the slim image has
+   no CA certificates, and apt checks every package against the signed
+   Release files.
+
+   The file is `Dockerfile`, not `Containerfile`. The recipe hash is a
+   label on the published image, `sh.liken.recipe`, not a build
+   record, and it covers the files that Docker sends in the build
+   context, so a base's `.dockerignore` keeps its `README.md` and its
+   `smoke/` check out of it. The recipe also covers each named
+   directory context that no dependency owns, and it refuses a `FROM`
+   outside the repository that names no digest. A pinned component
+   depends only on pinned components, publishes images only, and never
+   moves `:latest`. When its tag is published and its hash matches, CI
+   publishes nothing for it and downloads nothing: each consumer's
+   bake build makes the base again from its layer cache. Its jobs
+   still run when its own paths change, so a new smoke check runs.
+
+   `ci generate` also writes `docker-bake.hcl`, with one target for
+   each image. The generator reads each Dockerfile's `FROM` and
+   `COPY --from` lines for the stages that the image's target reaches,
+   and it gives each base that they name a `target:` context. The
+   publish job builds through the same file. `ci deps` counts a bare
+   `FROM mpv` as a use of `mpv`.
+
+   The shared stages went to the lowest base that uses them.
+   `closure.sh` and `snapshot.sh` are in `vulkan/`, and the other
+   bases take that directory as the build context `builder`. The
+   hotplug shim and the layout module are in `weston/`, because only
+   the compositor loads them, and they must link the glibc of the
+   compositor's snapshot. A change to either one is a new `weston`
+   revision.
+
 ### Stage 2: the OS builds from source
 
 This stage starts after stage 1 is done. It moves the OS's vendored

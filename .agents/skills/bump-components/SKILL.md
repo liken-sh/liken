@@ -1,6 +1,6 @@
 ---
 name: bump-components
-description: Bump the vendored component pins — the make versions report, each domain's latest.sh --bump, the changelog research, and a final report of what changes and what to watch. Use when I say /bump-components or ask to bump, update, or refresh the component pins.
+description: Bump the vendored component pins — the make versions report, each domain's latest.sh --bump, the changelog research, and a final report of what changes and what to watch — and the pinned base images, their Debian snapshot and their revisions. Use when I say /bump-components or ask to bump, update, or refresh the component pins or the base images.
 ---
 
 Bump every vendored pin that is behind, read the changelogs, and
@@ -111,7 +111,49 @@ metal boot are its first real test.
 4. `make smoke-uefi`: one boot to Ready proves the pieces still
    assemble into a machine.
 
-## 5. Report
+## 5. The base images
+
+The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
+pinned components at the top of the repository. `make versions` does
+not report them. Each one's `package.toml` states a `version`, the date
+of the snapshot.debian.org archive it installs from as `YYYYMMDD`, and
+a `revision`. Each one publishes under the tag `<version>-<revision>`.
+
+**A new snapshot.** All five move together, because a library that two
+bases hold must be the same file in both. The steps are in
+`vulkan/README.md`: check that the snapshot exists, read the digest of
+the newest `debian:trixie-slim`, set `version` to the date and
+`revision` to 1 in all five `package.toml` files, set the digest in
+every `FROM debian:trixie-slim` line, run `make workflows`, build every
+image that uses a base with `docker buildx bake`, and run each base's
+`smoke/` check. Compare the package versions with the old snapshot and
+report the ones that moved.
+
+**A new revision.** CI hashes each base's recipe: its `package.toml`,
+its `Dockerfile`, every file in its build context, the digest of each
+image outside the repository that it starts from, and the tag of each
+component in its `[depends]`. A change to any of them at the same
+version needs the next revision. The rule cascades: a base's tag is in
+the recipe of every pinned component above it, so a new revision of
+`ffmpeg` changes the recipe of `mpv`, and `mpv` needs a new revision in
+the same commit. Walk the graph up from each changed base and raise the
+revision of every pinned component that depends on it, directly or
+through another base:
+
+* `vulkan` raises `vaapi`, `ffmpeg`, `mpv`, and `weston`.
+* `vaapi` raises `ffmpeg` and `mpv`.
+* `ffmpeg` raises `mpv`.
+* `mpv` and `weston` raise nothing.
+
+A new snapshot sets every revision to 1, so it needs no cascade. When
+CI fails with "the recipe of N pinned components changed with no new
+revision", the message names each component to raise.
+
+The files that a base's `.dockerignore` leaves out, such as its
+`README.md` and its `smoke/` check, are not in the recipe, and a
+change to them needs no revision.
+
+## 6. Report
 
 Give one verdict per bumped component: what changed, whether there
 is anything to worry about, and what to watch in the drills. Lead

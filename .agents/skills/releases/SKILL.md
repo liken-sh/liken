@@ -1,6 +1,6 @@
 ---
 name: releases
-description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, pinning a development build, or reasoning about a component's version.
+description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, pinning a development build, or reasoning about a component's version.
 ---
 
 # Releases and development builds
@@ -80,10 +80,35 @@ one. A development build never moves `:latest`.
 The OS publishes no development builds. The channel holds releases
 only.
 
+## Pinned components
+
+The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
+pinned components. A pinned component's `package.toml` states a
+`version` and a `revision`, and it publishes under its own tag,
+`<version>-<revision>`, such as `20260928-1`. That tag never looks
+like a release version. The version of a base is the date of the Debian
+snapshot it installs from.
+
+A pinned component publishes when its tag is not on ghcr yet: on the
+first push to `main` or the first release tag that carries the new
+tag, while `PUBLISH` is `true`. A tag that is published already builds
+nothing. The published image carries the hash of its recipe in the
+label `sh.liken.recipe`, and the plan job fails when the tree's recipe
+differs from it: the recipe changed, and the revision did not. The
+`bump-components` skill holds the rule for a new revision.
+
+A pinned component never moves `:latest`. No consumer reads a
+published base: every consumer builds `FROM` the base in the tree,
+through `docker-bake.hcl`, so a change to a base reaches each
+consumer at the same commit, and the consumer releases because its
+dependency's directory changed.
+
 ## Where the outputs go
 
 * Each image goes to `ghcr.io/liken-sh/<image>`, under the version.
-  A release also moves `:latest`, unless a newer release has it.
+  A release also moves `:latest`, unless a newer release has it. A
+  pinned component's image goes under its own tag and leaves `:latest`
+  as it is.
 * Each `deploy/` directory goes to
   `ghcr.io/liken-sh/<component>-deploy` as an OCI artifact, after
   every image of the component. The artifact's `kustomization.yaml`
