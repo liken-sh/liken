@@ -13,9 +13,10 @@
 #   flatcar/     the redirect host's Flatcar image, which `make
 #                flatcar` downloads; about 550 MB, and redownloadable
 #
-# identity/, image/, and channel/ belonged to the machine this domain
-# once ran. A checkout from that era can still hold them, and none of
-# it may ever land in history, the identity keys above all.
+# The liken CLI writes identity/, image/, and channel/ into a
+# cluster's directory. This directory is not one, but a cluster made
+# here by mistake must never reach history, the identity keys above
+# all.
 .terraform/
 identity/
 image/
