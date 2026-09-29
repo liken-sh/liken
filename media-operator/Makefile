@@ -116,6 +116,18 @@ test-rust:
 
 .PHONY: test-docs
 test-docs:
+# The reference pages are generated and committed, so a checkout
+# carries them. make decides that a page is current by comparing file
+# times, and a fresh checkout gives every file about the same time.
+# In CI, make then builds nothing, and a change to a generator in
+# brand/ leaves a stale page that the site publishes. The check runs
+# the generate target with -B, which regenerates every page whatever
+# the times say, and fails when the result differs from what git has
+# staged, or adds an untracked file, as the skills check below does.
+	$(MAKE) -C docs -B generate
+	git diff --quiet -- docs/content/docs/reference \
+		&& test -z "$$(git ls-files --others --exclude-standard -- docs/content/docs/reference)" \
+		|| { git status --short -- docs/content/docs/reference; exit 1; }
 	$(MAKE) -C docs test
 # skills/ is generated from the guides and committed, so a checkout
 # carries it. The check regenerates it and fails when the result differs

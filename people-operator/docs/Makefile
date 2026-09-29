@@ -22,6 +22,13 @@ GENERATED := $(REFERENCE)/people.md
 SKILLS := go tool skills
 BASE := https://liken.sh/people/
 
+# The generate target builds every generated reference page and
+# nothing else. The test-docs target in ../Makefile runs it with -B,
+# so that every page is regenerated, and fails when one differs from
+# what is committed.
+.PHONY: generate
+generate: $(GENERATED)
+
 .PHONY: build
 build: $(GENERATED)
 	$(HUGO) --destination dist/site

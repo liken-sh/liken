@@ -49,6 +49,10 @@ content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml crdref
 content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref/cluster-preamble.md $(CRDREF_SOURCES)
 	go tool crdref $< $@ crdref/cluster-preamble.md
 
+# The generate target builds every generated reference page and
+# nothing else. The test-docs target in ../Makefile runs it with -B,
+# so that every page is regenerated, and fails when one differs from
+# what is committed.
 generate: $(GENERATED)
 
 # The built site. The find covers every content, layout, and theme
