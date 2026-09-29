@@ -35,7 +35,6 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -155,13 +154,4 @@ func List[T any](c *apiclient.Client, path string) ([]T, error) {
 		return nil, err
 	}
 	return list.Items, nil
-}
-
-// Unreachable reports whether a request failed before any API server
-// answered it: the dial failed, or the connection went silent until a
-// timeout. An error that carries an HTTP status is an answer, and it is
-// not this kind.
-func Unreachable(err error) bool {
-	var transport *url.Error
-	return errors.As(err, &transport)
 }

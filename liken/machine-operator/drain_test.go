@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -296,17 +297,47 @@ func TestGateThroughDrainHoldsWhenPodsCannotBeListed(t *testing.T) {
 	}
 }
 
-// A drain whose API server cannot be reached lets the granted reboot go
-// ahead, the same as a pass whose Node read failed. The Node came from
-// the watch's store, which keeps answering while the API server is
-// down, and no pod can move until it returns.
-func TestGateThroughDrainLetsTheRebootGoWhenTheAPIServerIsUnreachable(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	server.Close()
-	client := apiclient.New(server.URL, http.DefaultClient, "")
-	conv := gateThroughDrain(client, drainNode(true, true, drainNow.Format(time.RFC3339)), rebootingConvergence(), drainNow)
-	if !conv.requestReboot {
-		t.Errorf("the reboot held at %+v, want it to go ahead", conv.condition)
+// A drain holds a granted reboot while the pods of a live Node cannot
+// be listed, whatever the failure: a server that refuses the dial, a
+// server slower than the client's timeout, or an error status. A slow
+// API server, such as one whose etcd has no quorum, must not make a
+// machine reboot and kill its pods past their disruption budgets.
+func TestGateThroughDrainHoldsWhateverStopsThePodList(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+	t.Cleanup(slow.Close)
+	t.Cleanup(func() { close(release) })
+	cases := []struct {
+		name   string
+		client *apiclient.Client
+	}{
+		{"a server that refuses the dial", apiclient.New(closed.URL, http.DefaultClient, "")},
+		{"a server slower than the timeout", apiclient.New(slow.URL, &http.Client{Timeout: 50 * time.Millisecond}, "")},
+		{"a server that answers an error", testClient(t, (&drainAPI{listFail: true}).handler())},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conv := gateThroughDrain(c.client, drainNode(true, true, drainNow.Format(time.RFC3339)), rebootingConvergence(), drainNow)
+			if conv.requestReboot || conv.condition.Reason != "Draining" {
+				t.Errorf("the reboot went ahead at %+v, want it held", conv.condition)
+			}
+		})
+	}
+}
+
+// A pass whose Node read failed skips the drain and lets a granted
+// reboot go ahead: during a demotion, or while the API server is down
+// and the Node's store cannot answer, there is no Node to cordon.
+func TestAGrantedRebootWithNoNodeSkipsTheDrain(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the gate sent %s %s, want nothing", r.Method, r.URL.Path)
+	}))
+	var d disruptions
+	conv := d.gate(client, nil, errors.New("the API server is down"), turnGranted, drainNow, rebootingConvergence())
+	if !conv.requestReboot || d.draining {
+		t.Errorf("reboot = %v, draining = %v; want the reboot and no drain", conv.requestReboot, d.draining)
 	}
 }
 

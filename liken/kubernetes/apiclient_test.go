@@ -345,23 +345,3 @@ func TestInClusterClientAnswersA429AtOnce(t *testing.T) {
 		t.Errorf("err = %v after %d requests and %s, want the 429 at once", err, sent.Load(), time.Since(started))
 	}
 }
-
-// A request that no API server answered is unreachable. An answer with
-// a status is not, and neither is no error.
-func TestUnreachableSeparatesNoAnswerFromAnAnswer(t *testing.T) {
-	closed := httptest.NewServer(http.NotFoundHandler())
-	closed.Close()
-	down := apiclient.New(closed.URL, http.DefaultClient, "")
-	refusing := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "machines.liken.sh is forbidden", http.StatusForbidden)
-	}))
-	absent := testClient(t, http.NotFoundHandler())
-
-	_, downErr := GetMachine(down, "node-1")
-	_, refusedErr := GetMachine(refusing, "node-1")
-	_, absentErr := GetMachine(absent, "node-1")
-	if !Unreachable(downErr) || Unreachable(refusedErr) || Unreachable(absentErr) || Unreachable(nil) {
-		t.Errorf("Unreachable = %v, %v, %v, %v; want only the server that is down",
-			Unreachable(downErr), Unreachable(refusedErr), Unreachable(absentErr), Unreachable(nil))
-	}
-}
