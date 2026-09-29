@@ -20,10 +20,14 @@
 # secret that this repository gave it.
 #
 # Every input that shapes the host is below or beside this file: the
-# Flatcar image that the Makefile downloads, redirects.bu, the
-# Caddyfile, and the two variables. A change to any of them replaces
-# the instance, and nothing on the host changes by hand. The host has
-# no SSH. README.md gives the way in for an emergency.
+# Flatcar release in flatcar.mk, redirects.bu, the Caddyfile, and the
+# two variables. A change to any of them replaces the instance, and
+# nothing on the host changes by hand. The Flatcar pin sets only the
+# release that a new host boots first. Flatcar then updates the host
+# to the current stable release and follows the stable channel, so a
+# host that is a year old runs a current release, and a replacement
+# is never needed for an update. The host has no SSH. README.md gives
+# the way in for an emergency.
 
 variable "redirect_names" {
   description = "The subdomains of liken.sh that the redirect host answers over HTTPS, each with a 301 to liken.sh/<name>/"
@@ -48,10 +52,18 @@ variable "redirect_names" {
   }
 }
 
+# The image comes from Amazon ECR Public's copy of Docker's official
+# images. Its index digest is the same as the digest of Docker Hub's
+# library/caddy:2.11.4, so the bytes are the same. Docker Hub counts
+# anonymous pulls for each IPv4 address or IPv6 /64 against a small
+# limit, and the host's address can share that count with other
+# machines. ECR Public limits an anonymous client to one pull each
+# second.
+
 variable "caddy_image" {
   description = "The official Caddy image that the redirect host runs, with its tag and its digest"
   type        = string
-  default     = "docker.io/library/caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52"
+  default     = "public.ecr.aws/docker/library/caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52"
 
   # Docker pulls by the digest when a reference has one, so the tag
   # is only for the reader. Without a digest, a new push to the tag
@@ -62,37 +74,83 @@ variable "caddy_image" {
   }
 }
 
-# The Flatcar image, uploaded as a private Linode image. `make flatcar`
-# downloads it and checks its digest, then writes the version to
-# flatcar/version, so the Makefile holds the only copy of the pin.
-# Without the download, the plan fails here and names the missing file.
+# The Flatcar image, uploaded as a private Linode image. flatcar.mk
+# holds the pin, and this file reads the version and the MD5 digest
+# from the same lines that the Makefile includes. The MD5 digest is
+# the image's identity for Terraform: a new pin replaces the image,
+# and the instance below with it. The provider reads the file only
+# when it creates the image, so a plan needs no download, and only an
+# apply that creates the image needs `make flatcar` first. After the
+# upload, the provider records the MD5 digest of the bytes it sent,
+# and an apply fails if they are not the bytes that flatcar.mk names.
 #
-# The file hash is the image's identity for Terraform: a different
-# file replaces the image, and the instance below with it. Linode
-# offers the metadata service, which carries the Ignition config, only
-# to an image that is marked for cloud-init, so the upload sets
-# cloud_init. Its region is the one the release bucket uses, and
-# us-east offers the metadata service.
+# 4459.2.4 is the newest stable release with Flatcar's first disk
+# layout, whose image is 4,756,340,736 bytes uncompressed. Linode
+# refuses an image larger than 6144 MiB, and the images of the later
+# releases, with Flatcar's larger layout, are about 8 GB. An update
+# does not change the partitions, so the host keeps the first layout,
+# and Flatcar keeps updating that layout: it plans to drop it no
+# earlier than 2030 (github.com/flatcar/Flatcar/issues/1917).
+#
+# Linode offers the metadata service, which carries the Ignition
+# config, only to an image that is marked for cloud-init, so the
+# upload sets cloud_init. Its region is the one the release bucket
+# uses, and us-east offers the metadata service.
 
 locals {
-  flatcar_version = trimspace(file("${path.module}/flatcar/version"))
-  flatcar_image   = "${path.module}/flatcar/${local.flatcar_version}/flatcar_production_akamai_image.bin.gz"
+  flatcar = {
+    for pair in regexall("(?m)^(FLATCAR_[A-Z0-9]+) := (\\S+)$", file("${path.module}/flatcar.mk")) :
+    pair[0] => pair[1]
+  }
+  flatcar_image = "${path.module}/flatcar/${local.flatcar.FLATCAR_VERSION}/flatcar_production_akamai_image.bin.gz"
 }
 
 resource "linode_image" "flatcar" {
-  label       = "flatcar-${replace(local.flatcar_version, ".", "-")}"
-  description = "Flatcar Container Linux ${local.flatcar_version}, stable, for the liken.sh redirect host"
+  label       = "flatcar-${replace(local.flatcar.FLATCAR_VERSION, ".", "-")}"
+  description = "Flatcar Container Linux ${local.flatcar.FLATCAR_VERSION}, stable, the first boot of the liken.sh redirect host"
   region      = "us-east"
   cloud_init  = true
 
   file_path = local.flatcar_image
-  file_hash = filemd5(local.flatcar_image)
+  file_hash = local.flatcar.FLATCAR_MD5
 }
 
 # The Ignition config, from the Butane file and the Caddyfile. The ct
 # provider transpiles Butane inside the plan, so no rendered JSON is
 # ever in history to drift from its source, and strict mode makes a
 # Butane warning an error.
+#
+# The Caddyfile reaches the user data byte for byte, so it carries no
+# comments: a comment edit would replace the host and ask Let's
+# Encrypt for every certificate again. Its explanation is here.
+#
+# Caddy gets a Let's Encrypt certificate for each name, and renews
+# it, over HTTP-01 on port 80 or TLS-ALPN-01 on port 443. The
+# challenges need no credential, so the host holds no DNS token. The
+# list of names is fixed on purpose. A policy that asked for a
+# certificate for any name that arrives would let a stranger spend the
+# weekly Let's Encrypt quota of liken.sh by asking for random names,
+# and GitHub Pages renews the apex certificate from that same quota.
+#
+# The one site block lists each name twice, as https and as http://.
+# The HTTPS address makes Caddy manage the certificate. The http://
+# address answers plain HTTP with the same 301, straight to
+# liken.sh, so a name redirects over HTTP before it has its
+# certificate. Caddy's HTTP server answers an ACME HTTP-01 challenge
+# before it runs any site's routes (modules/caddyhttp/server.go), so
+# the http:// address does not take the challenge from Caddy.
+#
+# {labels.2} is the third label from the right of the request's host,
+# which is the name itself: display in display.liken.sh. {uri} is the
+# path and the query of the request, so a deep link keeps its page.
+#
+# The two sites with no host answer 404 for every other request: a
+# name that is not in the list, a host with a trailing dot, or the
+# bare address over HTTP. Over HTTPS, a name without a certificate
+# fails its TLS handshake before any site answers. The global options
+# turn off the admin endpoint, which nothing uses; turn off saving
+# the configuration, because the container's root filesystem is
+# read-only; and stop HTTP/3, because the firewall passes TCP only.
 
 data "ct_config" "redirects" {
   content = templatefile("${path.module}/redirects.bu", {
@@ -106,10 +164,13 @@ data "ct_config" "redirects" {
   pretty_print = false
 }
 
-# The firewall passes only the two ports that Caddy answers. Port 80
-# carries the HTTP-01 challenge and the redirect to HTTPS, and 443
-# carries the redirects and the TLS-ALPN-01 challenge. Every other
-# inbound packet is dropped, SSH included. Outbound traffic passes,
+# The firewall passes only the two ports that Caddy answers, and ICMP.
+# Port 80 carries the HTTP-01 challenge and the plain HTTP redirects,
+# and 443 carries the HTTPS redirects and the TLS-ALPN-01 challenge.
+# ICMP carries the errors that the network sends back, and IPv6 needs
+# one of them: a router does not fragment an IPv6 packet, so it sends
+# Packet Too Big, and path-MTU discovery fails if the host never
+# receives it. Every other inbound packet is dropped, SSH included. Outbound traffic passes,
 # because Caddy must reach Let's Encrypt, Docker must pull the image,
 # and Flatcar must reach its update server. Linode's firewall is
 # stateful, so the replies to those connections come back in.
@@ -124,6 +185,14 @@ resource "linode_firewall" "redirects" {
     action   = "ACCEPT"
     protocol = "TCP"
     ports    = "80,443"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  inbound {
+    label    = "icmp"
+    action   = "ACCEPT"
+    protocol = "ICMP"
     ipv4     = ["0.0.0.0/0"]
     ipv6     = ["::/0"]
   }
@@ -236,4 +305,16 @@ resource "linode_domain_record" "redirects_aaaa" {
   name        = "*"
   record_type = "AAAA"
   target      = split("/", linode_instance.redirects.ipv6)[0]
+}
+
+# The instance's ID and addresses, for the checks and the reboot in
+# README.md.
+
+output "redirect_host" {
+  description = "The redirect host's Linode ID and public addresses"
+  value = {
+    id   = linode_instance.redirects.id
+    ipv4 = one(linode_instance.redirects.ipv4)
+    ipv6 = split("/", linode_instance.redirects.ipv6)[0]
+  }
 }

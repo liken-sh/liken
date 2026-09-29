@@ -257,13 +257,16 @@ a cluster shows: `bluetooth.liken.sh`, `display.liken.sh`, and the
 other operator sites are API groups, and `git.liken.sh` and
 `per-node.liken.sh` are CSI driver names. A person who sees one of
 those names in a cluster and opens it in a browser must arrive at
-that component's manual. A small HTTP service answers every
-`*.liken.sh` name that has no record of its own with a 301 to
-`liken.sh/<name>/`. `www`, `releases`, and `log` keep their own
-records. One wildcard rule covers every name, including
-the API groups of components that do not exist yet. GitHub Pages
-cannot do this, because it serves one custom domain for each
-repository and does not redirect for another domain.
+that component's manual. A small host, a Flatcar Nanode that runs
+Caddy (`liken.sh/redirects.tf`), answers each name with a 301 to
+`liken.sh/<name>/`. A wildcard DNS record sends every `*.liken.sh`
+name that has no record of its own to the host, and `www`,
+`releases`, and `log` keep their own records. The host answers only
+the names in a fixed list, `redirect_names`, because it gets one
+certificate for each name, and a new component's name needs one
+entry in that list. GitHub Pages cannot do this, because it serves
+one custom domain for each repository and does not redirect for
+another domain.
 
 The old repositories are archived after the move, each with a
 `README.md` that names its new directory. The project has no users
@@ -1121,8 +1124,8 @@ the release numbers do not.
   Caddy gets one certificate for each name over HTTP-01 or
   TLS-ALPN-01, in place of the wildcard certificate, because a
   wildcard certificate needs DNS-01, and DNS-01 puts a token that can
-  edit the whole zone on an internet-facing host. The names are a fixed list,
-  `redirect_names`, in place of any name that arrives. A policy that
+  edit the whole zone on an internet-facing host. The names are a
+  fixed list, `redirect_names`, in place of any name that arrives. A policy that
   asked for a certificate for any name would let a stranger spend the
   weekly Let's Encrypt quota of liken.sh with random names, and
   GitHub Pages renews the apex certificate from that quota. The DNS
@@ -1132,10 +1135,16 @@ the release numbers do not.
   leaves `terraform.tf`, because a record of its own wins over the
   wildcard.
 
-  Still open: Linode's upload guide gives 6 GB as the largest
-  uncompressed image, and the Flatcar `4757.2.0` image for Linode is
-  8,455,716,864 bytes uncompressed. The first apply shows whether
-  Linode accepts it.
+  The first boot is Flatcar `4459.2.4`, not the newest stable
+  release. Linode refuses an uploaded image that is larger than 6144
+  MiB: it refused `4757.2.0`, whose image is 8,455,716,864 bytes
+  uncompressed, with "8064 MB exceeds single-image storage limit of
+  6144 MB". `4459.2.4` is the newest stable release with Flatcar's
+  first disk layout, and its image is 4,756,340,736 bytes. The host
+  keeps its automatic updates, so it moves to the current stable
+  release soon after its first boot. An update does not change the
+  partitions, and Flatcar plans to keep updating the first layout
+  until at least 2030 (flatcar/Flatcar#1917).
 - **Attestations on ghcr.** The `push-to-registry` report above
   applies to images. The first image attestation checks it.
 - **Does stagex's Go match the Go version that each k3s release
@@ -1217,5 +1226,14 @@ Checked on 2026-09-28:
 - Let's Encrypt's rate limits: <https://letsencrypt.org/docs/rate-limits/>.
 - Linode's limits on an uploaded image:
   <https://techdocs.akamai.com/cloud-computing/docs/upload-an-image>.
+- Flatcar's plan to keep updating the first disk layout until at
+  least 2030: <https://github.com/flatcar/Flatcar/issues/1917>, and the
+  change to the larger layout:
+  <https://github.com/flatcar/scripts/pull/3027>.
+- Caddy's HTTP server, which answers an ACME HTTP-01 challenge before
+  it runs any site's routes: `modules/caddyhttp/server.go` at
+  `v2.11.4`. certmagic's retries of a failed certificate, up to six
+  hours apart and for at most 30 days: `async.go` at `v0.25.3` in
+  <https://github.com/caddyserver/certmagic>.
 - GitHub Pages custom domains, one for each repository:
   <https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/about-custom-domains-and-github-pages>.

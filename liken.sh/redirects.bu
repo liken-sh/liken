@@ -4,17 +4,23 @@
 # its first boot, from the Linode metadata service. Ignition runs only
 # once, so this file is the whole of the host's state: a change here
 # makes a new instance, and nothing on the host changes by hand.
+#
+# The comments in this file are YAML comments, which the transpiler
+# drops, so a comment edit does not change the user data or replace
+# the host. The text of the Caddyfile and of the unit below does
+# reach the user data, so those texts carry no comments.
 variant: flatcar
 version: 1.1.0
 
-# Flatcar keeps its automatic updates. update_engine checks Flatcar's
-# update server for a newer stable release, and writes it to the
-# passive /usr partition. Then locksmithd reboots the host with its
-# default strategy, `reboot`, five minutes later. If the new release
-# fails to boot, GRUB boots the previous partition again. The Caddy
-# unit below starts at every boot, so an update needs no step here.
-# The Flatcar version that the Makefile pins is only the release that
-# the instance boots first.
+# Flatcar keeps its automatic updates on. update_engine checks
+# Flatcar's update server about 10 minutes after boot and about every
+# hour after that, and writes a newer stable release to the passive
+# /usr partition. Then locksmithd reboots the host with its default
+# strategy, `reboot`, five minutes later. If the new release fails to
+# boot, GRUB boots the previous partition again. So a new host boots
+# the release that flatcar.mk pins, and moves to the current stable
+# release within about half an hour. The Caddy unit starts at every
+# boot, so an update needs no step here.
 
 storage:
   files:
@@ -52,8 +58,17 @@ systemd:
     # file capability CAP_NET_BIND_SERVICE, so Caddy can bind ports 80
     # and 443 on the host network without root. The container drops
     # every other capability, and its root filesystem is read-only.
-    # The host network gives Caddy both address families with no
-    # port mapping in between.
+    # The host network gives Caddy both address families with no port
+    # mapping in between.
+    #
+    # ExecStartPre pulls the image only when Docker does not have it.
+    # A pull asks the registry for the manifest even when Docker has
+    # the image, so a pull at every start would stop Caddy at boot
+    # while the registry is down, although the image is on the disk.
+    # The pull is in ExecStartPre, so TimeoutStartSec limits it: a
+    # pull that hangs fails the start after five minutes, and Restart
+    # starts the unit again. The journald log driver puts Caddy's log
+    # in the journal, beside the unit's own messages.
     - name: caddy.service
       enabled: true
       contents: |
@@ -64,11 +79,11 @@ systemd:
         Wants=network-online.target
 
         [Service]
-        # The first start pulls the image, which can take longer than
-        # the default start timeout.
-        TimeoutStartSec=0
+        TimeoutStartSec=5min
         ExecStartPre=-/usr/bin/docker rm --force caddy
+        ExecStartPre=/bin/sh -c 'docker image inspect ${caddy_image} >/dev/null 2>&1 || docker pull ${caddy_image}'
         ExecStart=/usr/bin/docker run --name caddy \
+          --log-driver=journald \
           --network host \
           --user 65534:65534 \
           --cap-drop ALL \

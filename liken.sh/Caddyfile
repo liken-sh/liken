@@ -1,36 +1,19 @@
-# The redirect host's Caddy configuration. redirects.tf renders this
-# file as a Terraform template, and the Ignition config writes the
-# result to /etc/caddy/Caddyfile on the host.
-#
-# Caddy gets a Let's Encrypt certificate for each name in the site
-# address below, and renews it, over HTTP-01 on port 80 or TLS-ALPN-01
-# on port 443. The challenges need no credential, so the host holds no
-# DNS token. The list of names is fixed on purpose. A policy that asked
-# for a certificate for any name that arrives would let a stranger
-# spend the weekly Let's Encrypt quota of ${domain} by asking for
-# random names, and GitHub Pages renews the apex certificate from that
-# same quota.
-
 {
-	# Nothing on the host changes the configuration while Caddy runs,
-	# so the admin endpoint on localhost:2019 has no job.
 	admin off
-
-	# Caddy saves its running configuration to /config by default. The
-	# container's root filesystem is read-only, and this file is the
-	# configuration, so there is nothing to save.
 	persist_config off
-
-	# The firewall passes TCP only, so Caddy must not advertise HTTP/3,
-	# which runs over UDP.
 	servers {
 		protocols h1 h2
 	}
 }
 
-# {labels.2} is the third label from the right of the request's host,
-# which is the name itself: display in display.${domain}. {uri} is the
-# path and the query of the request, so a deep link keeps its page.
-${join(", ", [for name in names : "${name}.${domain}"])} {
+${join(", ", concat([for name in names : "${name}.${domain}"], [for name in names : "http://${name}.${domain}"]))} {
 	redir https://${domain}/{labels.2}{uri} 301
+}
+
+http:// {
+	respond 404
+}
+
+https:// {
+	respond 404
 }

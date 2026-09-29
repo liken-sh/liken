@@ -4,30 +4,33 @@
 #   make flatcar   download the pinned Flatcar image into flatcar/
 #
 # The redirect host boots the Flatcar Container Linux image that
-# redirects.tf uploads to Linode. The image is about 600 MB, so it
+# redirects.tf uploads to Linode. The image is about 550 MB, so it
 # stays out of history: this target downloads it into flatcar/, which
-# .gitignore excludes, and Terraform reads it from there.
-#
-# The version and the SHA-512 below are the pin. The digest comes from
-# the DIGESTS file that Flatcar publishes beside the image and signs
-# with its image signing key, so a download that does not match fails
-# here, before Terraform uploads it. README.md gives the steps to move
-# the pin and to check the signature on the new digest.
-FLATCAR_VERSION := 4757.2.0
-FLATCAR_SHA512 := c1cfaab50dd7872345cd4ab790722961f9be7e64cfc3dea9f84bc5d38f6a13973917bea8b493da3f408c784f782e9307f3869f4c9eab28888c4544133e19d81a
+# .gitignore excludes. Only an apply that creates the Linode image
+# reads the file. A plan needs no download, because flatcar.mk gives
+# Terraform the version and the MD5 digest.
+include flatcar.mk
 
 FLATCAR_IMAGE := flatcar/$(FLATCAR_VERSION)/flatcar_production_akamai_image.bin.gz
 FLATCAR_URL := https://stable.release.flatcar-linux.net/amd64-usr/$(FLATCAR_VERSION)/flatcar_production_akamai_image.bin.gz
 
-# flatcar/version tells Terraform which downloaded image to upload.
-# The target writes it after the digest check, so the file never names
-# an image that failed the check.
+# Linode refuses an uploaded image that is larger than 6144 MiB
+# uncompressed, and it refuses it only after the upload. The disk's
+# size is in the image's first MiB: the GPT header at byte 512 gives
+# the address of the backup header, which is the disk's last 512-byte
+# sector, at byte 32 of the header. So the check reads that one field
+# and does not decompress the whole image.
+LINODE_IMAGE_LIMIT := 6442450944
+
 .PHONY: flatcar
 flatcar: $(FLATCAR_IMAGE)
-	echo $(FLATCAR_VERSION) > flatcar/version
 
 $(FLATCAR_IMAGE):
 	mkdir -p $(@D)
-	curl --fail --location --output $@.part $(FLATCAR_URL)
+	curl --fail --location --max-time 1800 --output $@.part $(FLATCAR_URL)
 	echo "$(FLATCAR_SHA512)  $@.part" | sha512sum --check --strict
+	last=$$(gzip -dc $@.part | head -c 1048576 | od -An -tu8 -j544 -N8 | tr -d ' '); \
+	size=$$(( (last + 1) * 512 )); \
+	echo "$@: $$size bytes uncompressed, and Linode accepts at most $(LINODE_IMAGE_LIMIT)"; \
+	test $$size -le $(LINODE_IMAGE_LIMIT)
 	mv $@.part $@

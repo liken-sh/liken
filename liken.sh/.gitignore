@@ -11,7 +11,7 @@
 #   channel/     verified downloads from the release channel, cached
 #                by version; redownloadable, so never source
 #   flatcar/     the redirect host's Flatcar image, which `make
-#                flatcar` downloads; about 600 MB, and redownloadable
+#                flatcar` downloads; about 550 MB, and redownloadable
 #
 # identity/, image/, and channel/ belonged to the machine this domain
 # once ran. A checkout from that era can still hold them, and none of
