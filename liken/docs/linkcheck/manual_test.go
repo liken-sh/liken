@@ -36,6 +36,10 @@ var exceptions = []string{
 	// CI renders the test coverage report from the profile the gate
 	// wrote, and copies it into the built tree.
 	"/coverage.html",
+	// The top-level Makefile renders the reports of the components that
+	// have no manual into the built tree.
+	"/coverage/kubernetes.html",
+	"/coverage/media-screen.html",
 }
 
 // TestManualInternalLinks resolves every absolute link in the manual:

@@ -39,6 +39,10 @@ DOCS := $(CURDIR)/dist/docs
 # Each entry is a component's directory and its prefix in the site.
 SITES = $(shell cd ci && go run . sites -root ..)
 
+# Each entry is the directory, the name, and the first coverage file of
+# a component that has a coverage report and no manual to serve it.
+REPORTS = $(shell cd ci && go run . reports -root ..)
+
 # Each manual builds twice. The component's own `make -C docs build`
 # generates the reference pages, runs its own checks, and writes the
 # site for its address on liken.sh. Then Hugo builds the manual again
@@ -75,7 +79,9 @@ preview: docs
 # coverage.html. A component whose tests ran in this CI run has its
 # profiles on disk, and the report renders from them. Every other
 # component keeps the report that the site serves now, so a push that
-# changes one component leaves the other reports as they are.
+# changes one component leaves the other reports as they are. A
+# component with a report and no manual serves it at
+# coverage/<name>.html, under the same rule.
 .PHONY: site
 site:
 	rm -rf $(DOCS)
@@ -98,5 +104,17 @@ site:
 			$(SITE_URL)$${prefix:+/$$prefix}/coverage.html -o $$out/coverage.html; then \
 			echo "$$dir has no coverage report yet"; \
 			rm -f $$out/coverage.html; \
+		fi; \
+	done
+	@set -e; mkdir -p $(DOCS)/coverage; for report in $(REPORTS); do \
+		dir=$${report%%:*}; rest=$${report#*:}; name=$${rest%%:*}; input=$${rest#*:}; \
+		out=$(DOCS)/coverage/$$name.html; \
+		if [ -f $$dir/$$input ]; then \
+			$(MAKE) -C $$dir coverage-report; \
+			cp $$dir/coverage.html $$out; \
+		elif ! curl --fail --silent --show-error --retry 3 \
+			$(SITE_URL)/coverage/$$name.html -o $$out; then \
+			echo "$$dir has no coverage report yet"; \
+			rm -f $$out; \
 		fi; \
 	done

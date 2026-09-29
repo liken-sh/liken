@@ -79,6 +79,15 @@ jobs:
 
       - run: make test
 
+      # The site renders the coverage report from these files.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-media-screen-rust
+          path: |
+            media-screen/coverage-media-screen.xml
+          if-no-files-found: error
+          retention-days: 7
+
   prek:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
     runs-on: ubuntu-26.04

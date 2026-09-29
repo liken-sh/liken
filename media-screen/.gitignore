@@ -1,2 +1,7 @@
 # The Rust build tree. It never belongs to the tree.
 /target/
+
+# The coverage data the gate measures, and the page `make
+# coverage-report` draws from it. CI writes them on every run.
+/coverage-media-screen.xml
+/coverage.html

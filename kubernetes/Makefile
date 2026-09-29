@@ -37,3 +37,16 @@ test:
 	go test -race ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+
+# The coverage report is the profile the gate already measured, drawn
+# as one HTML page. This module has no manual, so the site serves the
+# page at coverage/kubernetes.html. `test` does not depend on it: the
+# gate decides whether a change passes, and the report only shows a
+# reader what the tests reached.
+#
+# coverage is brand's tool. This module has no docs module to pin it
+# as a tool, so the command runs it from brand's own module.
+.PHONY: coverage-report
+coverage-report: coverage.out
+	cd ../brand && go run ./coverage -title kubernetes -root ../kubernetes \
+		-label Go -out ../kubernetes/coverage.html ../kubernetes/coverage.out

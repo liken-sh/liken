@@ -273,3 +273,23 @@ func TestThePlanOnMainComparesWithTheNewestGreenRun(t *testing.T) {
 		})
 	}
 }
+
+// A component with a coverage job and no manual has no site to serve
+// its report, so the site serves it at coverage/<name>.html. reports
+// lists each such component, its directory, and the first file its
+// coverage job writes.
+func TestReportsListsEachCoverageJobWithNoManual(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"lib/package.toml":      "[package]\nname = \"lib\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\ncoverage = [\"coverage.out\"]\n",
+		"crate/package.toml":    "[package]\nname = \"crate\"\n[[jobs]]\nname = \"rust\"\ntoolchain = \"rust\"\nrun = \"make test\"\ncoverage = [\"coverage-crate.xml\"]\n",
+		"app/package.toml":      "[package]\nname = \"app\"\n[docs]\nprefix = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\ncoverage = [\"coverage.out\"]\n",
+		"untested/package.toml": "[package]\nname = \"untested\"\n",
+	})
+	w := newWorld(t, &fakeRegistry{})
+	if err := w.run([]string{"reports", "-root", root}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "crate:crate:coverage-crate.xml\nlib:lib:coverage.out\n"; w.out.String() != want {
+		t.Errorf("reports printed %q, want %q", w.out.String(), want)
+	}
+}

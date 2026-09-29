@@ -810,6 +810,12 @@ jobs:
           path: git-csi-driver
 
       - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].check && contains(fromJSON(needs.plan.outputs.components)['media-screen'].jobs, 'rust') }}
+        with:
+          name: coverage-media-screen-rust
+          path: media-screen
+
+      - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check && contains(fromJSON(needs.plan.outputs.components)['library-operator'].jobs, 'go') }}
         with:
           name: coverage-library-operator-go

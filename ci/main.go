@@ -11,6 +11,7 @@
 //	go run ./ci publish ...         push one component's outputs
 //	go run ./ci record -tag T       write the GitHub release for a tag
 //	go run ./ci sites               list each manual's directory and prefix
+//	go run ./ci reports             list each coverage report that no manual serves
 package main
 
 import (
@@ -54,7 +55,7 @@ type World struct {
 func (w World) run(args []string) error {
 	stdout := w.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, deps, publish, record, or sites")
+		return fmt.Errorf("name a command: generate, plan, deps, publish, record, sites, or reports")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
@@ -91,6 +92,19 @@ func (w World) run(args []string) error {
 		return p.Publish(c, *version, *mode)
 	case "record":
 		return w.record(*root, components, *tag)
+	case "reports":
+		for _, c := range sortedComponents(components) {
+			if c.Docs != nil {
+				continue
+			}
+			for _, job := range c.Jobs {
+				if len(job.Coverage) > 0 {
+					fmt.Fprintf(stdout, "%s:%s:%s\n", c.Dir, c.Name(), job.Coverage[0])
+					break
+				}
+			}
+		}
+		return nil
 	case "sites":
 		for _, c := range sortedComponents(components) {
 			if c.Docs != nil && c.Docs.Prefix != "" {
