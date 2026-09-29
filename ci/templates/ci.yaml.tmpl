@@ -26,13 +26,21 @@
 #   and a pull request diffs with its merge base.
 #
 #   A push to main also diffs with the newest main run that passed, and
-#   it runs every job when the plan cannot find that run. It publishes a development build of each component whose outputs
-#   changed since its newest published version, under a version such
-#   as 2026.10.02-001-dev-017-abcdef01.
+#   it runs every job when the plan cannot find that run. It publishes
+#   a development build of each component whose outputs changed since
+#   its newest published version, under a version such as
+#   2026.10.02-001-dev-017-abcdef01.
 #
 #   A release tag, such as 2026.10.02-001, publishes each component
 #   whose outputs changed since its own newest release, under the
 #   tag's version. A component that did not change keeps its version.
+#
+#   A run that publishes runs the same jobs and images as a run that
+#   does not: those that read the change since the newest main run
+#   that passed. A job whose files did not change passed on the same
+#   files in that run. It also runs each image that reads the VERSION
+#   build argument, because the publish gives it a new version. The
+#   publish builds every image of the component, from the layer cache.
 #
 # A pinned component, such as a base image, states its own version and
 # revision, and it publishes under the tag <version>-<revision>, such
@@ -47,7 +55,7 @@
 # says so, as long as nothing it needs failed.
 #
 # A real publish happens only when the repository variable PUBLISH is
-# true. Without it, main and the tags run every check and push
+# true. Without it, main and the tags run their checks and push
 # nothing, and the plan job still proves that the workflow can push
 # to every package.
 name: ci
@@ -101,6 +109,7 @@ jobs:
       actions: read
     outputs:
       components: ${{ steps.plan.outputs.components }}
+      site: ${{ steps.plan.outputs.site }}
     steps:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
@@ -193,16 +202,17 @@ jobs:
   # The site is every component's manual in one tree: liken's manual
   # at the root, and each other component's manual under its prefix,
   # such as liken.sh/display/. GitHub Pages serves it from this
-  # repository at liken.sh. Every push to main that starts a run
-  # deploys it, because the coverage report of each component is part
-  # of it. A push of plans only starts no run, and the site holds no
-  # plan.
+  # repository at liken.sh, together with the coverage report of each
+  # component. A push to main deploys it when the plan says the site
+  # changed: a manual's job ran, a job that writes a coverage profile
+  # ran, the site's build changed, or every job runs. A push of plans
+  # only starts no run, and the site holds no plan.
   #
   # A job that did not run in this push has no new coverage profile,
   # so its report is the one the site serves now.
   site:
     needs: [plan{% range .Components %}, {% .Name %}{% if .Publishes %}, {% .Name %}-publish{% end %}{% end %}]
-    if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
+    if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:

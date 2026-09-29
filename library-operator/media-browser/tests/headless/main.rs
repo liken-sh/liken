@@ -284,22 +284,28 @@ fn fixture(dir: &Path) -> (PathBuf, PathBuf) {
         )
         .expect("insert the fixture movie");
 
-    // The page reads its backdrop and its logo off the files table by
-    // role, so the fixture holds one of each beside the poster.
-    for (path, role) in [("backdrop.jpg", "backdrop"), ("logo.png", "logo")] {
+    // The page reads its backdrop, its logo, and its trailer off the files
+    // table by role, so the fixture holds one of each beside the poster.
+    // The trailer puts the Trailer button on the page, so a capture of the
+    // page draws every glyph the playback row has.
+    for (path, kind, role) in [
+        ("backdrop.jpg", "image", "backdrop"),
+        ("logo.png", "image", "logo"),
+        ("trailer.mkv", "video", "trailer"),
+    ] {
         connection
             .execute(
-                "INSERT INTO files (library, path, type, role) VALUES ('drill/films', ?, 'image', ?)",
-                (path, role),
+                "INSERT INTO files (library, path, type, role) VALUES ('drill/films', ?, ?, ?)",
+                (path, kind, role),
             )
-            .expect("insert the fixture art file");
+            .expect("insert the fixture file");
         connection
             .execute(
                 "INSERT INTO file_items (library, path, item) \
                  VALUES ('drill/films', ?, 'movie:path:one')",
                 (path,),
             )
-            .expect("link the fixture art file");
+            .expect("link the fixture file");
     }
 
     let volume = dir.join("volume");

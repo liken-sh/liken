@@ -113,3 +113,25 @@ func TestSyncReportsADigestPinnedOperator(t *testing.T) {
 		t.Fatalf("a digest pin must fail and name the domain: %v", err)
 	}
 }
+
+// Every -cli image is built for linux/amd64 alone, so a workstation of
+// any other architecture has no binary to pull. Sync refuses before it
+// pulls or writes anything, with an error that names the supported
+// architecture, instead of a registry error about a missing manifest.
+func TestSyncRefusesAnArchitectureWithNoBuild(t *testing.T) {
+	refs := fakePull(t)
+	binDir := filepath.Join(t.TempDir(), "bin")
+	operators := []Operator{{Domain: "audio", Image: "ghcr.io/liken-sh/audio-operator:2026.09.03-007"}}
+
+	err := Sync(operators, "arm64", binDir, "/usr/bin", &bytes.Buffer{})
+
+	if err == nil || !strings.Contains(err.Error(), "arm64") || !strings.Contains(err.Error(), "amd64") {
+		t.Fatalf("an arm64 sync must fail and name both architectures: %v", err)
+	}
+	if len(*refs) != 0 {
+		t.Errorf("pulled %v before refusing", *refs)
+	}
+	if _, statErr := os.Stat(binDir); !os.IsNotExist(statErr) {
+		t.Errorf("created %s before refusing", binDir)
+	}
+}

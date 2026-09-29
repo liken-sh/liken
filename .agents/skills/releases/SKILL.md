@@ -12,7 +12,7 @@ that writes that workflow from each component's `package.toml`,
 decides what each run publishes.
 
 **Publishing needs the repository variable `PUBLISH` set to `true`.**
-Without it, a tag and a push to `main` run every check and push
+Without it, a tag and a push to `main` run their checks and push
 nothing. Check it with `gh variable get PUBLISH -R liken-sh/liken`. If
 it is not `true`, stop and tell me; do not push a tag.
 
@@ -43,8 +43,10 @@ published release, finds the git tag of that release, and diffs the
 component's paths from there to the tagged commit:
 
 * A component whose outputs changed releases under the tag's version.
-  Its checks run, its images build and pass their smoke checks, and
-  its publish job pushes the images and then its deploy artifact.
+  The checks and the images that read the change since the newest
+  green run on `main` run, as the section "The checks a run runs"
+  says. Its publish job then builds every image of the component and
+  pushes the images and then its deploy artifact.
 * A component that did not change keeps its version. Its pods do not
   restart.
 * A component with no release yet, or whose release has no git tag
@@ -89,6 +91,35 @@ one. A development build never moves `:latest`.
 
 The OS publishes no development builds. The channel holds releases
 only.
+
+## The checks a run runs
+
+A run runs only the jobs and the images that a change can affect, and
+a run that publishes selects them the same way as a run that does not.
+A push to `main` and a release tag diff with the head of the newest
+`main` run that passed, so a job whose files did not change since then
+passed on the same files in that run. When the plan cannot find that
+run, every job runs.
+
+* A job runs when a changed file is one that its toolchain reads. A Go
+  job reads no Rust source and no page of the manual. A Rust job reads
+  no Go source and no page of the manual. A manual's `hugo` job reads
+  no Rust source. The OS build reads no page of its manual. A `prek`
+  job reads every file.
+* A job reads a dependency only through its toolchain: the modules
+  that its `go.mod` replaces, the crates that its crate takes by path,
+  or brand's theme for a manual. A pinned base reaches only images.
+* An image runs when what BuildKit sends it changed: its contexts less
+  their ignore files, its Dockerfile, its bake target, its smoke check,
+  or an image it builds on. A run that publishes also runs each image
+  that reads the `VERSION` build argument, so the image passes its
+  smoke check at the version that the publish pushes.
+* The site deploys when a manual's job or a job with a coverage
+  profile ran, when the site's build changed, or when every job runs.
+
+The publish waits for the checks that ran, and it builds every image
+of the component from the layer cache. The plan job's summary lists
+the jobs and the images that run for each component, and why.
 
 ## Pinned components
 

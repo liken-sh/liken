@@ -284,3 +284,17 @@ fn a_line_the_movie_does_not_carry_takes_no_height_and_no_gap() {
     assert_eq!(blocks.tagline.height, 0.0);
     assert_eq!(blocks.tagline.top, blocks.plot.top);
 }
+
+// A film with a start to resume and a trailer draws the widest row, and
+// it fits in the text column at 1920 by 1080.
+#[test]
+fn the_widest_playback_row_fits_inside_the_text_column() {
+    use crate::screens::movie::row::Button;
+    let words = [Button::Resume, Button::StartOver, Button::Trailer].map(Button::word);
+    let last = buttons::button(&words, 2, Point::ORIGIN);
+    assert!(
+        last.x + last.width <= column(FRAME),
+        "{last:?} past {}",
+        column(FRAME)
+    );
+}

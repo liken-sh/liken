@@ -7,7 +7,7 @@
 # that a workstation runs.
 #
 # The plan names the jobs that read the change, and
-# only those run. A run that publishes runs all of them.
+# only those run, in a run that publishes too.
 #
 # The name carries the component- prefix because the ci component would
 # otherwise share the name ci with the root workflow, and a lookup by

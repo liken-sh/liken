@@ -138,7 +138,8 @@ func TestThePlanWritesItsDecisionsAndItsDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decisions map[string]Decision
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(output), "components=")), &decisions); err != nil {
+	line, _, _ := strings.Cut(output, "\n")
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "components=")), &decisions); err != nil {
 		t.Fatalf("%v: %s", err, output)
 	}
 	if d := decisions["operator"]; !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Jobs, []string{"check"}) ||
@@ -159,6 +160,27 @@ func TestThePlanWritesItsDecisionsAndItsDryRun(t *testing.T) {
 		if !strings.Contains(summary, want) {
 			t.Errorf("the summary lacks %q:\n%s", want, summary)
 		}
+	}
+}
+
+func TestThePlanWritesWhetherTheSiteDeploys(t *testing.T) {
+	cases := []struct {
+		name, ref, output, summary string
+	}{
+		{"a push to a branch", "refs/heads/topic", "site=false\n", "The site does not deploy: only a push to main deploys the site."},
+		{"a push to main with no green run", "refs/heads/main", "site=true\n", "The site deploys: every job runs."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err, output, summary := planWorld(t, nil, map[string]string{"REF": c.ref, "GITHUB_TOKEN": "token",
+				"GITHUB_REPOSITORY": "liken-sh/liken", "GITHUB_API_URL": actionsAPI(t, http.StatusOK, `{"workflow_runs":[]}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output, c.output) || !strings.Contains(summary, c.summary) {
+				t.Errorf("the output:\n%s\nthe summary:\n%s", output, summary)
+			}
+		})
 	}
 }
 

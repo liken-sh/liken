@@ -9,7 +9,7 @@ use crate::catalog::Progress;
 use crate::catalog::progress;
 use crate::screens::TitleMark;
 use crate::screens::facts;
-use crate::views::watch::Icon;
+use crate::views::icon::Icon;
 
 /// One mark on the status line. Each one applies to everyone at the
 /// screen, at once.

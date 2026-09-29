@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -79,7 +80,8 @@ func (r *repo) planner(published map[string][]string) Planner {
 }
 
 // planFixture is a repository with an OS, an operator that builds on a
-// base, the base, and brand, each with one job. The OS's release 2026.09.28-001 and the
+// base, the base, and brand, each with one Go job. The OS's go.mod
+// replaces brand's module. The OS's release 2026.09.28-001 and the
 // operator's imported release operator/2026.09.27-001 are tagged.
 func planFixture(t *testing.T) *repo {
 	r := newRepo(t, map[string]string{
@@ -87,6 +89,7 @@ func planFixture(t *testing.T) *repo {
 		"base/package.toml":     "[package]\nname = \"base\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[outputs.images]]\nname = \"base\"\n",
 		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"operator\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
 		"liken/package.toml":    "[package]\nname = \"liken\"\n[depends]\ncomponents = [\"brand\"]\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\nchannel = true\n",
+		"liken/go.mod":          "module example.com/liken\n\nreplace example.com/brand => ../brand\n",
 		"operator/main.go":      "package main\n",
 		"base/Dockerfile":       "FROM scratch\n",
 		"operator/Dockerfile":   "FROM base\n",
@@ -147,6 +150,39 @@ func TestAChangeToADependencyReleasesTheDependent(t *testing.T) {
 	}
 }
 
+// A release tag diffs with the newest main run that passed, the way a
+// push to main does: a job whose files did not change since that run
+// passed there. The release still publishes every output of each
+// component that changed since its own release. When the plan cannot
+// say which run passed last, every job of a release runs.
+func TestAReleaseTagRunsWhatTheNewestGreenRunDidNotVerify(t *testing.T) {
+	r := planFixture(t)
+	before := r.run("rev-parse", "HEAD")
+	r.write("operator/main.go", "package main // changed\n")
+	head := r.commit("change the operator")
+	r.run("tag", "2026.10.02-001")
+	cases := []struct {
+		name       string
+		verified   string
+		unverified string
+		jobs       []string
+		images     []string
+	}{
+		{"a tag on the newest green run runs nothing", head, "", nil, nil},
+		{"a tag past the newest green run runs what changed since", before, "", []string{"check"}, []string{"operator"}},
+		{"a tag with no green run to compare with runs everything", "", "the API answered 403", []string{"check"}, []string{"operator"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := planGate(t, r, fixturePublished, Event{Name: "push", Ref: "refs/tags/2026.10.02-001", Head: "HEAD",
+				Verified: c.verified, Unverified: c.unverified, Publishing: true})["operator"]
+			if d.Publish != publishRelease || !reflect.DeepEqual(d.Jobs, c.jobs) || !reflect.DeepEqual(imageNames(d.Images), c.images) {
+				t.Errorf("operator: publish %s, jobs %v, images %v; want jobs %v, images %v", d.Publish, d.Jobs, imageNames(d.Images), c.jobs, c.images)
+			}
+		})
+	}
+}
+
 func TestAComponentWithNoReleaseOrNoTagReleases(t *testing.T) {
 	r := planFixture(t)
 	published := map[string][]string{"operator": {"2026.09.20-001"}, "liken": {"2026.09.28-001"}}
@@ -203,15 +239,11 @@ func TestAPushToMainPublishesADevelopmentBuildOfWhatChanged(t *testing.T) {
 }
 
 func TestAPushToMainRunsAManualChangeAndPublishesNothing(t *testing.T) {
-	r := planFixture(t)
-	before := r.run("rev-parse", "HEAD")
+	r, before := selectionFixture(t)
 	r.write("operator/docs/index.md", "a manual edit\n")
 	r.commit("edit the manual")
-	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d := decisions["operator"]; !d.Check || d.Publish != publishNone {
+	d := planGate(t, r, fixturePublished, Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})["operator"]
+	if !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Jobs, []string{"docs"}) || d.Images != nil {
 		t.Errorf("operator: %+v", d)
 	}
 }
@@ -284,8 +316,8 @@ func TestAPushToMainRunsWhatReadsAChangeAndPublishesOnlyAChangedOutput(t *testin
 			Decision{Check: true, Publish: publishNone}, Decision{Check: false, Publish: publishNone}},
 		{"the base's source runs and publishes both", "base/pkg/pkg.go",
 			Decision{Check: true, Publish: publishDev}, Decision{Check: true, Publish: publishDev}},
-		{"the operator's smoke check runs it and publishes nothing", "operator/smoke/operator.sh",
-			Decision{Check: false, Publish: publishNone}, Decision{Check: true, Publish: publishNone}},
+		{"a smoke check that no image names runs nothing", "operator/smoke/operator.sh",
+			Decision{Check: false, Publish: publishNone}, Decision{Check: false, Publish: publishNone}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

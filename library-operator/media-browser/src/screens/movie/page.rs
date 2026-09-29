@@ -12,7 +12,7 @@ use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::super::franchise::strips::Place;
-use super::{Focus, Movie, watch};
+use super::{Focus, Movie, row, watch};
 use crate::art::Art;
 use crate::look;
 use crate::views::stack::{self, Stack};
@@ -148,7 +148,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         // browser's strip does, so one mark draws on the glass.
         let focus = self.held.then_some(movie.focus);
 
-        let words: Vec<&'static str> = movie.buttons().iter().map(|button| button.word()).collect();
+        let words = row::Button::drawn(&movie.buttons());
         let at = blocks.buttons.at(offset);
         buttons::draw(
             &mut frame,

@@ -8,9 +8,11 @@
 # its smoke check.
 #
 # The plan names the jobs and the images that read the change, and
-# only those run. A run that publishes runs all of them. ci.yaml calls
-# this workflow a second time for the publish job, after every check
-# here and in this component's closure passed.
+# only those run, in a run that publishes too. A run that publishes also
+# runs each image that reads the VERSION build argument, because the
+# publish gives it a new version. ci.yaml calls this workflow a
+# second time for the publish job, after every check that ran here and
+# in this component's closure passed.
 #
 # The name carries the component- prefix because the ci component would
 # otherwise share the name ci with the root workflow, and a lookup by
@@ -397,8 +399,11 @@ jobs:
         with:
           version: 2.9.5
 
-      # Each image builds again through docker-bake.hcl, from the layer
-      # cache that the images job wrote, and pushes. The deploy artifact
+      # Each image builds again through docker-bake.hcl, and pushes. An
+      # image that ran in the images job above builds from the layers that
+      # the job wrote to the cache. An image that did not run reads
+      # neither the version nor any file that changed, and it builds from
+      # the layers that an earlier run on main wrote. The deploy artifact
       # goes last, because a cluster follows the deploy artifact, and it
       # must never name an image that is not pushed yet.
       - name: publish

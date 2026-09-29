@@ -89,7 +89,7 @@ func TestAPushToMainPublishesWhatTheNewestDevelopmentBuildLacks(t *testing.T) {
 	r.commit("change the OS")
 	decisions := planGate(t, r, devPublished(published), Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 	d := decisions["operator"]
-	if !d.Check || d.Publish != publishDev || !strings.Contains(d.Reason, "operator/main.go") {
+	if d.Publish != publishDev || !strings.Contains(d.Reason, "operator/main.go") {
 		t.Errorf("operator: %+v", d)
 	}
 	if d := decisions["base"]; d.Check || d.Publish != publishNone {

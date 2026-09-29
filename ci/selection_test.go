@@ -71,24 +71,24 @@ func TestAChangeRunsTheJobsAndImagesThatReadIt(t *testing.T) {
 	}{
 		{"its Go source runs its jobs and the image whose context holds it", "operator/main.go", "package main // changed\n",
 			[]string{"go", "docs"}, []string{"operator"}},
-		{"a file in one image's context runs that image alone", "operator/ui/app.rs", "fn main() { }\n",
-			[]string{"go", "docs"}, []string{"operator-ui"}},
-		{"its manual runs its jobs and no image", "operator/docs/index.md", "an edit\n",
-			[]string{"go", "docs"}, nil},
+		{"a Rust file in one image's context runs that image alone", "operator/ui/app.rs", "fn main() { }\n",
+			nil, []string{"operator-ui"}},
+		{"its manual runs the manual's job and no image", "operator/docs/index.md", "an edit\n",
+			[]string{"docs"}, nil},
 		{"its test runs its jobs and no image", "operator/main_test.go", "package main\n",
 			[]string{"go", "docs"}, nil},
 		{"an ignored file runs its jobs and no image", "operator/local/notes.txt", "more notes\n",
 			[]string{"go", "docs"}, nil},
 		{"its ignore file runs the image that reads it", "operator/.dockerignore", "ui\n",
 			[]string{"go", "docs"}, []string{"operator"}},
-		{"a smoke check runs its image", "operator/smoke/ui.sh", "false\n",
-			[]string{"go", "docs"}, []string{"operator-ui"}},
-		{"a helper beside a smoke check runs the image it checks", "operator/smoke/lib.sh", "true\n",
-			[]string{"go", "docs"}, []string{"operator-ui"}},
-		{"a base's Dockerfile runs every image that builds on it", "base/Dockerfile", "FROM scratch\nCOPY assets /a\n",
-			[]string{"go", "docs"}, []string{"operator"}},
+		{"a smoke check runs its image and the manual", "operator/smoke/ui.sh", "false\n",
+			[]string{"docs"}, []string{"operator-ui"}},
+		{"a helper beside a smoke check runs the image it checks and the manual", "operator/smoke/lib.sh", "true\n",
+			[]string{"docs"}, []string{"operator-ui"}},
+		{"a base's Dockerfile runs every image that builds on it and no job", "base/Dockerfile", "FROM scratch\nCOPY assets /a\n",
+			nil, []string{"operator"}},
 		{"a file in a named context runs the image that reads it, and the images on the base", "base/assets/logo.svg", "<svg></svg>\n",
-			[]string{"go", "docs"}, []string{"operator", "operator-ui"}},
+			nil, []string{"operator", "operator-ui"}},
 		{"brand's theme runs the manual's job alone", "brand/layouts/page.html", "<html lang=en>\n",
 			[]string{"docs"}, nil},
 	}
@@ -141,19 +141,35 @@ func TestAGeneratedFileRunsTheJobsAndImagesThatReadIt(t *testing.T) {
 	}
 }
 
-func TestARunThatPublishesRunsEveryJobAndImage(t *testing.T) {
-	r, before := selectionFixture(t)
-	r.write("operator/ui/app.rs", "fn main() { }\n")
-	r.commit("change the ui")
-	published := map[string][]string{"operator": {"2026.09.27-001"}}
-	d := planGate(t, r, published, Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})["operator"]
-	if d.Publish != publishDev || !reflect.DeepEqual(d.Jobs, []string{"go", "docs"}) || !reflect.DeepEqual(imageNames(d.Images), []string{"operator", "operator-ui"}) {
-		t.Errorf("operator: %+v", d)
+// A run that publishes runs what reads the change, and each image that
+// reads the VERSION build argument, because the publish gives it a new
+// version. The operator's image reads it, and the ui's image does not.
+func TestARunThatPublishesRunsWhatReadsTheChangeAndTheNewVersion(t *testing.T) {
+	cases := []struct {
+		name   string
+		file   string
+		text   string
+		jobs   []string
+		images []string
+	}{
+		{"a change to the ui runs the ui and the image that reads the version", "operator/ui/app.rs", "fn main() { }\n",
+			nil, []string{"operator", "operator-ui"}},
+		{"a change to the operator leaves out the ui", "operator/main.go", "package main // changed\n",
+			[]string{"go", "docs"}, []string{"operator"}},
 	}
-	for _, run := range d.Images {
-		if want := (ImageRun{Image: run.Image, Load: true, Smoke: map[string]string{"operator-ui": "operator/smoke/ui.sh"}[run.Image]}); run != want {
-			t.Errorf("the image run %+v, want %+v", run, want)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r, _ := selectionFixture(t)
+			r.write("operator/Dockerfile", "FROM base\nARG VERSION=dev\nCOPY . /src\n")
+			before := r.commit("stamp the version")
+			r.write(c.file, c.text)
+			r.commit("the change")
+			published := map[string][]string{"operator": {"2026.09.27-001"}}
+			d := planGate(t, r, published, Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})["operator"]
+			if d.Publish != publishDev || !reflect.DeepEqual(d.Jobs, c.jobs) || !reflect.DeepEqual(imageNames(d.Images), c.images) {
+				t.Errorf("operator: publish %s, jobs %v, images %v; want jobs %v, images %v", d.Publish, d.Jobs, imageNames(d.Images), c.jobs, c.images)
+			}
+		})
 	}
 }
 

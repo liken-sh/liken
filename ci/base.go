@@ -27,6 +27,9 @@ type comparison struct {
 //     again.
 //   - A pull request diffs with its merge base with the base branch:
 //     the base branch's newer commits are not part of the change.
+//   - A release tag diffs with the head of the newest main run that
+//     passed, or with the merge base of the two, and runs every job
+//     when the plan could not find that run.
 func (p Planner) Comparisons(e Event) ([]comparison, string) {
 	switch e.Name {
 	case "pull_request":
@@ -35,6 +38,9 @@ func (p Planner) Comparisons(e Event) ([]comparison, string) {
 		}
 		return nil, "the pull request's base is missing"
 	case "push":
+		if e.Tag() != "" {
+			return p.sinceVerified(e, nil)
+		}
 		var list []comparison
 		if p.Git.HasCommit(e.Before) && p.Git.IsAncestor(e.Before, e.Head) {
 			list = append(list, comparison{e.Before, "the commit before the push"})
@@ -43,24 +49,7 @@ func (p Planner) Comparisons(e Event) ([]comparison, string) {
 			if len(list) == 0 {
 				return nil, "the push has no earlier commit to compare with"
 			}
-			if e.Unverified != "" {
-				return nil, e.Unverified
-			}
-			if e.Verified == "" {
-				return list, ""
-			}
-			if !p.Git.HasCommit(e.Verified) {
-				return nil, "the newest main run that passed names a commit that the repository does not hold"
-			}
-			base, err := p.Git.MergeBase(e.Verified, e.Head)
-			if err != nil {
-				return nil, "the newest main run that passed shares no history with this commit"
-			}
-			why := "the newest main run that passed"
-			if base != e.Verified {
-				why = "the merge base of the newest main run that passed and this commit"
-			}
-			return append(list, comparison{base, why}), ""
+			return p.sinceVerified(e, list)
 		}
 		if e.MainRef != "" {
 			if base, err := p.Git.MergeBase(e.MainRef, e.Head); err == nil {
@@ -73,6 +62,37 @@ func (p Planner) Comparisons(e Event) ([]comparison, string) {
 		return list, ""
 	}
 	return nil, "a dispatch runs everything"
+}
+
+// sinceVerified adds the newest main run that passed to the list of
+// commits that a push to main or a release tag diffs with. When that
+// run's head is not an ancestor, as after a force push, the diff starts
+// at the merge base of the two. When the plan could not find that run,
+// every job runs. A release tag with no lookup at all, as on a
+// workstation, runs every job too, because it has no other commit to
+// compare with.
+func (p Planner) sinceVerified(e Event, list []comparison) ([]comparison, string) {
+	if e.Unverified != "" {
+		return nil, e.Unverified
+	}
+	if e.Verified == "" {
+		if len(list) == 0 {
+			return nil, "the release tag has no main run that passed to compare with"
+		}
+		return list, ""
+	}
+	if !p.Git.HasCommit(e.Verified) {
+		return nil, "the newest main run that passed names a commit that the repository does not hold"
+	}
+	base, err := p.Git.MergeBase(e.Verified, e.Head)
+	if err != nil {
+		return nil, "the newest main run that passed shares no history with this commit"
+	}
+	why := "the newest main run that passed"
+	if base != e.Verified {
+		why = "the merge base of the newest main run that passed and this commit"
+	}
+	return append(list, comparison{base, why}), ""
 }
 
 // readDiffs reads the diff with each commit and joins them: a component
@@ -95,6 +115,7 @@ func (p Planner) readDiffs(list []comparison, head string) (Diff, error) {
 			joined.Targets[k] = true
 		}
 		joined.SharedBake = joined.SharedBake || d.SharedBake
+		joined.Site = joined.Site || d.Site
 	}
 	return joined, nil
 }

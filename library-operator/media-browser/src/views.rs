@@ -11,6 +11,9 @@
 // The bar and the status line under a page's playback row, with the marks
 // that change the status, are one more.
 //
+// The small stroke glyphs before the words of a playback button and of a
+// mark are one more, so both rows draw from one set.
+//
 // A shade that changes along one axis, such as a scrim, is a ramp: a
 // picture one pixel thick that the renderer stretches across its bounds.
 //
@@ -36,6 +39,7 @@ pub mod curtain;
 pub mod divider;
 pub mod field;
 pub mod header;
+pub mod icon;
 pub mod keyboard;
 pub mod layers;
 pub mod people;

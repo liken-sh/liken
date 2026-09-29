@@ -93,7 +93,7 @@ target "audio-operator" {
 target "audio-operator-cli" {
   context    = "audio-operator"
   dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = ["linux/amd64"]
   contexts = {
     "kubernetes" = "kubernetes"
   }
@@ -153,7 +153,7 @@ target "bluetoothd" {
 target "bluetooth-operator-cli" {
   context    = "bluetooth-operator"
   dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = ["linux/amd64"]
   contexts = {
     "kubernetes" = "kubernetes"
   }
@@ -290,7 +290,7 @@ target "display-api" {
 target "display-operator-cli" {
   context    = "display-operator"
   dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = ["linux/amd64"]
   contexts = {
     "kubernetes" = "kubernetes"
   }
@@ -392,7 +392,7 @@ target "library-operator-corrosion" {
 target "library-operator-cli" {
   context    = "library-operator"
   dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = ["linux/amd64"]
   contexts = {
     "kubernetes" = "kubernetes"
   }
@@ -510,7 +510,7 @@ target "media-operator-api" {
 target "media-operator-cli" {
   context    = "media-operator"
   dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = ["linux/amd64"]
   contexts = {
     "kubernetes" = "kubernetes"
   }

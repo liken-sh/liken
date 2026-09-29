@@ -43,6 +43,25 @@ func TestADockerfileNamesWhatItBuildsFrom(t *testing.T) {
 	}
 }
 
+func TestADockerfileNamesItsBuildArguments(t *testing.T) {
+	cases := map[string]struct {
+		text string
+		args []string
+	}{
+		"a default":                {"FROM scratch\nARG VERSION=dev\n", []string{"VERSION"}},
+		"no default":               {"FROM scratch\nARG VERSION\n", []string{"VERSION"}},
+		"two on a line, and again": {"ARG BASE=a TARGETOS\nFROM scratch\nARG TARGETOS\n", []string{"BASE", "TARGETOS"}},
+		"none":                     {"FROM scratch\nRUN echo ARG VERSION\n", nil},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := parseDockerfile(c.text).Args; !reflect.DeepEqual(got, c.args) {
+				t.Errorf("args %v, want %v", got, c.args)
+			}
+		})
+	}
+}
+
 func TestTheBasesAreTheImagesOfTheRepository(t *testing.T) {
 	d := parseDockerfile("FROM golang AS build\nFROM mpv\nCOPY --from=brand f /\nCOPY --from=media-operator Cargo.toml /\nCOPY --from=vulkan / /v\n")
 	producer := map[string]string{"mpv": "mpv", "vulkan": "vulkan", "media-operator": "media-operator"}

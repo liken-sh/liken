@@ -30,7 +30,7 @@ func everything(c *Component) ([]string, []ImageRun) {
 }
 
 // A selector decides which of a component's jobs and images a change
-// reaches, when the run does not publish the component.
+// reaches.
 type selector struct {
 	root       string
 	components map[string]*Component
@@ -40,51 +40,42 @@ type selector struct {
 
 // Select lists the jobs and the images that read the change.
 //
-// A job reads the whole component: a Go test can read a file of the
-// manual, and a check of the manual reads the manifests. So each job
-// runs when a file of the component changed, or a file of a dependency
-// that the dependency's outputs are built from. A manual also builds
-// with brand's theme, so a change to brand runs each hugo job of a
-// component whose closure has a manual.
+// A job runs when a changed file is one that its toolchain reads, as
+// reads.go describes.
 //
 // An image reads only what BuildKit sends it: its build contexts, less
 // what their ignore files leave out, its Dockerfile, its bake target,
 // and the images it builds on. Its smoke check tests it too. So an
 // image runs when one of those changed.
-func (s selector) Select(c *Component) ([]string, []ImageRun) {
-	code, theme := false, false
-	for _, n := range Closure(s.components, c.Name()) {
-		dep := s.components[n]
-		if n == c.Name() && s.changedUnder(dep.Dir) || n != c.Name() && outputFile(dep, s.diff.Files) != "" {
-			code = true
-		}
-		if brand := s.components["brand"]; brand != nil && dep.Docs != nil && s.changedUnder(brand.Dir) {
-			theme = true
-		}
-	}
+//
+// A run that publishes the component also runs each image that reads
+// the VERSION build argument, because the publish gives it a new
+// version, and a new version is a change to what the image is built
+// from. The image then passes its smoke check at the version that the
+// publish pushes, and the publish builds it from the layers that its
+// run here wrote to the cache. An image that reads neither the version
+// nor any other part of the change has the inputs of the image that an
+// earlier green run built, and the publish builds it again from the
+// layers that run wrote to the cache.
+func (s selector) Select(c *Component, publishing bool) ([]string, []ImageRun) {
 	var jobs []string
 	for _, job := range c.Jobs {
-		if code || theme && job.Toolchain == "hugo" {
-			jobs = append(jobs, job.Name)
+		deps := s.jobDeps(c, job)
+		for _, file := range s.diff.Files {
+			if s.jobReads(c, job, deps, file) {
+				jobs = append(jobs, job.Name)
+				break
+			}
 		}
 	}
 	_, all := everything(c)
 	var images []ImageRun
 	for i, image := range c.Outputs.Images {
-		if s.imageReads(c, image, map[string]bool{}) {
+		if s.imageReads(c, image, map[string]bool{}) || publishing && s.readsVersion(c, image, map[string]bool{}) {
 			images = append(images, all[i])
 		}
 	}
 	return jobs, images
-}
-
-func (s selector) changedUnder(dir string) bool {
-	for _, file := range s.diff.Files {
-		if strings.HasPrefix(file, dir+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 // imageReads is true when the change reaches what the image's build

@@ -35,6 +35,8 @@ type Diff struct {
 	// SharedBake is true when the bake file changed outside its
 	// targets, such as a variable that every target reads.
 	SharedBake bool
+	// Site is true when the site job of the root workflow changed.
+	Site bool
 }
 
 // componentWorkflow matches the path of a component's generated
@@ -100,8 +102,9 @@ func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, 
 
 // rootWorkflowDiff names each component whose calls in the root
 // workflow differ between the two commits: the call of its checks, or
-// the call of its publish. A root workflow that is
-// missing or does not parse at either commit names every component.
+// the call of its publish. It also finds whether the site job differs.
+// A root workflow that is missing or does not parse at either commit
+// names every component and the site.
 func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string, d *Diff) error {
 	var calls [2]map[string][]byte
 	for i, rev := range []string{from, to} {
@@ -112,6 +115,9 @@ func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string,
 		if found {
 			calls[i] = workflowCalls(text)
 		}
+	}
+	if calls[0] == nil || calls[1] == nil || !bytes.Equal(calls[0]["site"], calls[1]["site"]) {
+		d.Site = true
 	}
 	for name := range components {
 		for _, job := range []string{name, name + "-publish"} {

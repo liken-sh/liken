@@ -12,11 +12,21 @@ import (
 	"path/filepath"
 )
 
+// The one architecture every -cli image is built for. The operators
+// build no other, so a workstation of another architecture has no
+// binary to pull.
+const builtArch = "amd64"
+
 // Sync installs one CLI per operator, then prints the one line to add
 // the plugin directory to PATH when it is not already there. arch is
 // the workstation's architecture, so the pull takes the workstation's
-// binary regardless of the node's.
+// binary regardless of the node's. Sync refuses an architecture with
+// no build before it pulls or writes anything, because the registry's
+// answer for a missing platform does not say that no build exists.
 func Sync(operators []Operator, arch, binDir, pathEnv string, out io.Writer) error {
+	if arch != builtArch {
+		return fmt.Errorf("the operator CLIs are built for %s only, and this workstation is %s", builtArch, arch)
+	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}

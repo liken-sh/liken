@@ -22,7 +22,10 @@ func (w World) plan(root string, components map[string]*Component) error {
 		Publishing: w.Getenv("PUBLISH") == "true",
 	}
 	var notes []string
-	if e.Main() {
+	// A push to main and a release tag both diff with the newest main
+	// run that passed, so a job whose files did not change since that
+	// run does not run again.
+	if e.Main() || e.Tag() != "" {
 		runs := Runs{API: orDefault(w.Getenv("GITHUB_API_URL"), "https://api.github.com"), Repository: w.Getenv("GITHUB_REPOSITORY"),
 			Token: w.Getenv("GITHUB_TOKEN"), Client: w.Published.Client}
 		verified, err := runs.NewestGreen("ci.yaml")
@@ -61,16 +64,23 @@ func (w World) plan(root string, components map[string]*Component) error {
 		refused = probe(w.Registry(token), components)
 	}
 
-	var summary strings.Builder
-	if e.Tag() == "" {
-		list, all := planner.Comparisons(e)
-		for _, c := range list {
-			notes = append(notes, fmt.Sprintf("The plan compares with `%s`, %s.", c.Commit, c.Why))
-		}
-		if all != "" {
-			notes = append(notes, "Every job runs: "+all+".")
-		}
+	list, all := planner.Comparisons(e)
+	for _, c := range list {
+		notes = append(notes, fmt.Sprintf("The plan compares with `%s`, %s.", c.Commit, c.Why))
 	}
+	if all != "" {
+		notes = append(notes, "Every job runs: "+all+".")
+	}
+	site, siteWhy, err := planner.Site(e, decisions)
+	if err != nil {
+		return err
+	}
+	if site {
+		notes = append(notes, "The site deploys: "+siteWhy+".")
+	} else {
+		notes = append(notes, "The site does not deploy: "+siteWhy+".")
+	}
+	var summary strings.Builder
 	writeSummary(&summary, e, components, decisions, candidates, notes, probed, refused)
 	fmt.Fprint(w.Stdout, summary.String())
 	if path := w.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
@@ -94,7 +104,7 @@ func (w World) plan(root string, components map[string]*Component) error {
 		return err
 	}
 	if path := w.Getenv("GITHUB_OUTPUT"); path != "" {
-		if err := appendFile(path, "components="+string(encoded)+"\n"); err != nil {
+		if err := appendFile(path, fmt.Sprintf("components=%s\nsite=%t\n", encoded, site)); err != nil {
 			return err
 		}
 	}

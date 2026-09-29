@@ -79,9 +79,8 @@ smoke = "library-operator/smoke/library-operator-corrosion.sh"
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is
-# built for both architectures.
+# built for linux/amd64 only.
 [[outputs.images]]
 name = "library-operator-cli"
 file = "Dockerfile.cli"
-platforms = ["linux/amd64", "linux/arm64"]
 contexts = { kubernetes = "kubernetes" }

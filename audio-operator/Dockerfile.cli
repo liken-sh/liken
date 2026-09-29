@@ -1,6 +1,6 @@
 # The -cli image. It carries one static binary,
-# kubectl-liken-audio, over a distroless base, and it is built for
-# both amd64 and arm64 so a workstation of either kind pulls its own.
+# kubectl-liken-audio, over a distroless base, and it is built
+# for linux/amd64 only.
 
 # The build stage runs on the builder's own architecture and
 # cross-compiles, so no target-architecture code runs here and the

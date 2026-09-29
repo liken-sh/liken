@@ -11,8 +11,9 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
-use iced_winit::core::{Color, Point, Radians, Rectangle};
+use iced_winit::core::{Color, Point, Rectangle};
 
+use super::icon::{self, Icon};
 use super::{area, clock, extent, label, mark, progress, text};
 use crate::look;
 
@@ -38,25 +39,22 @@ const SIZE: f32 = 19.0;
 const STATUS_GAP: f32 = 28.0;
 const MARK_GAP: f32 = 16.0;
 
-// The padding at both ends of a mark, the side of its icon, and the space
-// between the icon and the words. The check before a finished status
-// stands a little closer to its word.
+// The padding at both ends of a mark. The check before a finished status
+// stands a little closer to its word than a mark's icon does.
 const PAD: f32 = 20.0;
-const ICON: f32 = 20.0;
-const ICON_GAP: f32 = 10.0;
 const CHECK_GAP: f32 = 8.0;
 
-// The width of a resting mark's outline and of an icon's stroke.
-const EDGE: f32 = 2.0;
-
-/// The glyph a mark draws before its words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Icon {
-    /// A check: the work watched.
-    Check,
-    /// An arrow that turns back on itself: the work returned to its start.
-    Undo,
+// The side of an icon beside the line's words, and the space after it.
+fn icon_side() -> f32 {
+    icon::side(SIZE)
 }
+
+fn icon_gap() -> f32 {
+    icon::gap(SIZE)
+}
+
+// The width of a resting mark's outline.
+const EDGE: f32 = 2.0;
 
 /// Everything the line draws.
 pub struct Line<'a> {
@@ -104,13 +102,13 @@ pub fn band(at: Point) -> Rectangle {
 
 /// The width a mark takes around these words.
 pub fn mark_width(words: &str) -> f32 {
-    2.0 * PAD + ICON + ICON_GAP + text::measured(words, SIZE)
+    2.0 * PAD + icon_side() + icon_gap() + text::measured(words, SIZE)
 }
 
 /// The width the status takes, its check included.
 pub fn status_width(status: &str, finished: bool) -> f32 {
     let check = match finished {
-        true => ICON + CHECK_GAP,
+        true => icon_side() + CHECK_GAP,
         false => 0.0,
     };
     check + text::measured(status, SIZE)
@@ -153,13 +151,14 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, line: &Line, at: Point, width: 
     };
     let mut words_at = Point::new(band.x, band.center_y());
     if line.finished {
-        icon(
+        let side = icon_side();
+        icon::draw(
             frame,
             Icon::Check,
-            area(words_at.x, band.center_y() - ICON / 2.0, ICON, ICON),
+            area(words_at.x, band.center_y() - side / 2.0, side, side),
             ink,
         );
-        words_at.x += ICON + CHECK_GAP;
+        words_at.x += side + CHECK_GAP;
     }
     let status = |point: Point, color: Color| {
         label(
@@ -246,15 +245,16 @@ fn one_mark(
         }
     };
     let left = shape.x + PAD;
-    icon(
+    let side = icon_side();
+    icon::draw(
         frame,
         glyph,
-        area(left, shape.center_y() - ICON / 2.0, ICON, ICON),
+        area(left, shape.center_y() - side / 2.0, side, side),
         ink,
     );
     frame.fill_text(label(
         words,
-        Point::new(left + ICON + ICON_GAP, shape.center_y()),
+        Point::new(left + side + icon_gap(), shape.center_y()),
         SIZE,
         ink,
         Alignment::Left,
@@ -264,41 +264,6 @@ fn one_mark(
     if focused {
         mark(frame, shape);
     }
-}
-
-// One glyph in its box, drawn on a grid of 24 units a side: the grid the
-// brand's icons are drawn on, so the strokes match theirs.
-fn icon(frame: &mut canvas::Frame<Renderer>, glyph: Icon, at: Rectangle, ink: Color) {
-    let unit = at.width / 24.0;
-    let point = |x: f32, y: f32| Point::new(at.x + x * unit, at.y + y * unit);
-    let path = canvas::Path::new(|path| match glyph {
-        Icon::Check => {
-            path.move_to(point(5.0, 12.5));
-            path.line_to(point(9.5, 17.0));
-            path.line_to(point(19.0, 7.5));
-        }
-        // Three quarters and more of a circle, from its left edge round
-        // under and up to the upper left, and the arrowhead at its start.
-        Icon::Undo => {
-            path.arc(canvas::path::Arc {
-                center: point(12.0, 12.0),
-                radius: 8.0 * unit,
-                start_angle: Radians(std::f32::consts::PI),
-                end_angle: Radians(-2.348),
-            });
-            path.move_to(point(4.0, 4.0));
-            path.line_to(point(4.0, 8.5));
-            path.line_to(point(8.5, 8.5));
-        }
-    });
-    frame.stroke(
-        &path,
-        canvas::Stroke::default()
-            .with_color(ink)
-            .with_width(EDGE)
-            .with_line_cap(canvas::LineCap::Round)
-            .with_line_join(canvas::LineJoin::Round),
-    );
 }
 
 #[cfg(test)]
@@ -344,7 +309,7 @@ mod tests {
         assert!(mark_width("Clear progress") > mark_width("Mark watched"));
         assert_eq!(
             status_width("Watched", true),
-            status_width("Watched", false) + ICON + CHECK_GAP
+            status_width("Watched", false) + icon_side() + CHECK_GAP
         );
     }
 }

@@ -278,9 +278,11 @@ install the per-operator CLIs from the cluster, with `plugins sync`.
 `plugins sync` installs one CLI per operator. It lists the workloads
 that carry the `cli.liken.sh/plugin` label across the cluster's
 Deployments, DaemonSets, and StatefulSets, reads each one's operator
-image and its version tag, and pulls the matching `-cli` image for this
-workstation's architecture into `~/.liken/plugins/bin`. The CLI comes
-from the same version as the running operator, so the two never drift.
+image and its version tag, and pulls the matching `-cli` image into
+`~/.liken/plugins/bin`. The `-cli` images are built for `linux/amd64`
+only, so on a workstation of another architecture `plugins sync` stops
+with an error and installs nothing. The CLI comes from the same version as the running operator, so
+the two never drift.
 The command is idempotent: a second run installs the same versions over
 the same files.
 

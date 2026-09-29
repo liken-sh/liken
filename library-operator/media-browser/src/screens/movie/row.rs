@@ -5,6 +5,7 @@
 // page draws the same row and line for one episode.
 
 use crate::catalog::Progress;
+use crate::views::icon::Icon;
 
 /// One button of the row. The words are the row's own, so a page draws
 /// them and a press reads them from one place.
@@ -29,6 +30,23 @@ impl Button {
             Self::StartOver => "Start over",
             Self::Trailer => "Trailer",
         }
+    }
+
+    /// The glyph the button draws before its words. Play and Resume both
+    /// play the work on from a point, so they share the triangle.
+    pub fn icon(self) -> Icon {
+        match self {
+            Self::Play | Self::Resume => Icon::Play,
+            Self::StartOver => Icon::Start,
+            Self::Trailer => Icon::Camera,
+        }
+    }
+
+    /// The buttons as the row draws them, each with its glyph.
+    pub fn drawn(row: &[Self]) -> Vec<(Icon, &'static str)> {
+        row.iter()
+            .map(|button| (button.icon(), button.word()))
+            .collect()
     }
 }
 
@@ -113,16 +131,25 @@ mod tests {
     }
 
     #[test]
-    fn every_button_carries_its_own_word() {
-        let words: Vec<&str> = [
-            Button::Play,
-            Button::Resume,
-            Button::StartOver,
-            Button::Trailer,
-        ]
-        .iter()
-        .map(|button| button.word())
-        .collect();
-        assert_eq!(words, ["Play", "Resume", "Start over", "Trailer"]);
+    fn every_button_carries_its_own_word_and_glyph() {
+        assert_eq!(
+            [
+                Button::Play,
+                Button::Resume,
+                Button::StartOver,
+                Button::Trailer,
+            ]
+            .map(|button| (button.word(), button.icon())),
+            [
+                ("Play", Icon::Play),
+                ("Resume", Icon::Play),
+                ("Start over", Icon::Start),
+                ("Trailer", Icon::Camera),
+            ]
+        );
+        assert_eq!(
+            Button::drawn(&[Button::StartOver]),
+            [(Icon::Start, "Start over")]
+        );
     }
 }

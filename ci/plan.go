@@ -29,7 +29,7 @@ type Event struct {
 	// merge base of a branch that has no earlier commit to compare with.
 	MainRef string
 	// Publishing is true when the repository allows real publishes.
-	// Without it, a push to main and a release tag run every check
+	// Without it, a push to main and a release tag run their checks
 	// and push nothing.
 	Publishing bool
 }
@@ -112,10 +112,14 @@ func (p Planner) Plan(e Event) (map[string]Decision, error) {
 }
 
 // release plans a release tag. A component releases when a change
-// went into its outputs since its newest published release. The
-// component's other jobs run with it, and a component that does not
-// release runs nothing, because its commit passed the gate on the push
-// before the tag.
+// went into its outputs since its newest published release. A
+// component that does not release runs nothing.
+//
+// A component that releases runs the jobs and the images that read
+// the change since the newest main run that passed, the same way a
+// push to main selects them, and each image that reads the version.
+// Its other jobs passed on the same files in that run. When the plan
+// cannot find that run, every job of the component runs.
 func (p Planner) release(e Event, tag string) (map[string]Decision, error) {
 	if err := CheckReleaseTag(tag); err != nil {
 		return nil, err
@@ -124,16 +128,23 @@ func (p Planner) release(e Event, tag string) (map[string]Decision, error) {
 	if err != nil {
 		return nil, err
 	}
+	list, all := p.Comparisons(e)
+	diff, err := p.readDiffs(list, e.Head)
+	if err != nil {
+		return nil, err
+	}
+	sel := selector{root: p.Git.Dir, components: p.Components, producer: ImageProducers(p.Components), diff: diff}
 	for name, d := range decisions {
-		if !p.Components[name].Pinned() {
+		c := p.Components[name]
+		if !c.Pinned() {
 			d.Version = tag
 		}
 		if d.Changed {
 			d.Check = true
-			d.Jobs, d.Images = everything(p.Components[name])
 			if e.Publishing {
 				d.Publish = publishRelease
 			}
+			p.selectJobs(c, &d, sel, all != "")
 		}
 		decisions[name] = d
 	}
@@ -287,18 +298,24 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 }
 
 // selectJobs fills in the jobs and the images that run. A run that
-// publishes the component, builds a pinned tag that is not published,
-// or changed the component's workflow runs all of them, and so does a
-// run with no commit to compare with. Otherwise the selector decides,
-// and a component whose jobs and images all read nothing of the change
-// does not run.
+// builds a pinned tag that is not published, or changed the
+// component's workflow, runs all of them, and so does a run with no
+// commit to compare with. Otherwise the selector decides, and a
+// component whose jobs and images all read nothing of the change does
+// not run.
+//
+// A run that publishes selects the same way. On main the plan compares
+// with the newest main run that passed too, so a job whose files did
+// not change since that run passed there, on the same files. The
+// publish waits for the jobs and the images that run, and builds every
+// image of the component.
 func (p Planner) selectJobs(c *Component, d *Decision, sel selector, all bool) {
 	_, workflow := sel.diff.Workflows[c.Name()]
-	if all || workflow || d.Publish != publishNone || c.Pinned() && d.Changed {
+	if all || workflow || c.Pinned() && d.Changed {
 		d.Jobs, d.Images = everything(c)
 		return
 	}
-	d.Jobs, d.Images = sel.Select(c)
+	d.Jobs, d.Images = sel.Select(c, d.Publish != publishNone)
 	if len(d.Jobs) == 0 && len(d.Images) == 0 {
 		d.Check, d.Reason = false, "no job or image reads the change; "+d.Reason
 	}

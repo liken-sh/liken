@@ -56,9 +56,8 @@ contexts = { kubernetes = "kubernetes" }
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is
-# built for both architectures.
+# built for linux/amd64 only.
 [[outputs.images]]
 name = "bluetooth-operator-cli"
 file = "Dockerfile.cli"
-platforms = ["linux/amd64", "linux/arm64"]
 contexts = { kubernetes = "kubernetes" }

@@ -21,6 +21,9 @@ type Dockerfile struct {
 	Sources []string
 	Remotes []Remote
 	Stages  []Stage
+	// Args are the names of the build arguments that the file's ARG
+	// lines declare, in any stage.
+	Args []string
 	// Escape is true when the file starts with an escape parser
 	// directive, which changes the continuation character from the
 	// backslash that this parser reads.
@@ -116,6 +119,11 @@ func parseDockerfile(text string) Dockerfile {
 				stages[args[2]] = true
 			}
 			d.Stages = append(d.Stages, stage)
+		case "ARG":
+			for _, field := range fields[1:] {
+				name, _, _ := strings.Cut(field, "=")
+				d.Args = appendOnce(d.Args, name)
+			}
 		case "COPY", "ADD", "RUN":
 			checksum := ""
 			for _, field := range fields[1:] {

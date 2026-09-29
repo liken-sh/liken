@@ -16,7 +16,7 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::super::franchise::strips::Place;
 use super::layout::{self, Layout};
-use super::{COLUMNS, Focus, Series, seasons, watch};
+use super::{COLUMNS, Focus, Series, row, seasons, watch};
 use crate::art::Art;
 use crate::look;
 use crate::views::stack::Stack;
@@ -370,11 +370,7 @@ impl<A: Art> Page<'_, A> {
         // button row keep their place whatever holds focus.
         stack.add(text::height(layout::PLOT_LINES, look::PLOT));
 
-        let words: Vec<&'static str> = series
-            .buttons()
-            .iter()
-            .map(|button| button.word())
-            .collect();
+        let words = row::Button::drawn(&series.buttons());
         // An episode's own row draws in the same place, over the series'
         // row, while it holds focus.
         buttons::draw(
@@ -412,3 +408,6 @@ impl<A: Art> Page<'_, A> {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;
