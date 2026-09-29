@@ -51,6 +51,10 @@ type fakeAPI struct {
 	lists int
 	// applied names the Receiver of each apply on the main resource.
 	applied []string
+	// throttlingStatus answers every status write with a 429 that asks
+	// for a five-second wait, and statusThrottles counts those answers.
+	throttlingStatus bool
+	statusThrottles  int
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
@@ -115,7 +119,16 @@ func (a *fakeAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 func (a *fakeAPI) recordStatus(w http.ResponseWriter, r *http.Request) {
 	a.mutex.Lock()
 	refusing := a.refusing
+	throttling := a.throttlingStatus
+	if throttling {
+		a.statusThrottles++
+	}
 	a.mutex.Unlock()
+	if throttling {
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
 	if refusing {
 		select {
 		case a.written <- ReceiverStatus{}:

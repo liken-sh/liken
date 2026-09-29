@@ -52,6 +52,36 @@ func joinedNode(t *testing.T, api *cecAPI, wire *cectest.Bus) (*cectest.Adapter,
 	return adapter, cancel, done
 }
 
+// A stop ends the node workload's writes that wait out a 429, so the
+// workload ends within its grace period and not after the API server's
+// wait. The last entry waits at most cecStopWrite.
+func TestAStopEndsAWriteThatWaitsOutA429(t *testing.T) {
+	shorten(t, &cecReportInterval, 20*time.Millisecond)
+	shorten(t, &cecStopWrite, 50*time.Millisecond)
+	api := startCECAPI(t)
+	_, cancel, done := joinedNode(t, api, cecRoom())
+	api.mutex.Lock()
+	api.throttlingEntries = true
+	api.mutex.Unlock()
+	api.waitUntil(t, "a heartbeat to meet the 429", func() bool {
+		api.mutex.Lock()
+		defer api.mutex.Unlock()
+		return api.entryThrottles > 0
+	})
+	began := time.Now()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(testTimeout):
+		t.Fatal("the node workload did not stop")
+	}
+	if took := time.Since(began); took > time.Second {
+		t.Errorf("the node workload stopped after %s", took)
+	}
+}
+
 func TestTheEntryIsWrittenOnASteadyInterval(t *testing.T) {
 	shorten(t, &cecReportInterval, 20*time.Millisecond)
 	api := startCECAPI(t)

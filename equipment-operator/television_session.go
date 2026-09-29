@@ -55,15 +55,19 @@ var (
 // reports the remote's power button, write one after the other.
 //
 // Every list and write waits out a 429 and asks again, because the API
-// server answers 429 for a moment after a CRD changes. An event whose
-// writes still fail is held in retries and tried again on each later
-// pass, so a refusal delays a TV's session and never drops it.
+// server answers 429 for a moment after a CRD changes. The shared
+// client waits for at most ten seconds, and stop ends the wait sooner.
+// An event whose writes still fail is held in retries and tried again
+// on each later pass, so a refusal delays a TV's session and never
+// drops it.
 type televisionSessions struct {
 	client *Client
 	// televisions holds the Television watch's store, which list reads.
 	televisions *watchStore
-	// ctx bounds each request and the waits for a 429, and stop ends
-	// it, so a stop never waits for an API server that is not ready.
+	// ctx bounds the waits for a 429, and stop ends it, so a stop never
+	// waits for an API server that is not ready. A request already sent
+	// runs to its answer, because the Deployment releases its Lease after
+	// its last write (work.go).
 	ctx    context.Context
 	cancel context.CancelFunc
 	mutex  sync.Mutex
@@ -126,19 +130,20 @@ func (t *televisionSessions) retry() {
 	}
 }
 
-// list reads the Televisions, and waits out a 429 until stop. A session
-// event reads the status.session it wrote on the event before, and the
-// store can hold the copy from before that write until the write's own
-// event arrives, so the read replaces such a copy with the API server's
+// list reads the Televisions, and waits out a 429 for up to the shared
+// client's ten seconds, or until stop. A session event reads the
+// status.session it wrote on the event before, and the store can hold
+// the copy from before that write until the write's own event arrives,
+// so the read replaces such a copy with the API server's
 // (objectcache.go).
 func (t *televisionSessions) list() (*TelevisionList, error) {
-	return readTelevisions(t.client.withContext(t.ctx), t.televisions)
+	return readTelevisions(t.client.withWaits(t.ctx), t.televisions)
 }
 
 // apply writes one Television's status.session, and waits out a 429
-// until stop.
+// for up to the shared client's ten seconds, or until stop.
 func (t *televisionSessions) apply(name string, session *TelevisionSession) error {
-	return ApplyTelevisionSession(t.client.withContext(t.ctx), name, session)
+	return ApplyTelevisionSession(t.client.withWaits(t.ctx), name, session)
 }
 
 // markLive records the end of the operator's first pass: from then on,

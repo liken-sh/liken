@@ -29,6 +29,55 @@ func TestAwaitWorkAnswersWhetherTheWorkStopped(t *testing.T) {
 	}
 }
 
+// At a shutdown, a status write that waits out a 429 stops waiting, so
+// the Receiver loop returns within workStopWait and the Deployment
+// releases its Lease.
+func TestAShutdownEndsTheWaitOfAWriteThatMetA429(t *testing.T) {
+	noDiscovery(t)
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	api.setReceivers(testReceiver("theater", fake.address()))
+	api.mutex.Lock()
+	api.throttlingStatus = true
+	api.mutex.Unlock()
+	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.now = func() time.Time { return statusNow }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		operator.run(ctx)
+	}()
+	deadline := time.Now().Add(testTimeout)
+	for {
+		api.mutex.Lock()
+		throttled := api.statusThrottles > 0
+		api.mutex.Unlock()
+		if throttled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no status write met the 429")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	began := time.Now()
+
+	cancel()
+
+	select {
+	case <-stopped:
+	case <-time.After(workStopWait + testTimeout):
+		t.Fatal("the loop did not return")
+	}
+	if took := time.Since(began); took > time.Second {
+		t.Errorf("the loop returned after %s", took)
+	}
+	mustMatch(t, operator.stopped, true)
+}
+
 // At a shutdown, the Receiver loop returns only after a settings write
 // that is in flight has finished, because the Deployment releases its
 // Lease after the loop returns.

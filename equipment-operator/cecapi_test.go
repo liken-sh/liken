@@ -77,6 +77,11 @@ type cecAPI struct {
 	// entryWrites counts the status writes of each node workload's
 	// field manager.
 	entryWrites map[string]int
+	// throttlingEntries answers every node workload's status write with
+	// a 429 that asks for a five-second wait, the way an API server that
+	// is not ready answers, and entryThrottles counts those answers.
+	throttlingEntries bool
+	entryThrottles    int
 	// reads counts each GET that is not a watch, a list or a read of
 	// one object, by path, and watches counts the watches by path.
 	reads   map[string]int
@@ -461,6 +466,12 @@ func (a *cecAPI) applyStatus(w http.ResponseWriter, r *http.Request, name string
 		return
 	}
 	if machine, node := strings.CutPrefix(manager, "equipment-operator-cec-"); node {
+		if a.throttlingEntries {
+			a.entryThrottles++
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		if a.entryWrites == nil {
 			a.entryWrites = map[string]int{}
 		}

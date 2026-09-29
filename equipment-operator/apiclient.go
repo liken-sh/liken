@@ -10,11 +10,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"k8s.io/client-go/dynamic"
 
@@ -83,6 +85,43 @@ func InClusterClient() (*Client, error) {
 // API server. The copy shares the memo and the watches' client.
 func (c *Client) withContext(ctx context.Context) *Client {
 	return &Client{Client: c.Client.WithContext(ctx), access: c.access}
+}
+
+// withWaits answers the client with a wait after a 429 that ends when
+// ctx ends, while each request already sent runs to its answer. The
+// Deployment releases its Lease after its last write, and a write that
+// the client cut off could still land after another operator took the
+// Lease, so a Receiver unit ends only its waits (work.go).
+func (c *Client) withWaits(ctx context.Context) *Client {
+	return &Client{Client: c.Client.WithWaitContext(ctx), access: c.access}
+}
+
+// startRetry is the wait between two tries of a starting list that met
+// a 429 longer than the client waits. It is a variable so a test holds
+// it short.
+var startRetry = time.Second
+
+// untilAnswered makes a starting call until it answers something other
+// than a 429, or ctx ends. The API server answers 429 while it starts
+// the storage of a CRD, and a process that exited on it would restart
+// into the same answer. So an operator's wait for the API server loops
+// on its context, and any other failure, such as a missing grant, is
+// the caller's to report at once. The client bound to ctx has already
+// waited out each 429 up to its limit, so the loop waits startRetry
+// only against a 429 that asked for more than that.
+func untilAnswered(ctx context.Context, call func() error) error {
+	for {
+		err := call()
+		if !errors.Is(err, apiclient.ErrThrottled) {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "%v; asking again in %s\n", err, startRetry)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(startRetry):
+		}
+	}
 }
 
 // An apply is a body the API server reads as a partial object under the

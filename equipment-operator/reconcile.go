@@ -1040,7 +1040,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		address:       c.resolvedAddress(&receiver.Spec),
 		settingsTopic: receiver.Spec.SettingsTopic,
 		commandsTopic: receiver.Spec.CommandsTopic,
-		client:        c.client,
+		client:        c.client.withWaits(ctx),
 		sessions:      c.sessions,
 		busAddress:    c.busAddress,
 		now:           c.now,
@@ -1206,7 +1206,10 @@ func operateAsLeader(ctx context.Context, client *Client, config settings) error
 // the loop until ctx ends. It answers errStillWriting when a goroutine
 // that can write did not stop in time (work.go).
 func serve(ctx context.Context, client *Client, config settings, readings *metrics) error {
-	_, err := ListReceivers(client.withContext(ctx))
+	err := untilAnswered(ctx, func() error {
+		_, err := ListReceivers(client.withContext(ctx))
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("listing receivers: %w", err)
 	}

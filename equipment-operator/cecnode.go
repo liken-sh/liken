@@ -41,6 +41,13 @@ const (
 // write goes to the API server and sends nothing on the CEC wire.
 var cecReportInterval = 30 * time.Second
 
+// cecStopWrite bounds the write of the Stopped entry after the node
+// workload's context ends. The kubelet gives a pod 30 seconds after
+// SIGTERM, and a write that waits out a 429 would otherwise take up to
+// the shared client's limit of ten seconds. It is a variable so a test
+// holds it short.
+var cecStopWrite = 5 * time.Second
+
 // findAdapter answers the one CEC node the pod's claim delivered. The
 // claim is exclusive and names one device, so the container's /dev
 // holds one /dev/cecN.
@@ -230,6 +237,12 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 func (n *cecNode) run(ctx context.Context) error {
 	n.logOpened()
 	loop, cancel := context.WithCancel(ctx)
+	// Every request of the loop ends when the loop does, and so does the
+	// client's wait after a 429. A heartbeat that meets an API server
+	// that is not ready then holds neither the next heartbeat nor a
+	// SIGTERM for the client's ten seconds. The client is bound before
+	// anything the loop starts reads it.
+	n.client = n.client.withContext(loop)
 	var started sync.WaitGroup
 	started.Go(func() {
 		if err := cec.Read(loop, n.device, n.heard, n.adapterChanged); err != nil {
@@ -246,7 +259,7 @@ func (n *cecNode) run(ctx context.Context) error {
 	if err != nil {
 		cause = fmt.Sprintf("the adapter failed: %v", err)
 	}
-	n.stop(cause)
+	n.stop(ctx, cause)
 	return err
 }
 
@@ -315,7 +328,10 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 // reportedAt current, and the retry of a join or an API call that
 // failed.
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
-	_, err := ListCECBuses(n.client.withContext(ctx))
+	err := untilAnswered(ctx, func() error {
+		_, err := ListCECBuses(n.client)
+		return err
+	})
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -335,7 +351,10 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	// missing grant, ends the node workload at its start, as the
 	// CECBus list does. A cluster without the definition answers not
 	// found, which ListTelevisions reads as no Television.
-	_, err = ListTelevisions(n.client.withContext(ctx))
+	err = untilAnswered(ctx, func() error {
+		_, err := ListTelevisions(n.client)
+		return err
+	})
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -431,8 +450,10 @@ func (n *cecNode) retryIn() (time.Duration, bool) {
 // Pulse-Eight answers the TV by itself while it holds one, so a pod
 // that stopped without a release would leave the adapter on the bus
 // for a machine no pod serves. An adapter that left fails every call,
-// and the entry still says why the pod stopped.
-func (n *cecNode) stop(cause string) {
+// and the entry still says why the pod stopped. The loop's context has
+// ended by then, so the last write has a context of its own, which
+// cecStopWrite bounds.
+func (n *cecNode) stop(ctx context.Context, cause string) {
 	n.release()
 	n.mutex.Lock()
 	bus := n.bus
@@ -443,7 +464,9 @@ func (n *cecNode) stop(cause string) {
 	}
 	entry.ReportedAt = timestamp(n.now())
 	n.logState(bus, entry)
-	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, &entry); err != nil {
+	writing, done := context.WithTimeout(context.WithoutCancel(ctx), cecStopWrite)
+	defer done()
+	if err := ApplyCECAdapterStatus(n.client.withContext(writing), bus, n.machine, &entry); err != nil {
 		fmt.Fprintf(os.Stderr, "writing machine %s's last entry in CECBus %s: %v\n", n.machine, bus, err)
 	}
 }
