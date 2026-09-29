@@ -178,7 +178,7 @@ jobs:{% range .Jobs %}
   # with whether it is pinned, whether it loads, and its smoke check.
   images:
     name: ${{ matrix.image }}
-    if: ${{ inputs.stage == 'check' && inputs.images != '[]' }}
+    if: ${{ inputs.stage == 'check' && fromJSON(inputs.images)[0] != null }}
     runs-on: ubuntu-26.04
     timeout-minutes: {% .ImageTimeout %}
     strategy:

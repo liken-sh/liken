@@ -149,7 +149,7 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"      - run: |\n          make test\n          make build\n",
 		"name: coverage-app-go",
 		"  go:\n    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'go') }}\n",
-		"  images:\n    name: ${{ matrix.image }}\n    if: ${{ inputs.stage == 'check' && inputs.images != '[]' }}\n",
+		"  images:\n    name: ${{ matrix.image }}\n    if: ${{ inputs.stage == 'check' && fromJSON(inputs.images)[0] != null }}\n",
 		"include: ${{ fromJSON(inputs.images) }}",
 		"targets: ${{ matrix.image }}",
 		"BRANCH_CACHE=${{ matrix.image }}",

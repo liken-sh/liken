@@ -78,8 +78,8 @@ func (w World) plan(root string, components map[string]*Component) error {
 			return err
 		}
 	}
-	// A list that runs nothing is [] and never null, because each
-	// workflow compares its input with '[]'.
+	// A list that runs nothing is [] and never null, so every input of
+	// a component's workflow is a JSON list, as its description says.
 	for name, d := range decisions {
 		if d.Jobs == nil {
 			d.Jobs = []string{}

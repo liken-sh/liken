@@ -84,8 +84,15 @@ runs:
     # artifact. A pin bump changes the key, so only that domain
     # rebuilds cold; the kernel's 187M does not download again just
     # because k3s moved. The Go programs are deliberately not cached
-    # here (beyond setup-go's module and build caches): they are the
-    # code under test, and they rebuild on every run.
+    # here (beyond the Go cache above): they are the code under test,
+    # and they rebuild on every run.
+    #
+    # Unlike the Go cache, these entries save on every branch. The key
+    # follows the pinned content alone, so a branch writes an entry
+    # only when it bumps a pin, and then every later push of that
+    # branch restores it instead of fetching the domain again. Such a
+    # write is large, the kernel's is 187M, but a bump branch is rare,
+    # and its entry leaves the cache a week after its last use.
     - uses: actions/cache@v6
       with:
         path: liken/kernel/dist
