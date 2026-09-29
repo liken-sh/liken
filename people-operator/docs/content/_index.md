@@ -8,9 +8,9 @@ a Linux uid, and a link to an outside login. `people-operator` is the
 definition of that resource and nothing more. No program runs.
 
 Other operators refer to a `Person` by name and attach their own
-facts to it. The library operator's `Watch` names the people who
-watch a series together, and a `Play` names the people who watched
-it. This site describes the `Person` alone.
+facts to it. The media operator's `Play` names the people who
+watched it, and the library operator keeps each person's place in
+what they watch. This site describes the `Person` alone.
 
 Start with the [manual](docs/). The design and the plans are in the
 [`people-operator` directory](https://github.com/liken-sh/liken/tree/main/people-operator) of the

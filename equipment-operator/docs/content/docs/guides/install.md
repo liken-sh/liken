@@ -46,14 +46,20 @@ reference describes what the pod reports, and the
 [`Television`](/docs/reference/televisions/) reference describes the
 TV that a `CECBus` in `Control` finds.
 
-For GitOps, point a `Kustomization` at the base and pin `<ref>` to a
-release tag:
+For GitOps, point a `Kustomization` at the base and pin `<version>`
+to the operator's version, which is the release tag that last
+published it. The [GitHub release](https://github.com/liken-sh/liken/releases)
+for each tag lists every component and its version. The base names
+the image at `latest`, so pin the image to the same version:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
     namespace: liken-system
     resources:
-      - https://github.com/liken-sh/liken//equipment-operator/deploy?ref=<ref>
+      - https://github.com/liken-sh/liken//equipment-operator/deploy?ref=<version>
+    images:
+      - name: ghcr.io/liken-sh/equipment-operator
+        newTag: <version>
 
 ## Keep the pods off nodes with no CEC adapter
 

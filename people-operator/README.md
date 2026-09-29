@@ -15,10 +15,10 @@ spec:
 ```
 
 Other operators refer to a `Person` by name and attach their own
-facts to it. The `Watch` in
-[`library-operator`](../library-operator/)
-names the people who watch a series together, and a `Play` names the
-people who watched it, through owner references.
+facts to it. A `Play` in [`media-operator`](../media-operator/) names
+the people who watched it, through owner references, and
+[`library-operator`](../library-operator/) keeps each person's place
+in what they watch.
 
 `uid` and `identity` have no consumer yet. `uid` is the Linux uid that
 owns a person's files. `identity` is a login at an outside identity
