@@ -1,7 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"io/fs"
+	"maps"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -51,6 +55,93 @@ func (c *Component) isNotOutput(rest string) bool {
 		}
 	}
 	return strings.HasSuffix(rest, "_test.go") || slices.Contains(strings.Split(path.Dir(rest), "/"), "testdata")
+}
+
+// within is true when the path a is b or a path under b.
+func within(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/")
+}
+
+// validateExcluded refuses an excluded path that an image receives. A
+// build reads each file that its contexts send, less what their ignore
+// files leave out, so an image built from an excluded file would change
+// and its component would not release. An image of any component can
+// take a directory of another as a named context, so every image
+// counts.
+func validateExcluded(root string, components map[string]*Component) error {
+	for _, c := range sortedComponents(components) {
+		for _, excluded := range c.Outputs.Exclude {
+			target := path.Join(c.Dir, excluded)
+			for _, owner := range sortedComponents(components) {
+				for _, image := range owner.Outputs.Images {
+					file, err := imageReceives(root, owner, image, target)
+					if err != nil {
+						return err
+					}
+					if file != "" {
+						return fmt.Errorf("%s excludes %q, but the image %s receives %s", c.Name(), excluded, image.Name, file)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// imageReceives names the first file at or under target that the image
+// receives: its Dockerfile, or a file that one of its build contexts
+// sends. It uses the same ignore files as the recipe and the
+// selection.
+func imageReceives(root string, c *Component, image Image, target string) (string, error) {
+	dockerfile := path.Join(c.Dir, orDefault(image.File, "Dockerfile"))
+	if within(dockerfile, target) {
+		return dockerfile, nil
+	}
+	context := path.Join(c.Dir, image.Context)
+	contexts := map[string]string{context: ignoreFile(root, context, dockerfile)}
+	for _, dir := range image.Contexts {
+		contexts[dir] = path.Join(dir, ".dockerignore")
+	}
+	for _, dir := range slices.Sorted(maps.Keys(contexts)) {
+		file, err := contextSends(root, dir, contexts[dir], target)
+		if file != "" || err != nil {
+			return file, err
+		}
+	}
+	return "", nil
+}
+
+// contextSends names the first file at or under target that the build
+// context dir sends, or "".
+func contextSends(root, dir, ignorePath, target string) (string, error) {
+	start := target
+	switch {
+	case within(dir, target):
+		start = dir
+	case !within(target, dir):
+		return "", nil
+	}
+	ignore, err := readIgnore(root, ignorePath)
+	if err != nil {
+		return "", err
+	}
+	var sent string
+	err = filepath.WalkDir(filepath.Join(root, start), func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || sent != "" {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		skip, err := ignore.MatchesOrParentMatches(strings.TrimPrefix(rel, dir+"/"))
+		if err != nil || !skip {
+			sent = rel
+		}
+		return nil
+	})
+	return sent, err
 }
 
 // outputFile names the first changed file of the component that an

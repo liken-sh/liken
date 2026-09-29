@@ -113,7 +113,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: liken/docs
+        working-directory: liken
     steps:
       - uses: actions/checkout@v7
 
@@ -154,9 +154,7 @@ jobs:
             hugo-build-${{ runner.os }}-${{ hashFiles('liken/docs/go.sum') }}-
             hugo-build-${{ runner.os }}-
 
-      - run: |
-          make test
-          make build
+      - run: make test-docs
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6

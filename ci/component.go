@@ -105,7 +105,9 @@ type Outputs struct {
 	// component leaves out. A change to one runs the component's jobs,
 	// but it does not release the component or reach its dependents.
 	// A path that ends in a slash is a directory and covers every file
-	// under it. Any other path is one file.
+	// under it. Any other path is one file. The loader refuses a path
+	// that the deploy artifact holds or that an image receives, because
+	// an output is built from it.
 	Exclude []string `toml:"exclude"`
 }
 
@@ -203,7 +205,10 @@ func LoadComponents(root string) (map[string]*Component, error) {
 	if err != nil {
 		return nil, err
 	}
-	return components, validateGraph(components)
+	if err := validateGraph(components); err != nil {
+		return nil, err
+	}
+	return components, validateExcluded(root, components)
 }
 
 // readComponent reads one package.toml. A key that the schema does
@@ -317,7 +322,7 @@ func (c *Component) validatePin(path string) error {
 func (c *Component) validateExclude(path string) error {
 	for _, excluded := range c.Outputs.Exclude {
 		name := strings.TrimSuffix(excluded, "/")
-		if !filepath.IsLocal(name) || filepath.ToSlash(filepath.Clean(name)) != name {
+		if name == "." || !filepath.IsLocal(name) || filepath.ToSlash(filepath.Clean(name)) != name {
 			return fmt.Errorf("%s: the excluded path %q must be a path inside the component, with no . or .. in it", path, excluded)
 		}
 		info, err := os.Stat(filepath.Join(filepath.Dir(path), name))
@@ -326,6 +331,9 @@ func (c *Component) validateExclude(path string) error {
 		}
 		if info.IsDir() != strings.HasSuffix(excluded, "/") {
 			return fmt.Errorf("%s: an excluded directory ends in a slash, and an excluded file does not: %q", path, excluded)
+		}
+		if deploy := filepath.ToSlash(filepath.Clean(c.Outputs.Deploy)); c.Outputs.Deploy != "" && (within(name, deploy) || within(deploy, name)) {
+			return fmt.Errorf("%s: the excluded path %q overlaps the deploy directory %q, and the deploy artifact holds every file in it", path, excluded, c.Outputs.Deploy)
 		}
 	}
 	return nil

@@ -120,11 +120,27 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 			"a path inside the component"},
 		"an excluded file named as a directory": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"package.toml/\"]\n",
 			"an excluded directory ends in a slash"},
+		"the component itself excluded": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"./\"]\n",
+			"a path inside the component"},
+		"an excluded deploy directory": {"[package]\nname = \"a\"\n[outputs]\ndeploy = \"deploy\"\nexclude = [\"deploy/\"]\n",
+			"the deploy artifact holds"},
+		"an excluded path in the deploy directory": {"[package]\nname = \"a\"\n[outputs]\ndeploy = \"deploy\"\nexclude = [\"deploy/base/\"]\n",
+			"the deploy artifact holds"},
+		"an excluded directory that holds the deploy directory": {"[package]\nname = \"a\"\n[outputs]\ndeploy = \"deploy/base\"\nexclude = [\"deploy/\"]\n",
+			"the deploy artifact holds"},
+		"an excluded path that an image's build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/\"]\n[[outputs.images]]\nname = \"a\"\n",
+			"the image a receives"},
+		"an excluded path that a named build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/main.go\"]\n[[outputs.images]]\nname = \"a\"\ncontext = \"deploy\"\ncontexts = { src = \"a/cmd\" }\n",
+			"the image a receives"},
 		"a missing dependency": {"[package]\nname = \"a\"\n[depends]\ncomponents = [\"z\"]\n", "which is not a component"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			root := writeTree(t, map[string]string{"a/package.toml": c.toml})
+			root := writeTree(t, map[string]string{
+				"a/package.toml":              c.toml,
+				"a/deploy/base/operator.yaml": "",
+				"a/cmd/main.go":               "",
+			})
 			_, err := LoadComponents(root)
 			if err == nil || !strings.Contains(err.Error(), c.wants) {
 				t.Fatalf("got %v, want an error with %q", err, c.wants)

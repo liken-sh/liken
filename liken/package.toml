@@ -19,16 +19,14 @@ name = "checks"
 toolchain = "prek"
 coverage = ["coverage.out"]
 
-# The make target generates the reference pages first, because the link
-# check reads them as sources and as targets.
+# The link check, the generated skills, and the site build. The docs
+# tests generate the reference pages first, because the link check
+# reads them as sources and as targets.
 [[jobs]]
 name = "docs"
 toolchain = "hugo"
-dir = "docs"
-run = """
-make test
-make build
-"""
+module = "docs"
+run = "make test-docs"
 
 # The build proves that the tree still assembles an operating system,
 # and that it boots to a Ready Kubernetes node under both firmware
