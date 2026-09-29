@@ -5,7 +5,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -17,8 +19,8 @@ import (
 //
 // A tracked component has no version in its package.toml: its version
 // is the repository's release tag. A pinned component states an
-// upstream version and a revision. Only tracked components exist so
-// far, so the pinned fields are read and rejected.
+// upstream version and a revision, and it publishes under the tag
+// <version>-<revision>.
 type Component struct {
 	// Dir is the component's directory, relative to the repository
 	// root, with forward slashes and no trailing slash.
@@ -123,6 +125,15 @@ type Image struct {
 
 func (c *Component) Name() string { return c.Package.Name }
 
+// Pinned is true for a component that states its own version.
+func (c *Component) Pinned() bool { return c.Package.Version != "" }
+
+// PinnedTag is the tag that a pinned component publishes under, such
+// as 20260928-1.
+func (c *Component) PinnedTag() string {
+	return c.Package.Version + "-" + strconv.Itoa(c.Package.Revision)
+}
+
 // HasOutputs is true for a component that publishes anything.
 func (c *Component) HasOutputs() bool {
 	return len(c.Outputs.Images) > 0 || c.Outputs.Deploy != "" || c.Outputs.Channel
@@ -213,8 +224,8 @@ func (c *Component) validate(path string) error {
 	if c.Name() != filepath.Base(c.Dir) {
 		return fmt.Errorf("%s: the name %q is not the directory name %q", path, c.Name(), filepath.Base(c.Dir))
 	}
-	if c.Package.Version != "" || c.Package.Revision != 0 {
-		return fmt.Errorf("%s: pinned components are not built yet; a tracked component has no version or revision", path)
+	if err := c.validatePin(path); err != nil {
+		return err
 	}
 	jobs := map[string]bool{}
 	for _, job := range c.Jobs {
@@ -244,13 +255,56 @@ func (c *Component) validate(path string) error {
 	return nil
 }
 
+// pinnedVersion is the grammar of a pinned version: the characters of
+// an image tag, starting with a letter or a digit.
+var pinnedVersion = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._]*$`)
+
+// calendarDate is the start of a release version, yyyy.mm.dd.
+var calendarDate = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}`)
+
+// validatePin checks the version and the revision together. Either one
+// alone is a mistake: a revision with no version would read as a
+// tracked component, and a version with no revision has no tag.
+//
+// A pinned version must not look like a release version, because the
+// registry holds both kinds of tag side by side, and a reader tells
+// them apart by their shape.
+//
+// A pinned component publishes images alone. Its recipe hash lives in
+// a label of its image, and the plan reads it from there.
+func (c *Component) validatePin(path string) error {
+	version, revision := c.Package.Version, c.Package.Revision
+	switch {
+	case version == "" && revision == 0:
+		return nil
+	case version == "":
+		return fmt.Errorf("%s: a revision needs a version; a tracked component has neither", path)
+	case revision < 1:
+		return fmt.Errorf("%s: a pinned component needs a revision of 1 or more", path)
+	case !pinnedVersion.MatchString(version):
+		return fmt.Errorf("%s: the version %q has a character that an image tag cannot hold", path, version)
+	case calendarDate.MatchString(version):
+		return fmt.Errorf("%s: the tag %q looks like a release version; write a date as YYYYMMDD", path, c.PinnedTag())
+	case len(c.Outputs.Images) == 0 || c.Outputs.Deploy != "" || c.Outputs.Channel:
+		return fmt.Errorf("%s: a pinned component publishes images, and nothing else", path)
+	}
+	return nil
+}
+
 // validateGraph checks that every dependency exists and that the
 // graph has no cycle.
 func validateGraph(components map[string]*Component) error {
 	for _, c := range sortedComponents(components) {
 		for _, dep := range c.Depends.Components {
-			if _, ok := components[dep]; !ok {
+			other, ok := components[dep]
+			if !ok {
 				return fmt.Errorf("%s depends on %q, which is not a component", c.Name(), dep)
+			}
+			// A pinned component's recipe covers the tag of each
+			// dependency. A tracked component has no tag until a
+			// release gives it one, so it cannot be in a recipe.
+			if c.Pinned() && !other.Pinned() {
+				return fmt.Errorf("%s is pinned and depends on %s, which is not; a pinned component depends only on pinned components", c.Name(), dep)
 			}
 		}
 	}

@@ -60,14 +60,16 @@ func (d DepsChecker) Check() ([]Finding, error) {
 // to the repository root, or "" for a path that no component holds.
 // A component inside another one, such as liken/kernel inside liken,
 // owns its own directory.
-func (d DepsChecker) owner(rel string) string {
+func (d DepsChecker) owner(rel string) string { return ownerOf(d.Components, rel) }
+
+func ownerOf(components map[string]*Component, rel string) string {
 	best := ""
-	for _, c := range d.Components {
+	for _, c := range components {
 		if (rel == c.Dir || strings.HasPrefix(rel, c.Dir+"/")) && len(c.Dir) > len(best) {
 			best = c.Dir
 		}
 	}
-	for _, c := range d.Components {
+	for _, c := range components {
 		if c.Dir == best {
 			return c.Name()
 		}
@@ -263,7 +265,9 @@ func (d DepsChecker) cargoWorkspaces(c *Component) ([]Finding, error) {
 var imageRef = regexp.MustCompile(`ghcr\.io/liken-sh/([a-z0-9-]+)`)
 
 // images checks each image's build contexts, and the images of other
-// components that its Dockerfile starts from.
+// components that its Dockerfile starts from: a published image by its
+// ghcr.io reference, or an image in the tree by its bare name, such as
+// FROM mpv, which the bake file resolves to the mpv target.
 func (d DepsChecker) images(c *Component) ([]Finding, error) {
 	producer := map[string]string{}
 	for _, other := range d.Components {
@@ -271,6 +275,7 @@ func (d DepsChecker) images(c *Component) ([]Finding, error) {
 			producer[name] = other.Name()
 		}
 	}
+	targets := ImageProducers(d.Components)
 	var findings []Finding
 	for _, image := range c.Outputs.Images {
 		for name, dir := range image.Contexts {
@@ -283,6 +288,12 @@ func (d DepsChecker) images(c *Component) ([]Finding, error) {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return nil, err
+		}
+		for _, base := range parseDockerfile(string(data)).Bases(image, targets) {
+			if other := targets[base]; !d.allowed(c, other, false) {
+				findings = append(findings, Finding{Component: c.Name(), Uses: other,
+					Where: fmt.Sprintf("%s builds on the image %s", filepath.Join(c.Dir, orDefault(image.File, "Dockerfile")), base)})
+			}
 		}
 		for _, line := range strings.Split(string(data), "\n") {
 			fields := strings.Fields(line)
@@ -297,5 +308,13 @@ func (d DepsChecker) images(c *Component) ([]Finding, error) {
 			}
 		}
 	}
-	return findings, nil
+	// Two images that share a Dockerfile, such as two targets of one
+	// file, report its uses once.
+	var once []Finding
+	for _, f := range findings {
+		if !slices.Contains(once, f) {
+			once = append(once, f)
+		}
+	}
+	return once, nil
 }

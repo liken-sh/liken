@@ -170,3 +170,110 @@ func (r Registry) CanPush(pkg string) error {
 	}
 	return nil
 }
+
+// manifestTypes are the manifest formats that Labels reads: an image
+// index, which buildx pushes for more than one platform or with an
+// attestation, and a single image manifest.
+const manifestTypes = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, " +
+	"application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+
+// Labels reads the labels of the image at the tag. When the tag names
+// an index, the labels come from its linux/amd64 image, or from its
+// first image when it holds no linux/amd64 one. buildx writes an
+// attestation into an index as an image of the platform unknown/unknown,
+// so that entry never counts. A tag or a package that does not exist
+// has no labels and no error, the same as Tags.
+func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
+	token, err := r.bearer(pkg, "pull")
+	if refused, ok := err.(tokenRefused); ok && r.Token == "" &&
+		(refused.code == http.StatusForbidden || refused.code == http.StatusUnauthorized || refused.code == http.StatusNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	get := func(path, accept string, out any) (bool, error) {
+		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/v2/%s/%s/%s", r.Base, r.Owner, pkg, path), nil)
+		if err != nil {
+			return false, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		resp, err := r.client().Do(req)
+		if err != nil {
+			return false, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return false, nil
+		}
+		if resp.StatusCode != http.StatusOK {
+			return false, fmt.Errorf("reading %s of %s: %s", path, pkg, resp.Status)
+		}
+		return true, json.NewDecoder(resp.Body).Decode(out)
+	}
+	type platform struct {
+		OS           string `json:"os"`
+		Architecture string `json:"architecture"`
+	}
+	var index struct {
+		Manifests []struct {
+			Digest   string   `json:"digest"`
+			Platform platform `json:"platform"`
+		} `json:"manifests"`
+		Config struct {
+			Digest string `json:"digest"`
+		} `json:"config"`
+	}
+	found, err := get("manifests/"+tag, manifestTypes, &index)
+	if err != nil || !found {
+		return nil, err
+	}
+	config := index.Config.Digest
+	if len(index.Manifests) > 0 {
+		digest := ""
+		for _, m := range index.Manifests {
+			if m.Platform.OS == "unknown" || m.Platform.OS == "" {
+				continue
+			}
+			if digest == "" || m.Platform == (platform{"linux", "amd64"}) {
+				digest = m.Digest
+			}
+		}
+		if digest == "" {
+			return nil, fmt.Errorf("%s:%s is an index with no image in it", pkg, tag)
+		}
+		var manifest struct {
+			Config struct {
+				Digest string `json:"digest"`
+			} `json:"config"`
+		}
+		if found, err := get("manifests/"+digest, manifestTypes, &manifest); err != nil || !found {
+			return nil, fmt.Errorf("reading %s of %s:%s: %v", digest, pkg, tag, orNotFound(err))
+		}
+		config = manifest.Config.Digest
+	}
+	var blob struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"config"`
+	}
+	if found, err := get("blobs/"+config, "", &blob); err != nil || !found {
+		return nil, fmt.Errorf("reading the config of %s:%s: %v", pkg, tag, orNotFound(err))
+	}
+	if blob.Config.Labels == nil {
+		return map[string]string{}, nil
+	}
+	return blob.Config.Labels, nil
+}
+
+// orNotFound names a missing object that the registry's index or
+// manifest points at, where get reports it as no error.
+func orNotFound(err error) error {
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("the registry has no such object")
+}

@@ -14,14 +14,16 @@ import (
 func depsFixture(t *testing.T, operatorDepends string) DepsChecker {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"brand/package.toml":       "[package]\nname = \"brand\"\n",
-		"base/package.toml":        "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base-image\"\n",
-		"base/Dockerfile":          "FROM scratch\n",
-		"operator/package.toml":    "[package]\nname = \"operator\"\n[depends]\ncomponents = [" + operatorDepends + "]\n[[outputs.images]]\nname = \"operator\"\ncontexts = { brand = \"brand\" }\n",
+		"brand/package.toml": "[package]\nname = \"brand\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base-image\"\n",
+		"base/Dockerfile":    "FROM scratch\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [" + operatorDepends + "]\n" +
+			"[[outputs.images]]\nname = \"operator\"\ncontexts = { brand = \"brand\" }\n" +
+			"[[outputs.images]]\nname = \"operator-sidecar\"\ncontexts = { brand = \"brand\" }\n",
 		"operator/go.mod":          "module x\n",
 		"operator/docs/go.mod":     "module x/docs\n",
 		"operator/Cargo.lock":      "",
-		"operator/Dockerfile":      "ARG BASE=ghcr.io/liken-sh/base-image:2026.09.08-001\nFROM golang AS build\nFROM ${BASE}\nFROM ghcr.io/liken-sh/corrosion:1\n",
+		"operator/Dockerfile":      "ARG BASE=ghcr.io/liken-sh/base-image:2026.09.08-001\nFROM golang AS build\nFROM ${BASE}\nFROM ghcr.io/liken-sh/corrosion:1\nFROM base-image AS runtime\nCOPY --from=brand fonts /f\n",
 		"operator/testdata/go.mod": "module ignored\n",
 	})
 	abs, err := filepath.Abs(root)
@@ -93,7 +95,9 @@ func TestAnUndeclaredUseIsFound(t *testing.T) {
 		"operator uses base, and its package.toml does not name it in [depends]: operator/go.mod imports github.com/liken-sh/base",
 		"operator uses base, and its package.toml does not name it in [depends]: operator/Cargo.toml depends on the crate base-crate",
 		"operator uses brand, and its package.toml does not name it in [depends]: the image operator takes brand as its build context brand",
+		"operator uses base, and its package.toml does not name it in [depends]: operator/Dockerfile builds on the image base-image",
 		"operator uses base, and its package.toml does not name it in [depends]: operator/Dockerfile starts from ghcr.io/liken-sh/base-image",
+		"operator uses brand, and its package.toml does not name it in [depends]: the image operator-sidecar takes brand as its build context brand",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("findings:\n%s", strings.Join(got, "\n"))

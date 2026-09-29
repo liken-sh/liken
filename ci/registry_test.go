@@ -12,12 +12,16 @@ import (
 )
 
 // fakeRegistry answers the parts of the distribution API that the
-// program uses: the token service, a paged tag list, and blob upload
-// sessions. A token grants a push only for a credential in writers.
+// program uses: the token service, a paged tag list, manifests and
+// blobs, and blob upload sessions. A token grants a push only for a
+// credential in writers. manifests holds each manifest by
+// <package>/<tag or digest>, and blobs holds each blob by its digest.
 type fakeRegistry struct {
 	mu        sync.Mutex
 	tags      map[string][]string
 	writers   map[string]bool
+	manifests map[string]string
+	blobs     map[string]string
 	cancelled []string
 }
 
@@ -58,6 +62,21 @@ func (f *fakeRegistry) serve(t *testing.T) Registry {
 				w.Header().Set("Link", fmt.Sprintf(`</v2/liken-sh/%s/tags/list?last=%s&n=1>; rel="next"`, pkg, page[0]))
 			}
 			json.NewEncoder(w).Encode(map[string]any{"tags": page})
+		case strings.Contains(r.URL.Path, "/manifests/") && r.Method == http.MethodGet:
+			pkg, reference, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v2/liken-sh/"), "/manifests/")
+			manifest, ok := f.manifests[pkg+"/"+reference]
+			if !ok || !strings.Contains(r.Header.Get("Accept"), "application/vnd.oci.image.index.v1+json") {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write([]byte(manifest))
+		case strings.Contains(r.URL.Path, "/blobs/sha256:") && r.Method == http.MethodGet:
+			blob, ok := f.blobs[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write([]byte(blob))
 		case strings.HasSuffix(r.URL.Path, "/blobs/uploads/") && r.Method == http.MethodPost:
 			if r.Header.Get("Authorization") != "Bearer push" {
 				w.WriteHeader(http.StatusForbidden)
@@ -124,6 +143,61 @@ func TestAPushProbeReportsARefusal(t *testing.T) {
 	registry := (&fakeRegistry{}).serve(t)
 	registry.Token = "reader"
 	if err := registry.CanPush("operator"); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// imageFixture is a registry that holds base:1 as an index of an amd64
+// image, an arm64 image, and an attestation, the way buildx pushes
+// one; base:2 as one image with no labels; and base:3 as an index
+// whose image manifest is missing.
+func imageFixture() *fakeRegistry {
+	return &fakeRegistry{
+		manifests: map[string]string{
+			"base/1": `{"manifests": [
+				{"digest": "sha256:arm", "platform": {"os": "linux", "architecture": "arm64"}},
+				{"digest": "sha256:amd", "platform": {"os": "linux", "architecture": "amd64"}},
+				{"digest": "sha256:att", "platform": {"os": "unknown", "architecture": "unknown"}}]}`,
+			"base/sha256:amd": `{"config": {"digest": "sha256:amdconfig"}}`,
+			"base/sha256:arm": `{"config": {"digest": "sha256:armconfig"}}`,
+			"base/2":          `{"config": {"digest": "sha256:plain"}}`,
+			"base/3":          `{"manifests": [{"digest": "sha256:gone", "platform": {"os": "linux", "architecture": "amd64"}}]}`,
+			"arm/1":           `{"manifests": [{"digest": "sha256:arm", "platform": {"os": "linux", "architecture": "arm64"}}]}`,
+			"arm/sha256:arm":  `{"config": {"digest": "sha256:armconfig"}}`,
+		},
+		blobs: map[string]string{
+			"sha256:amdconfig": `{"config": {"Labels": {"sh.liken.recipe": "sha256:amd"}}}`,
+			"sha256:armconfig": `{"config": {"Labels": {"sh.liken.recipe": "sha256:arm"}}}`,
+			"sha256:plain":     `{"config": {}}`,
+		},
+	}
+}
+
+func TestTheLabelsOfAnImageAreRead(t *testing.T) {
+	registry := imageFixture().serve(t)
+	cases := []struct {
+		pkg, tag string
+		want     map[string]string
+	}{
+		{"base", "1", map[string]string{"sh.liken.recipe": "sha256:amd"}},
+		{"arm", "1", map[string]string{"sh.liken.recipe": "sha256:arm"}},
+		{"base", "2", map[string]string{}},
+		{"base", "9", nil},
+		{"missing", "1", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.pkg+":"+c.tag, func(t *testing.T) {
+			labels, err := registry.Labels(c.pkg, c.tag)
+			if err != nil || !reflect.DeepEqual(labels, c.want) {
+				t.Errorf("labels %v, err %v", labels, err)
+			}
+		})
+	}
+}
+
+func TestAnIndexThatPointsAtNothingIsAnError(t *testing.T) {
+	registry := imageFixture().serve(t)
+	if _, err := registry.Labels("base", "3"); err == nil || !strings.Contains(err.Error(), "no such object") {
 		t.Errorf("got %v", err)
 	}
 }

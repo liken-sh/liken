@@ -20,7 +20,12 @@ func (w World) plan(root string, components map[string]*Component) error {
 		Publishing: w.Getenv("PUBLISH") == "true",
 	}
 	git := Git{Dir: root}
-	planner := Planner{Components: components, Git: git, Versions: w.Published.Versions}
+	recipes, err := Recipes(root, components)
+	if err != nil {
+		return err
+	}
+	planner := Planner{Components: components, Git: git, Versions: w.Published.Versions,
+		Recipes: recipes, PublishedRecipe: w.Published.Recipe}
 	decisions, err := planner.Plan(e)
 	if err != nil {
 		return err

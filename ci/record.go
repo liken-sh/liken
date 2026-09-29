@@ -11,6 +11,9 @@ type RecordEntry struct {
 	Version   string `yaml:"version"`
 	// Released is true when this tag published the version.
 	Released bool `yaml:"released"`
+	// Pinned is true for a pinned component, whose version is the tag
+	// in its package.toml at the release's commit.
+	Pinned bool `yaml:"pinned"`
 }
 
 // Record lists every component that publishes, with its version at
@@ -20,6 +23,10 @@ func Record(components map[string]*Component, versions VersionsFunc, tag string)
 	var entries []RecordEntry
 	for _, c := range sortedComponents(components) {
 		if !c.HasOutputs() {
+			continue
+		}
+		if c.Pinned() {
+			entries = append(entries, RecordEntry{Component: c.Name(), Version: c.PinnedTag(), Pinned: true})
 			continue
 		}
 		published, err := versions(c)
@@ -45,7 +52,9 @@ func RecordNotes(tag string, entries []RecordEntry, catalogDigest string, change
 	b.WriteString("| Component | Version | |\n| --- | --- | --- |\n")
 	for _, e := range entries {
 		version, note := e.Version, "unchanged"
-		if version == "" {
+		if e.Pinned {
+			note = "pinned"
+		} else if version == "" {
 			version, note = "none", "not published yet"
 		} else if e.Released {
 			note = "released by this tag"

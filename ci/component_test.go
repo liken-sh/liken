@@ -60,11 +60,46 @@ aliases = ["app-sidecar"]
 	}
 }
 
+// pinnedImage is the outputs table of a pinned component with one image.
+const pinnedImage = "[[outputs.images]]\nname = \"a\"\n"
+
+func TestAPinnedComponentPublishesUnderItsVersionAndRevision(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"a/package.toml": "[package]\nname = \"a\"\nversion = \"20260928\"\nrevision = 2\n" + pinnedImage,
+		"b/package.toml": "[package]\nname = \"b\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := components["a"], components["b"]; !a.Pinned() || a.PinnedTag() != "20260928-2" || b.Pinned() {
+		t.Errorf("a pinned %v at %s, b pinned %v", a.Pinned(), a.PinnedTag(), b.Pinned())
+	}
+}
+
+func TestAPinnedComponentDependsOnlyOnPinnedComponents(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"a/package.toml": "[package]\nname = \"a\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"b\"]\n" + pinnedImage,
+		"b/package.toml": "[package]\nname = \"b\"\n",
+	})
+	_, err := LoadComponents(root)
+	if err == nil || !strings.Contains(err.Error(), "a pinned component depends only on pinned components") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestAPackageTomlIsRefused(t *testing.T) {
 	cases := map[string]struct{ toml, wants string }{
-		"a misspelled key":    {"[package]\nname = \"a\"\nversoin = \"1\"\n", "unknown keys: package.versoin"},
-		"a name that differs": {"[package]\nname = \"b\"\n", "is not the directory name"},
-		"a pinned version":    {"[package]\nname = \"a\"\nversion = \"1.0\"\nrevision = 1\n", "pinned components are not built yet"},
+		"a misspelled key":           {"[package]\nname = \"a\"\nversoin = \"1\"\n", "unknown keys: package.versoin"},
+		"a name that differs":        {"[package]\nname = \"b\"\n", "is not the directory name"},
+		"a revision with no version": {"[package]\nname = \"a\"\nrevision = 1\n" + pinnedImage, "a revision needs a version"},
+		"a version with no revision": {"[package]\nname = \"a\"\nversion = \"20260928\"\n" + pinnedImage, "a revision of 1 or more"},
+		"a version a tag cannot hold": {"[package]\nname = \"a\"\nversion = \"1.0/2\"\nrevision = 1\n" + pinnedImage,
+			"a character that an image tag cannot hold"},
+		"a version that looks like a release": {"[package]\nname = \"a\"\nversion = \"2026.09.28\"\nrevision = 1\n" + pinnedImage,
+			"looks like a release version"},
+		"a pinned deploy artifact": {"[package]\nname = \"a\"\nversion = \"20260928\"\nrevision = 1\n[outputs]\ndeploy = \"deploy\"\n" + pinnedImage,
+			"publishes images, and nothing else"},
 		"an unknown toolchain": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"x\"\ntoolchain = \"zig\"\nrun = \"make\"\n",
 			"the toolchain \"zig\""},
 		"a job with no command": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"x\"\ntoolchain = \"go\"\n", "a run command"},

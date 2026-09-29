@@ -74,6 +74,10 @@ type Planner struct {
 	Components map[string]*Component
 	Git        Git
 	Versions   VersionsFunc
+	// Recipes holds the recipe hash of each pinned component in the
+	// tree, and PublishedRecipe reads the hash of its published tag.
+	Recipes         map[string]string
+	PublishedRecipe PublishedRecipeFunc
 }
 
 // Plan decides, for each component, whether its jobs run, whether it
@@ -99,7 +103,9 @@ func (p Planner) release(e Event, tag string) (map[string]Decision, error) {
 		return nil, err
 	}
 	for name, d := range decisions {
-		d.Version = tag
+		if !p.Components[name].Pinned() {
+			d.Version = tag
+		}
 		if d.Changed {
 			d.Check = true
 			if e.Publishing {
@@ -114,8 +120,16 @@ func (p Planner) release(e Event, tag string) (map[string]Decision, error) {
 // Candidates decides which components a release tag at the commit
 // would publish, and why.
 func (p Planner) Candidates(head string) (map[string]Decision, error) {
+	published, err := p.pinnedPublished()
+	if err != nil {
+		return nil, err
+	}
 	decisions := map[string]Decision{}
 	for _, c := range sortedComponents(p.Components) {
+		if c.Pinned() {
+			decisions[c.Name()] = pinnedDecision(c, published[c.Name()], false, "")
+			continue
+		}
 		d := Decision{Publish: publishNone}
 		if !c.HasOutputs() {
 			d.Reason = "publishes nothing"
@@ -209,6 +223,10 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 		}
 		dev = DevVersion(tag, count, commit)
 	}
+	published, err := p.pinnedPublished()
+	if err != nil {
+		return nil, err
+	}
 	decisions := map[string]Decision{}
 	for _, c := range sortedComponents(p.Components) {
 		d := Decision{Publish: publishNone, Version: dev}
@@ -224,6 +242,9 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 				d.Reason = "nothing in its paths changed"
 			}
 			d.Changed, d.Why = ReleaseChanged(p.Components, c.Name(), files)
+		}
+		if c.Pinned() {
+			d = pinnedDecision(c, published[c.Name()], d.Check, d.Reason)
 		}
 		// The OS publishes only releases: a machine installs from the
 		// channel, and the channel holds releases.

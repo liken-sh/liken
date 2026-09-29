@@ -89,6 +89,7 @@ func planFixture(t *testing.T) *repo {
 		"liken/package.toml":    "[package]\nname = \"liken\"\n[depends]\ncomponents = [\"brand\"]\n[outputs]\nchannel = true\n",
 		"operator/main.go":      "package main\n",
 		"base/Dockerfile":       "FROM scratch\n",
+		"operator/Dockerfile":   "FROM base\n",
 	})
 	r.run("tag", "operator/2026.09.27-001")
 	r.run("tag", "base/2026.09.27-001")
