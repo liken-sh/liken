@@ -13,8 +13,11 @@ published.
   `k8s.io`, so a program that must not link client-go can use it.
 - `memo` records the `resourceVersion` of the newest copy of each
   object that an operator wrote or read, so a pass does not act on a
-  copy in a watch's store that is older than its own write. It imports
-  nothing from `k8s.io` either.
+  copy in a watch's store that is older than its own write. It also
+  sends the requests whose answers it records: a read of one object, a
+  write, and a status write that settles on the API server's copy after
+  a `409`. It imports nothing from `k8s.io` either, so the pod build of
+  `library-operator` can link it.
 - `informer` watches a collection through client-go's reflector and
   keeps a copy of it, and answers a pass's reads from that copy. It
   links only `tools/cache`, `dynamic`, and `rest` from client-go.

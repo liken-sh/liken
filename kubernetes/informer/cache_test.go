@@ -294,58 +294,6 @@ func ready(item *thing) bool {
 	return true
 }
 
-// A status write lands from a current copy. A write from an older copy
-// reads the object again and writes once more when the fresh copy
-// still needs it. A copy of an object that is gone answers
-// apiclient.ErrNotFound.
-func TestAStatusWriteSettlesOnTheAPIServersCopy(t *testing.T) {
-	alreadyReady := newThing("a", "", 2)
-	alreadyReady.Status.Phase = "Ready"
-	cases := []struct {
-		name      string
-		stored    *thing
-		held      string
-		failing   bool
-		wantWrote bool
-		wantErr   string
-		wantSent  []string
-	}{
-		{"a current copy", &thing{Metadata: thingMeta{Name: "a"}}, "101", false, true, "",
-			[]string{"PUT /things/a/status"}},
-		{"an older copy", &thing{Metadata: thingMeta{Name: "a"}}, "90", false, true, "",
-			[]string{"PUT /things/a/status", "GET /things/a", "PUT /things/a/status"}},
-		{"an older copy, and the fresh copy needs nothing", &alreadyReady, "90", false, false, "",
-			[]string{"PUT /things/a/status", "GET /things/a"}},
-		{"a copy of an object that is gone", nil, "90", false, false, apiclient.ErrNotFound.Error(),
-			[]string{"PUT /things/a/status", "GET /things/a"}},
-		{"a failure", nil, "90", true, false, "etcd is gone",
-			[]string{"PUT /things/a/status"}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			api := newFakeAPI()
-			api.failing = c.failing
-			if c.stored != nil {
-				api.put(*c.stored)
-			}
-			held := newThing("a", c.held, 1)
-			versions := memo.New()
-
-			wrote, err := SettleStatus[thing](testClient(t, api), versions, thingPath("a"), &held, ready)
-
-			if wrote != c.wantWrote || (c.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.wantErr)) {
-				t.Errorf("SettleStatus = %v, %v; want %v and an error that says %q", wrote, err, c.wantWrote, c.wantErr)
-			}
-			if sent := api.sent(); !slices.Equal(sent, c.wantSent) {
-				t.Errorf("the write sent %v, want %v", sent, c.wantSent)
-			}
-			if wrote && !versions.Current("a", held.Metadata.ResourceVersion) {
-				t.Errorf("the memo does not hold the written version %s", held.Metadata.ResourceVersion)
-			}
-		})
-	}
-}
-
 // A copy that needs no write sends nothing.
 func TestAStatusThatNeedsNoWriteSendsNothing(t *testing.T) {
 	api := newFakeAPI()
@@ -356,22 +304,5 @@ func TestAStatusThatNeedsNoWriteSendsNothing(t *testing.T) {
 
 	if wrote || err != nil || len(api.sent()) != 0 {
 		t.Errorf("SettleStatus = %v, %v, and sent requests; want nothing", wrote, err)
-	}
-}
-
-// A store key is namespace/name for a namespaced object and the name
-// for a cluster-scoped one.
-func TestAStoreKeyNamesTheNamespace(t *testing.T) {
-	cases := []struct {
-		meta thingMeta
-		want string
-	}{
-		{thingMeta{Name: "a"}, "a"},
-		{thingMeta{Name: "a", Namespace: "den"}, "den/a"},
-	}
-	for _, c := range cases {
-		if got := Key(&c.meta); got != c.want {
-			t.Errorf("Key(%+v) = %q, want %q", c.meta, got, c.want)
-		}
 	}
 }

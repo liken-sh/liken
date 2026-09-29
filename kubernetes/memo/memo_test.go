@@ -131,3 +131,27 @@ func TestRequestsAboutOneObjectRunOneAtATime(t *testing.T) {
 		t.Error("the memo does not hold the second answer")
 	}
 }
+
+// A list forgets each noted object that it did not answer and the store
+// does not hold. An object the store still holds keeps its record until
+// the watch delivers the delete, so its older copy is not current.
+func TestAListForgetsTheObjectsThatAreGone(t *testing.T) {
+	memo := New()
+	memo.Note("den", "3")
+	memo.Note("studio", "4")
+	memo.Note("kitchen", "5")
+
+	memo.ForgetGone(store{"studio": true}, map[string]bool{"den": true})
+
+	if !memo.Current("den", "3") || memo.Current("den", "2") {
+		t.Error("the memo forgot den, which the list answered")
+	}
+	if memo.Current("studio", "2") {
+		t.Error("the memo forgot studio, which the store still holds")
+	}
+	if !memo.Current("kitchen", "2") {
+		t.Error("the memo kept kitchen, which is gone")
+	}
+	var none *Versions
+	none.ForgetGone(store{}, nil)
+}

@@ -21,12 +21,10 @@ package informer
 // server once. When the watch delivers the write, the store answers
 // again.
 //
-// A write from a copy that another writer changed since carries an
-// older resourceVersion, and the API server answers 409 Conflict.
-// SettleStatus then reads the object from the API server and writes
-// once more, if the fresh copy still needs the write. A copy of an
-// object somebody deleted answers 404, and each caller handles that the
-// way it handles an object that is absent.
+// The memo package holds the requests whose answers the memo notes,
+// because a program that must not link client-go sends them too. This
+// package names the read and the status write as well, so a pass that
+// reads a store and writes needs one import.
 
 import (
 	"errors"
@@ -67,27 +65,15 @@ type Held struct {
 }
 
 // Meta is the part of an object's metadata that the cache reads.
-type Meta interface {
-	GetNamespace() string
-	GetName() string
-	GetResourceVersion() string
-}
+type Meta = memo.Meta
 
 // Object is a pointer to an operator's struct for one kind, which
 // answers the object's metadata.
-type Object[T any] interface {
-	*T
-	GetObjectMeta() Meta
-}
+type Object[T any] = memo.Object[T]
 
 // Key is the key a store holds an object under: namespace/name for a
 // namespaced object and the name for a cluster-scoped one.
-func Key(meta Meta) string {
-	if meta.GetNamespace() == "" {
-		return meta.GetName()
-	}
-	return meta.GetNamespace() + "/" + meta.GetName()
-}
+func Key(meta Meta) string { return memo.Key(meta) }
 
 // Cached answers the store's copy of one object, by its key, while the
 // store is ready. A copy that does not convert is reported and not
@@ -145,15 +131,7 @@ func ReadOne[T any, P Object[T]](c *apiclient.Client, held Held, key, path strin
 
 // ReadFresh reads one object from the API server and notes its version.
 func ReadFresh[T any, P Object[T]](c *apiclient.Client, versions *memo.Versions, key, path string) (*T, error) {
-	var fresh *T
-	err := versions.Send(key, func() (string, error) {
-		var err error
-		if fresh, err = apiclient.Get[T](c, path); err != nil {
-			return "", err
-		}
-		return P(fresh).GetObjectMeta().GetResourceVersion(), nil
-	})
-	return fresh, err
+	return memo.ReadFresh[T, P](c, versions, key, path)
 }
 
 // CurrentList answers the store's copies, in the order of their keys. A
@@ -195,41 +173,8 @@ func CurrentList[T any, P Object[T]](c *apiclient.Client, held Held, path func(k
 }
 
 // SettleStatus writes the status that apply sets on a copy of an
-// object. apply composes the status from the copy it is given, sets it,
-// and reports whether the copy needs the write. A write refused because
-// the copy is older than the API server's, or because the object is
-// gone, reads the object again, applies again to the fresh copy, and
-// writes once more. SettleStatus reports whether a write landed, and an
-// object that is gone answers apiclient.ErrNotFound. Each copy the API
-// server answers is noted in versions. After an error, held holds the
-// status that apply set, which the API server did not take.
+// object, and settles on the API server's copy after a 409 or a 404
+// (memo.SettleStatus).
 func SettleStatus[T any, P Object[T]](c *apiclient.Client, versions *memo.Versions, path string, held *T, apply func(*T) bool) (bool, error) {
-	key := Key(P(held).GetObjectMeta())
-	write := func() error {
-		return versions.Send(key, func() (string, error) {
-			if err := apiclient.ReplaceStatus(c, path, held); err != nil {
-				return "", err
-			}
-			return P(held).GetObjectMeta().GetResourceVersion(), nil
-		})
-	}
-	if !apply(held) {
-		return false, nil
-	}
-	err := write()
-	if !apiclient.Stale(err) {
-		return err == nil, err
-	}
-	current, err := ReadFresh[T, P](c, versions, key, path)
-	if err != nil {
-		return false, err
-	}
-	*held = *current
-	if !apply(held) {
-		return false, nil
-	}
-	if err := write(); err != nil {
-		return false, err
-	}
-	return true, nil
+	return memo.SettleStatus[T, P](c, versions, path, held, apply)
 }

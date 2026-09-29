@@ -123,3 +123,29 @@ func (m *Versions) Send(key string, request func() (version string, err error)) 
 	m.Note(key, version)
 	return err
 }
+
+// ForgetGone drops the record of each object that a list did not
+// answer and the store does not hold. The API server answered 404 for
+// such an object, and its watch delivered the delete. An operator whose
+// objects come and go, such as a Play for each film or a Job for each
+// run, calls it after each list, or the memo would keep a record of
+// every object for the life of the process. A key the store still holds
+// keeps its record, so a copy of an object the API server already
+// deleted is not current again before the watch removes it.
+func (m *Versions) ForgetGone(store KeyGetter, listed map[string]bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key := range m.seen {
+		if listed[key] {
+			continue
+		}
+		if _, held, _ := store.GetByKey(key); held {
+			continue
+		}
+		delete(m.seen, key)
+		delete(m.requests, key)
+	}
+}
