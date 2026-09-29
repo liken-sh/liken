@@ -42,6 +42,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
@@ -115,11 +116,14 @@ func decideRefresh(dsVersion string, machines []machine.Machine, pods []kubernet
 }
 
 // stewardOSPods carries out the steward's work, run once per sweep,
-// over every stewarded DaemonSet in turn.
-func stewardOSPods(r *fleetReader, machines []machine.Machine) {
+// over every stewarded DaemonSet in turn. The steward's memory holds
+// the terminating pods it has reported (stuckpods.go).
+func stewardOSPods(r *fleetReader, machines []machine.Machine, steward *podSteward, now time.Time) {
+	complete := true
 	for _, name := range stewardedDaemonSets {
-		stewardDaemonSet(r, machines, name)
+		complete = stewardDaemonSet(r, machines, name, steward, now) && complete
 	}
+	steward.settle(complete)
 }
 
 // daemonSetVersion reads one DaemonSet's os-version annotation: the
@@ -145,16 +149,20 @@ func daemonSetVersion(r *fleetReader, name string) string {
 // emptyDir resume cursors. So each OS upgrade re-sends the tail of
 // that machine's log streams once, and the envelopes' seq field
 // removes any duplicates.
-func stewardDaemonSet(r *fleetReader, machines []machine.Machine, name string) {
+//
+// It answers whether it read the DaemonSet's pods, or found no
+// DaemonSet to read them for.
+func stewardDaemonSet(r *fleetReader, machines []machine.Machine, name string, steward *podSteward, now time.Time) bool {
 	dsVersion := daemonSetVersion(r, name)
 	if dsVersion == "" {
-		return // no DaemonSet, or nothing applied yet, to steward toward
+		return true // no DaemonSet, or nothing applied yet, to steward toward
 	}
 	pods, err := r.daemonSetPods(name)
 	if err != nil {
 		fmt.Printf("listing %s pods for the steward: %v\n", name, err)
-		return
+		return false
 	}
+	steward.reportOverdue(pods, now)
 	for _, p := range decideRefresh(dsVersion, machines, pods) {
 		if err := kubernetes.EvictPod(r.client, p); err != nil {
 			fmt.Printf("refreshing pod %s: %v\n", p.Metadata.Name, err)
@@ -163,4 +171,5 @@ func stewardDaemonSet(r *fleetReader, machines []machine.Machine, name string) {
 				p.Metadata.Name, p.Spec.NodeName, dsVersion)
 		}
 	}
+	return true
 }

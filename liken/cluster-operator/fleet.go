@@ -133,15 +133,17 @@ func awaitsApproval(m *machine.Machine) bool {
 // sweepFleet carries out the sweep. It lists the fleet and its
 // heartbeats, determines the verdict, marks the silent machines Lost,
 // and publishes the verdict on the Cluster. The available parameter
-// is the channel poller's last answer, and probe holds when the flux
-// engine probe last asked. The caller passes both in as plain values,
-// so the sweep itself stays a function of its arguments.
+// is the channel poller's last answer, probe holds when the flux
+// engine probe last asked, and steward holds the terminating pods the
+// steward has reported. The caller passes all three in, so the sweep
+// itself stays a function of its arguments.
 //
 // A pass that cannot read the fleet returns the reason. The reading
 // is the whole pass here: with no list of machines there is no
 // verdict to reach, so this is the failure that the layer 2 error
 // counter counts (metrics.go).
-func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available string, probe *engineProbe, cm *clusterMetrics, now time.Time) error {
+func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available string, probe *engineProbe,
+	steward *podSteward, cm *clusterMetrics, now time.Time) error {
 	c := reads.client
 	machines, err := reads.machines()
 	if err != nil {
@@ -173,7 +175,7 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 	// are also fleet state. An upgraded machine keeps pods from
 	// before its upgrade until the steward refreshes them (see
 	// steward.go).
-	stewardOSPods(reads, machines)
+	stewardOSPods(reads, machines, steward, now)
 
 	// A retracted feature leaves its workloads behind. k3s only
 	// deletes an addon when it sees the addon's manifest disappear

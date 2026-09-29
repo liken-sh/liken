@@ -162,7 +162,7 @@ func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
 	}, &evicted)
 
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
-	stewardOSPods(&fleetReader{client: client}, machines)
+	stewardOSPods(&fleetReader{client: client}, machines, &podSteward{}, sweepNow)
 	if len(evicted) != 2 || evicted[0] != "liken-machine-operator-pod" || evicted[1] != "machine-logs-pod" {
 		t.Errorf("expected evictions from both DaemonSets, got %v", evicted)
 	}
@@ -178,7 +178,7 @@ func TestStewardSkipsMissingDaemonSets(t *testing.T) {
 	}, &evicted)
 
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
-	stewardOSPods(&fleetReader{client: client}, machines)
+	stewardOSPods(&fleetReader{client: client}, machines, &podSteward{}, sweepNow)
 	if len(evicted) != 1 || evicted[0] != "liken-machine-operator-pod" {
 		t.Errorf("expected only the operator's eviction, got %v", evicted)
 	}

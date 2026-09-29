@@ -131,18 +131,21 @@ func operate(stop context.Context, mayAct func(context.Context) bool, fleet *fle
 	name := clusterDoc.Metadata.Name
 	fmt.Printf("operating cluster %s\n", name)
 
-	// Two values outlive a pass, the same way the machine operator's
+	// Three values outlive a pass, the same way the machine operator's
 	// release fetcher does. The sweep stays level-triggered and
 	// stateless, and each of these remembers only what it needs to
-	// avoid asking too often. The channel poller keeps when it last
-	// asked and the channel's last answer. The flux engine probe keeps
-	// when it last asked whether the engine is still there.
+	// avoid asking or saying the same thing too often. The channel
+	// poller keeps when it last asked and the channel's last answer.
+	// The flux engine probe keeps when it last asked whether the engine
+	// is still there. The pod steward keeps the terminating pods it has
+	// already reported.
 	poller := newChannelPoller()
 	probe := &engineProbe{}
+	steward := &podSteward{}
 
 	for mayAct(stop) {
 		started := time.Now()
-		err := sweep(fleet, name, poller, probe, cm)
+		err := sweep(fleet, name, poller, probe, steward, cm)
 		om.ObserveReconcile(clusterKind, time.Since(started), err)
 		select {
 		case <-wakes:
@@ -158,7 +161,7 @@ func operate(stop context.Context, mayAct func(context.Context) bool, fleet *fle
 // poller its look at the spec. Then it lets the fleet sweep list the
 // fleet, judge it, and write the result, carrying the engine probe
 // along so the flux engine's care keeps its own cadence.
-func sweep(reads *fleetReader, name string, poller *channelPoller, probe *engineProbe, cm *clusterMetrics) error {
+func sweep(reads *fleetReader, name string, poller *channelPoller, probe *engineProbe, steward *podSteward, cm *clusterMetrics) error {
 	clusterDoc, err := reads.cluster(name)
 	if err != nil {
 		fmt.Printf("reading cluster %s: %v\n", name, err)
@@ -166,7 +169,7 @@ func sweep(reads *fleetReader, name string, poller *channelPoller, probe *engine
 	}
 	poller.Observe(clusterDoc.Spec.Releases,
 		clusterDoc.Metadata.Annotations[cluster.CheckReleasesAnnotation], time.Now())
-	return sweepFleet(reads, clusterDoc, poller.Available(), probe, cm, time.Now())
+	return sweepFleet(reads, clusterDoc, poller.Available(), probe, steward, cm, time.Now())
 }
 
 // awaitCluster waits until a Cluster exists, and answers it. A 404

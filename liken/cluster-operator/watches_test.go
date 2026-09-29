@@ -139,7 +139,7 @@ func runSweeps(t *testing.T, api *fakeapi.Server, r *fleetReader) ([]string, *cl
 			}
 			api.Forget()
 		}
-		if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, cm); err != nil {
+		if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -262,14 +262,14 @@ func TestASweepRightAfterItsOwnGrantReadsThatMachineDirectly(t *testing.T) {
 	cm, _ := fleetMetrics(t)
 	fake.Hold()
 
-	if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, cm); err != nil {
+	if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(fake.Requests(), "PUT "+kubernetes.MachinesPath+"/node-2/status") {
 		t.Fatalf("the first sweep sent %q, want a grant to node-2", fake.Requests())
 	}
 	fake.Forget()
-	if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, cm); err != nil {
+	if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
 		t.Fatal(err)
 	}
 

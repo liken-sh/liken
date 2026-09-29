@@ -15,6 +15,7 @@ import (
 type PodMetadata struct {
 	Name              string            `json:"name"`
 	Namespace         string            `json:"namespace"`
+	UID               string            `json:"uid"`
 	Annotations       map[string]string `json:"annotations"`
 	OwnerReferences   []OwnerReference  `json:"ownerReferences"`
 	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
