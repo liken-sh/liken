@@ -184,7 +184,17 @@ func TestCoreCapabilitiesOfTheDrillsPanels(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			capabilities := coreCapabilities(capabilityCodes(labCapabilities(t, c.panel)))
+			// The probe publishes each core control the string declares,
+			// through capabilityOf. The maximum is 0 here, because a
+			// continuous control's maximum comes from the panel's answer
+			// and not from the string.
+			codes := capabilityCodes(labCapabilities(t, c.panel))
+			capabilities := map[string]panelCapability{}
+			for _, control := range coreControls {
+				if values, carried := codes[control.Code]; carried {
+					capabilities[control.Name] = capabilityOf(control.Code, values, 0)
+				}
+			}
 
 			var carried []string
 			for name := range capabilities {

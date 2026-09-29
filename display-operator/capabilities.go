@@ -380,25 +380,3 @@ func isNameCharacter(character byte) bool {
 	return isHexDigit(character) || character == '_' ||
 		(character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
 }
-
-// The common core of what the panel declared, under the plain
-// names. Every other code the panel carries is dropped here, and the
-// resource publishes nothing about it.
-func coreCapabilities(codes map[byte][]uint16) map[string]panelCapability {
-	if codes == nil {
-		return nil
-	}
-	capabilities := map[string]panelCapability{}
-	for _, control := range coreControls {
-		values, carried := codes[control.Code]
-		if !carried {
-			continue
-		}
-		capability := panelCapability{}
-		for _, value := range values {
-			capability.Values = append(capability.Values, valueName(control.Code, value))
-		}
-		capabilities[control.Name] = capability
-	}
-	return capabilities
-}
