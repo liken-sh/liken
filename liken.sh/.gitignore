@@ -10,11 +10,14 @@
 #   image/       assembled install media and disk images
 #   channel/     verified downloads from the release channel, cached
 #                by version; redownloadable, so never source
+#   flatcar/     the redirect host's Flatcar image, which `make
+#                flatcar` downloads; about 600 MB, and redownloadable
 #
-# The last three belonged to the machine this domain once ran. A
-# checkout from that era can still hold them, and none of it may
-# ever land in history, the identity keys above all.
+# identity/, image/, and channel/ belonged to the machine this domain
+# once ran. A checkout from that era can still hold them, and none of
+# it may ever land in history, the identity keys above all.
 .terraform/
 identity/
 image/
 channel/
+flatcar/

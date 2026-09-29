@@ -1109,6 +1109,33 @@ the release numbers do not.
   `*.liken.sh` over HTTPS with a wildcard certificate. Linode DNS
   has no redirect feature, and a Linode community answer says that
   Object Storage does not serve redirects.
+
+  Decided on 2026-09-28: a Linode Nanode that runs Flatcar Container
+  Linux, declared in `liken.sh/redirects.tf` beside the zone. A
+  Nanode costs $5 a month, and Flatcar is immutable and updates
+  itself. The host runs one container, the official Caddy image, and
+  the Terraform plan renders its whole configuration into one
+  Ignition config, so a change makes a new instance and nobody
+  changes the host by hand. The small Go service that answered the
+  redirects is removed, because a Caddy `redir` does the same work.
+  Caddy gets one certificate for each name over HTTP-01 or
+  TLS-ALPN-01, in place of the wildcard certificate, because a
+  wildcard certificate needs DNS-01, and DNS-01 puts a token that can
+  edit the whole zone on an internet-facing host. The names are a fixed list,
+  `redirect_names`, in place of any name that arrives. A policy that
+  asked for a certificate for any name would let a stranger spend the
+  weekly Let's Encrypt quota of liken.sh with random names, and
+  GitHub Pages renews the apex certificate from that quota. The DNS
+  wildcard still sends every name without a record of its own to the
+  host, so a new component's name needs one entry in the list, not a
+  new record. A name redirects only after its CNAME to GitHub Pages
+  leaves `terraform.tf`, because a record of its own wins over the
+  wildcard.
+
+  Still open: Linode's upload guide gives 6 GB as the largest
+  uncompressed image, and the Flatcar `4757.2.0` image for Linode is
+  8,455,716,864 bytes uncompressed. The first apply shows whether
+  Linode accepts it.
 - **Attestations on ghcr.** The `push-to-registry` report above
   applies to images. The first image attestation checks it.
 - **Does stagex's Go match the Go version that each k3s release
@@ -1176,5 +1203,19 @@ Checked on 2026-09-28:
 - A Linode community answer that Object Storage does not serve
   redirects, with no date on the answer:
   <https://www.linode.com/community/questions/19668/how-can-i-add-a-redirection-rule-to-my-bucket>.
+- Flatcar on Linode, an uploaded image and an Ignition config in the
+  instance's metadata user data:
+  <https://www.flatcar.org/docs/latest/deploy/cloud/akamai/>.
+- The Linode regions API, which lists `Metadata` among the
+  capabilities of `us-east`: <https://api.linode.com/v4/regions/us-east>.
+- Caddy's `redir` directive and its placeholders. `{labels.2}` is the
+  third label of the host from the right, and `{uri}` is the request
+  URI with its query: <https://caddyserver.com/docs/caddyfile/directives/redir>,
+  <https://caddyserver.com/docs/caddyfile/concepts#placeholders>, and
+  `modules/caddyhttp/replacer.go` at `v2.11.4` in
+  <https://github.com/caddyserver/caddy>.
+- Let's Encrypt's rate limits: <https://letsencrypt.org/docs/rate-limits/>.
+- Linode's limits on an uploaded image:
+  <https://techdocs.akamai.com/cloud-computing/docs/upload-an-image>.
 - GitHub Pages custom domains, one for each repository:
   <https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/about-custom-domains-and-github-pages>.

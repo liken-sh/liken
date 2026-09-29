@@ -1,0 +1,85 @@
+# The redirect host's configuration, in Butane. redirects.tf renders
+# this file as a Terraform template, and the `ct_config` data source
+# transpiles the result to the Ignition config that Flatcar reads on
+# its first boot, from the Linode metadata service. Ignition runs only
+# once, so this file is the whole of the host's state: a change here
+# makes a new instance, and nothing on the host changes by hand.
+variant: flatcar
+version: 1.1.0
+
+# Flatcar keeps its automatic updates. update_engine checks Flatcar's
+# update server for a newer stable release, and writes it to the
+# passive /usr partition. Then locksmithd reboots the host with its
+# default strategy, `reboot`, five minutes later. If the new release
+# fails to boot, GRUB boots the previous partition again. The Caddy
+# unit below starts at every boot, so an update needs no step here.
+# The Flatcar version that the Makefile pins is only the release that
+# the instance boots first.
+
+storage:
+  files:
+    - path: /etc/caddy/Caddyfile
+      mode: 0644
+      contents:
+        inline: ${jsonencode(caddyfile)}
+  directories:
+    # Caddy's data directory: the ACME account and the certificates.
+    # /var is on the ROOT partition, which a reboot and an update keep,
+    # so a restart does not ask Let's Encrypt for the certificates
+    # again. A new instance starts with an empty directory, and asks
+    # once for each name.
+    - path: /var/lib/caddy
+      mode: 0700
+      user:
+        id: 65534
+      group:
+        id: 65534
+
+systemd:
+  units:
+    # The host has no SSH. The firewall drops port 22, and these masks
+    # stop sshd from listening at all. Flatcar starts sshd from
+    # sshd.socket, and sshd.service is the unit for a daemon that
+    # listens by itself, so both are masked. The core user gets no
+    # keys, because this config names none.
+    - name: sshd.socket
+      mask: true
+    - name: sshd.service
+      mask: true
+
+    # Caddy runs from the official image, pinned by digest, as the
+    # unprivileged user 65534. The image gives the caddy binary the
+    # file capability CAP_NET_BIND_SERVICE, so Caddy can bind ports 80
+    # and 443 on the host network without root. The container drops
+    # every other capability, and its root filesystem is read-only.
+    # The host network gives Caddy both address families with no
+    # port mapping in between.
+    - name: caddy.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Caddy, which redirects the names in the Caddyfile to their manuals
+        Requires=docker.service
+        After=docker.service network-online.target
+        Wants=network-online.target
+
+        [Service]
+        # The first start pulls the image, which can take longer than
+        # the default start timeout.
+        TimeoutStartSec=0
+        ExecStartPre=-/usr/bin/docker rm --force caddy
+        ExecStart=/usr/bin/docker run --name caddy \
+          --network host \
+          --user 65534:65534 \
+          --cap-drop ALL \
+          --cap-add NET_BIND_SERVICE \
+          --read-only \
+          --volume /etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
+          --volume /var/lib/caddy:/data \
+          ${caddy_image}
+        ExecStop=/usr/bin/docker stop caddy
+        Restart=always
+        RestartSec=5s
+
+        [Install]
+        WantedBy=multi-user.target

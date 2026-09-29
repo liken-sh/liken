@@ -1,10 +1,11 @@
 # The liken.sh domain: the project's public presence, as
-# infrastructure. This one file declares everything Linode needs for
-# the name to answer: the DNS zone, the website's records, and the
-# release channel. The release channel is the object storage bucket
-# that holds published releases, the credential that lets this
-# repo's CI upload them, and the token that keeps the channel's TLS
-# certificate fresh.
+# infrastructure. This file declares what Linode needs for the name
+# to answer: the DNS zone, the website's records, and the release
+# channel. The release channel is the object storage bucket that
+# holds published releases, the credential that lets this repo's CI
+# upload them, and the token that keeps the channel's TLS certificate
+# fresh. redirects.tf declares the one machine, the host that
+# redirects the old manual names to the site.
 #
 # The channel lives in object storage, rather than on a liken
 # machine, for a reason worth stating plainly: machines upgrade
@@ -46,6 +47,20 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
+    }
+    # The ct provider transpiles the redirect host's Butane config to
+    # Ignition during the plan (redirects.tf). Its minor versions
+    # change which Butane and Ignition versions it accepts, so the pin
+    # is exact.
+    ct = {
+      source  = "poseidon/ct"
+      version = "0.14.0"
+    }
+    # The random provider makes the one root password that Linode's
+    # API requires for the redirect host's disk (redirects.tf).
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
     }
   }
 
