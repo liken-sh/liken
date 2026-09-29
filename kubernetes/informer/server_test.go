@@ -83,6 +83,11 @@ const serverDown = -1
 // its last line, the way the API server does at timeoutSeconds.
 const holdOpen = "hold"
 
+// awaitGate, as a line of a script, holds the stream until the test
+// closes the server's gate, so an event reaches the watcher only after
+// a step of the test, such as the end of the first read.
+const awaitGate = "gate"
+
 // watchServer is an API server for one collection. Each read of the
 // collection answers the next of reads, and the last one again after
 // that. Each watch connection plays the next script of events. While
@@ -107,13 +112,15 @@ type watchServer struct {
 	queries   []string
 	opened    chan struct{}
 	failed    chan struct{}
+	gate      chan struct{}
 
 	// refused is a port that no process listens on.
 	refused string
 }
 
 func newWatchServer(path string, reads [][]thing, scripts ...[]string) *watchServer {
-	return &watchServer{path: path, reads: reads, scripts: scripts, opened: make(chan struct{}, len(scripts)+8), failed: make(chan struct{}, 1)}
+	return &watchServer{path: path, reads: reads, scripts: scripts, opened: make(chan struct{}, len(scripts)+8), failed: make(chan struct{}, 1),
+		gate: make(chan struct{})}
 }
 
 // fails reports whether the server fails now with the failure.
@@ -189,6 +196,14 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if line == holdOpen {
 			<-r.Context().Done()
 			return
+		}
+		if line == awaitGate {
+			select {
+			case <-s.gate:
+			case <-r.Context().Done():
+				return
+			}
+			continue
 		}
 		fmt.Fprintln(w, line)
 		w.(http.Flusher).Flush()

@@ -141,6 +141,19 @@ func TestAWatchOfOneObjectReportsAnAbsentObjectBeforeSynced(t *testing.T) {
 	}
 }
 
+// An object absent from the first read is reported absent, and when
+// it is created after that read, the owner takes it.
+func TestAWatchOfOneObjectReportsAnAbsentObjectAndItsArrival(t *testing.T) {
+	server := newWatchServer(thingsPath, [][]thing{{}}, []string{awaitGate, event("ADDED", sized("a", "8", 5)), holdOpen})
+	seen := &reports{}
+	watchThing(t, server, seen, func() { close(server.gate) })
+
+	eventually(t, "the owner takes the new object", func() bool { return len(seen.all()) == 2 })
+	if got, want := seen.all(), []string{"absent", "5"}; !slices.Equal(got, want) {
+		t.Errorf("reports = %q, want %q", got, want)
+	}
+}
+
 // A copy that does not convert is logged, and the owner keeps the copy
 // it holds, because the next version of the object can be valid.
 func TestAWatchOfOneObjectSkipsACopyThatDoesNotConvert(t *testing.T) {
