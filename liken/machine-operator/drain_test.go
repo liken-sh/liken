@@ -235,6 +235,16 @@ func TestDrainEvictsADriverOnceItsClaimHolderCompleted(t *testing.T) {
 	}
 }
 
+func TestDrainWaitsForATerminatingDriverWithoutAskingAgain(t *testing.T) {
+	step := draining(pod("display-operator", "displays", servesDRA, terminating), pod("web", "default"))
+	if evicted(step) != "web" {
+		t.Errorf("the driver is already leaving and is not asked again: %s", evicted(step))
+	}
+	if step.remaining != 2 {
+		t.Errorf("the terminating driver still has to move: %d", step.remaining)
+	}
+}
+
 func TestDrainEvictsADriverThatHoldsItsOwnClaimWithTheDrivers(t *testing.T) {
 	// The device operators claim raw hardware from liken.sh, whose
 	// driver is this operator, and no drain evicts it. So a driver
