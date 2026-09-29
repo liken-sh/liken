@@ -9,11 +9,12 @@ published.
 - `apiclient` sends each read and write as one HTTPS request with a
   JSON body. It reads the pod's ServiceAccount token on each request,
   separates a `404` and a `409` from a failure, and sends a request
-  again after the wait that a `429` asks for, and answers
-  `ErrThrottled` for a `429` that lasts longer. A client from
-  `WithContext` ends each request, and the wait after a `429`, when
-  its context ends. A client from `WithWaitContext` ends only the
-  wait, so a write already sent runs to its answer. It imports nothing from `k8s.io`, so a program
+  again after the wait that a `429` asks for. It answers `ErrThrottled`
+  for a `429` that lasts longer, and `RetryAfterSeconds` states the
+  wait that `429` asked for. A client from `WithContext` ends each
+  request, and the wait after a `429`, when its context ends. A client
+  from `WithWaitContext` ends only the wait, so a write already sent
+  runs to its answer. It imports nothing from `k8s.io`, so a program
   that must not link client-go can use it.
 - `memo` records the `resourceVersion` of the newest copy of each
   object that an operator wrote or read, so a pass does not act on a

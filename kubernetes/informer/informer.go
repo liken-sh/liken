@@ -231,8 +231,9 @@ func (c *Collection) Done() <-chan struct{} { return c.done }
 // A copy whose watch the API server forbids is not current, even after
 // a list. The case is a release skew: a new binary under the previous
 // release's RBAC, which grants list and not watch. The reflector then
-// lists the collection again after each backoff, up to thirty seconds
-// apart, and in between the copy holds no change at all. So after a 401
+// lists the collection again after each backoff, which grows to between
+// thirty and sixty seconds, and in between the copy holds no change at
+// all. So after a 401
 // or a 403 on a watch, the copy does not answer and the pass reads the
 // API server, until the API server accepts a watch again.
 //

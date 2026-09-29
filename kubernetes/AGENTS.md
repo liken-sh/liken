@@ -22,9 +22,9 @@ state. Such a hook comes here even for one operator, and the commit
 that adds it names the operator. The hooks of that kind now are
 `informer.Options.ListFailed` and `Options.Transform`, and
 `memo.Versions.Forget` and `Versions.Noted`, for `library-operator`,
-and `apiclient.ErrThrottled` and `Client.WithWaitContext`, for
-`equipment-operator`. The code the hook runs, such as the transform
-itself, stays in the operator.
+and `apiclient.ErrThrottled`, `RetryAfterSeconds`, and
+`Client.WithWaitContext`, for `equipment-operator`. The code the hook
+runs, such as the transform itself, stays in the operator.
 
 `apiclient` and `memo` import nothing from `k8s.io`, because some
 programs must not link client-go at all: the pod build of

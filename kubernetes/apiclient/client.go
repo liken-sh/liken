@@ -263,7 +263,8 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) er
 		message := responseText(resp.Body)
 		err := fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
 		if resp.StatusCode == http.StatusTooManyRequests {
-			return &throttledError{err: err, wait: c.retryAfter(resp.Header.Get("Retry-After"), message)}
+			seconds := retryAfter(resp.Header.Get("Retry-After"), message)
+			return &throttledError{err: err, wait: time.Duration(seconds) * c.throttleUnit, seconds: seconds}
 		}
 		return err
 	case out == nil:
@@ -293,8 +294,9 @@ func (c *Client) authorize(req *http.Request) error {
 // throttledError is a 429 from the API server, which asks the client to
 // wait and send the request again.
 type throttledError struct {
-	err  error
-	wait time.Duration
+	err     error
+	wait    time.Duration
+	seconds int
 }
 
 func (e *throttledError) Error() string { return e.err.Error() }
@@ -302,13 +304,13 @@ func (e *throttledError) Error() string { return e.err.Error() }
 // Is makes a throttledError match ErrThrottled.
 func (e *throttledError) Is(target error) bool { return target == ErrThrottled }
 
-// retryAfter reads how long a 429 asks the client to wait: the
+// retryAfter reads how many seconds a 429 asks the client to wait: the
 // Retry-After header, or the retryAfterSeconds of the Status body, or
 // one second when the answer states neither.
-func (c *Client) retryAfter(header, body string) time.Duration {
+func retryAfter(header, body string) int {
 	var seconds int
 	if _, err := fmt.Sscan(header, &seconds); err == nil && seconds > 0 {
-		return time.Duration(seconds) * c.throttleUnit
+		return seconds
 	}
 	var status struct {
 		Details struct {
@@ -316,9 +318,21 @@ func (c *Client) retryAfter(header, body string) time.Duration {
 		} `json:"details"`
 	}
 	if json.Unmarshal([]byte(body), &status) == nil && status.Details.RetryAfterSeconds > 0 {
-		return time.Duration(status.Details.RetryAfterSeconds) * c.throttleUnit
+		return status.Details.RetryAfterSeconds
 	}
-	return c.throttleUnit
+	return 1
+}
+
+// RetryAfterSeconds answers the seconds that the 429 an error holds
+// asked the caller to wait, and zero for an error that holds no 429. A
+// caller that asks again after ErrThrottled waits at least that long,
+// because the API server asked for it.
+func RetryAfterSeconds(err error) int {
+	var throttled *throttledError
+	if !errors.As(err, &throttled) {
+		return 0
+	}
+	return throttled.seconds
 }
 
 // responseText is the start of an answer's body, for an error that

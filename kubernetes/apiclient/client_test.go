@@ -479,11 +479,11 @@ func TestTheWaitAfterA429EndsWithTheContext(t *testing.T) {
 	}
 }
 
-// A client with a wait context ends only its wait after a 429 when the
-// context ends. A request already sent runs to its end, so a writer
-// that must know whether its write landed, such as an operator that
-// releases a Lease after its last write, still learns the answer.
-func TestAWaitContextEndsTheWaitAndNotTheRequest(t *testing.T) {
+// A request a client with a wait context already sent runs to its
+// answer when the context ends. A writer that must know whether its
+// write landed, such as an operator that releases a Lease after its last
+// write, still learns the answer.
+func TestAWaitContextLetsARequestSentRunToItsAnswer(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	release := make(chan struct{})
 	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -493,16 +493,70 @@ func TestAWaitContextEndsTheWaitAndNotTheRequest(t *testing.T) {
 	}))
 	time.AfterFunc(20*time.Millisecond, func() { close(release) })
 
-	if err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil); err != nil {
+	err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
+
+	if err != nil {
 		t.Errorf("err = %v, want the answer of the request that was sent", err)
 	}
+}
 
+// The wait after a 429 of a client with a wait context ends when the
+// context ends, and the request answers the 429.
+func TestAWaitContextEndsTheWaitAfterA429(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
 	throttled := &throttling{refusals: 100, retryAfter: "4"}
-	client, _ = testClient(t, throttled)
+	client, _ := testClient(t, throttled)
 	client.throttleUnit = time.Hour
 	began := time.Now()
+
 	err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
+
 	if !errors.Is(err, ErrThrottled) || time.Since(began) > 5*time.Second || throttled.requests.Load() != 1 {
 		t.Errorf("err = %v after %s and %d requests, want the 429 at once", err, time.Since(began), throttled.requests.Load())
+	}
+}
+
+// WithContext replaces a wait context, so a client bound to a new
+// context waits out a 429 under it, and not under the wait context that
+// ended.
+func TestWithContextReplacesAWaitContext(t *testing.T) {
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+	client, _ := testClient(t, &throttling{refusals: 1})
+	client.throttleUnit = time.Millisecond
+
+	err := client.WithWaitContext(ended).WithContext(t.Context()).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
+
+	if err != nil {
+		t.Errorf("err = %v, want the 429 waited out under the new context", err)
+	}
+}
+
+// A 429 the client answered states the seconds the API server asked the
+// caller to wait, and any other error states none.
+func TestA429StatesTheWaitTheAPIServerAskedFor(t *testing.T) {
+	cases := []struct {
+		name   string
+		server *throttling
+		want   int
+	}{
+		{"the header", &throttling{refusals: 100, retryAfter: "11"}, 11},
+		{"no advice", &throttling{refusals: 100}, 1},
+		{"no 429", &throttling{}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client, _ := testClient(t, c.server)
+			client.throttleUnit = time.Hour
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			defer cancel()
+
+			err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
+
+			if got := RetryAfterSeconds(err); got != c.want {
+				t.Errorf("RetryAfterSeconds(%v) = %d, want %d", err, got, c.want)
+			}
+		})
 	}
 }
