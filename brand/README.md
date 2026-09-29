@@ -207,7 +207,7 @@ repository is the only original.
 ## The coverage report
 
 `coverage/` is a Go program that turns the coverage data a
-repository's tests produce into one HTML page. A repository runs it
+component's tests produce into one HTML page. A component runs it
 as `go tool coverage`, the way it runs Hugo, and pins it as a tool
 dependency of its docs module:
 
@@ -244,7 +244,7 @@ link.
 ## The route reference generator
 
 `apiref/` is a Go program that turns an API's OpenAPI 3.1 document
-into one Markdown page. A repository runs it as `go tool apiref`,
+into one Markdown page. A component runs it as `go tool apiref`,
 pinned as a tool dependency of its docs module the way `crdref` is:
 
 ```sh
@@ -284,7 +284,7 @@ one is. `plans/02-openapi-as-a-page.md` is the design.
 
 `skills/` is a Go program that turns a site's guides into
 [Agent Skills](https://agentskills.io/), one `SKILL.md` per guide. A
-repository runs it as `go tool skills`, pinned as a tool dependency
+component runs it as `go tool skills`, pinned as a tool dependency
 of its docs module the way `crdref` is:
 
 ```sh
@@ -299,11 +299,11 @@ guide's URL and an instruction to confirm the `kubectl` context. The
 guide stays the one source, and the output directory is the
 generator's: a renamed or deleted guide leaves no stale skill.
 
-Each repository commits its `skills/` directory, so a checkout
+Each component commits its `skills/` directory, so a checkout
 includes its skills and CI fails when they are stale. An agent loads
-them with `claude --plugin-dir <checkout>` or `npx skills add
-liken-sh/<repository>`. `plans/01-guides-as-skills.md` is the
-design.
+them with `claude --plugin-dir <component directory>` or
+`npx skills add https://github.com/liken-sh/liken/tree/main/<component>`.
+`plans/01-guides-as-skills.md` is the design.
 
 ## The `liken-iced` crate
 
