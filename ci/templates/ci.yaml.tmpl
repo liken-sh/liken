@@ -105,8 +105,9 @@ jobs:
 
   # The files at the top of the repository belong to no component: the
   # plans, the agent files, and the workflows. The root
-  # .pre-commit-config.yaml checks them, and each component's own
-  # hooks run in that component's jobs.
+  # .pre-commit-config.yaml checks them. Each component's own hooks run
+  # in its prek job, and the generator refuses a component that has
+  # hooks and no prek job.
   repository:
     runs-on: ubuntu-26.04
     timeout-minutes: 5

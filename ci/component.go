@@ -83,6 +83,9 @@ type Job struct {
 	// Artifacts names files, relative to the component, that the job
 	// uploads whether it passes or fails, such as a boot log.
 	Artifacts []string `toml:"artifacts"`
+	// Skip names the hooks that a prek job leaves out, because another
+	// job of the component runs the same command.
+	Skip []string `toml:"skip"`
 }
 
 // Toolchains are the setups the workflow template knows.
@@ -238,6 +241,9 @@ func (c *Component) validate(path string) error {
 		jobs[job.Name] = true
 		if !slices.Contains(toolchains, job.Toolchain) {
 			return fmt.Errorf("%s: job %q: the toolchain %q is not one of %s", path, job.Name, job.Toolchain, strings.Join(toolchains, ", "))
+		}
+		if len(job.Skip) > 0 && job.Toolchain != "prek" {
+			return fmt.Errorf("%s: job %q: only a prek job skips hooks", path, job.Name)
 		}
 	}
 	if jobs["images"] || jobs["publish"] {

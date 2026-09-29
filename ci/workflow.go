@@ -138,6 +138,13 @@ type jobData struct {
 }
 
 func componentData(root string, c *Component) (map[string]any, error) {
+	// The hooks in a component's .pre-commit-config.yaml run in CI only
+	// through a prek job: the root workflow's repository job skips
+	// every component's directory.
+	if _, err := os.Stat(filepath.Join(root, c.Dir, ".pre-commit-config.yaml")); err == nil &&
+		!slices.ContainsFunc(c.Jobs, func(j Job) bool { return j.Toolchain == "prek" }) {
+		return nil, fmt.Errorf("%s has hooks in .pre-commit-config.yaml and no prek job to run them in CI", c.Name())
+	}
 	var jobs []jobData
 	var needs []string
 	for _, job := range c.Jobs {

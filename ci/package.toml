@@ -8,3 +8,10 @@ license = "MIT"
 name = "go"
 toolchain = "go"
 run = "make test"
+
+# The hooks in .pre-commit-config.yaml, less the ones that the jobs
+# above run.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+skip = ["test-go"]

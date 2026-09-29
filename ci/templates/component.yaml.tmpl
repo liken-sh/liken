@@ -102,8 +102,11 @@ jobs:{% range .Jobs %}
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make.
-      - uses: j178/prek-action@v2
+      # with the change it would make.{% if .Skip %} SKIP leaves out the hooks
+      # that another job of this workflow runs.{% end %}
+      - uses: j178/prek-action@v2{% if .Skip %}
+        env:
+          SKIP: {% join .Skip "," %}{% end %}
         with:
           prek-version: 0.5.2
           extra-args: --all-files {% .Component %}/{% else %}{% $lines := lines .Run %}{% if eq (len $lines) 1 %}

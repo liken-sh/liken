@@ -192,6 +192,54 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  prek:
+    if: ${{ contains(fromJSON(inputs.jobs), 'prek') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: library-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: library-operator/go.mod
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # library-operator/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('library-operator/go.sum') }}
+
+      # prek runs the hooks of this component only, with
+      # --show-diff-on-failure, so a hook that changes a file fails
+      # with the change it would make. SKIP leaves out the hooks
+      # that another job of this workflow runs.
+      - uses: j178/prek-action@v2
+        env:
+          SKIP: test-go,test-media-browser,test-docs
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files library-operator/
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
   # Each image builds through docker-bake.hcl at the top of the
   # repository, as the target of the same name. A Dockerfile that
   # builds on a base of the repository, as in FROM mpv, gets that base's
@@ -263,7 +311,7 @@ jobs:
         run: bash "${{ matrix.smoke }}" "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}"
 
   publish:
-    needs: [go, docs, rust, images]
+    needs: [go, docs, rust, prek, images]
     if: ${{ inputs.publish != 'none' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30

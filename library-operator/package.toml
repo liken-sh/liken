@@ -39,6 +39,13 @@ env = { CARGO_INCREMENTAL = "0", WLR_RENDERER = "pixman" }
 apt = ["cage", "wlr-randr", "mesa-vulkan-drivers", "libvulkan1", "libwayland-client0", "libxkbcommon0"]
 coverage = ["coverage-media-browser.xml"]
 
+# The hooks in .pre-commit-config.yaml, less the ones that the jobs
+# above run.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+skip = ["test-go", "test-media-browser", "test-docs"]
+
 [outputs]
 deploy = "deploy"
 

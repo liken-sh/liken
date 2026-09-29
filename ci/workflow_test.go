@@ -315,3 +315,48 @@ func TestTheOSBuildSavesItsGoCacheOnMain(t *testing.T) {
 		t.Errorf("the build and the publish do not both save the action's Go cache:\n%s", text)
 	}
 }
+
+// A component's hooks run in CI only through a prek job, so a
+// component with hooks and no prek job is refused.
+func TestAComponentWithHooksNeedsAPrekJob(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml":            "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n",
+		"app/.pre-commit-config.yaml": "repos: []\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "no prek job") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// A prek job skips the hooks that another job of the component runs.
+func TestAPrekJobSkipsTheHooksThatOtherJobsRun(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml":            "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test-go\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\nskip = [\"test-go\", \"test-docs\"]\n",
+		"app/.pre-commit-config.yaml": "repos: []\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "      - uses: j178/prek-action@v2\n        env:\n          SKIP: test-go,test-docs\n"
+	if text := string(files[".github/workflows/component-app.yaml"]); !strings.Contains(text, want) {
+		t.Errorf("the workflow lacks %q:\n%s", want, text)
+	}
+}
+
+func TestOnlyAPrekJobSkipsHooks(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\nskip = [\"x\"]\n",
+	})
+	if _, err := LoadComponents(root); err == nil || !strings.Contains(err.Error(), "only a prek job") {
+		t.Errorf("got %v", err)
+	}
+}

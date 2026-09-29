@@ -12,3 +12,10 @@ toolchain = "go"
 run = "make test"
 timeout = 15
 coverage = ["coverage.out"]
+
+# The hooks in .pre-commit-config.yaml, less the ones that the jobs
+# above run.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+skip = ["test-go"]

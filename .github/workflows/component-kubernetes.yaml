@@ -80,3 +80,51 @@ jobs:
             kubernetes/coverage.out
           if-no-files-found: error
           retention-days: 7
+
+  prek:
+    if: ${{ contains(fromJSON(inputs.jobs), 'prek') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: kubernetes
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: kubernetes/go.mod
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # kubernetes/go.sum.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('kubernetes/go.sum') }}
+
+      # prek runs the hooks of this component only, with
+      # --show-diff-on-failure, so a hook that changes a file fails
+      # with the change it would make. SKIP leaves out the hooks
+      # that another job of this workflow runs.
+      - uses: j178/prek-action@v2
+        env:
+          SKIP: test-go
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files kubernetes/
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
