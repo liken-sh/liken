@@ -146,41 +146,28 @@ records send every subdomain without a record of its own to the host,
 but a record of its own always wins over the wildcard. So a name
 redirects only when no other record in `terraform.tf` claims it.
 
-### Move the operator names to the host
+### Check a name
 
-The nine names in `extension_operators` in `terraform.tf` each have a
-CNAME to GitHub Pages, which serves the archived repositories'
-manuals. While a CNAME exists, requests for the name go to Pages, and
-Let's Encrypt cannot reach the host to check the name. Caddy retries
-a failed certificate with a longer wait each time, up to six hours
-between attempts, and it stops after 30 days until it restarts. A
-reboot restarts it, and so does each Flatcar update. So move the
-names in this order:
+The operator and driver names have no records of their own, so the
+wildcard records send them to the host. To check a name, read the
+host's ID and addresses with `terraform output redirect_host`, then:
 
-1. Run `make flatcar` and `terraform apply`. The apply creates the
-   host and the wildcard records.
-2. Read the host's ID and addresses with
-   `terraform output redirect_host`, and check that the host
-   redirects plain HTTP:
+    dig +short display.liken.sh
+    curl -sI http://display.liken.sh/docs/
+    curl -sI https://display.liken.sh/docs/
 
-       curl -sI -H 'Host: display.liken.sh' http://<ipv4>/docs/
+`dig` gives the host's address, and each `curl` answers with a 301
+to `https://liken.sh/display/docs/`. `curl -v` shows a certificate
+from Let's Encrypt.
 
-   The answer is a 301 to `https://liken.sh/display/docs/`.
-3. Check that each target section exists, for example
-   `curl -sI https://liken.sh/display/` answers 200.
-4. Remove the names from `extension_operators`, and apply.
-5. Wait for the old CNAMEs to expire, five minutes, until
-   `dig +short display.liken.sh` gives the host's address.
-6. Reboot the instance in Linode's Cloud Manager, or with
-   `linode-cli linodes reboot <id>`, so Caddy asks for the
-   certificates at once. Skip this step when the host is less than
-   an hour old: Caddy's early retries are minutes apart.
-7. Check each name over HTTPS:
-
-       curl -sI https://display.liken.sh/docs/
-
-   The answer is a 301 to `https://liken.sh/display/docs/`, and
-   `curl -v` shows a certificate from Let's Encrypt.
+A new host asks for its certificates at its first boot, before the
+changed wildcard records reach every resolver, so its first
+attempts can fail. Caddy retries a failed certificate with a longer
+wait each time, a few minutes apart at first and up to six hours
+apart later, and it stops after 30 days until it restarts. A reboot
+restarts Caddy, and so does each Flatcar update. If a name still
+has no certificate, reboot the instance in Linode's Cloud Manager,
+or with `linode-cli linodes reboot <id>`.
 
 ### No SSH
 

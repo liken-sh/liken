@@ -9,9 +9,13 @@
 # here deletes one. The repositories that predate this file were
 # adopted into the state once, so an entry and its real repository
 # always match by name.
-# The zone's records for the sites are above in terraform.tf, in the
-# extension_operators set, so the DNS half and the Pages half of every
-# site read from the same directory.
+# The zone's records for the sites are in terraform.tf, so the DNS
+# half and the Pages half of every site read from the same directory.
+# The archived repositories keep their Pages sites and their custom
+# domains, because GitHub refuses every change to an archived
+# repository. The zone has no records for those names, so the
+# wildcard in redirects.tf sends them to the redirect host, and their
+# Pages sites answer only at the github.io address.
 #
 # One thing stays outside this file on purpose. GitHub issues and
 # renews each Pages certificate on its own, so there is nothing to

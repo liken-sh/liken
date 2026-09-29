@@ -210,51 +210,15 @@ resource "linode_domain_record" "www" {
   target      = "liken-sh.github.io"
 }
 
-# The extension operators' manuals. Each operator repository
-# publishes its own Pages site under a liken.sh subdomain. The
-# hardware operators (bluetooth-operator, display-operator,
-# audio-operator) each publish devices, and their hostnames are also
-# their device class names, so the name a claim selects on is also
-# the address where a reader learns what it selects. media-operator
-# composes those devices into playback, and its manual answers at
-# media.liken.sh the same way. git-csi-driver is a CSI driver, not
-# a device operator, and its manual answers at git.liken.sh, the
-# driver's name. library-operator publishes no devices, so its
-# manual answers at library.liken.sh, the name of what it operates:
-# the media libraries of a cluster. people-operator's manual answers
-# at people.liken.sh on the same rule, and per-node-csi-driver's at
-# per-node.liken.sh, the name of its StorageClass. equipment-operator's
-# manual answers at equipment.liken.sh, the name of its API group.
-# A subdomain can CNAME where the apex
-# cannot, so each name points at the organization's Pages hostname,
-# and GitHub routes the request to the repository that claims the
-# name as its custom domain. The Pages verification record below
-# covers these names too, because it locks liken.sh's immediate
-# subdomains to this organization.
+# The operators' and drivers' names, such as display.liken.sh and
+# git.liken.sh, have no records in this file. Each name is also the
+# address of a manual, and the manuals are sections of the one site,
+# so the wildcard records in redirects.tf send each name to the
+# redirect host, which answers with a 301 to liken.sh/<name>/.
 
-resource "linode_domain_record" "extension_operators" {
-  for_each = toset([
-    "bluetooth",
-    "display",
-    "audio",
-    "media",
-    "git",
-    "library",
-    "people",
-    "per-node",
-    "equipment",
-  ])
-
-  domain_id   = linode_domain.liken_sh.id
-  name        = each.value
-  record_type = "CNAME"
-  target      = "liken-sh.github.io"
-}
-
-# The devlog at log.liken.sh is a Pages site like the manuals, but it
-# is a journal, not an operator, so its record stands apart from the
-# extension_operators set. The liken-sh/log repository claims the
-# name as its custom domain.
+# The devlog at log.liken.sh is a Pages site of its own. The
+# liken-sh/log repository claims the name as its custom domain, and
+# this record keeps the name away from the wildcard in redirects.tf.
 resource "linode_domain_record" "devlog" {
   domain_id   = linode_domain.liken_sh.id
   name        = "log"

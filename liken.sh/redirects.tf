@@ -280,11 +280,8 @@ resource "linode_instance_config" "redirects" {
 # The wildcard records send every subdomain of liken.sh to the host.
 # In DNS, a name with a record of its own never matches a wildcard, so
 # the apex, www, releases, log, and the verification records keep
-# their answers. So does each name in extension_operators in
-# terraform.tf: while its CNAME to GitHub Pages exists, requests for
-# that name go to the archived repository's Pages site, and the host
-# cannot get its certificate. A name redirects once its CNAME leaves
-# that set. A name with no record and no entry in redirect_names
+# their answers, and a name in redirect_names must have no record of
+# its own. A name with no record and no entry in redirect_names
 # reaches the host too. It gets a 404 over plain HTTP, and its TLS
 # handshake fails over HTTPS, because Caddy has no certificate for it.
 
