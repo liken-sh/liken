@@ -40,9 +40,20 @@ import (
 // InCluster builds the dynamic client for the watches from the pod's
 // ServiceAccount, the same credentials apiclient.InCluster reads.
 func InCluster() (dynamic.Interface, error) {
+	return InClusterAt("")
+}
+
+// InClusterAt is InCluster with the API server's address in place of
+// the one the environment names, for the reason that
+// apiclient.InClusterOptions.Server gives. An empty server means the
+// environment's address.
+func InClusterAt(server string) (dynamic.Interface, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
+	}
+	if server != "" {
+		config.Host = server
 	}
 	return dynamic.NewForConfig(config)
 }
@@ -117,6 +128,11 @@ type Options struct {
 	// reads costs memory for every object of the kind, such as the list
 	// of images a Node's runtime holds.
 	Transform func(*unstructured.Unstructured)
+
+	// Indexers name the indexes the copy keeps, for a pass that reads
+	// the objects of one label value without a scan of the whole copy.
+	// The store of a watch with indexers is a cache.Indexer.
+	Indexers cache.Indexers
 }
 
 // Collection is the copy of one watched collection.
@@ -202,6 +218,7 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 		ObjectType:    &unstructured.Unstructured{},
 		Handler:       handler,
 		Transform:     trim(options.Transform),
+		Indexers:      options.Indexers,
 	})
 	go func() {
 		defer close(c.done)

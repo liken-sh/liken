@@ -77,6 +77,10 @@ type Client struct {
 	// waits is the context that ends the wait after a 429
 	// (WithWaitContext). Nil means ctx ends it.
 	waits context.Context
+
+	// writeGuard, when it is set, runs before each send of a request
+	// that is not a GET (WithWriteGuard).
+	writeGuard func() error
 }
 
 // New builds a client from its three parts. InCluster reads them from
@@ -91,14 +95,42 @@ type InClusterOptions struct {
 	// ServiceAccountDir is the directory that holds the CA and the
 	// token. Empty means the directory the kubelet mounts.
 	ServiceAccountDir string
+
+	// Server is the API server's address, such as
+	// https://127.0.0.1:6443. Empty means the address that the
+	// environment names: the Service's virtual IP, where iptables pins
+	// each new connection to one API server that the client cannot
+	// choose. A pod on the host's network, on a machine that runs an
+	// API server or k3s's local load balancer, has a better address:
+	// its own loopback, where a remote server that died cannot hold a
+	// connection. The CA and the token are the same at both addresses.
+	Server string
+
+	// Timeout limits one request, from the dial to the last byte of
+	// the answer. Zero means 30 seconds. A program that must abandon a
+	// write before a deadline of its own, such as a leader whose Lease
+	// another copy can take, sets a shorter limit.
+	Timeout time.Duration
 }
+
+// defaultTimeout is the limit of InClusterOptions.Timeout when it is
+// zero.
+const defaultTimeout = 30 * time.Second
 
 // InCluster builds a client from the pod's environment and its
 // ServiceAccount.
 func InCluster(options InClusterOptions) (*Client, error) {
-	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
-	if host == "" || port == "" {
-		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
+	server := options.Server
+	if server == "" {
+		host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+		if host == "" || port == "" {
+			return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
+		}
+		server = "https://" + host + ":" + port
+	}
+	timeout := options.Timeout
+	if timeout == 0 {
+		timeout = defaultTimeout
 	}
 	dir := options.ServiceAccountDir
 	if dir == "" {
@@ -117,7 +149,7 @@ func InCluster(options InClusterOptions) (*Client, error) {
 		return nil, fmt.Errorf("service account CA contains no certificates")
 	}
 
-	return New("https://"+host+":"+port, &http.Client{
+	return New(server, &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 			// Each timeout limits the same failure: a server that stops
@@ -135,7 +167,7 @@ func InCluster(options InClusterOptions) (*Client, error) {
 		// package runs every watch. So the whole request, body
 		// included, has a limit too, and a body that stops part way
 		// cannot hold a pass.
-		Timeout: 30 * time.Second,
+		Timeout: timeout,
 	}, dir), nil
 }
 
@@ -160,6 +192,19 @@ func (c *Client) WithWaitContext(ctx context.Context) *Client {
 	bound := *c
 	bound.waits = ctx
 	return &bound
+}
+
+// WithWriteGuard answers a client that asks guard before it sends each
+// request that is not a GET, and each time it sends one again after a
+// 429. An error from guard refuses the request, and the client sends
+// nothing. A leader uses it to stop writing once it cannot show that it
+// still holds its Lease. The guard sits in the client, so it covers
+// every write, including those that memo and informer send. The client
+// it answers shares the connections of c.
+func (c *Client) WithWriteGuard(guard func() error) *Client {
+	guarded := *c
+	guarded.writeGuard = guard
+	return &guarded
 }
 
 // waitContext answers the context that ends the wait after a 429.
@@ -232,6 +277,11 @@ const maxThrottleWait = 10
 
 // send sends one request once.
 func (c *Client) send(method, path, contentType string, body []byte, out any) error {
+	if c.writeGuard != nil && method != http.MethodGet {
+		if err := c.writeGuard(); err != nil {
+			return fmt.Errorf("%s %s not sent: %w", method, path, err)
+		}
+	}
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)

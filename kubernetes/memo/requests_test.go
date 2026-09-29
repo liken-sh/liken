@@ -220,3 +220,29 @@ func TestAKeyNamesTheNamespace(t *testing.T) {
 		}
 	}
 }
+
+// plainRecord answers its metadata with no import of this package: its
+// method returns the interface literal that Meta aliases.
+type plainRecord struct {
+	Metadata recordMeta `json:"metadata"`
+}
+
+func (r *plainRecord) GetObjectMeta() interface {
+	GetNamespace() string
+	GetName() string
+	GetResourceVersion() string
+} {
+	return &r.Metadata
+}
+
+// A type whose package does not import this one is an Object, because
+// Meta is an alias of an interface literal and not a type of its own.
+func TestATypeThatNeverNamesMetaIsAnObject(t *testing.T) {
+	versions := New()
+	written, err := Written[plainRecord](versions, "a", func() (*plainRecord, error) {
+		return &plainRecord{Metadata: recordMeta{Name: "a", ResourceVersion: "7"}}, nil
+	})
+	if err != nil || written.Metadata.ResourceVersion != "7" || !versions.Current("a", "7") {
+		t.Errorf("Written = %+v, %v; want the copy at 7, noted", written, err)
+	}
+}

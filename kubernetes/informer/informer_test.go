@@ -211,3 +211,37 @@ func TestAFailedListIsReported(t *testing.T) {
 		t.Fatal("no failed list was reported")
 	}
 }
+
+// A watch with indexers keeps each index in its store, so a pass reads
+// the objects of one value without a scan of the whole copy.
+func TestAWatchKeepsTheIndexesItNames(t *testing.T) {
+	small, large := newThing("a", "7", 1), newThing("b", "8", 1)
+	small.Spec.Size, large.Spec.Size = 1, 9
+	server := newWatchServer(thingsPath, [][]thing{{small, large}})
+	bySize := func(object any) ([]string, error) {
+		item, err := Convert[thing](object)
+		if err != nil {
+			return nil, err
+		}
+		if item.Spec.Size > 5 {
+			return []string{"large"}, nil
+		}
+		return []string{"small"}, nil
+	}
+	c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{
+		Indexers: cache.Indexers{"size": bySize},
+	})
+	eventually(t, "the copy syncs", c.View().Ready)
+
+	indexer, ok := c.View().Store.(cache.Indexer)
+	if !ok {
+		t.Fatal("the store of a watch with indexers is not a cache.Indexer")
+	}
+	held, err := indexer.ByIndex("size", "large")
+	if err != nil || len(held) != 1 {
+		t.Fatalf("ByIndex = %d objects, %v; want b alone", len(held), err)
+	}
+	if item, _ := Convert[thing](held[0]); item.Metadata.Name != "b" {
+		t.Errorf("the large index holds %q, want b", item.Metadata.Name)
+	}
+}

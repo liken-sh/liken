@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -558,5 +559,97 @@ func TestA429StatesTheWaitTheAPIServerAskedFor(t *testing.T) {
 				t.Errorf("RetryAfterSeconds(%v) = %d, want %d", err, got, c.want)
 			}
 		})
+	}
+}
+
+// An in-cluster client with a server of its own reaches that server,
+// with the mounted CA and token, and needs no address from the
+// environment.
+func TestAnInClusterClientReachesTheServerItIsGiven(t *testing.T) {
+	dir, server := tlsCluster(t)
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+
+	client, err := InCluster(InClusterOptions{ServiceAccountDir: dir, Server: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := Get[struct{ Name string }](client, "/api/v1/nodes/node-1")
+	if err != nil || answer.Name != "Bearer pod-token" {
+		t.Errorf("Get = %+v, %v; want the answer to the pod's token", answer, err)
+	}
+}
+
+// An in-cluster client abandons a request that takes longer than its
+// timeout.
+func TestAnInClusterClientAbandonsARequestAtItsTimeout(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	dir := t.TempDir()
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), ca, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeToken(t, dir, "pod-token")
+
+	client, err := InCluster(InClusterOptions{ServiceAccountDir: dir, Server: server.URL, Timeout: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	err = client.RequestJSON(http.MethodGet, "/api/v1/nodes/node-1", nil, nil)
+	if err == nil || time.Since(started) > 5*time.Second {
+		t.Errorf("err = %v after %s, want a failure at the 50ms timeout", err, time.Since(started))
+	}
+}
+
+// A write guard refuses each write and no read, and the refused write
+// never reaches the API server.
+func TestAWriteGuardRefusesWritesAndNotReads(t *testing.T) {
+	var sent []string
+	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Method)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	refusal := errors.New("the lease is overdue")
+	guarded := client.WithWriteGuard(func() error { return refusal })
+
+	if err := guarded.RequestJSON(http.MethodGet, "/api/v1/nodes/node-1", nil, nil); err != nil {
+		t.Errorf("a read under the guard failed: %v", err)
+	}
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		if err := guarded.Request(method, "/api/v1/nodes/node-1", "application/json", []byte(`{}`), nil); !errors.Is(err, refusal) {
+			t.Errorf("%s under the guard = %v, want the guard's refusal", method, err)
+		}
+	}
+	if err := client.RequestJSON(http.MethodPut, "/api/v1/nodes/node-1", []byte(`{}`), nil); err != nil {
+		t.Errorf("a write from the client with no guard failed: %v", err)
+	}
+	if want := []string{http.MethodGet, http.MethodPut}; !slices.Equal(sent, want) {
+		t.Errorf("the API server received %q, want %q", sent, want)
+	}
+}
+
+// The guard runs again before a write is sent again after a 429, so a
+// write that waited past the guard's deadline is not sent again.
+func TestAWriteGuardRunsBeforeEachSendAfterA429(t *testing.T) {
+	server := &throttling{refusals: 1, retryAfter: "1"}
+	client, _ := testClient(t, server)
+	var asked atomic.Int64
+	guarded := client.WithWriteGuard(func() error {
+		if asked.Add(1) > 1 {
+			return errors.New("the lease is overdue")
+		}
+		return nil
+	})
+
+	err := guarded.RequestJSON(http.MethodPut, "/api/v1/nodes/node-1", []byte(`{}`), nil)
+
+	if err == nil || asked.Load() != 2 || server.requests.Load() != 1 {
+		t.Errorf("err = %v after %d guard calls and %d sends, want a refusal on the second call and one send",
+			err, asked.Load(), server.requests.Load())
 	}
 }

@@ -24,8 +24,11 @@ import (
 )
 
 // Meta is the part of an object's metadata that the memo and a store
-// read.
-type Meta interface {
+// read. It is an alias of an interface literal, not a type of its own,
+// so a package can answer it without an import of this module. liken's
+// machine package does that: init links it, and init must not link
+// net/http, which this module's client brings.
+type Meta = interface {
 	GetNamespace() string
 	GetName() string
 	GetResourceVersion() string
