@@ -711,8 +711,15 @@ test-go:
 	go vet ./...
 	go tool staticcheck ./...
 	go test ./...
-	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
+	$(MAKE) coverage-profile
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+
+# The profile runs the tests once more, on the gate's toolchain. A
+# release tag runs only the checks that its changes reach, so the
+# publish job often has no profile from a check job of its own run,
+# and it writes one here instead.
+coverage-profile:
+	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 
 # The coverage report is the profile as a page: one HTML file that
 # names every package's number and colors every line of source. The
@@ -727,7 +734,7 @@ test-go:
 #
 # test-go writes that profile as a side effect, not as a named
 # artifact, so this target takes it as it finds it. Run it after any
-# `make test`.
+# `make test`, or after `make coverage-profile`.
 coverage-report:
 	cd docs && go tool coverage -title liken -label Go \
 		-root .. -out ../coverage.html ../coverage.out
@@ -815,4 +822,4 @@ clean:
 	rm -rf $(HW_IMAGE_DIR)
 	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go coverage-report test-docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go coverage-profile coverage-report test-docs clean

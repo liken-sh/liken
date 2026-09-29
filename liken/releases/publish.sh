@@ -33,9 +33,10 @@ if [[ "$VERSION" == *-000 ]]; then
 fi
 
 # The release publishes the test coverage report beside the artifacts.
-# The report renders from the profile that the checks job of the same
-# run wrote, so the numbers it shows are the numbers the gate passed.
-make coverage-report
+# The report renders from a profile of the tagged commit that this job
+# writes, because a tag that changes no Go code runs no Go check job to
+# write one.
+make coverage-profile coverage-report
 cp coverage.html "$DIST/coverage.html"
 
 # s3cmd is the uploader, because it speaks plain S3 to non-AWS endpoints

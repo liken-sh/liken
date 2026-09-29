@@ -271,12 +271,6 @@ jobs:{% range .Jobs %}
         working-directory: {% .Dir %}
         run: bash -n releases/publish.sh
 
-      - if: ${{ !inputs.dryrun }}
-        uses: actions/download-artifact@v8
-        with:
-          name: coverage-{% .Name %}-checks
-          path: {% .Dir %}
-
       - name: publish to the channel
         if: ${{ !inputs.dryrun }}
         working-directory: {% .Dir %}

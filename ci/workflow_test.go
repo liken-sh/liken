@@ -498,13 +498,17 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	os := string(files[".github/workflows/component-os.yaml"])
 	for _, want := range []string{
 		`if [ "${{ inputs.dryrun }}" = true ]; then version="$(date -u +%Y.%m.%d)-000"; fi`,
-		"      - if: ${{ !inputs.dryrun }}\n        uses: actions/download-artifact@v8",
 		"      - name: publish to the channel\n        if: ${{ !inputs.dryrun }}\n",
 		"      - name: check the publish script\n        if: ${{ inputs.dryrun }}\n",
 	} {
 		if !strings.Contains(os, want) {
 			t.Errorf("the OS's workflow lacks %q", want)
 		}
+	}
+	// A tag that changes no Go code runs no check job, so the publish
+	// job writes its own coverage profile instead of downloading one.
+	if strings.Contains(os, "download-artifact") {
+		t.Error("the OS's publish job downloads an artifact that a tag may never upload")
 	}
 }
 

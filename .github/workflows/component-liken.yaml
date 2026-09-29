@@ -324,12 +324,6 @@ jobs:
         working-directory: liken
         run: bash -n releases/publish.sh
 
-      - if: ${{ !inputs.dryrun }}
-        uses: actions/download-artifact@v8
-        with:
-          name: coverage-liken-checks
-          path: liken
-
       - name: publish to the channel
         if: ${{ !inputs.dryrun }}
         working-directory: liken
