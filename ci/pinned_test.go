@@ -127,26 +127,58 @@ func TestTheRecordSaysWhatHappenedToEachPinnedTag(t *testing.T) {
 	r := pinnedFixture(t)
 	r.write("app/package.toml", "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 4\n[[outputs.images]]\nname = \"app\"\n")
 	r.write("app/Dockerfile", "FROM scratch\n")
-	r.commit("add a pinned app")
+	r.write("new/package.toml", "[package]\nname = \"new\"\nversion = \"20261001\"\nrevision = 1\n[[outputs.images]]\nname = \"new\"\n")
+	r.write("new/Dockerfile", "FROM scratch\n")
+	r.commit("add two pinned images")
 	p := r.pinnedPlanner(nil, nil)
-	built := map[string]string{"tool": "the tag's commit", "base": "an earlier commit"}
-	pinned := func(c *Component) (string, bool, error) {
-		commit, ok := built[c.Name()]
-		return commit, ok, nil
+	states := map[string]struct {
+		published bool
+		previous  string
+	}{
+		"tool": {true, "20260928-0"},
+		"base": {true, "20260928-1"},
+		"app":  {false, ""},
+		"new":  {true, ""},
 	}
-	entries, err := Record(p.Components, p.Versions, pinned, "2026.10.02-001", "the tag's commit")
+	pinned := func(c *Component) (bool, string, error) {
+		s := states[c.Name()]
+		return s.published, s.previous, nil
+	}
+	entries, err := Record(p.Components, p.Versions, pinned, "2026.10.02-001")
 	if err != nil {
 		t.Fatal(err)
 	}
 	notes := RecordNotes("2026.10.02-001", entries, "", nil)
 	for _, want := range []string{
-		"| `tool` | `20260928-1` | pinned, built from this tag's commit |",
+		"| `tool` | `20260928-1` | pinned, released by this tag |",
 		"| `base` | `20260928-1` | pinned, unchanged |",
 		"| `app` | `20260928-4` | pinned, not published yet |",
+		"| `new` | `20261001-1` | pinned, released by this tag |",
 		"| `operator` | `2026.09.28-001` | unchanged |",
 	} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("the notes lack %q:\n%s", want, notes)
 		}
+	}
+}
+
+func TestThePinnedTagAtAnEarlierReleaseIsReadFromItsCommit(t *testing.T) {
+	r := pinnedFixture(t)
+	r.write("tool/package.toml", "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"tool\"\n")
+	r.write("app/package.toml", "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"app\"\n")
+	r.write("app/Dockerfile", "FROM scratch\n")
+	r.commit("raise the tool and add an app")
+	components, err := LoadComponents(r.git.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{"tool": "20260928-1", "base": "20260928-1", "app": ""}
+	for name, want := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := r.git.PinnedTagAt("2026.09.28-001", components[name])
+			if err != nil || got != want {
+				t.Errorf("got %q, %v, want %q", got, err, want)
+			}
+		})
 	}
 }

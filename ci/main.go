@@ -152,11 +152,16 @@ func (w World) record(root string, components map[string]*Component, tag string)
 	}
 	p := w.Published
 	git := Git{Dir: root}
-	commit, err := git.Commit(tag)
-	if err != nil {
-		return err
+	previous, _, describeErr := git.Describe(tag + "^")
+	pinned := func(c *Component) (bool, string, error) {
+		_, published, err := p.Recipe(c)
+		if err != nil || describeErr != nil {
+			return published, "", err
+		}
+		then, err := git.PinnedTagAt(previous, c)
+		return published, then, err
 	}
-	entries, err := Record(components, p.Versions, p.PinnedCommit, tag, commit)
+	entries, err := Record(components, p.Versions, pinned, tag)
 	if err != nil {
 		return err
 	}
@@ -171,9 +176,8 @@ func (w World) record(root string, components map[string]*Component, tag string)
 		}
 	}
 	var changes []string
-	previous, _, err := git.Describe(tag + "^")
 	subjects, logErr := "", error(nil)
-	if err == nil {
+	if describeErr == nil {
 		subjects, logErr = git.run("log", "--format=%s", previous+".."+tag)
 	} else {
 		subjects, logErr = git.run("log", "--format=%s", tag)

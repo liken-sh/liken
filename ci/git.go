@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 // Git runs git commands in one repository.
@@ -96,4 +98,30 @@ func (g Git) Describe(rev string) (tag string, count int, err error) {
 		return "", 0, fmt.Errorf("git describe printed %q: %w", out, err)
 	}
 	return rest[:i], count, nil
+}
+
+// PinnedTagAt reads the pinned tag that the component's package.toml
+// states at the revision, or "" when the file is not there or states
+// no version.
+func (g Git) PinnedTagAt(rev string, c *Component) (string, error) {
+	if !g.HasCommit(rev) {
+		return "", fmt.Errorf("%s names no commit", rev)
+	}
+	text, err := g.run("show", rev+":"+c.Dir+"/package.toml")
+	if err != nil {
+		// A component that did not exist at the revision has no
+		// package.toml there, and so no tag.
+		if _, lsErr := g.run("cat-file", "-e", rev+":"+c.Dir+"/package.toml"); lsErr != nil {
+			return "", nil
+		}
+		return "", err
+	}
+	var then Component
+	if _, err := toml.Decode(text, &then); err != nil {
+		return "", fmt.Errorf("%s:%s/package.toml: %w", rev, c.Dir, err)
+	}
+	if !then.Pinned() {
+		return "", nil
+	}
+	return then.PinnedTag(), nil
 }

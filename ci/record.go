@@ -13,50 +13,41 @@ type RecordEntry struct {
 	Released bool `yaml:"released"`
 	// Pinned is true for a pinned component, whose version is the tag
 	// in its package.toml at the release's commit. Published is true
-	// when that tag is on ghcr, and Released when the image under it
-	// was built from the tag's commit.
+	// when that tag is on ghcr, and Released when the tag is new since
+	// the previous release.
 	Pinned    bool `yaml:"pinned"`
 	Published bool `yaml:"published"`
 }
 
-// PinnedCommitFunc reads the commit that a pinned component's
-// published tag was built from, from the image's
-// org.opencontainers.image.revision label. published is false when the
-// tag is not on ghcr.
-type PinnedCommitFunc func(*Component) (commit string, published bool, err error)
-
-// PinnedCommit reads the revision label of the component's first
-// image at its pinned tag.
-func (p Published) PinnedCommit(c *Component) (string, bool, error) {
-	labels, err := p.Registry.Labels(c.Outputs.Images[0].Name, c.PinnedTag())
-	if err != nil || labels == nil {
-		return "", false, err
-	}
-	return labels["org.opencontainers.image.revision"], true, nil
-}
+// PinnedStateFunc reads whether a pinned component's tag is published,
+// and the pinned tag that its package.toml stated at the previous
+// release, or "" when there was no previous release or the component
+// was not pinned there.
+type PinnedStateFunc func(*Component) (published bool, previous string, err error)
 
 // Record lists every component that publishes, with its version at
 // the tag: the newest release at or before the tag. A component that
-// did not change keeps the version an earlier tag gave it. A pinned
-// component's version is its tag at the commit, and the entry says
-// whether the image under that tag was built from the commit.
+// did not change keeps the version an earlier tag gave it.
 //
-// A push to main publishes a new pinned tag before the release tag
-// does, from the same commit, so "built from this tag's commit" is
-// what the record can prove, not which run pushed it.
-func Record(components map[string]*Component, versions VersionsFunc, pinned PinnedCommitFunc, tag, commit string) ([]RecordEntry, error) {
+// A pinned component's version is its tag at the release's commit. The
+// release released it when that tag differs from the one at the
+// previous release. The commit that raised the revision can be any
+// commit between the two, and a push to main can publish the tag
+// before the release does, so the comparison is between the two
+// releases, not with the commit an image was built from.
+func Record(components map[string]*Component, versions VersionsFunc, pinned PinnedStateFunc, tag string) ([]RecordEntry, error) {
 	var entries []RecordEntry
 	for _, c := range sortedComponents(components) {
 		if !c.HasOutputs() {
 			continue
 		}
 		if c.Pinned() {
-			built, published, err := pinned(c)
+			published, previous, err := pinned(c)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", c.Name(), err)
 			}
 			entries = append(entries, RecordEntry{Component: c.Name(), Version: c.PinnedTag(), Pinned: true,
-				Published: published, Released: published && built == commit})
+				Published: published, Released: published && previous != c.PinnedTag()})
 			continue
 		}
 		published, err := versions(c)
@@ -87,7 +78,7 @@ func RecordNotes(tag string, entries []RecordEntry, catalogDigest string, change
 			case !e.Published:
 				note = "pinned, not published yet"
 			case e.Released:
-				note = "pinned, built from this tag's commit"
+				note = "pinned, released by this tag"
 			default:
 				note = "pinned, unchanged"
 			}
