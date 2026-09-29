@@ -1,6 +1,7 @@
 package apiclient
 
 import (
+	"context"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -440,5 +441,40 @@ func TestAnInClusterClientNeedsItsEnvironment(t *testing.T) {
 				t.Errorf("err = %v, want one that says %q", err, c.wantErr)
 			}
 		})
+	}
+}
+
+// A client with a context sends each request with it, so a request
+// whose context ended is never sent.
+func TestAClientWithAnEndedContextSendsNothing(t *testing.T) {
+	server := &throttling{}
+	client, _ := testClient(t, server)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := client.WithContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
+
+	if !errors.Is(err, context.Canceled) || server.requests.Load() != 0 {
+		t.Errorf("err = %v after %d requests, want the context's end and none", err, server.requests.Load())
+	}
+}
+
+// The wait after a 429 ends when the client's context ends, and the
+// request answers the 429.
+func TestTheWaitAfterA429EndsWithTheContext(t *testing.T) {
+	server := &throttling{refusals: 100, retryAfter: "4"}
+	client, _ := testClient(t, server)
+	client.throttleUnit = time.Hour
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	began := time.Now()
+
+	err := client.WithContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
+
+	if err == nil || !strings.Contains(err.Error(), "429") || time.Since(began) > 5*time.Second {
+		t.Errorf("err = %v after %s, want the 429 at once", err, time.Since(began))
+	}
+	if server.requests.Load() != 1 {
+		t.Errorf("the client sent %d requests, want 1", server.requests.Load())
 	}
 }

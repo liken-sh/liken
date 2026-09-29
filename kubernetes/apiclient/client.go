@@ -17,6 +17,7 @@ package apiclient
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -62,6 +63,10 @@ type Client struct {
 	// throttleUnit is one second of the wait that a 429 asks for. The
 	// tests make it shorter, so a test of the retry waits milliseconds.
 	throttleUnit time.Duration
+
+	// ctx is the context every request carries (WithContext). Nil means
+	// no context ends a request.
+	ctx context.Context
 }
 
 // New builds a client from its three parts. InCluster reads them from
@@ -124,6 +129,24 @@ func InCluster(options InClusterOptions) (*Client, error) {
 	}, dir), nil
 }
 
+// WithContext answers a client whose requests carry ctx. A request
+// ends when ctx ends, and so does the wait after a 429, so a caller
+// that stops its work does not wait on the API server. The client it
+// answers shares the connections of c.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	bound := *c
+	bound.ctx = ctx
+	return &bound
+}
+
+// context answers the context of each request.
+func (c *Client) context() context.Context {
+	if c.ctx == nil {
+		return context.Background()
+	}
+	return c.ctx
+}
+
 // RequestJSON sends one request with a JSON body, and decodes the JSON
 // answer into out. A nil out discards the answer.
 func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
@@ -147,7 +170,13 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 		if !errors.As(err, &throttled) || waited+throttled.wait > maxThrottleWait*c.throttleUnit {
 			return err
 		}
-		time.Sleep(throttled.wait)
+		timer := time.NewTimer(throttled.wait)
+		select {
+		case <-c.context().Done():
+			timer.Stop()
+			return err
+		case <-timer.C:
+		}
 		waited += throttled.wait
 	}
 }
@@ -161,12 +190,12 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 // server that answers 429 for longer is overloaded, and the caller's
 // own retry, which waits longer, handles it.
 //
-// The wait does not end when the caller's work is cancelled, because
-// the client takes no context. The limit bounds it instead: a request
-// holds its caller for at most ten seconds of waits, plus the request
-// timeout of each send. A caller that holds a lock across the request,
-// such as memo.Versions.Send, holds it that long too, and a shutdown
-// that waits on the caller waits that long.
+// The wait ends when the context of a client from WithContext ends.
+// Otherwise the limit bounds it: a request holds its caller for at most
+// ten seconds of waits, plus the request timeout of each send. A caller
+// that holds a lock across the request, such as memo.Versions.Send,
+// holds it that long too, and a shutdown that waits on the caller waits
+// that long.
 const maxThrottleWait = 10
 
 // send sends one request once.
@@ -175,7 +204,7 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) er
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, c.base+path, reader)
+	req, err := http.NewRequestWithContext(c.context(), method, c.base+path, reader)
 	if err != nil {
 		return err
 	}
