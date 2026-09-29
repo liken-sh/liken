@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The wake's bounds. cecWakeGuard is how long the adapter listens for
@@ -352,7 +353,7 @@ func (n *cecNode) writeWake() {
 		fmt.Fprintf(os.Stderr, "writing the wake of Television %s: %v\n", record.television.Metadata.Name, err)
 		n.retryLater()
 	}
-	if err == nil || err == ErrNotFound || err == ErrConflict {
+	if err == nil || err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		n.mutex.Lock()
 		if n.woken.unwritten == record {
 			n.woken.unwritten = nil

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // standbyMemory is what the node workload holds about its standbys.
@@ -251,7 +252,7 @@ func (n *cecNode) writeStandby() {
 		fmt.Fprintf(os.Stderr, "writing the standby of Television %s: %v\n", record.television.Metadata.Name, err)
 		n.retryLater()
 	}
-	if err == nil || err == ErrNotFound || err == ErrConflict {
+	if err == nil || err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		n.mutex.Lock()
 		if n.standby.unwritten == record {
 			n.standby.unwritten = nil

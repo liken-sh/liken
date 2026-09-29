@@ -33,6 +33,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // A Receiver session that ends leaves its TV's status.session in place
@@ -60,8 +62,8 @@ type televisionSessions struct {
 	client *Client
 	// televisions holds the Television watch's store, which list reads.
 	televisions *watchStore
-	// ctx bounds the waits for a 429, and stop ends it, so a stop never
-	// waits for an API server that is not ready.
+	// ctx bounds each request and the waits for a 429, and stop ends
+	// it, so a stop never waits for an API server that is not ready.
 	ctx    context.Context
 	cancel context.CancelFunc
 	mutex  sync.Mutex
@@ -124,24 +126,19 @@ func (t *televisionSessions) retry() {
 	}
 }
 
-// list reads the Televisions, and waits out a 429. A session event
-// reads the status.session it wrote on the event before, and the store
-// can hold the copy from before that write until the write's own event
-// arrives, so the read replaces such a copy with the API server's
+// list reads the Televisions, and waits out a 429 until stop. A session
+// event reads the status.session it wrote on the event before, and the
+// store can hold the copy from before that write until the write's own
+// event arrives, so the read replaces such a copy with the API server's
 // (objectcache.go).
 func (t *televisionSessions) list() (*TelevisionList, error) {
-	var list *TelevisionList
-	err := retryThrottled(t.ctx, func() error {
-		var err error
-		list, err = readTelevisions(t.client, t.televisions)
-		return err
-	})
-	return list, err
+	return readTelevisions(t.client.withContext(t.ctx), t.televisions)
 }
 
-// apply writes one Television's status.session, and waits out a 429.
+// apply writes one Television's status.session, and waits out a 429
+// until stop.
 func (t *televisionSessions) apply(name string, session *TelevisionSession) error {
-	return retryThrottled(t.ctx, func() error { return ApplyTelevisionSession(t.client, name, session) })
+	return ApplyTelevisionSession(t.client.withContext(t.ctx), name, session)
 }
 
 // markLive records the end of the operator's first pass: from then on,
@@ -348,8 +345,8 @@ func (t *televisionSessions) awaitPowerRead(name, at string) (string, bool) {
 	defer cancel()
 	for {
 		changed := t.televisions.changed()
-		held := heldObjects{view: t.televisions.view(), versions: t.client.versions.televisions}
-		if television, err := readOne[Television](t.client, held, name, televisionPath(name)); err == nil {
+		held := informer.Held{View: t.televisions.view(), Versions: t.client.versions.televisions}
+		if television, err := informer.ReadOne[Television](t.client.Client, held, name, televisionPath(name)); err == nil {
 			if read := television.Status.PowerRead; read != nil && read.At == at {
 				return read.Power, true
 			}

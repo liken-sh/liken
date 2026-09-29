@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // pass finds this machine's bus and brings the adapter to its spec.
@@ -141,7 +142,7 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 // to. The adapter keeps what it found, because a person who adopts the
 // discovered bus names the same wire under another name.
 func (n *cecNode) leave(bus string) {
-	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, nil); err != nil && err != ErrNotFound {
+	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, nil); err != nil && err != apiclient.ErrNotFound {
 		fmt.Fprintf(os.Stderr, "removing machine %s from CECBus %s: %v\n", n.machine, bus, err)
 		n.retryLater()
 	}

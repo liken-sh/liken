@@ -15,6 +15,10 @@ import (
 	"net/url"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // A CECBus is cluster-scoped, like a Receiver.
@@ -44,8 +48,8 @@ func ListCECBuses(c *Client) (*CECBusList, error) {
 // them from the API server while the store has nothing to give
 // (objectcache.go).
 func readCECBuses(c *Client, held *watchStore) (*CECBusList, error) {
-	if view := held.view(); view.ready() {
-		items, err := currentList[CECBus](c, heldObjects{view: view, versions: c.versions.cecBuses}, cecBusPath)
+	if view := held.view(); view.Ready() {
+		items, err := informer.CurrentList[CECBus](c.Client, informer.Held{View: view, Versions: c.versions.cecBuses}, cecBusPath)
 		return &CECBusList{Items: items}, err
 	}
 	return ListCECBuses(c)
@@ -67,9 +71,9 @@ func applyCECBus(c *Client, name, path, manager string, body any) error {
 	if err != nil {
 		return err
 	}
-	_, err = written[CECBus](c.versions.cecBuses, name, func() (*CECBus, error) {
+	_, err = memo.Written[CECBus](c.versions.cecBuses, name, func() (*CECBus, error) {
 		answer := &CECBus{}
-		return answer, c.requestJSON(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, answer)
+		return answer, c.Request(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, answer)
 	})
 	return err
 }
@@ -140,7 +144,7 @@ func ApplyDiscoveredCECBus(c *Client, name, machine string) error {
 // DeleteCECBus removes one CECBus. A name that is already gone is not
 // an error.
 func DeleteCECBus(c *Client, name string) error {
-	return c.versions.cecBuses.send(name, func() (string, error) {
+	return c.versions.cecBuses.Send(name, func() (string, error) {
 		return "", deleteObject(c, cecBusPath(name), "CECBus "+name)
 	})
 }
@@ -159,7 +163,7 @@ type Display struct {
 const displaysPath = "/apis/display.liken.sh/v1alpha1/displays"
 
 func GetDisplay(c *Client, name string) (*Display, error) {
-	return get[Display](c, displayPath(name))
+	return apiclient.Get[Display](c.Client, displayPath(name))
 }
 
 func displayPath(name string) string { return displaysPath + "/" + name }
@@ -168,27 +172,27 @@ func displayPath(name string) string { return displaysPath + "/" + name }
 // them from the API server while the store has nothing to give. This
 // operator writes no Display, so the read has no memo.
 func readDisplays(c *Client, held *watchStore) (*DisplayList, error) {
-	if view := held.view(); view.ready() {
-		items, err := currentList[Display](c, heldObjects{view: view}, displayPath)
+	if view := held.view(); view.Ready() {
+		items, err := informer.CurrentList[Display](c.Client, informer.Held{View: view}, displayPath)
 		return &DisplayList{Items: items}, err
 	}
 	return ListDisplays(c)
 }
 
 // readDisplay answers one Display from the watch's store. A store that
-// holds every Display answers ErrNotFound for one it does not hold,
-// once it holds its first read. The Display is read from the API server
-// while the store has nothing to give, when its copy does not convert,
-// and when the store holds the Displays of one machine and not this
-// one, such as a Display that a bus names on another machine.
+// holds every Display answers apiclient.ErrNotFound for one it does
+// not hold, once it holds its first read. The Display is read from the
+// API server while the store has nothing to give, when its copy does
+// not convert, and when the store holds the Displays of one machine and
+// not this one, such as a Display that a bus names on another machine.
 func readDisplay(c *Client, held *watchStore, name string) (*Display, error) {
 	view := held.view()
-	if display, ok := cachedCopy[Display](view, name); ok {
+	if display, ok := informer.Cached[Display](view, name); ok {
 		return display, nil
 	}
-	if view.ready() && view.whole {
-		if _, stored, _ := view.store.GetByKey(name); !stored {
-			return nil, ErrNotFound
+	if view.Ready() && view.Whole {
+		if _, stored, _ := view.Store.GetByKey(name); !stored {
+			return nil, apiclient.ErrNotFound
 		}
 	}
 	return GetDisplay(c, name)
@@ -290,7 +294,7 @@ func ListDisplaysOn(c *Client, machine string) (*DisplayList, error) {
 func listDisplays(c *Client, path string) (*DisplayList, error) {
 	list := &DisplayList{}
 	err := c.RequestJSON(http.MethodGet, path, nil, list)
-	if err == ErrNotFound {
+	if err == apiclient.ErrNotFound {
 		return &DisplayList{}, nil
 	}
 	if err != nil {

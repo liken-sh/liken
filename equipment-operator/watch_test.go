@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 )
@@ -59,11 +60,11 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 		{name: "an object", object: asObject(t, good)},
 		{name: "a tombstone", object: cache.DeletedFinalStateUnknown{Key: "theater", Obj: asObject(t, good)}},
 		{name: "a field of the wrong type", object: mistyped, wantErr: "Receiver theater does not convert"},
-		{name: "a tombstone with no copy", object: cache.DeletedFinalStateUnknown{Key: "theater"}, wantErr: "not an object"},
+		{name: "a tombstone with no copy", object: cache.DeletedFinalStateUnknown{Key: "theater"}, wantErr: "the tombstone for theater holds no copy"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := convert[Receiver](c.object)
+			got, err := informer.Convert[Receiver](c.object)
 			if c.wantErr == "" {
 				mustSucceed(t, err)
 				mustMatch(t, got.Metadata.Generation, 2)
@@ -357,7 +358,7 @@ func TestAReceiverFromTheWatchIsTheReceiverAListGives(t *testing.T) {
 	watched := &unstructured.Unstructured{}
 	mustSucceed(t, watched.UnmarshalJSON([]byte(stored)))
 
-	converted, err := convert[Receiver](watched)
+	converted, err := informer.Convert[Receiver](watched)
 
 	mustSucceed(t, err)
 	mustDeepEqual(t, converted, listed)

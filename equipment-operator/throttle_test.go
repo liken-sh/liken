@@ -2,11 +2,11 @@ package main
 
 // An API server that is not ready answers 429 with the seconds to wait.
 // A new CRD makes it answer so for a second or two while its storage
-// starts, and the operator waits and asks again instead of exiting.
+// starts, and the shared client waits and asks again, so the operator
+// does not exit.
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,7 +21,6 @@ type busyAPI struct {
 	mutex    sync.Mutex
 	busy     int
 	requests int
-	header   string
 	body     string
 }
 
@@ -30,9 +29,6 @@ func (a *busyAPI) handle(w http.ResponseWriter, r *http.Request) {
 	defer a.mutex.Unlock()
 	a.requests++
 	if a.requests <= a.busy {
-		if a.header != "" {
-			w.Header().Set("Retry-After", a.header)
-		}
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(a.body))
 		return
@@ -40,38 +36,24 @@ func (a *busyAPI) handle(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"5"},"items":[]}`))
 }
 
-func (a *busyAPI) count() int {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-	return a.requests
-}
-
 // The Status body the API server sends with a 429 while a CRD's
-// storage starts.
-const initializingBody = `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"storage is (re)initializing","reason":"TooManyRequests","details":{"retryAfterSeconds":2},"code":429}`
+// storage starts. It asks for the shortest wait, one second, so a test
+// that meets it waits one second.
+const initializingBody = `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"storage is (re)initializing","reason":"TooManyRequests","details":{"retryAfterSeconds":1},"code":429}`
 
-// The API server ends its Status body with a newline, and an error that
-// carried it would break its log line in two.
-func TestAnErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
-	t.Parallel()
-	api := &busyAPI{busy: 1, body: initializingBody + "\n"}
-
-	_, err := ListCECBuses(testAPIClient(t, http.HandlerFunc(api.handle)))
-
-	if err == nil || !strings.HasSuffix(err.Error(), `"code":429}`) {
-		t.Errorf("got %q", err)
-	}
-}
-
+// A failed delete names the object, and carries the server's own text
+// without the newline the API server ends it with, so the log line
+// stays whole.
 func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name   string
 		delete func(*Client) error
+		what   string
 	}{
-		{"a Receiver", func(c *Client) error { return DeleteReceiver(c, "theater") }},
-		{"a CECBus", func(c *Client) error { return DeleteCECBus(c, "den") }},
-		{"a Television", func(c *Client) error { return DeleteTelevision(c, "den") }},
+		{"a Receiver", func(c *Client) error { return DeleteReceiver(c, "theater") }, "deleting receiver theater: "},
+		{"a CECBus", func(c *Client) error { return DeleteCECBus(c, "den") }, "deleting CECBus den: "},
+		{"a Television", func(c *Client) error { return DeleteTelevision(c, "den") }, "deleting Television den: "},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -82,98 +64,21 @@ func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T
 
 			err := c.delete(client)
 
-			if err == nil || !strings.HasSuffix(err.Error(), ": forbidden") {
+			if err == nil || !strings.HasPrefix(err.Error(), c.what) || !strings.HasSuffix(err.Error(), ": forbidden") {
 				t.Errorf("got %q", err)
 			}
 		})
 	}
 }
 
-func TestA429StatesHowLongToWait(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name   string
-		header string
-		body   string
-		wait   time.Duration
-	}{
-		{"the Status body", "", initializingBody, 2 * retryAfterUnit},
-		{"the Retry-After header", "3", initializingBody, 3 * retryAfterUnit},
-		{"neither", "", "slow down", retryAfterUnit},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			api := &busyAPI{busy: 1, header: c.header, body: c.body}
-
-			_, err := ListCECBuses(testAPIClient(t, http.HandlerFunc(api.handle)))
-
-			var throttled *throttledError
-			if !errors.As(err, &throttled) || throttled.wait != c.wait {
-				t.Fatalf("got %v, want a wait of %s", err, c.wait)
-			}
-			if !strings.Contains(err.Error(), "429 Too Many Requests: "+c.body) {
-				t.Errorf("the error leaves out the server's text: %v", err)
-			}
-		})
-	}
-}
-
-func TestRetryThrottledWaitsAndAsksAgain(t *testing.T) {
-	shorten(t, &retryAfterUnit, time.Millisecond)
-	api := &busyAPI{busy: 2, body: initializingBody}
-	client := testAPIClient(t, http.HandlerFunc(api.handle))
-
-	err := retryThrottled(t.Context(), func() error {
-		_, err := ListCECBuses(client)
-		return err
-	})
-
-	mustSucceed(t, err)
-	mustMatch(t, api.count(), 3)
-}
-
-func TestRetryThrottledStopsWithItsContext(t *testing.T) {
-	t.Parallel()
-	api := &busyAPI{busy: 1000, body: initializingBody}
-	client := testAPIClient(t, http.HandlerFunc(api.handle))
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
-
-	err := retryThrottled(ctx, func() error {
-		_, err := ListCECBuses(client)
-		return err
-	})
-
-	var throttled *throttledError
-	if !errors.As(err, &throttled) {
-		t.Errorf("got %v, want the last 429", err)
-	}
-}
-
-// Any other failure is the caller's to handle, at once.
-func TestRetryThrottledPassesOtherErrorsThrough(t *testing.T) {
-	t.Parallel()
-	calls := 0
-	failure := errors.New("refused")
-
-	err := retryThrottled(t.Context(), func() error {
-		calls++
-		return failure
-	})
-
-	if !errors.Is(err, failure) || calls != 1 {
-		t.Errorf("got %v after %d calls", err, calls)
-	}
-}
-
 // The Deployment and the node workload each start with a list, and a
 // 429 there is a wait, not an exit.
 func TestTheStartingListsWaitOutA429(t *testing.T) {
-	shorten(t, &retryAfterUnit, time.Millisecond)
 	t.Run("the Deployment", func(t *testing.T) {
+		t.Parallel()
 		noDiscovery(t)
-		api := &busyAPI{busy: 2, body: initializingBody}
-		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		api := &busyAPI{busy: 1, body: initializingBody}
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 		defer cancel()
 
 		err := serve(ctx, testAPIClient(t, http.HandlerFunc(api.handle)), settings{busAddress: "127.0.0.1:1"}, testMetrics(t))
@@ -181,11 +86,12 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 		mustSucceed(t, err)
 	})
 	t.Run("the node workload", func(t *testing.T) {
-		api := &busyAPI{busy: 2, body: initializingBody}
+		t.Parallel()
+		api := &busyAPI{busy: 1, body: initializingBody}
 		_, device := usbAdapter(cecRoom())
 		node, err := newCECNode(testAPIClient(t, http.HandlerFunc(api.handle)), "node-1", device)
 		mustSucceed(t, err)
-		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 		defer cancel()
 
 		mustSucceed(t, node.run(ctx))

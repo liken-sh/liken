@@ -268,7 +268,7 @@ jobs:
       packages: write
 
   equipment-operator:
-    needs: [plan]
+    needs: [plan, kubernetes]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['equipment-operator'].check }}
     uses: ./.github/workflows/component-equipment-operator.yaml
     with:

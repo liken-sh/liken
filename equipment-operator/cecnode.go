@@ -315,10 +315,7 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 // reportedAt current, and the retry of a join or an API call that
 // failed.
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
-	err := retryThrottled(ctx, func() error {
-		_, err := ListCECBuses(n.client)
-		return err
-	})
+	_, err := ListCECBuses(n.client.withContext(ctx))
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -338,10 +335,7 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	// missing grant, ends the node workload at its start, as the
 	// CECBus list does. A cluster without the definition answers not
 	// found, which ListTelevisions reads as no Television.
-	err = retryThrottled(ctx, func() error {
-		_, err := ListTelevisions(n.client)
-		return err
-	})
+	_, err = ListTelevisions(n.client.withContext(ctx))
 	if ctx.Err() != nil {
 		return nil
 	}

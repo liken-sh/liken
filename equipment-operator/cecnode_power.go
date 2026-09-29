@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The confirmation of a power command. After the command the adapter
@@ -197,7 +198,7 @@ func (n *cecNode) writePower() {
 		fmt.Fprintf(os.Stderr, "writing the applied power of Television %s: %v\n", record.television.Metadata.Name, err)
 		n.retryLater()
 	}
-	if err == nil || err == ErrNotFound || err == ErrConflict {
+	if err == nil || err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		n.mutex.Lock()
 		if n.powered.unwritten == record {
 			n.powered.unwritten = nil

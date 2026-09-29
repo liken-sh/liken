@@ -39,8 +39,9 @@ func goWork(ctx context.Context, work func()) {
 
 // workStopWait bounds the wait for the counted goroutines at a
 // shutdown. Each one ends on its context, and a request of the Client
-// ends at apiRequestTimeout at the latest, so the wait is for a write
-// already in flight. It is a variable so a test holds it short.
+// ends within the shared client's request timeout at the latest, so the
+// wait is for a write already in flight. It is a variable so a test
+// holds it short.
 var workStopWait = 5 * time.Second
 
 // errStillWriting says that a goroutine that can write did not stop

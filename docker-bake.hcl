@@ -307,6 +307,9 @@ target "equipment-operator" {
   context    = "equipment-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+  }
   args = {
     VERSION = VERSION
   }

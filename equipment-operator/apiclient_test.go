@@ -15,10 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The credentials are empty, so the client sends no bearer token and
@@ -280,14 +280,14 @@ func TestTheClientNamesTheTwoOrdinaryAnswers(t *testing.T) {
 	client := testAPIClient(t, api.handler())
 
 	t.Run("absent", func(t *testing.T) {
-		if _, err := GetReceiver(client, "theater"); err != ErrNotFound {
-			t.Fatalf("err = %v, want %v", err, ErrNotFound)
+		if _, err := GetReceiver(client, "theater"); err != apiclient.ErrNotFound {
+			t.Fatalf("err = %v, want %v", err, apiclient.ErrNotFound)
 		}
 	})
 	t.Run("taken", func(t *testing.T) {
 		_, err := ApplyReceiverStatus(client, "theater", ReceiverStatus{})
-		if err != ErrConflict {
-			t.Fatalf("err = %v, want %v", err, ErrConflict)
+		if err != apiclient.ErrConflict {
+			t.Fatalf("err = %v, want %v", err, apiclient.ErrConflict)
 		}
 	})
 }
@@ -302,7 +302,7 @@ func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
 
 	_, err := ListReceivers(testAPIClient(t, api.handler()))
 	mustFail(t, err)
-	if err == ErrNotFound || err == ErrConflict {
+	if err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -331,22 +331,6 @@ func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 	_, err = ListReceivers(client)
 	mustSucceed(t, err)
 	mustMatch(t, <-sent, "Bearer second-token")
-}
-
-// A request the client cannot build and a token it cannot read both fail
-// before anything reaches the network.
-func TestTheClientFailsBeforeItSends(t *testing.T) {
-	t.Parallel()
-	t.Run("the token is not there", func(t *testing.T) {
-		client := NewClient("http://127.0.0.1:1", http.DefaultClient, filepath.Join(t.TempDir(), "absent"))
-		_, err := client.send(t.Context(), http.MethodGet, receiversPath, jsonContentType, nil)
-		mustFail(t, err)
-	})
-	t.Run("the method is not a method", func(t *testing.T) {
-		client := NewClient("http://127.0.0.1:1", http.DefaultClient, "")
-		_, err := client.send(t.Context(), "GET RECEIVERS", receiversPath, jsonContentType, nil)
-		mustFail(t, err)
-	})
 }
 
 // A certificate in PEM form, taken from a test server's own
@@ -384,35 +368,6 @@ func TestInClusterClientReadsThePodsOwnConfig(t *testing.T) {
 	mustSucceed(t, err)
 	mustMatch(t, client.base, "https://10.43.0.1:443")
 	mustMatch(t, client.credentials, dir)
-}
-
-// A request whose body stops part way ends at apiRequestTimeout with an
-// error, so a stalled API server cannot hold a pass.
-func TestTheInClusterClientBoundsAWholeRequest(t *testing.T) {
-	shorten(t, &apiRequestTimeout, 200*time.Millisecond)
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"metadata":`)
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	address, err := url.Parse(server.URL)
-	mustSucceed(t, err)
-	t.Setenv("KUBERNETES_SERVICE_HOST", address.Hostname())
-	t.Setenv("KUBERNETES_SERVICE_PORT", address.Port())
-	dir := useServiceAccountDir(t, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
-	mustSucceed(t, os.WriteFile(filepath.Join(dir, "token"), []byte("token"), 0o600))
-	client, err := InClusterClient()
-	mustSucceed(t, err)
-	began := time.Now()
-
-	_, err = ListReceivers(client)
-
-	mustFail(t, err)
-	if took := time.Since(began); took > testTimeout {
-		t.Errorf("the request ended after %s", took)
-	}
 }
 
 // Every config a pod cannot supply fails at startup rather than at the

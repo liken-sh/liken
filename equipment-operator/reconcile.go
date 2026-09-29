@@ -1206,10 +1206,7 @@ func operateAsLeader(ctx context.Context, client *Client, config settings) error
 // the loop until ctx ends. It answers errStillWriting when a goroutine
 // that can write did not stop in time (work.go).
 func serve(ctx context.Context, client *Client, config settings, readings *metrics) error {
-	err := retryThrottled(ctx, func() error {
-		_, err := ListReceivers(client)
-		return err
-	})
+	_, err := ListReceivers(client.withContext(ctx))
 	if err != nil {
 		return fmt.Errorf("listing receivers: %w", err)
 	}

@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 )
@@ -21,7 +24,7 @@ func heldStore(t *testing.T, synced bool, objects ...*unstructured.Unstructured)
 		mustSucceed(t, store.Add(object))
 	}
 	held := &watchStore{}
-	held.hold(store, func() bool { return synced }, false)
+	held.hold(informer.View{Store: store, Synced: func() bool { return synced }}, false)
 	return held
 }
 
@@ -104,7 +107,7 @@ func TestADisplayIsReadFromTheStore(t *testing.T) {
 
 			display, err := readDisplay(api.client, c.held, c.display)
 
-			mustMatch(t, err == ErrNotFound, c.missing)
+			mustMatch(t, err == apiclient.ErrNotFound, c.missing)
 			if !c.missing {
 				mustMatch(t, display.Status.PhysicalAddress, c.address)
 			}
@@ -152,7 +155,7 @@ func awaitStores(t *testing.T, stores ...*watchStore) {
 	deadline := time.After(testTimeout)
 	for _, held := range stores {
 		for {
-			if held.view().ready() {
+			if held.view().Ready() {
 				break
 			}
 			select {
@@ -179,22 +182,21 @@ func startWatches(t *testing.T, client *Client, watches map[*watchStore]watchFun
 // delivered waits until a store holds the copy of each object the
 // memo noted, which is when the watch has delivered every write. With
 // no watch there is nothing to wait for.
-func delivered(t *testing.T, held *watchStore, versions *versionMemo) {
+func delivered(t *testing.T, held *watchStore, versions *memo.Versions) {
 	t.Helper()
-	if held.view().store == nil {
+	store := held.view().Store
+	if store == nil {
 		return
 	}
 	deadline := time.After(testTimeout)
 	for {
-		versions.mu.Lock()
-		waiting := false
-		for key, version := range versions.seen {
-			copied, stored, _ := held.view().store.GetByKey(key)
-			if version != "" && (!stored || copied.(*unstructured.Unstructured).GetResourceVersion() != version) {
+		waiting := len(versions.Unheld(store)) > 0
+		for _, object := range store.List() {
+			copied := object.(*unstructured.Unstructured)
+			if !versions.Current(copied.GetName(), copied.GetResourceVersion()) {
 				waiting = true
 			}
 		}
-		versions.mu.Unlock()
 		if !waiting {
 			return
 		}
@@ -317,8 +319,8 @@ func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
 	node := runNode(t, api)
 
 	view := node.displays.view()
-	mustDeepEqual(t, view.store.ListKeys(), []string{"acm-0001-receiver"})
-	mustMatch(t, view.whole, false)
+	mustDeepEqual(t, view.Store.ListKeys(), []string{"acm-0001-receiver"})
+	mustMatch(t, view.Whole, false)
 }
 
 // An API server whose Display definition declares no selectable field

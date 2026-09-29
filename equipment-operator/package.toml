@@ -4,6 +4,9 @@
 name = "equipment-operator"
 license = "MIT"
 
+[depends]
+components = ["kubernetes"]
+
 [docs]
 prefix = "equipment"
 
@@ -27,6 +30,10 @@ run = "make test-docs"
 [outputs]
 deploy = "deploy"
 
+# The image builds from this module's go.mod, which replaces the shared
+# kubernetes module with ../kubernetes, so it takes that directory as a
+# build context.
 [[outputs.images]]
 name = "equipment-operator"
 file = "Dockerfile"
+contexts = { kubernetes = "kubernetes" }

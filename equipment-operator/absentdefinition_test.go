@@ -86,16 +86,16 @@ func TestAnAbsentKindArrivesInTheStore(t *testing.T) {
 	held := &watchStore{}
 	runHeldWatch(t, api.client, watchTelevisions, nil, held)
 	awaitStores(t, held)
-	mustMatch(t, len(held.view().store.ListKeys()), 0)
+	mustMatch(t, len(held.view().Store.ListKeys()), 0)
 
 	api.defineTelevisions()
 	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
 
 	api.waitUntil(t, "the store to hold the Television", func() bool {
-		return len(held.view().store.ListKeys()) == 1
+		return len(held.view().Store.ListKeys()) == 1
 	})
 	mustSucceed(t, DeleteTelevision(api.client, "lounge"))
 	api.waitUntil(t, "the store to drop the Television", func() bool {
-		return len(held.view().store.ListKeys()) == 0
+		return len(held.view().Store.ListKeys()) == 0
 	})
 }

@@ -2,45 +2,27 @@ package main
 
 // A watch keeps this operator's view of a collection current without a
 // timer. The API server sends each change to the collection as it
-// happens, and a watch with no change to send costs nothing.
-//
-// client-go's reflector runs each watch. It reads the whole collection
-// first, as a list or as the initial events of a streaming list, and
-// then watches from the version that read returned, so it receives
-// every change made after the read. It resumes a watch that the API
-// server closed from the last version it delivered, reads the
-// collection again after a 410 Gone, and backs off while the API
-// server fails. Upstream maintains and tests that loop, so this
-// operator keeps none of its own.
-//
-// The operator imports only three parts of client-go for this: the
-// reflector and informer in tools/cache, the dynamic client that lists
-// and watches a custom resource with no generated code, and rest for
-// the connection's configuration. The typed clientset and the informer
-// factories link a client for every built-in kind, and this operator
-// watches none of them. The operator's own Client (apiclient.go) still
-// sends every write, and every read the stores cannot answer.
+// happens, and a watch with no change to send costs nothing. The shared
+// informer package runs each watch on client-go's reflector, and keeps
+// the copy of the collection that a pass reads (objectcache.go). The
+// operator's own Client (apiclient.go) still sends every write, and
+// every read the stores cannot answer.
 //
 // A handler only wakes the loop, and reads an object only to decide
-// whether the change is one the pass must see. A pass reads each kind
-// from the informers' stores (objectcache.go).
+// whether the change is one the pass must see.
 
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
-	"sync"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The collections this operator watches. Each one is cluster-scoped.
@@ -55,8 +37,8 @@ var (
 // API server with the same credentials as the Client's own requests:
 // the ServiceAccount's CA and token in a pod, and nothing in a test.
 // client-go reads the token file again as the kubelet renews it, the
-// way send does. The watches and the Deployment's leader election
-// both use it.
+// way the shared client does. The watches and the Deployment's leader
+// election both use it.
 func (c *Client) restConfig() *rest.Config {
 	config := &rest.Config{Host: c.base}
 	if c.credentials != "" {
@@ -76,15 +58,16 @@ func (c *Client) watcher() (dynamic.Interface, error) {
 }
 
 // watchCollection keeps one collection current until the context ends,
-// and sends each change to the handler.
+// and sends each change to the handler. It returns after the last
+// handler call.
 //
 // synced, when it is not nil, runs once, after the handler has taken
 // every object of the first read. A caller that lists before the
 // informer reads needs it: an object deleted between the two reads is
 // in neither the informer's read nor any event.
 //
-// restarted, when it is not nil, runs for each watch the reflector
-// opens after the first, and counts it in
+// restarted, when it is not nil, runs for each watch the API server
+// accepts after the first, and counts it in
 // equipment_watch_restarts_total. The first read is itself a watch
 // when the reflector reads with a streaming list.
 //
@@ -98,155 +81,33 @@ func (c *Client) watcher() (dynamic.Interface, error) {
 //
 // absent, when it is not nil, names the refusals that mean the
 // collection is not there to watch, such as the 404 of a kind whose
-// definition another operator installs. The list then answers an
-// empty collection, and the watch is a quiet stream (quietWatch).
+// definition another operator installs. The store then holds an empty
+// collection until the kind arrives.
 func watchCollection(ctx context.Context, client *Client, resource schema.GroupVersionResource, fieldSelector string, absent func(error) bool, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
 	watcher, err := client.watcher()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "watching %s: %v\n", resource.Resource, err)
 		return
 	}
-	collection := watcher.Resource(resource)
-	var opens sync.Mutex
-	opened := false
-	source := &cache.ListWatch{
-		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
-			options.FieldSelector = fieldSelector
-			list, err := collection.List(ctx, options)
-			if absent != nil && err != nil && absent(err) {
-				return &unstructured.UnstructuredList{}, nil
-			}
-			return list, err
-		},
-		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			options.FieldSelector = fieldSelector
-			stream, err := collection.Watch(ctx, options)
-			// The reflector's first read is a streaming list, and its
-			// refusal makes the reflector fall back to the list above,
-			// which answers the empty collection. A later watch of the
-			// absent collection is the quiet stream. Neither counts as an
-			// open, so the watch that finds the definition when it
-			// arrives counts as no restart.
-			if err != nil && absent != nil && absent(err) {
-				if options.SendInitialEvents == nil {
-					return quietWatch(ctx, optionalRecheck), nil
-				}
-				return nil, err
-			}
-			opens.Lock()
-			again := opened
-			opened = opened || err == nil
-			opens.Unlock()
-			if again && restarted != nil {
-				restarted()
-			}
-			return stream, err
-		},
-	}
 	if held != nil {
 		handler = bothHandlers(handler, held.announcer())
 	}
-	store, informer := cache.NewInformerWithOptions(cache.InformerOptions{
-		ListerWatcher: source,
-		ObjectType:    &unstructured.Unstructured{},
+	collection := informer.Start(ctx, watcher, informer.Source{Resource: resource, FieldSelector: fieldSelector}, informer.Options{
 		Handler:       handler,
-		Transform:     dropManagedFields,
+		Synced:        synced,
+		Reopened:      restarted,
+		Absent:        absent,
+		AbsentRecheck: optionalRecheck,
 	})
-	// The informer's handlers and synced both run before this returns,
-	// so a caller that stops reading the wake channel after it returns
-	// loses no send.
-	var group sync.WaitGroup
-	if synced != nil {
-		group.Go(func() {
-			select {
-			case <-informer.HasSyncedChecker().Done():
-				synced()
-			case <-ctx.Done():
-			}
-		})
-	}
-	held.hold(store, informer.HasSynced, fieldSelector != "")
+	held.hold(collection.View(), fieldSelector != "")
 	defer held.release()
-	informer.RunWithContext(ctx)
-	group.Wait()
+	<-collection.Done()
 }
 
 // optionalRecheck is how long the watch of an absent collection waits
-// before it asks the API server again. It is a variable so a test
-// waits milliseconds instead.
-//
-// An operator that installs the definition can arrive at any time, and
-// nothing this operator watches reports that. So the watch of an
-// absent collection is a quiet stream that ends after this wait with a
-// 410 Gone, and the reflector reads the collection again, which finds
-// it once it exists. The 410 makes that read a list, which answers a
-// resourceVersion to watch from. A stream that closed with no event
-// would make the reflector watch from the empty version of the empty
-// list, and a watch from no version reports no object deleted before
-// it opened. Without the quiet stream, the reflector would back off,
-// list again, and log a failure about every 30 seconds for as long as
-// the definition is missing.
+// before it asks the API server again (informer.Options.AbsentRecheck).
+// It is a variable so a test waits milliseconds instead.
 var optionalRecheck = 5 * time.Minute
-
-// quietWatch is the quiet stream. It sends no event until the recheck
-// is due, and then a 410 Gone. It ends when the context ends. The
-// caller reads the wait, so the stream's goroutine reads no shared
-// setting.
-func quietWatch(ctx context.Context, recheck time.Duration) watch.Interface {
-	stream := watch.NewRaceFreeFake()
-	go func() {
-		timer := time.NewTimer(recheck)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			stream.Stop()
-		case <-timer.C:
-			// The reflector stops the stream once it reads the error.
-			// A stream it stopped already takes no event.
-			stream.Error(&metav1.Status{
-				Status: metav1.StatusFailure, Code: http.StatusGone, Reason: metav1.StatusReasonExpired,
-				Message: "the collection was absent; read it again",
-			})
-		}
-	}()
-	return stream
-}
-
-// dropManagedFields removes metadata.managedFields from each object
-// before the informer stores it. The field records which client set
-// each field of the object. The operator never reads it, and without
-// the transform the informer holds a copy of it for every object.
-func dropManagedFields(object any) (any, error) {
-	if item, ok := object.(*unstructured.Unstructured); ok {
-		item.SetManagedFields(nil)
-	}
-	return object, nil
-}
-
-// convert decodes one object from a watch into the operator's own
-// struct. The informer hands a handler an *unstructured.Unstructured,
-// or, for an object that was deleted while the watch was down, a
-// tombstone that holds the last copy the informer knew, or no copy.
-//
-// An object that does not convert has a field whose type differs from
-// the operator's struct, so the CRD schema and the struct disagree.
-// The error names the object, and the caller logs it, because an
-// object that is dropped with no word leaves nobody a way to find out
-// why the operator ignored an edit.
-func convert[T any](object any) (T, error) {
-	var out T
-	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok {
-		object = tombstone.Obj
-	}
-	item, ok := object.(*unstructured.Unstructured)
-	if !ok {
-		return out, fmt.Errorf("the watch delivered a %T, not an object", object)
-	}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &out); err != nil {
-		return out, fmt.Errorf("%s %s does not convert: %w", item.GetKind(), item.GetName(), err)
-	}
-	return out, nil
-}
 
 // wakeOnEvery wakes the loop on every change the informer reports. A
 // loop that reads the whole object, its status included, uses it. The
@@ -290,8 +151,8 @@ func (h markHandler[T, M]) handler() cache.ResourceEventHandler {
 // reads, so both wake it. The object is converted only to report one
 // that does not convert.
 func (h markHandler[T, M]) arrived(object any) {
-	if _, err := convert[T](object); err != nil {
-		reportUnconverted(h.what, err)
+	if _, err := informer.Convert[T](object); err != nil {
+		informer.Report(h.what, err)
 	}
 	poke(h.wake)
 }
@@ -299,23 +160,18 @@ func (h markHandler[T, M]) arrived(object any) {
 // updated takes a change to an object the informer held, and wakes the
 // loop only when the mark moved.
 func (h markHandler[T, M]) updated(before, after any) {
-	now, err := convert[T](after)
+	now, err := informer.Convert[T](after)
 	if err != nil {
-		reportUnconverted(h.what, err)
+		informer.Report(h.what, err)
 		poke(h.wake)
 		return
 	}
 	// A held copy that does not convert was logged when it arrived.
 	// Nothing says what it held, so the change counts as a move.
-	was, err := convert[T](before)
+	was, err := informer.Convert[T](before)
 	if err != nil || h.mark(was) != h.mark(now) {
 		poke(h.wake)
 	}
-}
-
-// reportUnconverted logs an object that convert refused.
-func reportUnconverted(what string, err error) {
-	fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 }
 
 // watchReceivers is the Deployment's one watch of the Receivers, which

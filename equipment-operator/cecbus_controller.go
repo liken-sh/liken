@@ -92,19 +92,12 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	var list *CECBusList
 	for ctx.Err() == nil {
 		var err error
-		err = retryThrottled(ctx, func() error {
-			var err error
-			list, err = ListCECBuses(c.client)
-			if err != nil {
-				return fmt.Errorf("listing CECBuses: %w", err)
-			}
-			return nil
-		})
+		list, err = ListCECBuses(c.client.withContext(ctx))
 		if err == nil {
 			break
 		}
 		list = nil
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)
 		select {
 		case <-ctx.Done():
 			return

@@ -7,7 +7,6 @@ package main
 
 import (
 	"testing"
-	"time"
 )
 
 // sessionOperator is the Deployment over one Receiver whose idle
@@ -31,7 +30,6 @@ func sessionOperator(t *testing.T, api *cecAPI) *controller {
 var adoptedSession = &TelevisionSession{Player: "house/theater", Display: "acm-0001-receiver"}
 
 func TestAThrottledTelevisionListStillAdoptsTheSession(t *testing.T) {
-	shorten(t, &retryAfterUnit, time.Millisecond)
 	api := startCECAPI(t)
 	operator := sessionOperator(t, api)
 	api.mutex.Lock()

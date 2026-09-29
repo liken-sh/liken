@@ -22,6 +22,10 @@ import (
 	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // A Television is cluster-scoped, like a Receiver and a CECBus.
@@ -39,7 +43,7 @@ func televisionPath(name string) string {
 func ListTelevisions(c *Client) (*TelevisionList, error) {
 	list := &TelevisionList{}
 	err := c.RequestJSON(http.MethodGet, televisionsPath, nil, list)
-	if err == ErrNotFound {
+	if err == apiclient.ErrNotFound {
 		return &TelevisionList{}, nil
 	}
 	if err != nil {
@@ -52,8 +56,8 @@ func ListTelevisions(c *Client) (*TelevisionList, error) {
 // and lists them from the API server while the store has nothing to
 // give (objectcache.go).
 func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
-	if view := held.view(); view.ready() {
-		items, err := currentList[Television](c, heldObjects{view: view, versions: c.versions.televisions}, televisionPath)
+	if view := held.view(); view.Ready() {
+		items, err := informer.CurrentList[Television](c.Client, informer.Held{View: view, Versions: c.versions.televisions}, televisionPath)
 		return &TelevisionList{Items: items}, err
 	}
 	return ListTelevisions(c)
@@ -76,9 +80,9 @@ func applyTelevision(c *Client, name, path, manager string, body any) error {
 	if err != nil {
 		return err
 	}
-	_, err = written[Television](c.versions.televisions, name, func() (*Television, error) {
+	_, err = memo.Written[Television](c.versions.televisions, name, func() (*Television, error) {
 		answer := &Television{}
-		return answer, c.requestJSON(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, answer)
+		return answer, c.Request(http.MethodPatch, path+"?fieldManager="+manager+"&force=true", applyContentType, encoded, answer)
 	})
 	return err
 }
@@ -264,11 +268,11 @@ func CreateDiscoveredTelevision(c *Client, bus string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, err = written[Television](c.versions.televisions, name, func() (*Television, error) {
+	_, err = memo.Written[Television](c.versions.televisions, name, func() (*Television, error) {
 		answer := &Television{}
 		return answer, c.RequestJSON(http.MethodPost, televisionsPath, encoded, answer)
 	})
-	if err == ErrConflict {
+	if err == apiclient.ErrConflict {
 		return false, nil
 	}
 	return err == nil, err
@@ -277,7 +281,7 @@ func CreateDiscoveredTelevision(c *Client, bus string) (bool, error) {
 // DeleteTelevision removes one Television. A name that is already
 // gone is not an error.
 func DeleteTelevision(c *Client, name string) error {
-	return c.versions.televisions.send(name, func() (string, error) {
+	return c.versions.televisions.Send(name, func() (string, error) {
 		return "", deleteObject(c, televisionPath(name), "Television "+name)
 	})
 }
