@@ -20,7 +20,7 @@ to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 72. Each component also keeps the plans for work inside
+milestone is 73. Each component also keeps the plans for work inside
 that component in its own `plans/` directory, with its own numbers.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
@@ -234,6 +234,15 @@ milestone number because their implementation scope is not settled.
   series in the plan's table wait on facts the machine does not hold:
   an upgrade's duration, and the firmware version and update state
   that plan 33 brings.
+* **69.** [One repository builds every component](completed/69-one-repository-builds-every-component.md).
+  Built 2026-09-29. The operators, the drivers, `brand`, and `.agents`
+  moved into this repository, and every component declares a
+  `package.toml` in one dependency graph. A tracked component takes
+  the repository's one CalVer tag when its files or a dependency
+  changed, and clusters follow its manifests as an OCI artifact. The
+  base images are pinned components that build when their revision is
+  new. The second stage, the OS built from source, moved to milestone
+  72.
 * **70.** [Init attaches serio devices to their serial lines](completed/70-init-attaches-serio-devices.md).
   Built 2026-09-26. A `spec.serio` entry names a protocol and a USB
   device, and init holds the `serport` line discipline on that
@@ -306,14 +315,11 @@ milestone number because their implementation scope is not settled.
   A kernel lockup becomes a panic, and init resets the chipset's
   watchdog from boot to reboot, so a machine that hangs below the
   kernel resets itself and the next boot reports it.
-* **69.** [One repository builds every component](69-one-repository-builds-every-component.md).
-  The operators, the drivers, `brand`, and `.agents` move into this
-  repository, and every component declares a `package.toml` in one
-  dependency graph. A pinned component builds from source in pinned,
-  signed stagex images when its revision is new. A tracked component
-  takes the repository's one CalVer tag when its files or a
-  dependency changed, and clusters follow its manifests as an OCI
-  artifact.
+* **72.** [The OS builds from source](72-the-os-builds-from-source.md).
+  Plan 69's second stage. Each vendored domain of the OS becomes a
+  pinned component that builds from source in pinned, signed stagex
+  images when its revision is new, and each build has a public
+  attestation.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 

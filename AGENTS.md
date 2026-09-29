@@ -15,7 +15,7 @@ than one component, and each component keeps its own plans in its own
 `AGENTS.md` for the work inside it.
 
 Four repositories stay outside: `corrosion`, `plugins`, `log`, and
-`liken-dev-cluster`. Plan 69 in `plans/` gives the reasons.
+`liken-dev-cluster`. Plan 69 in `plans/completed/` gives the reasons.
 
 ## Work across components
 
