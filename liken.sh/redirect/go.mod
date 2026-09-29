@@ -6,6 +6,8 @@ toolchain go1.27.0
 
 tool github.com/vladopajic/go-test-coverage/v2
 
+require golang.org/x/crypto v0.57.0
+
 require (
 	github.com/alexflint/go-arg v1.6.0 // indirect
 	github.com/alexflint/go-scalar v1.2.0 // indirect
@@ -31,7 +33,9 @@ require (
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/vladopajic/go-test-coverage/v2 v2.19.0 // indirect
 	golang.org/x/image v0.41.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/tools v0.26.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

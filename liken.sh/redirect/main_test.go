@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,36 @@ func TestRunReportsAnAddressItCannotListenOn(t *testing.T) {
 	}
 	defer taken.Close()
 	if err := run([]string{"-addr", taken.Addr().String()}); err == nil {
+		t.Error("run listened on an address that is taken")
+	}
+}
+
+func TestTheCertificatesCoverOnlyTheNamedSubdomains(t *testing.T) {
+	manager := certificates("liken.sh", []string{"display", " git ", ""}, t.TempDir())
+	for host, allowed := range map[string]bool{
+		"display.liken.sh": true, "git.liken.sh": true,
+		"random.liken.sh": false, "liken.sh": false, "display.example.com": false,
+	} {
+		if err := manager.HostPolicy(context.Background(), host); (err == nil) != allowed {
+			t.Errorf("%s: policy answered %v", host, err)
+		}
+	}
+}
+
+func TestNamesNeedACache(t *testing.T) {
+	if err := run([]string{"-names", "display"}); err == nil {
+		t.Error("run served HTTPS with no certificate cache")
+	}
+}
+
+func TestRunWithNamesReportsAnAddressItCannotListenOn(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+	err = run([]string{"-names", "display", "-cache", t.TempDir(), "-addr", taken.Addr().String(), "-tls-addr", "127.0.0.1:0"})
+	if err == nil {
 		t.Error("run listened on an address that is taken")
 	}
 }
