@@ -22,6 +22,9 @@ pub enum Icon {
     Start,
     /// A film camera, two reels over a body and a lens: the trailer.
     Camera,
+    /// A bar with a triangle that points away from it: play from here
+    /// onward.
+    Onward,
 }
 
 /// The side of an icon beside words of this size. An icon is a pixel
@@ -77,6 +80,18 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, glyph: Icon, at: Rectangle, ink
             path.close();
             path.move_to(point(5.5, 5.0));
             path.line_to(point(5.5, 19.0));
+        }
+        // The bar is the episode the person picked, and the triangle
+        // leaves it to the right: play from here onward. The bar and the
+        // triangle keep Start's sizes, with the triangle turned round, so
+        // the two read as a pair on one row.
+        Icon::Onward => {
+            path.move_to(point(5.5, 5.0));
+            path.line_to(point(5.5, 19.0));
+            path.move_to(point(10.0, 5.0));
+            path.line_to(point(19.0, 12.0));
+            path.line_to(point(10.0, 19.0));
+            path.close();
         }
         // The two reels stand on the body, and the lens flares out of
         // its right side.

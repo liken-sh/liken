@@ -91,7 +91,7 @@ attached to the screen's machine.
 |---|---|
 | arrows | move focus |
 | enter | open the card, open an episode's row, or press a button or a mark of a title's page |
-| back | close an episode's row, or pop to the screen before this one |
+| back | close an episode's row, or pop to the screen before this one. On a row the page opened on, pop to the screen before this one |
 | home | pop to the home page |
 | search | open the search wall with the on-screen keyboard |
 | a letter or a digit | open the search wall with that character typed |
@@ -123,6 +123,15 @@ says why it is there: "Resume", "Next in" the series, the set, or the
 franchise. A card that is next in a series or a set opens that title's
 page. A card that is next in a franchise alone opens the franchise page
 on that member.
+
+A home card that names one episode opens the series' page with that
+episode's row already open, and focus on its first button, Resume or
+Play. The continue-watching row, the recently added row, and the banner
+all open an episode this way, so the play is one press from the card.
+Back from that row returns to the home page in one press, because the
+wall under it was never on the screen. Once focus leaves the row for
+the wall, back closes a row as it does on any series page. A card that
+names a series and no episode opens the page on its wall.
 
 A play that stands at position 0 is not started. The row draws no card
 for it, and its series, set, or franchise offers nothing after it, so
@@ -166,6 +175,18 @@ ratings line. The row holds the playback buttons of a movie's page
 except Trailer, with the bar and the status line under it. Down from
 the row puts focus on the marks, down from the marks returns to the
 still, and back closes the row.
+
+Pick up here follows the playback buttons on an episode's row. It marks
+every earlier episode of the series watched, for the people at the
+screen, and plays the episode from the beginning, as Play does, with
+the same next episode after it. The earlier episodes are every episode
+before this one in season and episode order, across seasons. The press
+marks the ones the people at the screen have not finished, a partly
+watched one included, and leaves the specials of season 0 alone. The
+row shows the button only where one earlier episode is still to mark,
+so the first episode, a special, and an episode whose earlier episodes
+are all finished do not show it. Its glyph is a bar with a triangle
+that points away from it.
 A person's page shows their credits and their biography.
 A franchise's page draws its story order as one lane, with a line per
 universe beside it. Over the first row of each era it draws a heading,
@@ -201,7 +222,14 @@ takes effect at once, with no confirmation step.
 
 The actions of a continue-watching card are on the page the card
 opens. A film's card opens the film's page, and an episode's card
-opens the series' page on that episode, where enter opens its row.
+opens the series' page with that episode's row open.
+
+Pick up here on an episode's row, in [section 5](#5-the-screens), marks
+every earlier episode watched in one press. The browser publishes one
+mark that lists those episodes, and the progress role writes a row for
+each of them. An earlier episode with no duration in the audience's
+play or in the catalog is left out, as a single watched mark on it
+sends nothing.
 
 The browser does not write the progress store. It publishes the mark
 on the bus, retained, and the progress role writes it as one play at
@@ -223,7 +251,9 @@ Neither mark deletes a play. The store keeps the earlier plays, but
 the browser reads the newest play of a title, so after a clear the
 screen offers no Resume and draws no position for the title. A later
 play of the title replaces either mark.
-[The library bus](https://liken.sh/library/docs/reference/bus/#a-mark) gives the message.
+[The library bus](https://liken.sh/library/docs/reference/bus/#a-mark) gives the message, and
+[a list of episodes](https://liken.sh/library/docs/reference/bus/#a-list-of-episodes) gives the
+form Pick up here publishes.
 
 A play counts as finished when the time left is at or under a twentieth
 of the work, and at or under five minutes, whichever leaves less time.

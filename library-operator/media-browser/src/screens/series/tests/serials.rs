@@ -33,6 +33,9 @@ pub struct Serials {
     // The episode count of each season, or the three of SEASONS where the
     // test names none.
     pub seasons: Vec<i64>,
+    // How many specials, season 0, come before the first season. The
+    // catalog orders episodes by their numbers, so specials lead the wall.
+    pub specials: i64,
     // How far the audience reached in each episode a play of theirs names,
     // and the people the last read of it named.
     pub progress: Vec<crate::catalog::Progress>,
@@ -169,11 +172,15 @@ impl Source for Serials {
             return Vec::new();
         }
         let undated = self.undated;
-        self.counts()
-            .into_iter()
-            .enumerate()
-            .flat_map(|(index, count)| {
-                let season = index as i64 + 1;
+        let specials = (0, self.specials);
+        std::iter::once(specials)
+            .chain(
+                self.counts()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, count)| (index as i64 + 1, count)),
+            )
+            .flat_map(|(season, count)| {
                 (1..=count).map(move |episode| Episode {
                     id: format!("episode:{season}:{episode}"),
                     season,

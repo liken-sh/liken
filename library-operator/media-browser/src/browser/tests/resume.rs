@@ -344,7 +344,7 @@ fn an_episode_a_series_and_its_franchises_offer_is_one_card_with_every_reason() 
 }
 
 #[test]
-fn a_press_on_a_card_with_a_series_reason_opens_the_series_page_on_that_episode() {
+fn a_press_on_a_card_with_a_series_reason_opens_the_series_page_on_that_episodes_row() {
     let (mut browser, bus) = watched(mid_serial(), true);
     on_the_row(&mut browser);
 
@@ -352,7 +352,7 @@ fn a_press_on_a_card_with_a_series_reason_opens_the_series_page_on_that_episode(
 
     let page = showing_series(&browser);
     assert_eq!(page.id, LAST_SERIAL);
-    assert_eq!(page.focus, SeriesFocus::Still(2));
+    assert_eq!(page.focus, SeriesFocus::Episode(2, 0));
     assert!(published_nothing(&bus));
 }
 
@@ -426,7 +426,7 @@ fn a_press_on_a_film_of_the_row_opens_its_page_on_resume() {
 }
 
 #[test]
-fn a_press_on_an_episode_of_the_row_opens_the_series_page_on_that_episode() {
+fn a_press_on_an_episode_of_the_row_opens_the_series_page_on_that_episodes_row() {
     let (mut browser, bus) = continuing();
     on_the_row(&mut browser);
     browser.key("right");
@@ -436,7 +436,7 @@ fn a_press_on_an_episode_of_the_row_opens_the_series_page_on_that_episode() {
     let page = showing_series(&browser);
     assert_eq!(page.id, SERIAL);
     assert_eq!(page.library, SERIALS);
-    assert_eq!(page.focus, SeriesFocus::Still(1));
+    assert_eq!(page.focus, SeriesFocus::Episode(1, 0));
     assert_eq!(page.stills[1].fitted, "Segment 2");
     assert!(published_nothing(&bus));
 }
@@ -450,7 +450,7 @@ fn a_press_on_an_episode_the_audience_has_not_started_opens_the_series_page_on_i
 
     let page = showing_series(&browser);
     assert_eq!(page.id, OTHER_SERIAL);
-    assert_eq!(page.focus, SeriesFocus::Still(2));
+    assert_eq!(page.focus, SeriesFocus::Episode(2, 0));
     assert!(published_nothing(&bus));
 }
 

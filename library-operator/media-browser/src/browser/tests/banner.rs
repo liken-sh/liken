@@ -164,13 +164,13 @@ fn down_from_the_banner_reaches_the_first_strip_and_up_returns() {
 }
 
 #[test]
-fn a_select_on_the_banner_opens_the_titles_page_on_the_episode_it_came_from() {
+fn a_select_on_the_banner_opens_the_titles_page_on_the_row_of_the_episode_it_came_from() {
     let mut browser = with_banner();
 
     browser.key("enter");
     let page = showing_series(&browser);
     assert_eq!(page.id, SERIAL);
-    assert_eq!(page.focus, SeriesFocus::Still(1));
+    assert_eq!(page.focus, SeriesFocus::Episode(1, 0));
 
     browser.key("escape");
     browser.key("right");

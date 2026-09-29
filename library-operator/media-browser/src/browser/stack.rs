@@ -68,6 +68,18 @@ impl<S: Source, A: Art> Browser<S, A> {
                 mark,
                 duration,
             } => self.request_mark(&library, &selection, mark, duration),
+            // Pick up here publishes its marks before it asks for the play,
+            // so the marks' press is no later than the play's first
+            // position, and the play takes the thread from the last of them.
+            Step::PickUp {
+                library,
+                series,
+                episodes,
+                play,
+            } => {
+                self.request_pick_up(&library, &series, &episodes);
+                self.take(*play);
+            }
         }
     }
 

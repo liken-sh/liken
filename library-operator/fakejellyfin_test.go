@@ -48,7 +48,11 @@ type fakeJellyfin struct {
 	// The largest page this server answers, whatever the query asks for.
 	// A test uses it to make a server that answers a smaller page than
 	// the query asked for.
-	capPage     int
+	capPage int
+	// The one item whose user-data writes this server refuses. A test uses
+	// it to drive a mark whose write lands on one item and fails on
+	// another.
+	refuseItem  string
 	listings    int
 	userReads   int
 	seriesReads int
@@ -105,6 +109,10 @@ func fakeUserDataKey(request *http.Request) string {
 // One user-data write: recorded as the body stated it, and applied to what
 // the server holds, field by field.
 func (f *fakeJellyfin) write(w http.ResponseWriter, request *http.Request) {
+	if f.refuseItem != "" && strings.HasPrefix(request.URL.Path, "/UserItems/"+f.refuseItem+"/") {
+		http.Error(w, "the server refused", http.StatusInternalServerError)
+		return
+	}
 	body, _ := io.ReadAll(request.Body)
 	data, fields := jellyfinUserData{}, map[string]json.RawMessage{}
 	_ = json.Unmarshal(body, &data)

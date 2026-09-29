@@ -4,6 +4,7 @@
 // This file holds what every group of tests under it builds from: the
 // catalog they read, the store they draw from, and the bus they fold.
 
+mod arrival;
 mod art_counts;
 mod audience;
 mod banner;
@@ -19,6 +20,7 @@ mod marks;
 mod moments;
 mod pages;
 mod paging;
+mod pickup;
 mod plays;
 mod prefetch;
 mod rail;

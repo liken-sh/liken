@@ -5,6 +5,7 @@
 // people after those. The header stays at the top of the frame, because
 // it shows the focused episode's facts and plot.
 
+mod episode;
 mod layout;
 mod page;
 pub mod progress;
@@ -18,7 +19,7 @@ use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
 use super::movie::{franchise_press, marked_duration, row, watch};
-use super::{InFranchise, Screen, Step, facts, foot, person, stripes, upnext};
+use super::{InFranchise, Screen, Step, facts, foot, person, stripes};
 use crate::art::Art;
 use crate::catalog::draw::Date;
 use crate::catalog::{Progress, Selection, SeriesDetails, Source};
@@ -191,6 +192,11 @@ pub struct Series {
     /// Whether the way into the page named the episode focus is on, so the
     /// progress read leaves focus where that way put it.
     placed: bool,
+    // Whether the episode's row open now is the one the page opened on,
+    // from a home card that named the episode. The person never saw the
+    // wall, so back from that row leaves the page and does not close the
+    // row onto a wall they did not ask for.
+    arrived: bool,
     // The franchise page this page was opened from, which is the container
     // a play from here follows. It is nothing where the page was reached
     // any other way.
@@ -260,6 +266,7 @@ impl Series {
             bars,
             entered: 0,
             placed: false,
+            arrived: false,
             via: None,
             focus: Focus::Still(0),
         })
@@ -284,6 +291,7 @@ impl Series {
             return;
         };
         fresh.placed = true;
+        fresh.arrived = self.arrived;
         fresh.via = self.via.clone();
         let focus = self.focus;
         *self = fresh;
@@ -300,7 +308,7 @@ impl Series {
             // The row changes with the episode's progress, so a re-read
             // keeps the episode and clamps the button.
             Focus::Episode(index, button) => match self.stills.get(index) {
-                Some(still) => Focus::Episode(index, button.min(episode_row(still).len() - 1)),
+                Some(_) => Focus::Episode(index, button.min(self.episode_row(index).len() - 1)),
                 None => Focus::Still(0),
             },
             Focus::EpisodeMark(index, mark) => match self.stills.get(index) {
@@ -340,8 +348,10 @@ impl Series {
     /// While an episode's row holds focus, the page draws that row in
     /// their place.
     pub fn buttons(&self) -> Vec<row::Button> {
-        if let Some(still) = self.opened() {
-            return episode_row(still);
+        if let Focus::Episode(index, _) | Focus::EpisodeMark(index, _) = self.focus
+            && index < self.stills.len()
+        {
+            return self.episode_row(index);
         }
         match self.trailer {
             true => vec![row::Button::Trailer],
@@ -367,10 +377,25 @@ impl Series {
         }
     }
 
+    /// Open the row of the episode the way into the page named, with focus
+    /// on its first button, which is Resume or Play. A home card that names
+    /// one episode opens the page this way, so the play is one press from
+    /// the card. A page opened on no episode stays on its wall.
+    pub fn arrive(&mut self) {
+        if let (true, Focus::Still(index)) = (self.placed, self.focus) {
+            self.focus = Focus::Episode(index, 0);
+            self.arrived = true;
+        }
+    }
+
     /// Fold in the press that leaves a screen. Back over an episode's row
-    /// closes the row and returns focus to its still. Every other focus
-    /// answers nothing, and the browser goes back.
+    /// closes the row and returns focus to its still, unless the page
+    /// opened on that row: then it answers nothing, as every other focus
+    /// does, and the browser goes back to the screen the card was on.
     pub fn escape(&mut self) -> Option<Step> {
+        if self.arrived {
+            return None;
+        }
         let (Focus::Episode(index, _) | Focus::EpisodeMark(index, _)) = self.focus else {
             return None;
         };
@@ -393,6 +418,11 @@ impl Series {
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
         };
+        // A press that leaves the row of the arrival shows the wall, and a
+        // row opened from the wall after that closes on back as any other.
+        if !matches!(self.focus, Focus::Episode(..) | Focus::EpisodeMark(..)) {
+            self.arrived = false;
+        }
         // An up that moved nothing is the browser's: the strip over every
         // screen takes focus on it.
         match key == "up" && self.focus == held && matches!(step, Step::Stay) {
@@ -456,123 +486,6 @@ impl Series {
             self.focus = Focus::Episode(index, 0);
         }
         Step::Stay
-    }
-
-    // One press while an episode's row holds focus. Select presses the
-    // button and returns focus to the still, so the page a film returns to
-    // is the wall. Left and right move across the row, and down reaches
-    // the marks on the status line under it. Up moves no focus, so the
-    // press reaches the browser's strip.
-    fn on_episode(
-        &mut self,
-        (index, button): (usize, usize),
-        key: &str,
-        source: &mut dyn Source,
-    ) -> Step {
-        let Some(still) = self.stills.get(index) else {
-            self.focus = Focus::Still(0);
-            return Step::Stay;
-        };
-        let buttons = episode_row(still);
-        match key {
-            "enter" => {
-                let Some(pressed) = buttons.get(button).copied() else {
-                    return Step::Stay;
-                };
-                self.focus = Focus::Still(index);
-                self.press(index, pressed, source)
-            }
-            // Every episode offers at least one mark, so down always
-            // lands on the status line.
-            "down" => {
-                self.focus = Focus::EpisodeMark(index, 0);
-                Step::Stay
-            }
-            "up" => Step::Stay,
-            _ => {
-                self.focus = Focus::Episode(index, focus::row(button, buttons.len(), key));
-                Step::Stay
-            }
-        }
-    }
-
-    // One press on a mark under an episode's row. Select marks the episode
-    // and returns focus to the still, as a button of the row does. Up
-    // returns to the first button of the row, and down closes the row and
-    // returns to the still it was opened from.
-    fn on_episode_mark(&mut self, (index, mark): (usize, usize), key: &str) -> Step {
-        let Some(still) = self.stills.get(index) else {
-            self.focus = Focus::Still(0);
-            return Step::Stay;
-        };
-        let marks = watch::marks(still.progress.as_ref());
-        match key {
-            "enter" => {
-                let Some(pressed) = marks.get(mark).copied() else {
-                    return Step::Stay;
-                };
-                self.focus = Focus::Still(index);
-                self.mark(index, pressed)
-            }
-            "up" => {
-                self.focus = Focus::Episode(index, 0);
-                Step::Stay
-            }
-            "down" => {
-                self.focus = Focus::Still(index);
-                Step::Stay
-            }
-            _ => {
-                self.focus = Focus::EpisodeMark(index, focus::row(mark, marks.len(), key));
-                Step::Stay
-            }
-        }
-    }
-
-    // One mark on one episode, for everyone at the screen.
-    fn mark(&self, index: usize, mark: watch::Mark) -> Step {
-        let still = &self.stills[index];
-        Step::Mark {
-            library: self.library.clone(),
-            selection: self.episode(still),
-            mark: mark.title(),
-            duration: marked_duration(still.progress.as_ref(), still.duration),
-        }
-    }
-
-    // The selection that names one episode of this series.
-    fn episode(&self, still: &Still) -> Selection {
-        Selection::Episode {
-            series: self.id.clone(),
-            season: still.season,
-            episode: still.episode,
-        }
-    }
-
-    // What one button of an episode's row asks for: the episode from the
-    // second the audience reached, or the episode from the beginning.
-    fn press(&self, index: usize, button: row::Button, source: &mut dyn Source) -> Step {
-        let still = &self.stills[index];
-        let numbers = (still.season, still.episode);
-        let selection = self.episode(still);
-        let start = match button {
-            row::Button::Resume => progress::start(still),
-            row::Button::Play | row::Button::StartOver | row::Button::Trailer => None,
-        };
-        Step::Play {
-            library: self.library.clone(),
-            selection,
-            start,
-            next: upnext::after_episode(
-                source,
-                &self.library,
-                &self.id,
-                &self.title,
-                numbers,
-                self.via.as_ref(),
-            )
-            .map(Box::new),
-        }
     }
 
     // Where one press inside the wall lands: a still, or the rung under
@@ -733,13 +646,6 @@ impl Head for Series {
     fn head(&self, bounds: Rectangle) -> Rectangle {
         page::head(bounds)
     }
-}
-
-/// The row of one episode: Play, or Resume and Start over while the
-/// audience is in the middle of it. It is the movie page's row with no
-/// trailer, because an episode holds none.
-pub fn episode_row(still: &Still) -> Vec<row::Button> {
-    row::of(still.progress.as_ref(), false)
 }
 
 /// The facts line of one series: the year, the season count, the

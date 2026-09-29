@@ -2,7 +2,9 @@
 // body and a season of episodes, where a press takes focus across the
 // dividers, and what a select asks the browser to play.
 
+mod arrival;
 mod episode;
+mod pickup;
 mod resume;
 mod seasons;
 mod serials;

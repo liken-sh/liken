@@ -365,6 +365,9 @@ One mark a person set on one title at the media browser: watched, or
 cleared. It applies to everyone at the screen. The progress role
 records it as one row of the store, beside the cluster's own `Play`s.
 The jellyfin role reads the same message to send the mark to Jellyfin.
+A mark can also name a list of a series' episodes, which
+[Pick up here](/docs/guides/browser/#6-marking-a-title-watched-or-clearing-it)
+publishes: see [a list of episodes](#a-list-of-episodes).
 
 The mark is retained, because the person pressed once and nothing
 repeats the press. A progress role that is down when the person
@@ -401,6 +404,8 @@ container, and the `Player`'s name from `MEDIA_PLAYER_NAME`.
 The row is ended at `at`, with the phase `Finished`, because no `Play`
 runs behind it.
 
+A mark that names one work carries no `episodes` field.
+
     {
       "mark": "watched",
       "player": "living-room",
@@ -410,6 +415,53 @@ runs behind it.
       "episode": 5,
       "position": 2760,
       "duration": 2760,
+      "at": 1759140000
+    }
+
+### A list of episodes
+
+Pick up here marks every earlier episode of a series watched in one
+press. The browser publishes one mark for the whole press, on the same
+topic and retained the same way, and the mark lists the episodes in
+`episodes`. The series' aliases, the people, the `Player`, and `at` are
+stated once. The mark carries no `season`, `episode`, `position`, or
+`duration` of its own: each entry of the list states its own.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `episodes` | list of objects | The episodes the mark covers, in series order. Each entry has `season`, `episode`, `position`, and `duration`, with the meaning each field has on a mark of one work. |
+
+The progress role writes one row for each entry, named
+`{name}-s{season}e{episode}` with each number in four digits, as in
+`mark-living-room-1759140000-s0001e0004`. Every row is recorded at `at`.
+The browser breaks a tie in recorded time on the row's name, and the
+four digits make the names sort in series order, so the browser reads
+the last episode of the list as the newest. The role writes each row
+only when the store holds no row of that name recorded at `at` or
+later, so a list delivered again writes only the rows that are missing.
+It clears the topic once, as it clears a mark of one work.
+
+The jellyfin role writes each entry to each person at the screen, and
+publishes one [sent mark](#a-sent-mark) for the whole list once every
+entry has landed. An entry Jellyfin does not hold is done with no
+write.
+
+The press publishes one message, and not one mark for each episode,
+because each mark's name takes the second of its press. The browser
+moves a second press within the same second to the next second, so a
+mark for each of 100 episodes would carry an `at` up to 100 seconds in
+the future. The play the same press starts would read as older than
+those marks until that time had passed.
+
+    {
+      "mark": "watched",
+      "player": "living-room",
+      "people": ["ada"],
+      "aliases": {"tvdb": "1000002"},
+      "episodes": [
+        {"season": 1, "episode": 4, "position": 2760, "duration": 2760},
+        {"season": 2, "episode": 1, "position": 2700, "duration": 2700}
+      ],
       "at": 1759140000
     }
 

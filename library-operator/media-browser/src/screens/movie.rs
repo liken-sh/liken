@@ -501,7 +501,9 @@ impl Movie {
                 film,
                 self.progress.as_ref().map(|progress| progress.position),
             ),
-            row::Button::Play | row::Button::StartOver => (film, None),
+            // A film's row never offers Pick up here, which marks earlier
+            // episodes, so the button would only play the film.
+            row::Button::Play | row::Button::StartOver | row::Button::PickUp => (film, None),
         };
         // A trailer is in no order, so it offers nothing after it.
         let next = match button {

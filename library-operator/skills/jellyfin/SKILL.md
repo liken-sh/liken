@@ -115,6 +115,15 @@ item's last played date. The role sends a mark on its ten-second pass,
 not at the moment it arrives, and a write that fails is sent again on
 the next pass.
 
+Mark watched writes nothing to an item Jellyfin already holds as played
+with no resume position, because only the date would change. Pick up
+here marks every earlier episode of a series in one press, and the role
+writes each of those episodes that Jellyfin holds and has not played.
+Jellyfin has no call that writes several items at once, so a long
+series takes one read and at most one write for each episode and each
+person. The role logs one line for each person with the counts, and
+not a line for each episode.
+
 The bus delivers a mark again each time the role subscribes, for 24
 hours after the press. Two checks keep an old mark from undoing a newer
 change in Jellyfin:

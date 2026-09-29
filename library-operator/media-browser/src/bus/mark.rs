@@ -10,6 +10,8 @@
 // read the mark when it subscribes again. The progress role clears the
 // topic once the retention has run.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Map, Value};
 
 use crate::catalog::Identity;
@@ -93,9 +95,95 @@ pub fn payload(
     Value::Object(message).to_string().into_bytes()
 }
 
+/// One episode of a mark that names several: its numbers, and the duration
+/// the mark states for it, in seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Episode {
+    pub season: i64,
+    pub episode: i64,
+    pub duration: i64,
+}
+
+/// A mark on several episodes of one series as bytes, which Pick up here
+/// publishes. It is one message for the whole press, so one press is one
+/// retained topic, and every row it writes carries the same `at`. The
+/// aliases are the series', and each entry of `episodes` states its own
+/// numbers, position, and duration in place of the single mark's.
+pub fn list_payload(
+    mark: TitleMark,
+    player: &str,
+    people: &[String],
+    aliases: &BTreeMap<String, String>,
+    episodes: &[Episode],
+    at: i64,
+) -> Vec<u8> {
+    let listed = episodes
+        .iter()
+        .map(|episode| {
+            serde_json::json!({
+                "season": episode.season,
+                "episode": episode.episode,
+                "position": mark.position(episode.duration),
+                "duration": episode.duration,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "mark": mark.word(),
+        "player": player,
+        "people": people,
+        "aliases": aliases,
+        "episodes": listed,
+        "at": at,
+    })
+    .to_string()
+    .into_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_mark_names_the_series_once_and_each_episode_in_the_list() {
+        let people = ["person-a".to_string()];
+        let episodes = [
+            Episode {
+                season: 1,
+                episode: 4,
+                duration: 2_700,
+            },
+            Episode {
+                season: 2,
+                episode: 1,
+                duration: 2_760,
+            },
+        ];
+        let message: Value = serde_json::from_slice(&list_payload(
+            TitleMark::Watched,
+            "den",
+            &people,
+            &episode().aliases,
+            &episodes,
+            1_759_140_000,
+        ))
+        .expect("the mark is JSON");
+
+        assert_eq!(
+            message,
+            serde_json::json!({
+                "mark": "watched",
+                "player": "den",
+                "people": ["person-a"],
+                "aliases": {"tvdb": "8001"},
+                "episodes": [
+                    {"season": 1, "episode": 4, "position": 2700, "duration": 2700},
+                    {"season": 2, "episode": 1, "position": 2760, "duration": 2760},
+                ],
+                "at": 1759140000,
+            })
+        );
+    }
 
     fn episode() -> Identity {
         Identity {

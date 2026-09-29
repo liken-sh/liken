@@ -24,7 +24,7 @@ use self::layout::Layout;
 pub use self::page::{Page, read, read_row};
 use self::rows::{GENRE, LIBRARY, rows};
 pub use self::rows::{Last, Row, Strip};
-use super::{Step, slots};
+use super::{Screen, Step, slots};
 use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
@@ -241,8 +241,8 @@ impl Home {
                 }
             }
             _ => match self.blocks.get_mut(self.focus) {
-                Some(Block::Banner(banner)) => return banner.key(key, source),
-                Some(Block::Strip(strip)) if key == "enter" => return strip.select(source),
+                Some(Block::Banner(banner)) => return arrive(banner.key(key, source)),
+                Some(Block::Strip(strip)) if key == "enter" => return arrive(strip.select(source)),
                 Some(Block::Strip(strip)) => strip.moved(key),
                 None => {}
             },
@@ -468,6 +468,20 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
             }
         });
         vec![frame.into_geometry()]
+    }
+}
+
+// A home card or banner title that names one episode opens its series'
+// page on that episode's row, with focus on its first button, so the play
+// is one press from the card. A card that names the series alone opens the
+// wall as a library's card does.
+fn arrive(step: Step) -> Step {
+    match step {
+        Step::Open(Screen::Series(mut page)) => {
+            page.arrive();
+            Step::Open(Screen::Series(page))
+        }
+        step => step,
     }
 }
 

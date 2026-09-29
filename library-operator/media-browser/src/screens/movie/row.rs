@@ -2,7 +2,8 @@
 // the film does to it: a film they are in the middle of leads with Resume
 // and Start over in the place of Play. Every button of the row starts a
 // play. The marks are on the status line under the row, and the series
-// page draws the same row and line for one episode.
+// page draws the same row and line for one episode, with Pick up here after
+// the row's buttons where earlier episodes are not finished.
 
 use crate::catalog::Progress;
 use crate::views::icon::Icon;
@@ -19,6 +20,9 @@ pub enum Button {
     StartOver,
     /// Play the film's trailer.
     Trailer,
+    /// Mark every earlier episode of a series watched, and play this
+    /// episode from the beginning. Only an episode's row offers it.
+    PickUp,
 }
 
 impl Button {
@@ -29,6 +33,7 @@ impl Button {
             Self::Resume => "Resume",
             Self::StartOver => "Start over",
             Self::Trailer => "Trailer",
+            Self::PickUp => "Pick up here",
         }
     }
 
@@ -39,6 +44,7 @@ impl Button {
             Self::Play | Self::Resume => Icon::Play,
             Self::StartOver => Icon::Start,
             Self::Trailer => Icon::Camera,
+            Self::PickUp => Icon::Onward,
         }
     }
 
@@ -138,6 +144,7 @@ mod tests {
                 Button::Resume,
                 Button::StartOver,
                 Button::Trailer,
+                Button::PickUp,
             ]
             .map(|button| (button.word(), button.icon())),
             [
@@ -145,6 +152,7 @@ mod tests {
                 ("Resume", Icon::Play),
                 ("Start over", Icon::Start),
                 ("Trailer", Icon::Camera),
+                ("Pick up here", Icon::Onward),
             ]
         );
         assert_eq!(

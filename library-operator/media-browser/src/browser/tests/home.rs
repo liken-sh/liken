@@ -164,7 +164,7 @@ fn an_empty_strip_is_skipped_and_up_from_the_libraries_reaches_the_strip() {
 }
 
 #[test]
-fn a_select_on_an_episode_opens_the_series_page_on_that_episode() {
+fn a_select_on_an_episode_opens_the_series_page_on_that_episodes_row() {
     let mut browser = on_strips(3);
 
     browser.key("enter");
@@ -172,7 +172,7 @@ fn a_select_on_an_episode_opens_the_series_page_on_that_episode() {
     let page = showing_series(&browser);
     assert_eq!(page.id, SERIAL);
     assert_eq!(page.library, SERIALS);
-    assert_eq!(page.focus, SeriesFocus::Still(1));
+    assert_eq!(page.focus, SeriesFocus::Episode(1, 0));
     assert_eq!(page.stills[1].fitted, "Segment 2");
 }
 

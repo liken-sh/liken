@@ -4,7 +4,9 @@ package main
 // Jellyfin. A mark arrives retained on the bus, the same message the
 // progress role records, and the jellyfin role writes it to each person's
 // user data: watched as played at the end of the work, cleared as unplayed
-// at the start.
+// at the start. A mark that lists several episodes, which Pick up here
+// publishes, is one write for each episode, and one sent record for the
+// whole list.
 //
 // The broker delivers each mark again on every subscription until the
 // progress role clears it, a day after the press. A second send of an old
@@ -167,31 +169,27 @@ func (m *jellyfinMarks) drop(name string) {
 }
 
 // send writes one mark to each person at the screen, and answers whether
-// the mark is done. A person or a work Jellyfin does not hold is done,
+// the mark is done. A mark on one work is one item, and a list is one item
+// for each episode. A person or an episode Jellyfin does not hold is done,
 // because a later pass would find the same. A read or a write that failed
-// is not, and the next pass sends the mark again; a person whose write
-// landed then reads the mark's own date back and is left alone.
+// is not, and the next pass sends the whole mark again; an item whose
+// write landed then reads the mark's own date back and is left alone.
 func (m *jellyfinMarks) send(ctx context.Context, name string, mark titleMark) bool {
 	if len(mark.People) == 0 {
 		m.logf("the mark %s names nobody, and jellyfin keeps progress by person", name)
 		return true
 	}
+	targets, missing := m.items(ctx, mark.Aliases, mark.works(name))
 	work := workNamed(mark.Aliases, mark.Season, mark.Episode)
-	item, found := m.out.index.itemFor(ctx, mark.Aliases, mark.Season, mark.Episode)
-	if !found {
+	if len(targets) == 0 {
 		m.logf("jellyfin holds no item for the mark %s of %s", name, work)
 		return true
 	}
 
-	played := mark.Mark == markWatched
-	pressed := time.Unix(mark.At, 0).UTC()
-	data := jellyfinUserDataUpdate{
-		PlaybackPositionTicks: jellyfinTicks(mark.Position),
-		Played:                &played,
-		// The date of the press, and not of the write, so the mark's own
-		// write reads back as no newer than the mark.
-		LastPlayedDate: pressed.Format(time.RFC3339),
-	}
+	// A list is one press, so it leaves one line for each person with the
+	// counts, and not a line for each of its episodes. A failure still
+	// leaves its own line, with Jellyfin's answer in it.
+	listed := len(mark.Episodes) > 0
 	done := true
 	for _, person := range mark.People {
 		user, known := m.out.index.userFor(ctx, person)
@@ -199,27 +197,107 @@ func (m *jellyfinMarks) send(ctx context.Context, name string, mark titleMark) b
 			m.logf("jellyfin holds no user named %s", person)
 			continue
 		}
-		held, err := m.out.api.userData(ctx, item, user)
-		if err != nil {
-			m.logf("could not read the progress of %s in jellyfin before the mark %s: %v", person, name, err)
-			done = false
-			continue
+		tally := jellyfinMarkTally{missing: missing}
+		for _, target := range targets {
+			if !m.write(ctx, name, mark, jellyfinMarkWrite{person: person, user: user, target: target, quiet: listed}, &tally) {
+				done = false
+			}
 		}
-		if jellyfinPlayedSince(held.LastPlayedDate, mark.At) {
-			m.logf("jellyfin holds a play of %s by person %s at %s, at or after the mark %s, and the role leaves it",
-				work, person, strings.TrimSpace(held.LastPlayedDate), name)
-			continue
+		if listed {
+			m.logf("wrote the mark %s on %d episodes of %s to jellyfin for person %s: "+
+				"%d written, %d already played, %d played since the press, %d not held",
+				name, len(mark.Episodes), work, person, tally.written, tally.played, tally.since, tally.missing)
 		}
-		if err := m.out.api.writeUserData(ctx, item, user, data); err != nil {
-			m.logf("could not write the mark %s for %s in jellyfin: %v", name, person, err)
-			done = false
-			continue
-		}
-		m.out.echoes.remember(user, item, mark.Position)
-		m.logf("wrote the mark %s of %s to jellyfin for person %s: item %s, user %s, %s at %s, pressed at %s",
-			name, work, person, item, user, mark.Mark, positionText(mark.Position), pressed.Format(time.RFC3339))
 	}
 	return done
+}
+
+// One item a mark writes: Jellyfin's id for it, and the row of the mark
+// that names it.
+type jellyfinMarkTarget struct {
+	item string
+	work markedWork
+}
+
+// items resolves each work of a mark to its Jellyfin item, and counts the
+// works Jellyfin does not hold.
+func (m *jellyfinMarks) items(ctx context.Context, aliases map[string]string, works []markedWork) ([]jellyfinMarkTarget, int) {
+	targets := []jellyfinMarkTarget{}
+	missing := 0
+	for _, work := range works {
+		item, found := m.out.index.itemFor(ctx, aliases, work.season, work.episode)
+		if !found {
+			missing++
+			continue
+		}
+		targets = append(targets, jellyfinMarkTarget{item: item, work: work})
+	}
+	return targets, missing
+}
+
+// One write of a mark: the person, their Jellyfin user, the item, and
+// whether the write leaves its line to the list's count.
+type jellyfinMarkWrite struct {
+	person string
+	user   string
+	target jellyfinMarkTarget
+	quiet  bool
+}
+
+// What a list did for one person, for the one line it leaves.
+type jellyfinMarkTally struct {
+	written, played, since, missing int
+}
+
+// write sends one item of a mark for one person, and answers false only
+// where a read or a write failed.
+//
+// Before it writes, the role reads what Jellyfin holds. A last played date
+// at or after the press is a newer play or toggle in Jellyfin, or this
+// mark's own write, and the role leaves it. An item played with no resume
+// position is already what a watched mark would write, less the date, so
+// the role leaves that too, and a person who watched the earlier seasons
+// of a series in Jellyfin costs a list no writes.
+func (m *jellyfinMarks) write(ctx context.Context, name string, mark titleMark, to jellyfinMarkWrite, tally *jellyfinMarkTally) bool {
+	work := to.target.work
+	named := workNamed(mark.Aliases, work.season, work.episode)
+	item := to.target.item
+	held, err := m.out.api.userData(ctx, item, to.user)
+	if err != nil {
+		m.logf("could not read the progress of %s in jellyfin before the mark %s: %v", to.person, name, err)
+		return false
+	}
+	if jellyfinPlayedSince(held.LastPlayedDate, mark.At) {
+		tally.since++
+		m.quietf(to.quiet, "jellyfin holds a play of %s by person %s at %s, at or after the mark %s, and the role leaves it",
+			named, to.person, strings.TrimSpace(held.LastPlayedDate), name)
+		return true
+	}
+	if mark.Mark == markWatched && held.Played && held.PlaybackPositionTicks == 0 {
+		tally.played++
+		m.quietf(to.quiet, "jellyfin holds %s as played by person %s, and the mark %s changes nothing there",
+			named, to.person, name)
+		return true
+	}
+
+	played := mark.Mark == markWatched
+	pressed := time.Unix(mark.At, 0).UTC()
+	data := jellyfinUserDataUpdate{
+		PlaybackPositionTicks: jellyfinTicks(work.position),
+		Played:                &played,
+		// The date of the press, and not of the write, so the mark's own
+		// write reads back as no newer than the mark.
+		LastPlayedDate: pressed.Format(time.RFC3339),
+	}
+	if err := m.out.api.writeUserData(ctx, item, to.user, data); err != nil {
+		m.logf("could not write the mark %s of %s for %s in jellyfin: %v", name, named, to.person, err)
+		return false
+	}
+	m.out.echoes.remember(to.user, item, work.position)
+	tally.written++
+	m.quietf(to.quiet, "wrote the mark %s of %s to jellyfin for person %s: item %s, user %s, %s at %s, pressed at %s",
+		name, named, to.person, item, to.user, mark.Mark, positionText(work.position), pressed.Format(time.RFC3339))
+	return true
 }
 
 // Whether Jellyfin's last played date is at or after the press. An item
@@ -231,6 +309,14 @@ func jellyfinPlayedSince(date string, at int64) bool {
 		return false
 	}
 	return played.Unix() >= at
+}
+
+// quietf writes one line unless the write belongs to a list, which leaves
+// one line of counts in its place.
+func (m *jellyfinMarks) quietf(quiet bool, format string, args ...any) {
+	if !quiet {
+		m.logf(format, args...)
+	}
 }
 
 func (m *jellyfinMarks) logf(format string, args ...any) {

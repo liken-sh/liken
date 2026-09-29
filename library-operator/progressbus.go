@@ -120,8 +120,8 @@ const (
 	markCleared = "cleared"
 )
 
-// One mark a person set on one title from the media browser, for everyone
-// at the screen. The browser publishes it retained, because the person
+// One mark a person set on one title, or on a list of a series' episodes,
+// from the media browser, for everyone at the screen. The browser publishes it retained, because the person
 // pressed once and nothing repeats it, and the progress role records it
 // whole the way it records an outside play. The jellyfin role reads the
 // same message to send the mark to Jellyfin, and reads Mark to know which
@@ -149,6 +149,20 @@ type titleMark struct {
 	// The Unix time of the press, which the store writes as the recorded
 	// time, so the mark stands over every play recorded before it.
 	At int64 `json:"at"`
+	// Several episodes of one series, which Pick up here marks in one
+	// press. The aliases are the series', and the mark states no season,
+	// episode, position, or duration of its own. Empty for a mark on one
+	// work.
+	Episodes []markedEpisode `json:"episodes,omitempty"`
+}
+
+// One episode of a mark that names several: its numbers, and the position
+// and duration the mark states for it, in seconds.
+type markedEpisode struct {
+	Season   int `json:"season"`
+	Episode  int `json:"episode"`
+	Position int `json:"position"`
+	Duration int `json:"duration"`
 }
 
 // playFinal is a Play's last status, read off the API by the operator

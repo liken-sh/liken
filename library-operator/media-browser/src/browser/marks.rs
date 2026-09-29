@@ -8,6 +8,7 @@ use super::{Browser, lines};
 use crate::art::Art;
 use crate::bus::mark::{self, TitleMark};
 use crate::catalog::{Selection, Source};
+use crate::log::opaque;
 
 /// Where this browser publishes its marks: the branch of the tree the
 /// namespace's plays are under, and the `Player` whose screen this is. A
@@ -71,29 +72,105 @@ impl<S: Source, A: Art> Browser<S, A> {
             return;
         }
         let identity = self.source.identity(library, selection);
-        let Some(bus) = &self.bus else {
-            self.log.line(format!(
-                "{asked}: sent nothing, because this run has no bus"
-            ));
+        let Some((topic, at)) = self.mark_route(&asked) else {
             return;
         };
-        if self.marks.branch.is_empty() {
-            self.log.line(format!(
-                "{asked}: sent nothing, because the operator named no plays topic"
-            ));
-            return;
-        }
-        let at = self.marks.stamp((self.now)());
-        let topic = mark::topic(&self.marks.branch, &self.marks.player, at);
-        bus.publish(
+        self.publish_mark(
             &topic,
             mark::payload(mark, &self.marks.player, &people, &identity, duration, at),
-            true,
         );
         self.log.line(format!(
             "{asked}: sent the mark at {} of {duration} on {topic}",
             mark.position(duration)
         ));
+    }
+
+    // Publish one mark on the earlier episodes Pick up here names, as one
+    // retained message for the whole press. One message keeps the press to
+    // one topic and one `at`: a mark for each episode would move each one
+    // to a second of its own, and the last would stand in the future over
+    // the play the same press starts.
+    pub(super) fn request_pick_up(
+        &mut self,
+        library: &str,
+        series: &str,
+        episodes: &[mark::Episode],
+    ) {
+        let people = self.audience.current(self.clock).to_vec();
+        let asked = format!(
+            "mark {} episodes of {} in {library} watched for {}",
+            episodes.len(),
+            opaque(series),
+            lines::people(&people)
+        );
+        self.did(format!(
+            "marked {} episodes of {} watched",
+            episodes.len(),
+            opaque(series)
+        ));
+        let Some(first) = episodes.first() else {
+            self.log.line(format!(
+                "{asked}: sent nothing, because no earlier episode is left to mark"
+            ));
+            return;
+        };
+        // An episode records against its series, so the first episode's
+        // identity carries the aliases every entry of the list takes.
+        let identity = self.source.identity(
+            library,
+            &Selection::Episode {
+                series: series.to_string(),
+                season: first.season,
+                episode: first.episode,
+            },
+        );
+        let Some((topic, at)) = self.mark_route(&asked) else {
+            return;
+        };
+        self.publish_mark(
+            &topic,
+            mark::list_payload(
+                TitleMark::Watched,
+                &self.marks.player,
+                &people,
+                &identity.aliases,
+                episodes,
+                at,
+            ),
+        );
+        let last = episodes[episodes.len() - 1];
+        self.log.line(format!(
+            "{asked}: sent the mark on S{}E{} to S{}E{} on {topic}",
+            first.season, first.episode, last.season, last.episode
+        ));
+    }
+
+    // The topic and the second of one press, or nothing where this run
+    // cannot publish a mark, with a line that says why.
+    fn mark_route(&mut self, asked: &str) -> Option<(String, i64)> {
+        if self.bus.is_none() {
+            self.log.line(format!(
+                "{asked}: sent nothing, because this run has no bus"
+            ));
+            return None;
+        }
+        if self.marks.branch.is_empty() {
+            self.log.line(format!(
+                "{asked}: sent nothing, because the operator named no plays topic"
+            ));
+            return None;
+        }
+        let at = self.marks.stamp((self.now)());
+        Some((mark::topic(&self.marks.branch, &self.marks.player, at), at))
+    }
+
+    // A mark is retained, because the person presses once and nothing
+    // repeats it: a progress role that is down reads it when it subscribes
+    // again.
+    fn publish_mark(&self, topic: &str, payload: Vec<u8>) {
+        if let Some(bus) = &self.bus {
+            bus.publish(topic, payload, true);
+        }
     }
 }
 
