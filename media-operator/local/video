@@ -129,8 +129,13 @@ q quit
 BINDINGS
 
 # Build what the run needs: the compositor image, the Go binary the block
-# server runs as, and the display.
-docker build -q -t local-video-weston:latest "$here/weston-nested" >/dev/null
+# server runs as, and the display. The compositor builds FROM the weston
+# image of this checkout, through the bake file at the top of the
+# repository.
+repository=$(cd "$root/.." && pwd)
+(cd "$repository" && docker buildx bake --progress=quiet \
+  -f docker-bake.hcl -f media-operator/local/weston-nested/docker-bake.hcl \
+  local-video-weston --load)
 BIN="$SOCKETS/media-operator"
 go -C "$root" build -o "$BIN" .
 cargo build --manifest-path "$root/Cargo.toml" --release -p media-display
