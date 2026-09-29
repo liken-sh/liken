@@ -1,5 +1,7 @@
-# These checks run before every commit, through prek. The gate is the
-# same `make` target CI runs, so a commit that passes here passes there.
+# These checks run before every commit, through pre-commit or prek,
+# its drop-in replacement. They are the fast, local ones: formatters,
+# linters, and hygiene checks. The test suites and the coverage gates
+# run in CI, through the `make` targets that package.toml names.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -10,9 +12,9 @@ repos:
       - id: check-added-large-files
   - repo: local
     hooks:
-      - id: test-rust
-        name: rust checks and coverage gate
-        entry: make test
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'cargo fmt --check'
         language: system
-        files: \.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^Makefile$
+        files: \.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$
         pass_filenames: false

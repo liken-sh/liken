@@ -850,9 +850,9 @@ jobs:
           path: library-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['liken'].check && contains(fromJSON(needs.plan.outputs.components)['liken'].jobs, 'checks') }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['liken'].check && contains(fromJSON(needs.plan.outputs.components)['liken'].jobs, 'go') }}
         with:
-          name: coverage-liken-checks
+          name: coverage-liken-go
           path: liken
 
       - uses: actions/download-artifact@v8

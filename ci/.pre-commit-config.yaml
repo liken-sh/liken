@@ -1,5 +1,7 @@
-# These checks run before every commit, through prek. The gate is the
-# same `make` target CI runs, so a commit that passes here passes there.
+# These checks run before every commit, through pre-commit or prek,
+# its drop-in replacement. They are the fast, local ones: formatters,
+# linters, and hygiene checks. The test suites and the coverage gates
+# run in CI, through the `make` targets that package.toml names.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -11,6 +13,18 @@ repos:
       - id: check-added-large-files
   - repo: local
     hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
+        language: system
+        files: \.go$
+        pass_filenames: false
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        files: \.go$|^go\.(mod|sum)$
+        pass_filenames: false
       - id: go-mod-tidy
         name: go mod tidy
         # -diff reports what a tidy would change, without changing it,
@@ -19,10 +33,4 @@ repos:
         entry: bash -c 'go mod tidy -diff'
         language: system
         files: \.go$|^go\.(mod|sum)$
-        pass_filenames: false
-      - id: test-go
-        name: go checks and coverage gate
-        entry: make test
-        language: system
-        files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$|^Makefile$|^templates/
         pass_filenames: false

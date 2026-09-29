@@ -265,11 +265,8 @@ jobs:
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make. SKIP leaves out the hooks
-      # that another job of this workflow runs.
+      # with the change it would make.
       - uses: j178/prek-action@v2
-        env:
-          SKIP: test-go,test-docs
         with:
           prek-version: 0.5.2
           extra-args: --all-files media-operator/

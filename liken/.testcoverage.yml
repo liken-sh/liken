@@ -1,6 +1,6 @@
-# This is the coverage gate, enforced before every commit (see
-# .pre-commit-config.yaml, which runs go-test-coverage over the
-# profile that the test hook writes).
+# This is the coverage gate. The `test-go` target in the Makefile runs
+# go-test-coverage over the profile that the tests write, and CI runs
+# that target.
 #
 # The thresholds only rise over time. Each one is set just under what
 # the tests actually measure today. So a change that loses coverage

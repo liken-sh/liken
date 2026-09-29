@@ -687,9 +687,10 @@ COVERAGE_TOOLCHAIN := go1.26.7
 # dependency graph out of the root go.sum; ./... does not descend into
 # it, and test-docs below runs the same checks against that module.
 #
-# gofmt is not here. It stays its own pre-commit hook, because that
-# hook rewrites the files it finds with the toolchain's own gofmt,
-# and a make target could only report them.
+# gofmt is not here. It is its own pre-commit hook, because that hook
+# rewrites the files it finds with the toolchain's own gofmt, and a
+# make target could only report them. vet and staticcheck run both in
+# this target and as pre-commit hooks.
 #
 # A package with no test file writes no rows to the profile, so the
 # gate never counts it: its number is not low, it is missing. This

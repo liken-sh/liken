@@ -13,9 +13,9 @@ timeout = 20
 env = { CARGO_INCREMENTAL = "0" }
 coverage = ["coverage-media-screen.xml"]
 
-# The hooks in .pre-commit-config.yaml, less the ones that the jobs
-# above run.
+# The hooks in .pre-commit-config.yaml: the formatters, the linters,
+# and the hygiene checks. The jobs above run the tests and the
+# coverage gates.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-skip = ["test-rust"]

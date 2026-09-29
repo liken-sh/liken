@@ -40,12 +40,12 @@ env = { CARGO_INCREMENTAL = "0", WLR_RENDERER = "pixman" }
 apt = ["cage", "wlr-randr", "mesa-vulkan-drivers", "libvulkan1", "libwayland-client0", "libxkbcommon0"]
 coverage = ["coverage-idle-screen.xml", "coverage-display.xml"]
 
-# The hooks in .pre-commit-config.yaml, less the ones that the jobs
-# above run.
+# The hooks in .pre-commit-config.yaml: the formatters, the linters,
+# and the hygiene checks. The jobs above run the tests and the
+# coverage gates.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-skip = ["test-go", "test-docs"]
 
 [outputs]
 deploy = "deploy"

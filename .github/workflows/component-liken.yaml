@@ -52,8 +52,61 @@ permissions:
   packages: write
 
 jobs:
-  checks:
-    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'checks') }}
+  go:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'go') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: liken
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: liken/go.mod
+          cache: false
+
+      # Every run restores the Go cache, and only a push to main saves
+      # it, when its key missed, so a branch never writes an entry that
+      # pushes one of main's out of the repository's 10 GB. The cache
+      # holds the Go modules and the build cache, and its key follows
+      # liken/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
+      - id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-
+
+      - run: make test-go
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      # The site renders the coverage report from these files.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-liken-go
+          path: |
+            liken/coverage.out
+          if-no-files-found: error
+          retention-days: 7
+
+  prek:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
@@ -101,15 +154,6 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
-
-      # The site renders the coverage report from these files.
-      - uses: actions/upload-artifact@v7
-        with:
-          name: coverage-liken-checks
-          path: |
-            liken/coverage.out
-          if-no-files-found: error
-          retention-days: 7
 
   docs:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'docs') }}
