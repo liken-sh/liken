@@ -11,7 +11,6 @@ package main
 import (
 	"context"
 	"net/http"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,86 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
-
-func configMapNamed(name, value string) ConfigMap {
-	return ConfigMap{Metadata: objectMeta{Name: name, Namespace: "test"}, Data: map[string]string{"value": value}}
-}
-
-// What a watch on one ConfigMap has seen, in order: each value, and
-// "gone" for an object that does not exist.
-type seenValues struct {
-	mu     sync.Mutex
-	values []string
-}
-
-func (s *seenValues) see(held *ConfigMap) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if held == nil {
-		s.values = append(s.values, "gone")
-		return
-	}
-	s.values = append(s.values, held.Data["value"])
-}
-
-func (s *seenValues) last() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.values) == 0 {
-		return ""
-	}
-	return s.values[len(s.values)-1]
-}
-
-func watchOneConfigMap(t *testing.T, objects *objectStore) *seenValues {
-	t.Helper()
-	seen := &seenValues{}
-	ctx, stop := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	t.Cleanup(func() {
-		stop()
-		<-done
-	})
-	go func() {
-		defer close(done)
-		watchNamed(ctx, objects.watcher(), configMapResource, "test", "tracked", "the test ConfigMap", seen.see)
-	}()
-	eventually(t, "the watch opening", func() bool { return objects.watching() > 0 })
-	return seen
-}
-
-// The first read answers the object as it stands, and each change
-// after it arrives on the watch: an update, a removal, and a new
-// object. The watch asks for the one object by name, which is how RBAC
-// matches it against a rule's resourceNames.
-func TestTheWatchSeesEachChangeToTheObject(t *testing.T) {
-	objects := newConfigMapStore(t, "test")
-	objects.put(configMapNamed("tracked", "first"))
-	objects.put(configMapNamed("other", "ignored"))
-	seen := watchOneConfigMap(t, objects)
-	eventually(t, "the first read", func() bool { return seen.last() == "first" })
-
-	objects.put(configMapNamed("tracked", "second"))
-	eventually(t, "the update", func() bool { return seen.last() == "second" })
-	objects.remove("tracked")
-	eventually(t, "the removal", func() bool { return seen.last() == "gone" })
-	objects.put(configMapNamed("tracked", "third"))
-	eventually(t, "the new object", func() bool { return seen.last() == "third" })
-
-	for _, query := range objects.asked() {
-		if got := query.Get("fieldSelector"); got != "metadata.name=tracked" {
-			t.Errorf("a request selected %q, want metadata.name=tracked", got)
-		}
-	}
-}
-
-// An object that does not exist at the first read is seen as gone.
-func TestTheWatchSeesAnAbsentObjectAsGone(t *testing.T) {
-	objects := newConfigMapStore(t, "test")
-	seen := watchOneConfigMap(t, objects)
-
-	eventually(t, "the first read", func() bool { return seen.last() == "gone" })
-}
 
 // The two watches that wake a pass on every change, each with the
 // collection it watches and the objects it reads there. The Display

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -91,16 +92,16 @@ func (a *clientAnchors) take(configMap *ConfigMap) error {
 func keepClientAnchors(ctx context.Context, watcher dynamic.Interface, anchors *clientAnchors,
 	report func(string), synced chan<- struct{}) {
 	subject := "configmap " + clientCANamespace + "/" + clientCAConfigMap
-	watchNamed(ctx, watcher, configMapResource, clientCANamespace, clientCAConfigMap, subject,
-		func(configMap *ConfigMap) {
-			if configMap == nil {
-				report(subject + " is absent; media-api verifies client certificates against the authority it read last")
-				return
-			}
-			if err := anchors.take(configMap); err != nil {
-				report(fmt.Sprintf("reading %s: %v", subject, err))
-			}
-		}, synced)
+	authority := informer.One{Resource: configMapResource, Namespace: clientCANamespace, Name: clientCAConfigMap, What: subject}
+	<-informer.WatchOne(ctx, watcher, authority, func(configMap *ConfigMap) {
+		if configMap == nil {
+			report(subject + " is absent; media-api verifies client certificates against the authority it read last")
+			return
+		}
+		if err := anchors.take(configMap); err != nil {
+			report(fmt.Sprintf("reading %s: %v", subject, err))
+		}
+	}, func() { close(synced) }).Done()
 }
 
 // certificateCaller reads the caller out of a connection that carries

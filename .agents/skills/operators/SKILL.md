@@ -295,6 +295,13 @@ runs them through the real reflector. `liken/kubernetes/watch` holds
   address of the radio the pass reads, cancel the informer's context,
   wait until `RunWithContext` has returned, and start a new informer
   with the new selector (`followPeripherals` in `editwatch.go`).
+- **Follow one object by name with `informer.WatchOne`.** It selects
+  the object with the field selector `metadata.name`, which is how RBAC
+  matches a list and a watch against a Role's `resourceNames`. It hands
+  the owner each version, and nil when the object does not exist,
+  including at the end of a first read that finds nothing. The API
+  pods of `audio-operator`, `display-operator`, and `media-operator`
+  follow their certificate Secrets and CA ConfigMaps this way.
 - **Test the handlers, not the reflector.** Point the dynamic client
   at an `httptest` server that answers a streaming list: an `ADDED`
   event for each object, then a `BOOKMARK` whose annotations hold

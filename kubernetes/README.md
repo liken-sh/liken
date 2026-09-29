@@ -26,8 +26,11 @@ published.
 - `informer` watches a collection through client-go's reflector and
   keeps a copy of it, and answers a pass's reads from that copy. A
   watch can read a kind that another operator defines, and that the
-  cluster does not serve, as an empty collection until it arrives. It
-  links only `tools/cache`, `dynamic`, and `rest` from client-go.
+  cluster does not serve, as an empty collection until it arrives.
+  `WatchOne` follows one object by name, such as a CA ConfigMap, and
+  hands each version to its owner, and nil when the object does not
+  exist. The package links only `tools/cache`, `dynamic`, and `rest`
+  from client-go.
 
 The `operators` skill in `.agents/skills` at the top of the repository
 gives the rules each watch must follow and the reasons for the

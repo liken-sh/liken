@@ -451,12 +451,13 @@ func reviewCertificate(server *apiServer, keeper *certificateKeeper, metrics *ap
 // read that changes nothing.
 func watchServingPair(ctx context.Context, watcher dynamic.Interface, namespace string, server *apiServer,
 	keeper *certificateKeeper, metrics *apiMetrics) {
-	watchNamed(ctx, watcher, secretResource, namespace, apiTLSSecretName, "secret "+namespace+"/"+apiTLSSecretName,
-		func(*Secret) {
-			if err := refreshCertificate(server, keeper, metrics); err != nil {
-				fmt.Fprintf(os.Stderr, "minting the serving certificate again: %v\n", err)
-			}
-		}, nil)
+	pair := informer.One{Resource: secretResource, Namespace: namespace, Name: apiTLSSecretName,
+		What: "secret " + namespace + "/" + apiTLSSecretName}
+	<-informer.WatchOne(ctx, watcher, pair, func(*Secret) {
+		if err := refreshCertificate(server, keeper, metrics); err != nil {
+			fmt.Fprintf(os.Stderr, "minting the serving certificate again: %v\n", err)
+		}
+	}, nil).Done()
 }
 
 // refreshCertificate reads the pair, renews the leaf when it nears

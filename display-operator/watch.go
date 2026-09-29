@@ -14,7 +14,6 @@ package main
 
 import (
 	"context"
-	"sync"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -67,58 +66,4 @@ func wakeWatch(ctx context.Context, client dynamic.Interface, kind reconcileKind
 		Synced:   wake,
 		Reopened: func() { readings.watchRestarted(kind) },
 	})
-}
-
-// watchNamed calls seen with the object each time it changes, and with
-// nil when the object does not exist. It returns when the context ends
-// and the watch has stopped. The field selector names the object,
-// which is also how RBAC matches a list and a watch against a rule's
-// resourceNames.
-//
-// An object absent from the first read has no event, so the watch
-// reports it as nil once that read is done, unless an event for the
-// object reached the handler first. The informer calls the handler on
-// one goroutine and the synced report on another, and the lock runs
-// one call to seen at a time. An object that arrives after an empty
-// first read is seen last in either order: its event runs after the
-// nil report, or the report finds the event and reports nothing.
-func watchNamed[T any](ctx context.Context, client dynamic.Interface, resource schema.GroupVersionResource,
-	namespace, name, what string, seen func(held *T)) {
-	var mu sync.Mutex
-	arrived := false
-	take := func(object any) {
-		mu.Lock()
-		defer mu.Unlock()
-		// An object that does not convert still exists, so it is not
-		// reported as gone at the end of the first read.
-		arrived = true
-		held, err := informer.Convert[T](object)
-		if err != nil {
-			informer.Report(what, err)
-			return
-		}
-		seen(&held)
-	}
-	gone := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		arrived = true
-		seen(nil)
-	}
-	source := informer.Source{Resource: resource, Namespace: namespace, FieldSelector: "metadata.name=" + name}
-	watch := informer.Start(ctx, client, source, informer.Options{
-		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc:    take,
-			UpdateFunc: func(_, object any) { take(object) },
-			DeleteFunc: func(any) { gone() },
-		},
-		Synced: func() {
-			mu.Lock()
-			defer mu.Unlock()
-			if !arrived {
-				seen(nil)
-			}
-		},
-	})
-	<-watch.Done()
 }

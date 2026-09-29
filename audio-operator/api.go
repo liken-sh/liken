@@ -25,14 +25,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/informer"
@@ -224,67 +222,37 @@ func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 // certificate authority, so a rotation of that authority takes effect
 // with no restart. The API never writes it, so the copy the watch
 // delivers is the one the pool takes, and a change costs no read.
-func (s *apiServer) followCertificateObjects(ctx context.Context, watcher dynamic.Interface, complain func(error)) {
-	followObject(ctx, watcher, informer.Source{Resource: secretResource, Namespace: s.certs.namespace}, captureTLSSecret,
-		func(*unstructured.Unstructured) {
-			if err := s.certs.keepCaptureLeaf(); err != nil {
-				complain(fmt.Errorf("keeping the capture container's leaf: %w", err))
-			}
-		})
-	followObject(ctx, watcher, informer.Source{Resource: configMapResource, Namespace: clientCANamespace}, clientCAConfigMap,
-		func(held *unstructured.Unstructured) {
-			var published *configMap
-			if held != nil {
-				converted, err := informer.Convert[configMap](held)
-				if err != nil {
-					complain(fmt.Errorf("reading the cluster's client authority: %w", err))
-					return
-				}
-				published = &converted
-			}
-			if err := s.anchors.adopt(published); err != nil {
-				complain(fmt.Errorf("reading the cluster's client authority: %w", err))
-			}
-		})
-}
-
-// followObject runs changed with the newest copy of one named object on
-// every change to it, and with nil when the object is deleted. When the
-// watch's first read holds no such object, changed runs once with nil,
-// because an object that does not exist arrives as no event. The list
-// and the watch both carry the field selector metadata.name, which is
-// what lets the Role grant them on that one name.
 //
-// The informer calls the handler on one goroutine and the synced check
-// on another. The lock runs one changed at a time, in the order of the
-// events.
-func followObject(ctx context.Context, watcher dynamic.Interface, source informer.Source, name string,
-	changed func(held *unstructured.Unstructured)) {
-	var one sync.Mutex
-	seen := false
-	serial := func(object any) {
-		one.Lock()
-		defer one.Unlock()
-		seen = true
-		held, _ := object.(*unstructured.Unstructured)
-		changed(held)
-	}
-	source.FieldSelector = "metadata.name=" + name
-	informer.Start(ctx, watcher, source, informer.Options{
-		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc:    serial,
-			UpdateFunc: func(_, after any) { serial(after) },
-			DeleteFunc: func(any) { serial(nil) },
-		},
-		Synced: func() {
-			one.Lock()
-			defer one.Unlock()
-			if !seen {
-				seen = true
-				changed(nil)
+// Each watch reports an object that its first read does not find, as
+// nil, so a Secret that is absent at start is minted then. The owners
+// read each copy as unstructured.Unstructured, which every copy
+// converts to: the leaf check reads nothing from the copy, and the
+// client authority reports a copy that does not convert as a
+// complaint of its own.
+func (s *apiServer) followCertificateObjects(ctx context.Context, watcher dynamic.Interface, complain func(error)) {
+	leaf := informer.One{Resource: secretResource, Namespace: s.certs.namespace, Name: captureTLSSecret,
+		What: "the Secret " + captureTLSSecret}
+	informer.WatchOne(ctx, watcher, leaf, func(*unstructured.Unstructured) {
+		if err := s.certs.keepCaptureLeaf(); err != nil {
+			complain(fmt.Errorf("keeping the capture container's leaf: %w", err))
+		}
+	}, nil)
+	authority := informer.One{Resource: configMapResource, Namespace: clientCANamespace, Name: clientCAConfigMap,
+		What: "the ConfigMap " + clientCAConfigMap}
+	informer.WatchOne(ctx, watcher, authority, func(held *unstructured.Unstructured) {
+		var published *configMap
+		if held != nil {
+			converted, err := informer.Convert[configMap](held)
+			if err != nil {
+				complain(fmt.Errorf("reading the cluster's client authority: %w", err))
+				return
 			}
-		},
-	})
+			published = &converted
+		}
+		if err := s.anchors.adopt(published); err != nil {
+			complain(fmt.Errorf("reading the cluster's client authority: %w", err))
+		}
+	}, nil)
 }
 
 // servedLeaf is the certificate the public listener serves, swapped in

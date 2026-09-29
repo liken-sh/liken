@@ -2,7 +2,7 @@ package main
 
 // The shared apiclient package sends every write, and every read that
 // must include this program's own last write. The watches read each
-// collection through client-go (clusterwatch.go and namedwatch.go).
+// collection through client-go (clusterwatch.go and informer.WatchOne).
 
 import (
 	"encoding/json"

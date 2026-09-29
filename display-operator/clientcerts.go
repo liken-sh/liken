@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The ConfigMap the API server publishes the cluster's client
@@ -92,16 +93,17 @@ func (a *clientAnchors) take(held *ConfigMap) error {
 // Either way the API keeps the pool it holds, because the certificates
 // that pool holds are still the ones the cluster issued.
 func keepClientAnchors(ctx context.Context, watcher dynamic.Interface, anchors *clientAnchors) {
-	watchNamed(ctx, watcher, configMapResource, clientCANamespace, clientCAConfigMap, "the ConfigMap "+clientCAConfigMap,
-		func(held *ConfigMap) {
-			if held == nil {
-				fmt.Fprintf(os.Stderr, "the ConfigMap %s is gone, and the API keeps the client authority it holds\n", clientCAConfigMap)
-				return
-			}
-			if err := anchors.take(held); err != nil {
-				fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
-			}
-		})
+	authority := informer.One{Resource: configMapResource, Namespace: clientCANamespace, Name: clientCAConfigMap,
+		What: "the ConfigMap " + clientCAConfigMap}
+	<-informer.WatchOne(ctx, watcher, authority, func(held *ConfigMap) {
+		if held == nil {
+			fmt.Fprintf(os.Stderr, "the ConfigMap %s is gone, and the API keeps the client authority it holds\n", clientCAConfigMap)
+			return
+		}
+		if err := anchors.take(held); err != nil {
+			fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
+		}
+	}, nil).Done()
 }
 
 // The configuration the API listens with. The certificate and the

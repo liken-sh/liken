@@ -5,7 +5,7 @@ package main
 // happens, and a watch with no change to send costs nothing. The
 // operator watches the collections its pass reads (clusterwatch.go),
 // and the api role watches the named objects that hold its
-// certificates (namedwatch.go).
+// certificates (informer.WatchOne, with namedwatch.go).
 //
 // The shared informer package runs each watch on client-go's reflector.
 // The program's own client (apiclient.go) still sends every write, and

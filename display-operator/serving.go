@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The API re-mints the leaves it signs on a twelve-hour clock, which is
@@ -168,8 +169,8 @@ func startAuthority(ctx context.Context, c *apiclient.Client, watcher dynamic.In
 func keepCertificates(ctx context.Context, c *apiclient.Client, watcher dynamic.Interface, namespace string,
 	ca *certificateAuthority, holder *certificateHolder, readings *apiMetrics) {
 	if ca == nil {
-		watchNamed(ctx, watcher, secretResource, namespace, apiTLSSecret, "the Secret "+apiTLSSecret,
-			func(held *Secret) { takeOwnersLeaf(held, holder, readings) })
+		owners := informer.One{Resource: secretResource, Namespace: namespace, Name: apiTLSSecret, What: "the Secret " + apiTLSSecret}
+		<-informer.WatchOne(ctx, watcher, owners, func(held *Secret) { takeOwnersLeaf(held, holder, readings) }, nil).Done()
 		return
 	}
 	go keepSidecarLeaf(ctx, c, watcher, namespace, ca)
@@ -233,15 +234,15 @@ func takeOwnersLeaf(held *Secret, holder *certificateHolder, readings *apiMetric
 // The API's own write arrives on the watch too, and a leaf that stands
 // costs one get and writes nothing.
 func keepSidecarLeaf(ctx context.Context, c *apiclient.Client, watcher dynamic.Interface, namespace string, ca *certificateAuthority) {
-	watchNamed(ctx, watcher, secretResource, namespace, sidecarTLSSecret, "the Secret "+sidecarTLSSecret,
-		func(held *Secret) {
-			if held != nil && sidecarLeafStands(held, sidecarName, time.Now()) {
-				return
-			}
-			if err := ensureSidecarLeaf(c, namespace, sidecarTLSSecret, ca, sidecarName, time.Now()); err != nil {
-				fmt.Fprintf(os.Stderr, "minting the sidecar certificate: %v\n", err)
-			}
-		})
+	sidecars := informer.One{Resource: secretResource, Namespace: namespace, Name: sidecarTLSSecret, What: "the Secret " + sidecarTLSSecret}
+	<-informer.WatchOne(ctx, watcher, sidecars, func(held *Secret) {
+		if held != nil && sidecarLeafStands(held, sidecarName, time.Now()) {
+			return
+		}
+		if err := ensureSidecarLeaf(c, namespace, sidecarTLSSecret, ca, sidecarName, time.Now()); err != nil {
+			fmt.Fprintf(os.Stderr, "minting the sidecar certificate: %v\n", err)
+		}
+	}, nil).Done()
 }
 
 // The sidecar's certificate arrives as an optional Secret volume the

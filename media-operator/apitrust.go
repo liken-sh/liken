@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -103,15 +104,15 @@ func (t *trustStore) follow(ctx context.Context, watcher dynamic.Interface) []<-
 	for _, name := range t.names {
 		synced := make(chan struct{})
 		read = append(read, synced)
-		go watchNamed(ctx, watcher, configMapResource, t.namespace, name,
-			"configmap "+t.namespace+"/"+name,
-			func(configMap *ConfigMap) {
-				if configMap == nil {
-					t.forget(name)
-					return
-				}
-				t.remember(name, configMap)
-			}, synced)
+		anchor := informer.One{Resource: configMapResource, Namespace: t.namespace, Name: name,
+			What: "configmap " + t.namespace + "/" + name}
+		informer.WatchOne(ctx, watcher, anchor, func(configMap *ConfigMap) {
+			if configMap == nil {
+				t.forget(name)
+				return
+			}
+			t.remember(name, configMap)
+		}, func() { close(synced) })
 	}
 	return read
 }
