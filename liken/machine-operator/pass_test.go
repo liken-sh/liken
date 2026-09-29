@@ -14,10 +14,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
 	"github.com/liken-sh/liken/liken/kubernetes/watch"
@@ -273,5 +275,71 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	}
 	if sent := fake.Requests(); len(sent) != 0 {
 		t.Errorf("the read after the watch delivered the write sent %q, want nothing", sent)
+	}
+}
+
+// failingWatches serves a fake API server whose watches fail with a 503
+// once fail is set, the way an API server answers while it restarts.
+type failingWatches struct {
+	api  *fakeapi.Server
+	fail atomic.Bool
+}
+
+func (f *failingWatches) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if f.fail.Load() && r.URL.Query().Get("watch") == "true" {
+		http.Error(w, "the API server is restarting", http.StatusServiceUnavailable)
+		return
+	}
+	f.api.ServeHTTP(w, r)
+}
+
+// breakWatches makes every later watch fail and cuts the streams that
+// are open, so each reflector opens a watch again and meets the 503.
+func breakWatches(server *httptest.Server, watches *failingWatches) {
+	watches.fail.Store(true)
+	server.CloseClientConnections()
+}
+
+// After a watch fails for any reason, such as an API server restart,
+// every copy stops answering, and a pass reads the API server. A copy
+// can miss the writes made while its reflector waits out a backoff, and
+// a pass that staged a withdrawn rollout from it would reboot into it.
+func TestAPassReadsTheAPIServerAfterAWatchFails(t *testing.T) {
+	isolatePass(t)
+	fake := newPassAPI()
+	watches := &failingWatches{api: fake}
+	server := httptest.NewServer(watches)
+	t.Cleanup(server.Close)
+	client, _ := passClients(t, fake)
+	watcher, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakes := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
+	awaitCopies(t, r, wakes)
+
+	breakWatches(server, watches)
+
+	copies := []*informer.Collection{r.machines, r.nodes, r.clusters, r.credentials, r.ownPods, r.slices}
+	deadline := time.Now().Add(10 * time.Second)
+	for slices.ContainsFunc(copies, func(c *informer.Collection) bool { return c.View().Ready() }) {
+		if time.Now().After(deadline) {
+			t.Fatal("a copy kept answering after its watch failed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	fake.Forget()
+	if _, err := r.cluster("lab"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.node("node-1"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GET " + kubernetes.ClustersPath + "/lab", "GET /api/v1/nodes/node-1"}
+	if sent := fake.Requests(); !slices.Equal(sent, want) {
+		t.Errorf("the reads sent %q, want %q", sent, want)
 	}
 }

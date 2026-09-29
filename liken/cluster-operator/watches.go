@@ -29,11 +29,14 @@ package main
 //     clock that judges a heartbeat's age, and the steward acts on a
 //     machine's version, which arrives as a Machine change.
 //
-// A copy that cannot answer, because its watch has not synced or the
-// API server refuses the watch, is never read as the truth. The sweep
-// reads the API server instead. That covers the first seconds after
-// this process takes the lead, and a release skew, where this binary
-// runs under the previous release's RBAC.
+// A copy that cannot answer, because its watch has not synced or its
+// last watch failed, is never read as the truth. The sweep reads the
+// API server instead. That covers the first seconds after this process
+// takes the lead, a release skew, where this binary runs under the
+// previous release's RBAC, and an API server restart. After a failed
+// watch, the reflector waits out a backoff of up to a minute before it
+// watches again, and a copy then misses each write made in that time,
+// such as a machine's Degraded status, which the budget must count.
 //
 // Two reads stay direct on every sweep. The flux deploy key Secret is
 // read only while the flux feature is declared, and the permission to
@@ -122,7 +125,10 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 			Handler:  handler,
 			Synced:   wake,
 			Reopened: func() { restarted(kind) },
-			Indexers: indexers,
+			// A copy stops answering after any failed watch, as the
+			// head of this file says.
+			UnreadyOnWatchError: true,
+			Indexers:            indexers,
 		})
 	}
 	machines := informer.Source{Resource: machineResource}
@@ -155,17 +161,24 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 // aging, and mark live machines Lost after 40 seconds, through a
 // write that reaches a live API server on another connection.
 //
-// The copies carry their own proof of freshness. The leader election
-// renews this program's own Lease in liken-system every five seconds,
-// and the Leases' copy receives each renewal. When the copy's view of
-// that renewal is older than one renewal deadline and one retry period,
-// fifteen seconds, the watches or the renewals have stopped, and the
-// sweep reads the API server instead. A heartbeat then ages at most
+// The Leases' copy carries its own proof of freshness. The leader
+// election renews this program's own Lease in liken-system every five
+// seconds, and the Leases' copy receives each renewal. When the copy's
+// view of that renewal is older than one renewal deadline and one retry
+// period, fifteen seconds, the stream or the renewals have stopped, and
+// the sweep reads the API server instead. A heartbeat then ages at most
 // fifteen seconds in the copy, well inside its 40. client-go gives the
 // election and the watches one shared connection, so a stalled
 // connection stops the renewals too: the write guard then refuses every
 // write after ten seconds, and the process exits when the election
 // gives up.
+//
+// That proof covers a quiet connection, not a failed watch. Each
+// reflector recovers from a failed watch on its own backoff, so a fresh
+// Leases' copy says nothing about the Machines' copy. A failed watch
+// makes its own copy stop answering instead
+// (informer.Options.UnreadyOnWatchError), and this check comes on top
+// of that.
 //
 // A copy that holds every object of its kind, with no selector, is
 // Whole, so a list from it also reads each object this program wrote

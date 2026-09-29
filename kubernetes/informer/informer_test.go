@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/memo"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
@@ -171,6 +172,48 @@ func TestOnlyARefusedPermissionStopsASyncedCopy(t *testing.T) {
 
 			if c.Synced() != tc.answers {
 				t.Errorf("Synced() = %v after the watch failed, want %v", c.Synced(), tc.answers)
+			}
+		})
+	}
+}
+
+// A copy whose Options.UnreadyOnWatchError is set stops answering after
+// any failed watch, and a read of it goes to the API server until the
+// API server accepts a watch again. The same failures leave a copy
+// without the option answering. An operator sets it when a copy that
+// missed changes, such as the changes made while its reflector waited
+// out a backoff after an API server restart, must never decide a pass.
+func TestAStrictCopyStopsAnsweringAfterAnyFailedWatch(t *testing.T) {
+	cases := []struct {
+		name    string
+		failure int
+		strict  bool
+		answers bool
+	}{
+		{"a strict copy, the API server refuses the connection", serverDown, true, false},
+		{"a strict copy, the API server is unavailable", http.StatusServiceUnavailable, true, false},
+		{"a strict copy, the watch is forbidden", http.StatusForbidden, true, false},
+		{"a copy, the API server refuses the connection", serverDown, false, true},
+		{"a copy, the API server is unavailable", http.StatusServiceUnavailable, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}}, []string{})
+			server.failing(tc.failure, 1)
+			c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{UnreadyOnWatchError: tc.strict})
+			server.awaitWatches(t, 1)
+			server.awaitFailures(t, 2)
+			api := newFakeAPI(newThing("a", "9", 1))
+
+			held := Held{View: c.View(), Versions: memo.New()}
+			got, err := ReadOne[thing](testClient(t, api), held, "a", thingPath("a"))
+
+			if err != nil || c.Synced() != tc.answers {
+				t.Fatalf("Synced() = %v, err = %v; want %v and no error", c.Synced(), err, tc.answers)
+			}
+			fromServer := got.Metadata.ResourceVersion == "9" && len(api.sent()) == 1
+			if fromServer == tc.answers {
+				t.Errorf("the read answered version %s; want the store's copy %v", got.Metadata.ResourceVersion, tc.answers)
 			}
 		})
 	}

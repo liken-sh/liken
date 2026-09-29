@@ -129,6 +129,17 @@ type Options struct {
 	// of images a Node's runtime holds.
 	Transform func(*unstructured.Unstructured)
 
+	// UnreadyOnWatchError, when it is true, makes the copy stop
+	// answering after any failed watch, not only after a 401 or a 403,
+	// until the API server accepts a watch again. While the API server
+	// restarts, the reflector backs off for up to a minute, and a write
+	// that lands on the API server in that time is in no copy. An
+	// operator whose pass must never act on such a copy sets it, and
+	// its pass reads the API server instead. liken's operators set it:
+	// a machine that acted on a copy older than a withdrawn rollout
+	// could stage the old target and reboot into it.
+	UnreadyOnWatchError bool
+
 	// Indexers name the indexes the copy keeps, for a pass that reads
 	// the objects of one label value without a scan of the whole copy.
 	// The store of a watch with indexers is a cache.Indexer.
@@ -145,21 +156,26 @@ type Collection struct {
 	done       chan struct{}
 
 	// watching is true after the API server accepts a watch, and false
-	// again after it forbids one. Synced says why it matters.
+	// again after it forbids one, or after any failed watch when strict
+	// is true. Synced says why it matters.
 	watching atomic.Bool
+
+	// strict is Options.UnreadyOnWatchError.
+	strict bool
 }
 
 // noteWatch records whether the API server grants the watch. An
 // accepted watch grants it, and a 401 or a 403 refuses it. Any other
 // failure, such as a refused connection while the API server restarts,
 // or a 5xx, says nothing about the permission, so the flag keeps its
-// last value. The dynamic client answers each refusal as a
-// *errors.StatusError, which carries the HTTP status.
+// last value, unless the copy is strict (Options.UnreadyOnWatchError).
+// The dynamic client answers each refusal as a *errors.StatusError,
+// which carries the HTTP status.
 func (c *Collection) noteWatch(err error) {
 	switch {
 	case err == nil:
 		c.watching.Store(true)
-	case apierrors.IsForbidden(err), apierrors.IsUnauthorized(err):
+	case c.strict, apierrors.IsForbidden(err), apierrors.IsUnauthorized(err):
 		c.watching.Store(false)
 	}
 }
@@ -173,7 +189,7 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 	if source.Namespace != "" {
 		collection = client.Resource(source.Resource).Namespace(source.Namespace)
 	}
-	c := &Collection{done: make(chan struct{})}
+	c := &Collection{done: make(chan struct{}), strict: options.UnreadyOnWatchError}
 	scope := func(list *metav1.ListOptions) {
 		list.LabelSelector = source.LabelSelector
 		list.FieldSelector = source.FieldSelector
@@ -254,12 +270,12 @@ func (c *Collection) Done() <-chan struct{} { return c.done }
 // or a 403 on a watch, the copy does not answer and the pass reads the
 // API server, until the API server accepts a watch again.
 //
-// A watch that fails for another reason does not stop the copy. While
-// the API server is down, a read of the API server fails too, and the
-// copy lets an operator keep its local work going. The reflector
-// resumes the watch from the copy's last version when the API server
-// returns, or lists again, so the copy then receives each change it
-// missed.
+// A watch that fails for another reason does not stop the copy, unless
+// the copy is strict (Options.UnreadyOnWatchError). While the API
+// server is down, a read of the API server fails too, and the copy lets
+// an operator keep its local work going. The reflector resumes the
+// watch from the copy's last version when the API server returns, or
+// lists again, so the copy then receives each change it missed.
 func (c *Collection) Synced() bool {
 	return c != nil && c.controller.HasSynced() && c.watching.Load()
 }

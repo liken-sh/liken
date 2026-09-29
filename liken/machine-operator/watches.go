@@ -46,6 +46,17 @@ package main
 // no list or watch on some of these kinds. The watch then keeps
 // retrying with a backoff, and every pass reads the API server until
 // the new RBAC lands.
+//
+// A copy also stops answering after any watch that fails, such as each
+// watch while k3s restarts (informer.Options.UnreadyOnWatchError), until
+// the API server accepts a watch again. The reflector waits out a
+// backoff of up to a minute before that, and a write made in that time,
+// such as a withdrawn Cluster rollback or a removed reboot approval, is
+// in no copy. A pass that acted on the copy could stage the old target
+// and write the reboot intent before any 409 stopped it. So the pass
+// reads the API server, which fails while it is down: the Node read
+// then fails and a granted reboot skips the drain, and the Machine read
+// keeps the last copy for the status the pass publishes.
 
 import (
 	"context"
@@ -128,6 +139,9 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 			Handler:  handler,
 			Synced:   wake,
 			Reopened: func() { restarted(kind) },
+			// A copy stops answering after any failed watch, as the
+			// head of this file says.
+			UnreadyOnWatchError: true,
 		})
 	}
 	named := func(n string) string { return "metadata.name=" + n }
