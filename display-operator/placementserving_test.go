@@ -153,3 +153,24 @@ func TestAMonitorThatReturnsIsReportedAgain(t *testing.T) {
 		t.Errorf("a steady pass listed the Displays %d more times, want none", fixture.displayLists-lists)
 	}
 }
+
+// A compositor that stops after the monitor left, and comes back with
+// the same monitors on the wire, still gets its answer on the Display.
+// Only the stop itself calls for the sweep here.
+func TestACompositorThatReturnsAfterTheMonitorLeftIsReported(t *testing.T) {
+	fixture := newPlacementFixture(t)
+	fixture.screen(labMonitor(), DisplaySpec{})
+	fixture.run()
+	fixture.darken("HDMI-A-1")
+	fixture.run()
+	fixture.probes(stoppedCompositor())
+	fixture.run()
+
+	fixture.serves()
+	fixture.run()
+
+	if condition := servingCondition(fixture, labMonitor()); condition.Status != conditionTrue {
+		t.Errorf("%s is %s/%s under a compositor that serves again, want %s", CompositorServingCondition,
+			condition.Status, condition.Reason, conditionTrue)
+	}
+}
