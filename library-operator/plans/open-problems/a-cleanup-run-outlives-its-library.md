@@ -37,10 +37,10 @@ for each catalog pod that confirmed the run:
 - `confirmer.go` writes one `confirmations` row per catalog pod for
   the run, and prunes only the confirmations of other `Job`s of the
   same worker. It keeps the row of the newest run.
-- `cleanupjob.go` releases the finalizer when the `Job` succeeded and
+- `depart.go` releases the finalizer when the `Job` succeeded and
   the reporter's report of the library shows that `Job`'s run
-  (`cleanupComplete` and `cleanupEchoed`). The report exists only
-  because the row exists.
+  (`cleanupComplete` and `cleanupEchoed` in `cleanupjob.go`). The
+  report exists only because the row exists.
 - `reporter.go` publishes a retained report for every key that
   `LibraryKeys` finds, and `LibraryKeys` reads the `library` column of
   every table in `catalogTables`, `runs` and `confirmations` included.

@@ -1,17 +1,17 @@
 package main
 
 // Interface bring-up runs in two passes: wired interfaces settle in
-// line, and radios settle behind the boot (plans/64). The split
+// line, and radios settle behind the boot
+// (plans/completed/64-the-boot-does-not-wait-for-radios.md). The split
 // exists because of one hard fact about the kernel: raising a link
 // holds the rtnl lock while the driver's open routine runs, and a
 // wedged driver never returns, holds the lock forever, and cannot be
 // killed. On 2026-08-26 exactly that took a machine down. Its wired
-// path was healthy, but the boot waited on the radio, so nothing
-// that could act ever started, and every following boot repeated the
-// wait. No timeout can contain a stuck kernel thread. What the boot
-// controls is what it risks before the machine can act, so the
-// radios go last, and on a machine that does not need them, they go
-// in the background.
+// path was healthy, but the boot waited on the radio, so nothing that
+// could act ever started, and every following boot repeated the wait.
+// No timeout can contain a stuck kernel thread. What the boot controls
+// is what it risks before the machine can act, so the radios go last,
+// and on a machine that does not need them, they go in the background.
 
 import (
 	"context"

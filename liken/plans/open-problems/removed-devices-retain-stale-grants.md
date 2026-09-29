@@ -37,6 +37,13 @@ present and a userspace driver detaches its kernel driver, its usbfs
 node can remain valid. `TestRefreshDeliversTheBusNodeAloneAfterADriverDetach`
 checks the supported rewrite to that node.
 
+A CEC adapter that `spec.serio` declares already fails closed. When its
+device no longer resolves, `serioFailsClosed` in
+[publishingserio.go](../../machine-operator/publishingserio.go) makes
+the refresh write `serioAbsentNode`, a node path that does not exist.
+The runtime then fails to create the container. Every other device class
+keeps its old paths.
+
 ## Proposed safeguard
 
 Invalidate a prepared device that no longer resolves. A container start

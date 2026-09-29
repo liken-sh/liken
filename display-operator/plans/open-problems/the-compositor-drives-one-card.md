@@ -1,6 +1,6 @@
 # The compositor drives one card
 
-Open problem. The operator runs one Weston kiosk bound to one DRM card,
+Open problem. The operator runs one Weston compositor bound to one DRM card,
 and it runs as a `DaemonSet`, one pod per node. A node with two graphics
 cards serves only the card the claim took. The monitors on the second
 card publish no device.

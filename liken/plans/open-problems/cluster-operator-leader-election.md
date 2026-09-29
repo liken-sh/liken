@@ -2,7 +2,7 @@
 
 Open problem. The cluster operator elects one acting copy with a
 `coordination.k8s.io` `Lease`
-([milestone 71](../completed/71-the-operators-watch-through-client-go.md)).
+([milestone 71](../../../plans/completed/71-the-operators-watch-through-client-go.md)).
 The election does not fence a paused former leader, and a stale
 reboot grant from that leader can exceed the disruption budget. This
 document records that remaining concern and the options for it.
@@ -164,9 +164,10 @@ Two cases stay open:
   happens at most once for each reboot of the only server.
 * **The other operators.** `media-operator`, `library-operator`, and
   `equipment-operator` each carry a copy of this election, with the
-  same scheme of one new identity for each process, and none has this
-  change. A copy must also keep the pod's name as its hostname, because
-  the identity starts with the hostname.
+  same scheme of one new identity for each process. Each copy has
+  `clearIfHeld` for its own process, and none takes or clears a `Lease`
+  that an earlier process of its pod held. Their identities start with
+  the pod's name from the `POD_NAME` variable, not the hostname.
 
 ### What would close it
 
@@ -187,13 +188,6 @@ the server that a copy's connection uses reboots. The in-cluster
 address reaches every server, but a request in flight to the server
 that stops fails, and a renewal deadline of 10 seconds allows only one
 retry.
-
-## Related problem
-
-The separate `media-operator` repository records the same
-single-instance concern in
-`plans/open-problems/two-operators-can-run-at-once.md`, and elects its
-leader with the same design and the same release fix.
 
 ## Verification needed
 

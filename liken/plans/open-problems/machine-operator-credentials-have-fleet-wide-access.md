@@ -18,22 +18,23 @@ The cluster-scoped permissions include:
 | --- | --- |
 | `machines` | get, list, watch, create |
 | `machines/status` | update |
-| `clusters` | get, create |
-| `nodes` | get, delete, patch |
-| `resourceslices` | get, create, update, delete |
+| `clusters` | get, list, watch, create |
+| `nodes` | get, list, watch, delete, patch |
+| `resourceslices` | get, list, watch, create, update, delete |
 | `resourceclaims` | get |
-| `pods` | list |
+| `pods` | list, watch |
 | `pods/eviction` | create |
 | `services`, `helmcharts` | list |
 
 Separate namespaced roles permit get, create, and update on any `Lease`
-in `liken-system`, and get on the single `registry-credentials` `Secret`.
-The secret rule has `resourceNames`; the node, status, slice, and lease
+in `liken-system`, and get, list, and watch on the single
+`registry-credentials` `Secret`. The secret rule has `resourceNames`; the node, status, slice, and lease
 rules do not. There is no lease-delete permission.
 
-The watch in [main.go](../../machine-operator/main.go) selects the
-operator's own `Machine`. The API applies that query filter, but a caller
-with the token can send a different request. The filter does not limit
+`watchThisMachine` in [watches.go](../../machine-operator/watches.go)
+selects the operator's own `Machine`, `Node`, and `ResourceSlice` with
+field selectors. The API applies those query filters, but a caller
+with the token can send a different request. The filters do not limit
 which objects that identity may access. Without list permission, a
 caller can still access an object whose name it already knows.
 

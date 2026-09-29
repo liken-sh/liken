@@ -7,8 +7,9 @@
 //
 // pinned as a tool dependency the way crdref is. The output is
 // committed in each repository, so a checkout carries its skills
-// and CI fails when they are stale. plans/01-guides-as-skills.md in
-// this repository is the design.
+// and CI fails when they are stale.
+// plans/completed/01-guides-as-skills.md in this component is the
+// design.
 package main
 
 import (

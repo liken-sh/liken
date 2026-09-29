@@ -7,7 +7,7 @@ the `CECBus` and `Television` resources, which reach the same
 equipment over the HDMI-CEC wire. The manifests and the tests are the
 documentation, and the comments teach how the system works.
 
-`plans/README.md` indexes the plans. Code exists only where a plan calls
+`plans/` holds the design documents. Code exists only where a plan calls
 for it.
 
 `make test` runs every check CI runs.

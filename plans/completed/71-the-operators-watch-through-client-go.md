@@ -14,7 +14,7 @@ leader election on a `Lease`, so its `Deployment` rolls a new pod in
 beside the old one.
 
 The open problem
-[Coordinate cluster-operator instances](../open-problems/cluster-operator-leader-election.md)
+[Coordinate cluster-operator instances](../../liken/plans/open-problems/cluster-operator-leader-election.md)
 stays open. This milestone answers every concern it raises except
 one: a paused former leader can still write a reboot grant from a
 stale view of the fleet. That needs a fence, and the fence needs a

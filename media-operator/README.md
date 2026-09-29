@@ -41,5 +41,5 @@ install guide, the reference for each resource, and the message bus
 every pod and any of your own programs share.
 [`plans/00-design.md`](plans/00-design.md) is the design: the
 resources, what was considered and set aside, and what the design
-still owes an answer to. [`plans/README.md`](plans/README.md)
-indexes the plans that built it and the ones still open.
+still owes an answer to. [`plans/`](plans/) holds the plans
+that built it and the ones still open.

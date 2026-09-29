@@ -1,12 +1,13 @@
 package main
 
 // metrics.go serves this operator's Prometheus registry: milestone 65's
-// layer 1 and layer 2, and the layer 3 rows plans/37-prometheus-metrics.md
-// states for this operator. The listener is optional, on its own port from
-// the milestone's table, and a failure in it never touches a reconcile
-// pass: a *metrics answers every recording method as a no-op when the
-// process runs with no listener address, so the pass that calls them
-// carries no branch of its own.
+// layer 1 and layer 2, and the layer 3 rows
+// plans/completed/37-prometheus-metrics.md states for this operator.
+// The listener is optional, on its own port from the milestone's table,
+// and a failure in it never touches a reconcile pass: a *metrics
+// answers every recording method as a no-op when the process runs with
+// no listener address, so the pass that calls them carries no branch of
+// its own.
 
 import (
 	"context"
@@ -75,9 +76,9 @@ type metrics struct {
 	reconcileErrors   *prometheus.CounterVec
 	watchRestarts     *prometheus.CounterVec
 
-	// Layer 3: the rows plans/37-prometheus-metrics.md states for this
-	// operator. Each reads a fact that already reaches this operator over
-	// the bus and already feeds a Library's status.
+	// Layer 3: the rows plans/completed/37-prometheus-metrics.md states
+	// for this operator. Each reads a fact that already reaches this
+	// operator over the bus and already feeds a Library's status.
 	runDuration    *prometheus.HistogramVec
 	runLastSuccess *prometheus.GaugeVec
 	items          *prometheus.GaugeVec

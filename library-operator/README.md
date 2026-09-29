@@ -21,5 +21,5 @@ The volume stays the source of truth. The files, the `.nfo` files,
 and the artwork are what the operator reads and writes. The catalog is
 derived and rebuildable.
 
-`plans/00-design.md` states the design. `plans/README.md` indexes the
-plans that build it, in order.
+`plans/00-design.md` states the design. The `plans/` directory holds
+the plans that build it.

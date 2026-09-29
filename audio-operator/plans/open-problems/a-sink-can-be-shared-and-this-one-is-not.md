@@ -26,16 +26,16 @@ is beta and on by default in Kubernetes v1.36. This fact comes from
 milestone 59's citation of `pkg/features/kube_features.go` on
 `release-1.36`. Nobody read that file again for this note.
 
-`liken` already sets the field. `publishDevices` in
-`machine-operator/dra.go` writes
+`liken` already sets the field. `inventoryDevices` in
+`liken/machine-operator/dra.go` writes
 `device.AllowMultipleAllocations = &shared` for any delivery its
 policy marks shareable. The integrated GPU is the case that caused
 this: a real GPU is shared, while its display outputs stay exclusive.
 So the mechanism exists in the layer below this operator, and it works
 there.
 
-`slices.go` in this operator does not set the field on any device it
-publishes.
+The `SliceDevice` type in this operator's `slices.go` has no such
+field, so no device this operator publishes sets it.
 
 ## What is not decided
 

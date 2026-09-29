@@ -16,8 +16,7 @@ is the research. Nothing here commits, builds, or releases.**
 
 Run the commands of steps 1 to 4 from `liken/`, where the domains and
 `make versions` are. The paths in those steps are relative to
-`liken/`, except `plans/open-problems/`, which is at the top of the
-repository. Step 5 works at the top of the repository.
+`liken/`. Step 5 works at the top of the repository.
 
 ## 1. Pull the report
 

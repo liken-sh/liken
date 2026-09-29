@@ -231,4 +231,4 @@ development build `2026.09.19-002-dev-028-ab218213`:
   AVTransport event, or need a read of their own. A drill answers
   this.
 * The settings families the amp will not confirm, which stay [an
-  open problem](open-problems/the-wiim-settings-the-amp-will-not-confirm.md).
+  open problem](../open-problems/the-wiim-settings-the-amp-will-not-confirm.md).

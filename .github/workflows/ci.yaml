@@ -52,6 +52,16 @@
 # to every package.
 name: ci
 
+# A change to plans only starts no run. No job reads a plan, and plans
+# often land in commits of their own. GitHub skips the workflow only
+# when every changed file matches paths-ignore: the top-level plans/
+# and each component's plans/, where a * does not match a /. A change
+# with any other file runs as usual. GitHub does not evaluate path
+# filters for a tag push, so a release tag always runs. A skipped push
+# loses no check: it makes no run, so the next push to main still
+# diffs with the newest main run that passed, and the next push to a
+# branch still diffs with the branch's merge base with main. No
+# ruleset requires these checks, so a skipped run blocks no merge.
 on:
   push:
     branches: ['**']
@@ -60,8 +70,10 @@ on:
     # components brought from their own repositories start with the
     # component's name, and they do not match.
     tags: ['2*']
+    paths-ignore: ['plans/**', '*/plans/**']
   pull_request:
     branches: [main]
+    paths-ignore: ['plans/**', '*/plans/**']
   workflow_dispatch:
 
 # On a branch or a pull request, a new push cancels the run of the old
@@ -729,8 +741,10 @@ jobs:
   # The site is every component's manual in one tree: liken's manual
   # at the root, and each other component's manual under its prefix,
   # such as liken.sh/display/. GitHub Pages serves it from this
-  # repository at liken.sh. Every push to main deploys it, because
-  # the coverage report of each component is part of it.
+  # repository at liken.sh. Every push to main that starts a run
+  # deploys it, because the coverage report of each component is part
+  # of it. A push of plans only starts no run, and the site holds no
+  # plan.
   #
   # A job that did not run in this push has no new coverage profile,
   # so its report is the one the site serves now.

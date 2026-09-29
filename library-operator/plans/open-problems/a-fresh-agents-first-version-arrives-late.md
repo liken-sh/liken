@@ -53,8 +53,8 @@ about an actor that it has just met.
 Three changes fix this cause. First, the Job writes its finished run
 row again every ten seconds while it waits, with a later finish time.
 Each write is a new version with a new broadcast and a gap that the
-catalog can detect (`runsnudge.go`). Second, the three walks of a
-namespace each run in a different minute. Third, the Corrosion fork
+catalog can detect (`handoffNudge` in `handoff.go`). Second, the
+three walks of a namespace each run in a different minute. Third, the Corrosion fork
 gets a setting for how long it remembers a member that left. A pod
 never returns under the same identity, and by default foca announces
 to remembered members for two days.

@@ -17,7 +17,9 @@ proposal to, the report boot can only print it on the console. This
 milestone sends the proposal over the network to the cluster, and
 gives the operator a resource to act on.
 
-The README names claiming unknown machines as an open problem. This
+The open problem
+[automatic-machine-enrollment](open-problems/automatic-machine-enrollment.md)
+records the question of claiming unknown machines. This
 milestone is the supervised half of the answer: the unknown machine
 sends its report, and a person decides. The unsupervised half, a
 Machine template that lets a node claim an identity with no person

@@ -1,12 +1,13 @@
 // Package metrics is liken's half of the Prometheus contract.
 //
-// A Machine's status says what a machine is now. It says nothing
-// about the past: how long the last upgrade took, how often a
-// download failed, or what the fleet's release skew was an hour ago.
-// Prometheus keeps that history, because a scraper reads the same
-// numbers every few seconds and stores each reading with its time.
-// plans/completed/65-prometheus-metrics.md is the contract that every liken
-// repository follows, and this package is liken's half of it.
+// A Machine's status says what a machine is now. It says nothing about
+// the past: how long the last upgrade took, how often a download
+// failed, or what the fleet's release skew was an hour ago. Prometheus
+// keeps that history, because a scraper reads the same numbers every
+// few seconds and stores each reading with its time.
+// `plans/completed/65-prometheus-metrics.md` at the top of the
+// repository is the contract that every liken repository follows, and
+// this package is liken's half of it.
 //
 // The contract has three layers. Layer 1 is the runtime: the client
 // library's go_* and process_* series, and one liken_build_info

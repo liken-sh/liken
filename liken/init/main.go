@@ -478,12 +478,12 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	})
 	publishBootManifest(choice)
 	publishBootClusterManifest(clusterRaw)
-	// A background radio's verdicts land through this component. It
-	// starts here, after publishBootFacts, because publishBootFacts
-	// writes the network subtree itself: a verdict written before it
-	// would be overwritten with the pending state it replaced. The
-	// radio's address and its status arrive late, and both beat a
-	// boot that waited (plans/64).
+	// A background radio's verdicts land through this component. It starts
+	// here, after publishBootFacts, because publishBootFacts writes the
+	// network subtree itself: a verdict written before it would be
+	// overwritten with the pending state it replaced. The radio's address
+	// and its status arrive late, and both beat a boot that waited
+	// (plans/completed/64-the-boot-does-not-wait-for-radios.md).
 	if radios != nil {
 		plane.start("the wireless verdicts", publishRadioVerdicts(radios, factsTree, clusterDoc))
 	}

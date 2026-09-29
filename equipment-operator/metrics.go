@@ -1,10 +1,11 @@
 package main
 
 // This is the operator's half of liken's Prometheus contract
-// (liken/plans/65-prometheus-metrics.md, and this repository's own
-// plans/01-prometheus-metrics.md): the runtime layer, the reconcile
-// loop layer, and the domain facts a Receiver's status already
-// carries, all on one registry a scrape reads from memory.
+// (plans/completed/65-prometheus-metrics.md at the top of the
+// repository, and this operator's own
+// plans/completed/01-prometheus-metrics.md): the runtime layer, the
+// reconcile loop layer, and the domain facts a Receiver's status
+// already carries, all on one registry a scrape reads from memory.
 //
 // A scrape never touches the network, the API server, or a receiver.
 // Every gauge here is set at the same moment the fact it reports

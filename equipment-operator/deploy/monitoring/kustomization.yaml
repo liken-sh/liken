@@ -1,7 +1,8 @@
-# The monitoring component: plans/completed/65-prometheus-metrics.md's
-# shared contract, this operator's half. It adds one PodMonitor and a
-# dashboard ConfigMap, and changes nothing in the base, so a cluster
-# owner with no prometheus-operator never takes this directory at all.
+# The monitoring component: this operator's half of the shared contract
+# in plans/completed/65-prometheus-metrics.md at the top of the
+# repository. It adds one PodMonitor and a dashboard ConfigMap, and
+# changes nothing in the base, so a cluster owner with no
+# prometheus-operator never takes this directory at all.
 #
 # An owner who runs the prometheus-operator adds it beside the base:
 #

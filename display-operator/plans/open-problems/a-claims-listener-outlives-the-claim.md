@@ -18,9 +18,11 @@ path. The old one stays open with no path to reach it. The module's
 log line names the descriptor on each open and on each close, which
 is what a reader would see first.
 
-The compositor restarts on every mode change and every time an
-output on the card is destroyed and re-created. So the count of open
-descriptors between restarts is the count of prepares in that
+The compositor restarts on every mode change. It also restarts when
+an output on the card is destroyed and re-created with another monitor
+or another mode, but that restart waits while a prepared claim holds
+any screen on the card (`healCanvas` in `displaycontrol.go`). So the
+count of open descriptors between restarts is the count of prepares in that
 window, and on the lab machines that is under ten.
 A screen that runs one mode for weeks with pods coming and going
 accumulates one descriptor per prepare. The process limit is 1024 by

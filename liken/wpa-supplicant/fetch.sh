@@ -2,7 +2,7 @@
 #
 # Vendors a static wpa_supplicant, the program that runs the 802.11
 # association and the WPA handshake for a wireless spec.network entry
-# (plans/62-wifi.md).
+# (plans/completed/62-wifi.md).
 #
 # liken vendors a supplicant instead of writing one. WPA2-PSK alone
 # is tractable, EAPOL frames plus netlink key installs, but WPA3 adds

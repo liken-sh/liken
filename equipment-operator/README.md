@@ -84,5 +84,5 @@ the session, `status.wokeAt` and the `WakeApplied` condition report
 what the wake did, and an edit of `spec.power` goes before a wake.
 
 The manual is at [equipment.liken.sh](https://liken.sh/equipment/).
-`plans/README.md` indexes the plans. `make test` runs every check CI
+`plans/` holds the design documents. `make test` runs every check CI
 runs.

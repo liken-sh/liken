@@ -10,8 +10,10 @@ from a stick, one machine at a time, with a person at each keyboard.
 The manifest declares each storage role and its size, and the
 installation lays those roles down as partitions. After that, the
 machine reports the sizes it booted with, and the staging rule in the
-machine-operator accepts a spec change only when every role grows.
-Anything else is `StagingRejected`.
+machine-operator (`validateStaging` in
+[converge.go](../../machine-operator/converge.go)) rejects a spec
+change that declares a role smaller than the partition that holds it.
+The rejection is `StagingRejected`.
 
 The install guide says to reinstall the machine with the new layout.
 That works, but the order of steps is awkward. The person edits the manifest,

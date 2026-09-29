@@ -13,7 +13,7 @@ The voice rules in that file govern all prose in this directory,
 comments included. The file is in `brand/`, the brand component
 at the top of the repository.
 
-`plans/00-design.md` is the design, and `plans/README.md` indexes the
+`plans/00-design.md` is the design, and the `plans/` directory holds the
 plans that build it. Code exists only where a plan calls for it.
 
 ## Errors include their source's text

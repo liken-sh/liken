@@ -1,6 +1,6 @@
 # The CEC physical address
 
-Plan 23. Proposed 2026-09-26.
+Plan 23. Built on 2026-09-26.
 
 Each connected `Display` reports the HDMI-CEC physical address that
 its EDID gives the machine's port. The operator reads the address
@@ -39,9 +39,9 @@ a receiver writes the address of each of its inputs into the EDID it
 serves on that input. The operator reads that EDID already. Only the
 parse of the vendor block is missing.
 
-[Plan 11](completed/11-darkening-respects-the-attached-input.md)
+[Plan 11](11-darkening-respects-the-attached-input.md)
 built that parse, and
-[plan 13](completed/13-the-attached-input-retires.md) removed it
+[plan 13](13-the-attached-input-retires.md) removed it
 with the guard it fed. Plan 13's reason was that nothing else read
 the value. The CEC support is a reader.
 
@@ -95,9 +95,9 @@ hardware as it is now, so a retained value stays in `status`.
 **What the operator does not do.** It does not open a CEC adapter,
 send a CEC message, or read a CEC bus. It reports the fact that the
 EDID states, and equipment-operator owns everything that speaks CEC
-([plan 09](https://github.com/liken-sh/equipment-operator/blob/main/plans/09-cec.md)).
+([plan 09](https://github.com/liken-sh/liken/blob/main/equipment-operator/plans/09-cec.md)).
 The adapter on the machine comes from `liken`'s
-[milestone 70](https://github.com/liken-sh/liken/blob/main/plans/completed/70-init-attaches-serio-devices.md).
+[milestone 70](https://github.com/liken-sh/liken/blob/main/liken/plans/completed/70-init-attaches-serio-devices.md).
 
 **Two connectors to one receiver.** A second drill on 2026-09-26
 found that the CEC adapter works on a spare receiver input with

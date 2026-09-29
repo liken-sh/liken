@@ -33,15 +33,23 @@ func Closure(components map[string]*Component, name string) []string {
 	return names
 }
 
+// plansDir holds a component's plans. No build, test, or drill reads
+// a plan. Only the whitespace hooks check one, and those hooks run at
+// commit time, and again over every file the next time the
+// component's prek job runs. So a change to a plan runs none of the
+// component's jobs, and an edit to the OS's plans does not start the
+// OS build and its boot drills.
+const plansDir = "plans/"
+
 // notOutputs are the paths at the top of a component that no output
 // is built from: the manual, the plans, the agent and reader notes, the
 // skills, and the smoke checks, which test an image and do not go into
 // it. A manual generates its skills from its guides, and the repository
 // keeps them for agents to read. brand's skills/ is the generator, and
-// only the manuals run it. A change to these paths runs the
-// component's own jobs, and it does not give the component a new
-// version.
-var notOutputs = []string{"docs/", "plans/", "AGENTS.md", "README.md", "skills/", "smoke/"}
+// only the manuals run it. A change to these paths does not give the
+// component a new version. A change to any of them except plans/
+// still runs the component's own jobs.
+var notOutputs = []string{"docs/", plansDir, "AGENTS.md", "README.md", "skills/", "smoke/"}
 
 // isNotOutput is true for a path, relative to the component, that no
 // output is built from: a path in notOutputs or in the component's
@@ -180,12 +188,13 @@ func ReleaseChanged(components map[string]*Component, name string, d Diff) (bool
 // CheckChanged is true when a change reaches the component's jobs:
 //
 //   - its part of a generated workflow;
-//   - any file in its own directory;
+//   - any file in its own directory, except its plans;
 //   - a file that an output of a component in its closure is built
 //     from, because a component reads its dependencies only through
 //     their builds;
-//   - any file in brand/, when a component in its closure has a
-//     manual, because every manual builds with brand's theme;
+//   - any file in brand/ except its plans, when a component in its
+//     closure has a manual, because every manual builds with brand's
+//     theme;
 //   - the bake target of an image in its closure, or the part of the
 //     bake file that every target shares when its closure has an image.
 func CheckChanged(components map[string]*Component, name string, d Diff) (bool, string) {
@@ -194,7 +203,7 @@ func CheckChanged(components map[string]*Component, name string, d Diff) (bool, 
 	}
 	c := components[name]
 	for _, file := range d.Files {
-		if strings.HasPrefix(file, c.Dir+"/") {
+		if strings.HasPrefix(file, c.Dir+"/") && !strings.HasPrefix(file, c.Dir+"/"+plansDir) {
 			return true, file
 		}
 	}
@@ -205,7 +214,7 @@ func CheckChanged(components map[string]*Component, name string, d Diff) (bool, 
 		}
 		if brand := components["brand"]; brand != nil && dep.Docs != nil {
 			for _, file := range d.Files {
-				if strings.HasPrefix(file, brand.Dir+"/") {
+				if strings.HasPrefix(file, brand.Dir+"/") && !strings.HasPrefix(file, brand.Dir+"/"+plansDir) {
 					return true, file
 				}
 			}

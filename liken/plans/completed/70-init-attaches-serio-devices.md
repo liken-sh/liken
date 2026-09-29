@@ -19,7 +19,7 @@ the TV's remote. The consumer of this milestone is the CEC support in
 equipment-operator
 ([plan 09](https://github.com/liken-sh/equipment-operator/blob/main/plans/09-cec.md)).
 display-operator's
-[plan 23](https://github.com/liken-sh/display-operator/blob/main/plans/23-the-cec-physical-address.md)
+[plan 23](../../../display-operator/plans/completed/23-the-cec-physical-address.md)
 supplies the address the adapter announces.
 
 The vendored kernel ships everything the adapter needs as modules:

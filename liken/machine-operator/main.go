@@ -51,14 +51,15 @@ import (
 const component = "liken-machine-operator"
 
 // metricsAddress is where this operator answers a Prometheus scrape.
-// The default is the port that plans/completed/65-prometheus-metrics.md gives
-// the machine operator, so the binary carries the contract and the
-// pod template only has to name the port it exposes. The address is
-// an argument, and not a constant, for two reasons. An empty value
-// turns the listener off, for an owner who runs no Prometheus and
-// wants the port back. This pod also runs on the host's network, so
-// the port belongs to the whole machine, and an owner who already
-// serves 9200 there needs a way to move liken.
+// The default is the port that
+// `plans/completed/65-prometheus-metrics.md` at the top of the
+// repository gives the machine operator, so the binary carries the
+// contract and the pod template only has to name the port it exposes.
+// The address is an argument, and not a constant, for two reasons. An
+// empty value turns the listener off, for an owner who runs no
+// Prometheus and wants the port back. This pod also runs on the host's
+// network, so the port belongs to the whole machine, and an owner who
+// already serves 9200 there needs a way to move liken.
 var metricsAddress = flag.String("metrics-address", ":9200",
 	"the address to serve /metrics on; empty serves no metrics")
 

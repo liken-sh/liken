@@ -1,5 +1,7 @@
 # 02, The OpenAPI document as a page
 
+Built 2026-09-17.
+
 Every manual whose operator serves an HTTP API gets one generated
 reference page, `Routes`, rendered from that API's OpenAPI 3.1
 document by one generator this repository publishes. The page is

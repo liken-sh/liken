@@ -25,7 +25,7 @@ The driver defines no custom resources and has no controller. A
 
 The manual is at [per-node.liken.sh](https://liken.sh/per-node/). The
 design is [`plans/00-design.md`](plans/00-design.md), and
-[`plans/README.md`](plans/README.md) indexes the plans that build it.
+[`plans/`](plans/) holds the plans that build it.
 
 ## Building and testing
 

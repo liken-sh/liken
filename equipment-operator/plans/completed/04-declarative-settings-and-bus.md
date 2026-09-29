@@ -1,6 +1,7 @@
 # Declarative settings and the bus controller
 
-Plan 04.
+Plan 04. Built on 2026-09-19. The four future families stay unbuilt,
+as the plan states.
 
 ## The problem
 

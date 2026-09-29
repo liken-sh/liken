@@ -21,7 +21,10 @@ verification.**
 1. Be on `main`, clean, with every commit pushed.
 2. CI must be green on the commit you will tag. If a push just
    happened, watch its run first. Do not tag a commit CI has not
-   proven.
+   proven. A commit that changes only plans starts no run. For such a
+   commit, the proof is the newest run on `main` before it, and that
+   run's summary also shows what the tag releases, because a plan
+   changes no output.
 3. `gh variable get PUBLISH -R liken-sh/liken` must print `true`.
    Without it, the tag publishes nothing. Stop and tell me.
 

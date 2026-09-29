@@ -162,7 +162,7 @@ None is chosen.
    follows the exponential backoff. So it does not shorten the wait.
    This option depends on `liken`: the `Cluster`'s
    `spec.runtime.kubelet` renders a `KubeletConfiguration` today for
-   the image collection settings only (`init/k3s.go`), so the setting
+   the image collection settings only (`liken/init/k3s.go`), so the setting
    needs a new field there. It also removes the backoff's protection
    from every workload on the node. A longest wait of 1 s makes every
    crash loop on the node restart once a second.

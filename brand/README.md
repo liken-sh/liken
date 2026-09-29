@@ -278,7 +278,7 @@ which is what the heading says.
 The preamble and the postamble are hand-written files that land
 verbatim, at the top and the bottom. They carry what the document
 cannot: what the API is for, and where the narrative page beside this
-one is. `plans/02-openapi-as-a-page.md` is the design.
+one is. `plans/completed/02-openapi-as-a-page.md` is the design.
 
 ## The skills generator
 
@@ -303,7 +303,7 @@ Each component commits its `skills/` directory, so a checkout
 includes its skills and CI fails when they are stale. An agent loads
 them with `claude --plugin-dir <component directory>` or
 `npx skills add https://github.com/liken-sh/liken/tree/main/<component>`.
-`plans/01-guides-as-skills.md` is the design.
+`plans/completed/01-guides-as-skills.md` is the design.
 
 ## The `liken-iced` crate
 

@@ -58,14 +58,20 @@ Go tests or `testdata/`. A change there does not release the
 component. A component's `package.toml` can name more such paths in
 `exclude` under `[outputs]`: `liken` names `deploy/monitoring/`,
 because a fleet fetches it by git and the channel holds no part of it.
+A change under `plans/` also runs none of the component's jobs,
+because no build, test, or drill reads a plan. A push or a pull
+request that changes only plans, in the top-level `plans/` or in a
+component's `plans/`, starts no `ci` run at all. A release tag always
+runs, because GitHub does not apply path filters to a tag push.
 
 The git tag of a release is the bare version for a release made in this
 repository, or `<component>/<version>` for a release the component made
 in its own repository.
 
 The plan job's summary on the run page lists each component, whether
-it releases, and why. On every push to a branch, the same summary shows
-what a tag at that commit would release, so read it before you tag.
+it releases, and why. On every push to a branch that starts a run,
+the same summary shows what a tag at that commit would release, so
+read it before you tag.
 
 The `record` job writes the GitHub release for the tag: every
 component and its version at that tag, and the OS's catalog entry when

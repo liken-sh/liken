@@ -10,17 +10,20 @@ its paired controllers publish no device.
 bluetoothd can manage several adapters at once, so the limit is not in
 BlueZ. It is in this operator. Two parts of it are written for one adapter:
 
-* The bond store is per adapter. [Plan 03](../completed/03-a-secret-for-each-adapter.md)
-  keys the stored bonds to one adapter's address, and the store reads
-  and writes only the tree of that adapter.
+* The bond store serves one adapter. Each bond has its own `Secret`,
+  labelled with its adapter's address, as
+  [plan 04](../completed/04-an-api-for-pairing.md) states. But
+  `bondStore` in `bondstore.go` holds one adapter's address for the
+  life of the process, and reads and writes only the tree of that
+  adapter.
 * Controller discovery is scoped to the operator's own adapter. The
   operator reads each HID device's `HID_PHYS` field and keeps only the
   devices whose `HID_PHYS` names this adapter, so a second adapter's
   controllers would need a second scope.
 
-A second adapter therefore needs a second `Secret`, a second discovery
-scope, and a second set of published controllers. The current code
-writes none of them.
+A second adapter therefore needs a bond store for each adapter, a
+second discovery scope, and a second set of published controllers.
+The current code writes none of them.
 
 ## What breaks on a two-adapter node
 
@@ -35,8 +38,8 @@ The audio operator serves every sound card on its node with
 `allocationMode: All`, because one PipeWire serves every ALSA card and
 its code already keys every output by card. bluetoothd could span
 adapters the same way. But here `allocationMode: All` also requires a
-per-adapter `Secret` and a per-adapter discovery scope, and that work
-needs a design, not only an edit to the claim.
+bond store and a discovery scope for each adapter, and that work needs
+a design, not only an edit to the claim.
 
 ## What is not measured
 

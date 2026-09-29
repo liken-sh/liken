@@ -1,14 +1,18 @@
 # Plans
 
-This directory contains the operator's design documents. Each one is
-numbered in sequence and keeps its number for life.
+This directory contains the operator's design documents.
 
-The form follows liken's own `plans/`. A document states a problem,
-the design that addresses it, and the alternatives that were
-considered and set aside. It also records how the work was proved. A
-proof runs on hardware.
+Each `plans/` directory numbers its own plans. A new plan takes the
+next number after the highest one in this directory and its
+subdirectories. A number never changes. Open problems have no number.
 
-The pattern these documents follow is documented in liken's repository:
+The form follows the plans of the OS in `liken/plans/`. A document
+states a problem, the design that addresses it, and the alternatives
+that were considered and set aside. It also records how the work was
+proved. A proof runs on hardware.
+
+The pattern these documents follow is documented in the top-level
+`plans/` of the repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
 [milestone 59](https://github.com/liken-sh/liken/blob/main/plans/completed/59-the-audio-operator.md).
@@ -22,105 +26,8 @@ measured if a drill ran. A drill that has not run yet is not a reason
 to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
-## Planned
-
-Nothing is planned right now.
-
-## Designs
-
-* [01, The taints on an output](completed/01-the-taints-an-output-carries.md).
-  Built.
-* [02, A closure on scratch](completed/02-a-closure-on-scratch.md).
-  Built, and drilled on liken-1 on 2026-08-17. The image becomes the
-  display operator's shape: a named file set on `scratch`, measured
-  from the running daemons' memory maps, with a release gate that
-  starts the daemons and fails on any file they map that the image
-  lacks. Answers and replaces the open problem "The image is still
-  Debian".
-* [03, The kubelet supervises the daemons](completed/03-the-kubelet-supervises-the-daemons.md).
-  Built, and drilled on liken-1 on 2026-08-17, the fault drill
-  included. The pod becomes four containers: a declare init step, the
-  two daemons as native sidecars with real-client probes, and the
-  operator. The die-together guarantee survives as an all-devices
-  taint the operator publishes when it loses the graph. The drill
-  proved it end to end, from the cross-namespace access defect that
-  `config/51-access-rules.conf` answers to the eviction that a
-  sustained outage causes.
-* [04, Bluetooth sinks](completed/04-bluetooth-sinks.md). Built,
-  and drilled on liken-1 on 2026-08-19, both halves. The audio half
-  of liken's milestone 60: the declare container enables
-  WirePlumber's bluez monitor when the claim delivered a media bus,
-  and each paired speaker publishes as an `audio.liken.sh` device
-  beside the card's outputs. The drill opened the open problem
-  "A2DP does not survive a Bluetooth pod restart".
-* [05, Choosing the codec](completed/05-choosing-the-codec.md).
-  Built and drilled on liken-1 on 2026-08-19, in release
-  2026.08.19-007. Each connected speaker publishes its codecs, a
-  claim states one through opaque config resolved on the
-  allocation, and every delivered sink arrives at unity volume.
-* [06, Restarting WirePlumber when the bus dies](completed/06-restarting-wireplumber-when-the-bus-dies.md).
-  Built, and drilled on liken-1 on 2026-08-21, in release
-  2026.08.21-002. A liveness probe on the WirePlumber container reads
-  whether the adapter still advertises a media profile that
-  bluetoothd hosts, so the kubelet restarts the one container whose
-  registration is gone. The drill measured 35 seconds from the loss
-  to the restart, with PipeWire and the card's sinks left running.
-  Answers and removes the open problem "A2DP does not survive a
-  Bluetooth pod restart".
-* [07, Sinks and sources](completed/07-sinks-and-sources.md).
-  Built, and drilled on `liken-1` and `stick-1` on 2026-08-28,
-  through release 2026.08.28-005. A cluster-scoped `Sink` for every
-  playback endpoint and a `Source` for every capture endpoint, with
-  a `status` that reports the card's own controls and what the
-  operator last observed, and a `spec` that declares what the
-  endpoint rests at. A claim remains responsible for delivering audio
-  bytes. The resource stores endpoint settings and observations. The device name is built
-  from the hardware's identity, and `observed` follows the control
-  device's events and `pw-dump -m` in place of a poll. The drill
-  covered the names, the DAC's controls, the level and mute under a
-  playing claim on an HDMI slot and on a Bluetooth adapter over
-  AVRCP, and the analog jack once liken loaded the codec driver
-  first. Still to drill: a card that leaves.
-* [08, Prometheus metrics](completed/08-prometheus-metrics.md).
-  Built, and drilled on liken-1 on 2026-09-10. Claimed endpoint
-  availability, failed control operations, and observation health,
-  with optional Prometheus collection.
-* [09, Capture audio over HTTP](completed/09-capture-audio-over-http.md).
-  Built on 2026-09-16, and drilled on liken-1 on 2026-09-16 and
-  2026-09-17. An HTTP API that taps what a `Sink` plays and what a
-  `Source` hears, as WAV, FLAC, or Ogg Opus, with a W3C Media
-  Fragments `t=` for the span. A small `audio-api` `Deployment`
-  authenticates the caller with a `TokenReview`, authorizes a `get`
-  on `sinks/audio` with a `SubjectAccessReview`, reads `status.node`,
-  and forwards to a fifth container in the `DaemonSet` pod that runs
-  `pw-record` on the pod's socket and encodes. The audio instance of
-  a design the display and media operators share. The drill read a
-  439.5 Hz peak in all three formats, a first byte at 0.45 to 0.59 s,
-  and 3.67 MB more closure on the node, and left the idle RSS by
-  `/proc` and the first byte as open problems in the plan.
-* [10, A capture body ends cleanly](completed/10-a-capture-body-ends-cleanly.md).
-  Built on 2026-09-19. A tap decides its body is complete from the
-  body itself, so stopping the recorder never marks a delivered body
-  as cut, and a client hangup is read from the request's own context.
-  The encoder is the only process status a delivered body still
-  depends on. Closes the open problem "The capture stream tests flake
-  in CI", and the three skipped tests are enabled again.
-* [11, The watches use client-go](completed/11-the-watches-use-client-go.md).
-  Built on 2026-09-27. The five Kubernetes watches, the operator's
-  `Sink`s and `Source`s and `audio-api`'s capture `Secret`, client
-  authority `ConfigMap`, and pods, run on client-go's reflector, and
-  the loop written by hand is gone. A status write no longer wakes a
-  pass, and the pass reads its `Sink`s and `Source`s from the watches'
-  stores, so a settled pass sends the API server no read. The binary grows from 15.4 MB to 20.3 MB stripped, and the idle
-  RSS from about 18 MB to 24 MB, measured on a k3s API server in
-  Docker. The drill on liken-1 is still owed.
-
-## Open problems
+[`completed/`](completed/) holds the plans that are built.
 
 [`open-problems/`](open-problems/) holds the questions this operator
 owes an answer to. Those documents have no number, because nobody has
 decided yet what work they become.
-
-* [Every published sink is exclusive, though PipeWire can share one](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
-  PipeWire mixes streams and every device this operator publishes is
-  exclusive, so the second pod to claim a sink waits behind the first.

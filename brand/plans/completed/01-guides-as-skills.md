@@ -1,5 +1,7 @@
 # 01, The guides as skills
 
+Built 2026-09-17.
+
 Every guide on a liken site becomes an agent skill, emitted by one
 generator this repository publishes. An agent that installs a
 repository's `skills/` directory gets the same steps a person reads

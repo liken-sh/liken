@@ -184,7 +184,7 @@ liken supports more hardware than this fleet, and that part of the
 question is open. liken publishes no supported-hardware list, and its image
 keeps `i915`, `xe`, `radeon` and `amdgpu` so that a console works on an
 ordinary machine
-([milestone 32](https://github.com/liken-sh/liken/blob/main/plans/completed/32-hardware-support-in-the-image.md)).
+([milestone 32](https://github.com/liken-sh/liken/blob/main/liken/plans/completed/32-hardware-support-in-the-image.md)).
 An `iris`-only compositor image would be narrower than the OS that runs
 it. A machine with AMD integrated graphics would boot, publish a GPU,
 and then start a compositor with no driver for the card. The image is

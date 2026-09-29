@@ -31,9 +31,9 @@ const (
 	busAddressVariable = "EQUIPMENT_BUS_ADDRESS"
 
 	// EQUIPMENT_METRICS_ADDRESS is where /metrics listens, as host:port.
-	// liken/plans/65-prometheus-metrics.md gives every process port 9200,
-	// since this operator runs on the cluster network. An empty value
-	// turns the listener off.
+	// plans/completed/65-prometheus-metrics.md at the top of the
+	// repository gives every process port 9200, since this operator runs
+	// on the cluster network. An empty value turns the listener off.
 	metricsAddressVariable = "EQUIPMENT_METRICS_ADDRESS"
 
 	// EQUIPMENT_NETWORK_DISCOVERY is on or off, and unset reads as on.

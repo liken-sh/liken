@@ -1,6 +1,6 @@
-# The wpa-supplicant domain: the wireless supplicant, one static
-# binary that fetch.sh builds from pinned source inside a pinned
-# container (plans/62-wifi.md). There is no daemon manifest and no OCI
+# The wpa-supplicant domain: the wireless supplicant, one static binary
+# that fetch.sh builds from pinned source inside a pinned container
+# (plans/completed/62-wifi.md). There is no daemon manifest and no OCI
 # image here, because init supervises this process on the host and no
 # pod ever runs it. The binary ships at /sbin in every image.
 #

@@ -47,10 +47,11 @@ import (
 const component = "liken-cluster-operator"
 
 // metricsAddress is where this operator answers a Prometheus scrape.
-// The default is the port that plans/completed/65-prometheus-metrics.md gives
-// every process on the cluster network, so the binary carries the
-// contract and the pod template only has to name the port it
-// exposes. An empty value turns the listener off, for an owner who
+// The default is the port that
+// `plans/completed/65-prometheus-metrics.md` at the top of the
+// repository gives every process on the cluster network, so the binary
+// carries the contract and the pod template only has to name the port
+// it exposes. An empty value turns the listener off, for an owner who
 // runs no Prometheus.
 var metricsAddress = flag.String("metrics-address", ":9200",
 	"the address to serve /metrics on; empty serves no metrics")

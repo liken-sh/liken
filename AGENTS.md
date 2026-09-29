@@ -11,7 +11,7 @@ component's `package.toml` and writes the CI workflows. `liken.sh/`
 declares the domain, the release channel, and the organization's
 repositories in Terraform. `plans/` holds the plans that cover more
 than one component, and each component keeps its own plans in its own
-`plans/`. Each component has its own
+`plans/`. The plans of the OS are in `liken/plans/`. Each component has its own
 `AGENTS.md` for the work inside it.
 
 Four repositories stay outside: `corrosion`, `plugins`, `log`, and

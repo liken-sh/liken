@@ -18,7 +18,7 @@ The second stage moves the OS's vendored domains to stagex builds, so
 that `liken` builds every program in its release artifacts from
 source. The build tools come from stagex, and each build is pinned
 and signed. The second stage is
-[plan 72](../72-the-os-builds-from-source.md).
+[plan 72](../../liken/plans/72-the-os-builds-from-source.md).
 
 A component takes its version in one of two ways. A **pinned**
 component, such as the kernel or `mpv`, declares an upstream version
@@ -577,7 +577,7 @@ version, so no cluster pins a commit sha.
 ## The order of the work
 
 The work has two stages. This plan holds stage 1, and
-[plan 72](../72-the-os-builds-from-source.md) holds stage 2. Each step
+[plan 72](../../liken/plans/72-the-os-builds-from-source.md) holds stage 2. Each step
 ends with CI green and a release rolled to liken-1. A step that
 changes the OS also ends with the smoke drills green.
 

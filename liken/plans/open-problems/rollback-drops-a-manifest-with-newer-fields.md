@@ -15,7 +15,7 @@ release added.
 A field that converges live reaches the proven manifest without a
 reboot: the live load promotes the manifest that contains it. After
 `spec.version` points the machine back at an older release, the older
-init reads `proven.yaml` in `loadManifests`
+init reads `proven.yaml` in `loadManifestCandidates`
 ([manifests.go](../../init/manifests.go)), fails the strict parse, and
 logs that the proven manifest is unreadable. With no staged manifest,
 it has no candidate, so it loads the seed from the deployment layer on

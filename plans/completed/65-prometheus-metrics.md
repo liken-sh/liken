@@ -214,7 +214,7 @@ found.
 | machine-operator | `liken_upgrade_duration_seconds` | histogram | staged to booted on the new slot. Waits for a staging time that survives the reboot; the system release record carries none today |
 | machine-operator | `liken_devices{class}` | gauge | a missing GPU or adapter shows as a drop |
 | machine-operator | `liken_last_crash_timestamp_seconds` | gauge | pstore capture; a crash loop is a line |
-| machine-operator | `liken_firmware_info{version}` | gauge, info | BIOS version. Waits for [plan 33](../33-firmware-updates.md); status carries no firmware version today |
+| machine-operator | `liken_firmware_info{version}` | gauge, info | BIOS version. Waits for [plan 33](../../liken/plans/33-firmware-updates.md); status carries no firmware version today |
 | machine-operator | `liken_firmware_update_pending` | gauge | milestone 30 state. Waits for plan 33 with the row above |
 | cluster-operator | `liken_machines{phase}` | gauge | fleet by phase |
 | cluster-operator | `liken_disruption_approvals_pending` | gauge | approvals outstanding |

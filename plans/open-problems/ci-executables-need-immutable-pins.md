@@ -54,7 +54,7 @@ integrity check that does not come from that download.
   version beside it for maintenance. Keep local composite-action
   references local.
 - Add a reviewable update process for both kinds of pin. Version reporting
-  can follow [milestone 48](../completed/48-check-and-update-dependency-pins.md), but
+  can follow [milestone 48](../../liken/plans/completed/48-check-and-update-dependency-pins.md), but
   action pins are outside that milestone's existing watched table.
 
 A pin fixes which upstream bytes run. It does not make them trustworthy.

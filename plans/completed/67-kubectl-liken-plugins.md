@@ -1,5 +1,7 @@
 # 67. kubectl liken: a plugin per operator
 
+Milestone 67. Built 2026-09-17.
+
 ## The problem
 
 An operator gives a cluster a capability, and a person or an agent
@@ -168,7 +170,7 @@ metadata:
 * **library:** `reenrich <library> [--only art|trailers|...]` requests a
   pass by writing `spec.refresh`. `rescan` (a full walk) writes the
   `scan` key of `spec.refresh`, which library-operator added in [plan
-  64](https://github.com/liken-sh/library-operator/blob/main/plans/completed/64-a-refresh-that-walks-a-library.md).
+  64](../../library-operator/plans/completed/64-a-refresh-that-walks-a-library.md).
 
 Each capture verb is a thin client over its operator's existing stream
 API. It authenticates with the caller's own kubeconfig credential:

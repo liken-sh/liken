@@ -1,7 +1,7 @@
 # 72. The OS builds from source
 
 Milestone 72. Split from
-[plan 69](completed/69-one-repository-builds-every-component.md) on
+[plan 69](../../plans/completed/69-one-repository-builds-every-component.md) on
 2026-09-29. Plan 69 moved every component into this repository and
 built the component graph, and it is complete. This plan is plan 69's
 second stage, as plan 69 wrote it: it moves the OS's vendored domains
@@ -256,7 +256,7 @@ The jobs keep the secrets small:
 - A separate publish job holds the channel key and the registry
   token. It takes the build job's output and uploads it.
 - Every third-party action is pinned by commit SHA. The open problem
-  [Pin CI executable inputs](open-problems/ci-executables-need-immutable-pins.md)
+  [Pin CI executable inputs](../../plans/open-problems/ci-executables-need-immutable-pins.md)
   covers the actions that the other workflows use.
 
 CI uses GitHub's standard runners, which are free for public

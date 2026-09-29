@@ -1,16 +1,19 @@
 # Plans
 
-This directory holds the operator's design documents. Each one is
-numbered in sequence and keeps its number for life.
+This directory holds the operator's design documents. A plan that is
+not built yet stays here. A plan that is built moves to `completed/`.
 
-The form follows liken's own `plans/`. A document states a problem,
-states the design that answers it, and states what was considered and
-set aside. It also states how the work was proved, and a proof runs on
-hardware.
+Each `plans/` directory numbers its own plans. A new plan takes the
+next number after the highest one in this directory and its
+subdirectories. A number never changes. Open problems have no number.
+
+The form follows the plans of the OS in `liken/plans/`. A document
+states a problem, states the design that answers it, and states what
+was considered and set aside. It also states how the work was proved,
+and a proof runs on hardware.
 
 The README states what the operator is. These documents state why it
 is built the way it is, and what it still owes an answer to.
-`completed/` holds the plans that are built.
 
 A plan closes in the commit that builds it. That commit moves the
 document to `completed/`, dates its header, and states what the lab
@@ -18,76 +21,8 @@ measured if a drill ran. A drill that has not run yet is not a reason
 to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
-## The design
+[`completed/`](completed/) holds the plans that are built.
 
-* [00, The equipment-operator design](00-design.md). What equipment
-  is, what a `Receiver` holds, how the operator owns the room's level
-  on the media bus, and what the Service front is for.
-* [01, Prometheus metrics](completed/01-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10. The
-  operator serves Prometheus metrics on port 9200 under liken's shared
-  contract: the receiver connected and claimed, power, volume, the
-  selected input, and commands by status.
-* [02, The Denon driver and the full receiver mirror](completed/02-denon-driver.md). Built and drilled on a home cluster on 2026-09-19. The protocol moved into `denon/` behind the `equipment.Driver` contract, the parser covers every line the measured AVR-X1700H emits, and the status carries both zones and the receiver's own settings.
-* [04, Declarative settings and the bus controller](04-declarative-settings-and-bus.md). Every setting the driver reads becomes declarable in `spec.denon.settings` and settable over a bus settings topic, one-shot actions go over a bus commands topic, and each setting key has exactly one writer.
-* [07, The receiver's HTTP interface and the TV wake](07-receiver-http-and-tv-wake.md). The receiver answers a second interface over HTTP, and it carries HDMI Control and the video controls. The receiver is a CEC responder, so it cannot wake the TV, and the wake needs a node-attached CEC adapter from plan 05. Plan 09 designs the wake, and its phase 3 builds it; the hardware drill is open. The HTTP driver design is not written.
-* [09, The TV and the receiver over HDMI-CEC](09-cec.md). A USB CEC adapter on a node joins the HDMI tree's CEC wire through the kernel's CEC API. A declared `CECBus` in `Listen` or `Control` mode reports every device on the wire, a new `Television` kind holds the TV's power and the displays that reach it, a `Receiver` gains a `cec:` block, and the wake job closes plan 07's TV wake. It depends on `liken` plan 70 and display-operator plan 23. Phase 1 is built and tested against the kernel's `vivid` driver: `cec/`, the `equipment-operator cec` node workload, and the `CECBus` in `Listen` and `Control`. Phase 2 is built and tested against `vivid` with `cec-follower` playing the TV: the `Television` with `spec.power`, `status.power`, and `status.displays`. Phase 3 is built and tested against `vivid` with a second output playing a streaming player: the session match, the wake job, and `status.activeSource`. The power press that turns the room off, TV included, is built and tested against `vivid` and the fakes: `status.session.standbyAt` and `StandbyApplied`. The adapter sends nothing on a timer, tested against `vivid` and the fakes: one scan when it joins, one set of questions for a device that announces itself, the TV's power from what the bus carries, and a read for each power press through `status.session.powerReadAt`. The hardware drills of phases 1 to 3, of the power press, and of the quiet bus, and phases 4 and 5, are open.
-* [10, The watches use client-go](completed/10-the-watches-use-client-go.md). Built on 2026-09-27. Every watch of the API server runs on client-go's reflector through the dynamic client, the loop written by hand is gone, and a pass reads the kinds it does not write from the informers' stores. The leader election that would let the `Deployment` roll with no gap is not built: the same binary runs the `cec` `DaemonSet`, and the `Deployment` uses the host network. The plan gives the options, and plan 11 builds the election. The drill on a cluster is open.
-* [11, One operator holds the `Lease`](completed/11-one-operator-holds-the-lease.md). Built on 2026-09-27. The image holds two builds: the `Deployment` runs the full build with client-go's leader election, and the `cec` `DaemonSet` runs the node build, which links neither the election nor the typed clientset. A copy that does not hold the `Lease` binds nothing and does nothing. The strategy stays `Recreate` because of the host port. The `Deployment` watches the `Receiver` objects once, and the operator's own requests have a deadline. The drill on a cluster is open.
-* [12, Network discovery can be turned off](completed/12-network-discovery-can-be-turned-off.md). Built on 2026-09-28. `EQUIPMENT_NETWORK_DISCOVERY` on the `Deployment` takes `on` or `off`, and `on` is the default. With `off`, the operator sends no mDNS or SSDP search and creates no `Receiver`, and a WiiM `Receiver` must state its address. The CEC paths stay out of the setting, because neither reaches a device on the LAN. The drill on a cluster is open.
-
-## Open problems
-
-* [WiiM settings that the amp does not report back](open-problems/the-wiim-settings-the-amp-will-not-confirm.md). The equalizer, the output mode, and the subwoofer have setters but no readable value, so they wait for a model whose reads answer. The alarm slots and the per-model command set sit beside them.
-* [The CI `go` job on a cold build cache](open-problems/the-go-job-on-a-cold-build-cache.md). After a change to the module files, the three builds in `make test-go` take about 5 minutes before a test runs, and the CEC and session tests that set package variables still run one at a time.
-
-## Completed
-
-* Plan 01, the `Receiver` with the `denon` protocol, the session, and
-  the level path. Proved on a living room on 2026-09-07: the Denon's
-  status followed its own remote, a `Play` selected the input, and
-  the room's remote stepped the receiver under a declared ceiling.
-  Releases 2026.09.07-001 to -003. Three things that day changed the
-  design: the Denon's `MVMAX` line is not a limit, a session must
-  adopt the receiver's position before it applies any level, and a
-  press is a direction and not a level.
-
-* Plan 02, the Denon driver and the full receiver mirror. Drilled on
-  a home cluster on 2026-09-19: a live Denon Receiver
-  reported both zones (main on MPLAY at 65, zone2 on PHONO at 90) and
-  every setting under `status.denon`, and a dimmer change made at the
-  receiver itself moved `status.denon.system.dimmer` from bright to
-  dark and back. Release 2026.09.19-001.
-
-* Plan 05, the operator on the host network. Drilled on a home
-  cluster on 2026-09-22: the operator runs on the host network, finds
-  the amps by mDNS and SSDP, and resolves each identity to a current
-  address without a declared address. The metrics listener moved to
-  9260.
-
-* Plan 06, the WiiM driver. Drilled on a home cluster on
-  2026-09-22: several WiiM amps report `status.wiim` in full, discovery
-  creates a Receiver for an unclaimed amp and steps aside when a person
-  declares one, a declared setting reaches the device and returns in
-  status, and a settings write over the media broker lands on the
-  device and back in `spec.wiim.settings`.
-
-* Plan 08, the WiiM's event path. Drilled on a home cluster on
-  2026-09-22: the driver subscribed to several WiiM amps' UPnP events for
-  volume, mute, and the transport state, and a volume change made on
-  one amp itself reached the room's topic in the same
-  second while the poll stayed at ten seconds. Development build
-  `2026.09.19-002-dev-028-ab218213`.
-
-* Plan 10, the watches use client-go. Built on 2026-09-27 and tested
-  on the laptop against scripted API servers. The stripped binary
-  grew from 10,981,536 to 15,618,208 bytes. No drill has run on a
-  cluster yet.
-
-* Plan 11, one operator holds the `Lease`. Built on 2026-09-27 and
-  tested on the laptop against fake API servers. The `Deployment`'s
-  binary is 29,135,008 bytes and the node workload's is 13,992,096
-  bytes. No drill has run on a cluster yet.
-
-* Plan 12, network discovery can be turned off. Built on 2026-09-28
-  and tested on the laptop against the fake API server and a stubbed
-  search. No drill has run on a cluster yet.
+[`open-problems/`](open-problems/) holds the questions this operator
+owes an answer to. Those documents have no number, because nobody has
+decided yet what work they become.

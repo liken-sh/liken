@@ -49,7 +49,9 @@ settings of every repository in the organization.
 [`ci/`](ci/) reads each component's `package.toml`, writes the CI
 workflows from them, and decides what each run builds and publishes.
 [`plans/`](plans/) holds the plans that cover more than one component,
-and each component keeps its own plans in its own `plans/`. Plan 69
+and each component keeps its own plans in its own `plans/`. The plans
+of the OS, with its design overview, are in
+[`liken/plans/`](liken/plans/). Plan 69
 describes how the components came into this repository and how one
 tag releases them. [`AGENTS.md`](AGENTS.md) holds the rules for
 agents that work in the repository, and `.agents/skills` holds their

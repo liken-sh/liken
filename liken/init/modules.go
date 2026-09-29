@@ -110,9 +110,9 @@ func loadDeclaredModules(names []string, parameters map[string]string) []machine
 //
 // The parameters map is spec.moduleParameters, and only this pass
 // carries one. The fixed list and a feature's list ship with the
-// release, and a machine that needs to modify how the OS loads its
-// own drivers has a bug for liken to fix, not a knob to turn
-// (plans/55).
+// release, and a machine that needs to modify how the OS loads its own
+// drivers has a bug for liken to fix, not a knob to turn
+// (plans/completed/55-kernel-module-parameters.md).
 func loadDeclaredModulesFrom(base string, names []string, parameters map[string]string) []machine.ModuleStatus {
 	if len(names) == 0 {
 		return nil

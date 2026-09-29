@@ -259,7 +259,7 @@ workflow runs both drills.
 certificate workflow downloads `lego` by version with no digest and
 runs it with the account-wide Linode token, which can write the
 releases bucket. The release upload key is scoped to that bucket
-alone. This is the open problem [ci-executables-need-immutable-pins](open-problems/ci-executables-need-immutable-pins.md).
+alone. This is the open problem [ci-executables-need-immutable-pins](../../plans/open-problems/ci-executables-need-immutable-pins.md).
 This milestone commits a SHA-256 for the archive and verifies it
 before extraction, and narrows the token to DNS.
 

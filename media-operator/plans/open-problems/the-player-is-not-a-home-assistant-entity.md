@@ -22,18 +22,20 @@ topics. With either option, the action vocabulary a `Keymap` already
 defines maps onto the commands, and a `Play`'s status maps onto the
 state.
 
-Two parts are missing before that entity exists. The first is the
-discovery config itself, which the operator publishes retained when a
-resource is created and clears when the resource is deleted. The
-second is an object for the entity to represent. A `Play` is
-short-lived: it is created to start playback and deleted to stop it.
-So an entity bound to a `Play` appears and disappears with each film.
-A `Player` is long-lived, the equipment at one location, and it is
-the natural `media_player`. So each `Player` should publish its own
-retained status: idle when nothing plays, and the current `Play`'s
-state when one does. Home Assistant binds its entity to that `Player`
-status, and the whole-house layer above reads the same topics to see
-what plays in every room.
+One part is missing before that entity exists: the discovery config
+itself, which the operator would publish retained when a resource is
+created and clear when the resource is deleted. The entity also needs
+an object to represent. A `Play` is short-lived: it is created to
+start playback and deleted to stop it. So an entity bound to a `Play`
+appears and disappears with each film. A `Player` is long-lived, the
+equipment at one location, and it is the natural `media_player`. The
+operator already publishes each `Player`'s retained status on
+`<base>/players/<namespace>/<name>/status`: its display name, its
+activity (`Idle`, `Starting`, or `Playing`), and the `Play` it runs.
+The position and the paused flag stay on that `Play`'s own status
+topic. Home Assistant would bind its entity to the `Player` status,
+and the whole-house layer above reads the same topics to see what
+plays in every room.
 
 Nothing here is designed yet. Plan 03 leaves the option open: the base
 topic is configurable, the data topics stay outside `homeassistant/`,
