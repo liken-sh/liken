@@ -290,6 +290,7 @@ encoder's last lines.
 | 404 | no `Display` has that name | | section 15.5.5 |
 | 405 | a method other than GET, HEAD, or OPTIONS | `Allow: GET, HEAD, OPTIONS` | section 15.5.6 |
 | 406 | `Accept` excludes everything the route can serve | | section 15.5.7 |
+| 409 | the `Display` has no panel on its connector: its `Connected` condition is False. A retry does not help until the monitor is connected | | section 15.5.10 |
 | 500 | the compositor denied the capture, and a retry does not help; or the encoder produced no picture | | section 15.6.1 |
 | 502 | the capture container answered with something that is not HTTP, or not a problem document | | section 15.6.3 |
 | 503 | the output is already being captured, the compositor is not serving the screen, the capture container refused the connection, is absent, or is not ready, or the `Display` has no `status.node` yet | `Retry-After: 5` | sections 15.6.4 and 10.2.3 |
@@ -314,13 +315,17 @@ encoder's last lines.
 | `https://display.liken.sh/problems/capture-denied` | the compositor denied the capture. `detail` is its `unauthorized` | 500 |
 | `https://display.liken.sh/problems/compositor-down` | the compositor is not serving the screen. `detail` is the `CompositorServing` condition's message | 503 |
 | `https://display.liken.sh/problems/encoder-failed` | the encode produced no picture | 500 |
+| `https://display.liken.sh/problems/no-panel` | the `Display` has no panel on its connector. `detail` is the `Connected` condition's message | 409 |
 
 The first four types are the ones the three capture APIs share. The
-last three are this API's own, because only the display domain has a
-compositor or an encoder. A screen with no node and a screen whose
-compositor is down are both a 503, with different types, because you
-are waiting for different things: the scheduler in one case, and the
-operator starting the compositor again in the other. An error with no
+last four are this API's own, because only the display domain has a
+compositor, an encoder, or a panel on a connector. A screen with no
+node and a screen whose compositor is down are both a 503, with
+different types, because you are waiting for different things: the
+scheduler in one case, and the operator starting the compositor again
+in the other. A screen with no panel is a 409 with no `Retry-After`,
+because no wait brings an unplugged monitor back: you connect the
+monitor, or you ask for another screen. An error with no
 type of its own has `type: about:blank` and the status phrase as its
 `title`. The OpenAPI document lists every type.
 
@@ -436,11 +441,12 @@ certificate this API trusts".
 
 **The info route on a screen that is down.** You do not need the
 screen to be up to ask what it is.
-`GET /v1/display/displays/{name}` returns 200 for a screen whose
-compositor is not serving, and for a node this API cannot reach. The
-document has the name, the node, and the size and refresh rate from
-the `Display` status, plus `compositor: down` or
-`sidecar: unreachable` with the condition's message in `detail`.
+`GET /v1/display/displays/{name}` returns 200 for a screen with no
+panel on its connector, for a screen whose compositor is not serving,
+and for a node this API cannot reach. The document has the name, the
+node, and the size and refresh rate from the `Display` status, plus
+`panel: disconnected`, `compositor: down`, or `sidecar: unreachable`
+with the words of the cause in `detail`.
 `scale`, `formats`, and `conversion` come from the node, so they are
 absent instead of guessed.
 

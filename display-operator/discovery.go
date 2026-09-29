@@ -87,10 +87,12 @@ type screenInfo struct {
 	// Content-Type.
 	Codecs string `json:"codecs,omitempty"`
 	// What is wrong with the screen, when something is. A screen that
-	// answers carries neither: compositor is "down" for a screen whose
-	// compositor is not serving, sidecar is "unreachable" for a node
-	// this API cannot call, and detail carries the words of whichever
-	// one it is.
+	// answers carries none of the three: panel is "disconnected" for a
+	// screen whose monitor is off its connector, compositor is "down"
+	// for a screen whose compositor is not serving, sidecar is
+	// "unreachable" for a node this API cannot call, and detail carries
+	// the words of whichever one it is.
+	Panel      string `json:"panel,omitempty"`
 	Compositor string `json:"compositor,omitempty"`
 	Sidecar    string `json:"sidecar,omitempty"`
 	Detail     string `json:"detail,omitempty"`

@@ -66,6 +66,31 @@ func newTestCluster(t *testing.T) *testCluster {
 					}},
 				},
 			},
+			// A screen whose monitor left its connector. It still
+			// carries the compositor condition a stopped compositor
+			// wrote, and the missing panel is the answer that stands.
+			"HDMI-A-4": {
+				Metadata: DisplayMeta{Name: "HDMI-A-4"},
+				Status: DisplayStatus{
+					Node:      "node-1",
+					Connector: "HDMI-A-4",
+					Mode:      &DisplayMode{Kernel: "3840x1600@60"},
+					Conditions: []DisplayCondition{
+						{
+							Type:    ConnectedCondition,
+							Status:  conditionFalse,
+							Reason:  "NoPanel",
+							Message: "no panel on HDMI-A-4",
+						},
+						{
+							Type:    CompositorServingCondition,
+							Status:  conditionFalse,
+							Reason:  CompositorDownReason,
+							Message: "dial unix /var/run/display.liken.sh/wayland-0: connect: no such file or directory",
+						},
+					},
+				},
+			},
 		},
 	}
 	cluster.Server = httptest.NewServer(http.HandlerFunc(cluster.answer))

@@ -315,16 +315,22 @@ func (s *apiServer) authorize(route apiRoute, name string, who *caller) *fault {
 	return nil
 }
 
-// A Display is absent, present with no node, or present with a
-// node whose compositor may or may not be serving. Each of the last
-// two is a 503 with Retry-After, not a 409: 409 is for a state the
-// caller can act on, and a Display waiting for its node is not one.
-// The two carry different types, because they are different waits.
-// A screen with no node is waiting for the scheduler, which is a
-// state every capture API has and which they share the type for. A
-// compositor that is not serving is display's own: the operator
-// restarts it, and the words the Display's own condition carries say
-// what it is doing.
+// A Display is absent, present with no node, present with no panel on
+// its connector, or present with a node whose compositor may or may
+// not be serving. A screen with no node and a screen whose compositor
+// is not serving are each a 503 with Retry-After, not a 409: 409 is
+// for a state the caller can act on, and neither wait is one. The two
+// carry different types, because they are different waits. A screen
+// with no node is waiting for the scheduler, which is a state every
+// capture API has and which they share the type for. A compositor
+// that is not serving is display's own: the operator restarts it, and
+// the words the Display's own condition carries say what it is doing.
+//
+// A screen with no panel is the 409. No wait brings an unplugged
+// monitor back, and a person acts on it by connecting the monitor. It
+// is checked before the compositor, because a Display whose monitor
+// left keeps whatever compositor condition it last had, and the
+// missing panel is the answer that holds either way.
 func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	screen, err := apiclient.Get[Display](s.client, DisplaysPath+"/"+name)
 	if err == apiclient.ErrNotFound {
@@ -335,6 +341,11 @@ func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	}
 	if screen.Status.Node == "" {
 		return nil, unavailable(problemNoNode, fmt.Sprintf("the Display %s names no node yet", name))
+	}
+	for _, condition := range screen.Status.Conditions {
+		if condition.Type == ConnectedCondition && condition.Status == conditionFalse {
+			return screen, noPanel(condition.Message)
+		}
 	}
 	for _, condition := range screen.Status.Conditions {
 		if condition.Type == CompositorServingCondition && condition.Status == conditionFalse {
@@ -424,12 +435,12 @@ func (s *apiServer) serveDocument(w http.ResponseWriter, r *http.Request, route 
 // events. Its Links point at the routes that capture the screen with
 // the related relation. A HEAD asks the node for nothing.
 //
-// A screen whose compositor is down, and a screen whose sidecar this
-// API cannot reach, answer 200 from the Display object alone: the
-// name, the node, and the mode the Display's status reports, with
-// what is wrong beside them. A caller asking what a screen is must
-// not need the screen to be up, and the members that come from the
-// node are left out rather than guessed.
+// A screen with no panel, a screen whose compositor is down, and a
+// screen whose sidecar this API cannot reach answer 200 from the
+// Display object alone: the name, the node, and the mode the
+// Display's status reports, with what is wrong beside them. A caller
+// asking what a screen is must not need the screen to be up, and the
+// members that come from the node are left out rather than guessed.
 func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiRoute,
 	name string, screen *Display, down *fault, id string, start time.Time, head bool) {
 	if head {
@@ -456,6 +467,9 @@ func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiR
 // What the info route answers with: the node's own reading of the
 // screen, or the Display's when the node cannot be asked.
 func (s *apiServer) screenInfo(r *http.Request, screen *Display, down *fault) (screenInfo, *fault) {
+	if down != nil && down.kind == problemNoPanel {
+		return staticInfo(screen, "panel", "disconnected", down.detail), nil
+	}
 	if down != nil {
 		return staticInfo(screen, "compositor", "down", down.detail), nil
 	}
@@ -480,11 +494,14 @@ func (s *apiServer) screenInfo(r *http.Request, screen *Display, down *fault) (s
 func staticInfo(screen *Display, part, state, detail string) screenInfo {
 	width, height, refresh := screenMode(screen)
 	info := screenInfo{Width: width, Height: height, Refresh: refresh, Detail: detail}
-	if part == "compositor" {
+	switch part {
+	case "panel":
+		info.Panel = state
+	case "compositor":
 		info.Compositor = state
-		return info
+	default:
+		info.Sidecar = state
 	}
-	info.Sidecar = state
 	return info
 }
 

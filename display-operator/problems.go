@@ -22,11 +22,11 @@ const (
 	displayProblemBase = "https://display.liken.sh/problems/"
 )
 
-// The seven typed problems this API answers with. no-node,
+// The eight typed problems this API answers with. no-node,
 // not-acceptable, capture-busy, and upstream-failed are shared with
-// the audio and media APIs. capture-denied, compositor-down, and
-// encoder-failed are display's own, because only this domain has a
-// compositor and an encoder.
+// the audio and media APIs. capture-denied, compositor-down,
+// encoder-failed, and no-panel are display's own, because only this
+// domain has a compositor, an encoder, and a panel on a connector.
 const (
 	problemBlank          = "about:blank"
 	problemNoNode         = sharedProblemBase + "no-node"
@@ -36,6 +36,7 @@ const (
 	problemCaptureDenied  = displayProblemBase + "capture-denied"
 	problemCompositorDown = displayProblemBase + "compositor-down"
 	problemEncoderFailed  = displayProblemBase + "encoder-failed"
+	problemNoPanel        = displayProblemBase + "no-panel"
 )
 
 // Every type this API answers with, for the OpenAPI document's own
@@ -51,6 +52,7 @@ func problemTypes() []string {
 		problemCaptureDenied,
 		problemCompositorDown,
 		problemEncoderFailed,
+		problemNoPanel,
 	}
 }
 
@@ -128,7 +130,7 @@ func newFault(status int, kind, detail string) *fault {
 	return &fault{status: status, kind: kind, title: faultTitle(kind, status), detail: detail}
 }
 
-// The titles of the seven typed problems. A title names the condition
+// The titles of the eight typed problems. A title names the condition
 // and never the one request it happened to; detail carries that.
 var problemTitles = map[string]string{
 	problemNoNode:         "The screen cannot be reached",
@@ -138,6 +140,7 @@ var problemTitles = map[string]string{
 	problemCaptureDenied:  "The compositor denied the capture",
 	problemCompositorDown: "The compositor is not serving this screen",
 	problemEncoderFailed:  "The encoder wrote no picture",
+	problemNoPanel:        "The screen has no panel on its connector",
 }
 
 func faultTitle(kind string, status int) string {
@@ -215,6 +218,15 @@ func unavailable(kind, detail string) *fault {
 	// of them.
 	f.headers = [][2]string{{"Retry-After", retryAfterSeconds}}
 	return f
+}
+
+// A screen whose monitor is off its connector is a 409, RFC 9110
+// section 15.5.10: the Display exists, so it is not a 404, and a retry
+// cannot help while the monitor stays unplugged, so it is not a 503
+// with Retry-After. The caller acts on it by connecting the monitor or
+// by asking for another screen.
+func noPanel(detail string) *fault {
+	return newFault(http.StatusConflict, problemNoPanel, detail)
 }
 
 func gatewayTimeout(detail string) *fault {

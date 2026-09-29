@@ -126,6 +126,14 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			detail: "connect: no such file or directory",
 		},
 		{
+			name:   "a screen with no panel on its connector",
+			method: http.MethodGet,
+			target: apiRoot + "/displays/HDMI-A-4/screen.png",
+			status: http.StatusConflict,
+			kind:   problemNoPanel,
+			detail: "no panel on HDMI-A-4",
+		},
+		{
 			name: "the output is being captured",
 			set: func(_ *testCluster, sidecar *sidecarFixture) {
 				sidecar.answers(answerProblem(http.StatusServiceUnavailable, problemCaptureBusy,
@@ -788,5 +796,44 @@ func TestTheAPIFlushesItsHeadersBeforeTheFirstByte(t *testing.T) {
 	}
 	if body := time.Since(sent); body < begin {
 		t.Errorf("the first body byte arrived %s after the request, want it at the %s beginning", body, begin)
+	}
+}
+
+// A retry cannot bring an unplugged monitor back, so the refusal of a
+// screen with no panel asks for no retry.
+func TestAScreenWithNoPanelAsksForNoRetry(t *testing.T) {
+	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-4/screen.png", nil)
+
+	if got := resp.Header.Get("Retry-After"); got != "" {
+		t.Errorf("the refusal carries Retry-After %q for a monitor that is not on the wire", got)
+	}
+}
+
+// The info route answers a screen with no panel from the Display
+// alone, and says that the panel is what is missing.
+func TestTheInfoRouteAnswersAScreenWithNoPanel(t *testing.T) {
+	sidecar := newSidecarFixture(t)
+	server := newTestAPI(t, newTestCluster(t), sidecar)
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-4", nil)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a screen with no panel answered %d, want 200", resp.StatusCode)
+	}
+	var info screenInfo
+	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Panel != "disconnected" || info.Compositor != "" || info.Sidecar != "" {
+		t.Errorf("the document says panel %q, compositor %q, sidecar %q, want panel disconnected alone",
+			info.Panel, info.Compositor, info.Sidecar)
+	}
+	if info.Detail != "no panel on HDMI-A-4" {
+		t.Errorf("the document's detail is %q, want the Connected condition's own words", info.Detail)
+	}
+	if sidecar.called() != 0 {
+		t.Errorf("the info route called the node %d times for a screen with no panel", sidecar.called())
 	}
 }

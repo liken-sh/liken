@@ -38,7 +38,8 @@
               "https://liken.sh/problems/upstream-failed",
               "https://display.liken.sh/problems/capture-denied",
               "https://display.liken.sh/problems/compositor-down",
-              "https://display.liken.sh/problems/encoder-failed"
+              "https://display.liken.sh/problems/encoder-failed",
+              "https://display.liken.sh/problems/no-panel"
             ],
             "format": "uri",
             "type": "string"
@@ -614,6 +615,16 @@
             },
             "description": "The Accept field excludes every form this route serves."
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -786,6 +797,16 @@
               }
             },
             "description": "The Accept field excludes every form this route serves."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1020,6 +1041,16 @@
             },
             "description": "The Accept field excludes every form this route serves."
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -1168,6 +1199,16 @@
               }
             },
             "description": "The Accept field excludes every form this route serves."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1393,6 +1434,16 @@
             },
             "description": "The Accept field excludes every form this route serves."
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -1541,6 +1592,16 @@
               }
             },
             "description": "The Accept field excludes every form this route serves."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -1775,6 +1836,16 @@
             },
             "description": "The Accept field excludes every form this route serves."
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -1923,6 +1994,16 @@
               }
             },
             "description": "The Accept field excludes every form this route serves."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {
@@ -2148,6 +2229,16 @@
             },
             "description": "The Accept field excludes every form this route serves."
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -2296,6 +2387,16 @@
               }
             },
             "description": "The Accept field excludes every form this route serves."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected."
           },
           "500": {
             "content": {

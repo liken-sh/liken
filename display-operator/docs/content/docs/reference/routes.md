@@ -200,6 +200,7 @@ The screen, in the format chosen by Accept
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -246,6 +247,7 @@ The screen, in the format chosen by Accept
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -316,6 +318,7 @@ One frame of the screen as JPEG
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -357,6 +360,7 @@ One frame of the screen as JPEG
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -426,6 +430,7 @@ A stream of the screen, one JPEG per frame
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -468,6 +473,7 @@ A stream of the screen, one JPEG per frame
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -537,6 +543,7 @@ A clip of the screen as H.264 in fragmented MP4
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -578,6 +585,7 @@ A clip of the screen as H.264 in fragmented MP4
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -645,6 +653,7 @@ One frame of the screen as PNG
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -685,6 +694,7 @@ One frame of the screen as PNG
 | 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
 | 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (no-panel). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
 | 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
@@ -799,7 +809,7 @@ The methods this route allows
 | <span id="problem--instance"></span>`instance` | string | yes |  |
 | <span id="problem--status"></span>`status` | integer | yes |  |
 | <span id="problem--title"></span>`title` | string | yes |  |
-| <span id="problem--type"></span>`type` | string (uri) | yes | One of: `about:blank`, `https://liken.sh/problems/no-node`, `https://liken.sh/problems/not-acceptable`, `https://liken.sh/problems/capture-busy`, `https://liken.sh/problems/upstream-failed`, `https://display.liken.sh/problems/capture-denied`, `https://display.liken.sh/problems/compositor-down`, `https://display.liken.sh/problems/encoder-failed`. |
+| <span id="problem--type"></span>`type` | string (uri) | yes | One of: `about:blank`, `https://liken.sh/problems/no-node`, `https://liken.sh/problems/not-acceptable`, `https://liken.sh/problems/capture-busy`, `https://liken.sh/problems/upstream-failed`, `https://display.liken.sh/problems/capture-denied`, `https://display.liken.sh/problems/compositor-down`, `https://display.liken.sh/problems/encoder-failed`, `https://display.liken.sh/problems/no-panel`. |
 
 #### Problem.acceptable[]
 
