@@ -18,6 +18,8 @@ import (
 	"errors"
 	"maps"
 	"slices"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The container name a person reads in kubectl logs, and the name label that
@@ -198,7 +200,7 @@ func (o *operator) standJellyfinService(ctx context.Context, catalog *NamespaceC
 	namespace, name := desired.Metadata.Namespace, desired.Metadata.Name
 
 	live, err := o.watched.readService(ctx, namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return o.createService(ctx, desired)
 	}
 	if err != nil {
@@ -241,7 +243,7 @@ func (o *operator) retireJellyfin(ctx context.Context, catalog *NamespaceCatalog
 
 	pod, err := o.readPod(ctx, namespace, name)
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, apiclient.ErrNotFound):
 	case err != nil:
 		return err
 	case pod.Metadata.Labels[scannerLabelKey] == jellyfinLabelValue:
@@ -253,7 +255,7 @@ func (o *operator) retireJellyfin(ctx context.Context, catalog *NamespaceCatalog
 
 	service, err := o.watched.readService(ctx, namespace, name)
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, apiclient.ErrNotFound):
 		return nil
 	case err != nil:
 		return err

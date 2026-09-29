@@ -6,14 +6,7 @@ package main
 // timer. The API server sends each change to the collection as it
 // happens, and a watch with no change to send costs nothing.
 //
-// client-go's reflector runs each watch. It reads the whole collection
-// first, as a list or as the initial events of a streaming list, and
-// then watches from the version that read returned, so it receives
-// every change made after the read. It resumes a watch that the API
-// server closed from the last version it delivered, reads the
-// collection again after a 410 Gone, and backs off while the API
-// server fails. Upstream maintains and tests that loop, so this
-// operator keeps none of its own.
+// The shared informer package runs each watch on client-go's reflector.
 //
 // Each informer holds the collection it watches, and a pass reads the
 // collection from that copy instead of listing it from the API server.
@@ -23,13 +16,8 @@ package main
 // objectcache.go, because the operator writes them and the copy can be
 // older than its own write.
 //
-// The operator imports only three parts of client-go for the watches:
-// the reflector and informer in tools/cache, the dynamic client that
-// lists and watches a custom resource with no generated code, and rest
-// for the in-cluster configuration. The typed clientset and the
-// informer factories link a client for every built-in kind. The
-// operator's own Client (apiclient.go) still sends every other read and
-// every write a pass makes.
+// The shared apiclient package still sends every other read and every
+// write a pass makes.
 //
 // This file is not in the pod build. The pods and Jobs the operator
 // creates run the same program with the build tag pod, and none of
@@ -37,20 +25,19 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // The eight collections this operator watches.
@@ -125,16 +112,16 @@ type watches struct {
 	// The client and the memos objectcache.go reads the Libraries, the
 	// Catalogs, and the MetadataProviders with. The memos are the
 	// operator's own, because the operator's writes note them.
-	client   *Client
+	client   *apiclient.Client
 	versions objectVersions
 
 	group sync.WaitGroup
 }
 
-// informer is what startWatches and settle need of one collection,
+// oneWatch is what startWatches and settle need of one collection,
 // whatever struct it decodes into.
-type informer interface {
-	run(ctx context.Context)
+type oneWatch interface {
+	wait()
 	settledOrEnded(ctx context.Context) error
 }
 
@@ -157,59 +144,59 @@ type informer interface {
 //     A field outside the operator's structs, such as a status field that
 //     only media-operator reads, wakes nothing.
 func startWatches(ctx context.Context, client dynamic.Interface, wake chan<- struct{}, m *metrics,
-	reader *Client, versions objectVersions) *watches {
+	reader *apiclient.Client, versions objectVersions) *watches {
 	w := &watches{
 		client:   reader,
 		versions: versions,
-		libraries: newCollection(client, wake, m, "libraries", kindLibrary, libraryResource, "",
+		libraries: newCollection(ctx, client, wake, m, "libraries", kindLibrary, libraryResource, "",
 			edited(func(library *Library) *ObjectMeta { return &library.Metadata })),
-		catalogs: newCollection(client, wake, m, "catalogs", kindCatalog, catalogResource, "",
+		catalogs: newCollection(ctx, client, wake, m, "catalogs", kindCatalog, catalogResource, "",
 			edited(func(catalog *NamespaceCatalog) *ObjectMeta { return &catalog.Metadata })),
-		memberPods: newCollection(client, wake, m, "catalog member pods", kindPod, podResource, catalogMemberSelector,
+		memberPods: newCollection(ctx, client, wake, m, "catalog member pods", kindPod, podResource, catalogMemberSelector,
 			readChanged(func(pod *Pod) *ObjectMeta { return &pod.Metadata })),
-		players: newCollection(client, wake, m, "players", kindPlayer, playerResource, "",
+		players: newCollection(ctx, client, wake, m, "players", kindPlayer, playerResource, "",
 			readChanged(func(player *Player) *ObjectMeta { return &player.Metadata })),
-		mediaPreferences: newCollection(client, wake, m, "media preferences", kindMediaPreferences,
+		mediaPreferences: newCollection(ctx, client, wake, m, "media preferences", kindMediaPreferences,
 			mediaPreferencesResource, "",
 			readChanged(func(preferences *MediaPreferences) *ObjectMeta { return &preferences.Metadata })),
-		metadataProviders: newCollection(client, wake, m, "metadata providers", kindMetadataProvider,
+		metadataProviders: newCollection(ctx, client, wake, m, "metadata providers", kindMetadataProvider,
 			metadataProviderResource, "",
 			edited(func(provider *MetadataProvider) *ObjectMeta { return &provider.Metadata })),
-		plays: newCollection(client, wake, m, "plays", kindPlay, playResource, "",
+		plays: newCollection(ctx, client, wake, m, "plays", kindPlay, playResource, "",
 			readChanged(func(play *Play) *ObjectMeta { return &play.Metadata })),
-		people: newCollection(client, wake, m, "people", kindPerson, personResource, "",
+		people: newCollection(ctx, client, wake, m, "people", kindPerson, personResource, "",
 			readChanged(func(person *Person) *ObjectMeta { return &person.Metadata })),
 
-		claims: newCollection(client, wake, m, "claims", kindClaim, claimResource, "",
+		claims: newCollection(ctx, client, wake, m, "claims", kindClaim, claimResource, "",
 			readChanged(func(claim *PersistentVolumeClaim) *ObjectMeta { return &claim.Metadata })),
-		volumes: newCollection(client, wake, m, "volumes", kindVolume, volumeResource, "",
+		volumes: newCollection(ctx, client, wake, m, "volumes", kindVolume, volumeResource, "",
 			readChanged(func(volume *PersistentVolume) *ObjectMeta { return &volume.Metadata })),
-		stoodPods: newCollection(client, wake, m, "stood pods", kindPod, podResource, stoodPodsSelector,
+		stoodPods: newCollection(ctx, client, wake, m, "stood pods", kindPod, podResource, stoodPodsSelector,
 			readChanged(func(pod *Pod) *ObjectMeta { return &pod.Metadata })),
-		progressMembers: newCollection(client, wake, m, "progress member pods", kindPod, podResource,
+		progressMembers: newCollection(ctx, client, wake, m, "progress member pods", kindPod, podResource,
 			progressMemberSelector, readChanged(func(pod *Pod) *ObjectMeta { return &pod.Metadata })),
-		workerJobs: newCollection(client, wake, m, "worker jobs", kindJob, jobResource, workerJobsSelector,
+		workerJobs: newCollection(ctx, client, wake, m, "worker jobs", kindJob, jobResource, workerJobsSelector,
 			readChanged(func(job *Job) *ObjectMeta { return &job.Metadata })),
-		nodes: newCollection(client, wake, m, "nodes", kindNode, nodeResource, "",
+		nodes: newCollection(ctx, client, wake, m, "nodes", kindNode, nodeResource, "",
 			readChanged(func(node *Node) *ObjectMeta { return &node.Metadata })),
-		services: newCollection(client, wake, m, "services", kindService, serviceResource, ownedServicesSelector,
+		services: newCollection(ctx, client, wake, m, "services", kindService, serviceResource, ownedServicesSelector,
 			addedOrRemoved[Service]),
-		endpointSlices: newCollection(client, wake, m, "endpoint slices", kindEndpointSlice, endpointSliceResource,
+		endpointSlices: newCollection(ctx, client, wake, m, "endpoint slices", kindEndpointSlice, endpointSliceResource,
 			ownedSlicesSelector, addedOrRemoved[EndpointSlice]),
-		configMaps: newCollection(client, wake, m, "people config maps", kindConfigMap, configMapResource,
+		configMaps: newCollection(ctx, client, wake, m, "people config maps", kindConfigMap, configMapResource,
 			ownedConfigMapsSelector, addedOrRemoved[ConfigMap]),
-		claimTemplates: newCollection(client, wake, m, "trickplay templates", kindClaimTemplate,
+		claimTemplates: newCollection(ctx, client, wake, m, "trickplay templates", kindClaimTemplate,
 			claimTemplateResource, ownedClaimTemplatesSelector, addedOrRemoved[ResourceClaimTemplate]),
 	}
 	for _, one := range w.all() {
-		w.group.Go(func() { one.run(ctx) })
+		w.group.Go(one.wait)
 	}
 	return w
 }
 
 // all is every informer, the seven the operator needs first.
-func (w *watches) all() []informer {
-	return []informer{w.libraries, w.catalogs, w.memberPods,
+func (w *watches) all() []oneWatch {
+	return []oneWatch{w.libraries, w.catalogs, w.memberPods,
 		w.claims, w.volumes, w.stoodPods, w.workerJobs,
 		w.players, w.mediaPreferences, w.metadataProviders, w.plays, w.people,
 		w.progressMembers, w.nodes, w.services, w.endpointSlices, w.configMaps, w.claimTemplates}
@@ -254,22 +241,22 @@ func (w *watches) settle(ctx context.Context) error {
 // A read of the Libraries or the Catalogs that fails ends the pass, the
 // way a failed list of them always has.
 func (w *watches) readLibraries(ctx context.Context) (*LibraryList, error) {
-	if !w.libraries.view().ready() {
+	if !w.libraries.read.Load() {
 		items, err := w.libraries.items()
 		return &LibraryList{Items: items}, err
 	}
-	items, err := currentList[Library](ctx, w.client,
-		heldObjects{view: w.libraries.view(), versions: w.versions.libraries}, namespacedPath(libraryPath))
+	items, err := informer.CurrentList[Library](w.client.WithContext(ctx),
+		informer.Held{View: w.libraries.view(), Versions: w.versions.libraries}, memo.NamespacedPath(libraryPath))
 	return &LibraryList{Items: items}, err
 }
 
 func (w *watches) readCatalogs(ctx context.Context) (*CatalogList, error) {
-	if !w.catalogs.view().ready() {
+	if !w.catalogs.read.Load() {
 		items, err := w.catalogs.items()
 		return &CatalogList{Items: items}, err
 	}
-	items, err := currentList[NamespaceCatalog](ctx, w.client,
-		heldObjects{view: w.catalogs.view(), versions: w.versions.catalogs}, namespacedPath(catalogPath))
+	items, err := informer.CurrentList[NamespaceCatalog](w.client.WithContext(ctx),
+		informer.Held{View: w.catalogs.view(), Versions: w.versions.catalogs}, memo.NamespacedPath(catalogPath))
 	return &CatalogList{Items: items}, err
 }
 
@@ -289,12 +276,12 @@ func (w *watches) readMediaPreferences() (*MediaPreferencesList, error) {
 }
 
 func (w *watches) readMetadataProviders(ctx context.Context) (*MetadataProviderList, error) {
-	if !w.metadataProviders.view().ready() {
+	if !w.metadataProviders.read.Load() {
 		items, err := w.metadataProviders.items()
 		return &MetadataProviderList{Items: items}, err
 	}
 	items := currentOrCached[MetadataProvider](ctx, w.client,
-		heldObjects{view: w.metadataProviders.view(), versions: w.versions.providers}, namespacedPath(metadataProviderPath))
+		informer.Held{View: w.metadataProviders.view(), Versions: w.versions.providers}, memo.NamespacedPath(metadataProviderPath))
 	return &MetadataProviderList{Items: items}, nil
 }
 
@@ -335,31 +322,30 @@ func (w *watches) readProgressMembers() (*PodList, error) {
 // deleted that the store still holds.
 //
 // Each Job takes a new name, so the memo forgets each Job that is gone
-// (forgetGone), or it would hold a record of every Job for the life of
-// the process.
+// (memo.Versions.ForgetGone), or it would hold a record of every Job for
+// the life of the process.
 func (w *watches) readWorkerJobs(ctx context.Context) (*JobList, error) {
-	view := w.workerJobs.view()
-	if !view.ready() {
+	if !w.workerJobs.read.Load() {
 		items, err := w.workerJobs.items()
 		return &JobList{Items: items}, err
 	}
-	return currentJobs(ctx, w.client, heldObjects{view: view, versions: w.versions.jobs})
+	return currentJobs(ctx, w.client, informer.Held{View: w.workerJobs.view(), Versions: w.versions.jobs})
 }
 
 // currentJobs answers the worker Jobs from a store that holds its first
 // read, through the memo, and forgets each Job that is gone.
-func currentJobs(ctx context.Context, c *Client, held heldObjects) (*JobList, error) {
-	held.view.whole = true
-	items, err := currentList[Job](ctx, c, held,
-		namespacedPath(func(namespace, name string) string { return jobsPath(namespace) + "/" + name }))
+func currentJobs(ctx context.Context, c *apiclient.Client, held informer.Held) (*JobList, error) {
+	held.View.Whole = true
+	items, err := informer.CurrentList[Job](c.WithContext(ctx), held,
+		memo.NamespacedPath(func(namespace, name string) string { return jobsPath(namespace) + "/" + name }))
 	if err != nil {
 		return nil, err
 	}
 	listed := make(map[string]bool, len(items))
 	for index := range items {
-		listed[storeKey(&items[index].Metadata)] = true
+		listed[informer.Key(&items[index].Metadata)] = true
 	}
-	held.versions.forgetGone(held.view.store, listed)
+	held.Versions.ForgetGone(held.View.Store, listed)
 	return &JobList{Items: items}, nil
 }
 
@@ -369,25 +355,25 @@ func (w *watches) readNodes() (*NodeList, error) {
 }
 
 func (w *watches) readService(ctx context.Context, namespace, name string) (*Service, error) {
-	return readStood[Service](ctx, w.client, heldObjects{view: w.services.view(), versions: w.versions.services},
-		storeKey(&ObjectMeta{Namespace: namespace, Name: name}), servicesPath(namespace)+"/"+name)
+	return readStood[Service](ctx, w.client, informer.Held{View: w.services.view(), Versions: w.versions.services},
+		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), servicesPath(namespace)+"/"+name)
 }
 
 func (w *watches) readEndpointSlice(ctx context.Context, namespace, name string) (*EndpointSlice, error) {
 	return readStood[EndpointSlice](ctx, w.client,
-		heldObjects{view: w.endpointSlices.view(), versions: w.versions.endpointSlices},
-		storeKey(&ObjectMeta{Namespace: namespace, Name: name}), endpointSlicesPath(namespace)+"/"+name)
+		informer.Held{View: w.endpointSlices.view(), Versions: w.versions.endpointSlices},
+		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), endpointSlicesPath(namespace)+"/"+name)
 }
 
 func (w *watches) readClaimTemplate(ctx context.Context, namespace, name string) (*ResourceClaimTemplate, error) {
 	return readStood[ResourceClaimTemplate](ctx, w.client,
-		heldObjects{view: w.claimTemplates.view(), versions: w.versions.claimTemplates},
-		storeKey(&ObjectMeta{Namespace: namespace, Name: name}), claimTemplatesPath(namespace)+"/"+name)
+		informer.Held{View: w.claimTemplates.view(), Versions: w.versions.claimTemplates},
+		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), claimTemplatesPath(namespace)+"/"+name)
 }
 
 func (w *watches) readConfigMap(ctx context.Context, namespace, name string) (*ConfigMap, error) {
-	return readStood[ConfigMap](ctx, w.client, heldObjects{view: w.configMaps.view(), versions: w.versions.configMaps},
-		storeKey(&ObjectMeta{Namespace: namespace, Name: name}), configMapsPath(namespace)+"/"+name)
+	return readStood[ConfigMap](ctx, w.client, informer.Held{View: w.configMaps.view(), Versions: w.versions.configMaps},
+		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), configMapsPath(namespace)+"/"+name)
 }
 
 // collection is one informer, and the state of its first read.
@@ -398,75 +384,44 @@ type collection[T any] struct {
 	// pass.
 	changed func(before, after T) bool
 
-	store    cache.Store
-	informer cache.Controller
+	watch *informer.Collection
 
 	// settled closes when the first read has succeeded or has failed.
-	// failure holds the last failed read, until a read succeeds.
+	// failure holds the last failed read, until a read succeeds. read is
+	// true once the informer has read the whole collection.
 	settled    chan struct{}
 	settleOnce sync.Once
 	mu         sync.Mutex
 	failure    error
+	read       atomic.Bool
 }
 
-// newCollection builds one informer and starts nothing. A label
+// newCollection starts one informer, which runs until ctx ends. A label
 // selector, when it is not empty, narrows the list and the watch to the
 // objects that carry that label. The watch of a namespaced resource
-// covers every namespace.
-func newCollection[T any](client dynamic.Interface, wake chan<- struct{}, m *metrics,
+// covers every namespace. Every watch the API server accepts after the
+// first counts as a restart.
+func newCollection[T any](ctx context.Context, client dynamic.Interface, wake chan<- struct{}, m *metrics,
 	what, kind string, resource schema.GroupVersionResource, selector string,
 	changed func(before, after T) bool) *collection[T] {
 	c := &collection[T]{what: what, changed: changed, settled: make(chan struct{})}
-	source := client.Resource(resource)
-	var opened atomic.Int64
-	lister := &cache.ListWatch{
-		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
-			options.LabelSelector = selector
-			list, err := source.List(ctx, options)
-			if err != nil {
-				c.failed(err)
-			}
-			return list, err
-		},
-		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			options.LabelSelector = selector
-			// Every watch after the first is one the reflector opened
-			// again, after the API server closed one or a read failed.
-			if opened.Add(1) > 1 {
-				m.recordWatchRestart(kind)
-			}
-			return source.Watch(ctx, options)
-		},
-	}
 	signal := func() { poke(wake) }
-	c.store, c.informer = cache.NewInformerWithOptions(cache.InformerOptions{
-		ListerWatcher: lister,
-		ObjectType:    &unstructured.Unstructured{},
+	c.watch = informer.Start(ctx, client, informer.Source{Resource: resource, LabelSelector: selector}, informer.Options{
 		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc:    func(object any) { c.added(object, signal) },
 			UpdateFunc: func(before, after any) { c.updated(before, after, signal) },
 			DeleteFunc: func(object any) { c.removed(object, signal) },
 		},
-		Transform: dropManagedFields,
+		Synced:     c.succeeded,
+		Reopened:   func() { m.recordWatchRestart(kind) },
+		ListFailed: c.failed,
+		Transform:  dropNodeImages,
 	})
 	return c
 }
 
-// run keeps the collection current until ctx ends.
-func (c *collection[T]) run(ctx context.Context) {
-	var group sync.WaitGroup
-	group.Go(func() {
-		select {
-		case <-c.informer.HasSyncedChecker().Done():
-			c.succeeded()
-		case <-ctx.Done():
-		}
-	})
-	// RunWithContext returns after the informer's last handler call, and
-	// the goroutine above ends with ctx, so run returns only after both.
-	c.informer.RunWithContext(ctx)
-	group.Wait()
-}
+// wait returns after the informer's last handler call, once ctx ends.
+func (c *collection[T]) wait() { <-c.watch.Done() }
 
 // failed records a read that failed, and settles the collection if it
 // has not been read yet.
@@ -483,6 +438,7 @@ func (c *collection[T]) succeeded() {
 	c.mu.Lock()
 	c.failure = nil
 	c.mu.Unlock()
+	c.read.Store(true)
 	c.settleOnce.Do(func() { close(c.settled) })
 }
 
@@ -496,27 +452,25 @@ func (c *collection[T]) settledOrEnded(ctx context.Context) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.failure != nil && !c.informer.HasSynced() {
+	if c.failure != nil && !c.read.Load() {
 		return c.failure
 	}
 	return nil
 }
 
 // view is the informer's store, for objectcache.go.
-func (c *collection[T]) view() storeView {
-	return storeView{store: c.store, synced: c.informer.HasSynced}
-}
+func (c *collection[T]) view() informer.View { return c.watch.View() }
 
 // items answers every object the informer holds, in namespace and name
 // order, the order a list from the API server takes, through the shared
-// cachedList. Before the first read succeeds it answers that read's
-// error. An object that does not convert is logged and left out, the rule
-// every liken-sh operator follows. The Libraries, the Catalogs, and the
-// MetadataProviders are read through currentList instead, which reads
-// such an object from the API server, so a pass never reads a Library
-// that is there as one that is gone.
+// informer.CachedList. Before the first read succeeds it answers that
+// read's error. An object that does not convert is logged and left out,
+// the rule every liken-sh operator follows. The Libraries, the Catalogs,
+// and the MetadataProviders are read through informer.CurrentList
+// instead, which reads such an object from the API server, so a pass
+// never reads a Library that is there as one that is gone.
 func (c *collection[T]) items() ([]T, error) {
-	if !c.informer.HasSynced() {
+	if !c.read.Load() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		if c.failure != nil {
@@ -524,23 +478,23 @@ func (c *collection[T]) items() ([]T, error) {
 		}
 		return nil, fmt.Errorf("the %s have not been read yet", c.what)
 	}
-	return cachedList[T](c.view()), nil
+	return informer.CachedList[T](c.view()), nil
 }
 
 // added wakes the pass for a new object. The informer also reports the
 // first read of the collection this way, one object at a time, and a
 // read after a gap in the watch as the differences from what it held.
 func (c *collection[T]) added(object any, wake func()) {
-	if _, err := convert[T](object); err != nil {
-		reportUnconverted(c.what, err)
+	if _, err := informer.Convert[T](object); err != nil {
+		informer.Report("the "+c.what, err)
 	}
 	wake()
 }
 
 // removed wakes the pass for an object the API server removed.
 func (c *collection[T]) removed(object any, wake func()) {
-	if _, err := convert[T](object); err != nil {
-		reportUnconverted(c.what, err)
+	if _, err := informer.Convert[T](object); err != nil {
+		informer.Report("the "+c.what, err)
 	}
 	wake()
 }
@@ -549,13 +503,13 @@ func (c *collection[T]) removed(object any, wake func()) {
 // one the pass acts on. A copy that does not convert is reported, and
 // the change wakes the pass, because nothing says what it changed.
 func (c *collection[T]) updated(before, after any, wake func()) {
-	now, err := convert[T](after)
+	now, err := informer.Convert[T](after)
 	if err != nil {
-		reportUnconverted(c.what, err)
+		informer.Report("the "+c.what, err)
 		wake()
 		return
 	}
-	was, err := convert[T](before)
+	was, err := informer.Convert[T](before)
 	if err != nil || c.changed(was, now) {
 		wake()
 	}
@@ -593,72 +547,11 @@ func readChanged[T any](meta func(*T) *ObjectMeta) func(before, after T) bool {
 // An edit by another writer waits for the next pass.
 func addedOrRemoved[T any](before, after T) bool { return false }
 
-// dropManagedFields removes metadata.managedFields from each object
-// before the informer stores it. The field records which client set
-// each field of the object. The operator never reads it, and without
-// the transform the informer holds a copy of it for every object.
-//
-// A Node also drops status.images, the list of every image its runtime
-// holds, which is most of a Node's size and which the operator never reads.
-func dropManagedFields(object any) (any, error) {
-	if item, ok := object.(*unstructured.Unstructured); ok {
-		item.SetManagedFields(nil)
-		if item.GetKind() == "Node" {
-			unstructured.RemoveNestedField(item.Object, "status", "images")
-		}
+// dropNodeImages removes status.images from a Node before the informer
+// stores it. The field lists every image the Node's runtime holds, which
+// is most of a Node's size, and the operator never reads it.
+func dropNodeImages(item *unstructured.Unstructured) {
+	if item.GetKind() == "Node" {
+		unstructured.RemoveNestedField(item.Object, "status", "images")
 	}
-	return object, nil
-}
-
-// convert decodes one object from a watch into the operator's own
-// struct. The informer hands a handler an *unstructured.Unstructured,
-// or, for an object that was deleted while the watch was down, a
-// tombstone that holds the last copy the informer knew. A tombstone can
-// hold no copy at all.
-//
-// An object that does not convert has a field whose type differs from
-// the operator's struct, so the CRD schema and the struct disagree. The
-// error names the object, and the caller logs it, because an object
-// that is dropped with no word leaves nobody a way to find out why the
-// operator ignored an edit.
-func convert[T any](object any) (T, error) {
-	var out T
-	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok {
-		object = tombstone.Obj
-	}
-	item, ok := object.(*unstructured.Unstructured)
-	if !ok {
-		return out, fmt.Errorf("the watch delivered a %T, not an object", object)
-	}
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &out)
-	if err == nil {
-		return out, nil
-	}
-	// The converter reads a field into the struct's own field type and
-	// does not call the type's UnmarshalJSON. A Service's targetPort is a
-	// number or a name, which TargetPort reads only through its
-	// UnmarshalJSON, so an object the converter refuses is decoded again
-	// from its JSON, the way a read from the API server decodes it.
-	body, marshalErr := json.Marshal(item.Object)
-	if marshalErr == nil {
-		var decoded T
-		if json.Unmarshal(body, &decoded) == nil {
-			return decoded, nil
-		}
-	}
-	return out, fmt.Errorf("%s %s does not convert: %w", item.GetKind(), objectName(item), err)
-}
-
-// objectName is namespace/name for a namespaced object and name for a
-// cluster-scoped one.
-func objectName(item *unstructured.Unstructured) string {
-	if item.GetNamespace() == "" {
-		return item.GetName()
-	}
-	return item.GetNamespace() + "/" + item.GetName()
-}
-
-// reportUnconverted logs an object that convert refused.
-func reportUnconverted(what string, err error) {
-	fmt.Fprintf(os.Stderr, "watching the %s: %v\n", what, err)
 }

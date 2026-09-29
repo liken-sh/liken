@@ -17,6 +17,9 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // gossipCluster is one of the two Corrosion clusters a namespace
@@ -163,7 +166,7 @@ func (o *operator) standGossipService(ctx context.Context, cluster gossipCluster
 	desired := buildGossipService(cluster, namespace, owners)
 
 	live, err := o.watched.readService(ctx, namespace, cluster.service)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return o.createService(ctx, desired)
 	}
 	if err != nil {
@@ -187,10 +190,10 @@ func (o *operator) standGossipService(ctx context.Context, cluster gossipCluster
 // Service from the API server, and a Service the watch does not select
 // yet, such as one with no label, is read and written anyway.
 func (o *operator) createService(ctx context.Context, service *Service) error {
-	_, err := written(o.versions.services, storeKey(&service.Metadata), func() (*Service, error) {
+	_, err := memo.Written(o.versions.services, memo.Key(&service.Metadata), func() (*Service, error) {
 		return CreateService(ctx, o.client, service)
 	})
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		return nil
 	}
 	return err
@@ -200,7 +203,7 @@ func (o *operator) createService(ctx context.Context, service *Service) error {
 // server answered. A conflict is left to the next pass, which reads the
 // Service from the API server because the memo holds no version.
 func (o *operator) updateService(ctx context.Context, service *Service) error {
-	_, err := written(o.versions.services, storeKey(&service.Metadata), func() (*Service, error) {
+	_, err := memo.Written(o.versions.services, memo.Key(&service.Metadata), func() (*Service, error) {
 		return UpdateService(ctx, o.client, service)
 	})
 	return err

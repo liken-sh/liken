@@ -18,6 +18,9 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // The group Jobs and CronJobs belong to.
@@ -164,13 +167,13 @@ const workerJobsSelector = scannerLabelKey + "=" + workerLabelValue
 // default policy of orphaning would leave behind holding the claim.
 const backgroundDeletion = "?propagationPolicy=Background"
 
-func CreateJob(ctx context.Context, c *Client, job *Job) (*Job, error) {
+func CreateJob(ctx context.Context, c *apiclient.Client, job *Job) (*Job, error) {
 	body, err := json.Marshal(job)
 	if err != nil {
 		return nil, err
 	}
 	created := &Job{}
-	if err := c.RequestJSON(ctx, http.MethodPost, jobsPath(job.Metadata.Namespace), body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, jobsPath(job.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -179,7 +182,7 @@ func CreateJob(ctx context.Context, c *Client, job *Job) (*Job, error) {
 // createJob creates one worker Job and notes the version the API server
 // answered, so the next pass lists the Job before the watch delivers it.
 func (o *operator) createJob(ctx context.Context, job *Job) (*Job, error) {
-	return written(o.versions.jobs, storeKey(&job.Metadata), func() (*Job, error) {
+	return memo.Written(o.versions.jobs, memo.Key(&job.Metadata), func() (*Job, error) {
 		return CreateJob(ctx, o.client, job)
 	})
 }
@@ -188,17 +191,17 @@ func (o *operator) createJob(ctx context.Context, job *Job) (*Job, error) {
 // copy of it, so the next pass reads it from the API server, and leaves
 // it out, while the watch's store still holds it.
 func (o *operator) deleteJob(ctx context.Context, namespace, name string) error {
-	return o.versions.jobs.send(storeKey(&ObjectMeta{Namespace: namespace, Name: name}), func() (string, error) {
+	return o.versions.jobs.Send(memo.Key(&ObjectMeta{Namespace: namespace, Name: name}), func() (string, error) {
 		return "", DeleteJob(ctx, o.client, namespace, name)
 	})
 }
 
 // DeleteJob removes one Job and the pods under it. An already-absent
 // Job is success, the rule DeletePod follows.
-func DeleteJob(ctx context.Context, c *Client, namespace, name string) error {
+func DeleteJob(ctx context.Context, c *apiclient.Client, namespace, name string) error {
 	path := jobsPath(namespace) + "/" + name + backgroundDeletion
-	err := c.RequestJSON(ctx, http.MethodDelete, path, nil, nil)
-	if errors.Is(err, ErrNotFound) {
+	err := c.WithContext(ctx).RequestJSON(http.MethodDelete, path, nil, nil)
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err
@@ -248,10 +251,10 @@ func (o *operator) mayRestandFailed(key string, now time.Time) bool {
 // DeleteCronJob removes the CronJob an earlier release ran a Library's
 // walk from. An already-absent CronJob is success, the rule DeleteJob
 // follows.
-func DeleteCronJob(ctx context.Context, c *Client, namespace, name string) error {
+func DeleteCronJob(ctx context.Context, c *apiclient.Client, namespace, name string) error {
 	path := cronJobsPath(namespace) + "/" + name + backgroundDeletion
-	err := c.RequestJSON(ctx, http.MethodDelete, path, nil, nil)
-	if errors.Is(err, ErrNotFound) {
+	err := c.WithContext(ctx).RequestJSON(http.MethodDelete, path, nil, nil)
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err

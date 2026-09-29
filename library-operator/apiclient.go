@@ -1,171 +1,49 @@
 package main
 
-// This is a Kubernetes client written straight against the HTTP API,
-// following liken's own (kubernetes/apiclient.go) and the media
-// operator's: the API is HTTPS that serves JSON, and the operator's
-// structs hold only the fields it reads. Every write, and every read
-// that the watches do not answer, goes through it. Only the watches and
-// the Lease use client-go (watch.go and leader.go), and the pod build
-// links no client-go.
-//
-// Every pod already holds what it needs to reach the API server.
-// Kubernetes injects two environment variables that name the
-// server's in-cluster address, and the kubelet mounts a CA
-// certificate and a ServiceAccount token at a known path.
+// The shared apiclient package sends every write, and every read that
+// the watches do not answer. Each request carries the context of the
+// pass that sends it (apiclient.Client.WithContext), so a pass that ends
+// takes its requests with it. The shared client imports nothing from
+// k8s.io, so the pod build links no client-go. Only the watches and the
+// Lease use client-go (watch.go and leader.go).
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
-	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The path the kubelet mounts the ServiceAccount credentials on.
-const defaultServiceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
-
-// ServiceAccountDir is a variable so a test points it at a directory
+// serviceAccountDir is a variable so a test points it at a directory
 // it controls.
-var serviceAccountDir = defaultServiceAccountDir
+var serviceAccountDir = apiclient.ServiceAccountDir
 
-// These two answers are values, not failures. An absent object is the
-// normal state the caller answers by creating it, and a conflict is
-// the normal state under optimistic concurrency that the caller
-// answers by reading again.
-var (
-	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("conflict: something else wrote this object first")
-)
-
-type Client struct {
-	base        string
-	http        *http.Client
-	credentials string
+// inClusterClient builds the client from the pod's environment and its
+// ServiceAccount.
+func inClusterClient() (*apiclient.Client, error) {
+	return apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir})
 }
 
-// NewClient builds a client from its three parts. InClusterClient
-// reads them from the pod's environment; a test hands in an
-// httptest server's base and no credentials.
-func NewClient(base string, httpClient *http.Client, credentials string) *Client {
-	return &Client{base: base, http: httpClient, credentials: credentials}
+// inClusterBase is the address the in-cluster client reaches the API
+// server at, from the two variables Kubernetes injects into every pod.
+func inClusterBase() string {
+	return "https://" + os.Getenv("KUBERNETES_SERVICE_HOST") + ":" + os.Getenv("KUBERNETES_SERVICE_PORT")
 }
 
-func InClusterClient() (*Client, error) {
-	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
-	if host == "" || port == "" {
-		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
-	}
-
-	// The client trusts the cluster's own CA and not the system
-	// store, so it accepts this API server and no other server that
-	// answers on the address.
-	caPEM, err := os.ReadFile(serviceAccountDir + "/ca.crt")
-	if err != nil {
-		return nil, fmt.Errorf("reading service account CA: %w", err)
-	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("service account CA contains no certificates")
-	}
-
-	return NewClient("https://"+host+":"+port, &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{RootCAs: roots},
-			// Each timeout bounds the same failure: a server that
-			// stops answering without sending anything. There is no
-			// overall client timeout, because every request carries
-			// the context of the pass that sends it, and the pass
-			// bounds it.
-			DialContext: (&net.Dialer{
-				Timeout:   5 * time.Second,
-				KeepAlive: 10 * time.Second,
-			}).DialContext,
-			ResponseHeaderTimeout: 10 * time.Second,
-			IdleConnTimeout:       30 * time.Second,
-		},
-	}, serviceAccountDir), nil
-}
-
-// RequestJSON sends one request and decodes the answer, turning every
-// non-2xx status into an error that carries the server's own message.
-func (c *Client) RequestJSON(ctx context.Context, method, path string, body []byte, out any) error {
-	return c.RequestWithType(ctx, method, path, jsonContentType, body, out)
-}
-
-// The two content types this client sends. A PATCH needs its own,
-// because the API server reads which patch dialect a request speaks
-// from the Content-Type header alone.
+// The two content types the operator's requests send. A PATCH states
+// its own, because the API server reads which patch dialect a request
+// speaks from the Content-Type header alone. The metadata providers and
+// Jellyfin take JSON too.
 const (
 	jsonContentType = "application/json"
 	mergePatchType  = "application/merge-patch+json"
 )
 
-// RequestWithType is RequestJSON with the request's own content type
-// stated, which is what a merge patch needs.
-func (c *Client) RequestWithType(ctx context.Context, method, path, contentType string, body []byte, out any) error {
-	resp, err := c.do(ctx, method, path, contentType, body)
-	if err != nil {
-		return err
-	}
-	defer drain(resp.Body)
-
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrNotFound
-	}
-	if resp.StatusCode == http.StatusConflict {
-		return ErrConflict
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
-	}
-	if out == nil {
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-// do sends one request and hands back the open response, which is what
-// RequestWithType is built on. The body's content type is stated, so
-// one request path sends both a JSON write and a merge patch.
-//
-// The context is the caller's, so a pass that ends takes its requests
-// with it.
-func (c *Client) do(ctx context.Context, method, path, contentType string, body []byte) (*http.Response, error) {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, reader)
-	if err != nil {
-		return nil, err
-	}
-	// The token is read from disk on every request. The mounted
-	// token is short-lived and the kubelet refreshes the file as
-	// each one nears expiry, so a client that held one in memory
-	// would start getting 401s.
-	if c.credentials != "" {
-		token, err := os.ReadFile(c.credentials + "/token")
-		if err != nil {
-			return nil, fmt.Errorf("reading service account token: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+string(token))
-	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", contentType)
-	}
-	return c.http.Do(req)
-}
-
-// Drain reads whatever the caller left in the body, then closes it.
+// drain reads whatever the caller left in the body, then closes it.
 // Go returns a connection to its pool only when the body reaches
 // EOF, so an early close costs a fresh connection and TLS handshake,
 // and reaches the server as a hang-up on a request it answered.
@@ -186,9 +64,9 @@ type Version struct {
 	GitVersion string `json:"gitVersion"`
 }
 
-func ServerVersion(ctx context.Context, client *Client) (Version, error) {
+func ServerVersion(ctx context.Context, client *apiclient.Client) (Version, error) {
 	var version Version
-	if err := client.RequestJSON(ctx, http.MethodGet, versionPath, nil, &version); err != nil {
+	if err := client.WithContext(ctx).RequestJSON(http.MethodGet, versionPath, nil, &version); err != nil {
 		return Version{}, err
 	}
 	return version, nil
@@ -297,8 +175,8 @@ func configMapsPath(namespace string) string {
 // which would take a person's own labels and annotations off the
 // Library. The resourceVersion inside the patch makes the write
 // conditional the same way a replace is: a write that raced another
-// answers ErrConflict instead of clobbering it.
-func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, resourceVersion string, finalizers []string) (string, error) {
+// answers apiclient.ErrConflict instead of clobbering it.
+func PatchLibraryFinalizers(ctx context.Context, c *apiclient.Client, namespace, name, resourceVersion string, finalizers []string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"metadata": map[string]any{
 			"resourceVersion": resourceVersion,
@@ -312,7 +190,7 @@ func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, res
 		Metadata ObjectMeta `json:"metadata"`
 	}
 	path := libraryPath(namespace, name)
-	if err := c.RequestWithType(ctx, http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
+	if err := c.WithContext(ctx).Request(http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
 		return "", err
 	}
 	return patched.Metadata.ResourceVersion, nil
@@ -320,13 +198,13 @@ func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, res
 
 // GetPersistentVolumeClaim reads the claim a Library names, for two
 // answers: whether it is bound, and which volume it is bound to. An
-// absent claim is ErrNotFound, which the pass reports as the
+// absent claim is apiclient.ErrNotFound, which the pass reports as the
 // ClaimNotFound reason rather than as a failure. It also reads the
 // catalog claim the operator provisions, to tell an existing one from
 // none.
-func GetPersistentVolumeClaim(ctx context.Context, c *Client, namespace, name string) (*PersistentVolumeClaim, error) {
+func GetPersistentVolumeClaim(ctx context.Context, c *apiclient.Client, namespace, name string) (*PersistentVolumeClaim, error) {
 	claim := &PersistentVolumeClaim{}
-	if err := c.RequestJSON(ctx, http.MethodGet, claimPath(namespace, name), nil, claim); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, claimPath(namespace, name), nil, claim); err != nil {
 		return nil, err
 	}
 	return claim, nil
@@ -335,13 +213,13 @@ func GetPersistentVolumeClaim(ctx context.Context, c *Client, namespace, name st
 // CreatePersistentVolumeClaim provisions a catalog claim: a Library's,
 // the catalog pod's, or a screen's. The operator creates one once and never
 // updates it, because a claim's spec is immutable once it binds.
-func CreatePersistentVolumeClaim(ctx context.Context, c *Client, claim *PersistentVolumeClaim) (*PersistentVolumeClaim, error) {
+func CreatePersistentVolumeClaim(ctx context.Context, c *apiclient.Client, claim *PersistentVolumeClaim) (*PersistentVolumeClaim, error) {
 	body, err := json.Marshal(claim)
 	if err != nil {
 		return nil, err
 	}
 	created := &PersistentVolumeClaim{}
-	if err := c.RequestJSON(ctx, http.MethodPost, claimsPath(claim.Metadata.Namespace), body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, claimsPath(claim.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -351,9 +229,9 @@ func CreatePersistentVolumeClaim(ctx context.Context, c *Client, claim *Persiste
 // the scheduler cannot place. It is the one claim this operator deletes. An
 // already-absent claim is success, because the operator deletes the claim to
 // replace it and a delete that races another pass must not fail.
-func DeletePersistentVolumeClaim(ctx context.Context, c *Client, namespace, name string) error {
-	err := c.RequestJSON(ctx, http.MethodDelete, claimPath(namespace, name), nil, nil)
-	if errors.Is(err, ErrNotFound) {
+func DeletePersistentVolumeClaim(ctx context.Context, c *apiclient.Client, namespace, name string) error {
+	err := c.WithContext(ctx).RequestJSON(http.MethodDelete, claimPath(namespace, name), nil, nil)
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err
@@ -362,20 +240,20 @@ func DeletePersistentVolumeClaim(ctx context.Context, c *Client, namespace, name
 // GetPersistentVolume reads the volume behind a bound claim, for what
 // serves it. A PersistentVolume is cluster-scoped, so the path carries
 // no namespace.
-func GetPersistentVolume(ctx context.Context, c *Client, name string) (*PersistentVolume, error) {
+func GetPersistentVolume(ctx context.Context, c *apiclient.Client, name string) (*PersistentVolume, error) {
 	volume := &PersistentVolume{}
-	if err := c.RequestJSON(ctx, http.MethodGet, volumesPath+"/"+name, nil, volume); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, volumesPath+"/"+name, nil, volume); err != nil {
 		return nil, err
 	}
 	return volume, nil
 }
 
 // GetStorageClass reads the class a claim names, for its provisioner. A
-// class the cluster does not serve is ErrNotFound, which the caller reads
+// class the cluster does not serve is apiclient.ErrNotFound, which the caller reads
 // as a class that is not per-node.
-func GetStorageClass(ctx context.Context, c *Client, name string) (*StorageClass, error) {
+func GetStorageClass(ctx context.Context, c *apiclient.Client, name string) (*StorageClass, error) {
 	class := &StorageClass{}
-	if err := c.RequestJSON(ctx, http.MethodGet, storageClassesPath+"/"+name, nil, class); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, storageClassesPath+"/"+name, nil, class); err != nil {
 		return nil, err
 	}
 	return class, nil
@@ -384,9 +262,9 @@ func GetStorageClass(ctx context.Context, c *Client, name string) (*StorageClass
 // ListStorageClasses reads every class the cluster serves, for the one class
 // whose provisioner is per-node. The cache of a provider's dataset files
 // needs that class whatever class the libraries use.
-func ListStorageClasses(ctx context.Context, c *Client) (*StorageClassList, error) {
+func ListStorageClasses(ctx context.Context, c *apiclient.Client) (*StorageClassList, error) {
 	list := &StorageClassList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, storageClassesPath, nil, list); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, storageClassesPath, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil
@@ -395,13 +273,13 @@ func ListStorageClasses(ctx context.Context, c *Client) (*StorageClassList, erro
 // CreatePersistentVolume writes the volume a per-node claim binds to. The
 // operator writes it before the claim, because the claim names it and no
 // provisioner answers a claim of that class.
-func CreatePersistentVolume(ctx context.Context, c *Client, volume *PersistentVolume) (*PersistentVolume, error) {
+func CreatePersistentVolume(ctx context.Context, c *apiclient.Client, volume *PersistentVolume) (*PersistentVolume, error) {
 	body, err := json.Marshal(volume)
 	if err != nil {
 		return nil, err
 	}
 	created := &PersistentVolume{}
-	if err := c.RequestJSON(ctx, http.MethodPost, volumesPath, body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, volumesPath, body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -430,33 +308,33 @@ func uidPrecondition(uid string) ([]byte, error) {
 // fresh one of the same name before the store holds the fresh one. The
 // API server refuses a delete whose uid is not the volume's with a 409,
 // so the delete never takes the fresh volume, and the refusal is success.
-func DeletePersistentVolume(ctx context.Context, c *Client, name, uid string) error {
+func DeletePersistentVolume(ctx context.Context, c *apiclient.Client, name, uid string) error {
 	body, err := uidPrecondition(uid)
 	if err != nil {
 		return err
 	}
-	err = c.RequestJSON(ctx, http.MethodDelete, volumesPath+"/"+name, body, nil)
-	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) {
+	err = c.WithContext(ctx).RequestJSON(http.MethodDelete, volumesPath+"/"+name, body, nil)
+	if errors.Is(err, apiclient.ErrNotFound) || errors.Is(err, apiclient.ErrConflict) {
 		return nil
 	}
 	return err
 }
 
-func GetPod(ctx context.Context, c *Client, namespace, name string) (*Pod, error) {
+func GetPod(ctx context.Context, c *apiclient.Client, namespace, name string) (*Pod, error) {
 	pod := &Pod{}
-	if err := c.RequestJSON(ctx, http.MethodGet, podsPath(namespace)+"/"+name, nil, pod); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, podsPath(namespace)+"/"+name, nil, pod); err != nil {
 		return nil, err
 	}
 	return pod, nil
 }
 
-func CreatePod(ctx context.Context, c *Client, pod *Pod) (*Pod, error) {
+func CreatePod(ctx context.Context, c *apiclient.Client, pod *Pod) (*Pod, error) {
 	body, err := json.Marshal(pod)
 	if err != nil {
 		return nil, err
 	}
 	created := &Pod{}
-	if err := c.RequestJSON(ctx, http.MethodPost, podsPath(pod.Metadata.Namespace), body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, podsPath(pod.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -465,13 +343,13 @@ func CreatePod(ctx context.Context, c *Client, pod *Pod) (*Pod, error) {
 // CreatePlay posts the Play one play request became. The API server
 // mints the name from the prefix, because a person may start the same
 // title twice and each start is its own Play.
-func CreatePlay(ctx context.Context, c *Client, play *Play) (*Play, error) {
+func CreatePlay(ctx context.Context, c *apiclient.Client, play *Play) (*Play, error) {
 	body, err := json.Marshal(play)
 	if err != nil {
 		return nil, err
 	}
 	created := &Play{}
-	if err := c.RequestJSON(ctx, http.MethodPost, playsPath(play.Metadata.Namespace), body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, playsPath(play.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -480,9 +358,9 @@ func CreatePlay(ctx context.Context, c *Client, play *Play) (*Play, error) {
 // DeletePod removes one pod this operator stands. An
 // already-absent pod is success, because the operator deletes a pod to
 // replace it and a delete that races another pass must not fail.
-func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
-	err := c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
-	if errors.Is(err, ErrNotFound) {
+func DeletePod(ctx context.Context, c *apiclient.Client, namespace, name string) error {
+	err := c.WithContext(ctx).RequestJSON(http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err
@@ -500,13 +378,13 @@ func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
 // copy before the watch delivers the delete. The API server refuses a
 // delete whose uid is not the pod's with a 409, and the answer is false:
 // the pod under that name is not the one the caller read.
-func ForceDeletePod(ctx context.Context, c *Client, namespace, name, uid string) (bool, error) {
+func ForceDeletePod(ctx context.Context, c *apiclient.Client, namespace, name, uid string) (bool, error) {
 	body, err := uidPrecondition(uid)
 	if err != nil {
 		return false, err
 	}
-	err = c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name+"?gracePeriodSeconds=0", body, nil)
-	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) {
+	err = c.WithContext(ctx).RequestJSON(http.MethodDelete, podsPath(namespace)+"/"+name+"?gracePeriodSeconds=0", body, nil)
+	if errors.Is(err, apiclient.ErrNotFound) || errors.Is(err, apiclient.ErrConflict) {
 		return false, nil
 	}
 	return err == nil, err
@@ -515,22 +393,22 @@ func ForceDeletePod(ctx context.Context, c *Client, namespace, name, uid string)
 // GetService reads one Service by name from the API server. The pass
 // reads the Services it stands from the watch, and through this only
 // where the memo says the watch's copy is not current (objectcache.go).
-func GetService(ctx context.Context, c *Client, namespace, name string) (*Service, error) {
+func GetService(ctx context.Context, c *apiclient.Client, namespace, name string) (*Service, error) {
 	service := &Service{}
-	if err := c.RequestJSON(ctx, http.MethodGet, servicesPath(namespace)+"/"+name, nil, service); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, servicesPath(namespace)+"/"+name, nil, service); err != nil {
 		return nil, err
 	}
 	return service, nil
 }
 
-func CreateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
+func CreateService(ctx context.Context, c *apiclient.Client, service *Service) (*Service, error) {
 	body, err := json.Marshal(service)
 	if err != nil {
 		return nil, err
 	}
 	created := &Service{}
 	path := servicesPath(service.Metadata.Namespace)
-	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, path, body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -539,9 +417,9 @@ func CreateService(ctx context.Context, c *Client, service *Service) (*Service, 
 // DeleteService removes one Service this operator stands. An absent Service
 // is success, because a Catalog that drops a block the operator stood a
 // Service for is reconciled on every pass.
-func DeleteService(ctx context.Context, c *Client, namespace, name string) error {
-	err := c.RequestJSON(ctx, http.MethodDelete, servicesPath(namespace)+"/"+name, nil, nil)
-	if errors.Is(err, ErrNotFound) {
+func DeleteService(ctx context.Context, c *apiclient.Client, namespace, name string) error {
+	err := c.WithContext(ctx).RequestJSON(http.MethodDelete, servicesPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err
@@ -549,34 +427,34 @@ func DeleteService(ctx context.Context, c *Client, namespace, name string) error
 
 // GetConfigMap reads one ConfigMap by name. The pass reads the people
 // ConfigMap from the watch instead; a test reads it through this.
-func GetConfigMap(ctx context.Context, c *Client, namespace, name string) (*ConfigMap, error) {
+func GetConfigMap(ctx context.Context, c *apiclient.Client, namespace, name string) (*ConfigMap, error) {
 	configMap := &ConfigMap{}
-	if err := c.RequestJSON(ctx, http.MethodGet, configMapsPath(namespace)+"/"+name, nil, configMap); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, configMapsPath(namespace)+"/"+name, nil, configMap); err != nil {
 		return nil, err
 	}
 	return configMap, nil
 }
 
-func CreateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*ConfigMap, error) {
+func CreateConfigMap(ctx context.Context, c *apiclient.Client, configMap *ConfigMap) (*ConfigMap, error) {
 	body, err := json.Marshal(configMap)
 	if err != nil {
 		return nil, err
 	}
 	created := &ConfigMap{}
-	if err := c.RequestJSON(ctx, http.MethodPost, configMapsPath(configMap.Metadata.Namespace), body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, configMapsPath(configMap.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
 }
 
-func UpdateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*ConfigMap, error) {
+func UpdateConfigMap(ctx context.Context, c *apiclient.Client, configMap *ConfigMap) (*ConfigMap, error) {
 	body, err := json.Marshal(configMap)
 	if err != nil {
 		return nil, err
 	}
 	written := &ConfigMap{}
 	path := configMapsPath(configMap.Metadata.Namespace) + "/" + configMap.Metadata.Name
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil
@@ -584,15 +462,15 @@ func UpdateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*Con
 
 // UpdateService writes the whole Service back. The resourceVersion in
 // the body makes the write conditional, so a Service that changed
-// underneath answers ErrConflict, and the next pass reads it again.
-func UpdateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
+// underneath answers apiclient.ErrConflict, and the next pass reads it again.
+func UpdateService(ctx context.Context, c *apiclient.Client, service *Service) (*Service, error) {
 	body, err := json.Marshal(service)
 	if err != nil {
 		return nil, err
 	}
 	written := &Service{}
 	path := servicesPath(service.Metadata.Namespace) + "/" + service.Metadata.Name
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil
@@ -604,7 +482,7 @@ func UpdateService(ctx context.Context, c *Client, service *Service) (*Service, 
 // where the caller states them. It is a merge patch, so every other
 // field media-operator wrote survives the write, and the
 // resourceVersion makes it conditional the same way a replace is.
-func PatchPlayMetadata(ctx context.Context, c *Client, namespace, name, resourceVersion string, metadata ObjectMeta) (string, error) {
+func PatchPlayMetadata(ctx context.Context, c *apiclient.Client, namespace, name, resourceVersion string, metadata ObjectMeta) (string, error) {
 	patch := map[string]any{
 		"resourceVersion": resourceVersion,
 		"finalizers":      metadata.Finalizers,
@@ -621,7 +499,7 @@ func PatchPlayMetadata(ctx context.Context, c *Client, namespace, name, resource
 // PatchPersonFinalizers writes a Person's finalizer list. The operator
 // holds one until every namespace's progress store has dropped that
 // person's rows.
-func PatchPersonFinalizers(ctx context.Context, c *Client, name, resourceVersion string, finalizers []string) (string, error) {
+func PatchPersonFinalizers(ctx context.Context, c *apiclient.Client, name, resourceVersion string, finalizers []string) (string, error) {
 	return patchMetadata(ctx, c, personPath(name), map[string]any{
 		"resourceVersion": resourceVersion,
 		"finalizers":      finalizers,
@@ -632,7 +510,7 @@ func PatchPersonFinalizers(ctx context.Context, c *Client, name, resourceVersion
 // metadata and answers with the resourceVersion the write produced,
 // which a caller needs before it writes the same object again in one
 // pass.
-func patchMetadata(ctx context.Context, c *Client, path string, metadata map[string]any) (string, error) {
+func patchMetadata(ctx context.Context, c *apiclient.Client, path string, metadata map[string]any) (string, error) {
 	body, err := json.Marshal(map[string]any{"metadata": metadata})
 	if err != nil {
 		return "", err
@@ -640,7 +518,7 @@ func patchMetadata(ctx context.Context, c *Client, path string, metadata map[str
 	var patched struct {
 		Metadata ObjectMeta `json:"metadata"`
 	}
-	if err := c.RequestWithType(ctx, http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
+	if err := c.WithContext(ctx).Request(http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
 		return "", err
 	}
 	return patched.Metadata.ResourceVersion, nil

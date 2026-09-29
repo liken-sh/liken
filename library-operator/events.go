@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The event type that reports a fault. The other type is Normal.
@@ -61,10 +63,10 @@ func eventsPath(namespace string) string {
 // ListWarningEvents reads the Warning events about one named object of one
 // namespace. The field selector narrows the list on the API server, so the
 // read returns the events of one pod and not of the whole namespace.
-func ListWarningEvents(ctx context.Context, c *Client, namespace, name string) (*EventList, error) {
+func ListWarningEvents(ctx context.Context, c *apiclient.Client, namespace, name string) (*EventList, error) {
 	query := url.Values{"fieldSelector": {"involvedObject.name=" + name + ",type=" + eventWarning}}
 	list := &EventList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, eventsPath(namespace)+"?"+query.Encode(), nil, list); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, eventsPath(namespace)+"?"+query.Encode(), nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil

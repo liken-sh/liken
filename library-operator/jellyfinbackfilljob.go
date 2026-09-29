@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // the Job takes the Catalog's name with the suffix -jellyfin-backfill, so
@@ -112,7 +114,7 @@ func (o *operator) standJellyfinBackfill(ctx context.Context, catalog *Namespace
 	}
 	created := buildJellyfinBackfillJob(catalog, o.scannerImage, o.busAddress, o.topicBase, o.mediaTopicBase)
 	_, err := o.createJob(ctx, created)
-	if err != nil && !errors.Is(err, ErrConflict) {
+	if err != nil && !errors.Is(err, apiclient.ErrConflict) {
 		o.logf("catalog %s/%s: could not create the job %s: %v", namespace, name, created.Metadata.Name, err)
 		return &CatalogJellyfinStatus{Server: server, Backfill: backfillPending}
 	}

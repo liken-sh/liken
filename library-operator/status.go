@@ -13,6 +13,9 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // Everything one pass observed about one Library, gathered so
@@ -327,10 +330,10 @@ func podFailureMessage(pod *Pod) string {
 // Library from the API server where the store's copy is older than this
 // operator's own write. A write that another writer's change refused
 // with a 409 reads the Library again, composes the status from the fresh
-// copy, and writes once more (settleStatus).
-func writeLibraryStatus(ctx context.Context, c *Client, versions *versionMemo, library *Library,
+// copy, and writes once more (memo.SettleStatus).
+func writeLibraryStatus(ctx context.Context, c *apiclient.Client, versions *memo.Versions, library *Library,
 	compose func(*Library) LibraryStatus) error {
-	_, err := settleStatus(ctx, c, versions, libraryPath(library.Metadata.Namespace, library.Metadata.Name), library,
+	_, err := memo.SettleStatus(c.WithContext(ctx), versions, libraryPath(library.Metadata.Namespace, library.Metadata.Name), library,
 		func(held *Library) bool {
 			desired := compose(held)
 			if same, err := sameStatus(held.Status, desired); err == nil && same {
@@ -341,7 +344,7 @@ func writeLibraryStatus(ctx context.Context, c *Client, versions *versionMemo, l
 		})
 	// A Library deleted during the pass is the state its departure
 	// ends in, and has no status left to write.
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err

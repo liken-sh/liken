@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // storeNamespaces is the set of namespaces with a progress store.
@@ -173,13 +175,13 @@ func (o *operator) releasePlay(ctx context.Context, play *Play, why string) {
 
 	_, err := PatchPlayMetadata(ctx, o.client, namespace, name, play.Metadata.ResourceVersion,
 		ObjectMeta{Finalizers: play.Metadata.without(progressFinalizer)})
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		// A write after the copy this pass read is in the copy the
 		// next pass reads, and that pass releases again.
 		return
 	}
 	// An object that is already gone is the state this release was for.
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Fprintf(os.Stderr, "releasing the Play with uid %s: %s\n", play.Metadata.UID, playError(err, name))
 		return
 	}

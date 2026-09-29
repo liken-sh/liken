@@ -9,6 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // The group and version the dynamic resource allocation objects are written
@@ -125,7 +128,7 @@ func (o *operator) standTrickplayTemplate(ctx context.Context, library *Library)
 	name := trickplayTemplateName(library.Metadata.Name)
 
 	live, err := o.watched.readClaimTemplate(ctx, namespace, name)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
 	stands := err == nil
@@ -147,10 +150,10 @@ func (o *operator) standTrickplayTemplate(ctx context.Context, library *Library)
 			return err
 		}
 	}
-	_, err = written(o.versions.claimTemplates, storeKey(&desired.Metadata), func() (*ResourceClaimTemplate, error) {
+	_, err = memo.Written(o.versions.claimTemplates, memo.Key(&desired.Metadata), func() (*ResourceClaimTemplate, error) {
 		return CreateResourceClaimTemplate(ctx, o.client, desired)
 	})
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		// Another pass, or another copy of this operator, created the template
 		// first, which is success.
 		return nil
@@ -178,7 +181,7 @@ func sameTemplateSpec(current, desired ResourceClaimTemplateSpec) (bool, error) 
 // holds no copy of it, so the next read goes to the API server while the
 // watch's store still holds the deleted copy.
 func (o *operator) deleteClaimTemplate(ctx context.Context, namespace, name string) error {
-	return o.versions.claimTemplates.send(storeKey(&ObjectMeta{Namespace: namespace, Name: name}), func() (string, error) {
+	return o.versions.claimTemplates.Send(memo.Key(&ObjectMeta{Namespace: namespace, Name: name}), func() (string, error) {
 		return "", DeleteResourceClaimTemplate(ctx, o.client, namespace, name)
 	})
 }
@@ -187,21 +190,21 @@ func claimTemplatesPath(namespace string) string {
 	return "/apis/" + deviceAPIVersion + "/namespaces/" + namespace + "/resourceclaimtemplates"
 }
 
-func GetResourceClaimTemplate(ctx context.Context, c *Client, namespace, name string) (*ResourceClaimTemplate, error) {
+func GetResourceClaimTemplate(ctx context.Context, c *apiclient.Client, namespace, name string) (*ResourceClaimTemplate, error) {
 	held := &ResourceClaimTemplate{}
-	if err := c.RequestJSON(ctx, http.MethodGet, claimTemplatesPath(namespace)+"/"+name, nil, held); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, claimTemplatesPath(namespace)+"/"+name, nil, held); err != nil {
 		return nil, err
 	}
 	return held, nil
 }
 
-func CreateResourceClaimTemplate(ctx context.Context, c *Client, template *ResourceClaimTemplate) (*ResourceClaimTemplate, error) {
+func CreateResourceClaimTemplate(ctx context.Context, c *apiclient.Client, template *ResourceClaimTemplate) (*ResourceClaimTemplate, error) {
 	body, err := json.Marshal(template)
 	if err != nil {
 		return nil, err
 	}
 	created := &ResourceClaimTemplate{}
-	if err := c.RequestJSON(ctx, http.MethodPost, claimTemplatesPath(template.Metadata.Namespace), body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, claimTemplatesPath(template.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -209,9 +212,9 @@ func CreateResourceClaimTemplate(ctx context.Context, c *Client, template *Resou
 
 // An already-absent template is success, the rule every other delete here
 // follows.
-func DeleteResourceClaimTemplate(ctx context.Context, c *Client, namespace, name string) error {
-	err := c.RequestJSON(ctx, http.MethodDelete, claimTemplatesPath(namespace)+"/"+name, nil, nil)
-	if errors.Is(err, ErrNotFound) {
+func DeleteResourceClaimTemplate(ctx context.Context, c *apiclient.Client, namespace, name string) error {
+	err := c.WithContext(ctx).RequestJSON(http.MethodDelete, claimTemplatesPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err

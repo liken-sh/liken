@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // A namespace with no Catalog, one Catalog, and more than one each
@@ -107,7 +109,7 @@ func TestReplaceStatusWritesTheCatalogsStatusSubresource(t *testing.T) {
 		Status:   CatalogStatus{StorageSize: "1Gi"},
 	}
 
-	if err := replaceStatus(t.Context(), client, catalogPath("house", "house"), catalog); err != nil {
+	if err := apiclient.ReplaceStatus(client.WithContext(t.Context()), catalogPath("house", "house"), catalog); err != nil {
 		t.Fatal(err)
 	}
 

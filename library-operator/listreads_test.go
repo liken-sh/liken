@@ -11,6 +11,8 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The pod list the pass would send for the catalog member pods, which a
@@ -19,16 +21,16 @@ const catalogMemberQuery = "labelSelector=" + memberLabelKey + "%3D" + memberLab
 
 // listReads answers every collection with one list from the API server.
 type listReads struct {
-	client *Client
+	client *apiclient.Client
 }
 
-func readList[L any](c *Client, path string) (*L, error) {
+func readList[L any](c *apiclient.Client, path string) (*L, error) {
 	return readListWith[L](context.Background(), c, path)
 }
 
-func readListWith[L any](ctx context.Context, c *Client, path string) (*L, error) {
+func readListWith[L any](ctx context.Context, c *apiclient.Client, path string) (*L, error) {
 	list := new(L)
-	if err := c.RequestJSON(ctx, http.MethodGet, path, nil, list); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, path, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil

@@ -17,6 +17,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // The one call each provider answers for the check: the path, and how the key
@@ -138,8 +141,8 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 	}
 	// A write that another writer's change refused with a 409 reads the
 	// provider again, derives the status from the fresh copy, and writes
-	// once more (settleStatus).
-	_, err = settleStatus(ctx, o.client, o.versions.providers,
+	// once more (memo.SettleStatus).
+	_, err = memo.SettleStatus(o.client.WithContext(ctx), o.versions.providers,
 		metadataProviderPath(provider.Metadata.Namespace, provider.Metadata.Name), provider,
 		func(held *MetadataProvider) bool {
 			desired := deriveProviderStatus(held, verdict, at)
@@ -150,7 +153,7 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 			return true
 		})
 	// A provider deleted during the pass has no status left to write.
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		o.forgetProviderCall(provider)
 		return nil
 	}
@@ -275,7 +278,7 @@ func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) 
 		return "", providerVerdict{}, nil
 	}
 	secret, err := GetSecret(ctx, o.client, provider.Metadata.Namespace, reference.Name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return "", providerVerdict{reason: reasonNoSecret,
 			message: fmt.Sprintf("the Secret %s does not exist in namespace %s",
 				reference.Name, provider.Metadata.Namespace)}, nil

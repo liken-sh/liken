@@ -19,6 +19,9 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // The API group the slice belongs to, and the address family it
@@ -197,12 +200,12 @@ func (o *operator) standGossipEndpoints(ctx context.Context, cluster gossipClust
 	desired := buildGossipEndpoints(cluster, namespace, owners, members)
 
 	live, err := o.watched.readEndpointSlice(ctx, namespace, cluster.service)
-	key := storeKey(&desired.Metadata)
-	if errors.Is(err, ErrNotFound) {
-		_, err := written(o.versions.endpointSlices, key, func() (*EndpointSlice, error) {
+	key := memo.Key(&desired.Metadata)
+	if errors.Is(err, apiclient.ErrNotFound) {
+		_, err := memo.Written(o.versions.endpointSlices, key, func() (*EndpointSlice, error) {
 			return CreateEndpointSlice(ctx, o.client, desired)
 		})
-		if errors.Is(err, ErrConflict) {
+		if errors.Is(err, apiclient.ErrConflict) {
 			return nil
 		}
 		return err
@@ -215,7 +218,7 @@ func (o *operator) standGossipEndpoints(ctx context.Context, cluster gossipClust
 		return nil
 	}
 	desired.Metadata.ResourceVersion = live.Metadata.ResourceVersion
-	_, err = written(o.versions.endpointSlices, key, func() (*EndpointSlice, error) {
+	_, err = memo.Written(o.versions.endpointSlices, key, func() (*EndpointSlice, error) {
 		return UpdateEndpointSlice(ctx, o.client, desired)
 	})
 	return err
@@ -249,23 +252,23 @@ func sameEndpoints(live, desired *EndpointSlice) bool {
 // GetEndpointSlice reads one slice by name from the API server. The pass
 // reads the slices it stands from the watch, and through this only where
 // the memo says the watch's copy is not current (objectcache.go). An
-// absent slice is ErrNotFound, which the pass answers by creating one.
-func GetEndpointSlice(ctx context.Context, c *Client, namespace, name string) (*EndpointSlice, error) {
+// absent slice is apiclient.ErrNotFound, which the pass answers by creating one.
+func GetEndpointSlice(ctx context.Context, c *apiclient.Client, namespace, name string) (*EndpointSlice, error) {
 	slice := &EndpointSlice{}
-	if err := c.RequestJSON(ctx, http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
 		return nil, err
 	}
 	return slice, nil
 }
 
-func CreateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+func CreateEndpointSlice(ctx context.Context, c *apiclient.Client, slice *EndpointSlice) (*EndpointSlice, error) {
 	body, err := json.Marshal(slice)
 	if err != nil {
 		return nil, err
 	}
 	created := &EndpointSlice{}
 	path := endpointSlicesPath(slice.Metadata.Namespace)
-	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPost, path, body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -273,15 +276,15 @@ func CreateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (
 
 // UpdateEndpointSlice writes the whole slice back. The resourceVersion
 // in the body makes the write conditional, so a slice that changed
-// underneath answers ErrConflict, and the next pass reads it again.
-func UpdateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+// underneath answers apiclient.ErrConflict, and the next pass reads it again.
+func UpdateEndpointSlice(ctx context.Context, c *apiclient.Client, slice *EndpointSlice) (*EndpointSlice, error) {
 	body, err := json.Marshal(slice)
 	if err != nil {
 		return nil, err
 	}
 	written := &EndpointSlice{}
 	path := endpointSlicesPath(slice.Metadata.Namespace) + "/" + slice.Metadata.Name
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil

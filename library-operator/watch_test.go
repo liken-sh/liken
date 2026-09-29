@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -48,7 +50,7 @@ func watchedCluster(t *testing.T, cluster *fakeCluster, m *metrics) (*watches, c
 	wake := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	watched := startWatches(ctx, client, wake, m,
-		NewClient(server.URL, server.Client(), ""), newObjectVersions())
+		apiclient.New(server.URL, server.Client(), ""), newObjectVersions())
 	t.Cleanup(func() {
 		cancel()
 		watched.wait()
@@ -307,11 +309,11 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 		{name: "an object", object: asObject(t, good)},
 		{name: "a tombstone", object: cache.DeletedFinalStateUnknown{Key: "house/movies", Obj: asObject(t, good)}},
 		{name: "a field of the wrong type", object: mistyped, wantErr: "Library house/movies does not convert"},
-		{name: "a tombstone with no copy", object: cache.DeletedFinalStateUnknown{Key: "house/movies"}, wantErr: "not an object"},
+		{name: "a tombstone with no copy", object: cache.DeletedFinalStateUnknown{Key: "house/movies"}, wantErr: "the tombstone for house/movies holds no copy"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := convert[Library](c.object)
+			got, err := informer.Convert[Library](c.object)
 			if c.wantErr == "" && (err != nil || got.Metadata.Generation != 2) {
 				t.Fatalf("convert = %+v, %v; want generation 2 and no error", got.Metadata, err)
 			}
@@ -335,7 +337,7 @@ func TestAChangeThatDoesNotConvertWakesThePass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	libraries := newCollection(client, make(chan struct{}, 1), nil, "libraries", kindLibrary, libraryResource, "",
+	libraries := newCollection(t.Context(), client, make(chan struct{}, 1), nil, "libraries", kindLibrary, libraryResource, "",
 		edited(func(library *Library) *ObjectMeta { return &library.Metadata }))
 	cases := []struct {
 		name   string
@@ -371,17 +373,31 @@ func asObject[T any](t *testing.T, item T) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: fields}
 }
 
-// The informer stores each object without its managedFields, which the
-// operator never reads.
-func TestTheWatchesDropManagedFields(t *testing.T) {
-	object := &unstructured.Unstructured{Object: map[string]any{
-		"metadata": map[string]any{"name": "movies", "managedFields": []any{map[string]any{"manager": "kubectl"}}},
-	}}
+// The informer stores each Node without status.images, which the
+// operator never reads, and leaves every other kind as it came.
+func TestTheWatchesDropANodesImages(t *testing.T) {
+	cases := []struct {
+		kind       string
+		wantImages bool
+	}{
+		{"Node", false},
+		{"Pod", true},
+	}
+	for _, c := range cases {
+		t.Run(c.kind, func(t *testing.T) {
+			object := &unstructured.Unstructured{Object: map[string]any{
+				"kind":     c.kind,
+				"metadata": map[string]any{"name": "node-1"},
+				"status":   map[string]any{"images": []any{map[string]any{"sizeBytes": int64(1)}}},
+			}}
 
-	stored, err := dropManagedFields(object)
+			dropNodeImages(object)
 
-	if err != nil || stored.(*unstructured.Unstructured).GetManagedFields() != nil {
-		t.Errorf("stored = %+v, %v; want no managedFields", stored, err)
+			_, held, _ := unstructured.NestedSlice(object.Object, "status", "images")
+			if held != c.wantImages {
+				t.Errorf("status.images held = %v, want %v", held, c.wantImages)
+			}
+		})
 	}
 }
 
@@ -464,7 +480,7 @@ func TestSettleWaitsOnlyForTheCollectionsTheOperatorNeeds(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			watched := startWatches(ctx, client, make(chan struct{}, 1), nil,
-				NewClient(server.URL, server.Client(), ""), newObjectVersions())
+				apiclient.New(server.URL, server.Client(), ""), newObjectVersions())
 			t.Cleanup(func() {
 				cancel()
 				watched.wait()

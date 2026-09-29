@@ -312,7 +312,7 @@ jobs:
       packages: write
 
   library-operator:
-    needs: [plan, brand, ffmpeg, media-operator, vulkan]
+    needs: [plan, brand, ffmpeg, kubernetes, media-operator, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].check }}
     uses: ./.github/workflows/component-library-operator.yaml
     with:

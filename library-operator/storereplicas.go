@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The topology the copies spread over. One copy per node is the rule,
@@ -98,7 +100,7 @@ func (o *operator) retireStoreReplica(ctx context.Context, namespace string, sto
 	name := store.replicaName(index)
 
 	pod, err := o.readPod(ctx, namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {

@@ -15,6 +15,9 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // The map's name in every screen namespace, the key the file is
@@ -88,12 +91,12 @@ func (o *operator) standPeopleConfigMap(ctx context.Context, namespace string, o
 		return err
 	}
 	live, err := o.watched.readConfigMap(ctx, namespace, peopleConfigMapName)
-	key := storeKey(&desired.Metadata)
-	if errors.Is(err, ErrNotFound) {
-		_, err := written(o.versions.configMaps, key, func() (*ConfigMap, error) {
+	key := memo.Key(&desired.Metadata)
+	if errors.Is(err, apiclient.ErrNotFound) {
+		_, err := memo.Written(o.versions.configMaps, key, func() (*ConfigMap, error) {
 			return CreateConfigMap(ctx, o.client, desired)
 		})
-		if errors.Is(err, ErrConflict) {
+		if errors.Is(err, apiclient.ErrConflict) {
 			return nil
 		}
 		return err
@@ -107,7 +110,7 @@ func (o *operator) standPeopleConfigMap(ctx context.Context, namespace string, o
 	}
 	live.Metadata.OwnerReferences = desired.Metadata.OwnerReferences
 	live.Data = desired.Data
-	if _, err := written(o.versions.configMaps, key, func() (*ConfigMap, error) {
+	if _, err := memo.Written(o.versions.configMaps, key, func() (*ConfigMap, error) {
 		return UpdateConfigMap(ctx, o.client, live)
 	}); err != nil {
 		return fmt.Errorf("rewriting the people of %s: %w", namespace, err)

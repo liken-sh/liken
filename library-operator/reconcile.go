@@ -17,6 +17,9 @@ import (
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // Binding is what a Library's storage resolved to: the volume behind
@@ -121,14 +124,14 @@ func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
 		finalizers = append(finalizers, libraryFinalizer)
 	}
 	var version string
-	err := o.versions.libraries.send(storeKey(&library.Metadata),
+	err := o.versions.libraries.Send(memo.Key(&library.Metadata),
 		func() (string, error) {
 			var err error
 			version, err = PatchLibraryFinalizers(ctx, o.client, library.Metadata.Namespace,
 				library.Metadata.Name, library.Metadata.ResourceVersion, finalizers)
 			return version, err
 		})
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		// A write after the copy this pass read is in the copy the
 		// next pass reads, and that pass patches again.
 		return nil
@@ -159,7 +162,7 @@ func (o *operator) resolveStorage(ctx context.Context, library *Library) (bindin
 	namespace, name := library.Metadata.Namespace, library.Spec.Storage.Claim
 
 	claim, err := o.readClaim(ctx, namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return binding{
 			reason: reasonClaimNotFound,
 			message: fmt.Sprintf("the PersistentVolumeClaim %s does not exist in namespace %s",
@@ -180,7 +183,7 @@ func (o *operator) resolveStorage(ctx context.Context, library *Library) (bindin
 	}
 
 	volume, err := o.readVolume(ctx, claim.Spec.VolumeName)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return binding{
 			reason: reasonVolumeNotFound,
 			message: fmt.Sprintf("the PersistentVolume %s the claim %s names does not exist",
@@ -243,9 +246,9 @@ func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
 	namespace, name := desired.Metadata.Namespace, desired.Metadata.Name
 
 	live, err := o.readPod(ctx, namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		created, err := CreatePod(ctx, o.client, desired)
-		if errors.Is(err, ErrConflict) {
+		if errors.Is(err, apiclient.ErrConflict) {
 			// Another pass, or another copy of this operator, created
 			// the pod first, which is success. The next pass reads it.
 			return nil, nil

@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The provisioner of a per-node StorageClass. The operator reads the
@@ -99,7 +101,7 @@ func (o *operator) standClaim(ctx context.Context, claim *PersistentVolumeClaim)
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
 
@@ -118,7 +120,7 @@ func (o *operator) standClaim(ctx context.Context, claim *PersistentVolumeClaim)
 	}
 
 	_, err = CreatePersistentVolumeClaim(ctx, o.client, claim)
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		return nil
 	}
 	return err
@@ -141,12 +143,12 @@ func (o *operator) standClaim(ctx context.Context, claim *PersistentVolumeClaim)
 // Pending, and standClaim leaves an existing claim alone forever.
 func (o *operator) standPerNodeVolume(ctx context.Context, claim *PersistentVolumeClaim) error {
 	_, err := CreatePersistentVolume(ctx, o.client, buildPerNodeVolume(claim))
-	if !errors.Is(err, ErrConflict) {
+	if !errors.Is(err, apiclient.ErrConflict) {
 		return err
 	}
 	name := perNodeVolumeName(claim.Metadata.Namespace, claim.Metadata.Name)
 	standing, err := GetPersistentVolume(ctx, o.client, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return o.rewritePerNodeVolume(ctx, claim)
 	}
 	if err != nil {
@@ -169,7 +171,7 @@ func (o *operator) standPerNodeVolume(ctx context.Context, claim *PersistentVolu
 // vanish.
 func (o *operator) rewritePerNodeVolume(ctx context.Context, claim *PersistentVolumeClaim) error {
 	_, err := CreatePersistentVolume(ctx, o.client, buildPerNodeVolume(claim))
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		name := perNodeVolumeName(claim.Metadata.Namespace, claim.Metadata.Name)
 		return fmt.Errorf("volume %s is still going away", name)
 	}
@@ -206,7 +208,7 @@ func (o *operator) classIsPerNode(ctx context.Context, name string) (bool, error
 		return perNode, nil
 	}
 	class, err := GetStorageClass(ctx, o.client, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		class = &StorageClass{}
 	} else if err != nil {
 		return false, err

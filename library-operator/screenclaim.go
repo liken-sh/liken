@@ -13,6 +13,8 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The claims one screen mounts, derived from the screen pod's name, so
@@ -130,7 +132,7 @@ func (o *operator) deleteScreenClaim(ctx context.Context, player *Player, name s
 	namespace := player.Metadata.Namespace
 
 	claim, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -160,7 +162,7 @@ func (o *operator) recoverUnschedulableScreen(ctx context.Context, player *Playe
 	namespace, name := player.Metadata.Namespace, screenClaimName(player.Metadata.Name)
 
 	claim, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {

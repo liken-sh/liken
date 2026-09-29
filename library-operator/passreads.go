@@ -12,7 +12,11 @@ package main
 // and the next pass reads the object. An object deleted after the read is
 // created again on the next pass.
 
-import "context"
+import (
+	"context"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+)
 
 // The claims of every namespace, which the watch of the claims lists and
 // watches. A Library names a claim a person made, which carries no label
@@ -82,14 +86,14 @@ type PersistentVolumeClaimList struct {
 // readClaim answers one claim from the pass's read, and reads it by name
 // from the API server where no pass has read the claims, which is a
 // caller outside a pass.
-// An absent claim is ErrNotFound in both cases.
+// An absent claim is apiclient.ErrNotFound in both cases.
 func (o *operator) readClaim(ctx context.Context, namespace, name string) (*PersistentVolumeClaim, error) {
 	if o.reads == nil {
 		return GetPersistentVolumeClaim(ctx, o.client, namespace, name)
 	}
 	claim, held := o.reads.claims[libraryKey(namespace, name)]
 	if !held {
-		return nil, ErrNotFound
+		return nil, apiclient.ErrNotFound
 	}
 	return claim, nil
 }
@@ -101,7 +105,7 @@ func (o *operator) readVolume(ctx context.Context, name string) (*PersistentVolu
 	}
 	volume, held := o.reads.volumes[name]
 	if !held {
-		return nil, ErrNotFound
+		return nil, apiclient.ErrNotFound
 	}
 	return volume, nil
 }
@@ -113,7 +117,7 @@ func (o *operator) readPod(ctx context.Context, namespace, name string) (*Pod, e
 	}
 	pod, held := o.reads.pods[libraryKey(namespace, name)]
 	if !held {
-		return nil, ErrNotFound
+		return nil, apiclient.ErrNotFound
 	}
 	return pod, nil
 }

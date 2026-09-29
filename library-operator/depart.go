@@ -27,6 +27,9 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // departure is what one pass decided about a deleting Library:
@@ -143,7 +146,7 @@ func (o *operator) standDepartureClaim(ctx context.Context, library *Library, ch
 	if err == nil {
 		return "", nil
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		return "", err
 	}
 	return "", o.standCatalogClaim(ctx, library, choice.catalog)
@@ -162,17 +165,17 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 	}
 	o.clearLibraryTopics(namespace, name)
 
-	err := o.versions.libraries.send(storeKey(&library.Metadata), func() (string, error) {
+	err := o.versions.libraries.Send(memo.Key(&library.Metadata), func() (string, error) {
 		return PatchLibraryFinalizers(ctx, o.client, namespace, name,
 			library.Metadata.ResourceVersion,
 			library.Metadata.without(libraryFinalizer, formerLibraryFinalizer))
 	})
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		// An object that is already gone is the state this release
 		// was for.
 		return nil
 	}
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		// A write after the copy this pass read is in the copy the
 		// next pass reads, and that pass releases again.
 		return nil

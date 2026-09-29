@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The Job one departure becomes, named from the Library, so
@@ -87,7 +89,7 @@ func (o *operator) standCleanupJob(ctx context.Context, library *Library, jobs [
 			return nil, nil
 		}
 		created, err := o.createJob(ctx, buildCleanupJob(library, o.scannerImage, o.corrosionImage))
-		if errors.Is(err, ErrConflict) {
+		if errors.Is(err, apiclient.ErrConflict) {
 			// Another writer created it first, which is the state this
 			// create was for; the next pass reads it.
 			return nil, nil

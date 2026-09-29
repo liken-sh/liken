@@ -16,6 +16,9 @@ import (
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // reconcileCatalogs stands each namespace's catalog cluster from its one
@@ -302,10 +305,10 @@ func catalogMembers(namespace string, pods []Pod) []string {
 // writeLibraryStatus also follows, so a pass that finds nothing changed
 // writes nothing. A write that another writer's change refused with a 409
 // reads the Catalog again, composes the status from the fresh copy, and
-// writes once more (settleStatus).
+// writes once more (memo.SettleStatus).
 func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCatalog,
 	compose func(*NamespaceCatalog) CatalogStatus) error {
-	_, err := settleStatus(ctx, o.client, o.versions.catalogs,
+	_, err := memo.SettleStatus(o.client.WithContext(ctx), o.versions.catalogs,
 		catalogPath(catalog.Metadata.Namespace, catalog.Metadata.Name), catalog,
 		func(held *NamespaceCatalog) bool {
 			desired := compose(held)
@@ -316,7 +319,7 @@ func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCat
 			return true
 		})
 	// A Catalog deleted during the pass has no status left to write.
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err

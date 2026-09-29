@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // FakeCluster holds the objects an API server would, and records every
@@ -1125,7 +1127,7 @@ const testLibraryNamespace = "house"
 func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
-	operator := newOperator(NewClient(server.URL, server.Client(), ""),
+	operator := newOperator(apiclient.New(server.URL, server.Client(), ""),
 		testScannerImage, testCorrosionImage, testBrowserImage, testFFmpegImage,
 		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
 	operator.watched = listReads{client: operator.client}

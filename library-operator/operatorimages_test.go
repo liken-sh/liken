@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 func TestDerivingTheCompanionImages(t *testing.T) {
@@ -101,7 +103,7 @@ func operatorPod(image string) *Pod {
 
 // testImageClient is a client against the fake cluster, the API the
 // operator reads its own pod through at start-up.
-func testImageClient(t *testing.T, cluster *fakeCluster) *Client {
+func testImageClient(t *testing.T, cluster *fakeCluster) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
 	t.Cleanup(server.Close)
@@ -110,7 +112,7 @@ func testImageClient(t *testing.T, cluster *fakeCluster) *Client {
 	t.Setenv(browserImageVariable, "")
 	t.Setenv(ffmpegImageVariable, "")
 	t.Setenv(podNameVariable, testOperatorPod)
-	return NewClient(server.URL, server.Client(), "")
+	return apiclient.New(server.URL, server.Client(), "")
 }
 
 func TestTheImagesComeFromTheOperatorsOwnPod(t *testing.T) {

@@ -5,7 +5,7 @@ name = "library-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "media-operator", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "media-operator", "vulkan"]
 
 [docs]
 prefix = "library"
@@ -42,13 +42,19 @@ coverage = ["coverage-media-browser.xml"]
 [outputs]
 deploy = "deploy"
 
+# Every image that builds from this module's go.mod takes the shared
+# kubernetes module as a build context, because go.mod replaces it with
+# ../kubernetes. The media browser and Corrosion images build from their
+# own directories alone.
 [[outputs.images]]
 name = "library-operator"
 file = "Dockerfile"
+contexts = { kubernetes = "kubernetes" }
 
 [[outputs.images]]
 name = "library-operator-ffmpeg"
 file = "Dockerfile.ffmpeg"
+contexts = { kubernetes = "kubernetes" }
 smoke = "library-operator/smoke/library-operator-ffmpeg.sh"
 
 [[outputs.images]]
@@ -71,3 +77,4 @@ smoke = "library-operator/smoke/library-operator-corrosion.sh"
 name = "library-operator-cli"
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
+contexts = { kubernetes = "kubernetes" }

@@ -450,6 +450,9 @@ target "library-operator" {
   context    = "library-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+  }
   args = {
     VERSION = VERSION
   }
@@ -464,6 +467,7 @@ target "library-operator-ffmpeg" {
   platforms  = ["linux/amd64"]
   contexts = {
     "ffmpeg" = "target:ffmpeg"
+    "kubernetes" = "kubernetes"
   }
   args = {
     VERSION = VERSION
@@ -506,6 +510,9 @@ target "library-operator-cli" {
   context    = "library-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64", "linux/arm64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+  }
   args = {
     VERSION = VERSION
   }

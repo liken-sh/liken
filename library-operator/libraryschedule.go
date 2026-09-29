@@ -20,6 +20,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // How many pods Kubernetes replaces before a Job itself fails, and how long
@@ -112,7 +114,7 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	job := buildLibraryJob(library, providers, o.languages, plan,
 		jobImages{operator: o.scannerImage, ffmpeg: o.ffmpegImage, corrosion: o.corrosionImage}, now)
 	_, err := o.createJob(ctx, job)
-	if err != nil && !errors.Is(err, ErrConflict) {
+	if err != nil && !errors.Is(err, apiclient.ErrConflict) {
 		return fmt.Errorf("creating the library job %s: %w", job.Metadata.Name, err)
 	}
 	// A conflict is another writer's create of the same Job, and that

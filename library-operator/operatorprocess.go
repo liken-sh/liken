@@ -62,11 +62,11 @@ func operate() error {
 		port = defaultWebhookPort
 	}
 
-	client, err := InClusterClient()
+	client, err := inClusterClient()
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}
-	config := inClusterConfig(client)
+	config := inClusterConfig()
 	watching, err := dynamic.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("the client for the watches: %w", err)
@@ -109,16 +109,16 @@ func operate() error {
 }
 
 // inClusterConfig is the configuration of the watches and the Lease,
-// from the same address and ServiceAccount files the operator's own
-// Client reads. The token is a file and not a value, so client-go reads
+// from the same address and ServiceAccount files the shared client
+// reads. The token is a file and not a value, so client-go reads
 // it again when the kubelet rotates it. Both clients send JSON: the
 // dynamic client decodes nothing else, and the Lease is one small
 // object.
-func inClusterConfig(client *Client) *rest.Config {
+func inClusterConfig() *rest.Config {
 	return &rest.Config{
-		Host:            client.base,
-		BearerTokenFile: client.credentials + "/token",
-		TLSClientConfig: rest.TLSClientConfig{CAFile: client.credentials + "/ca.crt"},
+		Host:            inClusterBase(),
+		BearerTokenFile: serviceAccountDir + "/token",
+		TLSClientConfig: rest.TLSClientConfig{CAFile: serviceAccountDir + "/ca.crt"},
 		ContentConfig:   rest.ContentConfig{ContentType: "application/json"},
 	}
 }

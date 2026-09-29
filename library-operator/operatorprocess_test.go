@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 )
@@ -117,7 +118,7 @@ func testClusterEnvironment(t *testing.T, cluster *fakeCluster) (chan struct{}, 
 		t.Fatal(err)
 	}
 	serviceAccountDir = directory
-	t.Cleanup(func() { serviceAccountDir = defaultServiceAccountDir })
+	t.Cleanup(func() { serviceAccountDir = apiclient.ServiceAccountDir })
 	return reached, leases
 }
 
@@ -181,7 +182,7 @@ func TestRunReconcilesOnceAndStops(t *testing.T) {
 	stop()
 	var reported strings.Builder
 
-	if err := library.run(stopped, &reported, testWatching(t, library), leading{}); err != nil {
+	if err := library.run(stopped, &reported, testWatching(t, cluster), leading{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,7 +210,7 @@ func TestRunFailsWhenTheCollectionsCannotBeRead(t *testing.T) {
 			cluster.broken[one.path] = http.StatusInternalServerError
 			library := testOperator(t, cluster)
 
-			err := library.run(testRunContext(t), io.Discard, testWatching(t, library), leading{})
+			err := library.run(testRunContext(t), io.Discard, testWatching(t, cluster), leading{})
 
 			if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 				t.Fatalf("err = %v, want the server's own message", err)
@@ -220,9 +221,11 @@ func TestRunFailsWhenTheCollectionsCannotBeRead(t *testing.T) {
 
 // testWatching is the dynamic client of the watches, pointed at the
 // fake cluster the operator's own client reaches.
-func testWatching(t *testing.T, o *operator) dynamic.Interface {
+func testWatching(t *testing.T, cluster *fakeCluster) dynamic.Interface {
 	t.Helper()
-	client, err := dynamic.NewForConfig(&rest.Config{Host: o.client.base})
+	server := httptest.NewServer(cluster.handler())
+	t.Cleanup(server.Close)
+	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +261,7 @@ func TestACopyThatWaitsForTheLeaseActsOnNothing(t *testing.T) {
 	stopped, stop := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer stop()
 
-	if err := library.run(stopped, io.Discard, testWatching(t, library), waiting{}); err != nil {
+	if err := library.run(stopped, io.Discard, testWatching(t, cluster), waiting{}); err != nil {
 		t.Fatal(err)
 	}
 

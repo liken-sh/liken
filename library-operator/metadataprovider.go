@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // A MetadataProvider shares the Library's group and version, because it is
@@ -211,9 +213,9 @@ func secretPath(namespace, name string) string {
 // The operator reads the Secret for the reachability check alone. The key
 // reaches a container through a secretKeyRef on the pod, so no worker holds
 // an API credential.
-func GetSecret(ctx context.Context, c *Client, namespace, name string) (*Secret, error) {
+func GetSecret(ctx context.Context, c *apiclient.Client, namespace, name string) (*Secret, error) {
 	secret := &Secret{}
-	if err := c.RequestJSON(ctx, http.MethodGet, secretPath(namespace, name), nil, secret); err != nil {
+	if err := c.WithContext(ctx).RequestJSON(http.MethodGet, secretPath(namespace, name), nil, secret); err != nil {
 		return nil, err
 	}
 	return secret, nil

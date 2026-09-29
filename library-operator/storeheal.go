@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // How long a node stays NotReady before its copies are healed. Ten
@@ -133,7 +135,7 @@ func (o *operator) healStoreReplica(ctx context.Context, pod *Pod) error {
 		return nil
 	}
 	claim, err := GetPersistentVolumeClaim(ctx, o.client, namespace, mounted)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	if err != nil {

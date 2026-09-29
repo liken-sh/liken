@@ -16,15 +16,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The credentials are empty, so the client sends no bearer token and
 // reads nothing from disk.
-func testAPIClient(t *testing.T, handler http.Handler) *Client {
+func testAPIClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	return apiclient.New(server.URL, server.Client(), "")
 }
 
 func TestServerVersionReadsTheVersionEndpoint(t *testing.T) {
@@ -46,140 +48,6 @@ func TestServerVersionReadsTheVersionEndpoint(t *testing.T) {
 	}
 }
 
-func TestRequestJSONTurnsStatusesIntoAnswers(t *testing.T) {
-	cases := []struct {
-		name   string
-		status int
-		body   string
-		want   error
-	}{
-		{name: "absent", status: http.StatusNotFound, body: "", want: ErrNotFound},
-		{name: "already written", status: http.StatusConflict, body: "", want: ErrConflict},
-		{name: "forbidden", status: http.StatusForbidden, body: "no access", want: nil},
-		{name: "broken", status: http.StatusInternalServerError, body: "the server failed", want: nil},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(testCase.status)
-				_, _ = w.Write([]byte(testCase.body))
-			}))
-
-			err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, &Version{})
-			if testCase.want != nil {
-				if !errors.Is(err, testCase.want) {
-					t.Fatalf("err = %v, want %v", err, testCase.want)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatal("err = nil, want the server's own message")
-			}
-			if !strings.Contains(err.Error(), testCase.body) {
-				t.Errorf("err = %v, want it to carry %q", err, testCase.body)
-			}
-		})
-	}
-}
-
-func TestRequestJSONAsksForJSONAndSendsNoTokenWithoutCredentials(t *testing.T) {
-	var accept, authorization, contentType string
-	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		accept = r.Header.Get("Accept")
-		authorization = r.Header.Get("Authorization")
-		contentType = r.Header.Get("Content-Type")
-		_, _ = w.Write([]byte("{}"))
-	}))
-
-	if err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if accept != "application/json" {
-		t.Errorf("Accept = %q, want application/json", accept)
-	}
-	if authorization != "" {
-		t.Errorf("Authorization = %q, want no header", authorization)
-	}
-	if contentType != "" {
-		t.Errorf("Content-Type = %q, want no header on a request with no body", contentType)
-	}
-}
-
-// A request that carries a body declares it as JSON, which is what the
-// API server reads a status write and a pod creation as.
-func TestRequestJSONSendsItsBodyAsJSON(t *testing.T) {
-	var contentType, sent string
-	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		contentType = r.Header.Get("Content-Type")
-		body, _ := io.ReadAll(r.Body)
-		sent = string(body)
-		_, _ = w.Write([]byte("{}"))
-	}))
-
-	if err := client.RequestJSON(t.Context(), http.MethodPost, "/api/v1/namespaces/house/pods", []byte(`{"kind":"Pod"}`), nil); err != nil {
-		t.Fatal(err)
-	}
-	if contentType != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", contentType)
-	}
-	if sent != `{"kind":"Pod"}` {
-		t.Errorf("body = %q, want the bytes the caller passed", sent)
-	}
-}
-
-func TestRequestJSONSendsTheTokenItReadsFromDisk(t *testing.T) {
-	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "token"), []byte("a-service-account-token"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var authorization string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorization = r.Header.Get("Authorization")
-		_, _ = w.Write([]byte("{}"))
-	}))
-	t.Cleanup(server.Close)
-
-	client := NewClient(server.URL, server.Client(), directory)
-	if err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if authorization != "Bearer a-service-account-token" {
-		t.Errorf("Authorization = %q, want the token from disk", authorization)
-	}
-}
-
-func TestRequestJSONFailsWhenTheTokenIsMissing(t *testing.T) {
-	client := NewClient("https://kubernetes.default.svc", http.DefaultClient, t.TempDir())
-
-	err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "service account token") {
-		t.Fatalf("err = %v, want a missing token", err)
-	}
-}
-
-func TestInClusterClientRefusesWithoutTheCluster(t *testing.T) {
-	cases := []struct {
-		name string
-		host string
-		port string
-		want string
-	}{
-		{name: "no host", host: "", port: "443", want: "not running in a cluster"},
-		{name: "no port", host: "10.43.0.1", port: "", want: "not running in a cluster"},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Setenv("KUBERNETES_SERVICE_HOST", testCase.host)
-			t.Setenv("KUBERNETES_SERVICE_PORT", testCase.port)
-
-			_, err := InClusterClient()
-			if err == nil || !strings.Contains(err.Error(), testCase.want) {
-				t.Fatalf("err = %v, want %q", err, testCase.want)
-			}
-		})
-	}
-}
-
 // A directory in the shape the kubelet mounts, holding whatever CA
 // bytes the test wants the client to read.
 func testServiceAccountDir(t *testing.T, ca string) string {
@@ -193,30 +61,6 @@ func testServiceAccountDir(t *testing.T, ca string) string {
 	return directory
 }
 
-func TestInClusterClientRefusesAnUnusableCA(t *testing.T) {
-	cases := []struct {
-		name string
-		ca   string
-		want string
-	}{
-		{name: "absent", ca: "", want: "reading service account CA"},
-		{name: "not certificates", ca: "this is not a certificate", want: "no certificates"},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
-			t.Setenv("KUBERNETES_SERVICE_PORT", "443")
-			serviceAccountDir = testServiceAccountDir(t, testCase.ca)
-			t.Cleanup(func() { serviceAccountDir = defaultServiceAccountDir })
-
-			_, err := InClusterClient()
-			if err == nil || !strings.Contains(err.Error(), testCase.want) {
-				t.Fatalf("err = %v, want %q", err, testCase.want)
-			}
-		})
-	}
-}
-
 // The PEM the client must trust: the certificate an httptest TLS
 // server presents.
 func testCertificatePEM(t *testing.T, server *httptest.Server) string {
@@ -225,36 +69,6 @@ func testCertificatePEM(t *testing.T, server *httptest.Server) string {
 		Type:  "CERTIFICATE",
 		Bytes: server.Certificate().Raw,
 	}))
-}
-
-func TestInClusterClientAddressesTheServiceFromTheEnvironment(t *testing.T) {
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
-	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
-	certificate := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	t.Cleanup(certificate.Close)
-	serviceAccountDir = testServiceAccountDir(t, testCertificatePEM(t, certificate))
-	t.Cleanup(func() { serviceAccountDir = defaultServiceAccountDir })
-
-	client, err := InClusterClient()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if client.base != "https://10.43.0.1:443" {
-		t.Errorf("base = %q, want https://10.43.0.1:443", client.base)
-	}
-	if client.credentials != serviceAccountDir {
-		t.Errorf("credentials = %q, want the mounted directory", client.credentials)
-	}
-}
-
-func TestRequestJSONFailsWhenTheAddressIsUnusable(t *testing.T) {
-	client := NewClient("https://kubernetes.default.svc\x7f", http.DefaultClient, "")
-
-	err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil)
-
-	if err == nil || !strings.Contains(err.Error(), "/version") {
-		t.Fatalf("err = %v, want the request it could not make", err)
-	}
 }
 
 // One request a verb made, in the terms these tests assert on: the
@@ -269,7 +83,7 @@ type recordedRequest struct {
 
 // An API server that records the request a verb makes and answers it
 // with the object the test supplies.
-func recordingAPI(t *testing.T, answer any) (*Client, *recordedRequest) {
+func recordingAPI(t *testing.T, answer any) (*apiclient.Client, *recordedRequest) {
 	t.Helper()
 	recorded := &recordedRequest{}
 	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +119,7 @@ func TestReplaceStatusWritesTheStatusSubresource(t *testing.T) {
 	client, recorded := recordingAPI(t, written)
 
 	back := *written
-	if err := replaceStatus(t.Context(), client, libraryPath("house", "movies"), &back); err != nil {
+	if err := apiclient.ReplaceStatus(client.WithContext(t.Context()), libraryPath("house", "movies"), &back); err != nil {
 		t.Fatal(err)
 	}
 
@@ -365,8 +179,8 @@ func TestPatchLibraryFinalizersReportsAConflict(t *testing.T) {
 
 	_, err := PatchLibraryFinalizers(t.Context(), client, "house", "movies", "1200", nil)
 
-	if !errors.Is(err, ErrConflict) {
-		t.Errorf("err = %v, want ErrConflict", err)
+	if !errors.Is(err, apiclient.ErrConflict) {
+		t.Errorf("err = %v, want apiclient.ErrConflict", err)
 	}
 }
 
@@ -375,7 +189,7 @@ func TestPatchLibraryFinalizersReportsAConflict(t *testing.T) {
 func TestReplaceStatusWritesAZeroCount(t *testing.T) {
 	client, recorded := recordingAPI(t, &Library{})
 
-	if err := replaceStatus(t.Context(), client, libraryPath("house", "movies"), &Library{
+	if err := apiclient.ReplaceStatus(client.WithContext(t.Context()), libraryPath("house", "movies"), &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 		Status:   LibraryStatus{Titles: 0, Unidentified: 0},
 	}); err != nil {
@@ -436,58 +250,64 @@ func TestGetPersistentVolumeReadsWhatServesTheStorage(t *testing.T) {
 func TestEveryVerbReportsAServerFailure(t *testing.T) {
 	cases := []struct {
 		name string
-		call func(*Client) error
+		call func(*apiclient.Client) error
 	}{
-		{name: "replaceStatus", call: func(c *Client) error {
-			return replaceStatus(t.Context(), c, libraryPath("house", "movies"), &Library{})
+		{name: "apiclient.ReplaceStatus", call: func(c *apiclient.Client) error {
+			return apiclient.ReplaceStatus(c.WithContext(t.Context()), libraryPath("house", "movies"), &Library{})
 		}},
-		{name: "PatchLibraryFinalizers", call: func(c *Client) error {
+		{name: "PatchLibraryFinalizers", call: func(c *apiclient.Client) error {
 			_, err := PatchLibraryFinalizers(t.Context(), c, "house", "movies", "1", nil)
 			return err
 		}},
-		{name: "GetPersistentVolumeClaim", call: func(c *Client) error {
+		{name: "GetPersistentVolumeClaim", call: func(c *apiclient.Client) error {
 			_, err := GetPersistentVolumeClaim(t.Context(), c, "house", "movies")
 			return err
 		}},
-		{name: "DeletePersistentVolumeClaim", call: func(c *Client) error {
+		{name: "DeletePersistentVolumeClaim", call: func(c *apiclient.Client) error {
 			return DeletePersistentVolumeClaim(t.Context(), c, "house", "den-media-browser-catalog")
 		}},
-		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
-		{name: "PatchPlayMetadata", call: func(c *Client) error {
+		{name: "GetPersistentVolume", call: func(c *apiclient.Client) error {
+			_, err := GetPersistentVolume(t.Context(), c, "pv-movies")
+			return err
+		}},
+		{name: "PatchPlayMetadata", call: func(c *apiclient.Client) error {
 			_, err := PatchPlayMetadata(t.Context(), c, "house", "den-b2k9x", "1", ObjectMeta{})
 			return err
 		}},
-		{name: "PatchPersonFinalizers", call: func(c *Client) error {
+		{name: "PatchPersonFinalizers", call: func(c *apiclient.Client) error {
 			_, err := PatchPersonFinalizers(t.Context(), c, "person-a", "1", nil)
 			return err
 		}},
-		{name: "CreateJob", call: func(c *Client) error { _, err := CreateJob(t.Context(), c, &Job{}); return err }},
-		{name: "DeleteJob", call: func(c *Client) error { return DeleteJob(t.Context(), c, "house", "movies-cleanup") }},
-		{name: "DeleteCronJob", call: func(c *Client) error { return DeleteCronJob(t.Context(), c, "house", "movies-scan") }},
-		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(t.Context(), c, "house", "movies-scanner"); return err }},
-		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(t.Context(), c, &Pod{}); return err }},
-		{name: "DeletePod", call: func(c *Client) error { return DeletePod(t.Context(), c, "house", "movies-scanner") }},
-		{name: "GetEndpointSlice", call: func(c *Client) error {
+		{name: "CreateJob", call: func(c *apiclient.Client) error { _, err := CreateJob(t.Context(), c, &Job{}); return err }},
+		{name: "DeleteJob", call: func(c *apiclient.Client) error { return DeleteJob(t.Context(), c, "house", "movies-cleanup") }},
+		{name: "DeleteCronJob", call: func(c *apiclient.Client) error { return DeleteCronJob(t.Context(), c, "house", "movies-scan") }},
+		{name: "GetPod", call: func(c *apiclient.Client) error {
+			_, err := GetPod(t.Context(), c, "house", "movies-scanner")
+			return err
+		}},
+		{name: "CreatePod", call: func(c *apiclient.Client) error { _, err := CreatePod(t.Context(), c, &Pod{}); return err }},
+		{name: "DeletePod", call: func(c *apiclient.Client) error { return DeletePod(t.Context(), c, "house", "movies-scanner") }},
+		{name: "GetEndpointSlice", call: func(c *apiclient.Client) error {
 			_, err := GetEndpointSlice(t.Context(), c, "house", "catalog")
 			return err
 		}},
-		{name: "CreateEndpointSlice", call: func(c *Client) error {
+		{name: "CreateEndpointSlice", call: func(c *apiclient.Client) error {
 			_, err := CreateEndpointSlice(t.Context(), c, &EndpointSlice{})
 			return err
 		}},
-		{name: "UpdateEndpointSlice", call: func(c *Client) error {
+		{name: "UpdateEndpointSlice", call: func(c *apiclient.Client) error {
 			_, err := UpdateEndpointSlice(t.Context(), c, &EndpointSlice{})
 			return err
 		}},
-		{name: "GetService", call: func(c *Client) error {
+		{name: "GetService", call: func(c *apiclient.Client) error {
 			_, err := GetService(t.Context(), c, "house", "catalog")
 			return err
 		}},
-		{name: "CreateService", call: func(c *Client) error {
+		{name: "CreateService", call: func(c *apiclient.Client) error {
 			_, err := CreateService(t.Context(), c, &Service{})
 			return err
 		}},
-		{name: "UpdateService", call: func(c *Client) error {
+		{name: "UpdateService", call: func(c *apiclient.Client) error {
 			_, err := UpdateService(t.Context(), c, &Service{})
 			return err
 		}},

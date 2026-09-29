@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The four image overrides. A variable that is set wins over the
@@ -85,7 +87,7 @@ var passTimeout = 30 * time.Second
 // are fields rather than globals so a test builds an operator around a
 // desk and a cluster it controls.
 type operator struct {
-	client         *Client
+	client         *apiclient.Client
 	scannerImage   string
 	corrosionImage string
 	browserImage   string
@@ -211,7 +213,7 @@ type operator struct {
 // bus subscriptions that fill it. The subscriptions are remembered
 // here and sent on every connection, so they outlive a broker
 // restart.
-func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffmpegImage,
+func newOperator(client *apiclient.Client, scannerImage, corrosionImage, browserImage, ffmpegImage,
 	busAddress, topicBase, namespace, webhookAddress string) *operator {
 	wake := make(chan struct{}, 1)
 	library := &operator{
@@ -575,7 +577,7 @@ type collections interface {
 
 	// The objects of which the pass stands one by name, and writes only
 	// where it differs from the one the pass builds. An absent object is
-	// ErrNotFound.
+	// apiclient.ErrNotFound.
 	readService(ctx context.Context, namespace, name string) (*Service, error)
 	readEndpointSlice(ctx context.Context, namespace, name string) (*EndpointSlice, error)
 	readConfigMap(ctx context.Context, namespace, name string) (*ConfigMap, error)

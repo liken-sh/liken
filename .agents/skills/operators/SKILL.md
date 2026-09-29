@@ -238,9 +238,8 @@ above.
 of the client, the watch, and the cache into the Go module
 `kubernetes/` at the top of the repository, one operator at a time.
 `bluetooth-operator`, `audio-operator`, `display-operator`,
-`equipment-operator`, and `media-operator` are on it.
-`library-operator` still carries its own `apiclient.go`, `watch.go`,
-and `objectcache.go`, and `liken` keeps its own client and informer in
+`equipment-operator`, `media-operator`, and `library-operator` are on
+it. Only `liken` keeps its own client and informer, in
 `liken/kubernetes/`, until the step moves them.
 
 ## Watch a collection with client-go
@@ -250,8 +249,8 @@ of a `Source`, with the `Handler`, `Synced`, and `Reopened` of its
 `Options`, and `Convert` and `Report` decode and log each object.
 `bluetooth-operator` is the reference for the handlers:
 `requestwatch.go` and `editwatch.go` hold them, and `watch_test.go`
-runs them through the real reflector. An operator that still carries
-its own `watch.go` builds the same skeleton by hand.
+runs them through the real reflector. `liken` builds the same skeleton
+in its own `liken/kubernetes/informer`.
 
 - **Imports.** Allowed: `k8s.io/client-go/tools/cache`,
   `k8s.io/client-go/dynamic`, `k8s.io/client-go/rest`, and
@@ -306,11 +305,11 @@ its own `watch.go` builds the same skeleton by hand.
 
 A pass reads the objects a watch holds from the informer's store, not
 from the API server. A settled pass then sends the API server no read
-of a watched kind. `kubernetes/informer` holds the reads and
-`kubernetes/memo` holds the memo. An operator that is not on the
-shared module yet has the same types and functions, unexported, in its
-own files, most of them in `objectcache.go`: `storeView`, `heldObjects`, `readOne`,
-`currentList`, `settleStatus`, and `versionMemo`.
+of a watched kind. `kubernetes/informer` holds the reads.
+`kubernetes/memo` holds the memo and the requests whose answers it
+notes (`ReadFresh`, `Written`, and `SettleStatus`), and imports nothing
+from `k8s.io`, so a program that must not link client-go writes
+through it too.
 
 - **The rule.** Read one object with `informer.ReadOne` and a list with
   `informer.CurrentList`. A store answers only when it is ready

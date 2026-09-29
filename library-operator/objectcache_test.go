@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -22,7 +24,7 @@ import (
 // given, as a watch holds them once it has delivered every write. A
 // later write to the fake cluster leaves the store older than the API
 // server, as a watch that has not delivered the write yet does.
-func storeHolding[T any](t *testing.T, objects ...T) storeView {
+func storeHolding[T any](t *testing.T, objects ...T) informer.View {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	for index := range objects {
@@ -34,18 +36,18 @@ func storeHolding[T any](t *testing.T, objects ...T) storeView {
 			t.Fatal(err)
 		}
 	}
-	return storeView{store: store, synced: func() bool { return true }}
+	return informer.View{Store: store, Synced: func() bool { return true }}
 }
 
 // storeReads answers the Catalogs from a store through the operator's
 // memo, the way watch.go does, and every other collection with a list.
 type storeReads struct {
 	listReads
-	catalogs heldObjects
+	catalogs informer.Held
 }
 
 func (r storeReads) readCatalogs(ctx context.Context) (*CatalogList, error) {
-	items, err := currentList[NamespaceCatalog](ctx, r.client, r.catalogs, namespacedPath(catalogPath))
+	items, err := informer.CurrentList[NamespaceCatalog](r.client.WithContext(ctx), r.catalogs, memo.NamespacedPath(catalogPath))
 	return &CatalogList{Items: items}, err
 }
 
@@ -68,7 +70,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	operator := testOperator(t, cluster)
 	operator.watched = storeReads{
 		listReads: listReads{client: operator.client},
-		catalogs:  heldObjects{view: storeHolding(t, *catalog), versions: operator.versions.catalogs},
+		catalogs:  informer.Held{View: storeHolding(t, *catalog), Versions: operator.versions.catalogs},
 	}
 	operator.pass()
 	cluster.mutex.Lock()
@@ -96,9 +98,9 @@ func TestASettledPassReadsNoCatalogFromTheAPIServer(t *testing.T) {
 	operator.pass()
 	operator.watched = storeReads{
 		listReads: listReads{client: operator.client},
-		catalogs: heldObjects{
-			view:     storeHolding(t, *cluster.heldCatalog("house")),
-			versions: operator.versions.catalogs,
+		catalogs: informer.Held{
+			View:     storeHolding(t, *cluster.heldCatalog("house")),
+			Versions: operator.versions.catalogs,
 		},
 	}
 	before := len(cluster.requestLines())
@@ -151,20 +153,20 @@ func TestAListReadsTheAPIServerWhereTheStoreCannotAnswer(t *testing.T) {
 			store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 			object, ok := c.stored.(*unstructured.Unstructured)
 			if !ok {
-				object = storeHolding(t, *c.stored.(*NamespaceCatalog)).store.List()[0].(*unstructured.Unstructured)
+				object = storeHolding(t, *c.stored.(*NamespaceCatalog)).Store.List()[0].(*unstructured.Unstructured)
 			}
 			if err := store.Add(object); err != nil {
 				t.Fatal(err)
 			}
-			view := storeView{store: store, synced: func() bool { return true }}
-			versions := newVersionMemo()
+			view := informer.View{Store: store, Synced: func() bool { return true }}
+			versions := memo.New()
 			if c.noted != "" {
-				versions.note("house/house", c.noted)
+				versions.Note("house/house", c.noted)
 			}
 			client := testOperator(t, cluster).client
 
-			got, err := currentList[NamespaceCatalog](t.Context(), client,
-				heldObjects{view: view, versions: versions}, namespacedPath(catalogPath))
+			got, err := informer.CurrentList[NamespaceCatalog](client.WithContext(t.Context()),
+				informer.Held{View: view, Versions: versions}, memo.NamespacedPath(catalogPath))
 
 			if err != nil {
 				t.Fatal(err)
@@ -195,11 +197,11 @@ func TestAProviderThatCannotBeReadKeepsTheStoresCopies(t *testing.T) {
 	provider := &MetadataProvider{Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"}}
 	cluster.providers["tmdb"] = provider
 	cluster.broken[metadataProviderPath("house", "tmdb")] = http.StatusInternalServerError
-	versions := newVersionMemo()
-	versions.note("house/tmdb", "9")
+	versions := memo.New()
+	versions.Note("house/tmdb", "9")
 
 	got := currentOrCached[MetadataProvider](t.Context(), testOperator(t, cluster).client,
-		heldObjects{view: storeHolding(t, *provider), versions: versions}, namespacedPath(metadataProviderPath))
+		informer.Held{View: storeHolding(t, *provider), Versions: versions}, memo.NamespacedPath(metadataProviderPath))
 
 	if len(got) != 1 || got[0].Metadata.Name != "tmdb" {
 		t.Errorf("the list = %+v, want the store's copy of tmdb", got)
@@ -230,13 +232,13 @@ func TestAStoodObjectIsReadFromTheAPIServerOnlyWhenTheMemoNotedIt(t *testing.T) 
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			cluster.services["house/catalog"] = service
-			versions := newVersionMemo()
+			versions := memo.New()
 			if one.noted != "" {
-				versions.note("house/catalog", one.noted)
+				versions.Note("house/catalog", one.noted)
 			}
 
 			got, err := readStood[Service](t.Context(), testOperator(t, cluster).client,
-				heldObjects{view: storeHolding(t, one.stored...), versions: versions},
+				informer.Held{View: storeHolding(t, one.stored...), Versions: versions},
 				"house/catalog", servicesPath("house")+"/catalog")
 
 			if found := err == nil && got != nil; found != one.found {
@@ -254,7 +256,7 @@ func TestAStoodObjectIsReadFromTheAPIServerOnlyWhenTheMemoNotedIt(t *testing.T) 
 // with a list.
 type jobStoreReads struct {
 	listReads
-	jobs heldObjects
+	jobs informer.Held
 }
 
 func (r jobStoreReads) readWorkerJobs(ctx context.Context) (*JobList, error) {
@@ -272,7 +274,7 @@ func TestAPassDoesNotCreateAJobTwiceBeforeTheWatchDeliversIt(t *testing.T) {
 	operator := testOperator(t, cluster)
 	operator.watched = jobStoreReads{
 		listReads: listReads{client: operator.client},
-		jobs:      heldObjects{view: storeHolding[Job](t), versions: operator.versions.jobs},
+		jobs:      informer.Held{View: storeHolding[Job](t), Versions: operator.versions.jobs},
 	}
 
 	operator.pass()
@@ -295,19 +297,19 @@ func TestADeletedJobLeavesTheListAndTheMemo(t *testing.T) {
 	}
 
 	stale, err := currentJobs(t.Context(), operator.client,
-		heldObjects{view: storeHolding(t, job), versions: operator.versions.jobs})
+		informer.Held{View: storeHolding(t, job), Versions: operator.versions.jobs})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := currentJobs(t.Context(), operator.client,
-		heldObjects{view: storeHolding[Job](t), versions: operator.versions.jobs}); err != nil {
+		informer.Held{View: storeHolding[Job](t), Versions: operator.versions.jobs}); err != nil {
 		t.Fatal(err)
 	}
 
 	if len(stale.Items) != 0 {
 		t.Errorf("the list holds %+v, want the deleted Job left out", stale.Items)
 	}
-	if operator.versions.jobs.noted("house/movies-walk-a") {
+	if operator.versions.jobs.Noted("house/movies-walk-a") {
 		t.Error("the memo still holds the Job the store dropped")
 	}
 }

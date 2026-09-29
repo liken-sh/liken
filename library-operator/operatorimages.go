@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 const (
@@ -48,7 +50,7 @@ type images struct {
 // a cluster with no downward API can still run it. Otherwise it reads
 // its own pod and derives the rest from the operator container's
 // image.
-func operatorImages(ctx context.Context, client *Client, namespace string) (images, error) {
+func operatorImages(ctx context.Context, client *apiclient.Client, namespace string) (images, error) {
 	named := images{
 		scanner:   os.Getenv(scannerImageVariable),
 		corrosion: os.Getenv(corrosionImageVariable),
