@@ -52,7 +52,7 @@ content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref
 # The generate target builds every generated reference page and
 # nothing else. The test-docs target in ../Makefile runs it with -B,
 # so that every page is regenerated, and fails when one differs from
-# what is committed.
+# what git has staged.
 generate: $(GENERATED)
 
 # The built site. The find covers every content, layout, and theme

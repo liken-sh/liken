@@ -32,7 +32,7 @@ BASE := https://liken.sh/bluetooth/
 # The generate target builds every generated reference page and
 # nothing else. The test-docs target in ../Makefile runs it with -B,
 # so that every page is regenerated, and fails when one differs from
-# what is committed.
+# what git has staged.
 .PHONY: generate
 generate: $(GENERATED)
 
