@@ -5,13 +5,15 @@ package informer
 // of a watched kind.
 //
 // A store answers only while it is ready: it holds the whole first
-// read, and the API server accepted the last watch, so a watch keeps
-// the store current. A store that holds part of the first read would
+// read, and the API server accepted a watch and forbade none since, so
+// a watch keeps the store current. A store that holds part of the first read would
 // leave objects out of a list, and a store whose watch the API server
-// refuses holds no change made since its last list. While a store is
-// not ready, every read goes to the API server. An object that a ready
-// store does not hold is read from the API server too, because it can
-// be an object the operator created a moment ago.
+// forbids holds no change made since its last list. A store whose
+// watch fails while the API server is down stays ready (Synced in
+// informer.go). While a store is not ready, every read goes to the API
+// server. An object that a ready store does not hold is read from the
+// API server too, because it can be an object the operator created a
+// moment ago.
 //
 // A store's copy can be older than the operator's own last write. The
 // memo package records the version of each copy the API server

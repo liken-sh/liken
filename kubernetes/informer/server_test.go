@@ -4,10 +4,13 @@ package informer
 // real reflector against.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,6 +74,10 @@ func asObject(t *testing.T, item thing) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: fields}
 }
 
+// serverDown, as a failure, refuses each connection to the server, the
+// way a client finds an API server that restarts.
+const serverDown = -1
+
 // holdOpen, as the last line of a script, keeps the stream open until
 // the watcher ends the request. Any other script ends the stream after
 // its last line, the way the API server does at timeoutSeconds.
@@ -93,15 +100,27 @@ type watchServer struct {
 	scripts [][]string
 
 	mu        sync.Mutex
-	refuse    bool
+	failure   int
+	spared    int
 	readCount int
 	watches   int
 	queries   []string
 	opened    chan struct{}
+	failed    chan struct{}
+
+	// refused is a port that no process listens on.
+	refused string
 }
 
 func newWatchServer(path string, reads [][]thing, scripts ...[]string) *watchServer {
-	return &watchServer{path: path, reads: reads, scripts: scripts, opened: make(chan struct{}, len(scripts)+8)}
+	return &watchServer{path: path, reads: reads, scripts: scripts, opened: make(chan struct{}, len(scripts)+8), failed: make(chan struct{}, 1)}
+}
+
+// fails reports whether the server fails now with the failure.
+func (s *watchServer) fails(failure int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failure == failure && s.watches >= s.spared
 }
 
 func (s *watchServer) read() ([]thing, string) {
@@ -112,11 +131,12 @@ func (s *watchServer) read() ([]thing, string) {
 	return s.reads[index], fmt.Sprint(100 * s.readCount)
 }
 
-// refusing sets whether the server refuses each watch.
-func (s *watchServer) refusing(refuse bool) {
+// failing sets how the server fails each watch after the first spared
+// watches it accepted. A failure of 0 accepts every watch.
+func (s *watchServer) failing(failure, spared int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.refuse = refuse
+	s.failure, s.spared = failure, spared
 }
 
 func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +147,8 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	s.mu.Lock()
 	s.queries = append(s.queries, "labelSelector="+query.Get("labelSelector")+" fieldSelector="+query.Get("fieldSelector"))
-	refuse := s.refuse
+	failure := s.failure
+	fail := failure > 0 && s.watches >= s.spared
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 
@@ -140,9 +161,8 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if refuse {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403}`)
+	if fail {
+		s.fail(w, failure)
 		return
 	}
 
@@ -175,6 +195,31 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// fail answers one watch with the HTTP status, and counts it.
+func (s *watchServer) fail(w http.ResponseWriter, status int) {
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":%q,"code":%d}`,
+		strings.ReplaceAll(http.StatusText(status), " ", ""), status)
+	s.countFailure()
+}
+
+func (s *watchServer) countFailure() {
+	select {
+	case s.failed <- struct{}{}:
+	default:
+	}
+}
+
+// dial connects a client to the server, or to the refused port while
+// the server is down.
+func (s *watchServer) dial(ctx context.Context, network, address string) (net.Conn, error) {
+	if s.fails(serverDown) {
+		address = s.refused
+		defer s.countFailure()
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, address)
+}
+
 func (s *watchServer) sent() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,6 +238,18 @@ func (s *watchServer) awaitWatches(t *testing.T, count int) {
 	}
 }
 
+// awaitFailures waits until the server has failed count more watches.
+func (s *watchServer) awaitFailures(t *testing.T, count int) {
+	t.Helper()
+	for range count {
+		select {
+		case <-s.failed:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the server failed fewer than %d watches", count)
+		}
+	}
+}
+
 // event is one line of a watch stream.
 func event(kind string, item thing) string {
 	object, _ := json.Marshal(item)
@@ -200,15 +257,33 @@ func event(kind string, item thing) string {
 }
 
 // testWatcher points a dynamic client at a test server.
-func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
+func testWatcher(t *testing.T, script *watchServer) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := httptest.NewUnstartedServer(script)
+	server.Config.SetKeepAlivesEnabled(false)
+	server.Start()
 	t.Cleanup(server.Close)
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	script.refused = refusedAddress(t)
+	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL, Dial: script.dial})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return client
+}
+
+// refusedAddress is a local port that no process listens on, so the
+// kernel refuses each connection to it.
+func refusedAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return address
 }
 
 // eventually waits until the condition holds.

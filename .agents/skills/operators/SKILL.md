@@ -315,10 +315,13 @@ own files, most of them in `objectcache.go`: `storeView`, `heldObjects`, `readOn
 - **The rule.** Read one object with `informer.ReadOne` and a list with
   `informer.CurrentList`. A store answers only when it is ready
   (`informer.View.Ready`): it holds the whole first read, and the API
-  server accepted the last watch. Before that, and while the API server
-  refuses the watch or no watch runs, read and list from the API
-  server. `ReadOne` reads an object the store does not hold from the
-  API server. A copy that does not convert is read from the API server
+  server accepted a watch and forbade none since. Before that, and
+  after a `401` or a `403` on a watch until the API server accepts one,
+  read and list from the API server. A watch that fails for another reason, such as a
+  refused connection while the API server restarts, leaves the store
+  ready, so the operator keeps its local work going from the store.
+  `ReadOne` reads an object the store does not hold from the API
+  server. A copy that does not convert is read from the API server
   too, so a list leaves out no object.
 - **The memo.** A store's copy can be older than the operator's own
   last write, because the watch delivers the write a moment later, and

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -102,9 +103,24 @@ type Collection struct {
 	controller cache.Controller
 	done       chan struct{}
 
-	// watching is true while the API server accepted the last watch the
-	// reflector opened. Synced says why it matters.
+	// watching is true after the API server accepts a watch, and false
+	// again after it forbids one. Synced says why it matters.
 	watching atomic.Bool
+}
+
+// noteWatch records whether the API server grants the watch. An
+// accepted watch grants it, and a 401 or a 403 refuses it. Any other
+// failure, such as a refused connection while the API server restarts,
+// or a 5xx, says nothing about the permission, so the flag keeps its
+// last value. The dynamic client answers each refusal as a
+// *errors.StatusError, which carries the HTTP status.
+func (c *Collection) noteWatch(err error) {
+	switch {
+	case err == nil:
+		c.watching.Store(true)
+	case apierrors.IsForbidden(err), apierrors.IsUnauthorized(err):
+		c.watching.Store(false)
+	}
 }
 
 // Start opens the watch and returns at once. The watch runs until the
@@ -130,7 +146,7 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 		WatchFuncWithContext: func(ctx context.Context, list metav1.ListOptions) (watch.Interface, error) {
 			scope(&list)
 			stream, err := collection.Watch(ctx, list)
-			c.watching.Store(err == nil)
+			c.noteWatch(err)
 			// The first accepted watch is the streaming list of the first
 			// read, or the watch after a plain list.
 			if err == nil && opened.Add(1) > 1 && options.Reopened != nil {
@@ -174,13 +190,20 @@ func (c *Collection) Done() <-chan struct{} { return c.done }
 // watch keeps it current. Until the first read is done, a read of the
 // copy could miss an object that exists.
 //
-// A copy whose watch the API server refuses is not current, even after
+// A copy whose watch the API server forbids is not current, even after
 // a list. The case is a release skew: a new binary under the previous
 // release's RBAC, which grants list and not watch. The reflector then
 // lists the collection again after each backoff, up to thirty seconds
-// apart, and in between the copy holds no change at all. So the copy
-// answers only while the API server accepted the last watch the
-// reflector opened, and otherwise the pass reads the API server.
+// apart, and in between the copy holds no change at all. So after a 401
+// or a 403 on a watch, the copy does not answer and the pass reads the
+// API server, until the API server accepts a watch again.
+//
+// A watch that fails for another reason does not stop the copy. While
+// the API server is down, a read of the API server fails too, and the
+// copy lets an operator keep its local work going. The reflector
+// resumes the watch from the copy's last version when the API server
+// returns, or lists again, so the copy then receives each change it
+// missed.
 func (c *Collection) Synced() bool {
 	return c != nil && c.controller.HasSynced() && c.watching.Load()
 }

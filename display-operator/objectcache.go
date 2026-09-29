@@ -143,17 +143,26 @@ type clusterStores struct {
 	pods    informer.View
 }
 
-// layout answers one Layout. Once the store holds its first read, it
-// holds every Layout, so a name it does not hold is a Layout that does
-// not exist, and the read costs the API server nothing.
+// layout answers one Layout. Once the store is ready, it holds every
+// Layout, so a name it does not hold is a Layout that does not exist,
+// and the read costs the API server nothing. The store can become
+// ready, or stop, between two checks, so layout checks once and reads
+// the store itself. A second check that disagreed with the first would
+// answer ErrNotFound for a Layout the store holds. A copy that does not
+// convert is read from the API server, as informer.ReadOne does.
 func (c clusterStores) layout(client *apiclient.Client, name string) (*Layout, error) {
-	if held, ok := informer.Cached[Layout](c.layouts, name); ok {
-		return held, nil
+	if !c.layouts.Ready() {
+		return getLayout(client, name)
 	}
-	if c.layouts.Ready() {
+	object, held, err := c.layouts.Store.GetByKey(name)
+	if err != nil || !held {
 		return nil, apiclient.ErrNotFound
 	}
-	return getLayout(client, name)
+	layout, err := informer.Convert[Layout](object)
+	if err != nil {
+		return getLayout(client, name)
+	}
+	return &layout, nil
 }
 
 // pod answers one pod, from the store when it holds it. The store

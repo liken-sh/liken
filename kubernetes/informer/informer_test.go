@@ -4,10 +4,11 @@ package informer
 // a scripted API server. The reflector's own loop is upstream's to
 // test. What these tests prove is that the copy holds the collection,
 // that each change the API server sends reaches the handler, and that
-// the copy answers only while its watch runs.
+// the copy stops answering only while the API server forbids its watch.
 
 import (
 	"context"
+	"net/http"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -127,18 +128,48 @@ func TestAWatchOpenedAgainCounts(t *testing.T) {
 	}
 }
 
-// A copy whose watch the API server refuses holds a list, and still
+// A copy whose watch the API server forbids holds a list, and still
 // answers nothing, because no watch keeps the list current. When the
 // API server accepts the watch again, the copy answers.
-func TestACopyWithARefusedWatchDoesNotAnswer(t *testing.T) {
+func TestACopyWithAForbiddenWatchDoesNotAnswer(t *testing.T) {
 	server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}})
-	server.refusing(true)
+	server.failing(http.StatusForbidden, 0)
 	c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{})
 	eventually(t, "the copy holds the list", c.controller.HasSynced)
 
 	if _, held := Cached[thing](c.View(), "a"); c.Synced() || c.View().Ready() || held {
-		t.Error("the copy answers while the API server refuses its watch")
+		t.Error("the copy answers while the API server forbids its watch")
 	}
-	server.refusing(false)
+	server.failing(0, 0)
 	eventually(t, "the copy answers once the watch runs", c.Synced)
+}
+
+// Only a refusal of the permission to watch stops a synced copy from
+// answering. A watch that fails because the API server is down or busy
+// says nothing about the copy's permission, and the operator keeps its
+// local work going from the copy until the API server returns.
+func TestOnlyARefusedPermissionStopsASyncedCopy(t *testing.T) {
+	cases := []struct {
+		name    string
+		failure int
+		answers bool
+	}{
+		{"the API server refuses the connection", serverDown, true},
+		{"the API server is unavailable", http.StatusServiceUnavailable, true},
+		{"the watch is forbidden", http.StatusForbidden, false},
+		{"the credentials are refused", http.StatusUnauthorized, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}}, []string{})
+			server.failing(tc.failure, 1)
+			c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{})
+			server.awaitWatches(t, 1)
+			server.awaitFailures(t, 2)
+
+			if c.Synced() != tc.answers {
+				t.Errorf("Synced() = %v after the watch failed, want %v", c.Synced(), tc.answers)
+			}
+		})
+	}
 }

@@ -187,6 +187,27 @@ func TestALayoutTheStoreDoesNotHoldIsNotRead(t *testing.T) {
 	assertCondition(t, fixture.status(labMonitor()), conditionFalse, LayoutNotFoundReason)
 }
 
+// A store can become ready while a pass reads a Layout from it. The
+// read goes to the API server, which holds the Layout, and never
+// answers that a Layout the store holds does not exist.
+func TestALayoutReadWhileTheStoreBecomesReadyIsFound(t *testing.T) {
+	fixture := newPlacementFixture(t)
+	fixture.layout("den", LayoutRegion{Name: "whole"})
+	becomesReady := storeHolding(t, valuesOf(fixture.layouts)...)
+	checks := 0
+	becomesReady.Synced = func() bool {
+		checks++
+		return checks > 1
+	}
+	stores := clusterStores{layouts: becomesReady}
+
+	layout, err := stores.layout(fixture.client, "den")
+
+	if err != nil || layout.Metadata.Name != "den" {
+		t.Errorf("layout(den) = %v, %v, want the Layout den", layout, err)
+	}
+}
+
 // The compositor's restart count comes from this operator's own pod,
 // which the store of this node's pods holds, so a pass that publishes
 // the slice reads no pod from the API server.
