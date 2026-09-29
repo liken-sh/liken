@@ -13,7 +13,7 @@ func pinnedFixture(t *testing.T) *repo {
 	r := newRepo(t, map[string]string{
 		"tool/package.toml":     "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\n",
 		"tool/Dockerfile":       "FROM debian@sha256:aaa\n",
-		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n[[outputs.images]]\nname = \"base\"\n",
 		"base/Dockerfile":       "FROM tool\n",
 		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"operator\"\n",
 		"operator/Dockerfile":   "FROM base\n",

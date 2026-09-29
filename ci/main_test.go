@@ -141,12 +141,17 @@ func TestThePlanWritesItsDecisionsAndItsDryRun(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(output), "components=")), &decisions); err != nil {
 		t.Fatalf("%v: %s", err, output)
 	}
-	if d := decisions["operator"]; !d.Check || d.Publish != publishNone {
+	if d := decisions["operator"]; !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Jobs, []string{"check"}) ||
+		!reflect.DeepEqual(d.Images, []ImageRun{{Image: "operator", Load: true}}) {
 		t.Errorf("operator: %+v", d)
+	}
+	if !strings.Contains(output, `"base":{"check":false,"publish":"none","version":"","jobs":[],"images":[]}`) {
+		t.Errorf("a component that runs nothing lacks empty lists: %s", output)
 	}
 	for _, want := range []string{
 		"Publishing is off",
-		"| `operator` | run | none | `-` | changed: operator/main.go |",
+		"| `operator` | check, operator | none | `-` | changed: operator/main.go |",
+		"| `base` | skip | none | `-` | nothing in its paths changed |",
 		"| `operator` | `2026.09.27-001` | yes | releases: changed: operator/main.go (since operator/2026.09.27-001) | `operator`, `operator-deploy` |",
 		"| `liken` | `2026.09.28-001` | no | no change since 2026.09.28-001 | - |",
 		"This workflow can push to every package.",

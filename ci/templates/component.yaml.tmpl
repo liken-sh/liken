@@ -4,9 +4,12 @@
 #
 # ci.yaml calls this workflow when a change reaches {% .Name %}. Each
 # check below is a job from package.toml, and it runs the same command
-# that a workstation runs.{% if .Images %} The images job builds every image and runs
+# that a workstation runs.{% if .Images %} The images job builds each image and runs
 # its smoke check. The publish job pushes nothing until every other
 # job in this workflow passes.{% end %}
+#
+# The plan names the jobs{% if .Images %} and the images{% end %} that read the change, and
+# only those run. A run that publishes runs all of them.
 name: {% .Name %}
 
 on:
@@ -22,6 +25,15 @@ on:
       publish:
         type: string
         required: true
+      # The names of the jobs that run, as a JSON list.
+      jobs:
+        type: string
+        required: true{% if .Images %}
+      # The images that run, as a JSON list of the images job's matrix
+      # entries.
+      images:
+        type: string
+        required: true{% end %}
 
 permissions:
   contents: read
@@ -29,6 +41,7 @@ permissions:
 
 jobs:{% range .Jobs %}
   {% .Name %}:
+    if: ${{ contains(fromJSON(inputs.jobs), '{% .Name %}') }}
     runs-on: ubuntu-26.04
     timeout-minutes: {% .Timeout %}
     defaults:
@@ -136,18 +149,18 @@ jobs:{% range .Jobs %}
   # decides which target writes. Each write ignores an error: a cache
   # that cannot be written makes the next build slower, and it never
   # fails this one.
+  #
+  # The matrix comes from the plan: one entry for each image that runs,
+  # with whether it is pinned, whether it loads, and its smoke check.
   images:
     name: ${{ matrix.image }}
+    if: ${{ inputs.images != '[]' }}
     runs-on: ubuntu-26.04
     timeout-minutes: {% .ImageTimeout %}
     strategy:
       fail-fast: false
       matrix:
-        include:{% range .Images %}
-          - image: {% .Name %}
-            pinned: {% .Pinned %}
-            load: {% .Load %}
-            smoke: '{% .Smoke %}'{% end %}
+        include: ${{ fromJSON(inputs.images) }}
     steps:
       - uses: actions/checkout@v7
 

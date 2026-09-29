@@ -167,17 +167,9 @@ func coveredByDependency(root string, components map[string]*Component, closure 
 // link adds its target, the way Docker sends it.
 func hashContext(root, dir, ignorePath string, add func(kind, name string, data []byte)) error {
 	base := filepath.Join(root, dir)
-	var patterns []string
-	if f, err := os.Open(filepath.Join(root, ignorePath)); err == nil {
-		patterns, err = ignorefile.ReadAll(f)
-		f.Close()
-		if err != nil {
-			return fmt.Errorf("%s: %w", ignorePath, err)
-		}
-	}
-	ignore, err := patternmatcher.New(patterns)
+	ignore, err := readIgnore(root, ignorePath)
 	if err != nil {
-		return fmt.Errorf("%s: %w", ignorePath, err)
+		return err
 	}
 	return filepath.WalkDir(base, func(file string, e fs.DirEntry, err error) error {
 		if err != nil || e.IsDir() {
@@ -211,6 +203,24 @@ func hashContext(root, dir, ignorePath string, add func(kind, name string, data 
 		add("file", path.Join(dir, rel)+" "+mode, data)
 		return nil
 	})
+}
+
+// readIgnore reads a build context's ignore file. A missing file
+// ignores nothing.
+func readIgnore(root, ignorePath string) (*patternmatcher.PatternMatcher, error) {
+	var patterns []string
+	if f, err := os.Open(filepath.Join(root, ignorePath)); err == nil {
+		patterns, err = ignorefile.ReadAll(f)
+		f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", ignorePath, err)
+		}
+	}
+	ignore, err := patternmatcher.New(patterns)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", ignorePath, err)
+	}
+	return ignore, nil
 }
 
 // Recipes hashes every pinned component.

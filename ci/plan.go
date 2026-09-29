@@ -70,6 +70,10 @@ type Decision struct {
 	Why string `json:"-"`
 	// Newest is the component's newest published release.
 	Newest string `json:"-"`
+	// Jobs and Images are the jobs and the images that run when Check
+	// is true.
+	Jobs   []string   `json:"jobs"`
+	Images []ImageRun `json:"images"`
 }
 
 // VersionsFunc lists the published versions of a component.
@@ -114,6 +118,7 @@ func (p Planner) release(e Event, tag string) (map[string]Decision, error) {
 		}
 		if d.Changed {
 			d.Check = true
+			d.Jobs, d.Images = everything(p.Components[name])
 			if e.Publishing {
 				d.Publish = publishRelease
 			}
@@ -224,6 +229,7 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 	if err != nil {
 		return nil, err
 	}
+	sel := selector{root: p.Git.Dir, components: p.Components, producer: ImageProducers(p.Components), diff: diff}
 	decisions := map[string]Decision{}
 	for _, c := range sortedComponents(p.Components) {
 		d := Decision{Publish: publishNone, Version: dev}
@@ -257,7 +263,28 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 		if devBuild && e.Publishing && d.Changed {
 			d.Publish = publishDev
 		}
+		if d.Check {
+			p.selectJobs(c, &d, sel, all != "")
+		}
 		decisions[c.Name()] = d
 	}
 	return decisions, nil
+}
+
+// selectJobs fills in the jobs and the images that run. A run that
+// publishes the component, builds a pinned tag that is not published,
+// or changed the component's workflow runs all of them, and so does a
+// run with no commit to compare with. Otherwise the selector decides,
+// and a component whose jobs and images all read nothing of the change
+// does not run.
+func (p Planner) selectJobs(c *Component, d *Decision, sel selector, all bool) {
+	_, workflow := sel.diff.Workflows[c.Name()]
+	if all || workflow || d.Publish != publishNone || c.Pinned() && d.Changed {
+		d.Jobs, d.Images = everything(c)
+		return
+	}
+	d.Jobs, d.Images = sel.Select(c)
+	if len(d.Jobs) == 0 && len(d.Images) == 0 {
+		d.Check, d.Reason = false, "no job or image reads the change; "+d.Reason
+	}
 }

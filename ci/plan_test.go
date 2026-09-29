@@ -79,14 +79,14 @@ func (r *repo) planner(published map[string][]string) Planner {
 }
 
 // planFixture is a repository with an OS, an operator that builds on a
-// base, the base, and brand. The OS's release 2026.09.28-001 and the
+// base, the base, and brand, each with one job. The OS's release 2026.09.28-001 and the
 // operator's imported release operator/2026.09.27-001 are tagged.
 func planFixture(t *testing.T) *repo {
 	r := newRepo(t, map[string]string{
-		"brand/package.toml":    "[package]\nname = \"brand\"\n",
-		"base/package.toml":     "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base\"\n",
-		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
-		"liken/package.toml":    "[package]\nname = \"liken\"\n[depends]\ncomponents = [\"brand\"]\n[outputs]\nchannel = true\n",
+		"brand/package.toml":    "[package]\nname = \"brand\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n",
+		"base/package.toml":     "[package]\nname = \"base\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[outputs.images]]\nname = \"base\"\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"operator\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
+		"liken/package.toml":    "[package]\nname = \"liken\"\n[depends]\ncomponents = [\"brand\"]\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\nchannel = true\n",
 		"operator/main.go":      "package main\n",
 		"base/Dockerfile":       "FROM scratch\n",
 		"operator/Dockerfile":   "FROM base\n",
@@ -262,7 +262,9 @@ func TestAPullRequestRunsWhatItChanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, runs := range map[string]bool{"brand": true, "liken": true, "operator": true, "base": false} {
+	// brand's theme reaches only a manual's hugo job, and the operator
+	// has none.
+	for name, runs := range map[string]bool{"brand": true, "liken": true, "operator": false, "base": false} {
 		if decisions[name].Check != runs {
 			t.Errorf("%s: %+v", name, decisions[name])
 		}

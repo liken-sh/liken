@@ -78,6 +78,15 @@ func TestTheRootWorkflowCallsEachComponentAfterItsDependencies(t *testing.T) {
 	if _, ok := jobs["os"]["secrets"]; !ok {
 		t.Error("the OS's call does not pass the secrets")
 	}
+	for name, images := range map[string]bool{"base": true, "app": false} {
+		with := jobs[name]["with"].(map[string]any)
+		if with["jobs"] != "${{ toJSON(fromJSON(needs.plan.outputs.components)['"+name+"'].jobs) }}" {
+			t.Errorf("%s's call passes the jobs %v", name, with["jobs"])
+		}
+		if _, ok := with["images"]; ok != images {
+			t.Errorf("%s's call passes images: %v", name, ok)
+		}
+	}
 	if _, ok := jobs["app"]["secrets"]; ok {
 		t.Error("an operator's call passes the secrets")
 	}
@@ -142,11 +151,11 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"      - run: make test-go\n",
 		"      - run: |\n          make test\n          make build\n",
 		"name: coverage-app-go",
-		"- image: app-cli\n            pinned: false\n            load: false",
-		"smoke: 'app/smoke/app.sh'",
+		"  go:\n    if: ${{ contains(fromJSON(inputs.jobs), 'go') }}\n",
+		"  images:\n    name: ${{ matrix.image }}\n    if: ${{ inputs.images != '[]' }}\n",
+		"include: ${{ fromJSON(inputs.images) }}",
 		"targets: ${{ matrix.image }}",
 		"BRANCH_CACHE=${{ matrix.image }}",
-		"- image: app\n            pinned: false",
 		"fluxcd/flux2/action@v2.9.5",
 		"go run . publish -root .. -component app",
 	} {
@@ -207,9 +216,29 @@ func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(files[".github/workflows/component-base.yaml"])
-	for _, want := range []string{"- image: base\n            pinned: true", "|| matrix.pinned }}\n        uses: docker/login-action@v3"} {
+	for _, want := range []string{"|| matrix.pinned }}\n        uses: docker/login-action@v3"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the workflow lacks %q:\n%s", want, text)
 		}
+	}
+}
+
+// The site takes a coverage profile only from a job that ran, because a
+// job that did not run uploaded nothing.
+func TestTheSiteTakesCoverageOnlyFromAJobThatRan(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"m\"\ncoverage = [\"coverage.out\"]\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "if: ${{ fromJSON(needs.plan.outputs.components)['app'].check && contains(fromJSON(needs.plan.outputs.components)['app'].jobs, 'go') }}\n        with:\n          name: coverage-app-go"
+	if !strings.Contains(string(files[".github/workflows/ci.yaml"]), want) {
+		t.Errorf("the site's download lacks %q", want)
 	}
 }

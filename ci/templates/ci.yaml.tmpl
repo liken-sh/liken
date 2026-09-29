@@ -153,6 +153,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].jobs) }}{% if .Images %}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].images) }}{% end %}
     permissions:
       contents: read
       packages: write{% if .Channel %}
@@ -165,8 +167,8 @@ jobs:
   # repository at liken.sh. Every push to main deploys it, because
   # the coverage report of each component is part of it.
   #
-  # A component whose jobs did not run in this push has no new
-  # coverage profile, so its report is the one the site serves now.
+  # A job that did not run in this push has no new coverage profile,
+  # so its report is the one the site serves now.
   site:
     needs: [plan{% range .Components %}, {% .Name %}{% end %}]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
@@ -189,7 +191,7 @@ jobs:
           cache-dependency-path: '**/docs/go.sum'
 {% range .Coverage %}
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['{% .Component %}'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['{% .Component %}'].check && contains(fromJSON(needs.plan.outputs.components)['{% .Component %}'].jobs, '{% .Job %}') }}
         with:
           name: coverage-{% .Component %}-{% .Job %}
           path: {% .Dir %}

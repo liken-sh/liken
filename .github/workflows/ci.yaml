@@ -170,6 +170,7 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs) }}
     permissions:
       contents: read
       packages: write
@@ -181,6 +182,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['audio-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['audio-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -192,6 +195,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -203,6 +208,7 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['brand'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['brand'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['brand'].jobs) }}
     permissions:
       contents: read
       packages: write
@@ -214,6 +220,7 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['ci'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['ci'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ci'].jobs) }}
     permissions:
       contents: read
       packages: write
@@ -225,6 +232,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vulkan'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vulkan'].images) }}
     permissions:
       contents: read
       packages: write
@@ -236,6 +245,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vaapi'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vaapi'].images) }}
     permissions:
       contents: read
       packages: write
@@ -247,6 +258,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ffmpeg'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ffmpeg'].images) }}
     permissions:
       contents: read
       packages: write
@@ -258,6 +271,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].images) }}
     permissions:
       contents: read
       packages: write
@@ -269,6 +284,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['display-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['display-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -280,6 +297,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['equipment-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['equipment-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -291,6 +310,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['git-csi-driver'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['git-csi-driver'].images) }}
     permissions:
       contents: read
       packages: write
@@ -302,6 +323,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['mpv'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].images) }}
     permissions:
       contents: read
       packages: write
@@ -313,6 +336,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -324,6 +349,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['library-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['library-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -335,6 +362,7 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['liken'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['liken'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['liken'].jobs) }}
     permissions:
       contents: read
       packages: write
@@ -348,6 +376,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].images) }}
     permissions:
       contents: read
       packages: write
@@ -359,6 +389,8 @@ jobs:
     with:
       version: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].images) }}
     permissions:
       contents: read
       packages: write
@@ -369,8 +401,8 @@ jobs:
   # repository at liken.sh. Every push to main deploys it, because
   # the coverage report of each component is part of it.
   #
-  # A component whose jobs did not run in this push has no new
-  # coverage profile, so its report is the one the site serves now.
+  # A job that did not run in this push has no new coverage profile,
+  # so its report is the one the site serves now.
   site:
     needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, mpv, media-operator, library-operator, liken, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' }}
@@ -393,79 +425,79 @@ jobs:
           cache-dependency-path: '**/docs/go.sum'
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check && contains(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs, 'go') }}
         with:
           name: coverage-kubernetes-go
           path: kubernetes
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].check && contains(fromJSON(needs.plan.outputs.components)['audio-operator'].jobs, 'go') }}
         with:
           name: coverage-audio-operator-go
           path: audio-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check && contains(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].jobs, 'go') }}
         with:
           name: coverage-bluetooth-operator-go
           path: bluetooth-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].check && contains(fromJSON(needs.plan.outputs.components)['display-operator'].jobs, 'go') }}
         with:
           name: coverage-display-operator-go
           path: display-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].check && contains(fromJSON(needs.plan.outputs.components)['equipment-operator'].jobs, 'go') }}
         with:
           name: coverage-equipment-operator-go
           path: equipment-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].check && contains(fromJSON(needs.plan.outputs.components)['git-csi-driver'].jobs, 'go') }}
         with:
           name: coverage-git-csi-driver-go
           path: git-csi-driver
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'go') }}
         with:
           name: coverage-media-operator-go
           path: media-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'rust') }}
         with:
           name: coverage-media-operator-rust
           path: media-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check && contains(fromJSON(needs.plan.outputs.components)['library-operator'].jobs, 'go') }}
         with:
           name: coverage-library-operator-go
           path: library-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check && contains(fromJSON(needs.plan.outputs.components)['library-operator'].jobs, 'rust') }}
         with:
           name: coverage-library-operator-rust
           path: library-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['liken'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['liken'].check && contains(fromJSON(needs.plan.outputs.components)['liken'].jobs, 'checks') }}
         with:
           name: coverage-liken-checks
           path: liken
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].check && contains(fromJSON(needs.plan.outputs.components)['people-operator'].jobs, 'go') }}
         with:
           name: coverage-people-operator-go
           path: people-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].check }}
+        if: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].check && contains(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].jobs, 'go') }}
         with:
           name: coverage-per-node-csi-driver-go
           path: per-node-csi-driver

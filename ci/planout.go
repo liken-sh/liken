@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -74,6 +75,17 @@ func (w World) plan(root string, components map[string]*Component) error {
 			return err
 		}
 	}
+	// A list that runs nothing is [] and never null, because each
+	// workflow compares its input with '[]'.
+	for name, d := range decisions {
+		if d.Jobs == nil {
+			d.Jobs = []string{}
+		}
+		if d.Images == nil {
+			d.Images = []ImageRun{}
+		}
+		decisions[name] = d
+	}
 	encoded, err := json.Marshal(decisions)
 	if err != nil {
 		return err
@@ -120,7 +132,7 @@ func writeSummary(b *strings.Builder, e Event, components map[string]*Component,
 		d := decisions[c.Name()]
 		jobs := "skip"
 		if d.Check {
-			jobs = "run"
+			jobs = strings.Join(append(slices.Clone(d.Jobs), imageNames(d.Images)...), ", ")
 		}
 		version := d.Version
 		if version == "" || d.Publish == publishNone {
@@ -189,6 +201,15 @@ func onceEach(versions VersionsFunc) VersionsFunc {
 		}
 		return v, err
 	}
+}
+
+// imageNames lists the images that run.
+func imageNames(runs []ImageRun) []string {
+	var names []string
+	for _, run := range runs {
+		names = append(names, run.Image)
+	}
+	return names
 }
 
 func appendFile(path, text string) error {

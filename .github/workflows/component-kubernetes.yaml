@@ -5,6 +5,9 @@
 # ci.yaml calls this workflow when a change reaches kubernetes. Each
 # check below is a job from package.toml, and it runs the same command
 # that a workstation runs.
+#
+# The plan names the jobs that read the change, and
+# only those run. A run that publishes runs all of them.
 name: kubernetes
 
 on:
@@ -20,6 +23,10 @@ on:
       publish:
         type: string
         required: true
+      # The names of the jobs that run, as a JSON list.
+      jobs:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -27,6 +34,7 @@ permissions:
 
 jobs:
   go:
+    if: ${{ contains(fromJSON(inputs.jobs), 'go') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:

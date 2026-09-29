@@ -4,9 +4,12 @@
 #
 # ci.yaml calls this workflow when a change reaches bluetooth-operator. Each
 # check below is a job from package.toml, and it runs the same command
-# that a workstation runs. The images job builds every image and runs
+# that a workstation runs. The images job builds each image and runs
 # its smoke check. The publish job pushes nothing until every other
 # job in this workflow passes.
+#
+# The plan names the jobs and the images that read the change, and
+# only those run. A run that publishes runs all of them.
 name: bluetooth-operator
 
 on:
@@ -22,6 +25,15 @@ on:
       publish:
         type: string
         required: true
+      # The names of the jobs that run, as a JSON list.
+      jobs:
+        type: string
+        required: true
+      # The images that run, as a JSON list of the images job's matrix
+      # entries.
+      images:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -29,6 +41,7 @@ permissions:
 
 jobs:
   go:
+    if: ${{ contains(fromJSON(inputs.jobs), 'go') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
@@ -54,6 +67,7 @@ jobs:
           retention-days: 7
 
   docs:
+    if: ${{ contains(fromJSON(inputs.jobs), 'docs') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
@@ -104,30 +118,18 @@ jobs:
   # decides which target writes. Each write ignores an error: a cache
   # that cannot be written makes the next build slower, and it never
   # fails this one.
+  #
+  # The matrix comes from the plan: one entry for each image that runs,
+  # with whether it is pinned, whether it loads, and its smoke check.
   images:
     name: ${{ matrix.image }}
+    if: ${{ inputs.images != '[]' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - image: bluetooth-operator
-            pinned: false
-            load: true
-            smoke: ''
-          - image: bluetooth-bondfetch
-            pinned: false
-            load: true
-            smoke: ''
-          - image: bluetoothd
-            pinned: false
-            load: true
-            smoke: ''
-          - image: bluetooth-operator-cli
-            pinned: false
-            load: false
-            smoke: ''
+        include: ${{ fromJSON(inputs.images) }}
     steps:
       - uses: actions/checkout@v7
 
