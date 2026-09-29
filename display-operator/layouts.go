@@ -53,10 +53,6 @@ type Layout struct {
 	Spec       LayoutSpec `json:"spec"`
 }
 
-type LayoutList struct {
-	Items []Layout `json:"items"`
-}
-
 // The operator never writes a Layout, so there is no
 // resourceVersion here: nothing of this resource is read to be
 // written back.
@@ -131,21 +127,9 @@ func getLayout(c *apiclient.Client, name string) (*Layout, error) {
 	return apiclient.Get[Layout](c, LayoutsPath+"/"+name)
 }
 
-func listLayouts(c *apiclient.Client) ([]Layout, error) {
-	list, err := apiclient.Get[LayoutList](c, LayoutsPath)
-	if err != nil {
-		return nil, err
-	}
-	return list.Items, nil
-}
-
-// The watch turns a Layout a person edited into one wake.
-func watchLayouts(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-	<-openLayouts(ctx, client, wake, readings).Done()
-}
-
-// openLayouts starts the Layout watch. Its store holds every Layout,
-// and the placement pass reads a Layout from it (objectcache.go).
+// openLayouts starts the Layout watch, which turns a Layout a person
+// edited into one wake. Its store holds every Layout, and the placement
+// pass reads a Layout from it (objectcache.go).
 func openLayouts(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection {
 	return wakeWatch(ctx, client, kindLayout, informer.Source{Resource: layoutResource}, nil, wake, readings)
 }

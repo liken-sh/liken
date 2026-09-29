@@ -140,16 +140,12 @@ func listPods(c *apiclient.Client, node string) ([]Pod, error) {
 	return list.Items, nil
 }
 
-// The watch turns a pod that arrived, left, or changed its labels into
-// one wake, because the labels a region's selector matches are the
-// pods' own. It carries the same field selector the listing does.
-func watchPods(ctx context.Context, client dynamic.Interface, node string, wake func(), readings *metrics) {
-	<-openPods(ctx, client, node, wake, readings).Done()
-}
-
-// openPods starts the pod watch. Its store holds every pod on this
-// node, which the placement pass reads for the holders of a claim, and
-// the compositor's restart count reads for this operator's own pod
+// openPods starts the pod watch. It turns a pod that arrived, left, or
+// changed its labels into one wake, because the labels a region's
+// selector matches are the pods' own. It carries the same field
+// selector the listing does. Its store holds every pod on this node,
+// which the placement pass reads for the holders of a claim, and the
+// compositor's restart count reads for this operator's own pod
 // (objectcache.go).
 //
 // The placement pass reads a pod's name, namespace, and labels, so an

@@ -70,23 +70,6 @@ func TestGetLayoutReadsTheLayoutADisplayNames(t *testing.T) {
 	}
 }
 
-func TestListLayoutsReadsEveryLayout(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != LayoutsPath {
-			t.Errorf("the operator read %s, want the layout collection", r.URL.Path)
-		}
-		fmt.Fprintf(w, `{"items":[%s]}`, frontDeskJSON)
-	}))
-
-	layouts, err := listLayouts(client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(layouts) != 1 || layouts[0].Metadata.Name != "front-desk" {
-		t.Errorf("the listing held %+v, want the front-desk layout", layouts)
-	}
-}
-
 // The watch reopens its connection until the context ends, and a
 // context that ended is what stops it. Without that, a shutdown would
 // wait out the retry.
@@ -97,5 +80,5 @@ func TestTheLayoutWatchEndsWithTheContext(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	watchLayouts(ctx, watcher, func() {}, nil)
+	<-openLayouts(ctx, watcher, func() {}, nil).Done()
 }

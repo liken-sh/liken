@@ -79,5 +79,5 @@ func TestThePodWatchEndsWithTheContext(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	watchPods(ctx, watcher, "liken-1", func() {}, nil)
+	<-openPods(ctx, watcher, "liken-1", func() {}, nil).Done()
 }

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -30,34 +31,37 @@ var wakeWatches = []struct {
 	collection string
 	apiVersion string
 	fields     string
-	start      func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics)
+	start      openWatch
 }{
-	{"Layout", LayoutsPath, DisplayAPIVersion, "", watchLayouts},
-	{"Pod", PodsPath, "v1", "spec.nodeName=node-1", func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-		watchPods(ctx, client, "node-1", wake, readings)
-	}},
+	{"Layout", LayoutsPath, DisplayAPIVersion, "", openLayouts},
+	{"Pod", PodsPath, "v1", "spec.nodeName=node-1", podsOnNode1},
+}
+
+// openWatch starts one wake watch, the way openDisplays and
+// openLayouts do.
+type openWatch func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection
+
+// podsOnNode1 starts the pod watch of the node the tests name.
+func podsOnNode1(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection {
+	return openPods(ctx, client, "node-1", wake, readings)
 }
 
 // runWakeWatch starts one wake watch against the store, and answers the
 // channel it wakes. The watch ends with the test.
-func runWakeWatch(t *testing.T, store *objectStore, start func(context.Context, dynamic.Interface, func(), *metrics), readings *metrics) <-chan struct{} {
+func runWakeWatch(t *testing.T, store *objectStore, start openWatch, readings *metrics) <-chan struct{} {
 	t.Helper()
 	wakes := make(chan struct{}, 1)
 	ctx, stop := context.WithCancel(context.Background())
-	done := make(chan struct{})
+	watch := start(ctx, store.watcher(), func() {
+		select {
+		case wakes <- struct{}{}:
+		default:
+		}
+	}, readings)
 	t.Cleanup(func() {
 		stop()
-		<-done
+		<-watch.Done()
 	})
-	go func() {
-		defer close(done)
-		start(ctx, store.watcher(), func() {
-			select {
-			case wakes <- struct{}{}:
-			default:
-			}
-		}, readings)
-	}()
 	return wakes
 }
 
@@ -119,9 +123,7 @@ func podAt(uid, region, address string) map[string]any {
 // namespace, and labels, so the kubelet's status writes wake nothing.
 func TestThePodWatchWakesOnALabelChangeAndNotOnAStatusWrite(t *testing.T) {
 	store := newObjectStore(t, PodsPath, "v1", "Pod")
-	wakes := runWakeWatch(t, store, func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-		watchPods(ctx, client, "node-1", wake, readings)
-	}, nil)
+	wakes := runWakeWatch(t, store, podsOnNode1, nil)
 	awaitWake(t, wakes, "the first read")
 	eventually(t, "the watch opening", func() bool { return store.watching() > 0 })
 
@@ -156,7 +158,7 @@ func displayAt(generation int64, node, connector string) map[string]any {
 // nothing.
 func TestTheDisplayWatchWakesOnAnEditAndNotOnAStatusWrite(t *testing.T) {
 	store := newObjectStore(t, DisplaysPath, DisplayAPIVersion, "Display")
-	wakes := runWakeWatch(t, store, watchDisplays, nil)
+	wakes := runWakeWatch(t, store, openDisplays, nil)
 	awaitWake(t, wakes, "the first read")
 	eventually(t, "the watch opening", func() bool { return store.watching() > 0 })
 
@@ -223,7 +225,7 @@ func TestADisplayEditIsAChangeToItsMark(t *testing.T) {
 func TestAReopenedWakeWatchCountsARestart(t *testing.T) {
 	store := newObjectStore(t, DisplaysPath, DisplayAPIVersion, "Display")
 	readings := newMetrics(componentName, "dev")
-	wakes := runWakeWatch(t, store, watchDisplays, readings)
+	wakes := runWakeWatch(t, store, openDisplays, readings)
 	awaitWake(t, wakes, "the first read")
 	eventually(t, "the watch opening", func() bool { return store.watching() > 0 })
 	restarts := readings.watchRestarts.WithLabelValues(string(kindDisplay))
@@ -249,7 +251,7 @@ func TestARefusedWatchCountsNoRestart(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		watchDisplays(ctx, watcher, func() {}, readings)
+		<-openDisplays(ctx, watcher, func() {}, readings).Done()
 	}()
 
 	eventually(t, "a third refused request", func() bool { return requests.Load() >= 3 })

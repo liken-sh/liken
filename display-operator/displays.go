@@ -406,10 +406,6 @@ func setCondition(conditions []DisplayCondition, next DisplayCondition) []Displa
 	return append(conditions, next)
 }
 
-func getDisplay(c *apiclient.Client, name string) (*Display, error) {
-	return apiclient.Get[Display](c, DisplaysPath+"/"+name)
-}
-
 func listDisplays(c *apiclient.Client) ([]Display, error) {
 	list, err := apiclient.Get[DisplayList](c, DisplaysPath)
 	if err != nil {
@@ -438,16 +434,11 @@ func createDisplay(c *apiclient.Client, name string) (*Display, error) {
 	return created, nil
 }
 
-// The watch wakes the passes for an edit to a Display, and the pass
-// that follows reads every Display this node serves from the watch's
-// store (objectcache.go).
-func watchDisplays(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-	<-openDisplays(ctx, client, wake, readings).Done()
-}
-
-// openDisplays starts the Display watch. It covers the whole cluster,
-// because a monitor carried to this node brings its Display with it,
-// under the name its EDID gives.
+// openDisplays starts the Display watch. The watch wakes the passes for
+// an edit to a Display, and the pass that follows reads every Display
+// this node serves from the watch's store (objectcache.go). It covers
+// the whole cluster, because a monitor carried to this node brings its
+// Display with it, under the name its EDID gives.
 //
 // A change wakes the passes when it is an edit:
 //
