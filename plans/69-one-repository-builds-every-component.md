@@ -966,6 +966,32 @@ how any vendored domain gets its bytes.
    would fail when it resumes. The running pods do not change while
    flux is suspended. The fleet resumes each component when its pins
    move to the new `OCIRepository`.
+
+   liken-1 moved on 2026-09-29, at release `2026.09.29-001`, the
+   first release from this repository. liken-1 declares no flux
+   feature, because that feature syncs from a git repository and the
+   testbed must not read the fleet's. So liken-1 runs only Flux's
+   source and kustomize controllers, installed by hand, with no git
+   source. Each component has one `OCIRepository` and one
+   `Kustomization` beside the cluster's own policy objects, and a
+   bump is an edit of one tag and an apply. The `Kustomization`s set
+   `deletionPolicy: Orphan`, so a deleted `Kustomization` leaves the
+   CustomResourceDefinitions and every object of their kinds in
+   place. A server-side dry run against the live objects showed only
+   the new images and new labels before the move. The OS moved to the
+   same release through the Cluster's catalog, and both machines took
+   their turns and came back Ready.
+
+   The move found one fault in the deploy artifacts. Five bases set
+   the top-level `namespace` field, and Flux merges a
+   `Kustomization`'s components into the artifact's own
+   `kustomization.yaml`, so the field moved each monitoring
+   component's dashboard into `liken-system`. Those bases now use the
+   `NamespaceTransformer` with `unsetOnly`, as the others did.
+
+   The fleets that follow releases move next. That move also chooses
+   how a fleet bumps: the `ImagePolicy` and image automation that
+   this plan describes, or hand edits as on liken-1.
 4. **The shared module.** Replace the copies of the client, the
    watch, and the cache with `kubernetes/`, one operator at a time.
 
