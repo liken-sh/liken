@@ -976,8 +976,14 @@ how any vendored domain gets its bytes.
    object, and whose memo has not noted it, answers that the object
    does not exist. For `liken`, the module gained an in-cluster address
    and request timeout, a write guard, the address of the watches, a
-   store's indexes, and an alias for the memo's metadata type, so that
-   `init` still links no `net/http`.
+   store's indexes, a memo that drops a record once the store holds its
+   version, an option that stops a store after any failed watch, and an
+   alias for the memo's metadata type, so that `init` still links no
+   `net/http`. liken's operators set that option on every watch: after
+   a k3s restart, a store can miss the writes made while its reflector
+   waits out a backoff, and a machine must not stage a rollout or
+   reboot from it.
+
 5. **The base images.** Make `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and
    `weston` pinned components, and make their consumers build
    `FROM` the tree.
