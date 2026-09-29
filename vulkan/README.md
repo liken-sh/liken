@@ -23,15 +23,23 @@ lavapipe and the AMD driver, link LLVM. The tree keeps the Intel and
 AMD drivers and leaves out the other five, so LLVM is in the image for
 the AMD driver alone.
 
-This directory also holds the two scripts that every base on Debian
-uses. The other bases take this directory as the build context named
+This directory also holds the files that every base on Debian uses.
+The other bases take this directory as the build context named
 `builder` for them:
 
 - `closure.sh` holds the functions that collect a closure, and the
   function that removes from a tree every file that the base under it
   already holds.
 - `snapshot.sh` points apt at one day of
-  [snapshot.debian.org](https://snapshot.debian.org/).
+  [snapshot.debian.org](https://snapshot.debian.org/), reads the
+  package lists, and checks each `InRelease` file against its sha256
+  in `snapshot.sha256`. The sources use http, because the slim image
+  has no CA certificates. apt checks Debian's signatures, but an old
+  snapshot is past its Valid-Until date, so without the checksums a
+  host on the path could serve an older signed `InRelease`.
+- `snapshot.sha256` holds the sha256 of each `InRelease` file of the
+  snapshot date. It is in this image's recipe, so the date and the
+  package lists are bound together.
 
 ## The version and the revision
 
@@ -64,20 +72,34 @@ both, and a node holds it once.
 
        curl -sI http://snapshot.debian.org/archive/debian/YYYYMMDDT000000Z/dists/trixie/Release
 
-2. Read the digest of the newest `debian:trixie-slim`:
+2. Replace the lines of `snapshot.sha256` with the sha256 of the three
+   `InRelease` files of the date. Fetch each one over https, which
+   checks the host:
+
+       for dist in debian/YYYYMMDDT000000Z/dists/trixie \
+           debian/YYYYMMDDT000000Z/dists/trixie-updates \
+           debian-security/YYYYMMDDT000000Z/dists/trixie-security; do
+         curl -sfL https://snapshot.debian.org/archive/$dist/InRelease | sha256sum
+       done
+
+   Each line names the file as apt stores it under
+   `/var/lib/apt/lists`, as the lines there now do, with the new date.
+3. Read the digest of the newest `debian:trixie-slim`:
 
        docker buildx imagetools inspect debian:trixie-slim
 
-3. In all five bases, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and
+4. In all five bases, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and
    `weston`, set `version` to the date and `revision` to 1 in
    `package.toml`, and set the digest in each `FROM debian:trixie-slim`
-   line of the `Dockerfile`.
-4. Run `make workflows` at the top of the repository. The bake file
+   line of the `Dockerfile`. The nested compositor in
+   `media-operator/local/weston-nested/Dockerfile` names the digest
+   too.
+5. Run `make workflows` at the top of the repository. The bake file
    carries each base's version and tag.
-5. Build every image that uses a base, from the top of the
-   repository, and run the smoke checks under each base's `smoke/`:
-
-       docker buildx bake mpv weston display-operator media-operator-player --load
+6. Run `make images` at the top of the repository. It builds every
+   image, each base and each consumer, for this machine's platform.
+   Then run each image's smoke check, the script that its
+   `package.toml` names under `smoke`, with the image's reference.
 
 The `bump-components` skill under `.agents/skills` holds the whole
 procedure, with the rule for a new revision.

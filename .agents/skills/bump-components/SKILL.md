@@ -121,13 +121,13 @@ a `revision`. Each one publishes under the tag `<version>-<revision>`.
 
 **A new snapshot.** All five move together, because a library that two
 bases hold must be the same file in both. The steps are in
-`vulkan/README.md`: check that the snapshot exists, read the digest of
-the newest `debian:trixie-slim`, set `version` to the date and
-`revision` to 1 in all five `package.toml` files, set the digest in
-every `FROM debian:trixie-slim` line, run `make workflows`, build every
-image that uses a base with `docker buildx bake`, and run each base's
-`smoke/` check. Compare the package versions with the old snapshot and
-report the ones that moved.
+`vulkan/README.md`: check that the snapshot exists, write the sha256
+of its three `InRelease` files into `vulkan/snapshot.sha256`, read the
+digest of the newest `debian:trixie-slim`, set `version` to the date
+and `revision` to 1 in all five `package.toml` files, set the digest
+in every `FROM debian:trixie-slim` line, run `make workflows`, run
+`make images`, and run each image's smoke check. Compare the package
+versions with the old snapshot and report the ones that moved.
 
 **A new revision.** CI hashes each base's recipe: its `package.toml`,
 its `Dockerfile`, every file in its build context, the digest of each

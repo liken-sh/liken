@@ -296,7 +296,7 @@ A pinned component declares its component in three files:
   its sha256 and its mirrors. The format follows stagex's
   `package.toml`, with two added tables, `[depends]` and
   `[outputs]`.
-- `Containerfile`: the build. It starts `FROM` a stagex image pinned
+- `Dockerfile`: the build. It starts `FROM` a stagex image pinned
   by digest, adds the verified source files, and runs the build with
   `--network=none`. Its last stage is `FROM scratch` and holds only
   the files that ship.
@@ -411,7 +411,7 @@ For each stagex image that a component uses, the build:
 ## Components that have their own build system
 
 Some upstream projects ship a full build system. For those, the
-`Containerfile` runs the upstream build scripts unchanged, inside a
+`Dockerfile` runs the upstream build scripts unchanged, inside a
 stagex image, with our pins. We do not rewrite their builds.
 
 k3s is two components in a chain:
@@ -478,14 +478,16 @@ kernel config change or a new stagex image. The pin in the domain
 changes from `7.2.6-1` to `7.2.6-2`, and that one line is the bump.
 
 CI enforces the rule with a recipe hash. The hash covers
-`package.toml`, the `Containerfile`, every file that the
-`Containerfile` adds, the digests of the stagex images, and the
-published revisions of the components in `[depends]`. For each
-pinned component, CI compares the hash with the one in the published
-build record for the pinned revision:
+`package.toml`, the `Dockerfile`, every file in its build context, the
+digest of each image it builds from, and the published revisions of
+the components in `[depends]`. For each pinned component, CI compares
+the hash with the one in the published build record for the pinned
+revision: the `sh.liken.recipe` label of an image, or
+`component.yaml` on the channel:
 
 - If a published revision exists and its hash matches, CI builds
-  nothing and downloads the published output.
+  nothing for the component. A consumer image builds on it again from
+  the layer cache, and the OS build downloads a channel output.
 - If a published revision exists and its hash differs, CI fails. The
   recipe changed without a bump.
 - If no published revision exists, CI builds the component.
@@ -957,18 +959,42 @@ how any vendored domain gets its bytes.
    no CA certificates, and apt checks every package against the signed
    Release files.
 
-   The file is `Dockerfile`, not `Containerfile`. The recipe hash is a
-   label on the published image, `sh.liken.recipe`, not a build
-   record, and it covers the files that Docker sends in the build
-   context, so a base's `.dockerignore` keeps its `README.md` and its
-   `smoke/` check out of it. The recipe also covers each named
-   directory context that no dependency owns, and it refuses a `FROM`
-   outside the repository that names no digest. A pinned component
-   depends only on pinned components, publishes images only, and never
-   moves `:latest`. When its tag is published and its hash matches, CI
-   publishes nothing for it and downloads nothing: each consumer's
-   bake build makes the base again from its layer cache. Its jobs
-   still run when its own paths change, so a new smoke check runs.
+   The build file is named `Dockerfile` everywhere in this plan now,
+   the name Docker reads by default. The build record of a base is the
+   label `sh.liken.recipe` on the published image. The recipe covers
+   the files that Docker sends in the build context, so a base's
+   `.dockerignore` keeps its `README.md` and its `smoke/` check out of
+   it; a `<Dockerfile>.dockerignore` takes precedence, as it does in
+   BuildKit. It covers only the executable bit of each file's mode, as
+   git does, so the umask of a checkout does not change it. It covers
+   each named directory context that lies outside the build context of
+   every image in the dependencies, each image outside the repository
+   that a `FROM`, `COPY --from`, or `RUN --mount` names, each file that
+   an `ADD` fetches, and the settings of the image's bake target. A
+   format number in `ci/recipe.go` changes every recipe when the way
+   the generator builds an image changes. The recipe refuses an image
+   outside the repository with no digest, an `ADD` from the network
+   with no `--checksum`, and an image of the repository whose
+   component is not in the dependencies. A pinned component depends
+   only on pinned components, publishes images only, and never moves
+   `:latest`. When its tag is published and its hash matches, CI
+   publishes nothing for it, and each consumer's bake build makes the
+   base again from its layer cache. Its jobs still run when its own
+   paths change, so a new smoke check runs.
+
+   The snapshot sources use `http`, and `Check-Valid-Until` is off for
+   an old snapshot, so a host on the path could serve an older
+   `InRelease` that Debian also signed. `vulkan/snapshot.sha256` holds
+   the sha256 of each `InRelease` file of the date, and `snapshot.sh`
+   checks them after `apt-get update`. The file is in the `vulkan`
+   recipe, so the date and the package lists are bound together.
+
+   Every images job also writes its image's layers to the GitHub
+   Actions cache under the image's name, on every branch, and every
+   build reads that cache. A consumer's job runs after its bases'
+   jobs, so on a branch that raises a base's revision the consumer
+   builds the base from the layers that the base's job wrote, not from
+   snapshot.debian.org again.
 
    `ci generate` also writes `docker-bake.hcl`, with one target for
    each image. The generator reads each Dockerfile's `FROM` and

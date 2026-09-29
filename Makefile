@@ -4,6 +4,7 @@
 #
 #   make workflows  write .github/workflows/ and docker-bake.hcl from
 #                   every package.toml
+#   make images     build every image into the local Docker daemon
 #   make docs       build every manual into dist/docs/, for a preview
 #   make preview    build them, then serve dist/docs/ at localhost
 #   make site       build the site that liken.sh serves, into dist/docs/
@@ -15,6 +16,18 @@
 .PHONY: workflows
 workflows:
 	cd ci && go run . generate -root ..
+
+# Every image of the repository, through the bake file, into the local
+# Docker daemon, each tagged the way the bake file names it. The Docker
+# daemon loads an image of one platform only, so the build makes each
+# image for this machine's platform, including the CLI images that CI
+# makes for two. Each smoke check under a component's smoke/ then runs
+# on the loaded image.
+PLATFORM ?= linux/$(shell docker version --format '{{.Server.Arch}}')
+
+.PHONY: images
+images:
+	docker buildx bake --set '*.platform=$(PLATFORM)' --load
 
 # The project's manuals, in the layout of the one site: liken's manual
 # at the root, and each other component's manual under the prefix its

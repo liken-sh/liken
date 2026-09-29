@@ -1,7 +1,8 @@
 # The build reads the Dockerfile and the files it copies. Everything
-# else here is documentation, checks, and configuration. Docker leaves
-# it out of the build context, and so the recipe hash leaves it out,
-# and a change to it needs no new revision.
+# else here is documentation, checks, and configuration, and Docker
+# leaves it out of the build context. The recipe hash covers the build
+# context, so a change to one of these files needs no new revision,
+# except package.toml: the recipe hashes it on its own.
 README.md
 LICENSE
 package.toml

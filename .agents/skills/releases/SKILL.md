@@ -101,7 +101,9 @@ A pinned component never moves `:latest`. No consumer reads a
 published base: every consumer builds `FROM` the base in the tree,
 through `docker-bake.hcl`, so a change to a base reaches each
 consumer at the same commit, and the consumer releases because its
-dependency's directory changed.
+dependency's directory changed. The workstation harness in
+`media-operator/local/` builds the same way, through its own bake
+target beside the repository's.
 
 ## Where the outputs go
 

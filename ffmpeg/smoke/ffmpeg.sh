@@ -4,7 +4,7 @@
 # Usage: ffmpeg.sh <image>
 #
 #   <image>  the full reference of the ffmpeg image, for example
-#            ghcr.io/liken-sh/ffmpeg:2026.10.02-001. The image must be
+#            ghcr.io/liken-sh/ffmpeg:20260928-1. The image must be
 #            in the local Docker daemon.
 #
 # ffmpeg opens libva, and libva opens the driver, by file name, so a

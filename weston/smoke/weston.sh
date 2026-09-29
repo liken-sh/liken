@@ -4,7 +4,7 @@
 # Usage: weston.sh <image>
 #
 #   <image>  the full reference of the weston image, for example
-#            ghcr.io/liken-sh/weston:2026.10.02-001. The image must be
+#            ghcr.io/liken-sh/weston:20260928-1. The image must be
 #            in the local Docker daemon.
 #
 # The compositor opens its backend, its renderer, its shell and its
@@ -15,8 +15,9 @@
 # backend, the EGL vendor, the DRI driver, the shell, and the
 # operator's own controller module.
 #
-# The config states the shell and the module that the operator itself
-# writes into `weston.ini` (`weston.go`, `westonConfig`). weston prints
+# The config states the shell and the module that display-operator
+# writes into `weston.ini` (`westonConfig` in
+# `display-operator/weston.go`). weston prints
 # a "Loading module" line before it opens a file, whether or not the
 # file is there, so the check greps the lines that only a loaded
 # library prints. `ivi-shell` registers its layout API, and

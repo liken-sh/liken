@@ -4,7 +4,7 @@
 # Usage: mpv.sh <image>
 #
 #   <image>  the full reference of the mpv image, for example
-#            ghcr.io/liken-sh/mpv:2026.10.02-001. The image must be in
+#            ghcr.io/liken-sh/mpv:20260928-1. The image must be in
 #            the local Docker daemon.
 #
 # mpv opens the PipeWire client modules, the SPA plugins, and the
