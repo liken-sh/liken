@@ -274,9 +274,15 @@ run = "make test"
 	text := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
 		"          cache: false\n",
-		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('app/go.sum') }}",
-		"key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('app/docs/go.sum') }}",
-		"key: hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-${{ github.sha }}",
+		// Each job has a build cache of its own: a job that builds less
+		// must not save the entry that another job then restores whole.
+		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum') }}\n" +
+			"          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-\n",
+		// Every manual reads the same modules, so the manuals share one.
+		"key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('app/docs/go.sum') }}\n" +
+			"          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-\n",
+		"key: hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-${{ github.sha }}\n" +
+			"          restore-keys: |\n            hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-\n            hugo-build-${{ runner.os }}-\n",
 		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
 		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
 		"          key: app\n          save-if: ${{ github.ref == 'refs/heads/main' }}\n",

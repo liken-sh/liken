@@ -60,14 +60,19 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules and the build cache, and its key follows
-      # kubernetes/go.sum.
+      # kubernetes/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('kubernetes/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-kubernetes-${{ github.job }}-${{ hashFiles('kubernetes/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-kubernetes-${{ github.job }}-
 
       - run: make test
 
@@ -108,14 +113,19 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules and the build cache, and its key follows
-      # kubernetes/go.sum.
+      # kubernetes/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('kubernetes/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-kubernetes-${{ github.job }}-${{ hashFiles('kubernetes/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-kubernetes-${{ github.job }}-
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails

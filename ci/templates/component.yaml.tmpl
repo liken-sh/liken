@@ -69,20 +69,23 @@ jobs:{% range .Jobs %}
       - id: build-setup
         uses: ./.github/actions/build-setup{% else %}
       - uses: actions/checkout@v7{% end %}{% if .Go %}
-{% template "go-restore" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
+{% template "go-restore" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (or (and (eq .Toolchain "hugo") "manuals") .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
 
       # A saved cache never changes, and Go trims a build cache entry
       # that no build used for five days, so a build cache saved once
       # would lose the compiled Hugo. This entry's key ends in the
       # commit: each push to main saves a new one, and every run
-      # restores the newest one for the same go.sum. Every manual with
-      # the same go.sum shares the entry.
+      # restores the newest one for the same go.sum, or for any go.sum
+      # when none matches, as on a branch that changes it. Every manual
+      # with the same go.sum shares the entry.
       - id: hugo-cache
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-${{ github.sha }}
-          restore-keys: hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-{% end %}{% if .Apt %}
+          restore-keys: |
+            hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-
+            hugo-build-${{ runner.os }}-{% end %}{% if .Apt %}
 
       - name: install {% join .Apt ", " %}
         run: |
@@ -122,7 +125,7 @@ jobs:{% range .Jobs %}
       - run: {% .Run %}{% else %}
 
       - run: |{% range $lines %}
-          {% . %}{% end %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
+          {% . %}{% end %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" (goCache (printf "%s/go.mod" .ModuleDir) (printf "%s/go.sum" .ModuleDir) (or (and (eq .Toolchain "hugo") "manuals") .ModuleDir) (ne .Toolchain "hugo")) %}{% end %}{% if eq .Toolchain "hugo" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -252,7 +255,7 @@ jobs:{% range .Jobs %}
       - name: publish to the channel
         working-directory: {% .Dir %}
         run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% else %}
-{% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" true) %}
+{% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -272,5 +275,5 @@ jobs:{% range .Jobs %}
       # must never name an image that is not pushed yet.
       - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" true) %}{% end %}
+        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.publish }}"{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% end %}
 {% end %}

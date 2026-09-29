@@ -28,14 +28,18 @@ runs:
 
     # Every run restores the Go cache, and only a push to main saves it,
     # so a branch never writes an entry that pushes one of main's out of
-    # the repository's 10 GB.
+    # the repository's 10 GB. Each job that calls this action has
+    # entries of its own, and a restore with no entry for this go.sum
+    # takes the job's newest one. This is the key format of the go-restore
+    # template in ci/templates/go.tmpl.
     - id: go-cache
       uses: actions/cache/restore@v6
       with:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-        key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('liken/go.sum') }}
+        key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum') }}
+        restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-
 
     # The fetch scripts document their own host requirements, and the
     # runner image already has most of them (curl, tar, ar, zstd,

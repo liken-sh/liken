@@ -68,14 +68,19 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules and the build cache, and its key follows
-      # audio-operator/go.sum.
+      # audio-operator/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('audio-operator/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-audio-operator-${{ github.job }}-${{ hashFiles('audio-operator/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-audio-operator-${{ github.job }}-
 
       - run: make test-go
 
@@ -116,26 +121,32 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules, and its key follows
-      # audio-operator/docs/go.sum.
+      # audio-operator/docs/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # family, which holds most of what the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
-          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('audio-operator/docs/go.sum') }}
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('audio-operator/docs/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-
 
       # A saved cache never changes, and Go trims a build cache entry
       # that no build used for five days, so a build cache saved once
       # would lose the compiled Hugo. This entry's key ends in the
       # commit: each push to main saves a new one, and every run
-      # restores the newest one for the same go.sum. Every manual with
-      # the same go.sum shares the entry.
+      # restores the newest one for the same go.sum, or for any go.sum
+      # when none matches, as on a branch that changes it. Every manual
+      # with the same go.sum shares the entry.
       - id: hugo-cache
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
           key: hugo-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: hugo-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-
+          restore-keys: |
+            hugo-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-
+            hugo-build-${{ runner.os }}-
 
       - run: make test-docs
 
@@ -172,14 +183,19 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules and the build cache, and its key follows
-      # audio-operator/go.sum.
+      # audio-operator/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('audio-operator/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-audio-operator-${{ github.job }}-${{ hashFiles('audio-operator/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-audio-operator-${{ github.job }}-
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
@@ -289,14 +305,19 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules and the build cache, and its key follows
-      # ci/go.sum.
+      # ci/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('ci/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       - uses: docker/setup-buildx-action@v3
 

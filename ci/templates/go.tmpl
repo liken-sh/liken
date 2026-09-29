@@ -9,14 +9,19 @@
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules{% if .Build %} and the build cache{% end %}, and its key follows
-      # {% .Sum %}.
+      # {% .Sum %}. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # {% if .Build %}job{% else %}family{% end %}, which holds most of what the job needs.{% if .Build %} Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.{% end %}
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod{% if .Build %}
             ~/.cache/go-build{% end %}
-          key: go-{% if .Build %}build{% else %}modules{% end %}-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('{% .Sum %}') }}{% end %}
+          key: go-{% if .Build %}build{% else %}modules{% end %}-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-{% if .Build %}${{ github.job }}-{% end %}${{ hashFiles('{% .Sum %}') }}
+          restore-keys: go-{% if .Build %}build{% else %}modules{% end %}-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-{% if .Build %}${{ github.job }}-{% end %}{% end %}
 {% define "go-save" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}

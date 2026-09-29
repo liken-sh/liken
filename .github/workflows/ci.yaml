@@ -107,14 +107,19 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules and the build cache, and its key follows
-      # ci/go.sum.
+      # ci/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('ci/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       - id: plan
         working-directory: ci
@@ -191,13 +196,16 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules, and its key follows
-      # **/go.sum.
+      # **/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # family, which holds most of what the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
-          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/go.sum') }}
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-every-module-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-every-module-
 
       - name: check the generated workflows
         working-directory: ci
@@ -720,13 +728,16 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules, and its key follows
-      # **/docs/go.sum.
+      # **/docs/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # family, which holds most of what the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
-          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/docs/go.sum') }}
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('**/docs/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-
 
       - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check && contains(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs, 'go') }}
@@ -901,14 +912,19 @@ jobs:
       # it, when its key missed, so a branch never writes an entry that
       # pushes one of main's out of the repository's 10 GB. The cache
       # holds the Go modules and the build cache, and its key follows
-      # ci/go.sum.
+      # ci/go.sum. When no entry has that key, as on a branch that
+      # changes the file, the restore takes the newest entry of the same
+      # job, which holds most of what the job needs. Each job
+      # has entries of its own: a job that builds less would save an
+      # entry that the other job then restores whole and never saves.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('ci/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       - name: write the release record
         working-directory: ci
