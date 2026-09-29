@@ -1,0 +1,19 @@
+# What an image build receives from brand/. Four images take this
+# directory as the build context named brand: media-operator's player,
+# idle, and display images, and library-operator's media browser. They
+# copy the liken-iced crate's manifest and sources, the mark and the
+# stylesheet that the crate reads when it compiles, and the fonts.
+#
+# So this file keeps those paths and leaves out every other path: the
+# Hugo theme, the voice rules, the site tools, their tests, and what a
+# workstation writes, such as the gigabytes of iced/target/. The CI
+# generator reads this file too, and rebuilds the four images only for
+# a change to a path that it keeps. A Dockerfile that copies another
+# path from brand fails until the path is added here.
+*
+!fonts/
+!iced/Cargo.toml
+!iced/Cargo.lock
+!iced/src/
+!liken.svg
+!liken.css
