@@ -1,16 +1,23 @@
-# The operator's Dockerfile copies go.mod, go.sum, and the Go sources in
-# this directory, and nothing else. Everything below is documentation,
-# plans, manifests, test data, a workstation's build output, or the
-# media browser's Rust tree, which builds from its own context. Sending
-# any of it to the daemon costs the build time and no build reads it;
-# the cargo target directory is the large one, gigabytes on a
-# workstation.
+# The Go images copy go.mod, go.sum, the Go sources in this directory,
+# and cli/, and nothing else. Everything below is documentation, plans,
+# manifests, test data, smoke scripts, generated skills, a workstation's
+# build output, or the source of an image with its own context (the
+# media browser's Rust tree and Corrosion). Sending any of it to the
+# daemon costs the build time and no Go build reads it. A change to any
+# of it must not rebuild the Go images, and CI selects images by what
+# this file leaves in. The cargo target directory is the large one,
+# gigabytes on a workstation.
 deploy
 docs
 plans
 testdata
 local
-media-browser/target
+media-browser
+corrosion
+skills
+smoke
+coverage.out
+coverage-media-browser.xml
 README.md
 LICENSE
 /library-operator

@@ -1,0 +1,13 @@
+# The screen build reads the Cargo workspace files and the manifests and
+# sources of the `idle` and `display` crates. An allowlist keeps the Go
+# sources, the docs, and the deploy manifests out of this build context,
+# so a change to them does not rebuild the screen images. The `idle`
+# tests run in CI and no image stage reads them.
+*
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!idle/Cargo.toml
+!idle/src/
+!display/Cargo.toml
+!display/src/

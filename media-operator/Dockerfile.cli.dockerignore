@@ -1,0 +1,10 @@
+# The CLI build reads the module files and the `cli/` package. An
+# allowlist keeps the operator sources, the Rust crates, and the docs out
+# of this build context, so a change to them does not rebuild this image.
+*
+!go.mod
+!go.sum
+!cli/
+# go build never reads a test file or testdata, so a test-only edit does not rebuild this image.
+**/*_test.go
+**/testdata/
