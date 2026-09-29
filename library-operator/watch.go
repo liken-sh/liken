@@ -477,7 +477,8 @@ func (c *collection[T]) view() informer.View { return c.watch.View() }
 // Plays, the people, the claims, the volumes, the stood pods, the
 // progress pods, and the nodes only from their stores. While the watch
 // is forbidden, the reflector lists the collection again after each
-// backoff, up to thirty seconds apart, so the store is at most that old.
+// backoff, which grows to between thirty and sixty seconds, so the store
+// is at most that old.
 // A read of each collection from the API server on every pass would
 // cost more than the delay it saves.
 func (c *collection[T]) items() ([]T, error) {

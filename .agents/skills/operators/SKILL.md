@@ -321,8 +321,8 @@ it.
   Plays, people, claims, volumes, stood pods, progress pods, and nodes
   only from their stores, and has no read of them from the API server.
   While their watch is forbidden, the reflector lists each again after
-  each backoff, up to thirty seconds apart, and the pass reads that
-  list (`library-operator/watch.go`, `items`). A watch that fails for
+  each backoff, which grows to between thirty and sixty seconds, and
+  the pass reads that list (`library-operator/watch.go`, `items`). A watch that fails for
   another reason, such as a refused connection while the API server
   restarts, leaves the store ready, so the operator keeps its local
   work going from the store.
