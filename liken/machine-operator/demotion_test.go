@@ -8,6 +8,8 @@ package main
 // majority math the next time an actual leader reboots.
 
 import (
+	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/liken-sh/liken/liken/api"
@@ -62,5 +64,32 @@ func TestDemotionWaitsForItsRebootTurn(t *testing.T) {
 	}
 	if d.condition.Reason != "AwaitingTurn" {
 		t.Errorf("got %+v", d.condition)
+	}
+}
+
+// The demotion deletes the Node only while it is the instance the pass
+// read. The delete carries the UID as a precondition, so a Node that
+// k3s registered again after the read, under the same name, is kept:
+// the API server answers 409 and deletes nothing.
+func TestTheDemotionDeletesOnlyTheNodeItRead(t *testing.T) {
+	var sent struct {
+		Kind          string `json:"kind"`
+		Preconditions struct {
+			UID string `json:"uid"`
+		} `json:"preconditions"`
+	}
+	var method, path string
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+
+	if err := deleteNode(client, "node-2", "uid-read"); err != nil {
+		t.Fatal(err)
+	}
+
+	if method != http.MethodDelete || path != "/api/v1/nodes/node-2" || sent.Kind != "DeleteOptions" || sent.Preconditions.UID != "uid-read" {
+		t.Errorf("sent %s %s with %+v, want a DELETE of node-2 whose precondition is uid-read", method, path, sent)
 	}
 }

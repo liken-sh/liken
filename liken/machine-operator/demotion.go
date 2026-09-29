@@ -100,9 +100,9 @@ func decideDemotion(role api.Role, nodeLabels map[string]string, rebootPolicy ma
 
 // carryOutDemotion performs the cleanup. It writes the reboot intent
 // first, because deleting the Node kills this pod, so the reboot
-// must already be in progress. Then it deletes the Node, which
-// triggers etcd member removal.
-func carryOutDemotion(c *apiclient.Client, name string, d demotion) api.Condition {
+// must already be in progress. Then it deletes the Node instance the
+// pass read, by its UID, which triggers etcd member removal.
+func carryOutDemotion(c *apiclient.Client, node *nodeObject, d demotion) api.Condition {
 	if !d.cleanup {
 		return d.condition
 	}
@@ -111,7 +111,8 @@ func carryOutDemotion(c *apiclient.Client, name string, d demotion) api.Conditio
 		return api.Condition{Type: "NodeCurrent", Status: api.ConditionFalse, Reason: "DemotionFailed",
 			Message: fmt.Sprintf("writing the reboot intent: %v", err)}
 	}
-	if err := deleteNode(c, name); err != nil {
+	name := node.Metadata.Name
+	if err := deleteNode(c, name, node.Metadata.UID); err != nil {
 		// The reboot is already in progress. The next boot detects
 		// the mismatch again and retries the delete.
 		fmt.Printf("deleting the stale Node %s: %v\n", name, err)

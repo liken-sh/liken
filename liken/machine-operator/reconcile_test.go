@@ -51,7 +51,7 @@ func TestGetAndDeleteNode(t *testing.T) {
 	if _, ok := node.Metadata.Labels["node-role.kubernetes.io/control-plane"]; !ok {
 		t.Errorf("the labels come through: %+v", node.Metadata.Labels)
 	}
-	if err := deleteNode(client, "node-1"); err != nil || !fake.deleted {
+	if err := deleteNode(client, "node-1", node.Metadata.UID); err != nil || !fake.deleted {
 		t.Errorf("the delete should land: %v", err)
 	}
 }

@@ -454,7 +454,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		// stale Node carries a registered etcd membership, so the
 		// operator must delete it.
 		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault(), t)
-		condition := carryOutDemotion(c, m.Metadata.Name, d)
+		condition := carryOutDemotion(c, node, d)
 		status.Conditions = api.SetCondition(status.Conditions, condition, now)
 		disr.rebooting = disr.rebooting || d.cleanup
 

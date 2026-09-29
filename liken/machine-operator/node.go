@@ -9,6 +9,7 @@ package main
 // (demotion.go).
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -64,6 +65,20 @@ func getNode(c *apiclient.Client, name string) (*nodeObject, error) {
 	return n, nil
 }
 
-func deleteNode(c *apiclient.Client, name string) error {
-	return c.RequestJSON(http.MethodDelete, nodesPath+"/"+name, nil, nil)
+// deleteNode deletes the Node instance whose UID the caller read. The
+// UID is a precondition of the delete: a Node that k3s registered again
+// under the same name after the read has another UID, and the API
+// server answers 409 and keeps it. Without the precondition, a pass
+// that acted on a stale copy could delete the Node a machine just
+// registered.
+func deleteNode(c *apiclient.Client, name, uid string) error {
+	body, err := json.Marshal(map[string]any{
+		"apiVersion":    "v1",
+		"kind":          "DeleteOptions",
+		"preconditions": map[string]string{"uid": uid},
+	})
+	if err != nil {
+		return err
+	}
+	return c.RequestJSON(http.MethodDelete, nodesPath+"/"+name, body, nil)
 }
