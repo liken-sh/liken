@@ -12,13 +12,12 @@ use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::super::franchise::strips::Place;
-use super::{Focus, Movie};
+use super::{Focus, Movie, watch};
 use crate::art::Art;
-use crate::catalog::progress::clock;
 use crate::look;
 use crate::views::stack::{self, Stack};
 use crate::views::{
-    area, buttons, card, curtain, header, people, progress, ratings, screen, strip, text,
+    area, buttons, card, curtain, header, people, ratings, screen, strip, text, watch as line,
 };
 
 // The share of the width the column of text takes. The column ends inside
@@ -52,18 +51,6 @@ const FOOT: f32 = 36.0;
 // The extra space over a stripe and over the foot, on top of the gap
 // between two blocks, so each stands clear of the block over it.
 const STRIPE_LEAD: f32 = 16.0;
-
-// The space between the foot of the button row and the bar under it, so
-// the bar reads as a mark under the row and not as its edge.
-const BAR_LEAD: f32 = 18.0;
-
-// The space between the right end of the button row and what stands
-// beside it: the clock of a bar, or the word of a film watched.
-const BESIDE: f32 = 24.0;
-
-// The word at the end of the button row's line on a film the audience
-// already finished.
-const WATCHED: &str = "Watched";
 
 /// The box the movie's logo draws in at these bounds, scroll included,
 /// which is where the loading state starts the logo's move.
@@ -172,38 +159,27 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 _ => None,
             },
         );
-        // The bar and its clock, or the word of a film watched, beside and
-        // under the row the words just drew.
-        let row = row(&words, at);
-        let beside = region.x + region.width - row.x - row.width - BESIDE;
-        match &movie.progress {
-            Some(watched) if watched.finished => {
-                text::line(
-                    &mut frame,
-                    WATCHED,
-                    Point::new(row.x + row.width + BESIDE, centered(row)),
-                    look::FACE,
-                    look::faint(),
-                    beside,
-                );
-            }
-            Some(reached) => {
-                let track = track(row);
-                progress::fill(&mut frame, track, reached.played().fraction());
-                text::line(
-                    &mut frame,
-                    &clock(reached.position, reached.duration),
-                    Point::new(
-                        track.x + track.width + BESIDE,
-                        centered(area(track.x, track.y + track.height, 0.0, progress::HEIGHT)),
-                    ),
-                    look::FACE,
-                    look::faint(),
-                    beside,
-                );
-            }
-            None => {}
-        }
+        // The status line under the row, with its bar the width of the
+        // text column, so the bar ends where the plot's lines end on every
+        // row and the status never runs past the scrim's full shade.
+        let status = movie.status();
+        let marks = watch::Mark::drawn(&movie.marks());
+        line::draw(
+            &mut frame,
+            &line::Line {
+                share: watch::share(movie.progress.as_ref()),
+                status: &status.words,
+                finished: status.finished,
+                marks: &marks,
+                focus: match focus {
+                    Some(Focus::Marks(index)) => Some(index),
+                    _ => None,
+                },
+                halo: false,
+            },
+            Point::new(at.x, at.y + buttons::HEIGHT),
+            column,
+        );
 
         if let (Some(set), Some(block)) = (&movie.set, blocks.strip) {
             strip::draw(
@@ -396,7 +372,7 @@ impl Blocks {
         );
         let tagline = place(0.0, lines(&movie.tagline, look::TAGLINE, column, 0));
         let plot = place(0.0, lines(&movie.plot, look::PLOT, column, PLOT_LINES));
-        let buttons = place(0.0, buttons::HEIGHT + bar_band(movie));
+        let buttons = place(0.0, buttons::HEIGHT + line::height());
         let strip = movie
             .set
             .as_ref()
@@ -451,7 +427,7 @@ impl Blocks {
             Focus::Stripe(stripe, _) => self.stripes.get(stripe).copied(),
             Focus::Franchise(strip, _) => self.franchises.get(strip).copied(),
             Focus::Strip(_) => self.strip,
-            Focus::Buttons(_) => None,
+            Focus::Buttons(_) | Focus::Marks(_) => None,
         }
         .unwrap_or(self.buttons);
         let tail = (self.after(block) - block.bottom() + TRAIL * people::HEIGHT)
@@ -476,35 +452,6 @@ impl Blocks {
 // the content region's, so it ends inside the scrim's full shade.
 fn column(bounds: Rectangle) -> f32 {
     bounds.width * COLUMN
-}
-
-// The box the button row fills, from the first button's left edge to the
-// last button's right edge. The focus mark reaches outside that box; what
-// is measured against the row is measured against the buttons.
-fn row(words: &[&'static str], at: Point) -> Rectangle {
-    area(at.x, at.y, buttons::row_width(words), buttons::HEIGHT)
-}
-
-// The box the bar draws along the foot of: the button row, taller by the
-// lead, so the bar spans the row and stands the lead under it.
-fn track(row: Rectangle) -> Rectangle {
-    area(row.x, row.y, row.width, row.height + BAR_LEAD)
-}
-
-// The top of a line of text at [`look::FACE`] that reads as centered on
-// this box.
-fn centered(band: Rectangle) -> f32 {
-    band.y + (band.height - text::height(1, look::FACE)) / 2.0
-}
-
-// What the bar under the button row adds to the row's block: the space
-// over the bar and the line of text beside it, which is the taller of the
-// two. A page that draws no bar adds nothing.
-fn bar_band(movie: &Movie) -> f32 {
-    match &movie.progress {
-        Some(progress) if !progress.finished => BAR_LEAD + text::height(1, look::FACE),
-        _ => 0.0,
-    }
 }
 
 // The height a block of text takes at this size and width, cut to `cap`

@@ -63,13 +63,12 @@ fn on_the_serial(browser: &mut Browser<Fake, NoArt>) {
     browser.key("enter");
 }
 
-// The words of the film page's button row.
+// The words of the film page's playback row, then of its marks.
 fn words(browser: &Browser<Fake, NoArt>) -> Vec<&'static str> {
-    showing_page(browser)
-        .buttons()
-        .iter()
-        .map(|button| button.word())
-        .collect()
+    let page = showing_page(browser);
+    let buttons = page.buttons().into_iter().map(|button| button.word());
+    let marks = page.marks().into_iter().map(|mark| mark.word());
+    buttons.chain(marks).collect()
 }
 
 #[test]

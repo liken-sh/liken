@@ -326,6 +326,33 @@ fn a_series_page_scrolls_into_its_second_season() {
     drawn(&frames.join("002.70.png"), &run);
 }
 
+// Select on a still opens the episode's row in the header, and down puts
+// focus on the first mark of the status line under it.
+#[test]
+fn an_episodes_row_draws_its_status_line() {
+    let dir = workspace("episode-line");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.5:down,0.9:enter,1.3:enter,1.7:down",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "2.1",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    drawn(&frames.join("002.10.png"), &run);
+}
+
 // A select on a headshot opens the person's page, which draws the
 // headshot, the words beside it, and the wall of their works.
 #[test]
@@ -337,7 +364,7 @@ fn a_select_on_a_headshot_draws_the_persons_page() {
         &dir,
         &[
             "--script",
-            "0.5:enter,1.0:enter,1.4:down,1.8:down,2.2:enter",
+            "0.5:enter,1.0:enter,1.4:down,1.6:down,1.8:down,2.2:enter",
             "--capture",
             &text(&frames),
             "--capture-at",
@@ -616,7 +643,7 @@ fn a_select_on_a_franchise_strip_draws_the_franchise_page() {
             "--script",
             "0.4:down,0.55:down,0.7:down,0.85:down,1.0:down,1.15:down,1.3:down,1.45:down,\
              1.6:down,1.9:up,2.2:up,2.5:enter,\
-             3.0:enter,3.4:down,3.8:down,4.6:enter,5.6:down,5.9:down,6.2:down,6.5:down,\
+             3.0:enter,3.3:down,3.55:down,3.8:down,4.6:enter,5.6:down,5.9:down,6.2:down,6.5:down,\
              7.2:left,8.0:down,8.6:right,9.4:down,9.7:down,10.0:down,10.3:down,10.6:down",
             "--capture",
             &text(&frames),

@@ -1,6 +1,7 @@
 // The movie page over an invented catalog: the words it builds out of a
 // body, and where a press takes focus.
 
+mod marks;
 mod resume;
 
 use super::*;
@@ -321,7 +322,7 @@ fn page(films: Films) -> (Movie, Films) {
 fn a_page_opens_with_focus_on_play() {
     let (page, _) = page(Films::default());
     assert_eq!(page.focus, Focus::Buttons(0));
-    assert_eq!(words(&page), ["Play", "Mark watched"]);
+    assert_eq!(words(&page), ["Play"]);
 }
 
 #[test]
@@ -330,7 +331,7 @@ fn a_movie_with_a_trailer_file_gets_the_second_button() {
         trailer: true,
         ..Films::default()
     });
-    assert_eq!(words(&page), ["Play", "Trailer", "Mark watched"]);
+    assert_eq!(words(&page), ["Play", "Trailer"]);
 }
 
 #[test]
@@ -444,11 +445,9 @@ fn left_and_right_move_across_the_buttons() {
     page.key("right", &mut source);
     assert_eq!(page.focus, Focus::Buttons(1));
     page.key("right", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(2));
-    page.key("right", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(2));
-    page.key("left", &mut source);
     assert_eq!(page.focus, Focus::Buttons(1));
+    page.key("left", &mut source);
+    assert_eq!(page.focus, Focus::Buttons(0));
 }
 
 #[test]
@@ -475,33 +474,36 @@ fn play_and_trailer_ask_for_their_own_choices() {
 }
 
 #[test]
-fn down_reaches_the_strip_at_this_film_and_up_returns_to_play() {
+fn down_reaches_the_strip_at_this_film_and_up_returns_to_the_marks() {
     let (mut page, mut source) = page(Films {
         set: true,
         ..Films::default()
     });
     page.key("down", &mut source);
+    page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Strip(1));
     page.key("left", &mut source);
     assert_eq!(page.focus, Focus::Strip(0));
     page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(0));
+    assert_eq!(page.focus, Focus::Marks(0));
 }
 
 #[test]
-fn down_with_no_strip_and_no_stripe_moves_nowhere() {
+fn down_with_no_strip_and_no_stripe_stops_on_the_marks() {
     let (mut page, mut source) = page(Films::default());
     page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(0));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Marks(0));
 }
 
 #[test]
-fn down_from_the_buttons_reaches_the_stripes_where_the_movie_is_in_no_set() {
+fn down_from_the_marks_reaches_the_stripes_where_the_movie_is_in_no_set() {
     let (mut page, mut source) = credited();
+    page.key("down", &mut source);
     page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Stripe(0, 0));
     page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(0));
+    assert_eq!(page.focus, Focus::Marks(0));
 }
 
 #[test]
@@ -511,6 +513,7 @@ fn down_from_the_strip_reaches_the_stripes_and_up_returns_to_it() {
         credits: true,
         ..Films::default()
     });
+    page.key("down", &mut source);
     page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Strip(1));
     page.key("down", &mut source);
@@ -522,6 +525,7 @@ fn down_from_the_strip_reaches_the_stripes_and_up_returns_to_it() {
 #[test]
 fn the_arrows_move_within_a_stripe_and_between_the_stripes() {
     let (mut page, mut source) = credited();
+    page.key("down", &mut source);
     page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Stripe(0, 0));
     page.key("right", &mut source);
@@ -541,6 +545,7 @@ fn a_select_on_a_headshot_opens_the_persons_page() {
     let (mut page, mut source) = credited();
     page.key("down", &mut source);
     page.key("down", &mut source);
+    page.key("down", &mut source);
 
     let Step::Open(Screen::Person(opened)) = page.key("enter", &mut source) else {
         panic!("a select on a headshot opens the person");
@@ -557,6 +562,7 @@ fn a_select_on_a_name_with_no_entry_opens_nothing() {
         ..Films::default()
     });
     page.key("down", &mut source);
+    page.key("down", &mut source);
 
     assert_eq!(page.focus, Focus::Stripe(0, 0));
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
@@ -565,6 +571,7 @@ fn a_select_on_a_name_with_no_entry_opens_nothing() {
 #[test]
 fn a_reread_keeps_the_rung_a_stripe_holds() {
     let (mut page, mut source) = credited();
+    page.key("down", &mut source);
     page.key("down", &mut source);
     page.key("right", &mut source);
 
@@ -576,6 +583,7 @@ fn a_reread_keeps_the_rung_a_stripe_holds() {
 #[test]
 fn a_page_whose_credits_left_holds_focus_on_play() {
     let (mut page, mut source) = credited();
+    page.key("down", &mut source);
     page.key("down", &mut source);
     source.credits = false;
 
@@ -590,6 +598,7 @@ fn a_select_on_a_sibling_replaces_the_page() {
         set: true,
         ..Films::default()
     });
+    page.key("down", &mut source);
     page.key("down", &mut source);
     page.key("left", &mut source);
 
@@ -608,6 +617,7 @@ fn a_select_on_this_film_replaces_nothing() {
         set: true,
         ..Films::default()
     });
+    page.key("down", &mut source);
     page.key("down", &mut source);
 
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
@@ -694,6 +704,7 @@ fn a_reread_keeps_the_focus_the_page_holds() {
     assert_eq!(page.focus, Focus::Buttons(1));
 
     page.key("down", &mut source);
+    page.key("down", &mut source);
     page.reread(&mut source);
     assert_eq!(page.focus, Focus::Strip(1));
 }
@@ -715,6 +726,7 @@ fn a_page_whose_set_left_holds_focus_on_play() {
         set: true,
         ..Films::default()
     });
+    page.key("down", &mut source);
     page.key("down", &mut source);
     page.set = None;
 
@@ -756,6 +768,7 @@ fn a_movie_in_a_franchise_draws_a_strip_under_its_set_strip() {
 fn down_from_the_set_strip_reaches_the_franchise_strips_heading() {
     let (mut page, mut source) = ordered();
     page.key("down", &mut source);
+    page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Strip(1));
     page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
@@ -778,15 +791,16 @@ fn up_from_the_stripes_climbs_back_through_the_franchise_strip() {
 }
 
 #[test]
-fn a_movie_in_a_franchise_and_no_set_reaches_the_strip_from_the_buttons() {
+fn a_movie_in_a_franchise_and_no_set_reaches_the_strip_from_the_marks() {
     let (mut page, mut source) = page(Films {
         franchise: true,
         ..Films::default()
     });
     page.key("down", &mut source);
+    page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
     page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(0));
+    assert_eq!(page.focus, Focus::Marks(0));
 }
 
 #[test]

@@ -11,6 +11,7 @@ fn three_deep() -> Browser<Fake, NoArt> {
     browser.key("enter");
     browser.key("enter");
     browser.key("down");
+    browser.key("down");
     browser.key("enter");
     assert_eq!(browser.stack.len(), 3);
     browser

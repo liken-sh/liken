@@ -8,6 +8,9 @@
 //
 // A jump rail of rotated bars at the left of a long wall is one more.
 //
+// The bar and the status line under a page's playback row, with the marks
+// that change the status, are one more.
+//
 // A shade that changes along one axis, such as a scrim, is a ramp: a
 // picture one pixel thick that the renderer stretches across its bounds.
 //
@@ -47,6 +50,7 @@ pub mod strip;
 pub mod text;
 pub mod volume;
 pub mod wall;
+pub mod watch;
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;

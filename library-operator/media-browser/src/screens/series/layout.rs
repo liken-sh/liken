@@ -112,6 +112,13 @@ pub fn head() -> f32 {
         + FOOT
 }
 
+/// The top of an episode's open row, from the top of the header: level
+/// with the ratings line, so the row, its bar, and its status line fit
+/// beside the text column inside the header's fixed height.
+pub fn episode_row() -> f32 {
+    TOP + LOGO_HEIGHT + GAP + text::height(1, look::FACTS) + GAP
+}
+
 /// The box one season's divider draws in, in frame space after the
 /// scroll. The divider stands at the top of its own band while that top
 /// is in view, holds at the top of the region while the season's rows
@@ -276,9 +283,9 @@ impl Layout {
                 }
                 None => return 0.0,
             },
-            // The episode's own row is in the header too, and the wall
-            // stands at the still it was opened from.
-            Focus::Still(index) | Focus::Episode(index, _) => {
+            // The episode's own row and its marks are in the header too,
+            // and the wall stands at the still they were opened from.
+            Focus::Still(index) | Focus::Episode(index, _) | Focus::EpisodeMark(index, _) => {
                 let Some(band) = self.band(index, seasons) else {
                     return 0.0;
                 };

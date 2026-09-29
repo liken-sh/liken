@@ -79,6 +79,7 @@ fn a_sibling_in_the_strip_replaces_the_page_and_back_reaches_the_wall() {
     assert_eq!(showing_page(&browser).id, "movies:1");
 
     browser.key("down");
+    browser.key("down");
     browser.key("right");
     assert_eq!(showing_page(&browser).focus, Focus::Strip(1));
     browser.key("enter");

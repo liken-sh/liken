@@ -1,13 +1,15 @@
 // A movie's page. The backdrop draws full bleed under the text, and the
 // page reads down: the logo or the title, the facts, the tagline, the
-// plot, the buttons, the set strip, a strip for each franchise the movie
-// belongs to, and the stripes of credited people.
+// plot, the playback row, the status line under it, the set strip, a strip
+// for each franchise the movie belongs to, and the stripes of credited
+// people.
 // Focus lands on the first button of the row, so a film is two presses
 // from the wall, as it was when the wall played it on select. That button
 // is Resume where the audience is in the middle of the film.
 
 mod page;
 pub mod row;
+pub mod watch;
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -30,8 +32,10 @@ use crate::views::{layers, ratings};
 /// Where focus is on the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
-    /// One button of the row.
+    /// One button of the playback row.
     Buttons(usize),
+    /// One mark on the status line under the playback row.
+    Marks(usize),
     /// One member of the set strip.
     Strip(usize),
     /// One rung of the franchise strips: which strip, and the heading or
@@ -139,8 +143,8 @@ pub struct Movie {
     // any other way.
     pub via: Option<InFranchise>,
     /// Where the audience reached in the film, or nothing where no play of
-    /// theirs names it. It decides the button row, the bar under it, and
-    /// the word at the end of its line.
+    /// theirs names it. It decides the playback row, the bar under it,
+    /// and the status and the marks on the line under the bar.
     pub progress: Option<Progress>,
     /// Where focus is.
     pub focus: Focus,
@@ -218,18 +222,34 @@ impl Movie {
     /// The buttons this page draws. Play is always there, or Resume and
     /// Start over in its place while the audience is in the middle of the
     /// film. Trailer joins them where the `files` table holds a trailer
-    /// for the movie, and the two marks close the row.
+    /// for the movie.
     pub fn buttons(&self) -> Vec<row::Button> {
         row::of(self.progress.as_ref(), self.trailer)
     }
 
+    /// The marks the status line offers under the playback row.
+    pub fn marks(&self) -> Vec<watch::Mark> {
+        watch::marks(self.progress.as_ref())
+    }
+
+    /// What the status line says about where the audience stands, against
+    /// the duration a mark would state.
+    pub fn status(&self) -> watch::Status {
+        watch::status(
+            self.progress.as_ref(),
+            marked_duration(self.progress.as_ref(), self.duration),
+        )
+    }
+
     /// Fold one press in. Left and right move across the row that holds
-    /// focus, down reaches the set strip, then the franchise strips, and
-    /// then the stripes, and up climbs back to the buttons. A franchise
-    /// strip's heading is a rung over its members.
+    /// focus. Down reaches the marks, then the set strip, then the
+    /// franchise strips, and then the stripes, and up climbs back to the
+    /// playback row. A franchise strip's heading is a rung over its
+    /// members.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self.focus {
             Focus::Buttons(index) => self.on_button(index, key, source),
+            Focus::Marks(index) => self.on_mark(index, key),
             Focus::Strip(index) => self.on_strip(index, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
@@ -295,12 +315,45 @@ impl Movie {
             // The buttons are the topmost focus, so up moves nothing and
             // the press reaches the browser's strip.
             "up" => Step::Still,
+            // Every film offers at least one mark, so down always lands
+            // on the status line.
             "down" => {
-                self.focus = self.below(index);
+                self.focus = Focus::Marks(0);
                 Step::Stay
             }
             _ => {
                 self.focus = Focus::Buttons(focus::row(index, self.buttons().len(), key));
+                Step::Stay
+            }
+        }
+    }
+
+    // One press on a mark. Up returns to the first button of the playback
+    // row, which plays the film. Down goes on to the set strip, the
+    // franchise strips, or the stripes, and stays on the mark where the
+    // page holds none of them.
+    fn on_mark(&mut self, index: usize, key: &str) -> Step {
+        let marks = self.marks();
+        match key {
+            "enter" => match marks.get(index) {
+                Some(mark) => self.mark(
+                    Selection::Movie {
+                        id: self.id.clone(),
+                    },
+                    mark.title(),
+                ),
+                None => Step::Stay,
+            },
+            "up" => {
+                self.focus = Focus::Buttons(0);
+                Step::Stay
+            }
+            "down" => {
+                self.focus = self.below().unwrap_or(self.focus);
+                Step::Stay
+            }
+            _ => {
+                self.focus = Focus::Marks(focus::row(index, marks.len(), key));
                 Step::Stay
             }
         }
@@ -329,7 +382,7 @@ impl Movie {
                 }
             }
             "up" => {
-                self.focus = Focus::Buttons(0);
+                self.focus = Focus::Marks(0);
                 Step::Stay
             }
             "down" => {
@@ -365,19 +418,19 @@ impl Movie {
         Step::Stay
     }
 
-    // The rung under the buttons: the set strip where the movie is in a
-    // set, then the franchise strips, then the first stripe, and the
-    // buttons themselves where the page holds none of the three.
-    fn below(&self, index: usize) -> Focus {
+    // The rung under the status line: the set strip where the movie is in
+    // a set, then the franchise strips, then the first stripe, and
+    // nothing where the page holds none of the three.
+    fn below(&self) -> Option<Focus> {
         if let Some(set) = &self.set {
-            return Focus::Strip(set.current);
+            return Some(Focus::Strip(set.current));
         }
         match self.franchises.first() {
-            Some((strip, place)) => Focus::Franchise(strip, place),
-            None => match self.stripes.first() {
-                Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-                None => Focus::Buttons(index),
-            },
+            Some((strip, place)) => Some(Focus::Franchise(strip, place)),
+            None => self
+                .stripes
+                .first()
+                .map(|(stripe, slot)| Focus::Stripe(stripe, slot)),
         }
     }
 
@@ -395,24 +448,21 @@ impl Movie {
     }
 
     // The rung over the first stripe: the last franchise strip, the set
-    // strip where the movie is in a set, and the buttons where the page
+    // strip where the movie is in a set, and the marks where the page
     // holds neither.
     fn above(&self) -> Focus {
         if let Some((strip, place)) = self.franchises.last() {
             return Focus::Franchise(strip, place);
         }
-        match &self.set {
-            Some(set) => Focus::Strip(set.current),
-            None => Focus::Buttons(0),
-        }
+        self.over_franchises()
     }
 
     // The rung over the franchise strips: the set strip where the movie
-    // is in a set, and the buttons where it is not.
+    // is in a set, and the marks where it is not.
     fn over_franchises(&self) -> Focus {
         match &self.set {
             Some(set) => Focus::Strip(set.current),
-            None => Focus::Buttons(0),
+            None => Focus::Marks(0),
         }
     }
 
@@ -435,15 +485,12 @@ impl Movie {
     }
 
     // The play one button asks for: the trailer, the film from the second
-    // the audience reached, or the film from the beginning. A mark asks for
-    // no play.
+    // the audience reached, or the film from the beginning.
     fn press(&self, button: row::Button, source: &mut dyn Source) -> Step {
         let film = Selection::Movie {
             id: self.id.clone(),
         };
         let (selection, start) = match button {
-            row::Button::MarkWatched => return self.mark(film, TitleMark::Watched),
-            row::Button::ClearProgress => return self.mark(film, TitleMark::Cleared),
             row::Button::Trailer => (
                 Selection::Trailer {
                     id: self.id.clone(),
@@ -490,6 +537,7 @@ impl Movie {
     fn hold(&self, focus: Focus) -> Focus {
         match focus {
             Focus::Buttons(index) => Focus::Buttons(index.min(self.buttons().len() - 1)),
+            Focus::Marks(index) => Focus::Marks(index.min(self.marks().len() - 1)),
             Focus::Strip(index) => match &self.set {
                 Some(set) => Focus::Strip(index.min(set.members.len() - 1)),
                 None => Focus::Buttons(0),

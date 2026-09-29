@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::screens::TitleMark;
-use crate::screens::movie::row::Button;
+use crate::screens::movie::watch::Mark;
 
 // The branch the operator names on a screen pod for the namespace's plays,
 // and the second every mark of these cases is pressed at.
@@ -49,13 +49,15 @@ fn marks(bus: &FakeBus) -> Vec<(String, serde_json::Value, bool)> {
         .collect()
 }
 
-// Put focus on one button of the page on top and press it.
-fn press_button(browser: &mut Browser<Fake, NoArt>, button: Button) {
+// Put focus on one mark of the page on top, down from the playback row,
+// and press it.
+fn press_mark(browser: &mut Browser<Fake, NoArt>, mark: Mark) {
     let index = showing_page(browser)
-        .buttons()
+        .marks()
         .iter()
-        .position(|held| *held == button)
-        .expect("the row holds the button");
+        .position(|held| *held == mark)
+        .expect("the status line holds the mark");
+    browser.key("down");
     for _ in 0..index {
         browser.key("right");
     }
@@ -68,7 +70,7 @@ fn mark_watched_on_a_films_page_publishes_a_retained_mark_for_the_room() {
     browser.key("enter");
     browser.key("enter");
 
-    press_button(&mut browser, Button::MarkWatched);
+    press_mark(&mut browser, Mark::Watched);
 
     assert_eq!(
         marks(&bus),
@@ -109,9 +111,8 @@ fn clear_progress_on_an_episode_publishes_position_zero_with_its_numbers() {
     browser.key("enter");
     browser.key("enter");
     browser.key("enter");
-    for _ in 0..3 {
-        browser.key("right");
-    }
+    browser.key("down");
+    browser.key("right");
 
     browser.key("enter");
 
@@ -136,7 +137,7 @@ fn a_second_mark_in_the_same_second_names_the_next_second() {
     let (mut browser, bus) = marking();
     browser.key("enter");
     browser.key("enter");
-    press_button(&mut browser, Button::MarkWatched);
+    press_mark(&mut browser, Mark::Watched);
     browser.take(Step::Mark {
         library: "screening/films".into(),
         selection: Selection::Movie {

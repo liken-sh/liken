@@ -53,6 +53,7 @@ fn down_from_the_strip_gives_a_movies_page_its_focus_back() {
 fn up_from_the_first_row_of_a_persons_works_reaches_the_strip() {
     let mut browser = on_a_movie();
     browser.key("down");
+    browser.key("down");
     browser.key("enter");
     let _ = showing_person(&browser);
 

@@ -38,9 +38,8 @@ pub fn draw<T: Card>(frame: &mut canvas::Frame<Renderer>, card: &T, slot: Rectan
     fill(frame, slot, fraction);
 }
 
-/// Draw the bar along the foot of this box at this share. A page that draws
-/// the bar under something other than art, such as a button row, names the
-/// box itself.
+/// Draw the bar along the foot of this box at this share. A page that holds
+/// the share itself, and not a card that answers it, names the share here.
 pub fn fill(frame: &mut canvas::Frame<Renderer>, slot: Rectangle, fraction: f32) {
     let (track, watched) = bar(slot, fraction);
     frame.fill_rectangle(track.position(), extent(track), look::faint());

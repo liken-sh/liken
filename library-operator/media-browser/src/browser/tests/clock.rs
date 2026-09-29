@@ -50,6 +50,7 @@ fn the_strip_draws_over_every_screen_the_stack_holds() {
     assert!(browser.strip().is_some(), "a movie page");
 
     browser.key("down");
+    browser.key("down");
     browser.key("enter");
     let _ = showing_person(&browser);
     assert!(browser.strip().is_some(), "a person's page");

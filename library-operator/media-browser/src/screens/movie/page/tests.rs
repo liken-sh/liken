@@ -118,7 +118,7 @@ fn strip_top(movie: &Movie) -> f32 {
 }
 
 #[test]
-fn the_bar_under_the_button_row_holds_a_band_of_its_own() {
+fn the_status_line_takes_the_same_band_in_every_state() {
     let plain = crowded(Focus::Buttons(0));
     let mut reached = crowded(Focus::Buttons(0));
     reached.progress = Some(Progress {
@@ -134,33 +134,18 @@ fn the_bar_under_the_button_row_holds_a_band_of_its_own() {
         ..crowded(Focus::Buttons(0))
     };
 
-    assert!(strip_top(&reached) > strip_top(&plain));
+    assert_eq!(strip_top(&reached), strip_top(&plain));
     assert_eq!(strip_top(&finished), strip_top(&plain));
-}
-
-// The words of the row a film the audience is in the middle of draws, and
-// where the row starts on the page.
-const WORDS: [&str; 3] = ["Resume", "Start over", "Trailer"];
-const AT: Point = Point::new(screen::MARGIN_X, 640.0);
-
-#[test]
-fn the_row_spans_the_first_button_to_the_last() {
-    let row = row(&WORDS, AT);
-    let last = buttons::button(&WORDS, WORDS.len() - 1, AT);
-
-    assert_eq!(row.x, buttons::button(&WORDS, 0, AT).x);
-    assert_eq!(row.x + row.width, last.x + last.width);
-    assert_eq!(row.height, buttons::HEIGHT);
+    assert_eq!(
+        blocks(&plain).buttons.height,
+        buttons::HEIGHT + line::height()
+    );
 }
 
 #[test]
-fn the_bar_spans_the_button_row_and_stands_a_lead_under_it() {
-    let row = row(&WORDS, AT);
-    let (bar, _) = progress::bar(track(row), 0.5);
-
-    assert_eq!(bar.x, row.x);
-    assert_eq!(bar.width, row.width);
-    assert_eq!(bar.y, row.y + row.height + BAR_LEAD);
+fn the_marks_show_the_page_from_its_top() {
+    let movie = crowded(Focus::Marks(0));
+    assert_eq!(blocks(&movie).scroll(&movie, HEIGHT), 0.0);
 }
 
 #[test]

@@ -90,7 +90,7 @@ attached to the screen's machine.
 | Key | Effect |
 |---|---|
 | arrows | move focus |
-| enter | open the card, open an episode's row, or press a button of a title's page |
+| enter | open the card, open an episode's row, or press a button or a mark of a title's page |
 | back | close an episode's row, or pop to the screen before this one |
 | home | pop to the home page |
 | search | open the search wall with the on-screen keyboard |
@@ -137,10 +137,35 @@ restarts inside those hours draws the same room and asks nobody.
 message.
 
 A movie's page shows its art, its facts, its people, and the set or
-franchise it is part of. A series' page shows its seasons as a wall of
-episode stills. Enter on a still opens the episode's own row in the
-header, with the buttons a movie's page has except Trailer, and back
-closes the row.
+franchise it is part of. Under the plot, the playback row holds Play,
+or Resume and Start over for a film the people at the screen are in the
+middle of, and Trailer where the film has a trailer file. Every button
+of the row starts a play.
+
+Under the playback row, a bar as wide as the text column shows how far
+the people at the screen reached. Under the bar, the status line gives
+where they stand, and the marks of
+[section 6](#6-marking-a-title-watched-or-clearing-it) follow it:
+
+| Where they stand | Status line |
+|---|---|
+| Not started | `Not started · 1h 39m` |
+| In the middle of the film | `0:13:07 watched · 1h 26m remaining` |
+| Finished | A check, then `Watched` |
+
+The position has hours in a title an hour or longer, as in `0:13:07`,
+and minutes and seconds in a shorter one, as in `21:40`. Down from the
+playback row puts focus on the first mark, left and right move between
+the marks, and up returns to the playback row. Down from the marks
+moves on to the set strip, the franchise strips, or the cast. While a
+mark has focus, the bar is twice as tall and the status is brighter.
+
+A series' page shows its seasons as a wall of episode stills. Enter on
+a still opens the episode's own row in the header, level with the
+ratings line. The row holds the playback buttons of a movie's page
+except Trailer, with the bar and the status line under it. Down from
+the row puts focus on the marks, down from the marks returns to the
+still, and back closes the row.
 A person's page shows their credits and their biography.
 A franchise's page draws its story order as one lane, with a line per
 universe beside it. Over the first row of each era it draws a heading,
@@ -164,12 +189,12 @@ hits puts focus on the strip, and enter there opens the grid again.
 
 ## 6. Marking a title watched or clearing it
 
-A movie's page and an episode's row end with two buttons. Each one
-applies to everyone at the screen, the same people the
-continue-watching row is read for, and it takes effect at once, with
-no confirmation step.
+The status line of a movie's page and of an episode's row holds the
+marks that apply to the title, after the status. Each mark applies to everyone at the
+screen, the same people the continue-watching row is read for, and it
+takes effect at once, with no confirmation step.
 
-| Button | Where it shows | Effect |
+| Mark | Where it shows | Effect |
 |---|---|---|
 | Mark watched | on a title they have not finished | The title counts as finished. A film leaves the continue-watching row. In a series, a set, or a franchise, the next title takes the card. |
 | Clear progress | on a title they started or finished | The title counts as not started, and its whole series, set, or franchise leaves the row. |
@@ -190,8 +215,9 @@ recorded it. Each screen pod's progress agent names every play whose
 row changed as the row arrives, and the browser then reads the
 progress of the titles on its screen again. So every screen of the
 namespace shows a mark pressed on another screen, and a position that
-a `Play` records moves the bars and the continue-watching row the same
-way. A change to a title the screen does not show reads nothing more.
+a `Play` records moves the bars, the status lines, and the
+continue-watching row the same way. A change to a title the screen
+does not show reads nothing more.
 
 Neither mark deletes a play. The store keeps the earlier plays, but
 the browser reads the newest play of a title, so after a clear the

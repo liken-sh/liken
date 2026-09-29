@@ -33,6 +33,10 @@ pub fn read(page: &mut Series, source: &mut dyn Source, people: &[String]) {
         page.focus = Focus::Still(next);
         page.refoot(source);
     }
+    // The open episode's row and marks change with its progress, so a
+    // focus on a button or a mark the read took away moves to one the
+    // episode still offers.
+    page.focus = page.hold(page.focus);
 }
 
 /// The share of one episode its bar draws: the whole work for an episode

@@ -16,12 +16,13 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::super::franchise::strips::Place;
 use super::layout::{self, Layout};
-use super::{COLUMNS, Focus, Series, seasons};
+use super::{COLUMNS, Focus, Series, seasons, watch};
 use crate::art::Art;
 use crate::look;
 use crate::views::stack::Stack;
 use crate::views::{
     area, buttons, card, curtain, divider, header, people, rail, ratings, strip, text, wall,
+    watch as line,
 };
 
 // The share of the width the column of text takes. The column ends inside
@@ -353,10 +354,17 @@ impl<A: Art> Page<'_, A> {
             column,
             layout::PLOT_LINES,
         );
-        // The button row draws beside the text column, level with the top
-        // of the plot, so the header keeps the height it has on a series
-        // that holds no trailer.
-        let beside = Point::new(buttons_left(region, column), stack.at().y);
+        // The series' own row draws beside the text column, level with the
+        // top of the plot, so the header keeps the height it has on a
+        // series that holds no trailer.
+        let opened = series.opened();
+        let beside = Point::new(
+            buttons_left(region, column),
+            match opened {
+                Some(_) => region.y + layout::episode_row(),
+                None => stack.at().y,
+            },
+        );
         // Every block under the ratings adds the height it is cut to, and
         // not the lines one episode's text filled, so the plot and the
         // button row keep their place whatever holds focus.
@@ -377,6 +385,30 @@ impl<A: Art> Page<'_, A> {
                 Some(Focus::Buttons(index) | Focus::Episode(_, index)) => Some(index),
                 _ => None,
             },
+        );
+        let Some(still) = opened else {
+            return;
+        };
+        // The status line draws over the backdrop, past the scrim's full
+        // shade, so its status draws over a halo. The bar is as wide as the
+        // text column where the header has the room.
+        let status = still.status();
+        let marks = watch::Mark::drawn(&series.marks());
+        line::draw(
+            frame,
+            &line::Line {
+                share: watch::share(still.progress.as_ref()),
+                status: &status.words,
+                finished: status.finished,
+                marks: &marks,
+                focus: match focus {
+                    Some(Focus::EpisodeMark(_, index)) => Some(index),
+                    _ => None,
+                },
+                halo: true,
+            },
+            Point::new(beside.x, beside.y + buttons::HEIGHT),
+            column.min(region.x + region.width - beside.x),
         );
     }
 }

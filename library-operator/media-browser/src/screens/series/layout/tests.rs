@@ -58,6 +58,12 @@ fn the_header_takes_the_top_of_the_frame_and_the_wall_takes_the_rest() {
 }
 
 #[test]
+fn an_episodes_row_and_its_status_line_fit_inside_the_header() {
+    let foot = episode_row() + crate::views::buttons::HEIGHT + crate::views::watch::height();
+    assert!(foot <= head() - FOOT, "{foot} past {}", head() - FOOT);
+}
+
+#[test]
 fn the_header_is_as_tall_as_the_blocks_it_draws() {
     assert_eq!(header(frame()).height, head());
     assert!(head() < HEIGHT / 2.0, "{}", head());

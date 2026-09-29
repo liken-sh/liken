@@ -11,21 +11,17 @@ pub use watched::{Credits, finished};
 
 use super::draw::Date;
 
-/// The position and the duration of one play as a page draws them,
-/// `H:MM:SS / H:MM:SS`. The longer of the two decides whether both carry
-/// hours, so the two numbers of one line are spelled the same way.
-pub fn clock(position: i64, duration: i64) -> String {
-    let hours = position.max(duration) >= 3_600;
-    format!(
-        "{} / {}",
-        spelled(position, hours),
-        spelled(duration, hours)
-    )
+/// The second one play reached, as the status line under a page's buttons
+/// spells it: `H:MM:SS` in a work an hour or longer, and `MM:SS` in a
+/// shorter one. The longer of the position and the duration decides, so a
+/// play that ran past the end of a short work still carries its hours.
+pub fn position(position: i64, duration: i64) -> String {
+    spelled(position, position.max(duration) >= 3_600)
 }
 
-// One number of that line: hours, minutes, and seconds where the line
-// carries hours, and minutes and seconds where it does not. A position
-// before the start of the work reads as the start.
+// One position: hours, minutes, and seconds where the caller asks for
+// hours, and minutes and seconds where it does not. A position before
+// the start of the work reads as the start.
 fn spelled(seconds: i64, hours: bool) -> String {
     let seconds = seconds.max(0);
     match hours {
@@ -172,23 +168,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_work_an_hour_or_longer_carries_hours_in_both_numbers() {
-        assert_eq!(clock(2_912, 6_730), "0:48:32 / 1:52:10");
+    fn a_position_in_a_work_an_hour_or_longer_carries_hours() {
+        assert_eq!(position(787, 5_982), "0:13:07");
     }
 
     #[test]
-    fn a_work_under_an_hour_carries_minutes_and_seconds() {
-        assert_eq!(clock(425, 1_320), "07:05 / 22:00");
+    fn a_position_in_a_work_under_an_hour_carries_minutes_and_seconds() {
+        assert_eq!(position(1_300, 2_880), "21:40");
+        assert_eq!(position(425, 1_320), "07:05");
     }
 
     #[test]
-    fn a_play_past_an_hour_of_a_shorter_work_still_carries_hours() {
-        assert_eq!(clock(3_600, 1_320), "1:00:00 / 0:22:00");
+    fn a_position_past_an_hour_of_a_shorter_work_still_carries_hours() {
+        assert_eq!(position(3_600, 1_320), "1:00:00");
     }
 
     #[test]
-    fn a_play_that_reached_nothing_reads_as_the_start() {
-        assert_eq!(clock(0, 1_320), "00:00 / 22:00");
+    fn a_position_before_the_start_reads_as_the_start() {
+        assert_eq!(position(-5, 1_320), "00:00");
     }
 
     #[test]

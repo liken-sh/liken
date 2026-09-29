@@ -7,6 +7,7 @@
 use super::resume::{plays, reached, watched};
 use super::*;
 use crate::screens::movie::row::Button;
+use crate::screens::movie::watch::Mark;
 
 // The film the row and the page of these cases draw, and its library.
 const FILMS: &str = "screening/films";
@@ -58,17 +59,43 @@ fn cards(browser: &Browser<Fake, NoArt>) -> Vec<String> {
         .collect()
 }
 
+// The film's page as it draws a film the audience finished: the Play
+// row, a full bar, the watched status, and the clear alone.
+fn assert_finished(browser: &Browser<Fake, NoArt>) {
+    let page = showing_page(browser);
+    assert_eq!(page.buttons(), [Button::Play]);
+    assert_eq!(page.marks(), [Mark::Cleared]);
+    assert_eq!(page.status().words, "Watched");
+    assert_eq!(
+        crate::screens::movie::watch::share(page.progress.as_ref()),
+        1.0
+    );
+}
+
 #[test]
-fn a_mark_recorded_under_the_films_page_redraws_its_buttons_with_no_press() {
+fn a_mark_recorded_under_the_films_page_redraws_its_row_bar_and_status_with_no_press() {
     let mut browser = on_the_films_page();
     record(&mut browser, 5_400);
     browser.source.touched = vec![touched(FILM, &["first"])];
 
     assert!(browser.pump(1.0));
 
+    assert_finished(&browser);
+}
+
+#[test]
+fn a_position_recorded_under_the_films_page_moves_its_bar_and_status_with_no_press() {
+    let mut browser = on_the_films_page();
+    record(&mut browser, 2_700);
+    browser.source.touched = vec![touched(FILM, &["first"])];
+
+    assert!(browser.pump(1.0));
+
+    let page = showing_page(&browser);
+    assert_eq!(page.status().words, "0:45:00 watched · 45m remaining");
     assert_eq!(
-        showing_page(&browser).buttons(),
-        [Button::Play, Button::ClearProgress]
+        crate::screens::movie::watch::share(page.progress.as_ref()),
+        0.5
     );
 }
 
@@ -147,10 +174,7 @@ fn a_change_under_a_film_is_read_when_the_film_ends() {
     *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
     browser.pump(3.0);
 
-    assert_eq!(
-        showing_page(&browser).buttons(),
-        [Button::Play, Button::ClearProgress]
-    );
+    assert_finished(&browser);
 }
 
 // A film writes its position about once a second. A page that draws the
@@ -179,10 +203,7 @@ fn a_change_no_play_names_reads_the_pages_progress_again() {
 
     assert!(browser.pump(1.0));
 
-    assert_eq!(
-        showing_page(&browser).buttons(),
-        [Button::Play, Button::ClearProgress]
-    );
+    assert_finished(&browser);
 }
 
 // The browser over an audience of one, on the screen these presses from
@@ -238,4 +259,5 @@ fn a_play_of_an_episode_draws_its_bar_on_the_series_page_with_no_press() {
         stills[0].progress.as_ref().map(|reached| reached.position),
         Some(900)
     );
+    assert_eq!(stills[0].status().words, "15:00 watched · 31m remaining");
 }

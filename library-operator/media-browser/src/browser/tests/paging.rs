@@ -81,6 +81,7 @@ fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
         assert_eq!(showing_page(&browser).id, "movies:1");
 
         browser.key("down");
+        browser.key("down");
         assert_eq!(showing_page(&browser).focus, Focus::Stripe(0, 0));
 
         browser.key("enter");
@@ -382,6 +383,7 @@ fn a_reread_of_a_shorter_set_clamps_the_strips_focus() {
     browser.source.sets = true;
     browser.key("enter");
     browser.key("enter");
+    browser.key("down");
     browser.key("down");
     browser.key("right");
     browser.key("right");

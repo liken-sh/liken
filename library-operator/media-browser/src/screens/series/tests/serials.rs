@@ -315,6 +315,7 @@ pub fn still(focus: Focus) -> usize {
         Focus::Still(index) => index,
         Focus::Buttons(..)
         | Focus::Episode(..)
+        | Focus::EpisodeMark(..)
         | Focus::Rail(..)
         | Focus::Franchise(..)
         | Focus::Stripe(..) => {
