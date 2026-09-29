@@ -11,12 +11,6 @@
 .PHONY: test
 test: test-go test-docs
 
-# ci is the one target both a workstation and the CI workflow run: the
-# same gate under one name, so a person never wonders which target the
-# workflow files actually call.
-.PHONY: ci
-ci: test
-
 # The coverage gate measures on its own run, on a pinned toolchain.
 # Go 1.27 splits a basic block into one profile row per run of code
 # inside it, and repeats the whole block's statement count on every

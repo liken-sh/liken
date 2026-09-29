@@ -20,7 +20,7 @@ require (
 	github.com/beevik/ntp v1.5.0
 	github.com/insomniacslk/dhcp v0.0.0-20260728151720-c308df0fdcef
 	github.com/klauspost/compress v1.19.2
-	github.com/liken-sh/brand v0.0.0-20260826005113-79f51d4d6ec6
+	github.com/liken-sh/brand v0.0.0
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0

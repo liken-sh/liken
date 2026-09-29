@@ -1,12 +1,12 @@
 # The coverage profile go test writes for the pre-commit gate. It
-# lives at the root because it profiles the whole module; everything
-# else gitignored in this repo is ignored by its own domain's file.
+# lives at the top of liken/ because it profiles the whole module;
+# everything else gitignored in liken/ is ignored by its own domain's
+# file.
 coverage.out
 # The report `make coverage-report` renders from that profile. CI
 # builds its own copy and publishes it; a workstation's copy is a
 # build artifact like any other.
 coverage.html
-operator/operator
 
 # The version stamp file version.mk maintains: the git-described
 # version as a file Make can track, rewritten only when the version
