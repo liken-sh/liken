@@ -367,12 +367,14 @@ impl<A: Art> Page<'_, A> {
             .iter()
             .map(|button| button.word())
             .collect();
+        // An episode's own row draws in the same place, over the series'
+        // row, while it holds focus.
         buttons::draw(
             frame,
             &words,
             beside,
             match focus {
-                Some(Focus::Buttons(index)) => Some(index),
+                Some(Focus::Buttons(index) | Focus::Episode(_, index)) => Some(index),
                 _ => None,
             },
         );

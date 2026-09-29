@@ -139,7 +139,10 @@ publishes `play-next` when a person takes the up-next offer on the
 scrubber, and the client that wrote the `Play` reads it and creates
 the next `Play`. It publishes `home` when a person presses home during
 a film, just before the `Play` ends, and the client under the film
-reads that ask as a press of the home key.
+reads that ask as a press of the home key. It publishes `power` the
+same way when a person presses power during a film. The client holds
+that ask until the `Player`'s status reads `Idle`, and then answers it
+the way it answers a power press between films.
 
 "The playback pod" in this table is its command sidecar, the one
 container that connects to the bus. "The idle pod" is the idle screen

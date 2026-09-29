@@ -70,7 +70,7 @@ fn reached(position: i64, finished: bool, recorded: i64) -> Progress {
 fn a_film_no_play_names_draws_the_row_it_always_drew() {
     let (page, source) = watched(None);
 
-    assert_eq!(words(&page), ["Play", "Trailer"]);
+    assert_eq!(words(&page), ["Play", "Trailer", "Mark watched"]);
     assert_eq!(page.progress, None);
     assert_eq!(source.watching, [WATCHER.to_string()]);
 }
@@ -79,7 +79,16 @@ fn a_film_no_play_names_draws_the_row_it_always_drew() {
 fn a_film_the_audience_is_in_the_middle_of_leads_with_resume() {
     let (page, _) = watched(progress(false));
 
-    assert_eq!(words(&page), ["Resume", "Start over", "Trailer"]);
+    assert_eq!(
+        words(&page),
+        [
+            "Resume",
+            "Start over",
+            "Trailer",
+            "Mark watched",
+            "Clear progress"
+        ]
+    );
     assert_eq!(page.focus, Focus::Buttons(0));
 }
 
@@ -87,7 +96,7 @@ fn a_film_the_audience_is_in_the_middle_of_leads_with_resume() {
 fn a_play_that_named_more_people_than_the_audience_draws_no_resume() {
     let (page, _) = after_plays(vec![own(reached(REACHED, false, 10), false)]);
 
-    assert_eq!(words(&page), ["Play", "Trailer"]);
+    assert_eq!(words(&page), ["Play", "Trailer", "Mark watched"]);
     assert_eq!(page.progress, None);
 }
 
@@ -98,7 +107,16 @@ fn a_later_play_with_more_people_moves_the_audiences_own_thread() {
         own(reached(REACHED, false, 20), false),
     ]);
 
-    assert_eq!(words(&page), ["Resume", "Start over", "Trailer"]);
+    assert_eq!(
+        words(&page),
+        [
+            "Resume",
+            "Start over",
+            "Trailer",
+            "Mark watched",
+            "Clear progress"
+        ]
+    );
     assert_eq!(
         page.progress.as_ref().map(|reached| reached.position),
         Some(REACHED)
@@ -112,14 +130,14 @@ fn a_play_with_more_people_that_finished_the_film_leaves_the_play_row() {
         own(reached(RUNTIME, true, 20), false),
     ]);
 
-    assert_eq!(words(&page), ["Play", "Trailer"]);
+    assert_eq!(words(&page), ["Play", "Trailer", "Clear progress"]);
 }
 
 #[test]
-fn a_film_the_audience_finished_leads_with_play() {
+fn a_film_the_audience_finished_leads_with_play_and_offers_the_clear() {
     let (page, _) = watched(progress(true));
 
-    assert_eq!(words(&page), ["Play", "Trailer"]);
+    assert_eq!(words(&page), ["Play", "Trailer", "Clear progress"]);
     assert_eq!(page.focus, Focus::Buttons(0));
 }
 
@@ -188,8 +206,8 @@ fn a_progress_read_that_shortens_the_row_keeps_focus_on_a_button_it_holds() {
 
     page.read_progress(&mut source, &[WATCHER.to_string()]);
 
-    assert_eq!(words(&page), ["Play", "Trailer"]);
-    assert_eq!(page.focus, Focus::Buttons(1));
+    assert_eq!(words(&page), ["Play", "Trailer", "Clear progress"]);
+    assert_eq!(page.focus, Focus::Buttons(2));
 }
 
 #[test]
@@ -200,6 +218,72 @@ fn a_reread_holds_focus_on_the_button_the_row_already_drew() {
 
     page.reread(&mut source);
 
-    assert_eq!(words(&page), ["Resume", "Start over", "Trailer"]);
+    assert_eq!(
+        words(&page),
+        [
+            "Resume",
+            "Start over",
+            "Trailer",
+            "Mark watched",
+            "Clear progress"
+        ]
+    );
     assert_eq!(page.focus, Focus::Buttons(2));
+}
+
+// What a press on the focused button marks: the choice, the mark, and the
+// duration it states.
+fn marked(page: &mut Movie, source: &mut Films) -> (Selection, TitleMark, i64) {
+    let Step::Mark {
+        selection,
+        mark,
+        duration,
+        ..
+    } = page.key("enter", source)
+    else {
+        panic!("a press on a mark button marks the film");
+    };
+    (selection, mark, duration)
+}
+
+#[test]
+fn mark_watched_marks_the_film_at_the_duration_of_the_audiences_play() {
+    let (mut page, mut source) = watched(progress(false));
+    page.focus = Focus::Buttons(3);
+
+    let (selection, mark, duration) = marked(&mut page, &mut source);
+
+    assert_eq!(selection, Selection::Movie { id: "two".into() });
+    assert_eq!(mark, TitleMark::Watched);
+    assert_eq!(duration, RUNTIME);
+}
+
+#[test]
+fn clear_progress_clears_the_film() {
+    let (mut page, mut source) = watched(progress(false));
+    page.focus = Focus::Buttons(4);
+
+    let (_, mark, _) = marked(&mut page, &mut source);
+
+    assert_eq!(mark, TitleMark::Cleared);
+}
+
+#[test]
+fn a_mark_on_a_film_no_play_names_takes_the_catalogs_running_time() {
+    let (mut page, mut source) = watched(None);
+    page.focus = Focus::Buttons(2);
+
+    let (_, mark, duration) = marked(&mut page, &mut source);
+
+    assert_eq!(mark, TitleMark::Watched);
+    assert_eq!(duration, page.duration);
+    assert!(duration > 0);
+}
+
+#[test]
+fn a_film_they_cleared_draws_the_row_of_a_film_no_play_names() {
+    let (page, _) = watched(Some(reached(0, false, 30)));
+
+    assert_eq!(words(&page), ["Play", "Trailer", "Mark watched"]);
+    assert_eq!(page.progress, None);
 }

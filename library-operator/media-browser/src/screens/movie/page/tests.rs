@@ -53,6 +53,7 @@ fn crowded(focus: Focus) -> Movie {
         logo: String::new(),
         backdrop: "backdrop.jpg".into(),
         trailer: true,
+        duration: 6_730,
         facts: "1994 · 1h 52m · PG · Drama, Mystery".into(),
         ratings: ratings::scores(&[
             ("imdb".to_string(), 6.5),

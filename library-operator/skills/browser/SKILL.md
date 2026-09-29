@@ -90,8 +90,8 @@ attached to the screen's machine.
 | Key | Effect |
 |---|---|
 | arrows | move focus |
-| enter | open the card, or play from a title's page |
-| back | pop to the screen before this one |
+| enter | open the card, open an episode's row, or press a button of a title's page |
+| back | close an episode's row, or pop to the screen before this one |
 | home | pop to the home page |
 | search | open the search wall with the on-screen keyboard |
 | a letter or a digit | open the search wall with that character typed |
@@ -124,6 +124,12 @@ franchise. A card that is next in a series or a set opens that title's
 page. A card that is next in a franchise alone opens the franchise page
 on that member.
 
+A play that stands at position 0 is not started. The row draws no card
+for it, and its series, set, or franchise offers nothing after it, so
+the whole container leaves the row. A cleared title writes that play,
+and so does a title marked unplayed in Jellyfin. A play that starts
+over and stops before its first position report reads the same way.
+
 The answer to who is watching lasts until three hours pass with no
 press. The browser keeps it on the bus, retained, so a screen pod that
 restarts inside those hours draws the same room and asks nobody.
@@ -132,7 +138,10 @@ message.
 
 A movie's page shows its art, its facts, its people, and the set or
 franchise it is part of. A series' page shows its seasons as a wall of
-episode stills. A person's page shows their credits and their biography.
+episode stills. Enter on a still opens the episode's own row in the
+header, with the buttons a movie's page has except Trailer, and back
+closes the row.
+A person's page shows their credits and their biography.
 A franchise's page draws its story order as one lane, with a line per
 universe beside it. Over the first row of each era it draws a heading,
 with the era's length beside its name. An era inside a wider one reads
@@ -153,7 +162,36 @@ the text. Back over the wall with the grid closed clears the text, and
 back over an empty search leaves the wall. Up from the first row of
 hits puts focus on the strip, and enter there opens the grid again.
 
-## 6. Playback
+## 6. Marking a title watched or clearing it
+
+A movie's page and an episode's row end with two buttons. Each one
+applies to everyone at the screen, the same people the
+continue-watching row is read for, and it takes effect at once, with
+no confirmation step.
+
+| Button | Where it shows | Effect |
+|---|---|---|
+| Mark watched | on a title they have not finished | The title counts as finished. A film leaves the continue-watching row. In a series, a set, or a franchise, the next title takes the card. |
+| Clear progress | on a title they started or finished | The title counts as not started, and its whole series, set, or franchise leaves the row. |
+
+The actions of a continue-watching card are on the page the card
+opens. A film's card opens the film's page, and an episode's card
+opens the series' page on that episode, where enter opens its row.
+
+The browser does not write the progress store. It publishes the mark
+on the bus, retained, and the progress role writes it as one play at
+the end of the title for watched, or at 0 for a clear. The mark states
+the duration of the audience's play of the title where one exists, and
+the catalog's running time where none does. A title with neither
+sends no watched mark, and the browser logs a line that says so.
+
+Neither mark deletes a play. The store keeps the earlier plays, but
+the browser reads the newest play of a title, so after a clear the
+screen offers no Resume and draws no position for the title. A later
+play of the title replaces either mark.
+[The library bus](https://liken.sh/library/docs/reference/bus/#a-mark) gives the message.
+
+## 7. Playback
 
 Enter on a title resolves what to play from the browser's own copy of
 the catalog. It then publishes the list on the bus, as a play request

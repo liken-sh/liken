@@ -108,6 +108,8 @@ func (p *progress) subscribe() {
 	// The outside plays are the jellyfin role's, on the same tree, and
 	// one namespace's role records only its own.
 	p.bus.Subscribe(playOutsideFilter(p.topicBase, p.namespace))
+	// The marks are the media browser's, on the same tree.
+	p.bus.Subscribe(playMarkFilter(p.topicBase, p.namespace))
 	// A Person is cluster-scoped, so every namespace's role answers
 	// every forget request.
 	p.bus.Subscribe(personForgetFilter(p.topicBase))
@@ -164,6 +166,8 @@ func (p *progress) onMessage(topic string, payload []byte) {
 			p.recordAudience(ctx, play, payload)
 		case playOutsideKind:
 			p.recordOutside(ctx, play, payload)
+		case playMarkKind:
+			p.recordMark(ctx, play, payload)
 		case playFinalKind:
 			p.recordFinal(ctx, play, payload)
 		}

@@ -28,7 +28,10 @@ const theEnsureCommand = "input.ensure"
 // toggle. The equipment operator reads that toggle on the unit's power
 // topic, and turns the room off or on. An input ask sent with it would
 // make the receiver select the unit's input and power on again, while
-// the toggle puts the room to standby.
+// the toggle puts the room to standby. The playback pod's table binds
+// the same names to power. The Rust crate media-screen holds a copy of
+// this list as POWER in media-screen/src/screen/keys.rs, because a Go
+// list cannot reach it: a change to one changes both.
 var powerKeys = []string{"KEY_POWER", "KEY_POWER2", "KEY_SLEEP"}
 
 // ensureDesk maps each unit to the commands topic of the receiver its

@@ -270,21 +270,36 @@ func TestTheCycleKeyWithNoFocusTopicSaysWhy(t *testing.T) {
 	mustLogOnce(t, log, "command: KEY_CYCLEWINDOWS from remote house/sofa ignored, because the remote has no focus topic")
 }
 
-func TestTheHomeKeyLogsTheAskAndTheEnding(t *testing.T) {
+func TestTheHomeAndPowerKeysLogTheAskAndTheEnding(t *testing.T) {
 	cases := []struct {
 		name   string
+		key    string
 		player string
 		want   string
 	}{
 		{
-			name:   "a pod that read its player",
+			name:   "home on a pod that read its player",
+			key:    "KEY_HOMEPAGE",
 			player: keyTestPlayer,
 			want: "command: KEY_HOMEPAGE from remote house/sofa: home, published the home ask to " +
 				playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer) + ", so the run ends",
 		},
 		{
-			name: "a pod that read no player",
+			name: "home on a pod that read no player",
+			key:  "KEY_HOMEPAGE",
 			want: "command: KEY_HOMEPAGE from remote house/sofa: home, with no player commands topic to ask on, so the run ends",
+		},
+		{
+			name:   "power on a pod that read its player",
+			key:    "KEY_POWER",
+			player: keyTestPlayer,
+			want: "command: KEY_POWER from remote house/sofa: power, published the power ask to " +
+				playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer) + ", so the run ends",
+		},
+		{
+			name: "power on a pod that read no player",
+			key:  "KEY_POWER",
+			want: "command: KEY_POWER from remote house/sofa: power, with no player commands topic to ask on, so the run ends",
 		},
 	}
 	for _, each := range cases {
@@ -296,7 +311,7 @@ func TestTheHomeKeyLogsTheAskAndTheEnding(t *testing.T) {
 
 			events, _ := keyTestTopics()
 
-			c.handle(events, mustEncode(t, keyEvent{Key: "KEY_HOMEPAGE", Value: 1}))
+			c.handle(events, mustEncode(t, keyEvent{Key: each.key, Value: 1}))
 
 			mustLogOnce(t, log, each.want)
 		})

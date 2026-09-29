@@ -1397,3 +1397,4 @@ fn a_tick_before_the_deadline_and_a_tick_with_no_deadline_state_nothing() {
 
 mod lines;
 mod panel;
+mod power_ask;

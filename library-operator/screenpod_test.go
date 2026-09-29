@@ -820,6 +820,7 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 		idleOffAfterSecondsVariable:  "1800",
 		libraryPlayTopicVariable:     "liken/library/players/house/den/play",
 		libraryAudienceTopicVariable: "liken/library/players/house/den/audience",
+		libraryPlaysTopicVariable:    "liken/library/plays/house",
 	}
 	for name, value := range want {
 		if environment[name] != value {

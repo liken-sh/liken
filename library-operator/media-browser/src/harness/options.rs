@@ -25,6 +25,11 @@ pub const PLAY_TOPIC: &str = "LIBRARY_PLAY_TOPIC";
 /// the only program that writes it.
 pub const AUDIENCE_TOPIC: &str = "LIBRARY_AUDIENCE_TOPIC";
 
+/// The branch of the topic tree the namespace's plays are under. The
+/// browser publishes each mark a person sets under it, and the library
+/// operator's progress role records it there.
+pub const PLAYS_TOPIC: &str = "LIBRARY_PLAYS_TOPIC";
+
 /// The address the Prometheus listener binds, from milestone 65's
 /// contract. An unset, empty, or unparseable value serves no metrics,
 /// which is what a run outside a pod gets and what a pod gets until the
@@ -130,6 +135,9 @@ pub struct Options {
     /// The audience topic, from [`AUDIENCE_TOPIC`]. A run that misses it
     /// keeps who is watching to itself, and asks again after a restart.
     pub audience_topic: String,
+    /// The plays branch, from [`PLAYS_TOPIC`]. A run that misses it
+    /// publishes no mark.
+    pub plays_topic: String,
     /// The metrics listener's address, from [`METRICS_ADDRESS`]. `None`
     /// serves no metrics.
     pub metrics_address: Option<SocketAddr>,
@@ -159,6 +167,7 @@ impl Default for Options {
             window_grace: None,
             play_topic: String::new(),
             audience_topic: String::new(),
+            plays_topic: String::new(),
             metrics_address: None,
         }
     }
@@ -257,8 +266,8 @@ impl Options {
 
 impl Options {
     /// Read what the container was told. A pod cannot discover the
-    /// grace the operator set or the two topics this operator names, so
-    /// all three arrive in the environment and none is a flag. The bus
+    /// grace the operator set or the three topics this operator names, so
+    /// all four arrive in the environment and none is a flag. The bus
     /// wiring arrives the same way and `media-screen` reads it, so none
     /// of it is here.
     pub fn from_environment(&mut self) {
@@ -272,6 +281,7 @@ impl Options {
         self.window_grace = grace(&value(WINDOW_GRACE).unwrap_or_default());
         self.play_topic = value(PLAY_TOPIC).unwrap_or_default();
         self.audience_topic = value(AUDIENCE_TOPIC).unwrap_or_default();
+        self.plays_topic = value(PLAYS_TOPIC).unwrap_or_default();
         self.metrics_address = metrics_address(&value(METRICS_ADDRESS).unwrap_or_default());
     }
 }

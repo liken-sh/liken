@@ -313,7 +313,11 @@ pub fn pressed(page: &mut Series, source: &mut Serials, key: &str) -> Focus {
 pub fn still(focus: Focus) -> usize {
     match focus {
         Focus::Still(index) => index,
-        Focus::Buttons(..) | Focus::Rail(..) | Focus::Franchise(..) | Focus::Stripe(..) => {
+        Focus::Buttons(..)
+        | Focus::Episode(..)
+        | Focus::Rail(..)
+        | Focus::Franchise(..)
+        | Focus::Stripe(..) => {
             panic!("focus left the wall")
         }
     }

@@ -88,6 +88,8 @@ fn main() {
 fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     let play_topic = options.play_topic.clone();
     let audience_topic = options.audience_topic.clone();
+    let plays_topic = options.plays_topic.clone();
+    let player = wiring.player_name.clone();
 
     let Some(catalog) = options.catalog.clone() else {
         return harness::run(
@@ -96,7 +98,8 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
                 .with_timing(options.stats.is_some())
                 .with_audience(options.people.clone(), options.audience.clone())
                 .with_people_file(options.people_file.clone())
-                .with_bus(bus(wiring, &audience_topic), play_topic, audience_topic),
+                .with_bus(bus(wiring, &audience_topic), play_topic, audience_topic)
+                .with_marks(plays_topic, player),
             options,
         );
     };
@@ -133,7 +136,8 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
             .with_timing(options.stats.is_some())
             .with_audience(options.people.clone(), options.audience.clone())
             .with_people_file(options.people_file.clone())
-            .with_bus(bus(wiring, &audience_topic), play_topic, audience_topic),
+            .with_bus(bus(wiring, &audience_topic), play_topic, audience_topic)
+            .with_marks(plays_topic, player),
         options,
     )
 }

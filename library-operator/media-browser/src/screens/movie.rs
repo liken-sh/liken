@@ -16,7 +16,9 @@ use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
-use super::{InFranchise, Item, Screen, Step, facts, foot, franchise, person, stripes, upnext};
+use super::{
+    InFranchise, Item, Screen, Step, TitleMark, facts, foot, franchise, person, stripes, upnext,
+};
 use crate::art::Art;
 use crate::catalog::draw::Date;
 use crate::catalog::progress::thread;
@@ -109,8 +111,11 @@ pub struct Movie {
     /// The path of the backdrop file, empty where the movie has none.
     pub backdrop: String,
     /// Whether the movie holds a trailer file. That is what puts the
-    /// second button on the row.
+    /// trailer button on the row.
     pub trailer: bool,
+    /// The running time in seconds, zero where the catalog holds none. A
+    /// watched mark on a film with no play of the audience's names it.
+    pub duration: i64,
     /// The year, the runtime, the content rating, and the genres, on one
     /// line.
     pub facts: String,
@@ -156,6 +161,7 @@ impl Movie {
             logo: details.logo.clone(),
             backdrop: details.backdrop.clone(),
             trailer: !details.trailer.is_empty(),
+            duration: details.duration,
             facts: facts_of(&details),
             ratings: ratings::scores(&details.ratings),
             tagline: details.tagline.clone(),
@@ -189,9 +195,10 @@ impl Movie {
     /// at every open and at every re-read, because only the browser holds
     /// the audience.
     // The film is a container of one leaf, and the thread rule over its
-    // plays says whether the page resumes, so the page and the
-    // continue-watching row agree. A film the thread finished, or one with no
-    // play that names exactly these people, draws the Play row.
+    // plays says where the audience stands, so the page and the
+    // continue-watching row agree. A film with no play that names exactly
+    // these people, or one they cleared to 0, carries no progress. A film
+    // they finished carries its finished play, so the row offers the clear.
     pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
         let plays: Vec<thread::Play> = source
             .plays_of(&self.library, &self.id, people)
@@ -202,15 +209,17 @@ impl Movie {
                 exact: play.exact,
             })
             .collect();
-        self.progress = thread::walk(1, &plays).map(|offer| offer.standing);
+        self.progress = thread::standing(1, &plays)
+            .map(|play| play.progress.clone())
+            .filter(|progress| row::started(Some(progress)));
         self.focus = self.hold(self.focus);
     }
 
     /// The buttons this page draws. Play is always there, or Resume and
     /// Start over in its place while the audience is in the middle of the
     /// film. Trailer joins them where the `files` table holds a trailer
-    /// for the movie.
-    pub fn buttons(&self) -> &'static [row::Button] {
+    /// for the movie, and the two marks close the row.
+    pub fn buttons(&self) -> Vec<row::Button> {
         row::of(self.progress.as_ref(), self.trailer)
     }
 
@@ -426,9 +435,15 @@ impl Movie {
     }
 
     // The play one button asks for: the trailer, the film from the second
-    // the audience reached, or the film from the beginning.
+    // the audience reached, or the film from the beginning. A mark asks for
+    // no play.
     fn press(&self, button: row::Button, source: &mut dyn Source) -> Step {
+        let film = Selection::Movie {
+            id: self.id.clone(),
+        };
         let (selection, start) = match button {
+            row::Button::MarkWatched => return self.mark(film, TitleMark::Watched),
+            row::Button::ClearProgress => return self.mark(film, TitleMark::Cleared),
             row::Button::Trailer => (
                 Selection::Trailer {
                     id: self.id.clone(),
@@ -436,17 +451,10 @@ impl Movie {
                 None,
             ),
             row::Button::Resume => (
-                Selection::Movie {
-                    id: self.id.clone(),
-                },
+                film,
                 self.progress.as_ref().map(|progress| progress.position),
             ),
-            row::Button::Play | row::Button::StartOver => (
-                Selection::Movie {
-                    id: self.id.clone(),
-                },
-                None,
-            ),
+            row::Button::Play | row::Button::StartOver => (film, None),
         };
         // A trailer is in no order, so it offers nothing after it.
         let next = match button {
@@ -464,6 +472,16 @@ impl Movie {
             selection,
             start,
             next: next.map(Box::new),
+        }
+    }
+
+    // One mark on the film, for everyone at the screen.
+    fn mark(&self, selection: Selection, mark: TitleMark) -> Step {
+        Step::Mark {
+            library: self.library.clone(),
+            selection,
+            mark,
+            duration: marked_duration(self.progress.as_ref(), self.duration),
         }
     }
 
@@ -491,6 +509,17 @@ impl Movie {
 impl Head for Movie {
     fn head(&self, bounds: Rectangle) -> Rectangle {
         page::head(self, bounds)
+    }
+}
+
+/// The duration a mark on one work states: the duration of the audience's
+/// play where one names it, and the catalog's running time where none does.
+/// The play's duration is the length of the file that ran, so it matches
+/// the rows the store already holds for the work.
+pub(crate) fn marked_duration(progress: Option<&Progress>, catalog: i64) -> i64 {
+    match progress {
+        Some(progress) if progress.duration > 0 => progress.duration,
+        _ => catalog,
     }
 }
 

@@ -159,10 +159,22 @@ Set these variables on your container. Each value comes from
   up-next offer on the scrubber, for a client that starts what follows.
   It publishes `{"action": "home"}` there when a person presses home
   during a film, just before the `Play` ends. The client reads that
-  message as a press of the home key. When a `Play` ends, the client's
+  message as a press of the home key. It publishes
+  `{"action": "power"}` there when a person presses power during a
+  film, just before the `Play` ends. The client holds that message
+  until the status reads `Idle`, and then answers it as a power press:
+  the toggle on `bus.powerTopic` when the unit has one, and the shade
+  when it has none. The client drops the message when no `Idle`
+  arrives within 10 seconds. The `media-screen` crate holds this rule. When a `Play` ends, the client's
   own surface is on the screen again without a command from the client, and the
   retained status is the cue. Nothing else arrives, and the client
   publishes nothing back.
+* `MEDIA_PLAYER_POWER_TOPIC`, from `bus.powerTopic`. It is present
+  only when the unit's screen is wired through a `Receiver`. A power
+  press between films publishes `{"action": "toggle"}` there, not
+  retained, and the equipment operator turns the room off or on. Set
+  nothing when the field is absent, and a power press reaches the
+  client.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
   publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
   The operator turns the desire into an override on the screen's
@@ -188,8 +200,8 @@ The one repeat that acts is the answer to the client's own cycle
 request, on a controller that only this `Player` lists.
 
 The client brings its own shade down. The operator's client does it on
-back. A client with levels does it when back has no level left to
-return to.
+back and on power. A client with levels does it on power, and on back
+when back has no level left to return to.
 
 ## Expect the claim to change
 

@@ -29,13 +29,16 @@ type keyBinding struct {
 // names a keyboard and a media remote report for play and pause, the
 // four names a shell sends for OK, and the three it sends for back.
 // KEY_CYCLEWINDOWS asks the operator to move the focus mark and
-// reaches no player program. The reserved keys, KEY_POWER and BTN_MODE,
-// are absent on purpose: they belong to a home surface this operator
-// does not own.
+// reaches no player program. BTN_MODE is absent on purpose: it is
+// reserved for a home surface this operator does not own.
 //
 // The two home names, KEY_HOMEPAGE and KEY_WWW, end the film and ask the
 // client under it for its home page.
-var playbackKeys = map[string]keyBinding{
+//
+// The power names end the film and ask the client under it to do what
+// power does between films. They are powerKeys, the names ensureInput
+// exempts.
+var playbackKeys = withPowerRows(map[string]keyBinding{
 	"KEY_PLAYPAUSE": {command: mediaCommand{Action: actionPause}},
 	"KEY_PLAY":      {command: mediaCommand{Action: actionPause}},
 	"KEY_PAUSE":     {command: mediaCommand{Action: actionPause}},
@@ -73,6 +76,16 @@ var playbackKeys = map[string]keyBinding{
 	"KEY_WWW":      {command: mediaCommand{Action: actionHome}},
 
 	"KEY_CYCLEWINDOWS": {command: mediaCommand{Action: actionCycleFocus}},
+})
+
+// withPowerRows adds one row per power name to the table. The rows come
+// from powerKeys, so the names the playback pod ends a film on are the
+// names ensureInput exempts, and one list states them in Go.
+func withPowerRows(table map[string]keyBinding) map[string]keyBinding {
+	for _, key := range powerKeys {
+		table[key] = keyBinding{command: mediaCommand{Action: actionPower}}
+	}
+	return table
 }
 
 // commandForKey reads one key event as this pod's command. Value 0

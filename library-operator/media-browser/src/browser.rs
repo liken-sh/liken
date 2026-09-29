@@ -32,6 +32,8 @@ use crate::views;
 mod keys;
 // The words the log lines use for screens, presses, and activities.
 mod lines;
+// The marks a person sets on a title, and where they are published.
+mod marks;
 // One press and the line it prints.
 mod press;
 mod reader;
@@ -43,6 +45,7 @@ mod refresh;
 mod stack;
 
 use keys::key_of;
+use marks::Marks;
 use refresh::Refresh;
 
 /// The browsing screen, generic over where its rows and its art
@@ -81,6 +84,9 @@ pub struct Browser<S: Source, A: Art> {
     // this browser's own message, written for the browser that starts
     // after this one, so the browser is both the writer and the reader.
     audience_topic: String,
+    // Where this browser publishes the marks a person sets, and the second
+    // of the last one.
+    marks: Marks,
     // The wall clock, in whole seconds since the Unix epoch. It is a
     // field so a test states the second every stamp carries. The run
     // clock cannot carry the stamp: it starts at zero on every run, and
@@ -188,6 +194,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             bus: None,
             play_topic: String::new(),
             audience_topic: String::new(),
+            marks: Marks::default(),
             now: clock::seconds,
             audience: Audience::default(),
             people_file: None,
@@ -239,6 +246,14 @@ impl<S: Source, A: Art> Browser<S, A> {
         self.bus = bus;
         self.play_topic = play_topic;
         self.audience_topic = audience_topic;
+        self
+    }
+
+    /// The browser that publishes each mark a person sets under this
+    /// branch of the tree, the one the namespace's plays are under, as the
+    /// mark of this `Player`'s screen. A run with no branch publishes none.
+    pub fn with_marks(mut self, branch: String, player: String) -> Self {
+        self.marks = Marks::new(branch, player);
         self
     }
 

@@ -125,11 +125,13 @@ func (s *progressStore) recordAudience(ctx context.Context, play string, audienc
 	return s.apply(ctx, statements)
 }
 
-// recordOutside writes one play that ran outside this cluster: its audience,
-// its position, and the time of the event as the recorded time.
+// recordOutside writes one row whole from one message: a play that ran
+// outside this cluster, or a mark a person set at the media browser. It
+// writes the audience, the position, and the time of the event as the
+// recorded time.
 // The read of the recorded time comes first, because the newer at wins and a
 // Corrosion transaction cannot branch.
-// The row names no Library, because nothing in this cluster played it.
+// The row names no Library, because no Play of this cluster wrote it.
 func (s *progressStore) recordOutside(ctx context.Context, play string, outside outsidePlay) error {
 	cells, err := s.row(ctx, `SELECT recorded FROM plays WHERE play = ? LIMIT 1`, []any{play})
 	if err != nil {

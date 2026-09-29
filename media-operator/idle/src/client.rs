@@ -105,12 +105,16 @@ impl Client {
     /// `Play` ended reads the move it missed.
     pub fn receive(&mut self, moment: Moment, at: f64) {
         // Every key the crate does not own reaches this client. The stock
-        // idle screen draws no list, so every key but back reaches
-        // nothing, and back is the shade. The client decides this and not
-        // the crate, because a client with levels sleeps at its top level
-        // alone, and only the client reads its levels.
+        // idle screen draws no list, so every key but back and power
+        // reaches nothing, and back and power are the shade. The client
+        // decides this and not the crate, because a client with levels
+        // sleeps on back at its top level alone, and only the client reads
+        // its levels. Power lowers the shade the way the media browser's
+        // power does, so power means the same with either screen. A power
+        // key reaches this client only on a unit with no Receiver, because
+        // the crate answers it with the room's toggle on a unit with one.
         if let Moment::Press(key) = &moment
-            && media_screen::screen::keys::back(key)
+            && (media_screen::screen::keys::back(key) || media_screen::screen::keys::power(key))
             && let Some(bus) = &self.bus
         {
             bus.sleep();
@@ -312,6 +316,21 @@ mod tests {
         assert_eq!(
             slept.load(Ordering::SeqCst),
             media_screen::screen::keys::BACK.len()
+        );
+    }
+
+    #[test]
+    fn a_power_press_asks_the_bus_for_the_shade() {
+        let mut client = seeded();
+        let (_sender, slept) = on_a_channel(&mut client);
+
+        for key in media_screen::screen::keys::POWER {
+            client.receive(Moment::Press(key.into()), 1.0);
+        }
+
+        assert_eq!(
+            slept.load(Ordering::SeqCst),
+            media_screen::screen::keys::POWER.len()
         );
     }
 

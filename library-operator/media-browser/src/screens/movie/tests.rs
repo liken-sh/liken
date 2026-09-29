@@ -321,7 +321,7 @@ fn page(films: Films) -> (Movie, Films) {
 fn a_page_opens_with_focus_on_play() {
     let (page, _) = page(Films::default());
     assert_eq!(page.focus, Focus::Buttons(0));
-    assert_eq!(words(&page), ["Play"]);
+    assert_eq!(words(&page), ["Play", "Mark watched"]);
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn a_movie_with_a_trailer_file_gets_the_second_button() {
         trailer: true,
         ..Films::default()
     });
-    assert_eq!(words(&page), ["Play", "Trailer"]);
+    assert_eq!(words(&page), ["Play", "Trailer", "Mark watched"]);
 }
 
 #[test]
@@ -444,9 +444,11 @@ fn left_and_right_move_across_the_buttons() {
     page.key("right", &mut source);
     assert_eq!(page.focus, Focus::Buttons(1));
     page.key("right", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(1));
+    assert_eq!(page.focus, Focus::Buttons(2));
+    page.key("right", &mut source);
+    assert_eq!(page.focus, Focus::Buttons(2));
     page.key("left", &mut source);
-    assert_eq!(page.focus, Focus::Buttons(0));
+    assert_eq!(page.focus, Focus::Buttons(1));
 }
 
 #[test]

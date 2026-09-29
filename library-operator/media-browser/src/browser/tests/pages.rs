@@ -78,7 +78,10 @@ fn a_film_the_audience_is_in_the_middle_of_opens_on_resume() {
 
     on_the_film(&mut browser);
 
-    assert_eq!(words(&browser), ["Resume", "Start over"]);
+    assert_eq!(
+        words(&browser),
+        ["Resume", "Start over", "Mark watched", "Clear progress"]
+    );
     assert_eq!(showing_page(&browser).focus, Focus::Buttons(0));
     assert_eq!(browser.source.watching, [WATCHER.to_string()]);
 }
@@ -89,7 +92,7 @@ fn a_film_the_audience_finished_opens_on_play() {
 
     on_the_film(&mut browser);
 
-    assert_eq!(words(&browser), ["Play"]);
+    assert_eq!(words(&browser), ["Play", "Clear progress"]);
 }
 
 #[test]
@@ -98,7 +101,7 @@ fn a_film_no_play_names_opens_on_play() {
 
     on_the_film(&mut browser);
 
-    assert_eq!(words(&browser), ["Play"]);
+    assert_eq!(words(&browser), ["Play", "Mark watched"]);
     assert_eq!(showing_page(&browser).progress, None);
 }
 
@@ -146,7 +149,7 @@ fn a_press_on_an_episode_they_are_in_the_middle_of_publishes_the_second() {
     let (mut browser, bus) = watching(None, vec![reached(900, RUNTIME, (1, 2))]);
 
     on_the_serial(&mut browser);
-    browser.key("enter");
+    play_episode(&mut browser);
 
     assert_eq!(
         browser.source.chosen,

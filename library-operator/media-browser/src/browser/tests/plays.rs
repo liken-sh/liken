@@ -100,7 +100,7 @@ fn a_select_on_an_episode_names_the_episode_the_still_carries() {
     browser.key("down");
     browser.key("right");
 
-    browser.key("enter");
+    play_episode(&mut browser);
 
     assert_eq!(
         browser.source.chosen,

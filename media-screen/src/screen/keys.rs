@@ -31,9 +31,17 @@ pub const BACK: [&str; 3] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT"];
 /// The three power synonyms. A shell sends whichever one it was built
 /// with, so a client reads all three. A unit whose screen is wired
 /// through a Receiver answers a power press itself as a toggle on the
-/// bus; a unit that is not forwards the key, and the client's shade
-/// stands as it did.
-pub const POWER: [&str; 3] = ["KEY_POWER", "KEY_SLEEP", "KEY_POWER2"];
+/// bus; a unit that is not forwards the key, and the client lowers its
+/// shade. `media-operator` holds a copy of this list as `powerKeys` in
+/// `media-operator/ensure.go`, because a Rust list cannot reach Go: a
+/// change to one changes both.
+pub const POWER: [&str; 3] = [POWER_PRESS, "KEY_SLEEP", "KEY_POWER2"];
+
+/// The key name a power ask reaches the client under, on a unit with no
+/// Receiver. The playback pod publishes the ask on the `Player`'s commands
+/// topic during a film, and this crate turns it into a press once the unit
+/// is idle, so a client binds the power names alone.
+pub const POWER_PRESS: &str = "KEY_POWER";
 
 /// The key name a home ask reaches the client under. The playback pod
 /// publishes the ask on the `Player`'s commands topic during a film, and

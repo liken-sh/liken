@@ -60,7 +60,7 @@ pub const PANEL_TOPIC: &str = "MEDIA_PLAYER_PANEL_TOPIC";
 /// The topic a power press on a unit whose screen is wired through a
 /// Receiver publishes a toggle on. The operator sets it only for such a
 /// unit, so an empty value is the receiver gate: a unit with none
-/// forwards the power key and the client keeps its shade.
+/// forwards the power key, and the client lowers its shade.
 pub const POWER_TOPIC: &str = "MEDIA_PLAYER_POWER_TOPIC";
 
 /// The two lists of the unit's controllers, newline-joined and aligned by

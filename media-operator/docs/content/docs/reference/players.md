@@ -214,7 +214,7 @@ The bus facts a delegate's client reads. With the two windows above, this block 
 | <span id="statusidlebus--volumeownertopic"></span>`volumeOwnerTopic` | string | no | The retained topic that carries the owner mark for the unit's level, present whenever volumeTopic is. A non-empty payload means equipment owns the level, and the client then draws no level of its own and applies none. An empty payload means no owner holds it. |
 | <span id="statusidlebus--commandstopic"></span>`commandsTopic` | string | no | The topic the playback pod publishes play-next on when a person takes the up-next offer on the scrubber. The client that wrote the Play reads that ask and starts the next work. When a Play ends, the client's own surface is on the screen again and the retained status is the cue, so nothing is published here for it. The pod also publishes home when a person presses home during a film, just before the Play ends, and the client reads that ask as a press of the home key. |
 | <span id="statusidlebus--paneltopic"></span>`panelTopic` | string | no | The retained topic a client states its panel desire on, as on or off. The client holds no API credentials, so the operator reads the desire here and overrides the screen's Display. |
-| <span id="statusidlebus--powertopic"></span>`powerTopic` | string | no | The topic a power press on this unit publishes a toggle on, present only when the unit's screen is wired through a Receiver. The equipment operator answers it by flipping the receiver's power. A unit with none carries no topic, and its client keeps the shade on a power press exactly as it has it today. |
+| <span id="statusidlebus--powertopic"></span>`powerTopic` | string | no | The topic a power press on this unit publishes a toggle on, present only when the unit's screen is wired through a Receiver. The equipment operator answers it by flipping the receiver's power. A unit with none carries no topic, and a power press reaches its client, which lowers the shade. |
 | <span id="statusidlebus--remotes"></span>`remotes` | [\[\]object](#statusidlebusremotes) | no | The unit's controllers, one entry each, in spec.remotes order. That position is the index a focus moment carries, and it is the order the status topic lists the parts in. A unit with no controllers lists none. |
 
 #### status.idle.bus.remotes[]
@@ -401,9 +401,17 @@ its `request` is the `Play`'s own `spec.next.request`, byte for byte.
 The client that wrote the `Play` reads that ask and creates the next
 `Play`. The same sidecar publishes `home` when a person presses home
 during a film, just before the `Play` ends, and the client reads that
-ask as a press of the home key.
+ask as a press of the home key. It publishes `power` when a person
+presses power during a film, also just before the `Play` ends. The
+client holds that ask until this `Player`'s status reads `Idle`, and
+then answers it as a power press between films: on a unit wired
+through a `Receiver`, it publishes the toggle on the power topic, and
+on a unit with none, it lowers the shade. The toggle waits for `Idle`
+so that the equipment operator reads the room after the film ended. A
+client that reads no `Idle` within 10 seconds drops the ask.
 
 | Message | Writer | What it says |
 |---|---|---|
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |
 | `{"action": "home"}` | the playback pod | A person pressed home during a film. The `Play` ends after it, and the client reads the ask as a press of the home key. |
+| `{"action": "power"}` | the playback pod | A person pressed power during a film. The `Play` ends after it, and the client answers the ask as a power press once the status reads `Idle`. |

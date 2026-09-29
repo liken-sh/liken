@@ -35,21 +35,18 @@ pub struct Offer {
 // A play on a leaf past the end is ignored. A tie in recorded time breaks
 // on the play name, so the order is stable. A container with no play that
 // names exactly the audience has no thread and offers nothing.
+//
+// A thread that stands unfinished at position 0 offers nothing either, and
+// its container leaves the row. A cleared mark writes that row, and so does
+// an unplayed toggle in Jellyfin, and both mean the audience has not
+// started the leaf. A play that starts over and stops before its first
+// position report writes the same row, which reads the same as never
+// starting.
 pub fn walk(leaves: usize, plays: &[Play]) -> Option<Offer> {
-    let mut ordered: Vec<&Play> = plays.iter().filter(|play| play.leaf < leaves).collect();
-    ordered.sort_by(|one, other| {
-        (one.progress.recorded, &one.progress.play)
-            .cmp(&(other.progress.recorded, &other.progress.play))
-    });
-    let own = ordered.iter().rposition(|play| play.exact)?;
-    let mut standing = ordered[own];
-    for play in &ordered[own + 1..] {
-        if play.leaf == expected(standing) {
-            standing = play;
-        }
-    }
+    let standing = standing(leaves, plays)?;
     let recorded = standing.progress.recorded;
     match (standing.progress.finished, standing.leaf + 1 < leaves) {
+        (false, _) if standing.progress.position <= 0 => None,
         (false, _) => Some(Offer {
             leaf: standing.leaf,
             progress: Some(standing.progress.played()),
@@ -64,6 +61,25 @@ pub fn walk(leaves: usize, plays: &[Play]) -> Option<Offer> {
         }),
         (true, false) => None,
     }
+}
+
+/// The play the thread stands on, finished or not, or nothing where no play
+/// names exactly the audience. A film's page reads it whole, because a page
+/// draws a film the audience finished, which the walk offers nothing for.
+pub fn standing(leaves: usize, plays: &[Play]) -> Option<&Play> {
+    let mut ordered: Vec<&Play> = plays.iter().filter(|play| play.leaf < leaves).collect();
+    ordered.sort_by(|one, other| {
+        (one.progress.recorded, &one.progress.play)
+            .cmp(&(other.progress.recorded, &other.progress.play))
+    });
+    let own = ordered.iter().rposition(|play| play.exact)?;
+    let mut standing = ordered[own];
+    for play in &ordered[own + 1..] {
+        if play.leaf == expected(standing) {
+            standing = play;
+        }
+    }
+    Some(standing)
 }
 
 // The leaf the thread expects the next play on: the same leaf while the
@@ -244,6 +260,66 @@ mod tests {
     fn a_leaf_the_audience_finished_before_is_offered_again() {
         let nights = [(1, "A", 1, true), (0, "A", 2, true)];
         assert_eq!(offered(&nights, "A"), Some(1));
+    }
+
+    // The offer to the three of `FIRST_TWO` after one more play of theirs on
+    // `leaf` at this position, recorded after every night.
+    fn stopped_at(nights: &[Night], leaf: usize, position: i64) -> Option<Offer> {
+        let mut plays = plays(nights, "ABC");
+        plays.push(Play {
+            leaf,
+            progress: Progress {
+                play: format!("ABC-at-{position}"),
+                position,
+                duration: RUNTIME,
+                recorded: 100,
+                ..Progress::default()
+            },
+            exact: true,
+        });
+        walk(6, &plays)
+    }
+
+    #[test]
+    fn a_play_at_zero_standing_on_a_film_offers_nothing() {
+        assert_eq!(walk(1, &[]), None);
+        let plays = vec![Play {
+            leaf: 0,
+            progress: Progress {
+                play: "cleared".into(),
+                duration: RUNTIME,
+                recorded: 1,
+                ..Progress::default()
+            },
+            exact: true,
+        }];
+        assert_eq!(walk(1, &plays), None);
+    }
+
+    #[test]
+    fn a_play_at_zero_on_the_next_leaf_takes_the_whole_container_off_the_row() {
+        assert_eq!(stopped_at(&FIRST_TWO, 2, 0), None);
+    }
+
+    #[test]
+    fn a_play_at_zero_on_a_finished_leaf_takes_the_whole_container_off_the_row() {
+        assert_eq!(stopped_at(&FIRST_TWO, 1, 0), None);
+    }
+
+    #[test]
+    fn a_play_one_second_in_still_resumes() {
+        assert_eq!(
+            stopped_at(&FIRST_TWO, 2, 1).map(|offer| offer.leaf),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn a_play_past_the_line_after_a_play_at_zero_moves_the_thread_on() {
+        let nights = [(0, "A", 1, false), (0, "A", 2, true)];
+        let mut plays = plays(&nights, "A");
+        plays[0].progress.position = 0;
+        assert_eq!(walk(6, &plays).map(|offer| offer.leaf), Some(1));
     }
 
     #[test]

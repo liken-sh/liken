@@ -401,10 +401,14 @@ func (c *commander) apply(trigger string, command mediaCommand, quiet bool) {
 		c.pressVolume(trigger, command, quiet)
 		return
 	}
-	// A home command publishes the ask on the Player's commands topic
-	// and then runs the ending path.
-	if command.Action == actionHome {
+	// A home or a power command publishes the ask on the Player's
+	// commands topic and then runs the ending path.
+	switch command.Action {
+	case actionHome:
 		c.home(trigger)
+		return
+	case actionPower:
+		c.power(trigger)
 		return
 	}
 	mpv := commandFor(command)

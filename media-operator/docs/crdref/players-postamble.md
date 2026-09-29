@@ -173,9 +173,17 @@ its `request` is the `Play`'s own `spec.next.request`, byte for byte.
 The client that wrote the `Play` reads that ask and creates the next
 `Play`. The same sidecar publishes `home` when a person presses home
 during a film, just before the `Play` ends, and the client reads that
-ask as a press of the home key.
+ask as a press of the home key. It publishes `power` when a person
+presses power during a film, also just before the `Play` ends. The
+client holds that ask until this `Player`'s status reads `Idle`, and
+then answers it as a power press between films: on a unit wired
+through a `Receiver`, it publishes the toggle on the power topic, and
+on a unit with none, it lowers the shade. The toggle waits for `Idle`
+so that the equipment operator reads the room after the film ended. A
+client that reads no `Idle` within 10 seconds drops the ask.
 
 | Message | Writer | What it says |
 |---|---|---|
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |
 | `{"action": "home"}` | the playback pod | A person pressed home during a film. The `Play` ends after it, and the client reads the ask as a press of the home key. |
+| `{"action": "power"}` | the playback pod | A person pressed power during a film. The `Play` ends after it, and the client answers the ask as a power press once the status reads `Idle`. |

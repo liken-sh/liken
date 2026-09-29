@@ -39,6 +39,9 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 		{key: "KEY_EXIT", want: mediaCommand{Action: actionBack}},
 		{key: "KEY_HOMEPAGE", want: mediaCommand{Action: actionHome}},
 		{key: "KEY_WWW", want: mediaCommand{Action: actionHome}},
+		{key: "KEY_POWER", want: mediaCommand{Action: actionPower}},
+		{key: "KEY_POWER2", want: mediaCommand{Action: actionPower}},
+		{key: "KEY_SLEEP", want: mediaCommand{Action: actionPower}},
 		{key: "KEY_CYCLEWINDOWS", want: mediaCommand{Action: actionCycleFocus}},
 	}
 
@@ -72,6 +75,7 @@ func TestTheFourHeldKindsActOnARepeat(t *testing.T) {
 		{key: "KEY_BACK"},
 		{key: "KEY_INFO"},
 		{key: "KEY_HOMEPAGE"},
+		{key: "KEY_POWER"},
 		{key: "KEY_CYCLEWINDOWS"},
 	}
 
@@ -90,7 +94,6 @@ func TestAReleaseAndAnUnboundKeyDoNothing(t *testing.T) {
 		event keyEvent
 	}{
 		{name: "the release of a bound key", event: keyEvent{Key: "KEY_PLAYPAUSE", Value: 0}},
-		{name: "the power key", event: keyEvent{Key: "KEY_POWER", Value: 1}},
 		{name: "the mode button", event: keyEvent{Key: "BTN_MODE", Value: 1}},
 		{name: "a letter on a keyboard remote", event: keyEvent{Key: "KEY_Q", Value: 1}},
 		{name: "a value no kernel reports", event: keyEvent{Key: "KEY_PLAYPAUSE", Value: 7}},

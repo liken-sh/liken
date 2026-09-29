@@ -361,7 +361,7 @@ fn a_select_on_a_still_asks_for_the_episode_and_its_season() {
     browser.key("enter");
     browser.key("right");
 
-    browser.key("enter");
+    play_episode(&mut browser);
 
     assert_eq!(
         browser.source.chosen,

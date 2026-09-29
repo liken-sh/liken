@@ -59,6 +59,15 @@ impl<S: Source, A: Art> Browser<S, A> {
                     self.loading = Some(loading::Loading::entered(self.clock));
                 }
             }
+            // A mark enters no state on the screen. The progress store
+            // changes when the progress role records the mark, and the
+            // change reaches the pages the way a play's position does.
+            Step::Mark {
+                library,
+                selection,
+                mark,
+                duration,
+            } => self.request_mark(&library, &selection, mark, duration),
         }
     }
 

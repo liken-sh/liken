@@ -19,6 +19,11 @@ package main
 // The outside play is the one message in this file that is not retained. The
 // jellyfin role publishes it for a play that ran outside the cluster, and the
 // next post repeats the position.
+//
+// A mark is the one message a screen writes into this tree. A person at the
+// media browser marks a title watched or clears its progress, the browser
+// publishes the mark retained on a topic of its own, and the progress role
+// writes it as one row and clears it once the retention has run.
 
 import "strings"
 
@@ -43,6 +48,7 @@ const (
 const (
 	playAudienceKind    = "audience"
 	playOutsideKind     = "outside"
+	playMarkKind        = "mark"
 	playFinalKind       = "final"
 	playRecordedKind    = "recorded"
 	personForgetKind    = "forget"
@@ -104,6 +110,46 @@ type outsidePlay struct {
 	At int64 `json:"at"`
 }
 
+// The two marks a person sets from the media browser. Each is a position,
+// and the store holds no flag for either: watched is a row at the end of
+// the work, and cleared is a row at 0, which the browser's thread rule
+// reads as not started.
+const (
+	markWatched = "watched"
+	markCleared = "cleared"
+)
+
+// One mark a person set on one title from the media browser, for everyone
+// at the screen. The browser publishes it retained, because the person
+// pressed once and nothing repeats it, and the progress role records it
+// whole the way it records an outside play. The jellyfin role reads the
+// same message to send the mark to Jellyfin, and reads Mark to know which
+// of the two it is.
+type titleMark struct {
+	// watched or cleared.
+	Mark string `json:"mark"`
+	// The Player whose screen the person pressed on, in the column that
+	// names a Player.
+	Player string `json:"player"`
+	// The people at the screen, as Person names. Empty where nobody
+	// answered who is watching.
+	People []string `json:"people"`
+	// The work's ids by provider, and for an episode the series' ids,
+	// as a play request names them.
+	Aliases map[string]string `json:"aliases"`
+	// The season and episode numbers for an episode, and 0 for a work
+	// that has neither.
+	Season  int `json:"season"`
+	Episode int `json:"episode"`
+	// The position and the duration in seconds. A watched mark states the
+	// duration as its position, and a cleared mark states 0.
+	Position int `json:"position"`
+	Duration int `json:"duration"`
+	// The Unix time of the press, which the store writes as the recorded
+	// time, so the mark stands over every play recorded before it.
+	At int64 `json:"at"`
+}
+
 // playFinal is a Play's last status, read off the API by the operator
 // once the Play's phase is Finished or Failed. It closes the gap the
 // bus leaves: a progress role that was down for the last report of a
@@ -159,6 +205,20 @@ func playOutsideTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/" + playOutsideKind
 }
 
+// The branch every topic of one namespace's plays is under. The media
+// browser takes it in its environment and names each mark under it.
+func playsBranch(base, namespace string) string {
+	return base + "/plays/" + namespace
+}
+
+// Carries one mark. Retained; the media browser publishes it, and the
+// progress role clears it once the store holds it and the retention has
+// run. The name is the browser's, mark-{player}-{at}, so every mark is
+// one topic and one row.
+func playMarkTopic(base, namespace, name string) string {
+	return playsBranch(base, namespace) + "/" + name + "/" + playMarkKind
+}
+
 // Carries the last status of an ended Play. Retained; the operator
 // publishes and clears it.
 func playFinalTopic(base, namespace, name string) string {
@@ -192,6 +252,12 @@ func playRecordedFilter(base string) string {
 // records beside the Plays of its own.
 func playOutsideFilter(base, namespace string) string {
 	return base + "/plays/" + namespace + "/+/" + playOutsideKind
+}
+
+// Reaches every mark in one namespace, which the progress role records and
+// the jellyfin role sends on to Jellyfin.
+func playMarkFilter(base, namespace string) string {
+	return base + "/plays/" + namespace + "/+/" + playMarkKind
 }
 
 // Carries the operator's request to forget one person, to every

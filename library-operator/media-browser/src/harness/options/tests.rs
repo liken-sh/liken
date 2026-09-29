@@ -192,17 +192,19 @@ fn an_empty_environment_arms_nothing() {
 }
 
 #[test]
-fn an_empty_environment_names_neither_topic() {
+fn an_empty_environment_names_no_topic() {
     let options = environment(&[]);
     assert_eq!(options.play_topic, "");
     assert_eq!(options.audience_topic, "");
+    assert_eq!(options.plays_topic, "");
 }
 
 #[test]
-fn this_operator_names_both_of_its_topics() {
+fn this_operator_names_all_three_of_its_topics() {
     let options = environment(&[
         (PLAY_TOPIC, "liken/library/players/house/den/play"),
         (AUDIENCE_TOPIC, "liken/library/players/house/den/audience"),
+        (PLAYS_TOPIC, "liken/library/plays/house"),
     ]);
 
     assert_eq!(options.play_topic, "liken/library/players/house/den/play");
@@ -210,6 +212,7 @@ fn this_operator_names_both_of_its_topics() {
         options.audience_topic,
         "liken/library/players/house/den/audience"
     );
+    assert_eq!(options.plays_topic, "liken/library/plays/house");
 }
 
 #[test]

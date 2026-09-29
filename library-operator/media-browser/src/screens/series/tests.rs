@@ -2,6 +2,7 @@
 // body and a season of episodes, where a press takes focus across the
 // dividers, and what a select asks the browser to play.
 
+mod episode;
 mod resume;
 mod seasons;
 mod serials;
@@ -369,11 +370,12 @@ fn a_reread_whose_credits_left_returns_focus_to_the_wall() {
 fn select_plays_the_episode_and_the_rest_of_its_season() {
     let (mut page, mut source) = page(Serials::default());
     page.focus = Focus::Still(6);
+    page.key("enter", &mut source);
     let Step::Play {
         library, selection, ..
     } = page.key("enter", &mut source)
     else {
-        panic!("a select on a still plays it");
+        panic!("Play on the episode's row plays it");
     };
     assert_eq!(library, "screening/serials");
     assert_eq!(

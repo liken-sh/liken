@@ -46,8 +46,9 @@ func TestNewProgressReadsItsEnvironment(t *testing.T) {
 	}
 }
 
-// The role reads a media status topic in its own namespace, both of its
-// own Play topics, and every person's forget topic.
+// The role reads a media status topic in its own namespace, its own
+// Play topics, the outside plays and the marks, and every person's forget
+// topic.
 func TestTheProgressRoleSubscribesToEveryTopicItRecords(t *testing.T) {
 	role, _ := recordingProgress(t)
 
@@ -62,6 +63,7 @@ func TestTheProgressRoleSubscribesToEveryTopicItRecords(t *testing.T) {
 		playAudienceFilter(defaultTopicBase, "house"),
 		playFinalFilter(defaultTopicBase, "house"),
 		playOutsideFilter(defaultTopicBase, "house"),
+		playMarkFilter(defaultTopicBase, "house"),
 		personForgetFilter(defaultTopicBase),
 	} {
 		if !held[filter] {

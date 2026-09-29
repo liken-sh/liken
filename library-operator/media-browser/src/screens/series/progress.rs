@@ -6,6 +6,7 @@ use super::{Focus, Series, Still};
 use crate::catalog::progress::thread;
 use crate::catalog::{Progress, Resume, Source};
 use crate::screens::InFranchise;
+use crate::screens::movie::row;
 
 /// Read how far these people reached in each episode of the series, and
 /// hang each row on the still it names. Focus lands on the episode to watch
@@ -36,22 +37,25 @@ pub fn read(page: &mut Series, source: &mut dyn Source, people: &[String]) {
 
 /// The share of one episode its bar draws: the whole work for an episode
 /// the audience finished, and the share they reached for one they are in
-/// the middle of. Nothing for an episode no play of theirs names.
+/// the middle of. Nothing for an episode they have not started, which is
+/// one no play of theirs names or one they cleared to 0.
 pub fn share(progress: Option<&Progress>) -> Option<f32> {
-    progress.map(|progress| match progress.finished {
-        true => 1.0,
-        false => progress.played().fraction(),
-    })
+    progress
+        .filter(|_| row::started(progress))
+        .map(|progress| match progress.finished {
+            true => 1.0,
+            false => progress.played().fraction(),
+        })
 }
 
-/// The second a press on one still starts the play at: where the audience
-/// stopped in an episode they are in the middle of, and the beginning of
-/// every other episode.
+/// The second the Resume button of one still starts the play at: where the
+/// audience stopped in an episode they are in the middle of, and the
+/// beginning of every other episode.
 pub fn start(still: &Still) -> Option<i64> {
     still
         .progress
         .as_ref()
-        .filter(|progress| !progress.finished)
+        .filter(|_| row::resuming(still.progress.as_ref()))
         .map(|progress| progress.position)
 }
 
@@ -198,6 +202,16 @@ mod tests {
             Some(900.0 / 2_760.0_f32)
         );
         assert_eq!(share(stills[2].progress.as_ref()), None);
+    }
+
+    #[test]
+    fn an_episode_cleared_to_zero_draws_no_bar_and_starts_at_the_beginning() {
+        let mut stills = stills(&[(0, 100, false)]);
+        if let Some(progress) = &mut stills[0].progress {
+            progress.position = 0;
+        }
+        assert_eq!(share(stills[0].progress.as_ref()), None);
+        assert_eq!(start(&stills[0]), None);
     }
 
     #[test]

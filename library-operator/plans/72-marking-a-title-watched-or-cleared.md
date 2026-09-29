@@ -4,6 +4,15 @@ Designed, not built. A person at the screen can mark a title watched
 or clear its progress from the browser, and the Jellyfin sync carries
 both marks in each direction without a watched flag of its own.
 
+Half built on 2026-09-29. The two marks and the rule for a play at zero
+are built: the browser's thread rule, the two buttons on a movie's page
+and on an episode's row, the mark message on the bus, and the progress
+role's record of it. The Jellyfin half is not built: the outbound
+writer sends no mark, a rewatch still sends `Played: false`, the
+finished line still differs between the two sides, and the jellyfin
+role runs no reconcile at start. "The mark as built" below states the
+contract the Jellyfin half builds on.
+
 ## The problem
 
 "Continue watching" holds every title that the people at the screen
@@ -114,6 +123,55 @@ The sync has faults that a mark exposes. This plan fixes these:
   every user's played and resumable items once and records what
   changed. The newer time wins, as it does in `recordOutside` today.
 
+### The mark as built
+
+The browser publishes each mark retained on
+`plays/{namespace}/mark-{player}-{at}/mark`, one topic for each press,
+so a second mark cannot replace a first that no reader has recorded.
+The operator names the branch `{base}/plays/{namespace}` on the
+browser container as `LIBRARY_PLAYS_TOPIC`, and the browser reads the
+`Player`'s name from `MEDIA_PLAYER_NAME`. Two presses on one screen in
+the same second take the next second, so each name is unique and the
+later press has the later `at`.
+
+The payload is `titleMark` in `progressbus.go` and `bus/mark.rs` in the
+browser: `mark` (`watched` or `cleared`), `player`, `people`,
+`aliases`, `season`, `episode`, `position` (the duration for watched,
+0 for cleared), `duration`, and `at`, the Unix second of the press.
+
+The progress role records a mark through `recordOutside`, as an ended
+row named after the mark, with `recorded = at`. A row of that name
+recorded at `at` or later is left alone, so a redelivery never changes
+a row, and never writes back a person that a forget removed. The role
+clears the retained topic 24 hours after `at`, once it has recorded
+the mark: at once for a mark older than that, and with a timer for a
+newer one. A role that restarts before the timer fires reads the mark
+again and schedules the clear again from the same `at`. A payload that
+is not a mark is cleared at once.
+
+The jellyfin role subscribes to `plays/{namespace}/+/mark`. It
+receives each mark live, and each mark younger than 24 hours again on
+every subscription. So the jellyfin role reads a mark that was
+published while it was down, but it must treat a second delivery as
+the same mark, and must not let an old mark overwrite a newer toggle
+in Jellyfin.
+
+The duration comes from the audience's play of the title where one
+exists, and from the catalog's running time where none does. A watched
+mark on a title with neither sends nothing, because a row with no
+duration never reads as finished.
+
+A movie's page ends its row with "Mark watched" on a film the audience
+has not finished and "Clear progress" on one they started or finished.
+The page now reads the standing play whole, so a film they finished
+offers the clear and draws the "Watched" word. On a series page, enter
+on a still opens that episode's own row in the header, with Play or
+Resume and Start over and the two marks, and back closes it. So a play
+from the episode wall takes two presses, as a film does from its
+wall. A continue-watching card gets no key of its own: the four keys
+every remote has already move and select, so the card's actions are on
+the page the card opens.
+
 ## What the design must answer
 
 - Where the one finished rule lives, so the browser, the outbound
@@ -121,11 +179,19 @@ The sync has faults that a mark exposes. This plan fixes these:
 - What a mark records as its time. A backfilled item with no
   `LastPlayedDate` is stored at `recorded = 1` and loses to every other
   row; a mark must not lose to an older play.
+
+  Answered: the time of the press, as the browser's wall clock reads
+  it in Unix seconds, which the progress role writes as `recorded`. A
+  mark is newer than every play recorded before the press, and a play
+  after it replaces it.
 - How the reconcile at start avoids an echo: the outbound writer drops
   an inbound position within 1 s of one it wrote in the last 5
   minutes, and the reconcile must not write back what the writer sent.
 - Whether the two actions need a confirmation on the screen. Clear
   removes a position that the person cannot get back.
+
+  Answered: no confirmation. Each action is one press, and a later
+  play of the title replaces the mark.
 
 ## Not in this plan
 

@@ -1,6 +1,6 @@
 //! The socket half of the crate: the thread that holds the connection, the
-//! subscribe it sends on every session, the clock that runs the two windows,
-//! and the publishes the rules ask for.
+//! subscribe it sends on every session, the clock that runs the two windows
+//! and the power ask's deadline, and the publishes the rules ask for.
 //!
 //! The client sees none of this. It holds a [`Reader`], calls
 //! [`Bus::drain`] on every wake of its loop, and draws what comes back.
@@ -295,9 +295,9 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
     }
 }
 
-/// The clock thread, which is the two windows. It sleeps to the armed
-/// deadline, or with no timeout while nothing is armed, so a screen at rest
-/// wakes this thread for nothing. A fold on another thread that arms a
+/// The clock thread, which is the two windows and the power ask's deadline.
+/// It sleeps to the earliest armed deadline, or with no timeout while
+/// nothing is armed, so a screen at rest wakes this thread for nothing. A fold on another thread that arms a
 /// window, or moves one earlier, rings the alarm, and the clock reads the
 /// deadline again.
 fn clock(threads: &Threads) {

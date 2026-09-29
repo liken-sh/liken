@@ -276,7 +276,9 @@ impl Layout {
                 }
                 None => return 0.0,
             },
-            Focus::Still(index) => {
+            // The episode's own row is in the header too, and the wall
+            // stands at the still it was opened from.
+            Focus::Still(index) | Focus::Episode(index, _) => {
                 let Some(band) = self.band(index, seasons) else {
                     return 0.0;
                 };

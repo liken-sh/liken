@@ -95,12 +95,13 @@ fn a_page_opened_on_an_episode_keeps_it_whatever_the_plays_name() {
 #[test]
 fn a_press_on_an_episode_they_are_in_the_middle_of_plays_from_there() {
     let (mut page, mut source) = watched(vec![played(1, 2, 200, 690)]);
+    page.key("enter", &mut source);
 
     let Step::Play {
         selection, start, ..
     } = page.key("enter", &mut source)
     else {
-        panic!("a select on a still plays it");
+        panic!("Resume on the episode's row plays it");
     };
 
     assert_eq!(
@@ -117,9 +118,10 @@ fn a_press_on_an_episode_they_are_in_the_middle_of_plays_from_there() {
 #[test]
 fn a_press_on_every_other_episode_plays_from_the_beginning() {
     let (mut page, mut source) = watched(vec![played(1, 1, 100, RUNTIME)]);
+    page.key("enter", &mut source);
 
     let Step::Play { start, .. } = page.key("enter", &mut source) else {
-        panic!("a select on a still plays it");
+        panic!("Play on the episode's row plays it");
     };
 
     assert_eq!(page.focus, Focus::Still(1));

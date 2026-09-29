@@ -30,6 +30,7 @@ use iced_winit::core::{Element, Theme};
 
 use self::series::seasons_of;
 use crate::art::Art;
+pub use crate::bus::mark::TitleMark;
 use crate::catalog::{InSeries, Played, Query, Selection, Slot, Source};
 use crate::views::curtain::Curtain;
 use crate::views::field::TextField;
@@ -89,6 +90,21 @@ pub enum Step {
         // names it, and it is nothing where the container ends here.
         next: Option<Box<upnext::Next>>,
     },
+    /// Mark what the person chose watched, or clear its progress, for
+    /// everyone at the screen. Only the browser holds the audience and the
+    /// bus, so the page names the work and the browser publishes the mark.
+    Mark {
+        /// The library the choice resolves against.
+        library: String,
+        /// The movie or the episode the mark is on.
+        selection: Selection,
+        /// Which of the two marks.
+        mark: TitleMark,
+        /// How long the work runs, in seconds: the duration of the
+        /// audience's play where one names it, and the catalog's running
+        /// time where none does. Zero where neither holds one.
+        duration: i64,
+    },
 }
 
 impl Screen {
@@ -105,14 +121,16 @@ impl Screen {
         }
     }
 
-    /// Fold in the press that leaves a screen. Only a search wall takes
-    /// one for itself: backspace removes a character of the text, escape
-    /// over a shown grid closes the grid, and escape over a hidden grid
-    /// clears the text. Every other screen answers nothing, and the
+    /// Fold in the press that leaves a screen. A search wall takes one
+    /// for itself: backspace removes a character of the text, escape over
+    /// a shown grid closes the grid, and escape over a hidden grid clears
+    /// the text. A series page takes one while an episode's row is open,
+    /// and closes the row. Every other screen answers nothing, and the
     /// browser then goes back.
     pub fn escape(&mut self, key: &str, source: &mut dyn Source) -> Option<Step> {
         match self {
             Self::Wall(screen) => screen.escape(key, source),
+            Self::Series(screen) => screen.escape(),
             _ => None,
         }
     }

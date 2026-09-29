@@ -46,6 +46,7 @@ answer is meant to outlive the process that wrote it.
 | `plays/{namespace}/{play}/final` | the operator | the progress role, the jellyfin role | yes | [the final status](#the-final-status) |
 | `plays/{namespace}/{play}/recorded` | the progress role | the operator | yes | [the recorded mark](#the-recorded-mark) |
 | `plays/{namespace}/{name}/outside` | the jellyfin role | the progress role | no | [an outside play](#an-outside-play) |
+| `plays/{namespace}/{name}/mark` | the media browser | the progress role, the jellyfin role | yes | [a mark](#a-mark) |
 | `people/{person}/forget` | the operator | every namespace's progress role | yes | [the forget request](#the-forget-request) |
 | `people/{person}/forgotten/{namespace}` | the progress role | the operator | yes | [the forgotten answer](#the-forgotten-answer) |
 | `progress/{namespace}/availability` | the progress role | nothing in this project | yes | `online` or `offline` |
@@ -64,7 +65,8 @@ client that connects later reads nothing for a `Library`, a `Play`, or
 a `Person` that no longer exists. The operator clears the library,
 play, and people topics. The progress role clears its own `forgotten`
 answer when it reads an empty `forget`. The media browser clears its
-own audience topic when the answer on it lapses.
+own audience topic when the answer on it lapses. The progress role
+clears each mark once it has recorded it and the retention has run.
 
 ## The library report
 
@@ -350,6 +352,62 @@ hand has no position of its own.
       "duration": 6730,
       "ended": false,
       "at": 1756508474
+    }
+
+## A mark
+
+`plays/{namespace}/{name}/mark`
+
+One mark a person set on one title at the media browser: watched, or
+cleared. It applies to everyone at the screen. The progress role
+records it as one row of the store, beside the cluster's own `Play`s.
+The jellyfin role reads the same message to send the mark to Jellyfin.
+
+The mark is retained, because the person pressed once and nothing
+repeats the press. A progress role that is down when the person
+presses reads the mark when it subscribes again. The progress role
+clears the topic 24 hours after `at`, once it has recorded the mark.
+A mark it reads after those 24 hours, it records and clears at once.
+A payload that is not a mark, it clears at once and records nothing.
+Every reader receives a retained mark again on each subscription
+within the 24 hours, so a reader must treat a second delivery as the
+same mark.
+
+The `{name}` segment is not a `Play`. It is `mark-{player}-{at}`, so
+each press is one topic and one row. The browser moves a second press
+within the same second to the next second, so no two marks of one
+screen share a name. The progress role writes a row only when the
+store holds no row of that name recorded at `at` or later, so a mark
+delivered again never changes a row.
+
+The browser takes the branch of the tree from `LIBRARY_PLAYS_TOPIC`,
+`{base}/plays/{namespace}`, which the operator sets on the browser
+container, and the `Player`'s name from `MEDIA_PLAYER_NAME`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `mark` | string | `watched` or `cleared`. |
+| `player` | string | The `Player` whose screen the person pressed on, in the column that names a `Player`. |
+| `people` | list of strings | The people at the screen, as `Person` names. Empty where nobody answered who is watching. |
+| `aliases` | map of strings | The work's ids by provider, as a play request names them. An episode carries the series' ids. |
+| `season`, `episode` | integers | The numbers of an episode, and 0 for a work that has neither. |
+| `position` | integer | The duration for `watched`, and 0 for `cleared`, in seconds. |
+| `duration` | integer | The length of the work in seconds: the duration of the audience's play of the work where one exists, and the catalog's running time where none does. |
+| `at` | integer | The Unix time of the press, which the store writes as the recorded time. The row stands over every play recorded before it, and a later play replaces it. |
+
+The row is ended at `at`, with the phase `Finished`, because no `Play`
+runs behind it.
+
+    {
+      "mark": "watched",
+      "player": "living-room",
+      "people": ["ada"],
+      "aliases": {"tvdb": "1000002"},
+      "season": 2,
+      "episode": 5,
+      "position": 2760,
+      "duration": 2760,
+      "at": 1759140000
     }
 
 ## The forget request

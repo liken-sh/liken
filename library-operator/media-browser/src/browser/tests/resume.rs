@@ -7,7 +7,7 @@ use crate::catalog::Progress;
 
 // One play of one work. It is the audience's own unless the case says
 // otherwise.
-fn play(kind: &str, id: &str, title: &str, progress: Progress) -> Resume {
+pub(super) fn play(kind: &str, id: &str, title: &str, progress: Progress) -> Resume {
     Resume {
         library: match kind {
             "movie" => "screening/films".to_string(),
@@ -25,7 +25,12 @@ fn play(kind: &str, id: &str, title: &str, progress: Progress) -> Resume {
 
 // Where one play reached, in the numbers the store holds, and the second
 // it was recorded.
-fn reached(position: i64, duration: i64, numbers: (i64, i64), recorded: i64) -> Progress {
+pub(super) fn reached(
+    position: i64,
+    duration: i64,
+    numbers: (i64, i64),
+    recorded: i64,
+) -> Progress {
     Progress {
         play: format!("play-{recorded}"),
         position,
@@ -42,7 +47,7 @@ fn reached(position: i64, duration: i64, numbers: (i64, i64), recorded: i64) -> 
 // audience stopped in, a film they finished, a show they stopped inside an
 // episode of, a show whose episode they finished with another after it,
 // and a show whose last episode they finished.
-fn plays() -> Vec<Resume> {
+pub(super) fn plays() -> Vec<Resume> {
     vec![
         play(
             "movie",
@@ -81,7 +86,7 @@ fn plays() -> Vec<Resume> {
 // answers these plays and whose catalog resolves one file to play.
 // `orders` says whether the films carry a set and belong to franchises, so
 // a finished work has something after it.
-fn watched(plays: Vec<Resume>, orders: bool) -> (Browser<Fake, NoArt>, FakeBus) {
+pub(super) fn watched(plays: Vec<Resume>, orders: bool) -> (Browser<Fake, NoArt>, FakeBus) {
     let (mut browser, bus) = playing(vec![one_item()]);
     browser.source.continues = plays;
     browser.source.sets = orders;
@@ -123,7 +128,7 @@ fn on_the_row(browser: &mut Browser<Fake, NoArt>) {
 }
 
 // The continue-watching row's strip.
-fn row(browser: &Browser<Fake, NoArt>) -> &crate::screens::home::Strip {
+pub(super) fn row(browser: &Browser<Fake, NoArt>) -> &crate::screens::home::Strip {
     strip_at(browser, 1)
 }
 

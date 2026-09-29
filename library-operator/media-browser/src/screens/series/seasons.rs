@@ -73,6 +73,7 @@ pub fn still_of(episode: Episode, today: &str, band: f32) -> Still {
         aired: facts::joined(&[&runtime, &facts::date_worded(&episode.released, today)]),
         season: episode.season,
         episode: episode.episode,
+        duration: episode.duration,
         name: episode.title,
         plot: episode.plot,
         art: episode.art,

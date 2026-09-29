@@ -20,10 +20,12 @@ fn on_a_movie() -> (Browser<Fake, NoArt>, FakeBus) {
     (browser, bus)
 }
 
-// The browser on a series page with focus on the first still.
+// The browser on a series page with focus on the first button of the first
+// episode's row.
 fn on_a_series() -> (Browser<Fake, NoArt>, FakeBus) {
     let (mut browser, bus) = playing(vec![one_item()]);
     browser.key("right");
+    browser.key("enter");
     browser.key("enter");
     browser.key("enter");
     browser.tick(PRESS);

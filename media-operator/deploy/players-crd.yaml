@@ -632,8 +632,8 @@ spec:
                             screen is wired through a Receiver. The
                             equipment operator answers it by flipping the
                             receiver's power. A unit with none carries no
-                            topic, and its client keeps the shade on a
-                            power press exactly as it has it today.
+                            topic, and a power press reaches its client,
+                            which lowers the shade.
                         remotes:
                           type: array
                           x-kubernetes-list-type: atomic

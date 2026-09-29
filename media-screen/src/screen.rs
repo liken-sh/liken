@@ -8,12 +8,11 @@
 //! each one with no broker and no thread, and [`crate::Reader`] is the
 //! only part of the crate that opens anything.
 
+mod commands;
 pub mod keys;
 pub mod press;
 
 use std::time::{Duration, Instant};
-
-use serde::Deserialize;
 
 use crate::panel;
 use crate::status::{Activity, Status};
@@ -24,16 +23,6 @@ use crate::wiring::{Remote, Wiring};
 /// same path `media-operator`'s `remoteFocusCycleTopic` builds, so a client
 /// needs no second topic list.
 const CYCLE_SUFFIX: &str = "/cycle";
-
-/// The ask the playback pod's command sidecar publishes when a person takes
-/// the up-next offer on the scrubber. The client that wrote the `Play` reads
-/// it and starts what follows.
-const PLAY_NEXT: &str = "play-next";
-
-/// The ask the same sidecar publishes when a person presses home during a
-/// film. The client reads it as a press of the home key, just before the
-/// `Play` ends.
-const HOME: &str = "home";
 
 /// The toggle a power press on a unit whose screen is wired through a
 /// Receiver publishes on the power topic, not retained, because a
@@ -111,15 +100,6 @@ pub enum Effect {
     Publish(Publish),
 }
 
-/// The request as bytes, for a client that parses it with its own types. A
-/// message that carries none gives an empty request.
-fn request_bytes(request: Option<serde_json::Value>) -> Vec<u8> {
-    let Some(value) = request else {
-        return Vec::new();
-    };
-    serde_json::to_vec(&value).unwrap_or_default()
-}
-
 /// One controller's mark and whether this bus session already delivered one.
 /// The first message of a session is the broker's retained catch-up, a
 /// restore and not a person, so it sets the gate and pulses nothing.
@@ -162,7 +142,7 @@ pub struct Screen {
     commands_topic: String,
     panel_topic: String,
     /// The topic a power press publishes a toggle on. Empty is the receiver
-    /// gate: the key forwards and the client keeps its shade.
+    /// gate: the key forwards and the client lowers its shade.
     power_topic: String,
     /// The unit's controllers, in `spec.remotes` order, so a controller's
     /// index in this list is the index a focus moment carries.
@@ -199,22 +179,14 @@ pub struct Screen {
     desire: Option<&'static str>,
     /// The armed window and the moment it runs out.
     deadline: Option<(Instant, Window)>,
+    /// The moment a power ask that waits for `Idle` is dropped, and `None`
+    /// while no ask waits. [`commands`] holds the rule.
+    power_ask: Option<Instant>,
     /// The lines the folds since the last [`Screen::take_lines`] wrote, one
     /// per operation a person caused: a press and what it did or why it did
     /// nothing, a window that brought the shade down, a panel desire. A
     /// repeat, a catch-up, and a status that moves nothing write none.
     lines: Vec<String>,
-}
-
-/// The two fields of the commands topic this crate reads. The request is
-/// whatever object the writer of the `Play` put there, so it is kept as a
-/// value and passed on unread.
-#[derive(Deserialize)]
-struct Command {
-    #[serde(default)]
-    action: String,
-    #[serde(default)]
-    request: Option<serde_json::Value>,
 }
 
 impl Screen {
@@ -241,6 +213,7 @@ impl Screen {
             // dark room keeps the room dark.
             desire: None,
             deadline: None,
+            power_ask: None,
             lines: Vec::new(),
         }
     }
@@ -295,9 +268,14 @@ impl Screen {
         filters
     }
 
-    /// The moment the armed window runs out, and nothing while none is armed.
+    /// The earlier of the moment the armed window runs out and the moment a
+    /// held power ask is dropped, and nothing while neither is armed.
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.deadline.map(|(at, _)| at)
+        let window = self.deadline.map(|(at, _)| at);
+        match (window, self.power_ask) {
+            (Some(window), Some(ask)) => Some(window.min(ask)),
+            (window, ask) => window.or(ask),
+        }
     }
 
     /// Fold one message from any subscription, and the topic says which
@@ -339,7 +317,7 @@ impl Screen {
             return self.on_focus(index, payload, now);
         }
         if !self.commands_topic.is_empty() && topic == self.commands_topic {
-            return self.on_command(payload);
+            return self.on_command(payload, now);
         }
         if !self.panel_topic.is_empty() && topic == self.panel_topic {
             return self.on_panel(payload, retained, now);
@@ -358,8 +336,10 @@ impl Screen {
 
     /// The armed window running out: the quiet window brings the shade down
     /// and starts the off window, and the off window states the off desire
-    /// and arms nothing.
+    /// and arms nothing. A held power ask whose deadline passed is dropped
+    /// first.
     pub fn tick(&mut self, now: Instant) -> Vec<Effect> {
+        self.expire_power_ask(now);
         let Some((at, window)) = self.deadline else {
             return Vec::new();
         };
@@ -436,7 +416,8 @@ impl Screen {
     /// Fold one status. `Idle` is the only activity the timer arms in, so a
     /// status that leaves `Idle` disarms it. The same status lifts the shade
     /// if the screen sleeps, so a `Play` started from another room shows its
-    /// film and not a black screen.
+    /// film and not a black screen. A status that moves the unit into `Idle`
+    /// answers a held power ask, after the client draws the status.
     ///
     /// The operator republishes the status on any change to the payload, a
     /// controller's `Connected` flap included, so only a status that moved
@@ -460,6 +441,9 @@ impl Screen {
         }
         self.rearm(now);
         self.shade(moment, &mut effects);
+        if self.idle && self.power_ask.take().is_some() {
+            self.answer_power_ask(&mut effects);
+        }
         effects
     }
 
@@ -579,14 +563,10 @@ impl Screen {
             // press does. A held key that repeated would flip the equipment
             // on and off under the hand, so only the press publishes. A unit
             // with no receiver falls through to the ordinary rules below,
-            // and the client keeps its shade.
+            // and the client lowers its shade.
             power = true;
             if press.down() {
-                publish = Some(Publish {
-                    topic: self.power_topic.clone(),
-                    payload: POWER_TOGGLE.to_vec(),
-                    retained: false,
-                });
+                publish = Some(self.power_toggle());
                 line = Some(format!(
                     "{trigger}: power, published the toggle to {}",
                     self.power_topic
@@ -682,38 +662,6 @@ impl Screen {
         effects
     }
 
-    /// Fold one message off the commands topic. The ask a person makes on the
-    /// up-next offer acts whether or not the unit is idle, because the unit is
-    /// never idle when it arrives.
-    ///
-    /// A home ask reaches the client as a press of the home key, so the
-    /// client binds one name for home.
-    fn on_command(&mut self, payload: &[u8]) -> Vec<Effect> {
-        let Some(command) = crate::object::<Command>(payload) else {
-            return Vec::new();
-        };
-        match command.action.as_str() {
-            PLAY_NEXT => {
-                self.lines.push(format!(
-                    "{} asked for {PLAY_NEXT}, passed to the client",
-                    self.commands_topic
-                ));
-                vec![Effect::Moment(Moment::PlayNext(request_bytes(
-                    command.request,
-                )))]
-            }
-            HOME => {
-                self.lines.push(format!(
-                    "{} asked for {HOME}, passed to the client as {}",
-                    self.commands_topic,
-                    keys::HOME
-                ));
-                vec![Effect::Moment(Moment::Press(keys::HOME.into()))]
-            }
-            _ => Vec::new(),
-        }
-    }
-
     /// The cycle request the operator arbitrates, on the controller's own
     /// cycle topic, not retained, because a cycle is an event and not a
     /// state. It is the same message the playback pod's command sidecar
@@ -728,6 +676,17 @@ impl Screen {
             payload: Vec::new(),
             retained: false,
         })
+    }
+
+    /// The toggle a power press publishes on a unit whose screen is wired
+    /// through a Receiver. A power ask the playback pod held until `Idle`
+    /// publishes the same toggle.
+    fn power_toggle(&self) -> Publish {
+        Publish {
+            topic: self.power_topic.clone(),
+            payload: POWER_TOGGLE.to_vec(),
+            retained: false,
+        }
     }
 
     /// What a level press publishes, retained. A key that names no level, and

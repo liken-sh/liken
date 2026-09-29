@@ -307,8 +307,8 @@ func buildIdlePod(
 		EnvVar{Name: playerPanelTopicVariable, Value: playerPanelTopic(topicBase, namespace, name)})
 	// The power topic reaches the client only when the unit's screen is
 	// wired through a Receiver, so a power press turns the equipment and
-	// not the client's shade. A unit with none carries no topic, and its
-	// client keeps the shade exactly as it has it today.
+	// not the client's shade. A unit with none carries no topic, and a
+	// power press reaches the client, which lowers the shade.
 	if powerTopic != "" {
 		container.Env = append(container.Env,
 			EnvVar{Name: playerPowerTopicVariable, Value: powerTopic})

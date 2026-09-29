@@ -256,8 +256,8 @@ func TestAUnitWiredToNoReceiverReportsNoBlock(t *testing.T) {
 
 // The idle bus carries the power topic only when the unit's screen is
 // wired through a Receiver, and the session carries the same topic. That
-// is the gate a client reads: no topic, and a power press keeps the shade
-// exactly as it has it today.
+// is the gate a client reads: no topic, and a power press reaches the
+// client, which lowers the shade.
 func TestTheIdleBusCarriesThePowerTopicOnlyWithAReceiver(t *testing.T) {
 	cases := []struct {
 		name    string

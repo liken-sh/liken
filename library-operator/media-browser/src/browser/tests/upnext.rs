@@ -50,7 +50,7 @@ fn on_a_film(sets: bool) -> (Browser<Fake, NoArt>, FakeBus) {
 fn a_play_from_a_series_wall_names_the_next_episode() {
     let (mut browser, bus) = on_a_series();
 
-    browser.key("enter");
+    play_episode(&mut browser);
 
     assert_eq!(
         offered(&bus),
@@ -79,7 +79,7 @@ fn the_last_episode_of_a_series_offers_nothing_after_it() {
     }
     assert_eq!(showing_series(&browser).focus, SeriesFocus::Still(7));
 
-    browser.key("enter");
+    play_episode(&mut browser);
 
     assert_eq!(offered(&bus), None);
 }
@@ -132,7 +132,7 @@ fn an_episode_of_a_series_reached_through_a_franchise_names_the_next_episode() {
 
     browser.key("enter");
     assert_eq!(showing_series(&browser).id, LAST_SERIAL);
-    browser.key("enter");
+    play_episode(&mut browser);
 
     assert_eq!(
         offered(&bus),
@@ -163,7 +163,7 @@ fn the_last_covered_episode_of_a_member_names_the_member_after_it() {
         browser.key("right");
     }
 
-    browser.key("enter");
+    play_episode(&mut browser);
 
     assert_eq!(
         offered(&bus),
@@ -251,7 +251,7 @@ fn the_request_block_comes_back_the_way_it_went_out() {
     let (mut browser, bus) = on_a_franchise(RUN);
     browser.key("enter");
 
-    browser.key("enter");
+    play_episode(&mut browser);
 
     let block = offered(&bus).expect("an offer")["request"].to_string();
     let back = next::request(block.as_bytes()).expect("the block decodes");

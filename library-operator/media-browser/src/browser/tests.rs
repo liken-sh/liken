@@ -7,12 +7,14 @@
 mod art_counts;
 mod audience;
 mod banner;
+mod cleared;
 mod clock;
 mod home;
 mod identity;
 mod keys;
 mod lines;
 mod loading;
+mod marks;
 mod moments;
 mod pages;
 mod paging;
@@ -939,6 +941,13 @@ fn playing(items: Vec<PlayItem>) -> (Browser<Fake, NoArt>, FakeBus) {
     let (mut browser, bus) = on_bus(3, Vec::new());
     browser.source.items = items;
     (browser, bus)
+}
+
+// Play the episode whose still holds focus: select on a still opens the
+// episode's row, and select on its first button plays it.
+fn play_episode(browser: &mut Browser<Fake, NoArt>) {
+    browser.key("enter");
+    browser.key("enter");
 }
 
 // The one request the browser published, decoded.

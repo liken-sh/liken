@@ -129,6 +129,12 @@ const libraryPlayTopicVariable = "LIBRARY_PLAY_TOPIC"
 // operator's own variable for the same reason the play topic is.
 const libraryAudienceTopicVariable = "LIBRARY_AUDIENCE_TOPIC"
 
+// The branch of the tree that holds the namespace's plays. The browser
+// publishes each mark a person sets under it, at
+// {branch}/mark-{player}-{at}/mark, where the progress role records it.
+// The browser reads the Player's name from media-operator's own variable.
+const libraryPlaysTopicVariable = "LIBRARY_PLAYS_TOPIC"
+
 // ScreenPodName is the pod one Player becomes. The name is derived
 // rather than generated, so every pass names the same pod and the operator
 // needs no record of what it created.
@@ -395,6 +401,10 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 			// is older than the idle window.
 			EnvVar{Name: libraryAudienceTopicVariable, Value: audienceTopic(
 				topicBase, player.Metadata.Namespace, player.Metadata.Name)},
+			// The marks travel on the same connection, into the tree the
+			// progress role reads.
+			EnvVar{Name: libraryPlaysTopicVariable, Value: playsBranch(
+				topicBase, player.Metadata.Namespace)},
 		)
 	}
 
