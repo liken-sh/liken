@@ -102,7 +102,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: ""
             smoke: 'audio-operator/smoke/audio-operator.sh'
           - image: audio-operator-cli
             context: audio-operator
@@ -110,7 +110,7 @@ jobs:
             target: ''
             platforms: linux/amd64,linux/arm64
             load: false
-            build-contexts: ''
+            build-contexts: ""
             smoke: ''
     steps:
       - uses: actions/checkout@v7

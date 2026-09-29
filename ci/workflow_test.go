@@ -110,6 +110,9 @@ deploy = "deploy"
 name = "app"
 smoke = "app/smoke/app.sh"
 [[outputs.images]]
+name = "app-browser"
+contexts = { brand = "brand", media = "media" }
+[[outputs.images]]
 name = "app-cli"
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
@@ -141,6 +144,7 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"name: coverage-app-go",
 		"platforms: linux/amd64,linux/arm64\n            load: false",
 		"smoke: 'app/smoke/app.sh'",
+		`build-contexts: "brand=brand\nmedia=media"`,
 		"fluxcd/flux2/action@v2.9.5",
 		"go run . publish -root .. -component app",
 	} {

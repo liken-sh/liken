@@ -172,7 +172,9 @@ func componentData(c *Component) (map[string]any, error) {
 		for _, name := range slices.Sorted(maps.Keys(image.Contexts)) {
 			contexts = append(contexts, name+"="+image.Contexts[name])
 		}
-		d.BuildContexts = strings.Join(contexts, ",")
+		// build-push-action reads one named context per line, and the
+		// matrix holds the list as one YAML string with escaped newlines.
+		d.BuildContexts = strings.Join(contexts, `\n`)
 		images = append(images, d)
 	}
 	if len(images) > 0 {

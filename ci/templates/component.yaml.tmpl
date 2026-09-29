@@ -134,7 +134,7 @@ jobs:{% range .Jobs %}
             target: '{% .Target %}'
             platforms: {% .PlatformList %}
             load: {% .Load %}
-            build-contexts: '{% .BuildContexts %}'
+            build-contexts: "{% .BuildContexts %}"
             smoke: '{% .Smoke %}'{% end %}
     steps:
       - uses: actions/checkout@v7

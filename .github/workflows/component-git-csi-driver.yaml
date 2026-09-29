@@ -102,7 +102,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: ""
             smoke: 'git-csi-driver/smoke/git-csi-driver.sh'
     steps:
       - uses: actions/checkout@v7

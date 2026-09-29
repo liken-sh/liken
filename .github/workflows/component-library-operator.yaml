@@ -143,7 +143,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: ""
             smoke: ''
           - image: library-operator-ffmpeg
             context: library-operator
@@ -151,7 +151,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: ""
             smoke: 'library-operator/smoke/library-operator-ffmpeg.sh'
           - image: library-operator-media-browser
             context: library-operator/media-browser
@@ -159,7 +159,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: 'brand=brand,media-operator=media-operator'
+            build-contexts: "brand=brand\nmedia-operator=media-operator"
             smoke: 'library-operator/smoke/library-operator-media-browser.sh'
           - image: library-operator-corrosion
             context: library-operator/corrosion
@@ -167,7 +167,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: ""
             smoke: 'library-operator/smoke/library-operator-corrosion.sh'
           - image: library-operator-cli
             context: library-operator
@@ -175,7 +175,7 @@ jobs:
             target: ''
             platforms: linux/amd64,linux/arm64
             load: false
-            build-contexts: ''
+            build-contexts: ""
             smoke: ''
     steps:
       - uses: actions/checkout@v7

@@ -65,7 +65,7 @@ jobs:
             target: ''
             platforms: linux/amd64
             load: true
-            build-contexts: ''
+            build-contexts: ""
             smoke: 'liken.sh/redirect/smoke/redirect.sh'
     steps:
       - uses: actions/checkout@v7
