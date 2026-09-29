@@ -91,6 +91,9 @@ func TestAGeneratedFileRunsOnlyTheComponentsWhosePartChanged(t *testing.T) {
 		{"a component's call in the root workflow", func(r *repo) {
 			r.write(".github/workflows/ci.yaml", rootWorkflow(map[string]string{"base": "v", "operator": "w", "liken": "v", "brand": "v"}, "ubuntu"))
 		}, []string{"operator"}},
+		{"a component's publish call in the root workflow", func(r *repo) {
+			r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu")+"  operator-publish:\n    uses: ./.github/workflows/component-operator.yaml\n")
+		}, []string{"operator"}},
 		{"a shared job of the root workflow", func(r *repo) {
 			r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu-next"))
 		}, nil},

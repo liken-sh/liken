@@ -87,8 +87,9 @@ func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, 
 	return d, nil
 }
 
-// rootWorkflowDiff names each component whose call in the root
-// workflow differs between the two commits. A root workflow that is
+// rootWorkflowDiff names each component whose calls in the root
+// workflow differ between the two commits: the call of its checks, or
+// the call of its publish. A root workflow that is
 // missing or does not parse at either commit names every component.
 func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string, d *Diff) error {
 	var calls [2]map[string][]byte
@@ -102,8 +103,10 @@ func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string,
 		}
 	}
 	for name := range components {
-		if calls[0] == nil || calls[1] == nil || !bytes.Equal(calls[0][name], calls[1][name]) {
-			d.Workflows[name] = rootWorkflowFile
+		for _, job := range []string{name, name + "-publish"} {
+			if calls[0] == nil || calls[1] == nil || !bytes.Equal(calls[0][job], calls[1][job]) {
+				d.Workflows[name] = rootWorkflowFile
+			}
 		}
 	}
 	return nil
