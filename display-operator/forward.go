@@ -368,3 +368,17 @@ func (s *apiServer) capturedAs(screen *Display, mediaType string, chosen capture
 	}
 	return captureContentType(mediaType, width, height, chosen.Framerate)
 }
+
+// maxDrain bounds the read that drain makes of a sidecar's answer. The
+// largest answer a caller leaves unread is one small document, so a
+// body past this size is cheaper to lose with its connection.
+const maxDrain = 4 << 20
+
+// drain reads what the caller left in a sidecar's answer, then closes
+// it. Go returns a connection to its pool only when the body reaches
+// EOF, so a body closed early costs a new TCP connection and TLS
+// handshake on the next request to the same sidecar.
+func drain(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
+	_ = body.Close()
+}

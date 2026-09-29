@@ -23,6 +23,13 @@ require (
 	k8s.io/kubelet v0.36.3
 )
 
+// The client, the watch, and the cache that the operators share. The
+// module is in this repository, and the replace below builds against
+// the copy in the tree, so no version of it is published.
+require github.com/liken-sh/liken/kubernetes v0.0.0
+
+replace github.com/liken-sh/liken/kubernetes => ../kubernetes
+
 require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/pflag v1.0.9

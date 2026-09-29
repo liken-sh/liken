@@ -22,6 +22,9 @@ import (
 	"context"
 
 	"k8s.io/client-go/dynamic"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The Layout collection, under the same group and version the
@@ -124,12 +127,12 @@ const (
 	selectorDoesNotExist = "DoesNotExist"
 )
 
-func getLayout(c *Client, name string) (*Layout, error) {
-	return get[Layout](c, LayoutsPath+"/"+name)
+func getLayout(c *apiclient.Client, name string) (*Layout, error) {
+	return apiclient.Get[Layout](c, LayoutsPath+"/"+name)
 }
 
-func listLayouts(c *Client) ([]Layout, error) {
-	list, err := get[LayoutList](c, LayoutsPath)
+func listLayouts(c *apiclient.Client) ([]Layout, error) {
+	list, err := apiclient.Get[LayoutList](c, LayoutsPath)
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +141,11 @@ func listLayouts(c *Client) ([]Layout, error) {
 
 // The watch turns a Layout a person edited into one wake.
 func watchLayouts(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-	openLayouts(client, wake, readings).run(ctx)
+	<-openLayouts(ctx, client, wake, readings).Done()
 }
 
-// openLayouts builds the Layout watch. Its store holds every Layout,
+// openLayouts starts the Layout watch. Its store holds every Layout,
 // and the placement pass reads a Layout from it (objectcache.go).
-func openLayouts(client dynamic.Interface, wake func(), readings *metrics) openWatch {
-	return wakeWatch(client, kindLayout, collectionWatch{resource: layoutResource}, wake, readings)
+func openLayouts(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection {
+	return wakeWatch(ctx, client, kindLayout, informer.Source{Resource: layoutResource}, nil, wake, readings)
 }

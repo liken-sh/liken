@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // A certificate authority in the shape the API server publishes in
@@ -289,7 +291,7 @@ func (m *authenticationConfigMap) holds(caPEM string) {
 func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	first, second := newClientAuthority(t), newClientAuthority(t)
 	published := newAuthenticationConfigMap(t, string(first.certPEM))
-	client := NewClient(published.URL, published.Client(), "")
+	client := apiclient.New(published.URL, published.Client(), "")
 	anchors := &clientAnchors{}
 
 	if err := anchors.load(client); err != nil {
@@ -328,7 +330,7 @@ func TestAnAbsentConfigMapLeavesNoAnchors(t *testing.T) {
 	published.absent = true
 	anchors := &clientAnchors{}
 
-	err := anchors.load(NewClient(published.URL, published.Client(), ""))
+	err := anchors.load(apiclient.New(published.URL, published.Client(), ""))
 
 	if err == nil {
 		t.Fatal("an absent ConfigMap answered no error")

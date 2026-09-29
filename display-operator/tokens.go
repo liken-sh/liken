@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The two audiences. A caller's token names display-api to reach the
@@ -90,7 +92,7 @@ type reviewUser struct {
 // and named the audience that was asked for, so a pod's ordinary
 // API-server token, whose audience is the API server, does not open
 // the door.
-func reviewToken(c *Client, token, audience string) (*caller, *fault) {
+func reviewToken(c *apiclient.Client, token, audience string) (*caller, *fault) {
 	body, err := json.Marshal(tokenReview{
 		APIVersion: authenticationAPIVersion,
 		Kind:       "TokenReview",
@@ -267,7 +269,7 @@ type subjectAccessReviewStatus struct {
 // The subresource exists in no CRD. It is a string RBAC matches, as
 // pods/log is, so a ClusterRole names displays/screen and the API
 // server answers without any object of that name.
-func authorizeSubject(c *Client, who *caller,
+func authorizeSubject(c *apiclient.Client, who *caller,
 	verb, group, resource, subresource, namespace, name string) (allowed bool, reason string, f *fault) {
 	body, err := json.Marshal(subjectAccessReview{
 		APIVersion: authorizationAPIVersion,

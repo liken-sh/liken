@@ -23,6 +23,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The role argument the pod's fourth container passes, and the
@@ -74,7 +76,7 @@ const captureOpenTimeout = 5 * time.Second
 // The sidecar holds the socket it captures through, the render node
 // it encodes on, and the captures running now, keyed by connector.
 type captureServer struct {
-	client     *Client
+	client     *apiclient.Client
 	tokens     *tokenCache
 	readings   *captureMetrics
 	process    http.Handler
@@ -101,7 +103,7 @@ func serveCaptureSidecar() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}

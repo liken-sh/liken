@@ -36,6 +36,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The restore's backoff. A panel that is waking answers slowly,
@@ -56,7 +59,7 @@ const (
 // sysfs walk the slice publisher makes, and the clock and the wait are
 // fields for the reason the DDC client's sleep is one.
 type displayControl struct {
-	client *Client
+	client *apiclient.Client
 	// displays reads and writes the Displays, from the watch's store
 	// where it can (objectcache.go).
 	displays *displayStore
@@ -123,10 +126,10 @@ type displayControl struct {
 	metrics *metrics
 }
 
-func newDisplayControl(client *Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
+func newDisplayControl(client *apiclient.Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
 	return &displayControl{
 		client:     client,
-		displays:   newDisplayStore(client, storeView{}),
+		displays:   newDisplayStore(client, informer.View{}),
 		node:       node,
 		controls:   controls,
 		outputs:    outputs,
@@ -367,7 +370,7 @@ func (d *displayControl) claimed() (map[string]bool, error) {
 // mode switch that repeats.
 func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held map[string]bool, ambiguous string) error {
 	err := d.reconcileOnce(ctx, name, output, held, ambiguous)
-	if errors.Is(err, ErrConflict) {
+	if errors.Is(err, apiclient.ErrConflict) {
 		d.wake()
 	}
 	return err
@@ -378,7 +381,7 @@ func (d *displayControl) reconcile(ctx context.Context, name string, output Outp
 // reports what the actuation left behind.
 func (d *displayControl) reconcileOnce(ctx context.Context, name string, output Output, held map[string]bool, ambiguous string) error {
 	display, err := d.displays.get(name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		display, err = d.displays.create(name)
 	}
 	if err != nil {
@@ -983,7 +986,7 @@ func (d *displayControl) absent(display *Display) error {
 		return status, published.Node == d.node
 	}
 	err := d.displays.settleStatus(display, absent)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
 	return err

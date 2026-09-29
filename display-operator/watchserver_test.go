@@ -15,6 +15,8 @@ import (
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // objectStore is an API server that holds one collection. It answers a
@@ -81,8 +83,8 @@ func newSecretStore(t *testing.T, namespace string) *objectStore {
 	return newObjectStore(t, secretsPath(namespace), "v1", "Secret")
 }
 
-func (o *objectStore) client() *Client {
-	return NewClient(o.URL, o.Client(), "")
+func (o *objectStore) client() *apiclient.Client {
+	return apiclient.New(o.URL, o.Client(), "")
 }
 
 func (o *objectStore) watcher() dynamic.Interface {

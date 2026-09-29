@@ -34,6 +34,9 @@ import (
 	"math"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // claimIDPrefix is how much of a claim's UID the surface id carries.
@@ -75,7 +78,7 @@ type placedSurface struct {
 // runs the decision for each screen, states what changed to the
 // module, and writes each Display's status.
 type placementPass struct {
-	client *Client
+	client *apiclient.Client
 	// displays and stores answer the Displays, the Layouts, and this
 	// node's pods from the watches' stores (objectcache.go). A pass
 	// built with no watch reads them from the API server.
@@ -113,11 +116,11 @@ type placementPass struct {
 	metrics *metrics
 }
 
-func newPlacementPass(client *Client, node, socketPath string, link *layoutLink, claims *claimIndex,
+func newPlacementPass(client *apiclient.Client, node, socketPath string, link *layoutLink, claims *claimIndex,
 	outputs func() []Output) *placementPass {
 	return &placementPass{
 		client:     client,
-		displays:   newDisplayStore(client, storeView{}),
+		displays:   newDisplayStore(client, informer.View{}),
 		node:       node,
 		link:       link,
 		claims:     claims,
@@ -251,7 +254,7 @@ func (p *placementPass) dark(live compositorLiveness) error {
 		if display.Status.Node != p.node {
 			continue
 		}
-		if err := p.displays.settleStatus(&display, dark); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := p.displays.settleStatus(&display, dark); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 			failures = append(failures, fmt.Errorf("%s: %w", display.Metadata.Name, err))
 		}
 	}
@@ -382,7 +385,7 @@ func (p *placementPass) display(connector string, outputs []Output) (*Display, e
 		return nil, nil
 	}
 	display, err := p.displays.get(name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, nil
 	}
 	return display, err
@@ -402,7 +405,7 @@ func (p *placementPass) layoutOf(named string) (*LayoutSpec, DisplayCondition, e
 			"this screen names no layout, so every surface is drawn over the whole screen with the newest on top"), nil
 	}
 	layout, err := p.stores.layout(p.client, named)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, p.condition(false, LayoutNotFoundReason,
 			"no Layout is named "+named+", so this screen is drawn to the default"), nil
 	}
@@ -506,7 +509,7 @@ func (p *placementPass) report(display *Display, on []screenSurface, decision sc
 		return status, true
 	}
 	err := p.displays.settleStatus(display, compose)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		// A Display somebody deleted is the Display controller's to
 		// create again, and this pass reports the screen after that.
 		return nil

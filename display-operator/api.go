@@ -19,6 +19,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The role argument the display-api Deployment passes to the binary.
@@ -76,7 +79,7 @@ var (
 // forwards captures on. record writes the Captured Event, and now is
 // a field so a test can hold the clock still.
 type apiServer struct {
-	client     *Client
+	client     *apiclient.Client
 	sidecars   *sidecarIndex
 	tokens     *tokenCache
 	readings   *apiMetrics
@@ -95,11 +98,11 @@ func serveAPI() {
 	defer stop()
 
 	namespace := envOr("POD_NAMESPACE", sidecarNamespace)
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
-	watcher, err := inClusterWatcher()
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}
@@ -323,8 +326,8 @@ func (s *apiServer) authorize(route apiRoute, name string, who *caller) *fault {
 // restarts it, and the words the Display's own condition carries say
 // what it is doing.
 func (s *apiServer) readDisplay(name string) (*Display, *fault) {
-	screen, err := get[Display](s.client, DisplaysPath+"/"+name)
-	if err == ErrNotFound {
+	screen, err := apiclient.Get[Display](s.client, DisplaysPath+"/"+name)
+	if err == apiclient.ErrNotFound {
 		return nil, notFound(fmt.Sprintf("no Display is named %s", name))
 	}
 	if err != nil {

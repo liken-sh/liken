@@ -37,6 +37,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 const (
@@ -229,11 +232,11 @@ func operate() {
 	// has no retry logic of its own, because the kubelet already
 	// provides it: a pod that exits nonzero restarts with backoff, and
 	// the failure shows in kubectl instead of hiding in a log.
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
-	watcher, err := inClusterWatcher()
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}
@@ -352,20 +355,17 @@ func operate() {
 		default:
 		}
 	}
-	pods := openPods(watcher, nodeName, resourceWake, readings)
-	layouts := openLayouts(watcher, resourceWake, readings)
-	displays := openDisplays(watcher, func() {
+	pods := openPods(ctx, watcher, nodeName, resourceWake, readings)
+	layouts := openLayouts(ctx, watcher, resourceWake, readings)
+	displays := openDisplays(ctx, watcher, func() {
 		panels.wake()
 		resourceWake()
 	}, readings)
-	go pods.run(ctx)
-	go layouts.run(ctx)
-	go displays.run(ctx)
 	// Both passes read the objects the watches hold from their stores,
 	// and share one Display store, so each reads the other's writes
 	// (objectcache.go).
-	stores := clusterStores{layouts: layouts.view(), pods: pods.view()}
-	shared := newDisplayStore(client, displays.view())
+	stores := clusterStores{layouts: layouts.View(), pods: pods.View()}
+	shared := newDisplayStore(client, displays.View())
 	panels.displays = shared
 	places.displays, places.stores = shared, stores
 	// The Display controller starts once its store is set, because its
@@ -567,7 +567,7 @@ func eventsEnded(ctx context.Context) error {
 // grace, so an HDMI link that goes down and comes back carrying the
 // same monitor taints nothing. One pass writes the history once, so no
 // other caller may pass one in.
-func reconcile(client *Client, nodeName string, owner OwnerReference, card, socketPath string,
+func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, card, socketPath string,
 	currentModes func() (map[string]string, error), controls *panelControls, links *linkHistory,
 	readings *metrics) error {
 	outputs := discoverOutputs(sysRoot, card)

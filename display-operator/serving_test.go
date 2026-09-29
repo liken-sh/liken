@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The holder is what a handshake asks, so a certificate that changed
@@ -385,7 +387,7 @@ func TestTheAPIMintsTheSidecarsSecretAgainWhenItGoes(t *testing.T) {
 	api := newSecretStore(t, testNamespace)
 	go keepSidecarLeaf(t.Context(), api.client(), api.watcher(), testNamespace, ca)
 	minted := func() bool {
-		held, err := get[Secret](api.client(), secretsPath(testNamespace)+"/"+sidecarTLSSecret)
+		held, err := apiclient.Get[Secret](api.client(), secretsPath(testNamespace)+"/"+sidecarTLSSecret)
 		return err == nil && sidecarLeafStands(held, sidecarName, time.Now())
 	}
 	eventually(t, "the first mint", minted)

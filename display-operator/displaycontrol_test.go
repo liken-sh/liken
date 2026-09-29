@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // A panel of the lab drill, answering the capability string it
@@ -60,7 +62,7 @@ type wiredPanel struct {
 
 type displayFixture struct {
 	t        *testing.T
-	client   *Client
+	client   *apiclient.Client
 	control  *displayControl
 	panel    *fakeMonitor
 	bench    *panelBench

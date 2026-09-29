@@ -5,6 +5,9 @@
 name = "display-operator"
 license = "MIT"
 
+[depends]
+components = ["kubernetes"]
+
 [docs]
 prefix = "display"
 
@@ -56,21 +59,28 @@ file = "Dockerfile"
 target = "weston"
 smoke = "display-operator/smoke/weston.sh"
 
+# The three images that carry the operator's binary run the build
+# stage, which takes the shared kubernetes module as a build context,
+# because go.mod replaces it with ../kubernetes. The base images above
+# skip that stage and need no context.
 [[outputs.images]]
 name = "display-operator"
 file = "Dockerfile"
 target = "display-operator"
+contexts = { kubernetes = "kubernetes" }
 
 [[outputs.images]]
 name = "display-capture"
 file = "Dockerfile"
 target = "display-capture"
 smoke = "display-operator/smoke/display-capture.sh"
+contexts = { kubernetes = "kubernetes" }
 
 [[outputs.images]]
 name = "display-api"
 file = "Dockerfile"
 target = "display-api"
+contexts = { kubernetes = "kubernetes" }
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is
@@ -79,3 +89,4 @@ target = "display-api"
 name = "display-operator-cli"
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
+contexts = { kubernetes = "kubernetes" }

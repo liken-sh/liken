@@ -17,6 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The API group is the driver's own name, so one domain names
@@ -403,12 +406,12 @@ func setCondition(conditions []DisplayCondition, next DisplayCondition) []Displa
 	return append(conditions, next)
 }
 
-func getDisplay(c *Client, name string) (*Display, error) {
-	return get[Display](c, DisplaysPath+"/"+name)
+func getDisplay(c *apiclient.Client, name string) (*Display, error) {
+	return apiclient.Get[Display](c, DisplaysPath+"/"+name)
 }
 
-func listDisplays(c *Client) ([]Display, error) {
-	list, err := get[DisplayList](c, DisplaysPath)
+func listDisplays(c *apiclient.Client) ([]Display, error) {
+	list, err := apiclient.Get[DisplayList](c, DisplaysPath)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +421,7 @@ func listDisplays(c *Client) ([]Display, error) {
 // The create carries an empty spec. The operator states nothing
 // about how a panel should rest: the resource exists so a person or a
 // machine writer can, and an empty spec writes nothing to the wire.
-func createDisplay(c *Client, name string) (*Display, error) {
+func createDisplay(c *apiclient.Client, name string) (*Display, error) {
 	display := &Display{
 		APIVersion: DisplayAPIVersion,
 		Kind:       "Display",
@@ -435,33 +438,14 @@ func createDisplay(c *Client, name string) (*Display, error) {
 	return created, nil
 }
 
-// replaceStatus writes one object's status to the status
-// subresource, so a spec a person edited between the read and the
-// write is not overwritten. The caller states the object's apiVersion
-// and kind. The API server's copy replaces the caller's, because a
-// write produces a new resourceVersion, and the next write must state
-// it.
-func replaceStatus[T any](c *Client, path string, object *T) error {
-	body, err := json.Marshal(object)
-	if err != nil {
-		return err
-	}
-	stored := new(T)
-	if err := c.RequestJSON(http.MethodPut, path+"/status", body, stored); err != nil {
-		return err
-	}
-	*object = *stored
-	return nil
-}
-
 // The watch wakes the passes for an edit to a Display, and the pass
 // that follows reads every Display this node serves from the watch's
 // store (objectcache.go).
 func watchDisplays(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
-	openDisplays(client, wake, readings).run(ctx)
+	<-openDisplays(ctx, client, wake, readings).Done()
 }
 
-// openDisplays builds the Display watch. It covers the whole cluster,
+// openDisplays starts the Display watch. It covers the whole cluster,
 // because a monitor carried to this node brings its Display with it,
 // under the name its EDID gives.
 //
@@ -483,8 +467,14 @@ func watchDisplays(ctx context.Context, client dynamic.Interface, wake func(), r
 // read back from the store or the API server at their next wake. The
 // DDC poll's tick and the hardware's events wake the Display
 // controller on this node's own schedule.
-func openDisplays(client dynamic.Interface, wake func(), readings *metrics) openWatch {
-	edits := cache.ResourceEventHandlerFuncs{
+func openDisplays(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection {
+	return wakeWatch(ctx, client, kindDisplay, informer.Source{Resource: displayResource}, displayEdits(wake), wake, readings)
+}
+
+// displayEdits is the Display watch's handler, which wakes the passes
+// on an edit (openDisplays).
+func displayEdits(wake func()) cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(any) { wake() },
 		UpdateFunc: func(before, after any) {
 			was, is := editOf(before), editOf(after)
@@ -494,7 +484,6 @@ func openDisplays(client dynamic.Interface, wake func(), readings *metrics) open
 		},
 		DeleteFunc: func(any) { wake() },
 	}
-	return wakeWatch(client, kindDisplay, collectionWatch{resource: displayResource, handler: edits}, wake, readings)
 }
 
 // editMark is what an edit changes on an object: its UID, its

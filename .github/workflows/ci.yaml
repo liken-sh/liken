@@ -201,7 +201,7 @@ jobs:
       packages: write
 
   display-operator:
-    needs: [plan]
+    needs: [plan, kubernetes]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].check }}
     uses: ./.github/workflows/component-display-operator.yaml
     with:

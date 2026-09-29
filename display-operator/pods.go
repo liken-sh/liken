@@ -25,6 +25,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The pod collection, and the field selector that keeps a read to one
@@ -121,16 +124,16 @@ func (m PodMeta) key() string {
 // getPod reads one pod by name. It is the second read of a holder the
 // node listing does not name, which is a pod that arrived after the
 // listing was taken and a pod that runs somewhere else.
-func getPod(c *Client, namespace, name string) (*Pod, error) {
-	return get[Pod](c, "/api/v1/namespaces/"+namespace+"/pods/"+name)
+func getPod(c *apiclient.Client, namespace, name string) (*Pod, error) {
+	return apiclient.Get[Pod](c, "/api/v1/namespaces/"+namespace+"/pods/"+name)
 }
 
 // listPods reads the pods on one node. The field selector is what
 // holds the read to this node: a pod that holds a claim on a screen
 // this operator drives runs on the same node as the screen, so the
 // pods of every other node answer nothing a pass reads.
-func listPods(c *Client, node string) ([]Pod, error) {
-	list, err := get[PodList](c, PodsPath+podsOnNode+node)
+func listPods(c *apiclient.Client, node string) ([]Pod, error) {
+	list, err := apiclient.Get[PodList](c, PodsPath+podsOnNode+node)
 	if err != nil {
 		return nil, err
 	}
@@ -141,10 +144,10 @@ func listPods(c *Client, node string) ([]Pod, error) {
 // one wake, because the labels a region's selector matches are the
 // pods' own. It carries the same field selector the listing does.
 func watchPods(ctx context.Context, client dynamic.Interface, node string, wake func(), readings *metrics) {
-	openPods(client, node, wake, readings).run(ctx)
+	<-openPods(ctx, client, node, wake, readings).Done()
 }
 
-// openPods builds the pod watch. Its store holds every pod on this
+// openPods starts the pod watch. Its store holds every pod on this
 // node, which the placement pass reads for the holders of a claim, and
 // the compositor's restart count reads for this operator's own pod
 // (objectcache.go).
@@ -156,7 +159,7 @@ func watchPods(ctx context.Context, client dynamic.Interface, node string, wake 
 // probe the compositor again to find nothing to change. The restart
 // count is read on the passes that publish the slice, which the
 // compositor's socket wakes, so it needs no wake from this watch.
-func openPods(client dynamic.Interface, node string, wake func(), readings *metrics) openWatch {
+func openPods(ctx context.Context, client dynamic.Interface, node string, wake func(), readings *metrics) *informer.Collection {
 	labels := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(any) { wake() },
 		UpdateFunc: func(before, after any) {
@@ -166,7 +169,7 @@ func openPods(client dynamic.Interface, node string, wake func(), readings *metr
 		},
 		DeleteFunc: func(any) { wake() },
 	}
-	return wakeWatch(client, kindPod, collectionWatch{resource: podResource, fields: podsOnNodeField + node, handler: labels}, wake, readings)
+	return wakeWatch(ctx, client, kindPod, informer.Source{Resource: podResource, FieldSelector: podsOnNodeField + node}, labels, wake, readings)
 }
 
 // labelsMoved reports whether an update changed a pod's labels or its

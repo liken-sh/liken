@@ -15,6 +15,8 @@ import (
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // The pods the API watches: the display-operator DaemonSet's pods in
@@ -127,12 +129,8 @@ func (i *sidecarIndex) forget(key string) {
 
 // The watch keeps the index current for as long as the API runs.
 func (i *sidecarIndex) run(ctx context.Context, client dynamic.Interface, namespace string) {
-	watchCollection(ctx, client, collectionWatch{
-		resource:  podResource,
-		namespace: namespace,
-		labels:    sidecarSelector,
-		handler:   i.handler("the capture sidecars in " + namespace),
-	})
+	source := informer.Source{Resource: podResource, Namespace: namespace, LabelSelector: sidecarSelector}
+	<-informer.Start(ctx, client, source, informer.Options{Handler: i.handler("the capture sidecars in " + namespace)}).Done()
 }
 
 // handler moves the index with each change the informer reports. The
@@ -144,9 +142,9 @@ func (i *sidecarIndex) run(ctx context.Context, client dynamic.Interface, namesp
 // no pod that stayed leaves the index on the way.
 func (i *sidecarIndex) handler(what string) cache.ResourceEventHandler {
 	take := func(object any) {
-		pod, err := convert[Pod](object)
+		pod, err := informer.Convert[Pod](object)
 		if err != nil {
-			reportUnconverted(what, err)
+			informer.Report(what, err)
 			return
 		}
 		i.hold(pod)
@@ -155,7 +153,7 @@ func (i *sidecarIndex) handler(what string) cache.ResourceEventHandler {
 		AddFunc:    take,
 		UpdateFunc: func(_, object any) { take(object) },
 		DeleteFunc: func(object any) {
-			pod, err := convert[Pod](object)
+			pod, err := informer.Convert[Pod](object)
 			if err == nil {
 				i.drop(pod)
 				return
@@ -163,7 +161,7 @@ func (i *sidecarIndex) handler(what string) cache.ResourceEventHandler {
 			// A pod that does not convert still left, so the index
 			// drops it by its key, which needs none of the fields that
 			// failed.
-			reportUnconverted(what, err)
+			informer.Report(what, err)
 			if key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(object); err == nil {
 				i.forget(key)
 			}

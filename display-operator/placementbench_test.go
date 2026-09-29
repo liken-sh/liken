@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The claims of the drills below. A surface id carries the first
@@ -55,7 +57,7 @@ type placementFixture struct {
 	module *fakeModule
 	link   *layoutLink
 	pass   *placementPass
-	client *Client
+	client *apiclient.Client
 	wired  []wiredScreen
 
 	displays map[string]*Display

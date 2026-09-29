@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // This fixture is an API server that answers the two review paths
@@ -58,11 +60,11 @@ func (a *reviewAPI) sent(t *testing.T, path string) []map[string]any {
 
 // An empty credentials directory is a client that reads no token
 // file, so a drill needs none on disk.
-func reviewClient(t *testing.T, api *reviewAPI) *Client {
+func reviewClient(t *testing.T, api *reviewAPI) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	return apiclient.New(server.URL, server.Client(), "")
 }
 
 // fieldAt reads one field out of a decoded JSON body by its path,

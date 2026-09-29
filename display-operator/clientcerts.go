@@ -18,6 +18,8 @@ import (
 	"sync"
 
 	"k8s.io/client-go/dynamic"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The ConfigMap the API server publishes the cluster's client
@@ -61,8 +63,8 @@ func (a *clientAnchors) held() *x509.CertPool {
 // load reads the ConfigMap and replaces the pool with what it holds.
 // The key carries one PEM block when no rotation is in progress and
 // more than one during a rotation, and a pool takes all of them.
-func (a *clientAnchors) load(c *Client) error {
-	held, err := get[ConfigMap](c, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
+func (a *clientAnchors) load(c *apiclient.Client) error {
+	held, err := apiclient.Get[ConfigMap](c, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
 	if err != nil {
 		return fmt.Errorf("reading the ConfigMap %s: %w", clientCAConfigMap, err)
 	}

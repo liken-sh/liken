@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // This fixture is an API server that holds Secrets and ConfigMaps in
@@ -115,11 +117,11 @@ func objectName(raw json.RawMessage) string {
 	return object.Metadata.Name
 }
 
-func objectClient(t *testing.T, api *objectAPI) *Client {
+func objectClient(t *testing.T, api *objectAPI) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	return apiclient.New(server.URL, server.Client(), "")
 }
 
 const (

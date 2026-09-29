@@ -26,6 +26,8 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The claim collection across every namespace, which is what the
@@ -58,13 +60,13 @@ func (r claimRef) key() string {
 // is filled in by one listing. A pass over the claims this process
 // prepared costs no request at all.
 type claimIndex struct {
-	client *Client
+	client *apiclient.Client
 
 	mu     sync.Mutex
 	claims map[string]claimRef
 }
 
-func newClaimIndex(client *Client) *claimIndex {
+func newClaimIndex(client *apiclient.Client) *claimIndex {
 	return &claimIndex{client: client, claims: map[string]claimRef{}}
 }
 
@@ -149,7 +151,7 @@ func (i *claimIndex) refill(missing string) error {
 // listResourceClaims reads the claims of every namespace. A screen
 // serves whichever namespace claims it, so the listing is not scoped
 // to one.
-func listResourceClaims(c *Client) ([]ResourceClaim, error) {
+func listResourceClaims(c *apiclient.Client) ([]ResourceClaim, error) {
 	list := &ResourceClaimList{}
 	if err := c.RequestJSON(http.MethodGet, ResourceClaimsPath, nil, list); err != nil {
 		return nil, err
@@ -171,7 +173,7 @@ type claimHolders struct {
 // client holds several surfaces of the same two claims, so one pass
 // asks the API server for each claim once.
 type holderReader struct {
-	client *Client
+	client *apiclient.Client
 	node   string
 	claims *claimIndex
 	// stores holds this node's pods, which the reader reads in place of
@@ -183,7 +185,7 @@ type holderReader struct {
 	listed bool
 }
 
-func newHolderReader(client *Client, node string, claims *claimIndex, stores clusterStores) *holderReader {
+func newHolderReader(client *apiclient.Client, node string, claims *claimIndex, stores clusterStores) *holderReader {
 	return &holderReader{
 		client: client,
 		node:   node,
@@ -227,7 +229,7 @@ func (h *holderReader) resolve(uid string) (claimHolders, error) {
 	// node, so a watch would send every node's operator every claim in
 	// the cluster, for the few claims on this node's screens.
 	claim, err := GetResourceClaim(h.client, ref.Namespace, ref.Name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return claimHolders{}, nil
 	}
 	if err != nil {
@@ -271,7 +273,7 @@ func (h *holderReader) pod(namespace, name string) (*Pod, error) {
 		return &pod, nil
 	}
 	pod, err := h.stores.pod(h.client, namespace, name)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, nil
 	}
 	return pod, err

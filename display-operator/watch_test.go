@@ -2,15 +2,15 @@ package main
 
 // These tests run the handlers of each watch through client-go's real
 // reflector, against the scripted API server in watchserver_test.go.
-// The reflector's own loop is upstream's to test. What these tests
-// prove is that each change the API server sends reaches this
-// program's handlers, that each watch asks for the objects it must,
-// and that an object that does not convert is reported.
+// The reflector's own loop is upstream's to test, and the shared
+// informer package tests the copy it keeps and the decode of each
+// object. What these tests prove is that each change the API server
+// sends reaches this program's handlers, and that each watch asks for
+// the objects it must.
 
 import (
 	"context"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,7 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/tools/cache"
 )
 
 func configMapNamed(name, value string) ConfigMap {
@@ -102,35 +101,6 @@ func TestTheWatchSeesAnAbsentObjectAsGone(t *testing.T) {
 	seen := watchOneConfigMap(t, objects)
 
 	eventually(t, "the first read", func() bool { return seen.last() == "gone" })
-}
-
-// An object whose fields do not fit this program's struct is an error
-// that names it, and so is a tombstone that holds one. A tombstone
-// that holds no copy at all is an error too, and names its key.
-func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
-	mistyped := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "v1",
-		"kind":       "ConfigMap",
-		"metadata":   map[string]any{"name": "tracked", "namespace": "test"},
-		"data":       int64(5),
-	}}
-	cases := []struct {
-		name   string
-		object any
-		want   string
-	}{
-		{name: "an object", object: mistyped, want: "ConfigMap test/tracked does not convert"},
-		{name: "a tombstone", object: cache.DeletedFinalStateUnknown{Key: "test/tracked", Obj: mistyped}, want: "ConfigMap test/tracked does not convert"},
-		{name: "an empty tombstone", object: cache.DeletedFinalStateUnknown{Key: "test/tracked"}, want: "the tombstone for test/tracked holds no copy"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			_, err := convert[ConfigMap](c.object)
-			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Errorf("convert answered %v, want an error that says %q", err, c.want)
-			}
-		})
-	}
 }
 
 // The two watches that wake a pass on every change, each with the
@@ -320,8 +290,7 @@ func TestADisplayEditIsAChangeToItsMark(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			woke := false
-			watch := openDisplays(idleWatcher(t), func() { woke = true }, nil)
-			watch.scope.handler.OnUpdate(object(1, "uid-1", false), c.after)
+			displayEdits(func() { woke = true }).OnUpdate(object(1, "uid-1", false), c.after)
 			if woke != c.want {
 				t.Errorf("the change woke a pass: %t, want %t", woke, c.want)
 			}

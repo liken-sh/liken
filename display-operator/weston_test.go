@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // compositorFixture points the pod's three roles at one machine: the
@@ -556,7 +558,7 @@ func TestProbeCompositorReadsWhatTheSocketAnswers(t *testing.T) {
 // podWithRestarts is the pod this operator runs in, as the API server
 // answers for it, with the compositor's sidecar at the named restart
 // count.
-func podWithRestarts(t *testing.T, counts *int) *Client {
+func podWithRestarts(t *testing.T, counts *int) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/namespaces/liken-system/pods/display-operator-abcde" {

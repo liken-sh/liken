@@ -20,6 +20,8 @@ import (
 	"time"
 
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 const (
@@ -32,7 +34,7 @@ const (
 // allocation the scheduler would have written on the claim's status:
 // the results, and the config the scheduler resolved from the claim's
 // own blocks and the DeviceClass's.
-func allocatedClaim(t *testing.T, results []AllocatedDevice, config string) *Client {
+func allocatedClaim(t *testing.T, results []AllocatedDevice, config string) *apiclient.Client {
 	t.Helper()
 	encoded, err := json.Marshal(results)
 	if err != nil {

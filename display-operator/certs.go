@@ -21,6 +21,8 @@ import (
 	"math/big"
 	"net/http"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The CA lives ten years and a leaf lives one. A leaf is re-minted
@@ -207,12 +209,12 @@ type servingMaterial struct {
 // cert-manager or by hand. The API serves what it holds, mints
 // nothing, and answers with no authority, and the caller decides
 // what a sidecar leaf means without one.
-func ensureServingMaterial(c *Client, namespace, secretName string, names []string, now time.Time) (*servingMaterial, *certificateAuthority, error) {
-	held, err := get[Secret](c, secretsPath(namespace)+"/"+secretName)
+func ensureServingMaterial(c *apiclient.Client, namespace, secretName string, names []string, now time.Time) (*servingMaterial, *certificateAuthority, error) {
+	held, err := apiclient.Get[Secret](c, secretsPath(namespace)+"/"+secretName)
 	if err == nil {
 		return readServingMaterial(held)
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if !errors.Is(err, apiclient.ErrNotFound) {
 		return nil, nil, err
 	}
 
@@ -241,8 +243,8 @@ func ensureServingMaterial(c *Client, namespace, secretName string, names []stri
 	// replicas that each minted a CA would serve two, and a client
 	// trusting one would refuse the other.
 	err = writeObject(c, http.MethodPost, secretsPath(namespace), secret)
-	if errors.Is(err, ErrConflict) {
-		winner, readErr := get[Secret](c, secretsPath(namespace)+"/"+secretName)
+	if errors.Is(err, apiclient.ErrConflict) {
+		winner, readErr := apiclient.Get[Secret](c, secretsPath(namespace)+"/"+secretName)
 		if readErr != nil {
 			return nil, nil, readErr
 		}
@@ -318,10 +320,10 @@ func parsePEM(certPEM []byte) (*x509.Certificate, error) {
 // ensureSidecarLeaf puts the sidecar's leaf, whose one SAN tells it
 // from the public leaf, into its own Secret, which every node's pod
 // mounts as an optional volume.
-func ensureSidecarLeaf(c *Client, namespace, secretName string, ca *certificateAuthority, sanName string, now time.Time) error {
+func ensureSidecarLeaf(c *apiclient.Client, namespace, secretName string, ca *certificateAuthority, sanName string, now time.Time) error {
 	path := secretsPath(namespace) + "/" + secretName
-	held, err := get[Secret](c, path)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	held, err := apiclient.Get[Secret](c, path)
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
 	if err == nil && sidecarLeafStands(held, sanName, now) {
@@ -345,7 +347,7 @@ func ensureSidecarLeaf(c *Client, namespace, secretName string, ca *certificateA
 	}
 	if held == nil {
 		err = writeObject(c, http.MethodPost, secretsPath(namespace), secret)
-		if errors.Is(err, ErrConflict) {
+		if errors.Is(err, apiclient.ErrConflict) {
 			return nil
 		}
 		return err
@@ -357,10 +359,10 @@ func ensureSidecarLeaf(c *Client, namespace, secretName string, ca *certificateA
 // renewServingMaterial re-mints the public leaf once less than a
 // third of its life remains. While the leaf stands it answers nil,
 // so the caller writes nothing on an ordinary pass.
-func renewServingMaterial(c *Client, namespace, secretName string,
+func renewServingMaterial(c *apiclient.Client, namespace, secretName string,
 	ca *certificateAuthority, names []string, now time.Time) (*servingMaterial, error) {
 	path := secretsPath(namespace) + "/" + secretName
-	held, err := get[Secret](c, path)
+	held, err := apiclient.Get[Secret](c, path)
 	if err != nil {
 		return nil, err
 	}
@@ -400,10 +402,10 @@ func sidecarLeafStands(secret *Secret, sanName string, now time.Time) bool {
 // ensureTrustAnchor publishes the CA certificate alone in a
 // ConfigMap, so a client reads it with an ordinary get and never
 // touches a Secret.
-func ensureTrustAnchor(c *Client, namespace, configMapName string, caPEM []byte) error {
+func ensureTrustAnchor(c *apiclient.Client, namespace, configMapName string, caPEM []byte) error {
 	path := configMapsPath(namespace) + "/" + configMapName
-	held, err := get[ConfigMap](c, path)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	held, err := apiclient.Get[ConfigMap](c, path)
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
 
@@ -419,8 +421,8 @@ func ensureTrustAnchor(c *Client, namespace, configMapName string, caPEM []byte)
 		// it when it holds the same anchor. A winner that holds
 		// another anchor is overwritten with this one, and a second
 		// race has nothing new to answer.
-		if errors.Is(err, ErrConflict) {
-			winner, readErr := get[ConfigMap](c, path)
+		if errors.Is(err, apiclient.ErrConflict) {
+			winner, readErr := apiclient.Get[ConfigMap](c, path)
 			if readErr != nil {
 				return readErr
 			}
@@ -441,7 +443,7 @@ func ensureTrustAnchor(c *Client, namespace, configMapName string, caPEM []byte)
 
 // A write reads nothing back, because the API holds what it sent and
 // the answer carries no new fact.
-func writeObject(c *Client, method, path string, object any) error {
+func writeObject(c *apiclient.Client, method, path string, object any) error {
 	body, err := json.Marshal(object)
 	if err != nil {
 		return err

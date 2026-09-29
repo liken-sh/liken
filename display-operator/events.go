@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // An Event is namespaced and a Display is not, so its Events live in
@@ -60,7 +62,7 @@ type EventSource struct {
 
 // A failed Event write is reported to the log and never fails the
 // request, because the bytes already reached the caller.
-func recordCapture(c *Client, screen *Display, subject, aspect, form string) {
+func recordCapture(c *apiclient.Client, screen *Display, subject, aspect, form string) {
 	name := screen.Metadata.Name
 	at := time.Now().UTC().Format(time.RFC3339)
 	body, err := json.Marshal(Event{

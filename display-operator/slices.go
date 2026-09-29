@@ -27,6 +27,8 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // DriverName identifies this operator as a DRA driver. A driver name
@@ -550,9 +552,9 @@ var ErrNoDevices = errors.New("the card reports no connectors")
 // takes the slice with it, and that is the only automatic removal.
 //
 // The write includes the resourceVersion from the read, so a
-// conflicting writer gets ErrConflict instead of losing its change.
+// conflicting writer gets apiclient.ErrConflict instead of losing its change.
 // The next pass reads again and writes again.
-func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
+func EnsureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
 	if len(devices) == 0 {
 		return ErrNoDevices
 	}
@@ -567,8 +569,8 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 	// and watch on every ResourceSlice in the cluster, because RBAC
 	// cannot name the slice of one node, and the grant (deploy/rbac.yaml)
 	// keeps every other driver's inventory out of this operator's reach.
-	current, err := get[ResourceSlice](c, path)
-	if err == ErrNotFound {
+	current, err := apiclient.Get[ResourceSlice](c, path)
+	if err == apiclient.ErrNotFound {
 		slice := &ResourceSlice{
 			APIVersion: "resource.k8s.io/v1",
 			Kind:       "ResourceSlice",
@@ -640,8 +642,8 @@ type nodeObject struct {
 
 // NodeOwner reads this operator's node and builds the owner reference
 // for its slice.
-func NodeOwner(c *Client, nodeName string) (OwnerReference, error) {
-	node, err := get[nodeObject](c, "/api/v1/nodes/"+nodeName)
+func NodeOwner(c *apiclient.Client, nodeName string) (OwnerReference, error) {
+	node, err := apiclient.Get[nodeObject](c, "/api/v1/nodes/"+nodeName)
 	if err != nil {
 		return OwnerReference{}, err
 	}

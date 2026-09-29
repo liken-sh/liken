@@ -13,13 +13,15 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // storeHolding is a watch's store that holds copies of the objects
 // given, as a watch holds them once it has delivered every write. A
 // later write to the fixture leaves the store older than the API
 // server.
-func storeHolding[T any](t *testing.T, objects ...T) storeView {
+func storeHolding[T any](t *testing.T, objects ...T) informer.View {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	for index := range objects {
@@ -31,7 +33,7 @@ func storeHolding[T any](t *testing.T, objects ...T) storeView {
 			t.Fatal(err)
 		}
 	}
-	return storeView{store: store, synced: func() bool { return true }}
+	return informer.View{Store: store, Synced: func() bool { return true }}
 }
 
 func displaysOf(held map[string]*Display) []Display {
@@ -205,53 +207,5 @@ func TestTheRestartCountReadsThePodFromTheStore(t *testing.T) {
 	}
 	if restarts.seen != 2 {
 		t.Errorf("the reader read a count of %d, want the 2 the pod in the store holds", restarts.seen)
-	}
-}
-
-// arrivingStore is a store whose informer takes one object just after
-// the first read of its keys, the way the watch event of a create
-// lands while a pass lists.
-type arrivingStore struct {
-	cache.Store
-	arriving *unstructured.Unstructured
-}
-
-func (s *arrivingStore) ListKeys() []string {
-	keys := s.Store.ListKeys()
-	if s.arriving != nil {
-		_ = s.Store.Add(s.arriving)
-		s.arriving = nil
-	}
-	return keys
-}
-
-// A list from a whole store answers a Display the operator created,
-// even when the watch event of the create reaches the store during the
-// list. The Display controller's sweep reads the list to decide which
-// Displays exist, and a list that left one out would make the sweep
-// leave its panel unmanaged until the next pass.
-func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
-	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
-	fields, err := runtime.DefaultUnstructuredConverter.ToUnstructured(
-		&Display{Metadata: DisplayMeta{Name: "HDMI-A-1", ResourceVersion: "5"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	created := &unstructured.Unstructured{Object: fields}
-	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: created}
-	versions := newVersionMemo()
-	versions.note("HDMI-A-1", "5")
-	view := storeView{store: store, synced: func() bool { return true }, whole: true}
-
-	list, err := currentList[Display](fixture.client, heldObjects{view: view, versions: versions}, displayPath)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 {
-		t.Errorf("the list holds %d Displays, want 1", len(list))
-	}
-	if got := reads(fixture.requests); len(got) != 0 {
-		t.Errorf("the list sent %v, want no reads", got)
 	}
 }

@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"os"
 	"slices"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // seedModes adds the resting mode of each monitor on the card to the
@@ -60,7 +62,7 @@ func seedModes(record map[string]string, outputs []Output, displays []Display) m
 // starts at each monitor's preferred mode, and the Display pass
 // applies the resting mode later with one restart.
 func restingDisplays() []Display {
-	client, err := InClusterClient()
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the resting modes: %v\n", err)
 		return nil

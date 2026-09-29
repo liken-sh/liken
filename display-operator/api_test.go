@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The cluster a test API reads is a real HTTP server answering the
@@ -190,7 +192,7 @@ func (s *sidecarFixture) answers(answer func(w http.ResponseWriter, r *http.Requ
 
 func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *apiServer {
 	t.Helper()
-	client := NewClient(cluster.URL, cluster.Client(), "")
+	client := apiclient.New(cluster.URL, cluster.Client(), "")
 	tokenFile := t.TempDir() + "/token"
 	if err := os.WriteFile(tokenFile, []byte("the-api-token"), 0o600); err != nil {
 		t.Fatal(err)

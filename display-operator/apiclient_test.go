@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // testClient points the operator's API client at a test server, with a
 // service account token on disk the way the kubelet mounts one.
-func testClient(t *testing.T, handler http.Handler) *Client {
+func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -19,5 +21,5 @@ func testClient(t *testing.T, handler http.Handler) *Client {
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return NewClient(server.URL, server.Client(), credentials)
+	return apiclient.New(server.URL, server.Client(), credentials)
 }

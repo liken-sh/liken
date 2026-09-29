@@ -48,6 +48,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // hotplugShim is the path of the preload library in the image. The
@@ -673,7 +675,7 @@ func (h *hungCompositor) done() {
 // A reader with no pod to name is an operator a person runs by hand,
 // and it counts nothing.
 type westonRestarts struct {
-	client    *Client
+	client    *apiclient.Client
 	namespace string
 	pod       string
 	// pods is the store of this node's pods, which holds this pod, and
@@ -687,7 +689,7 @@ type westonRestarts struct {
 	known bool
 }
 
-func newWestonRestarts(client *Client, namespace, pod string) *westonRestarts {
+func newWestonRestarts(client *apiclient.Client, namespace, pod string) *westonRestarts {
 	if client == nil || namespace == "" || pod == "" {
 		return nil
 	}
