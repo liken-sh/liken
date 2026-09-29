@@ -556,6 +556,9 @@ change:
   first.
 - A component's checks wait only for the pinned bases its images build
   on. Its publish waits for the checks of its whole closure.
+- A change to a component's publish job, to its publish call, or to
+  `ci/publish.go` runs the publish job in a dry mode in the check
+  stage: it builds what a publish would push, and pushes nothing.
 
 The dependencies are declared by hand in `[depends]`, and a missing
 entry fails silently: the component does not rebuild, and it keeps
@@ -593,7 +596,9 @@ A push to `main` is a development build. It builds each tracked
 component whose outputs changed since its newest published version,
 and each component that depends on one. A development version names
 its commit, so the diff starts there, and a build that failed to
-publish is published by the next push. The version comes from `git describe` of the newest
+publish is published by the next push. The checks of a push to main
+also diff with the newest main run that passed, and every job runs
+when the plan cannot find that run. The version comes from `git describe` of the newest
 repository tag, with a suffix: `2026.10.02-001-dev-017-abcdef01` is
 17 commits past `2026.10.02-001`, at commit `abcdef01`. The count is
 for the whole repository, not for the component, so it is not
