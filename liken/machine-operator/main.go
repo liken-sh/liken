@@ -40,9 +40,10 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
-	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -189,13 +190,13 @@ func main() {
 	// newest state answers the whole burst. That is what
 	// level-triggered means, and it is the same merging an informer's
 	// work queue does.
-	watcher, err := informer.InCluster(localAPIEndpoint(clusterDoc, name))
+	watcher, err := informer.InClusterAt(localAPIEndpoint(clusterDoc, name))
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}
 	wakes := make(chan struct{}, 1)
 	objects := watchThisMachine(context.Background(), watcher, client, name, clusterName,
-		informer.Signal(wakes), operatorMetrics.WatchRestarted)
+		watch.Signal(wakes), operatorMetrics.WatchRestarted)
 
 	// The facts watch turns init's writes into wakes. inotify does not
 	// recurse, so the watch reconciles its set with the tree before

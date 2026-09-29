@@ -55,12 +55,14 @@ override:
   # bootstrapping that only a pod's mounted credentials can satisfy.
   - path: ^kubernetes$
     threshold: 92
-  # The watches: the copies and the wake handlers, run through
-  # client-go's real reflector against a scripted API server. What
-  # stays untested is the in-cluster configuration and a scattering of
-  # store errors that client-go's own store never returns.
-  - path: ^kubernetes/informer$
-    threshold: 83
+  # The watches' handlers and reads: the wake rules, run through
+  # client-go's real reflector against a scripted API server, and the
+  # reads of a store and a memo held by hand. What stays untested is a
+  # scattering of store errors that client-go's own store never
+  # returns. The watch itself is the shared module's, with its own
+  # tests.
+  - path: ^kubernetes/watch$
+    threshold: 97
   # The fake API server the operators' tests share. Its tests hold it
   # to the answers those tests rely on.
   - path: ^kubernetes/fakeapi$

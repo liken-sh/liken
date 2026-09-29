@@ -20,7 +20,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
-	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 	"k8s.io/client-go/dynamic"
@@ -156,7 +156,7 @@ func awaitEcho(t *testing.T, api *fakeapi.Server, r *reader) {
 	written := api.ResourceVersion(kubernetes.MachinesPath, "node-1")
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		m, _, ok := informer.Get[machine.Machine](r.machines, "node-1")
+		m, _, ok := watch.Get[machine.Machine](r.machines.View(), "node-1")
 		if ok && m.Metadata.ResourceVersion == written {
 			return
 		}
@@ -230,5 +230,48 @@ func TestAPassNamesTheMachineAsItsLeaseOwner(t *testing.T) {
 	want := []kubernetes.OwnerReference{{APIVersion: "liken.sh/v1alpha1", Kind: "Machine", Name: "node-1", UID: "uid-node-1"}}
 	if !slices.Equal(lease.Metadata.OwnerReferences, want) {
 		t.Errorf("the lease's owners are %+v, want %+v", lease.Metadata.OwnerReferences, want)
+	}
+}
+
+// A pass that runs before the watch delivers this operator's own status
+// write does not start from the older copy in the Machine's store. It
+// reads the Machine from the API server once, and after the watch
+// delivers the write, the store answers again with no request.
+func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
+	isolatePass(t)
+	fake := newPassAPI()
+	client, watcher := passClients(t, fake)
+	wakes := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
+	awaitCopies(t, r, wakes)
+	current, err := r.machine("node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := current.Status
+	status.Phase = "Ready"
+	fake.Hold()
+	if err := r.publishStatus(current, &status); err != nil {
+		t.Fatal(err)
+	}
+	fake.Forget()
+
+	held, err := r.machine("node-1")
+	if err != nil || held.Status.Phase != "Ready" {
+		t.Errorf("the read after the write = %+v, %v; want the written status", held, err)
+	}
+	if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath + "/node-1"}) {
+		t.Errorf("the read after the write sent %q, want one read of the Machine", sent)
+	}
+	fake.Release()
+	awaitEcho(t, fake, r)
+	fake.Forget()
+	if _, err := r.machine("node-1"); err != nil {
+		t.Fatal(err)
+	}
+	if sent := fake.Requests(); len(sent) != 0 {
+		t.Errorf("the read after the watch delivered the write sent %q, want nothing", sent)
 	}
 }

@@ -35,9 +35,10 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
-	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 )
@@ -76,7 +77,7 @@ func main() {
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
-	watcher, err := informer.InCluster("")
+	watcher, err := informer.InCluster()
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}
@@ -95,7 +96,7 @@ func main() {
 	// of Machine changes makes one wake, and one sweep over the newest
 	// state answers the whole burst.
 	wakes := make(chan struct{}, 1)
-	fleet := watchFleet(context.Background(), watcher, client, informer.Signal(wakes),
+	fleet := watchFleet(context.Background(), watcher, client, watch.Signal(wakes),
 		operatorMetrics.WatchRestarted)
 
 	// The ticker is a clock. A heartbeat ages past the staleness limit

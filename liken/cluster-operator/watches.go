@@ -45,16 +45,16 @@ package main
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
-	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -99,6 +99,18 @@ type fleetReader struct {
 	leaseCopy     *informer.Collection
 	daemonSetCopy *informer.Collection
 	podCopy       *informer.Collection
+
+	// machineVersions and clusterVersions are the memos of this
+	// program's own status writes to the Machines and the Cluster, and
+	// of its reads of them from the API server (kubernetes/memo). The
+	// watch delivers a write a moment after the API server answers it.
+	// A sweep that decided from a copy without its own last grant would
+	// count one fewer machine in flight, and could grant a turn beyond
+	// the disruption budget. So a copy answers only at the version of
+	// this program's last write or read of the object, and the sweep
+	// otherwise reads that one object from the API server.
+	machineVersions *memo.Versions
+	clusterVersions *memo.Versions
 }
 
 // watchFleet opens the watches and returns the reader over their
@@ -121,17 +133,19 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 		LabelSelector: appLabel + " in (" + strings.Join(stewardedDaemonSets, ",") + ")"}
 
 	return &fleetReader{
-		client:        client,
-		machineCopy:   start(machineKind, machines, informer.WakeOnChange[machine.Machine](machines, wake), nil),
-		clusterCopy:   start(clusterKind, clusters, informer.WakeOnEdit[cluster.Cluster](clusters, wake), nil),
-		leaseCopy:     start(leaseKind, leases, nil, nil),
-		daemonSetCopy: start(daemonSetKind, daemonSets, informer.WakeOnEdit[featureWorkload](daemonSets, wake), nil),
-		podCopy:       start(podKind, pods, nil, cache.Indexers{appLabel: informer.LabelIndex(appLabel)}),
+		client:          client,
+		machineCopy:     start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake), nil),
+		clusterCopy:     start(clusterKind, clusters, watch.WakeOnEdit[cluster.Cluster](clusters, wake), nil),
+		leaseCopy:       start(leaseKind, leases, nil, nil),
+		daemonSetCopy:   start(daemonSetKind, daemonSets, watch.WakeOnEdit[featureWorkload](daemonSets, wake), nil),
+		podCopy:         start(podKind, pods, nil, cache.Indexers{appLabel: watch.LabelIndex(appLabel)}),
+		machineVersions: memo.New(),
+		clusterVersions: memo.New(),
 	}
 }
 
-// current answers a copy the sweep may read, or nil when the copies
-// may be behind the API server.
+// current answers the view of a copy the sweep may read, or a view
+// that answers nothing when the copies may be behind the API server.
 //
 // Every watch of this process shares one HTTP/2 connection. When the
 // API server behind it loses power or leaves the network, the stream
@@ -152,101 +166,108 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 // connection stops the renewals too: the write guard then refuses every
 // write after ten seconds, and the process exits when the election
 // gives up.
-func (r *fleetReader) current(held *informer.Collection) *informer.Collection {
+//
+// A copy that holds every object of its kind, with no selector, is
+// Whole, so a list from it also reads each object this program wrote
+// that the copy does not hold yet.
+func (r *fleetReader) current(held *informer.Collection) informer.View {
 	if held == nil {
-		return nil
+		return informer.View{}
 	}
-	lease, found, ok := informer.Get[kubernetes.Lease](r.leaseCopy, leaseNamespace+"/"+leaseName)
+	lease, found, ok := watch.Get[kubernetes.Lease](r.leaseCopy.View(), leaseNamespace+"/"+leaseName)
 	if !ok || !found {
-		return nil
+		return informer.View{}
 	}
 	renewed, err := time.Parse(time.RFC3339Nano, lease.Spec.RenewTime)
 	if err != nil || time.Since(renewed) >= copyFreshness {
-		return nil
+		return informer.View{}
 	}
-	return held
+	view := held.View()
+	view.Whole = held == r.machineCopy || held == r.clusterCopy
+	return view
 }
 
 // copyFreshness is how old the copy's view of this program's own
 // leader Lease may be before the sweep stops reading the copies.
 var copyFreshness = operatorLeaseTiming.renewDeadline + operatorLeaseTiming.retryPeriod
 
-// machines reads every Machine in the fleet. The copy cannot answer
-// while it lacks one of this program's own writes, such as a grant the
-// last sweep wrote, and the sweep then reads the API server, which
-// holds the write. A sweep that decided from a copy without its own
-// grant would count one fewer machine in flight (kubernetes/informer's
-// writes.go).
+// machines reads every Machine in the fleet. A copy at another version
+// than this program's own last write or read of the Machine, such as a
+// copy without the grant the last sweep wrote, is read again from the
+// API server, which holds the write.
 func (r *fleetReader) machines() ([]machine.Machine, error) {
-	if machines, ok := informer.List[machine.Machine](r.current(r.machineCopy)); ok {
-		return machines, nil
+	view := r.current(r.machineCopy)
+	if !view.Ready() {
+		return kubernetes.ListMachines(r.client)
 	}
-	machines, err := kubernetes.ListMachines(r.client)
-	for _, m := range machines {
-		r.machineCopy.Observed(m.Metadata.Name, m.Metadata.ResourceVersion)
+	held := informer.Held{View: view, Versions: r.machineVersions}
+	machines, err := informer.CurrentList[machine.Machine](r.client, held, machinePath)
+	if err != nil {
+		return nil, err
 	}
-	return machines, err
+	forgetGone(held, machines)
+	return machines, nil
 }
 
-// publishStatus writes a Machine's status, and records the write for
-// the Machines' copy.
+func machinePath(name string) string { return kubernetes.MachinesPath + "/" + name }
+
+func clusterPath(name string) string { return kubernetes.ClustersPath + "/" + name }
+
+// forgetGone drops the memo's record of each object that the list left
+// out and the store no longer holds: a Machine somebody deleted, whose
+// record would otherwise stay for the life of the process.
+func forgetGone[T any, P informer.Object[T]](held informer.Held, items []T) {
+	listed := make(map[string]bool, len(items))
+	for i := range items {
+		listed[informer.Key(P(&items[i]).GetObjectMeta())] = true
+	}
+	held.Versions.ForgetGone(held.View.Store, listed)
+}
+
+// publishStatus writes a Machine's status, and notes the version the
+// API server answered for the Machines' copy. A write that fails notes
+// that this program holds no current copy: a request that timed out can
+// still have landed, so the next read of that Machine goes to the API
+// server.
 func (r *fleetReader) publishStatus(m *machine.Machine, status *machine.MachineStatus) error {
-	version, err := kubernetes.PublishStatus(r.client, m, status)
-	recordWrite(r.machineCopy, m.Metadata.Name, version, err)
-	return err
+	return r.machineVersions.Send(m.Metadata.Name, func() (string, error) {
+		return kubernetes.PublishStatus(r.client, m, status)
+	})
 }
 
-// publishClusterStatus writes the Cluster's status, and records the
-// write for the Clusters' copy, so the next sweep does not compare its
-// verdict against a status older than its own last write.
+// publishClusterStatus writes the Cluster's status, and notes the
+// version for the Clusters' copy, so the next sweep does not compare
+// its verdict against a status older than its own last write.
 func (r *fleetReader) publishClusterStatus(clusterDoc *cluster.Cluster) error {
-	version, err := kubernetes.PublishClusterStatus(r.client, clusterDoc)
-	recordWrite(r.clusterCopy, clusterDoc.Metadata.Name, version, err)
-	return err
-}
-
-// recordWrite tells a copy about one write. A conflict, a 404, and a
-// write the guard refused wrote nothing. Any other failure leaves the
-// outcome unknown: a request that timed out can still have landed.
-func recordWrite(held *informer.Collection, key, version string, err error) {
-	switch {
-	case err == nil:
-		held.Wrote(key, version)
-	case errors.Is(err, errNotLeading), errors.Is(err, apiclient.ErrNotFound):
-		// The guard sent nothing, and a 404 wrote nothing to an
-		// object that no longer exists, and whose removal the watch
-		// has delivered or will deliver.
-	case !errors.Is(err, apiclient.ErrConflict):
-		held.Wrote(key, "")
-	}
+	return r.clusterVersions.Send(clusterDoc.Metadata.Name, func() (string, error) {
+		return kubernetes.PublishClusterStatus(r.client, clusterDoc)
+	})
 }
 
 // clusters reads every Cluster. A fleet has one.
 func (r *fleetReader) clusters() ([]cluster.Cluster, error) {
-	if clusters, ok := informer.List[cluster.Cluster](r.current(r.clusterCopy)); ok {
-		return clusters, nil
+	view := r.current(r.clusterCopy)
+	if !view.Ready() {
+		return kubernetes.ListClusters(r.client)
 	}
-	return kubernetes.ListClusters(r.client)
+	held := informer.Held{View: view, Versions: r.clusterVersions}
+	clusters, err := informer.CurrentList[cluster.Cluster](r.client, held, clusterPath)
+	if err != nil {
+		return nil, err
+	}
+	forgetGone(held, clusters)
+	return clusters, nil
 }
 
 // cluster reads the Cluster this program operates.
 func (r *fleetReader) cluster(name string) (*cluster.Cluster, error) {
-	if c, found, ok := informer.Get[cluster.Cluster](r.current(r.clusterCopy), name); ok {
-		if !found {
-			return nil, apiclient.ErrNotFound
-		}
-		return c, nil
-	}
-	c, err := kubernetes.GetCluster(r.client, name)
-	if err == nil {
-		r.clusterCopy.Observed(name, c.Metadata.ResourceVersion)
-	}
-	return c, err
+	return watch.ReadOne[cluster.Cluster](r.client,
+		informer.Held{View: r.current(r.clusterCopy), Versions: r.clusterVersions}, name, clusterPath(name))
 }
 
 // heartbeats reads every machine's last renewal.
 func (r *fleetReader) heartbeats() (map[string]time.Time, error) {
-	if leases, ok := informer.List[kubernetes.Lease](r.current(r.leaseCopy)); ok {
+	if leases, ok := watch.List[kubernetes.Lease](r.current(r.leaseCopy)); ok {
 		return kubernetes.Renewals(leases), nil
 	}
 	return kubernetes.ListHeartbeats(r.client)
@@ -257,7 +278,7 @@ func (r *fleetReader) heartbeats() (map[string]time.Time, error) {
 // reads too.
 func (r *fleetReader) workloads(listPath string) ([]featureWorkload, error) {
 	if listPath == daemonSetsPath {
-		if daemonSets, ok := informer.List[featureWorkload](r.current(r.daemonSetCopy)); ok {
+		if daemonSets, ok := watch.List[featureWorkload](r.current(r.daemonSetCopy)); ok {
 			return daemonSets, nil
 		}
 	}
@@ -266,22 +287,18 @@ func (r *fleetReader) workloads(listPath string) ([]featureWorkload, error) {
 
 // daemonSet reads one DaemonSet in liken-system.
 func (r *fleetReader) daemonSet(name string) (*featureWorkload, error) {
-	if ds, found, ok := informer.Get[featureWorkload](r.current(r.daemonSetCopy), "liken-system/"+name); ok {
+	if ds, found, ok := watch.Get[featureWorkload](r.current(r.daemonSetCopy), "liken-system/"+name); ok {
 		if !found {
 			return nil, apiclient.ErrNotFound
 		}
 		return ds, nil
 	}
-	ds := &featureWorkload{}
-	if err := r.client.RequestJSON(http.MethodGet, daemonSetsPath+"/"+name, nil, ds); err != nil {
-		return nil, err
-	}
-	return ds, nil
+	return apiclient.Get[featureWorkload](r.client, daemonSetsPath+"/"+name)
 }
 
 // daemonSetPods reads the pods of one stewarded DaemonSet.
 func (r *fleetReader) daemonSetPods(name string) ([]kubernetes.Pod, error) {
-	if pods, ok := informer.ByIndex[kubernetes.Pod](r.current(r.podCopy), appLabel, name); ok {
+	if pods, ok := watch.ByIndex[kubernetes.Pod](r.current(r.podCopy), appLabel, name); ok {
 		return pods, nil
 	}
 	return kubernetes.List[kubernetes.Pod](r.client, daemonSetPodsPath(name))

@@ -71,6 +71,28 @@ type ObjectMeta struct {
 	Annotations     map[string]string `json:"annotations,omitempty"`
 }
 
+// Meta is the part of an object's metadata that a watch's store and an
+// operator's memo of its own writes read: the shared module's
+// memo.Meta. Both are aliases of the same interface literal, so the
+// Machine and the Cluster answer memo.Meta with no import of that
+// module. init links this package, and the module's client would bring
+// net/http into init.
+type Meta = interface {
+	GetNamespace() string
+	GetName() string
+	GetResourceVersion() string
+}
+
+// GetName answers the object's name.
+func (m ObjectMeta) GetName() string { return m.Name }
+
+// GetNamespace answers the empty namespace, because every liken kind
+// is cluster-scoped.
+func (m ObjectMeta) GetNamespace() string { return "" }
+
+// GetResourceVersion answers the version of the copy.
+func (m ObjectMeta) GetResourceVersion() string { return m.ResourceVersion }
+
 // Phase summarizes a document's state in one word. Go models a
 // closed vocabulary with a named string type. The constants below
 // are the only legal values. The compiler catches an error when code

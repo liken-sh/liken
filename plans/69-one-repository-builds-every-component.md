@@ -968,6 +968,16 @@ how any vendored domain gets its bytes.
    move to the new `OCIRepository`.
 4. **The shared module.** Replace the copies of the client, the
    watch, and the cache with `kubernetes/`, one operator at a time.
+
+   Built 2026-09-29. The six operators, and `liken`'s machine
+   operator, cluster operator, and CLI, import `kubernetes/`. `liken`
+   keeps its wake handlers and one rule for reads in
+   `liken/kubernetes/watch`: a ready store that does not hold an
+   object, and whose memo has not noted it, answers that the object
+   does not exist. For `liken`, the module gained an in-cluster address
+   and request timeout, a write guard, the address of the watches, a
+   store's indexes, and an alias for the memo's metadata type, so that
+   `init` still links no `net/http`.
 5. **The base images.** Make `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and
    `weston` pinned components, and make their consumers build
    `FROM` the tree.

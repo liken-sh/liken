@@ -575,7 +575,7 @@ func publishOwnStatus(r *reader, m *machine.Machine, status *machine.MachineStat
 	// This read goes to the API server, not to the watch's copy. It
 	// follows a write that lost to another writer, and the copy can
 	// still lag behind the write that won.
-	fresh, gerr := kubernetes.GetMachine(r.client, m.Metadata.Name)
+	fresh, gerr := r.freshMachine(m.Metadata.Name)
 	if gerr != nil {
 		return err
 	}

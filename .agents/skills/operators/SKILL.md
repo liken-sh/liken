@@ -238,9 +238,10 @@ above.
 of the client, the watch, and the cache into the Go module
 `kubernetes/` at the top of the repository, one operator at a time.
 `bluetooth-operator`, `audio-operator`, `display-operator`,
-`equipment-operator`, `media-operator`, and `library-operator` are on
-it. Only `liken` keeps its own client and informer, in
-`liken/kubernetes/`, until the step moves them.
+`equipment-operator`, `media-operator`, `library-operator`, and
+`liken`'s machine operator, cluster operator, and CLI are on it.
+`liken/kubernetes/watch` holds what `liken`'s two operators add: the
+wake handlers and the reads of a store.
 
 ## Watch a collection with client-go
 
@@ -249,8 +250,8 @@ of a `Source`, with the `Handler`, `Synced`, and `Reopened` of its
 `Options`, and `Convert` and `Report` decode and log each object.
 `bluetooth-operator` is the reference for the handlers:
 `requestwatch.go` and `editwatch.go` hold them, and `watch_test.go`
-runs them through the real reflector. `liken` builds the same skeleton
-in its own `liken/kubernetes/informer`.
+runs them through the real reflector. `liken/kubernetes/watch` holds
+`liken`'s handlers, `WakeOnChange` and `WakeOnEdit`.
 
 - **Imports.** Allowed: `k8s.io/client-go/tools/cache`,
   `k8s.io/client-go/dynamic`, `k8s.io/client-go/rest`, and
@@ -328,7 +329,11 @@ it.
   work going from the store.
   `ReadOne` reads an object the store does not hold from the API
   server. A copy that does not convert is read from the API server
-  too, so a list leaves out no object.
+  too, so a list leaves out no object. `liken`'s watches each select
+  exactly the objects a pass reads, often one object by name, so its
+  reads (`liken/kubernetes/watch`) answer from a ready store that an
+  object it does not hold, and that the memo has not noted, does not
+  exist, the same way `library-operator`'s `readStood` does.
 - **The memo.** A store's copy can be older than the operator's own
   last write, because the watch delivers the write a moment later, and
   later still while the watch is down. A pass that acts on that copy

@@ -1,4 +1,4 @@
-package informer
+package watch
 
 // A liken operator runs one full pass for each wake, and the pass reads
 // every object it judges again, from the copies. So a watch's handler
@@ -14,6 +14,8 @@ package informer
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // Signal returns a wake function for a channel with one slot. A send
@@ -34,7 +36,7 @@ func Signal(wake chan<- struct{}) func() {
 // Machine that another writer reports on. An update that the informer
 // delivers after it reads the collection again, for an object whose
 // resourceVersion did not move, is no change and does not wake.
-func WakeOnChange[T any](source Source, wake func()) cache.ResourceEventHandler {
+func WakeOnChange[T any](source informer.Source, wake func()) cache.ResourceEventHandler {
 	h := wakeHandler[T]{source: source, wake: wake, changed: func(before, after *unstructured.Unstructured) bool {
 		return before.GetResourceVersion() != after.GetResourceVersion()
 	}}
@@ -55,7 +57,7 @@ func WakeOnChange[T any](source Source, wake func()) cache.ResourceEventHandler 
 // watch, an object that somebody deleted and created again with the
 // same name reaches the handler as an update, and the new object can
 // have the generation the old one had.
-func WakeOnEdit[T any](source Source, wake func()) cache.ResourceEventHandler {
+func WakeOnEdit[T any](source informer.Source, wake func()) cache.ResourceEventHandler {
 	h := wakeHandler[T]{source: source, wake: wake, changed: func(before, after *unstructured.Unstructured) bool {
 		return before.GetUID() != after.GetUID() ||
 			before.GetGeneration() != after.GetGeneration() ||
@@ -72,7 +74,7 @@ func WakeOnEdit[T any](source Source, wake func()) cache.ResourceEventHandler {
 // update, or a deletion, so a change made during the gap reaches the
 // handler too.
 type wakeHandler[T any] struct {
-	source  Source
+	source  informer.Source
 	wake    func()
 	changed func(before, after *unstructured.Unstructured) bool
 }
@@ -86,8 +88,8 @@ func (h wakeHandler[T]) handler() cache.ResourceEventHandler {
 }
 
 func (h wakeHandler[T]) added(object any) {
-	if _, err := Convert[T](object); err != nil {
-		report(h.source, err)
+	if _, err := informer.Convert[T](object); err != nil {
+		informer.Report(h.source.String(), err)
 		return
 	}
 	h.wake()
@@ -97,8 +99,8 @@ func (h wakeHandler[T]) added(object any) {
 // tombstone can hold no copy of the object at all, and one extra pass
 // costs less than a removal the pass never judged.
 func (h wakeHandler[T]) removed(object any) {
-	if _, err := Convert[T](object); err != nil {
-		report(h.source, err)
+	if _, err := informer.Convert[T](object); err != nil {
+		informer.Report(h.source.String(), err)
 	}
 	h.wake()
 }
@@ -107,8 +109,8 @@ func (h wakeHandler[T]) removed(object any) {
 // an object says nothing about what changed, so the update counts as a
 // change.
 func (h wakeHandler[T]) updated(before, after any) {
-	if _, err := Convert[T](after); err != nil {
-		report(h.source, err)
+	if _, err := informer.Convert[T](after); err != nil {
+		informer.Report(h.source.String(), err)
 		return
 	}
 	held, heldOK := before.(*unstructured.Unstructured)

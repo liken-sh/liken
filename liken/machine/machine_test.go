@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/liken/api"
 )
 
 // writeManifest writes a manifest into a fresh directory and returns
@@ -307,5 +309,13 @@ func TestNetworkValidateRejectsAHostEntryNamedLocalhost(t *testing.T) {
 	}}
 	if err := spec.Validate(); err == nil {
 		t.Error("expected an error for an entry that names localhost")
+	}
+}
+
+// A Machine answers its own metadata to a watch's store and the memo.
+func TestAMachineAnswersItsMetadata(t *testing.T) {
+	m := &Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "42"}}
+	if meta := m.GetObjectMeta(); meta.GetName() != "node-1" || meta.GetResourceVersion() != "42" {
+		t.Errorf("GetObjectMeta = %q at %q, want node-1 at 42", meta.GetName(), meta.GetResourceVersion())
 	}
 }

@@ -322,3 +322,11 @@ func TestNetworkValidateAcceptsSubnets(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+// A Cluster answers its own metadata to a watch's store and the memo.
+func TestAClusterAnswersItsMetadata(t *testing.T) {
+	c := &Cluster{Metadata: api.ObjectMeta{Name: "lab", ResourceVersion: "42"}}
+	if meta := c.GetObjectMeta(); meta.GetName() != "lab" || meta.GetResourceVersion() != "42" {
+		t.Errorf("GetObjectMeta = %q at %q, want lab at 42", meta.GetName(), meta.GetResourceVersion())
+	}
+}

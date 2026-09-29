@@ -23,7 +23,7 @@ import (
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
-	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 	"k8s.io/client-go/dynamic"
@@ -114,7 +114,7 @@ func awaitClusterEcho(t *testing.T, api *fakeapi.Server, r *fleetReader) {
 	written := api.ResourceVersion(kubernetes.ClustersPath, "lab")
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		c, _, ok := informer.Get[cluster.Cluster](r.clusterCopy, "lab")
+		c, _, ok := watch.Get[cluster.Cluster](r.clusterCopy.View(), "lab")
 		if ok && c.Metadata.ResourceVersion == written {
 			return
 		}
@@ -233,10 +233,10 @@ func TestOperateFinishesTheSweepInFlightAtAShutdown(t *testing.T) {
 }
 
 // A sweep that runs before the watch delivers the grant the last sweep
-// wrote cannot decide from the Machines' copy, because the copy would
-// count one fewer machine in flight. It reads the Machines from the
-// API server, sees the grant, and grants no second turn.
-func TestASweepRightAfterItsOwnGrantReadsTheFleetDirectly(t *testing.T) {
+// wrote cannot decide from the Machine's copy, because the copy would
+// count one fewer machine in flight. It reads that Machine from the API
+// server, sees the grant, and grants no second turn.
+func TestASweepRightAfterItsOwnGrantReadsThatMachineDirectly(t *testing.T) {
 	fake := newFleetAPI(time.Now())
 	client, watcher := fleetClients(t, fake)
 	waiting, err := kubernetes.GetMachine(client, "node-2")
@@ -273,8 +273,8 @@ func TestASweepRightAfterItsOwnGrantReadsTheFleetDirectly(t *testing.T) {
 	}
 
 	sent := fake.Requests()
-	if !slices.Contains(sent, "GET "+kubernetes.MachinesPath) {
-		t.Errorf("the second sweep sent %q, want a direct read of the Machines", sent)
+	if !slices.Contains(sent, "GET "+kubernetes.MachinesPath+"/node-2") {
+		t.Errorf("the second sweep sent %q, want a direct read of node-2", sent)
 	}
 	if slices.ContainsFunc(sent, func(r string) bool { return strings.HasPrefix(r, "PUT "+kubernetes.MachinesPath) }) {
 		t.Errorf("the second sweep sent %q, want no second grant", sent)
@@ -303,19 +303,21 @@ func TestTheCopiesAnswerOnlyWhileTheLeaderLeaseInThemIsFresh(t *testing.T) {
 			wakes := make(chan struct{}, 1)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			r := watchFleet(ctx, watcher, client, informer.Signal(wakes), func(string) {})
+			r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
 			awaitFleetCopies(t, r, wakes)
 
-			if got := r.current(r.machineCopy) != nil; got != c.current {
+			if got := r.current(r.machineCopy).Ready(); got != c.current {
 				t.Errorf("current = %v, want %v", got, c.current)
 			}
 		})
 	}
 }
 
-// A write that the guard refused, or that answered 404, wrote nothing,
-// so it leaves the copy answering.
-func TestAWriteThatWroteNothingLeavesTheCopyAnswering(t *testing.T) {
+// A write that failed, even one that wrote nothing, such as one the
+// guard refused or one that answered 404 or 409, leaves this program
+// with no current copy of that Machine. The next list reads that one
+// Machine from the API server, and after that the copy answers again.
+func TestAFailedWriteCostsOneReadOfThatMachine(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
@@ -331,13 +333,19 @@ func TestAWriteThatWroteNothingLeavesTheCopyAnswering(t *testing.T) {
 			wakes := make(chan struct{}, 1)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			r := watchFleet(ctx, watcher, client, informer.Signal(wakes), func(string) {})
+			r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
 			awaitFleetCopies(t, r, wakes)
+			fake.Forget()
 
-			recordWrite(r.machineCopy, "node-1", "", c.err)
+			_ = r.machineVersions.Send("node-1", func() (string, error) { return "", c.err })
 
-			if _, ok := informer.List[machine.Machine](r.machineCopy); !ok {
-				t.Error("the copy stopped answering after a write that wrote nothing")
+			for range 2 {
+				if machines, err := r.machines(); err != nil || len(machines) != 2 {
+					t.Fatalf("machines = %d, %v; want both", len(machines), err)
+				}
+			}
+			if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath + "/node-1"}) {
+				t.Errorf("two lists after the failed write sent %q, want one read of node-1", sent)
 			}
 		})
 	}

@@ -64,6 +64,10 @@ type Cluster struct {
 	Status     ClusterStatus  `json:"status,omitzero"`
 }
 
+// GetObjectMeta answers the metadata that a watch's store and the
+// operators' memo read (api.Meta).
+func (m *Cluster) GetObjectMeta() api.Meta { return m.Metadata }
+
 // ClusterOrigin records how the cluster's datastore came to exist.
 // Founded means liken created the datastore, through the founding
 // leader's cluster-init. Adopted means the datastore already existed

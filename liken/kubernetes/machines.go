@@ -3,7 +3,8 @@ package kubernetes
 // This file reads and reports on Machines: the operations both
 // operators share. The machine operator reads and writes its own
 // Machine. The cluster operator reads every Machine. The watches are
-// in the informer package.
+// in the shared informer package, and their handlers and reads in the
+// watch package.
 
 import (
 	"encoding/json"
@@ -36,8 +37,9 @@ func ListMachines(c *apiclient.Client) ([]machine.Machine, error) {
 // handle contention.
 //
 // It answers the resourceVersion the API server gave the write. A
-// caller that reads a watch's copy records it, so the copy does not
-// answer until the watch delivers the write (informer.Wrote).
+// caller that reads a watch's copy notes it in the memo of its writes
+// (the shared memo package), so the copy answers only once it holds
+// the write.
 func PublishStatus(c *apiclient.Client, m *machine.Machine, status *machine.MachineStatus) (string, error) {
 	updated := *m
 	updated.Status = *status

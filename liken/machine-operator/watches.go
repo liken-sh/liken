@@ -49,14 +49,15 @@ package main
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
-	"github.com/liken-sh/liken/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -102,6 +103,15 @@ type reader struct {
 	credentials *informer.Collection
 	ownPods     *informer.Collection
 	slices      *informer.Collection
+
+	// machineVersions is the memo of this operator's own status writes
+	// to its Machine, and of its reads of it from the API server
+	// (kubernetes/memo). The watch delivers a write a moment after the
+	// API server answers it, so without the memo the next pass could
+	// start from a copy older than the status it just wrote. The pass
+	// writes no other watched kind through a version, so no other kind
+	// has a memo.
+	machineVersions *memo.Versions
 }
 
 // watchThisMachine opens the watches and returns the reader over their
@@ -125,54 +135,50 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 		LabelSelector: operatorPodLabel, FieldSelector: "spec.nodeName=" + name}
 	slices := informer.Source{Resource: sliceResource, FieldSelector: named(kubernetes.ResourceSliceName(name))}
 
-	r := &reader{client: client}
-	r.machines = start(machineKind, machines, informer.WakeOnChange[machine.Machine](machines, wake))
-	r.nodes = start(nodeKind, nodes, informer.WakeOnChange[nodeObject](nodes, wake))
-	r.ownPods = start(podKind, pods, informer.WakeOnChange[kubernetes.Pod](pods, wake))
+	r := &reader{client: client, machineVersions: memo.New()}
+	r.machines = start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake))
+	r.nodes = start(nodeKind, nodes, watch.WakeOnChange[nodeObject](nodes, wake))
+	r.ownPods = start(podKind, pods, watch.WakeOnChange[kubernetes.Pod](pods, wake))
 	r.slices = start(resourceSliceKind, slices, nil)
 	if clusterName != "" {
 		clusters := informer.Source{Resource: clusterResource, FieldSelector: named(clusterName)}
 		secrets := informer.Source{Resource: secretResource, Namespace: "liken-system",
 			FieldSelector: named(kubernetes.RegistryCredentialsSecret)}
-		r.clusters = start(clusterWatchKind, clusters, informer.WakeOnEdit[cluster.Cluster](clusters, wake))
-		r.credentials = start(secretKind, secrets, informer.WakeOnChange[kubernetes.Secret](secrets, wake))
+		r.clusters = start(clusterWatchKind, clusters, watch.WakeOnEdit[cluster.Cluster](clusters, wake))
+		r.credentials = start(secretKind, secrets, watch.WakeOnChange[kubernetes.Secret](secrets, wake))
 	}
 	return r
 }
 
-// machine reads this machine's own Machine. The copy cannot answer
-// while it lacks this operator's own last status write, and the pass
-// then reads the API server, so a pass never starts from a copy older
-// than the status it just wrote (kubernetes/informer's writes.go).
+// machine reads this machine's own Machine. The copy answers only at
+// the version of this operator's own last status write or read, and
+// the pass otherwise reads the API server once, so a pass never starts
+// from a copy older than the status it just wrote.
 func (r *reader) machine(name string) (*machine.Machine, error) {
-	if m, found, ok := informer.Get[machine.Machine](r.machines, name); ok {
-		return orNotFound(m, found)
-	}
-	m, err := kubernetes.GetMachine(r.client, name)
-	if err == nil {
-		r.machines.Observed(name, m.Metadata.ResourceVersion)
-	}
-	return m, err
+	return watch.ReadOne[machine.Machine](r.client,
+		informer.Held{View: r.machines.View(), Versions: r.machineVersions}, name, kubernetes.MachinesPath+"/"+name)
 }
 
-// publishStatus writes this machine's status, and records the write
-// for the Machine's copy. A conflict wrote nothing. Any other failure
-// leaves the outcome unknown, because a request that timed out can
-// still have landed.
+// freshMachine reads this machine's Machine from the API server, and
+// notes the version for the Machine's copy.
+func (r *reader) freshMachine(name string) (*machine.Machine, error) {
+	return informer.ReadFresh[machine.Machine](r.client, r.machineVersions, name, kubernetes.MachinesPath+"/"+name)
+}
+
+// publishStatus writes this machine's status, and notes the version the
+// API server answered for the Machine's copy. A write that fails notes
+// that this operator holds no current copy, because a request that
+// timed out can still have landed, so the next read goes to the API
+// server.
 func (r *reader) publishStatus(m *machine.Machine, status *machine.MachineStatus) error {
-	version, err := kubernetes.PublishStatus(r.client, m, status)
-	switch {
-	case err == nil:
-		r.machines.Wrote(m.Metadata.Name, version)
-	case !errors.Is(err, apiclient.ErrConflict):
-		r.machines.Wrote(m.Metadata.Name, "")
-	}
-	return err
+	return r.machineVersions.Send(m.Metadata.Name, func() (string, error) {
+		return kubernetes.PublishStatus(r.client, m, status)
+	})
 }
 
 // node reads this machine's Node.
 func (r *reader) node(name string) (*nodeObject, error) {
-	if n, found, ok := informer.Get[nodeObject](r.nodes, name); ok {
+	if n, found, ok := watch.Get[nodeObject](r.nodes.View(), name); ok {
 		return orNotFound(n, found)
 	}
 	return getNode(r.client, name)
@@ -180,7 +186,7 @@ func (r *reader) node(name string) (*nodeObject, error) {
 
 // cluster reads the Cluster this machine belongs to.
 func (r *reader) cluster(name string) (*cluster.Cluster, error) {
-	if c, found, ok := informer.Get[cluster.Cluster](r.clusters, name); ok {
+	if c, found, ok := watch.Get[cluster.Cluster](r.clusters.View(), name); ok {
 		return orNotFound(c, found)
 	}
 	return kubernetes.GetCluster(r.client, name)
@@ -190,7 +196,7 @@ func (r *reader) cluster(name string) (*cluster.Cluster, error) {
 // absent Secret returns nil, nil, as GetRegistryCredentialsSecret
 // does.
 func (r *reader) registryCredentials() (*kubernetes.Secret, error) {
-	if s, found, ok := informer.Get[kubernetes.Secret](r.credentials, credentialsKey); ok {
+	if s, found, ok := watch.Get[kubernetes.Secret](r.credentials.View(), credentialsKey); ok {
 		if !found {
 			return nil, nil
 		}
@@ -202,7 +208,7 @@ func (r *reader) registryCredentials() (*kubernetes.Secret, error) {
 // operatorPods reads this node's own machine-operator pod, as a list
 // of one, or none early in a boot.
 func (r *reader) operatorPods(nodeName string) ([]kubernetes.Pod, error) {
-	if pods, ok := informer.List[kubernetes.Pod](r.ownPods); ok {
+	if pods, ok := watch.List[kubernetes.Pod](r.ownPods.View()); ok {
 		return pods, nil
 	}
 	return kubernetes.List[kubernetes.Pod](r.client, ownPodPath(nodeName))
@@ -211,7 +217,7 @@ func (r *reader) operatorPods(nodeName string) ([]kubernetes.Pod, error) {
 // resourceSlice reads this node's ResourceSlice, nil when it does not
 // exist.
 func (r *reader) resourceSlice(nodeName string) (*kubernetes.ResourceSlice, error) {
-	if s, found, ok := informer.Get[kubernetes.ResourceSlice](r.slices, kubernetes.ResourceSliceName(nodeName)); ok {
+	if s, found, ok := watch.Get[kubernetes.ResourceSlice](r.slices.View(), kubernetes.ResourceSliceName(nodeName)); ok {
 		if !found {
 			return nil, nil
 		}
@@ -220,7 +226,7 @@ func (r *reader) resourceSlice(nodeName string) (*kubernetes.ResourceSlice, erro
 	return kubernetes.GetResourceSlice(r.client, nodeName)
 }
 
-// orNotFound turns a synced copy's answer into the answer a direct read
+// orNotFound turns a ready store's answer into the answer a direct read
 // gives: the object, or apiclient.ErrNotFound.
 func orNotFound[T any](item *T, found bool) (*T, error) {
 	if !found {

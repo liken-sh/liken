@@ -1,4 +1,4 @@
-package informer
+package watch
 
 // The scripted API server the tests run the real reflector against.
 
@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 const (
@@ -23,26 +25,36 @@ const (
 
 var thingResource = schema.GroupVersionResource{Group: "test.liken.sh", Version: "v1", Resource: "things"}
 
+// thingMeta is the metadata of the test kind.
+type thingMeta struct {
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace,omitempty"`
+	UID               string            `json:"uid,omitempty"`
+	ResourceVersion   string            `json:"resourceVersion,omitempty"`
+	Generation        int64             `json:"generation,omitempty"`
+	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	ManagedFields     []any             `json:"managedFields,omitempty"`
+}
+
+func (m *thingMeta) GetName() string            { return m.Name }
+func (m *thingMeta) GetNamespace() string       { return m.Namespace }
+func (m *thingMeta) GetResourceVersion() string { return m.ResourceVersion }
+
 // thing is the operator's own struct for the test kind.
 type thing struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Metadata   struct {
-		Name              string            `json:"name"`
-		UID               string            `json:"uid,omitempty"`
-		ResourceVersion   string            `json:"resourceVersion,omitempty"`
-		Generation        int64             `json:"generation,omitempty"`
-		DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
-		Labels            map[string]string `json:"labels,omitempty"`
-		ManagedFields     []any             `json:"managedFields,omitempty"`
-	} `json:"metadata"`
-	Spec struct {
+	APIVersion string    `json:"apiVersion"`
+	Kind       string    `json:"kind"`
+	Metadata   thingMeta `json:"metadata"`
+	Spec       struct {
 		Size int `json:"size"`
 	} `json:"spec"`
 	Status struct {
 		Phase string `json:"phase,omitempty"`
 	} `json:"status"`
 }
+
+func (t *thing) GetObjectMeta() informer.Meta { return &t.Metadata }
 
 func newThing(name, version string, generation int64) thing {
 	t := thing{APIVersion: testAPI, Kind: testKind}
@@ -79,7 +91,6 @@ type watchServer struct {
 	mu        sync.Mutex
 	readCount int
 	watches   int
-	queries   []string
 	opened    chan struct{}
 	released  chan struct{}
 }
@@ -107,9 +118,6 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	s.mu.Lock()
-	s.queries = append(s.queries, "labelSelector="+query.Get("labelSelector")+" fieldSelector="+query.Get("fieldSelector"))
-	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 
 	if query.Get("watch") != "true" {
@@ -162,12 +170,6 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // release lets a paused stream play the rest of its script.
 func (s *watchServer) release() { s.released <- struct{}{} }
 
-func (s *watchServer) sent() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string{}, s.queries...)
-}
-
 // awaitWatches waits until the watcher has opened count more watches.
 func (s *watchServer) awaitWatches(t *testing.T, count int) {
 	t.Helper()
@@ -186,8 +188,8 @@ func event(kind string, item thing) string {
 	return fmt.Sprintf(`{"type":%q,"object":%s}`, kind, object)
 }
 
-// testClient points a dynamic client at a test server.
-func testClient(t *testing.T, handler http.Handler) dynamic.Interface {
+// testWatcher points a dynamic client at a test server.
+func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -220,12 +222,15 @@ func wokeWithin(wakes <-chan struct{}, within time.Duration) bool {
 	}
 }
 
-// awaitSynced waits until the copy holds the first read.
-func awaitSynced(t *testing.T, c *Collection) {
+// awaitReady waits until the store holds the first read and the API
+// server accepted a watch.
+func awaitReady(t *testing.T, c *informer.Collection) {
 	t.Helper()
-	select {
-	case <-c.controller.HasSyncedChecker().Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("the copy never synced")
+	deadline := time.Now().Add(5 * time.Second)
+	for !c.View().Ready() {
+		if time.Now().After(deadline) {
+			t.Fatal("the copy never became ready")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

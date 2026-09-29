@@ -99,6 +99,10 @@ type Machine struct {
 	Status     MachineStatus  `json:"status,omitzero"`
 }
 
+// GetObjectMeta answers the metadata that a watch's store and the
+// operators' memo read (api.Meta).
+func (m *Machine) GetObjectMeta() api.Meta { return m.Metadata }
+
 // MachineSpec is the declared half of a Machine. It states what a
 // person asks this machine to be. A git repository can also declare
 // this, through the cluster's flux feature. Each
