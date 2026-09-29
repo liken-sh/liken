@@ -26,8 +26,11 @@ func (w World) plan(root string, components map[string]*Component) error {
 		runs := Runs{API: orDefault(w.Getenv("GITHUB_API_URL"), "https://api.github.com"), Repository: w.Getenv("GITHUB_REPOSITORY"),
 			Token: w.Getenv("GITHUB_TOKEN"), Client: w.Published.Client}
 		verified, err := runs.NewestGreen("ci.yaml")
-		if err != nil {
-			notes = append(notes, fmt.Sprintf("The newest main run that passed is unknown, so the plan compares with the commit before the push alone: %v", err))
+		switch {
+		case err != nil:
+			e.Unverified = fmt.Sprintf("the newest main run that passed is unknown (%v)", err)
+		case verified == "":
+			e.Unverified = "no main run has passed yet"
 		}
 		e.Verified = verified
 	}

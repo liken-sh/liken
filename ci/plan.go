@@ -19,9 +19,11 @@ type Event struct {
 	Base string
 	// Head is the commit the run builds.
 	Head string
-	// Verified is the head of the newest run on main that passed, or ""
-	// when it is unknown.
-	Verified string
+	// Verified is the head of the newest run on main that passed.
+	// Unverified says why the plan could not find that run, such as an
+	// error from the API or no run that passed yet. When both are "",
+	// nothing looked for the run, as in a test or on a workstation.
+	Verified, Unverified string
 	// MainRef names main in the checkout, such as origin/main, for the
 	// merge base of a branch that has no earlier commit to compare with.
 	MainRef string

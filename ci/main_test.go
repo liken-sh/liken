@@ -241,11 +241,12 @@ func TestTheOSVersionsComeFromTheChannelAndADeployArtifactFallsBackToItsImage(t 
 
 func TestThePlanOnMainComparesWithTheNewestGreenRun(t *testing.T) {
 	cases := []struct {
-		name, want string
-		status     int
+		name, want, body string
+		status           int
 	}{
-		{"a green run", "the newest main run that passed", http.StatusOK},
-		{"an API that refuses", "The newest main run that passed is unknown", http.StatusForbidden},
+		{"a green run", "the newest main run that passed", `{"workflow_runs":[{"head_sha":"GREEN"}]}`, http.StatusOK},
+		{"an API that refuses", "Every job runs: the newest main run that passed is unknown", `{}`, http.StatusForbidden},
+		{"no green run", "Every job runs: no main run has passed yet", `{"workflow_runs":[]}`, http.StatusOK},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -260,7 +261,7 @@ func TestThePlanOnMainComparesWithTheNewestGreenRun(t *testing.T) {
 			w.env = map[string]string{
 				"EVENT": "push", "REF": "refs/heads/main", "BEFORE": before, "GITHUB_STEP_SUMMARY": summary,
 				"GITHUB_TOKEN": "token", "GITHUB_REPOSITORY": "liken-sh/liken",
-				"GITHUB_API_URL": actionsAPI(t, c.status, `{"workflow_runs":[{"head_sha":"`+green+`"}]}`),
+				"GITHUB_API_URL": actionsAPI(t, c.status, strings.ReplaceAll(c.body, "GREEN", green)),
 			}
 			if err := w.run([]string{"plan", "-root", r.git.Dir}); err != nil {
 				t.Fatal(err)

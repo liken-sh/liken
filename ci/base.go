@@ -16,10 +16,15 @@ type comparison struct {
 //
 //   - A push to main diffs with the commit before the push, and with
 //     the head of the newest main run that passed, so a change that a
-//     failed run did not verify runs again.
+//     failed run did not verify runs again. When that run's head is not
+//     an ancestor, as after a force push, the diff starts at the merge
+//     base of the two. When the plan could not find that run, every
+//     job runs: a change it skipped now would stay unverified for good,
+//     because the next run that passed would hide it.
 //   - A push to another branch diffs with the commit before the push
-//     when that commit is an ancestor. A new branch or a force push
-//     diffs with the branch's merge base with main instead.
+//     when that commit is an ancestor, and with the branch's merge base
+//     with main, so a change that a cancelled run did not check runs
+//     again.
 //   - A pull request diffs with its merge base with the base branch:
 //     the base branch's newer commits are not part of the change.
 func (p Planner) Comparisons(e Event) ([]comparison, string) {
@@ -30,26 +35,42 @@ func (p Planner) Comparisons(e Event) ([]comparison, string) {
 		}
 		return nil, "the pull request's base is missing"
 	case "push":
-		ancestor := p.Git.HasCommit(e.Before) && p.Git.IsAncestor(e.Before, e.Head)
+		var list []comparison
+		if p.Git.HasCommit(e.Before) && p.Git.IsAncestor(e.Before, e.Head) {
+			list = append(list, comparison{e.Before, "the commit before the push"})
+		}
 		if e.Main() {
-			if !ancestor {
+			if len(list) == 0 {
 				return nil, "the push has no earlier commit to compare with"
 			}
-			list := []comparison{{e.Before, "the commit before the push"}}
-			if e.Verified != "" && e.Verified != e.Before && p.Git.HasCommit(e.Verified) && p.Git.IsAncestor(e.Verified, e.Head) {
-				list = append(list, comparison{e.Verified, "the newest main run that passed"})
+			if e.Unverified != "" {
+				return nil, e.Unverified
 			}
-			return list, ""
-		}
-		if ancestor {
-			return []comparison{{e.Before, "the commit before the push"}}, ""
+			if e.Verified == "" {
+				return list, ""
+			}
+			if !p.Git.HasCommit(e.Verified) {
+				return nil, "the newest main run that passed names a commit that the repository does not hold"
+			}
+			base, err := p.Git.MergeBase(e.Verified, e.Head)
+			if err != nil {
+				return nil, "the newest main run that passed shares no history with this commit"
+			}
+			why := "the newest main run that passed"
+			if base != e.Verified {
+				why = "the merge base of the newest main run that passed and this commit"
+			}
+			return append(list, comparison{base, why}), ""
 		}
 		if e.MainRef != "" {
 			if base, err := p.Git.MergeBase(e.MainRef, e.Head); err == nil {
-				return []comparison{{base, "the branch's merge base with main"}}, ""
+				list = append(list, comparison{base, "the branch's merge base with main"})
 			}
 		}
-		return nil, "the push has no earlier commit to compare with"
+		if len(list) == 0 {
+			return nil, "the push has no earlier commit to compare with"
+		}
+		return list, ""
 	}
 	return nil, "a dispatch runs everything"
 }

@@ -22,11 +22,11 @@
 #
 #   A push to a branch, a pull request, or a dispatch runs the jobs of
 #   each component whose files changed. It publishes nothing. A push
-#   diffs with the commit before it, and a new branch, a force push,
-#   or a pull request diffs with its merge base with main.
+#   diffs with the commit before it and with its merge base with main,
+#   and a pull request diffs with its merge base.
 #
-#   A push to main also diffs with the newest main run that passed. It
-#   publishes a development build of each component whose outputs
+#   A push to main also diffs with the newest main run that passed, and
+#   it runs every job when the plan cannot find that run. It publishes a development build of each component whose outputs
 #   changed since its newest published version, under a version such
 #   as 2026.10.02-001-dev-017-abcdef01.
 #
