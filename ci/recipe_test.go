@@ -88,6 +88,37 @@ func TestTheRecipeCoversWhatTheImageIsBuiltFrom(t *testing.T) {
 			}
 			return nil
 		}, true},
+		{"a named context below a dependency's build context", func(root string) error {
+			manifest := "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n" +
+				"[[outputs.images]]\nname = \"base\"\ncontexts = { closure = \"tool/image/sub\" }\n"
+			if err := write("base/package.toml", manifest)(root); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Join(root, "tool/image/sub"), 0o755); err != nil {
+				return err
+			}
+			before := recipeOf(t, root, "base")
+			if err := write("tool/image/sub/x.sh", "x\n")(root); err != nil {
+				return err
+			}
+			if after := recipeOf(t, root, "base"); after == before {
+				return fmt.Errorf("a file below tool's build context left the recipe as it was")
+			}
+			return nil
+		}, true},
+		{"a dependency's context that its Dockerfile's ignore file shapes", func(root string) error {
+			if err := write("tool/image/Dockerfile.dockerignore", "closure.sh\n")(root); err != nil {
+				return err
+			}
+			before := recipeOf(t, root, "base")
+			if err := write("tool/image/closure.sh", "collect more\n")(root); err != nil {
+				return err
+			}
+			if after := recipeOf(t, root, "base"); after == before {
+				return fmt.Errorf("a file that tool's recipe leaves out left base's recipe as it was")
+			}
+			return nil
+		}, true},
 		{"the recipe format", func(root string) error {
 			format := recipeFormat
 			recipeFormat = "a new format"
@@ -123,6 +154,8 @@ func TestARecipeRefusesWhatItCannotPin(t *testing.T) {
 		"a mount source with no digest": {"FROM tool\nRUN --mount=type=bind,from=busybox:latest,target=/b true\n", "busybox:latest, which names no digest"},
 		"an image outside its depends":  {"FROM tool\nCOPY --from=other / /o\n", "other is not in the dependencies of base"},
 		"an ADD with no checksum":       {"FROM tool\nADD https://example.com/x /x\n", "https://example.com/x with no --checksum"},
+		"an escape directive":           {"# escape=`\nFROM tool\n", "an escape directive"},
+		"apt with no snapshot":          {"FROM debian@sha256:aaa AS closure\nRUN apt-get update\nFROM tool\n", "the stage closure runs apt"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

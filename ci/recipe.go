@@ -64,6 +64,14 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 		}
 		add("dockerfile", file, data)
 		parsed := parseDockerfile(string(data))
+		// The parser reads a backslash as the continuation character, so
+		// a file that changes it could hide a source from the recipe.
+		if parsed.Escape {
+			return "", fmt.Errorf("%s: %s starts with an escape directive; a pinned component's Dockerfile continues its lines with a backslash", c.Name(), file)
+		}
+		if err := parsed.SnapshotFirst(); err != nil {
+			return "", fmt.Errorf("%s: %s: %w", c.Name(), file, err)
+		}
 		for _, name := range append(slices.Clone(parsed.From), parsed.Sources...) {
 			if _, dir := image.Contexts[name]; dir || name == "scratch" {
 				continue
@@ -95,7 +103,7 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 			return "", fmt.Errorf("%s: %w", c.Name(), err)
 		}
 		for _, dir := range image.Contexts {
-			if coveredByDependency(components, closure, c.Name(), dir) {
+			if coveredByDependency(root, components, closure, c.Name(), dir) {
 				continue
 			}
 			if err := hashContext(root, dir, path.Join(dir, ".dockerignore"), add); err != nil {
@@ -127,12 +135,15 @@ func ignoreFile(root, context, dockerfile string) string {
 	return path.Join(context, ".dockerignore")
 }
 
-// coveredByDependency is true when a named directory context lies
-// inside the build context of an image of another component in the
-// closure. That component's recipe covers every file there, and its
-// tag is in this recipe. A directory outside every such context has
-// files that no recipe covers, so this recipe hashes them itself.
-func coveredByDependency(components map[string]*Component, closure []string, self, dir string) bool {
+// coveredByDependency is true when a named directory context is the
+// build context of an image of another component in the closure, and
+// that image reads the context's own .dockerignore. That component's
+// recipe then covers exactly the files that Docker sends, and its tag
+// is in this recipe. Any other directory can send a file that no
+// recipe covers: a subdirectory reads only its own .dockerignore, and
+// a <Dockerfile>.dockerignore shapes the dependency's context and not
+// this one. So this recipe hashes such a directory itself.
+func coveredByDependency(root string, components map[string]*Component, closure []string, self, dir string) bool {
 	for _, name := range closure {
 		if name == self {
 			continue
@@ -140,7 +151,8 @@ func coveredByDependency(components map[string]*Component, closure []string, sel
 		dep := components[name]
 		for _, image := range dep.Outputs.Images {
 			context := path.Join(dep.Dir, image.Context)
-			if dir == context || strings.HasPrefix(dir, context+"/") {
+			file := path.Join(dep.Dir, orDefault(image.File, "Dockerfile"))
+			if dir == context && ignoreFile(root, context, file) == path.Join(context, ".dockerignore") {
 				return true
 			}
 		}

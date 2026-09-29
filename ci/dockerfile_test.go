@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,49 @@ func TestAnAddFromTheNetworkIsARemoteSource(t *testing.T) {
 	want := []Remote{{"https://example.com/x.tar.gz", "sha256:abc"}, {"git@github.com:x/y.git", ""}, {"https://example.com/z", ""}}
 	if !reflect.DeepEqual(d.Remotes, want) {
 		t.Errorf("remotes %+v", d.Remotes)
+	}
+}
+
+func TestAnEmptyLineInsideAnInstructionDoesNotEndIt(t *testing.T) {
+	d := parseDockerfile("FROM scratch\nCOPY \\\n\n  --from=debian:trixie-slim / /\n")
+	if !reflect.DeepEqual(d.Sources, []string{"debian:trixie-slim"}) {
+		t.Errorf("sources %v", d.Sources)
+	}
+}
+
+func TestAnEscapeDirectiveIsRead(t *testing.T) {
+	cases := map[string]bool{
+		"# escape=`\nFROM scratch\n":                                true,
+		"# syntax=docker/dockerfile:1\n#Escape = `\nFROM scratch\n": true,
+		"# syntax=docker/dockerfile:1\nFROM scratch\n":              false,
+		"# a comment\n# escape=`\nFROM scratch\n":                   false,
+	}
+	for text, escape := range cases {
+		t.Run(text, func(t *testing.T) {
+			if got := parseDockerfile(text).Escape; got != escape {
+				t.Errorf("escape %v", got)
+			}
+		})
+	}
+}
+
+func TestEachStageThatRunsAptPointsItAtTheSnapshotFirst(t *testing.T) {
+	cases := map[string]struct{ text, wants string }{
+		"the same RUN, snapshot first": {"FROM d AS a\nRUN sh /snapshot.sh \"$V\" && apt-get install -y x\n", ""},
+		"an earlier RUN":               {"FROM d AS a\nRUN sh /snapshot.sh 1\nRUN apt install x\n", ""},
+		"a stage that inherits it":     {"FROM d AS a\nRUN sh /snapshot.sh 1\nFROM a AS b\nRUN apt-get install x\n", ""},
+		"a path with apt in it":        {"FROM d AS a\nRUN rm -rf /var/lib/apt/lists\n", ""},
+		"no snapshot":                  {"FROM d AS a\nRUN apt-get update\n", "the stage a runs apt"},
+		"apt before the snapshot":      {"FROM d AS a\nRUN apt-get update && sh /snapshot.sh 1\n", "the stage a runs apt"},
+		"an unnamed stage":             {"FROM d\nRUN true\nRUN apt-get update\n", "the stage 0 runs apt"},
+		"a stage from another image":   {"FROM d AS a\nRUN sh /snapshot.sh 1\nFROM d AS b\nRUN apt-get install x\n", "the stage b runs apt"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := parseDockerfile(c.text).SnapshotFirst()
+			if c.wants == "" && err != nil || c.wants != "" && (err == nil || !strings.Contains(err.Error(), c.wants)) {
+				t.Errorf("got %v, want %q", err, c.wants)
+			}
+		})
 	}
 }

@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +21,10 @@ type Dockerfile struct {
 	Sources []string
 	Remotes []Remote
 	Stages  []Stage
+	// Escape is true when the file starts with an escape parser
+	// directive, which changes the continuation character from the
+	// backslash that this parser reads.
+	Escape bool
 }
 
 // A Stage is one FROM line and the instructions under it.
@@ -28,7 +34,17 @@ type Stage struct {
 	// from, and Sources are the images or stages it copies from.
 	From    string
 	Sources []string
+	// Runs are the commands of the stage's RUN lines, in order.
+	Runs []string
 }
+
+// escapeDirective matches the escape parser directive, which BuildKit
+// reads only in the comment lines at the top of the file, before any
+// other line.
+var escapeDirective = regexp.MustCompile(`(?i)^#\s*escape\s*=`)
+
+// directive matches any parser directive line.
+var directive = regexp.MustCompile(`^#\s*[A-Za-z]+\s*=`)
 
 // A Remote is one source of an ADD line that the build fetches from
 // the network, with the checksum that its --checksum flag states.
@@ -45,14 +61,15 @@ func readDockerfile(path string) (Dockerfile, error) {
 }
 
 // instructions joins each instruction that a backslash continues onto
-// the next lines into one line. Docker skips a comment line inside an
-// instruction, so the join does too.
+// the next lines into one line. BuildKit skips a comment line and an
+// empty line inside an instruction, so the join does too: an empty
+// line there does not end the instruction.
 func instructions(text string) []string {
 	var lines []string
 	current := ""
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if current != "" && strings.HasPrefix(trimmed, "#") {
+		if current != "" && (trimmed == "" || strings.HasPrefix(trimmed, "#")) {
 			continue
 		}
 		if rest, ok := strings.CutSuffix(strings.TrimRight(line, " \t"), "\\"); ok {
@@ -70,6 +87,14 @@ func instructions(text string) []string {
 
 func parseDockerfile(text string) Dockerfile {
 	var d Dockerfile
+	for _, line := range strings.Split(text, "\n") {
+		if !directive.MatchString(strings.TrimSpace(line)) {
+			break
+		}
+		if escapeDirective.MatchString(strings.TrimSpace(line)) {
+			d.Escape = true
+		}
+	}
 	stages := map[string]bool{}
 	for _, line := range instructions(text) {
 		fields := strings.Fields(line)
@@ -110,6 +135,9 @@ func parseDockerfile(text string) Dockerfile {
 				if n := len(d.Stages); n > 0 {
 					d.Stages[n-1].Sources = appendOnce(d.Stages[n-1].Sources, source)
 				}
+			}
+			if n := len(d.Stages); n > 0 && instruction == "RUN" {
+				d.Stages[n-1].Runs = append(d.Stages[n-1].Runs, strings.Join(withoutFlags(fields[1:]), " "))
 			}
 			if instruction == "ADD" {
 				for _, source := range addSources(fields[1:]) {
@@ -245,4 +273,36 @@ func (d Dockerfile) Bases(image Image, producer map[string]string) []string {
 		}
 	}
 	return bases
+}
+
+// aptCommand matches apt or apt-get run as a command, and not a path
+// such as /var/lib/apt/lists.
+var aptCommand = regexp.MustCompile(`(^|[\s;&|(])apt(-get)?\s`)
+
+// SnapshotFirst checks that every stage that runs apt points apt at
+// the snapshot first: a RUN of the stage, or of a stage it builds on,
+// calls snapshot.sh before the first apt command. A stage that ran apt
+// against Debian's moving archive would install packages that the
+// snapshot date does not name.
+func (d Dockerfile) SnapshotFirst() error {
+	pinned := map[string]bool{}
+	for i, stage := range d.Stages {
+		name := stage.Name
+		if name == "" {
+			name = strconv.Itoa(i)
+		}
+		ready := pinned[stage.From]
+		for _, run := range stage.Runs {
+			apt := aptCommand.FindStringIndex(run)
+			snapshot := strings.Index(run, "snapshot.sh")
+			if apt != nil && !ready && (snapshot < 0 || snapshot > apt[0]) {
+				return fmt.Errorf("the stage %s runs apt before it runs snapshot.sh, so apt reads Debian's moving archive and not the snapshot", name)
+			}
+			if snapshot >= 0 {
+				ready = true
+			}
+		}
+		pinned[name] = ready
+	}
+	return nil
 }
