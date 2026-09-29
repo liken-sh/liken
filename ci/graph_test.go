@@ -39,14 +39,13 @@ func TestACheckRunsWhenItsPathsChange(t *testing.T) {
 		{"its own file", "app", "app/main.go", true},
 		{"its dependency's file", "app", "base/Dockerfile", true},
 		{"brand, for a component with a manual", "app", "brand/voice.md", true},
-		{"a workflow", "app", ".github/workflows/ci.yaml", true},
 		{"another component's file", "app", "os/init/main.go", false},
 		{"brand, for a component with no manual", "base", "brand/voice.md", false},
 		{"a file at the top", "app", "README.md", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if runs, _ := CheckChanged(components, c.component, []string{c.file}); runs != c.runs {
+			if runs, _ := CheckChanged(components, c.component, Diff{Files: []string{c.file}}); runs != c.runs {
 				t.Errorf("CheckChanged(%s, %s) = %v", c.component, c.file, runs)
 			}
 		})
@@ -69,7 +68,7 @@ func TestAReleaseChangeIsAChangeToAnOutput(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			changed, why := ReleaseChanged(components, c.component, []string{c.file})
+			changed, why := ReleaseChanged(components, c.component, Diff{Files: []string{c.file}})
 			if changed != (c.why != "") || why != c.why {
 				t.Errorf("ReleaseChanged(%s, %s) = %v, %q", c.component, c.file, changed, why)
 			}

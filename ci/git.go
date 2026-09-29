@@ -46,13 +46,31 @@ func gitEnv(extra ...string) []string {
 	return append(env, extra...)
 }
 
-// Changed lists the files that differ between two commits.
+// Changed lists the files that differ between two commits. Rename
+// detection is off: a rename lists the old path and the new one, so a
+// file that moves from one component to another changes both.
 func (g Git) Changed(from, to string) ([]string, error) {
-	out, err := g.run("diff", "--name-only", from, to)
+	out, err := g.run("diff", "--name-only", "--no-renames", from, to)
 	if err != nil || out == "" {
 		return nil, err
 	}
 	return strings.Split(out, "\n"), nil
+}
+
+// Show reads a file at a revision. found is false when the revision has
+// no such file.
+func (g Git) Show(rev, path string) (text string, found bool, err error) {
+	if _, err := g.run("cat-file", "-e", rev+":"+path); err != nil {
+		return "", false, nil
+	}
+	cmd := exec.Command("git", "show", rev+":"+path)
+	cmd.Dir = g.Dir
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, fmt.Errorf("git show %s:%s: %w", rev, path, err)
+	}
+	return string(out), true, nil
 }
 
 // HasCommit is true when the repository has the commit. A push's

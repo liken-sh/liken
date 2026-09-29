@@ -28,16 +28,11 @@ func Closure(components map[string]*Component, name string) []string {
 	return names
 }
 
-// everyJob is the prefix of the paths whose change runs every
-// component's jobs: the workflows themselves.
-const everyJob = ".github/"
-
 // CheckPaths are the paths whose change runs the component's jobs:
-// the directories of its closure, the workflows, and brand/ when the
-// component has a manual, because every manual builds with brand's
-// theme.
+// the directories of its closure, and brand/ when the component has a
+// manual, because every manual builds with brand's theme.
 func CheckPaths(components map[string]*Component, name string) []string {
-	paths := []string{everyJob}
+	var paths []string
 	for _, n := range Closure(components, name) {
 		paths = append(paths, components[n].Dir+"/")
 		if components[n].Docs != nil && components["brand"] != nil {
@@ -54,37 +49,70 @@ func CheckPaths(components map[string]*Component, name string) []string {
 // component a new version.
 var notOutputs = []string{"docs/", "plans/", "AGENTS.md", "README.md"}
 
-// ReleaseChanged is true when a changed file goes into the component's
+// ReleaseChanged is true when a change goes into the component's
 // outputs: a file in the directory of a component in its closure,
-// except the paths in notOutputs.
-func ReleaseChanged(components map[string]*Component, name string, changed []string) (bool, string) {
+// except the paths in notOutputs, or the bake target of an image in
+// its closure.
+func ReleaseChanged(components map[string]*Component, name string, d Diff) (bool, string) {
 	for _, n := range Closure(components, name) {
 		dir := components[n].Dir + "/"
-		for _, file := range changed {
-			rest, ok := strings.CutPrefix(file, dir)
-			if !ok || isNotOutput(rest) {
-				continue
+		what := ""
+		for _, file := range d.Files {
+			if rest, ok := strings.CutPrefix(file, dir); ok && !isNotOutput(rest) {
+				what = file
+				break
 			}
-			if n == name {
-				return true, "changed: " + file
-			}
-			return true, "its dependency " + n + " changed: " + file
+		}
+		if what == "" {
+			what = targetChanged(components[n], d)
+		}
+		switch {
+		case what == "":
+			continue
+		case n == name:
+			return true, "changed: " + what
+		default:
+			return true, "its dependency " + n + " changed: " + what
 		}
 	}
 	return false, ""
 }
 
-// CheckChanged is true when a changed file is under one of the
-// component's check paths.
-func CheckChanged(components map[string]*Component, name string, changed []string) (bool, string) {
+// CheckChanged is true when a change reaches the component's jobs: its
+// part of a generated workflow, a file under one of its check paths,
+// the bake target of an image in its closure, or the part of the bake
+// file that every target shares when its closure has an image.
+func CheckChanged(components map[string]*Component, name string, d Diff) (bool, string) {
+	if file, ok := d.Workflows[name]; ok {
+		return true, file
+	}
 	for _, path := range CheckPaths(components, name) {
-		for _, file := range changed {
+		for _, file := range d.Files {
 			if strings.HasPrefix(file, path) {
 				return true, file
 			}
 		}
 	}
+	for _, n := range Closure(components, name) {
+		if what := targetChanged(components[n], d); what != "" {
+			return true, what
+		}
+		if d.SharedBake && len(components[n].Outputs.Images) > 0 {
+			return true, bakeFile
+		}
+	}
 	return false, ""
+}
+
+// targetChanged names the first image of the component whose bake
+// target changed, or "".
+func targetChanged(c *Component, d Diff) string {
+	for _, image := range c.Outputs.Images {
+		if d.Targets[image.Name] {
+			return "the bake target " + image.Name + " in " + bakeFile
+		}
+	}
+	return ""
 }
 
 func isNotOutput(rest string) bool {

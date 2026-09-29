@@ -180,11 +180,11 @@ func (p Planner) sinceRelease(c *Component, head string, d *Decision) error {
 		d.Changed, d.Why = true, "no git tag names its release "+d.Newest
 		return nil
 	}
-	files, err := p.Git.Changed(from, head)
+	diff, err := p.Git.ReadDiff(p.Components, from, head)
 	if err != nil {
 		return err
 	}
-	d.Changed, d.Why = ReleaseChanged(p.Components, c.Name(), files)
+	d.Changed, d.Why = ReleaseChanged(p.Components, c.Name(), diff)
 	if d.Changed {
 		d.Why += " (since " + from + ")"
 	}
@@ -203,11 +203,11 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 	case "pull_request":
 		base = e.Base
 	}
-	var files []string
+	var diff Diff
 	all := !p.Git.HasCommit(base)
 	if !all {
 		var err error
-		if files, err = p.Git.Changed(base, e.Head); err != nil {
+		if diff, err = p.Git.ReadDiff(p.Components, base, e.Head); err != nil {
 			return nil, err
 		}
 	}
@@ -236,12 +236,12 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 			d.Changed, d.Why = true, d.Reason
 		default:
 			var file string
-			if d.Check, file = CheckChanged(p.Components, c.Name(), files); d.Check {
+			if d.Check, file = CheckChanged(p.Components, c.Name(), diff); d.Check {
 				d.Reason = "changed: " + file
 			} else {
 				d.Reason = "nothing in its paths changed"
 			}
-			d.Changed, d.Why = ReleaseChanged(p.Components, c.Name(), files)
+			d.Changed, d.Why = ReleaseChanged(p.Components, c.Name(), diff)
 		}
 		if c.Pinned() {
 			d = pinnedDecision(c, published[c.Name()], d.Check, d.Reason)
