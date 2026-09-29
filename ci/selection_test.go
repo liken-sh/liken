@@ -83,6 +83,8 @@ func TestAChangeRunsTheJobsAndImagesThatReadIt(t *testing.T) {
 			[]string{"go", "docs"}, []string{"operator"}},
 		{"a smoke check runs its image", "operator/smoke/ui.sh", "false\n",
 			[]string{"go", "docs"}, []string{"operator-ui"}},
+		{"a helper beside a smoke check runs the image it checks", "operator/smoke/lib.sh", "true\n",
+			[]string{"go", "docs"}, []string{"operator-ui"}},
 		{"a base's Dockerfile runs every image that builds on it", "base/Dockerfile", "FROM scratch\nCOPY assets /a\n",
 			[]string{"go", "docs"}, []string{"operator"}},
 		{"a file in a named context runs the image that reads it, and the images on the base", "base/assets/logo.svg", "<svg></svg>\n",

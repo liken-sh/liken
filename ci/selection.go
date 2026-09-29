@@ -101,7 +101,7 @@ func (s selector) imageReads(c *Component, image Image, seen map[string]bool) bo
 	file := path.Join(c.Dir, orDefault(image.File, "Dockerfile"))
 	context := path.Join(c.Dir, image.Context)
 	for _, changed := range s.diff.Files {
-		if changed == file || image.Smoke != "" && changed == image.Smoke {
+		if changed == file || s.smokeReads(image, changed) {
 			return true
 		}
 	}
@@ -126,6 +126,29 @@ func (s selector) imageReads(c *Component, image Image, seen map[string]bool) bo
 		}
 	}
 	return false
+}
+
+// smokeReads is true when a changed file is the image's smoke check, or
+// a file beside it that is no other image's smoke check, such as a
+// helper the check reads.
+func (s selector) smokeReads(image Image, changed string) bool {
+	if image.Smoke == "" {
+		return false
+	}
+	if changed == image.Smoke {
+		return true
+	}
+	if !strings.HasPrefix(changed, path.Dir(image.Smoke)+"/") {
+		return false
+	}
+	for _, c := range s.components {
+		for _, other := range c.Outputs.Images {
+			if other.Smoke == changed {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // contextChanged is true when a changed file is one that Docker sends
