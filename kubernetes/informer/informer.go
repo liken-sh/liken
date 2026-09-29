@@ -105,6 +105,18 @@ type Options struct {
 	// AbsentRecheck is how long the watch of an absent collection waits
 	// before it asks the API server again. Zero means five minutes.
 	AbsentRecheck time.Duration
+
+	// ListFailed, when it is not nil, runs each time a list of the whole
+	// collection fails, with the error. An operator that waits for its
+	// first read uses it to stop waiting for a read that fails, such as
+	// the list of a kind the cluster does not serve.
+	ListFailed func(error)
+
+	// Transform, when it is not nil, trims each object before the copy
+	// holds it, after the managedFields are gone. A field that no pass
+	// reads costs memory for every object of the kind, such as the list
+	// of images a Node's runtime holds.
+	Transform func(*unstructured.Unstructured)
 }
 
 // Collection is the copy of one watched collection.
@@ -155,7 +167,11 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 	lister := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, list metav1.ListOptions) (runtime.Object, error) {
 			scope(&list)
-			return absent.list(collection.List(ctx, list))
+			items, err := absent.list(collection.List(ctx, list))
+			if err != nil && options.ListFailed != nil {
+				options.ListFailed(err)
+			}
+			return items, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, list metav1.ListOptions) (watch.Interface, error) {
 			scope(&list)
@@ -185,7 +201,7 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 		ListerWatcher: lister,
 		ObjectType:    &unstructured.Unstructured{},
 		Handler:       handler,
-		Transform:     dropManagedFields,
+		Transform:     trim(options.Transform),
 	})
 	go func() {
 		defer close(c.done)
@@ -238,13 +254,19 @@ func (c *Collection) View() View {
 	return View{Store: c.store, Synced: c.Synced}
 }
 
-// dropManagedFields removes metadata.managedFields from each object
-// before the informer stores it. The field records which client set
-// each field of the object. No operator reads it, and without the
-// transform the copy holds it for every object.
-func dropManagedFields(object any) (any, error) {
-	if item, ok := object.(*unstructured.Unstructured); ok {
-		item.SetManagedFields(nil)
+// trim answers the transform that removes metadata.managedFields from
+// each object before the informer stores it, and then runs the
+// operator's own. The field records which client set each field of the
+// object. No operator reads it, and without the transform the copy
+// holds it for every object.
+func trim(operators func(*unstructured.Unstructured)) cache.TransformFunc {
+	return func(object any) (any, error) {
+		if item, ok := object.(*unstructured.Unstructured); ok {
+			item.SetManagedFields(nil)
+			if operators != nil {
+				operators(item)
+			}
+		}
+		return object, nil
 	}
-	return object, nil
 }

@@ -155,3 +155,24 @@ func TestAListForgetsTheObjectsThatAreGone(t *testing.T) {
 	var none *Versions
 	none.ForgetGone(store{}, nil)
 }
+
+// The memo reports a key it noted at any version, the empty one
+// included, and nothing once it forgets the key.
+func TestTheMemoForgetsOneObject(t *testing.T) {
+	memo := New()
+	memo.Note("den", "3")
+	memo.Note("studio", "")
+
+	if !memo.Noted("den") || !memo.Noted("studio") || memo.Noted("kitchen") {
+		t.Error("the memo does not report the keys it noted")
+	}
+	memo.Forget("den")
+	if memo.Noted("den") || !memo.Current("den", "2") {
+		t.Error("the memo kept den after it forgot it")
+	}
+	var none *Versions
+	none.Forget("den")
+	if none.Noted("den") {
+		t.Error("a nil memo noted a key")
+	}
+}

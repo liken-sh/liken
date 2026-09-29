@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -171,5 +173,41 @@ func TestOnlyARefusedPermissionStopsASyncedCopy(t *testing.T) {
 				t.Errorf("Synced() = %v after the watch failed, want %v", c.Synced(), tc.answers)
 			}
 		})
+	}
+}
+
+// An operator's transform trims each object before the copy holds it,
+// after the managedFields are gone.
+func TestTheCopyHoldsWhatTheTransformLeaves(t *testing.T) {
+	a := newThing("a", "7", 1)
+	a.Spec.Size = 3
+	a.Metadata.ManagedFields = []any{map[string]any{"manager": "kubectl"}}
+	server := newWatchServer(thingsPath, [][]thing{{a}})
+	c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{
+		Transform: func(item *unstructured.Unstructured) { unstructured.RemoveNestedField(item.Object, "spec", "size") },
+	})
+	eventually(t, "the copy syncs", c.Synced)
+
+	held, ok := Cached[thing](c.View(), "a")
+	if !ok || held.Spec.Size != 0 || held.Metadata.ManagedFields != nil {
+		t.Errorf("the copy holds %+v, want a with no size and no managedFields", held)
+	}
+}
+
+// A list that fails is reported to the operator, which can stop waiting
+// for a first read that does not come.
+func TestAFailedListIsReported(t *testing.T) {
+	failures := make(chan error, 16)
+	Start(t.Context(), undefinedWatcher(t, &undefined{}), Source{Resource: thingResource}, Options{
+		ListFailed: func(err error) { failures <- err },
+	})
+
+	select {
+	case err := <-failures:
+		if !apierrors.IsNotFound(err) {
+			t.Errorf("the failed list reported %v, want the 404", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no failed list was reported")
 	}
 }

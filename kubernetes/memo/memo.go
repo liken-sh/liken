@@ -149,3 +149,32 @@ func (m *Versions) ForgetGone(store KeyGetter, listed map[string]bool) {
 		delete(m.requests, key)
 	}
 }
+
+// Forget drops the record of one object. An operator that reads an
+// object by name from a store forgets it once the API server answers
+// 404, so the next read of the name answers from the store and sends
+// nothing.
+func (m *Versions) Forget(key string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.seen, key)
+	delete(m.requests, key)
+}
+
+// Noted reports whether the memo holds a record of the key at any
+// version, the empty one included. A store that holds a whole selection
+// and not the key answers that no such object exists, unless the memo
+// noted it: the operator created it a moment ago, or a request about it
+// failed.
+func (m *Versions) Noted(key string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, noted := m.seen[key]
+	return noted
+}
