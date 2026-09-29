@@ -1,7 +1,5 @@
 # The build needs the module files and the Go sources. Everything else
 # is documentation, manifests, or test fixtures.
-.git
-.github
 deploy
 docs
 testdata

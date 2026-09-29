@@ -1,7 +1,5 @@
 # The build needs the module files and the Go sources. Everything else
 # is documentation, manifests, or the site.
-.git
-.github
 deploy
 docs
 lab
