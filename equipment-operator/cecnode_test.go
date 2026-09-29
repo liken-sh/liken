@@ -139,6 +139,28 @@ func TestABusOfTheMachinesNameThatNamesAnotherMachineIsLeftAlone(t *testing.T) {
 	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
 }
 
+// A list can leave out a bus that exists: the pass reads each bus it
+// wrote from the API server, and the store can still lack a bus that a
+// person created a moment before. A bus of the machine's name that such
+// a list leaves out is left alone too, and not taken over as the
+// adapter's own.
+func TestABusOfTheMachinesNameThatAListMissedIsLeftAlone(t *testing.T) {
+	t.Parallel()
+	api := startCECAPI(t)
+	api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
+	_, device := usbAdapter(cecRoom())
+	node, err := newCECNode(api.client, "node-1", device)
+	mustSucceed(t, err)
+
+	chosen := node.choose(&CECBusList{})
+
+	if chosen != nil {
+		t.Errorf("chose %s", chosen.Metadata.Name)
+	}
+	bus, _ := api.bus("node-1")
+	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+}
+
 // A machine that a bus stops naming removes its entry from that bus.
 func TestAMachineThatLeavesABusRemovesItsEntry(t *testing.T) {
 	t.Parallel()

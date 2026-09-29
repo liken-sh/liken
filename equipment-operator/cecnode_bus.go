@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/liken-sh/equipment-operator/cec"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // pass finds this machine's bus and brings the adapter to its spec.
@@ -88,6 +90,26 @@ func (n *cecNode) passTelevisions(bus *CECBus) {
 	n.passTelevision(bus, television)
 }
 
+// busExists reads one CECBus from the API server, and answers whether
+// it exists. The list choose reads is not one snapshot: it reads each
+// bus this workload wrote from the API server, and the rest from the
+// store, which can still lack a bus a person created a moment before.
+// The apply that creates the adapter's own bus takes over any bus of
+// that name, so the one read before it goes to the API server. A read
+// that fails answers true, so the pass creates nothing, and the next
+// pass tries again.
+func (n *cecNode) busExists(name string) bool {
+	_, err := informer.ReadFresh[CECBus](n.client.Client, n.client.versions.cecBuses, name, cecBusPath(name))
+	if errors.Is(err, apiclient.ErrNotFound) {
+		return false
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading CECBus %s: %v\n", name, err)
+		n.retryLater()
+	}
+	return true
+}
+
 // choose answers the CECBus this machine's adapter belongs to. A
 // person's CECBus that names the machine wins, and the node workload
 // deletes the CECBus it discovered for the machine, as discovery.go
@@ -125,7 +147,7 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 	if len(discovered) > 0 {
 		return discovered[0]
 	}
-	if taken[n.machine] {
+	if taken[n.machine] || n.busExists(n.machine) {
 		fmt.Fprintf(os.Stderr, "a CECBus named %s exists and does not name machine %s, so the adapter makes no CECBus of its own\n", n.machine, n.machine)
 		return nil
 	}
