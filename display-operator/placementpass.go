@@ -110,14 +110,18 @@ type placementPass struct {
 	// nothing at all.
 	placed  map[int]placedSurface
 	ordered map[string][]int
-	// Unswept is true while a Display on this node can carry a
-	// compositor condition that no longer holds. A screen's report
-	// writes the condition only on the Displays of lit outputs, and
-	// dark writes it on every Display of this node, so a Display whose
-	// monitor is off the wire keeps what dark wrote until a sweep
-	// writes the answer again. A new process does not know what an
-	// earlier one wrote, so the flag starts true.
+	// Unswept is true while a Display on this node whose monitor is
+	// off the wire can carry a status that no longer holds. A screen's
+	// report writes only the Displays of lit outputs, so a Display
+	// keeps the windows it reported when its monitor left, and the
+	// compositor condition that dark wrote, until a sweep writes it
+	// again. A new process does not know what an earlier one wrote, so
+	// the flag starts true.
 	unswept bool
+	// Wired is the name of each Display whose monitor was on the wire
+	// at the last pass, sorted. A change in it is a monitor that left
+	// or came back, which is what sets unswept again.
+	wired []string
 	// Metrics counts the surfaces this pass places on each output. It
 	// is nil in every test that drives a pass with no listener behind
 	// it, and a nil metrics records nothing.
@@ -156,8 +160,8 @@ func newPlacementPass(client *apiclient.Client, node, socketPath string, link *l
 // nothing to read and nowhere to send in the meantime.
 //
 // The first pass that finds the compositor and the module serving, in
-// this process and after each dark pass, also sweeps: it writes the
-// compositor's answer on every Display of this node, because no
+// this process, after each dark pass, and after a monitor leaves or
+// comes back, also sweeps every Display of this node, because no
 // screen reports a Display whose monitor is off the wire.
 func (p *placementPass) pass() error {
 	live := p.compositor()
@@ -167,6 +171,10 @@ func (p *placementPass) pass() error {
 	state := p.link.state()
 	if !state.Serving {
 		return nil
+	}
+	outputs := p.outputs()
+	if wired := wiredDisplays(outputs); !slices.Equal(wired, p.wired) {
+		p.wired, p.unswept = wired, true
 	}
 	var failures []error
 	if p.unswept {
@@ -208,7 +216,6 @@ func (p *placementPass) pass() error {
 		}
 	}
 
-	outputs := p.outputs()
 	screens, unresolved := p.resolve(state, sockets, outputs)
 	failures = append(failures, unresolved...)
 	stated := false
@@ -263,7 +270,7 @@ func (p *placementPass) dark(live compositorLiveness) error {
 	// on a Display whose monitor is off the wire, so the first pass
 	// that finds it serving sweeps.
 	p.unswept = true
-	return p.settleEach(func(published DisplayStatus) DisplayStatus {
+	return p.settleEach(func(_ string, published DisplayStatus) DisplayStatus {
 		status := published
 		status.Surfaces = nil
 		status.Layout = nil
@@ -272,35 +279,62 @@ func (p *placementPass) dark(live compositorLiveness) error {
 	})
 }
 
-// sweep writes the compositor's answer on every Display of this node,
-// and nothing else. A screen's report covers a Display whose monitor
-// is on the wire, and this covers the rest: a monitor that left is
-// still on this node's card, and the condition reports the compositor
-// that serves that card. The write happens only on a Display whose
-// condition differs, so a sweep over current Displays writes nothing.
+// sweep writes the compositor's answer on every Display of this node.
+// A screen's report covers a Display whose monitor is on the wire, and
+// this covers the rest: a monitor that left is still on this node's
+// card, and the condition reports the compositor that serves that
+// card.
+//
+// A Display whose monitor is off the wire also loses its windows and
+// its arrangement. The compositor destroyed that output, and the
+// module hid each window that was on it, so no window is on that
+// screen and no region is drawn. A Display whose monitor is on the
+// wire keeps both, because its screen's report writes them, and a
+// screen the pass leaves as it is must keep what it shows.
+//
+// The write happens only on a Display whose status differs, so a
+// sweep over current Displays writes nothing.
 func (p *placementPass) sweep(live compositorLiveness) error {
-	return p.settleEach(func(published DisplayStatus) DisplayStatus {
+	return p.settleEach(func(name string, published DisplayStatus) DisplayStatus {
 		status := published
+		if _, wired := slices.BinarySearch(p.wired, name); !wired {
+			status.Surfaces = nil
+			status.Layout = nil
+		}
 		status.Conditions = setCondition(status.Conditions, p.serving(live))
 		return status
 	})
 }
 
+// wiredDisplays names the Display of each monitor on the wire, sorted,
+// the way the Display controller names it.
+func wiredDisplays(outputs []Output) []string {
+	var names []string
+	for _, output := range outputs {
+		if output.Connected {
+			names = append(names, monitorID(output.Monitor))
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
 // settleEach writes compose's status on every Display of this node.
 // A retry after a conflict composes again from the fresh copy, and
 // leaves a Display that another node took since.
-func (p *placementPass) settleEach(compose func(published DisplayStatus) DisplayStatus) error {
+func (p *placementPass) settleEach(compose func(name string, published DisplayStatus) DisplayStatus) error {
 	displays, err := p.displays.list()
 	if err != nil {
 		return err
-	}
-	ours := func(published DisplayStatus) (DisplayStatus, bool) {
-		return compose(published), published.Node == p.node
 	}
 	var failures []error
 	for _, display := range displays {
 		if display.Status.Node != p.node {
 			continue
+		}
+		name := display.Metadata.Name
+		ours := func(published DisplayStatus) (DisplayStatus, bool) {
+			return compose(name, published), published.Node == p.node
 		}
 		if err := p.displays.settleStatus(&display, ours); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 			failures = append(failures, fmt.Errorf("%s: %w", display.Metadata.Name, err))

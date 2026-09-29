@@ -97,3 +97,59 @@ func TestTheDisplaysAreListedOnlyUntilEachCarriesTheAnswer(t *testing.T) {
 		t.Errorf("a steady pass listed the Displays %d more times, want none", fixture.displayLists-lists)
 	}
 }
+
+// A monitor that leaves while the compositor serves takes its windows
+// off the screen with it: the compositor destroys the output, and the
+// module hides each window that was on it. The Display then reports no
+// windows and no arrangement, the same as a Display whose compositor
+// stopped.
+func TestADisplayWhoseMonitorLeftReportsNoSurfaces(t *testing.T) {
+	fixture := newPlacementFixture(t)
+	fixture.screen(labMonitor(), DisplaySpec{})
+	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("living-room", "film-0", nil)
+	fixture.surface(film, 1920, 1080)
+	fixture.run()
+	if status := fixture.status(labMonitor()); len(status.Surfaces) != 1 || status.Layout == nil {
+		t.Fatalf("the screen reports %+v and %+v while its monitor is on the wire", status.Surfaces, status.Layout)
+	}
+
+	fixture.darken("HDMI-A-1")
+	fixture.run()
+
+	status := fixture.status(labMonitor())
+	if status.Surfaces != nil {
+		t.Errorf("the screen reports %+v with no monitor on the wire", status.Surfaces)
+	}
+	if status.Layout != nil {
+		t.Errorf("the screen reports the layout %+v with no monitor on the wire", status.Layout)
+	}
+	if condition := servingCondition(fixture, labMonitor()); condition.Status != conditionTrue {
+		t.Errorf("%s is %s under a compositor that serves", CompositorServingCondition, condition.Status)
+	}
+}
+
+// The monitor that comes back is reported again from the pass that
+// finds it, and the pass after that lists nothing.
+func TestAMonitorThatReturnsIsReportedAgain(t *testing.T) {
+	fixture := newPlacementFixture(t)
+	fixture.screen(labMonitor(), DisplaySpec{})
+	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("living-room", "film-0", nil)
+	fixture.surface(film, 1920, 1080)
+	fixture.run()
+	fixture.darken("HDMI-A-1")
+	fixture.run()
+
+	fixture.light(livingRoomScreen())
+	fixture.run()
+
+	if status := fixture.status(labMonitor()); len(status.Surfaces) != 1 || status.Layout == nil {
+		t.Errorf("the screen reports %+v and %+v after its monitor returned", status.Surfaces, status.Layout)
+	}
+	lists := fixture.displayLists
+	fixture.run()
+	if fixture.displayLists != lists {
+		t.Errorf("a steady pass listed the Displays %d more times, want none", fixture.displayLists-lists)
+	}
+}
