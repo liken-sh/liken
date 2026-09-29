@@ -218,6 +218,11 @@ resource "linode_firewall" "redirects" {
 # setting interfaces_for_new_linodes sets it. The configuration
 # profile below needs the legacy kind, which gives the instance its
 # public interface with no interface resources.
+#
+# The watchdog (Linode's Lassie) boots the instance again after it
+# powers off. A reboot from inside the guest, such as the reboot
+# after each Flatcar update, reaches Linode as a power-off, so without
+# the watchdog the first update would leave the host down.
 
 resource "linode_instance" "redirects" {
   label                = "liken-sh-redirects"
@@ -225,6 +230,7 @@ resource "linode_instance" "redirects" {
   type                 = "g6-nanode-1"
   firewall_id          = linode_firewall.redirects.id
   interface_generation = "legacy_config"
+  watchdog_enabled     = true
 
   metadata {
     user_data = base64encode(data.ct_config.redirects.rendered)
