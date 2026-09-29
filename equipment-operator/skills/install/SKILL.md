@@ -54,7 +54,7 @@ release tag:
     kind: Kustomization
     namespace: liken-system
     resources:
-      - https://github.com/liken-sh/equipment-operator//deploy?ref=<ref>
+      - https://github.com/liken-sh/liken//equipment-operator/deploy?ref=<ref>
 
 ## Keep the pods off nodes with no CEC adapter
 

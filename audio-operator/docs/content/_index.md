@@ -62,5 +62,5 @@ audio as well, and each paired speaker publishes as an
 `audio.liken.sh` device beside the card's outputs. One PipeWire and
 one socket serve both.
 
-* [The repository](https://github.com/liken-sh/audio-operator)
+* [The source](https://github.com/liken-sh/liken/tree/main/audio-operator)
 * [The `liken` manual](https://liken.sh/docs/)

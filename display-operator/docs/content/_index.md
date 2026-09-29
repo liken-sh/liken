@@ -54,5 +54,5 @@ device for each connector. Its siblings publish
 with its screen through `monitor.liken.sh/id`, the identity both
 drivers read from the same monitor.
 
-* [The repository](https://github.com/liken-sh/display-operator)
+* [The source](https://github.com/liken-sh/liken/tree/main/display-operator)
 * [The `liken` manual](https://liken.sh/docs/)

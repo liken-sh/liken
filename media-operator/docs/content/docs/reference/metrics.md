@@ -36,7 +36,7 @@ carries a `PodMonitor` for each of these pods, beside the base.
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/media-operator//deploy?ref=<tag>
+  - https://github.com/liken-sh/liken//media-operator/deploy?ref=<tag>
 components:
-  - https://github.com/liken-sh/media-operator//deploy/monitoring?ref=<tag>
+  - https://github.com/liken-sh/liken//media-operator/deploy/monitoring?ref=<tag>
 ```

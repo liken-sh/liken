@@ -59,5 +59,5 @@ resources it already applies:
 
 ```yaml
 components:
-  - https://github.com/liken-sh/liken//monitoring?ref=2026.09.10-001
+  - https://github.com/liken-sh/liken//liken/monitoring?ref=2026.09.29-002
 ```

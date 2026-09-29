@@ -15,4 +15,5 @@ Equipment is anything a `Player` needs to reach the room and that
 describes the `Receiver` and the operator that drives it.
 
 Start with the [manual](docs/). The design and the plans are in the
-[repository](https://github.com/liken-sh/equipment-operator).
+[`equipment-operator` directory](https://github.com/liken-sh/liken/tree/main/equipment-operator) of the
+`liken` repository.

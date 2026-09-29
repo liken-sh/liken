@@ -4,9 +4,9 @@
 # prometheus-operator adds this component beside the base:
 #
 # resources:
-#   - https://github.com/liken-sh/display-operator//deploy?ref=<tag>
+#   - https://github.com/liken-sh/liken//display-operator/deploy?ref=<tag>
 # components:
-#   - https://github.com/liken-sh/display-operator//deploy/monitoring?ref=<tag>
+#   - https://github.com/liken-sh/liken//display-operator/deploy/monitoring?ref=<tag>
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

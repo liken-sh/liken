@@ -11,9 +11,9 @@ without one. A cluster owner who runs the prometheus-operator adds the
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/git-csi-driver//deploy?ref=<tag>
+  - https://github.com/liken-sh/liken//git-csi-driver/deploy?ref=<tag>
 components:
-  - https://github.com/liken-sh/git-csi-driver//deploy/monitoring?ref=<tag>
+  - https://github.com/liken-sh/liken//git-csi-driver/deploy/monitoring?ref=<tag>
 ```
 
 | Component | Metric | Type | Why |

@@ -10,5 +10,5 @@ libraries it catalogs. The guides give the steps. The reference
 describes each resource and its fields.
 
 The
-[design documents](https://github.com/liken-sh/library-operator/tree/main/plans)
+[design documents](https://github.com/liken-sh/liken/tree/main/library-operator/plans)
 say why the operator is built the way it is.

@@ -23,7 +23,7 @@ the base, which holds a `PodMonitor` for the port.
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/audio-operator//deploy?ref=<version>
+  - https://github.com/liken-sh/liken//audio-operator/deploy?ref=<version>
 components:
-  - https://github.com/liken-sh/audio-operator//deploy/monitoring?ref=<version>
+  - https://github.com/liken-sh/liken//audio-operator/deploy/monitoring?ref=<version>
 ```

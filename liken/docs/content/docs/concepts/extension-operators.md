@@ -50,13 +50,16 @@ for its devices:
 
 * [bluetooth.liken.sh](https://liken.sh/bluetooth/) publishes paired
   Bluetooth controllers. The source is
-  [liken-sh/bluetooth-operator](https://github.com/liken-sh/bluetooth-operator).
+  the [`bluetooth-operator` directory](https://github.com/liken-sh/liken/tree/main/bluetooth-operator)
+  of the `liken` repository.
 * [display.liken.sh](https://liken.sh/display/) publishes monitor
   outputs. The source is
-  [liken-sh/display-operator](https://github.com/liken-sh/display-operator).
+  the [`display-operator` directory](https://github.com/liken-sh/liken/tree/main/display-operator)
+  of the `liken` repository.
 * [audio.liken.sh](https://liken.sh/audio/) publishes audio outputs.
   The source is
-  [liken-sh/audio-operator](https://github.com/liken-sh/audio-operator).
+  the [`audio-operator` directory](https://github.com/liken-sh/liken/tree/main/audio-operator)
+  of the `liken` repository.
 
 ## The media operators
 
@@ -72,7 +75,8 @@ them only for the pods it runs. Its manual is
 [media.liken.sh](https://liken.sh/media/): the resources, the install,
 and the MQTT message bus its pods and your own programs share. The
 source is
-[liken-sh/media-operator](https://github.com/liken-sh/media-operator).
+the [`media-operator` directory](https://github.com/liken-sh/liken/tree/main/media-operator)
+of the `liken` repository.
 
 The library operator declares the media libraries of that cluster as
 Kubernetes resources: a root directory of movies or series on a
@@ -83,4 +87,5 @@ the `Player`'s own claim. The media
 operator never reads the library operator's resources. Its manual is
 [library.liken.sh](https://liken.sh/library/): the resources, the
 install, the scanners, and the browser. The source is
-[liken-sh/library-operator](https://github.com/liken-sh/library-operator).
+the [`library-operator` directory](https://github.com/liken-sh/liken/tree/main/library-operator)
+of the `liken` repository.

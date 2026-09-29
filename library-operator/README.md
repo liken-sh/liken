@@ -4,7 +4,7 @@
 Kubernetes resources, and puts a media browser for them on every
 screen. It runs on a
 [`liken`](https://github.com/liken-sh/liken) cluster above
-[`media-operator`](https://github.com/liken-sh/media-operator), which
+[`media-operator`](../media-operator/), which
 owns the players, the plays, and the remotes. This operator owns what
 there is to play.
 

@@ -95,10 +95,10 @@ node-local class such as `local-path` fits both.
 
 ## 2. Apply the manifests
 
-The install is the kustomize base in the repository's
+The install is the kustomize base in the operator's
 [`deploy/`](https://liken.sh/library/deploy/kustomization.yaml) directory. Take it into a
-kustomization of your own and pin `<tag>` to a release, so the install
-is the same every time it is applied:
+kustomization of your own and pin `<tag>` to the operator's version,
+so the install is the same every time it is applied:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
@@ -106,11 +106,15 @@ is the same every time it is applied:
     namespace: liken-system
 
     resources:
-      - https://github.com/liken-sh/library-operator//deploy?ref=<tag>
+      - https://github.com/liken-sh/liken//library-operator/deploy?ref=<tag>
 
     images:
       - name: ghcr.io/liken-sh/library-operator
         newTag: <tag>
+
+The operator's version is the release tag that last published it. The
+[GitHub release](https://github.com/liken-sh/liken/releases) for each
+tag lists every component and its version.
 
 The base creates the three `CustomResourceDefinitions`, a
 `ServiceAccount`, a `ClusterRole` with its binding, a `Role` with its
@@ -189,27 +193,32 @@ the listing shows its counts and its phase:
 
 ## Running a development build
 
-Every push to the operator's main branch publishes a development
-build. Its version is the most recent release plus a suffix:
+A push to `main` that changes the operator publishes a development
+build of it. Its version is the most recent release tag plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
-`2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds has the same version, and `:latest` still names the most
-recent release.
+`2026.09.03-007`, at commit `abcdef01`. Every image of the operator
+has the same version, and `:latest` still names the most recent
+release.
 
 A development build has no git tag, so the manifests pin to the
 commit's full sha, and the image pins to the version:
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/library-operator//deploy?ref=<full 40-character sha>
+  - https://github.com/liken-sh/liken//library-operator/deploy?ref=<full 40-character sha>
 images:
   - name: ghcr.io/liken-sh/library-operator
     newTag: 2026.09.03-007-dev-003-abcdef01
 ```
 
 A git fetch by sha needs all forty characters; the eight in the
-version are not enough. The CI run for that commit prints both lines
-in its summary.
+version are not enough. The summary of the CI run for that commit
+gives the version.
+
+The same build publishes the manifests as the OCI artifact
+`oci://ghcr.io/liken-sh/library-operator-deploy:<version>`, with each
+image of the operator set to that version. A Flux `OCIRepository`
+can pull that artifact by the version, with no sha.
 
 ## Remove the operator
 
@@ -221,7 +230,7 @@ removes its rows from the namespace's catalog. If the operator's
 
     kubectl -n media delete library movies
     kubectl -n media delete catalog media
-    kubectl delete -k https://github.com/liken-sh/library-operator//deploy?ref=<tag>
+    kubectl delete -k https://github.com/liken-sh/liken//library-operator/deploy?ref=<tag>
 
 Deleting the `Catalog` deletes the catalog pod and the claim the
 operator provisioned for it. Deleting the base deletes the

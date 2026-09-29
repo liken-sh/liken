@@ -152,8 +152,8 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/audio/deploy/rbac.yaml
       - https://liken.sh/audio/deploy/operator.yaml
 
-A clone works too: `kubectl apply -k deploy/` from the repository
-applies the same files through
+A clone works too: `kubectl apply -k audio-operator/deploy/` from the
+repository applies the same files through
 [`deploy/kustomization.yaml`](/deploy/kustomization.yaml).
 
 ## 4. Watch the operator find the outputs
@@ -297,27 +297,32 @@ Copy the `none` requirement into each term of your patch.
 
 ## Running a development build
 
-Every push to the operator's main branch publishes a development
-build. Its version is the most recent release plus a suffix:
+A push to `main` that changes the operator publishes a development
+build of it. Its version is the most recent release tag plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
-`2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds has the same version, and `:latest` still names the
-most recent release.
+`2026.09.03-007`, at commit `abcdef01`. Every image of the operator
+has the same version, and `:latest` still names the most recent
+release.
 
 A development build has no git tag, so the manifests pin to the
 commit's full sha, and the image pins to the version:
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/audio-operator//deploy?ref=<full 40-character sha>
+  - https://github.com/liken-sh/liken//audio-operator/deploy?ref=<full 40-character sha>
 images:
   - name: ghcr.io/liken-sh/audio-operator
     newTag: 2026.09.03-007-dev-003-abcdef01
 ```
 
 A git fetch by sha needs all forty characters; the eight in the
-version are not enough. The CI run for that commit prints both
-lines in its summary.
+version are not enough. The summary of the CI run for that commit
+gives the version.
+
+The same build publishes the manifests as the OCI artifact
+`oci://ghcr.io/liken-sh/audio-operator-deploy:<version>`, with each
+image of the operator set to that version. A Flux `OCIRepository`
+can pull that artifact by the version, with no sha.
 
 ## Remove the operator
 

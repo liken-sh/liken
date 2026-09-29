@@ -1,8 +1,8 @@
 # people-operator
 
 A `Person` names one person who uses a `liken` cluster. This
-repository is the definition of that resource, `people.liken.sh/v1alpha1`,
-and nothing more. No program runs.
+directory holds the definition of that resource,
+`people.liken.sh/v1alpha1`, and nothing more. No program runs.
 
 ```yaml
 apiVersion: people.liken.sh/v1alpha1
@@ -16,7 +16,7 @@ spec:
 
 Other operators refer to a `Person` by name and attach their own
 facts to it. The `Watch` in
-[`library-operator`](https://github.com/liken-sh/library-operator)
+[`library-operator`](../library-operator/)
 names the people who watch a series together, and a `Play` names the
 people who watched it, through owner references.
 

@@ -27,9 +27,9 @@ the base, which holds a `PodMonitor` for the port.
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/display-operator//deploy?ref=<version>
+  - https://github.com/liken-sh/liken//display-operator/deploy?ref=<version>
 components:
-  - https://github.com/liken-sh/display-operator//deploy/monitoring?ref=<version>
+  - https://github.com/liken-sh/liken//display-operator/deploy/monitoring?ref=<version>
 ```
 
 ## The card observation

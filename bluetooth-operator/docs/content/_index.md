@@ -45,6 +45,6 @@ Start with [Install the operator](/docs/guides/install/), then
 [Pair a controller and give it to a pod](/docs/guides/pair-a-controller/).
 [Devices](/docs/reference/devices/) describes the published devices, their
 attributes, and the claims that select them. The source is
-[liken-sh/bluetooth-operator](https://github.com/liken-sh/bluetooth-operator),
+[`bluetooth-operator` in liken-sh/liken](https://github.com/liken-sh/liken/tree/main/bluetooth-operator),
 and it is written to be read: the comments in the Go files and the
 manifests explain how the operator works.

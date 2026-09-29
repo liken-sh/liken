@@ -118,21 +118,24 @@ Or point your own GitOps at the same files with a `Kustomization`:
 
 The site serves the manifests of the current `main`, and the images
 in `operator.yaml` name `:latest`. To pin a release instead,
-reference the repository's `kustomize` base at a release tag. One tag
-versions the manifests and the three images together, so pin all four
-to the same version:
+reference the operator's `kustomize` base at the operator's version,
+which is the release tag that last published it. The
+[GitHub release](https://github.com/liken-sh/liken/releases) for each
+tag lists every component and its version. One tag versions the
+manifests and the three images together, so pin all four to the same
+version:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
     resources:
-      - https://github.com/liken-sh/bluetooth-operator//deploy?ref=2026.08.17-022
+      - https://github.com/liken-sh/liken//bluetooth-operator/deploy?ref=2026.09.29-002
     images:
       - name: ghcr.io/liken-sh/bluetooth-operator
-        newTag: 2026.08.17-022
+        newTag: 2026.09.29-002
       - name: ghcr.io/liken-sh/bluetoothd
-        newTag: 2026.08.17-022
+        newTag: 2026.09.29-002
       - name: ghcr.io/liken-sh/bluetooth-bondfetch
-        newTag: 2026.08.17-022
+        newTag: 2026.09.29-002
 
 Whichever path you take, the manifests contain:
 
@@ -213,18 +216,18 @@ Copy the `none` requirement into each term of your patch.
 
 ## Running a development build
 
-Every push to the operator's main branch publishes a development
-build. Its version is the most recent release plus a suffix:
+A push to `main` that changes the operator publishes a development
+build of it. Its version is the most recent release tag plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
-`2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds has the same version, and `:latest` still names the
-most recent release.
+`2026.09.03-007`, at commit `abcdef01`. Every image of the operator
+has the same version, and `:latest` still names the most recent
+release.
 
 A development build has no git tag, so the manifests pin to the
 commit's full sha, and the image pins to the version:
 
     resources:
-      - https://github.com/liken-sh/bluetooth-operator//deploy?ref=<full 40-character sha>
+      - https://github.com/liken-sh/liken//bluetooth-operator/deploy?ref=<full 40-character sha>
     images:
       - name: ghcr.io/liken-sh/bluetooth-operator
         newTag: 2026.09.03-007-dev-003-abcdef01
@@ -234,8 +237,13 @@ commit's full sha, and the image pins to the version:
         newTag: 2026.09.03-007-dev-003-abcdef01
 
 A git fetch by sha needs all forty characters; the eight in the
-version are not enough. The CI run for that commit prints both
-lines in its summary.
+version are not enough. The summary of the CI run for that commit
+gives the version.
+
+The same build publishes the manifests as the OCI artifact
+`oci://ghcr.io/liken-sh/bluetooth-operator-deploy:<version>`, with each
+image of the operator set to that version. A Flux `OCIRepository`
+can pull that artifact by the version, with no sha.
 
 ## How the pod finds the radio
 

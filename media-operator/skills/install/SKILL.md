@@ -73,33 +73,38 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/media/deploy/operator.yaml
       - https://liken.sh/media/deploy/bus.yaml
 
-A clone works too: `kubectl apply -k deploy/` from the repository
-applies the same files through
+A clone works too: `kubectl apply -k media-operator/deploy/` from the
+repository applies the same files through
 [`deploy/kustomization.yaml`](https://liken.sh/media/deploy/kustomization.yaml).
 
 ## Running a development build
 
-Every push to the operator's main branch publishes a development
-build. Its version is the most recent release plus a suffix:
+A push to `main` that changes the operator publishes a development
+build of it. Its version is the most recent release tag plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
-`2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds has the same version, and `:latest` still names the
-most recent release.
+`2026.09.03-007`, at commit `abcdef01`. Every image of the operator
+has the same version, and `:latest` still names the most recent
+release.
 
 A development build has no git tag, so the manifests pin to the
 commit's full sha, and the image pins to the version:
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/media-operator//deploy?ref=<full 40-character sha>
+  - https://github.com/liken-sh/liken//media-operator/deploy?ref=<full 40-character sha>
 images:
   - name: ghcr.io/liken-sh/media-operator
     newTag: 2026.09.03-007-dev-003-abcdef01
 ```
 
 A git fetch by sha needs all forty characters; the eight in the
-version are not enough. The CI run for that commit prints both
-lines in its summary.
+version are not enough. The summary of the CI run for that commit
+gives the version.
+
+The same build publishes the manifests as the OCI artifact
+`oci://ghcr.io/liken-sh/media-operator-deploy:<version>`, with each
+image of the operator set to that version. A Flux `OCIRepository`
+can pull that artifact by the version, with no sha.
 
 ## What the install runs
 
@@ -139,7 +144,7 @@ again as headroom.
 
 The values come from the `ConfigMap` `media-operator-resources`, which
 the base generates from
-[`deploy/container-resources.yaml`](https://github.com/liken-sh/media-operator/blob/main/deploy/container-resources.yaml).
+[`deploy/container-resources.yaml`](https://github.com/liken-sh/liken/blob/main/media-operator/deploy/container-resources.yaml).
 The operator reads it once at start. The generator adds a hash of the
 content to the `ConfigMap`'s name, so a changed value restarts the
 operator, and the pods it creates after that carry the new value. The
@@ -153,7 +158,7 @@ raises the player's memory limit for a machine that plays large films:
 
     # kustomization.yaml
     resources:
-      - https://github.com/liken-sh/media-operator//deploy?ref=<tag>
+      - https://github.com/liken-sh/liken//media-operator/deploy?ref=<tag>
     configMapGenerator:
       - name: media-operator-resources
         behavior: merge

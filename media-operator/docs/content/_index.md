@@ -64,5 +64,5 @@ display, and one claim per run for what a `Play` needs. A cluster that never ins
 this operator runs unchanged. Media library management is a separate
 concern, and this project does none of it.
 
-* [The repository](https://github.com/liken-sh/media-operator)
+* [The source](https://github.com/liken-sh/liken/tree/main/media-operator)
 * [The `liken` manual](https://liken.sh/docs/)

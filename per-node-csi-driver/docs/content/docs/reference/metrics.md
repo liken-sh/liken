@@ -14,9 +14,9 @@ cluster owner who runs the prometheus-operator adds the
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/per-node-csi-driver//deploy?ref=<tag>
+  - https://github.com/liken-sh/liken//per-node-csi-driver/deploy?ref=<tag>
 components:
-  - https://github.com/liken-sh/per-node-csi-driver//deploy/monitoring?ref=<tag>
+  - https://github.com/liken-sh/liken//per-node-csi-driver/deploy/monitoring?ref=<tag>
 ```
 
 ## The metrics

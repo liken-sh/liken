@@ -19,7 +19,7 @@ Prometheus at all; an owner who runs the prometheus-operator adds the
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/equipment-operator//deploy?ref=<version>
+  - https://github.com/liken-sh/liken//equipment-operator/deploy?ref=<version>
 components:
-  - https://github.com/liken-sh/equipment-operator//deploy/monitoring?ref=<version>
+  - https://github.com/liken-sh/liken//equipment-operator/deploy/monitoring?ref=<version>
 ```

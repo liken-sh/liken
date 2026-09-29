@@ -26,4 +26,5 @@ no class, and in its inline form it needs only the `csi` block in a pod
 spec.
 
 Start with the [manual](docs/). The design and the plans are in the
-[repository](https://github.com/liken-sh/git-csi-driver).
+[`git-csi-driver` directory](https://github.com/liken-sh/liken/tree/main/git-csi-driver) of the
+`liken` repository.

@@ -13,4 +13,5 @@ watch a series together, and a `Play` names the people who watched
 it. This site describes the `Person` alone.
 
 Start with the [manual](docs/). The design and the plans are in the
-[repository](https://github.com/liken-sh/people-operator).
+[`people-operator` directory](https://github.com/liken-sh/liken/tree/main/people-operator) of the
+`liken` repository.

@@ -33,11 +33,11 @@ cluster policy, yours to create, and the install guide gives its
 YAML.
 
 This manual is small on purpose. The
-[repository](https://github.com/liken-sh/bluetooth-operator) is
+[source](https://github.com/liken-sh/liken/tree/main/bluetooth-operator) is
 written to be read: the Go files and the manifests have comments
 that explain how the operator works. The manual tells you how to
 operate it; the
-[design documents](https://github.com/liken-sh/bluetooth-operator/tree/main/plans)
+[design documents](https://github.com/liken-sh/liken/tree/main/bluetooth-operator/plans)
 say why it is built the way it is.
 
 Every page of this site is also available as Markdown. Add `index.md`

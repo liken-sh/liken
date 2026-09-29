@@ -39,7 +39,7 @@ and they carry no worker.
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/library-operator//deploy?ref=<ref>
+  - https://github.com/liken-sh/liken//library-operator/deploy?ref=<ref>
 components:
-  - https://github.com/liken-sh/library-operator//deploy/monitoring?ref=<ref>
+  - https://github.com/liken-sh/liken//library-operator/deploy/monitoring?ref=<ref>
 ```

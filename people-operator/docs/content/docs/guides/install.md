@@ -5,20 +5,19 @@ description: "Install the Person resource definition from people-operator's kust
 ---
 
 Install the resource definition from the kustomize base in the
-repository's `deploy/` directory. You need `kubectl` with
+operator's `deploy/` directory. You need `kubectl` with
 cluster-admin rights. A `Person` is cluster-scoped, so the base sets
 no namespace.
 
 Add the base to your own kustomization and pin `<ref>` to a release
-tag. Until the first release, pin the full commit sha instead. A
-pinned ref installs the same definition every time you apply it.
+tag. A pinned ref installs the same definition every time you apply it.
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - https://github.com/liken-sh/people-operator//deploy?ref=<ref>
+  - https://github.com/liken-sh/liken//people-operator/deploy?ref=<ref>
 ```
 
 Then declare each person. The object's name is the name every other

@@ -23,7 +23,7 @@ component beside the base to scrape it.
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/bluetooth-operator//deploy?ref=<ref>
+  - https://github.com/liken-sh/liken//bluetooth-operator/deploy?ref=<ref>
 components:
-  - https://github.com/liken-sh/bluetooth-operator//deploy/monitoring?ref=<ref>
+  - https://github.com/liken-sh/liken//bluetooth-operator/deploy/monitoring?ref=<ref>
 ```

@@ -280,7 +280,7 @@ and keep playing through it.
 **A second claim on the same output parks.** Every device this
 operator publishes is exclusive, so the second pod waits `Pending`
 until the first releases the output.
-[Every published sink is exclusive, though PipeWire can share one](https://github.com/liken-sh/audio-operator/blob/main/plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md)
+[Every published sink is exclusive, though PipeWire can share one](https://github.com/liken-sh/liken/blob/main/audio-operator/plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md)
 records that decision.
 
 To put sound and picture on one monitor, continue with

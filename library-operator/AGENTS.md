@@ -4,7 +4,7 @@ This directory holds the media library layer of a
 [`liken`](https://liken.sh/) cluster. It
 declares libraries as Kubernetes resources, keeps a catalog of what they
 hold, and puts a media browser on the screens that
-[`media-operator`](https://github.com/liken-sh/media-operator) plays to.
+[`media-operator`](../media-operator/) plays to.
 The documents, the manifests, and the source files are the
 documentation, and the comments teach how the system works.
 

@@ -42,5 +42,5 @@ unchanged, and a `Player` whose idle controller never names it draws
 screen it draws claims the display through the `Player`'s standing
 claim, which the [display operator](https://liken.sh/display/) serves.
 
-* [The repository](https://github.com/liken-sh/library-operator)
+* [The source](https://github.com/liken-sh/liken/tree/main/library-operator)
 * [The `liken` manual](https://liken.sh/docs/)

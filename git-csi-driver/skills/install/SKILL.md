@@ -5,13 +5,14 @@ description: "Install git-csi-driver from its kustomize base and set the plugin'
 
 This skill is the guide at https://liken.sh/git/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-Install the driver from the kustomize base in the repository's
-`deploy/` directory. You need a cluster with standard CSI plumbing,
-`kubectl` with cluster-admin rights, and the `liken-system` namespace.
+Install the driver from the kustomize base in the driver's `deploy/`
+directory. You need a cluster with standard CSI plumbing, `kubectl`
+with cluster-admin rights, and the `liken-system` namespace.
 
-Add the base to your own kustomization and pin `<tag>` to a release,
-so the install is the same every time you apply it. The base creates
-the `CSIDriver` object, the `ServiceAccount`s and their roles, the
+Add the base to your own kustomization and pin `<tag>` to the
+driver's version, so the install is the same every time you apply it.
+The base creates the `CSIDriver` object,
+the `ServiceAccount`s and their roles, the
 `DaemonSet` that runs the node plugin beside the kubelet's registrar,
 and the `Deployment` that runs the controller plugin beside the
 `external-resizer`. The `external-resizer` sends a claim's class
@@ -24,12 +25,16 @@ kind: Kustomization
 namespace: liken-system
 
 resources:
-  - https://github.com/liken-sh/git-csi-driver//deploy?ref=<tag>
+  - https://github.com/liken-sh/liken//git-csi-driver/deploy?ref=<tag>
 
 images:
   - name: ghcr.io/liken-sh/git-csi-driver
     newTag: <tag>
 ```
+
+The driver's version is the release tag that last published it. The
+[GitHub release](https://github.com/liken-sh/liken/releases) for each
+tag lists every component and its version.
 
 Check that every node lists `git.liken.sh` among its drivers. A node
 appears there after the registrar tells its kubelet about the plugin

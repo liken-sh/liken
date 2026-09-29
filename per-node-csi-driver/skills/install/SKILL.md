@@ -5,13 +5,14 @@ description: "Install per-node-csi-driver from its kustomize base with the per-n
 
 This skill is the guide at https://liken.sh/per-node/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-Install the driver from the kustomize base in the repository's
-`deploy/` directory. You need a cluster with standard CSI plumbing,
-`kubectl` with cluster-admin rights, and the `liken-system` namespace.
+Install the driver from the kustomize base in the driver's `deploy/`
+directory. You need a cluster with standard CSI plumbing, `kubectl`
+with cluster-admin rights, and the `liken-system` namespace.
 
-Add the base to your own kustomization and pin `<tag>` to a release,
-so the install is the same every time you apply it. The base creates
-the `CSIDriver` object, the `StorageClass` named `per-node`, the
+Add the base to your own kustomization and pin `<tag>` to the
+driver's version, so the install is the same every time you apply it.
+The base creates the `CSIDriver` object,
+the `StorageClass` named `per-node`, the
 `ServiceAccount` and its role, and the `DaemonSet` that runs the node
 plugin beside the kubelet's registrar on every node. There is no
 controller `Deployment`, because the driver provisions nothing.
@@ -23,12 +24,16 @@ kind: Kustomization
 namespace: liken-system
 
 resources:
-  - https://github.com/liken-sh/per-node-csi-driver//deploy?ref=<tag>
+  - https://github.com/liken-sh/liken//per-node-csi-driver/deploy?ref=<tag>
 
 images:
   - name: ghcr.io/liken-sh/per-node-csi-driver
     newTag: <tag>
 ```
+
+The driver's version is the release tag that last published it. The
+[GitHub release](https://github.com/liken-sh/liken/releases) for each
+tag lists every component and its version.
 
 Check that every node lists `per-node.liken.sh` among its drivers. A
 node appears there after the registrar tells its kubelet about the

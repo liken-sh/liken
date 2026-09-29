@@ -26,4 +26,5 @@ controller. A `PersistentVolume` names the driver and the handle, and a
 `PersistentVolumeClaim` binds to it.
 
 Start with the [manual](docs/). The design and the plans are in the
-[repository](https://github.com/liken-sh/per-node-csi-driver).
+[`per-node-csi-driver` directory](https://github.com/liken-sh/liken/tree/main/per-node-csi-driver) of the
+`liken` repository.
