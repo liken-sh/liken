@@ -128,11 +128,14 @@ kind: ClusterRole
 metadata:
   name: equipment-operator-cec
 rules:
-  # The watch wakes the pod when a person edits a CECBus. patch and
-  # create are for the CECBus the pod makes in Listen for an adapter no
-  # CECBus names, and delete removes that CECBus when a person's
-  # CECBus names the same machine. The pod deletes only a CECBus that
-  # carries the discovered label and names its own machine.
+  # The watch wakes the pod when a person edits a CECBus. create is for
+  # the CECBus the pod makes in Listen for an adapter no CECBus names,
+  # which it sends as a POST, so a CECBus a person made under the same
+  # name stays the person's. patch is for a pod of the previous
+  # release, which applied that CECBus, while a rollout runs both
+  # releases. delete removes that CECBus when a person's CECBus names
+  # the same machine. The pod deletes only a CECBus that carries the
+  # discovered label and names its own machine.
   - apiGroups: [equipment.liken.sh]
     resources: [cecbuses]
     verbs: [get, list, watch, patch, create, delete]
