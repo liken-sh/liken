@@ -213,8 +213,8 @@ func TestA429IsSentAgainAfterTheWaitItAsksFor(t *testing.T) {
 			if c.wantErr != (err != nil) || (err == nil && out.Metadata.Name != "studio") {
 				t.Errorf("err = %v, name %q; want an error: %v", err, out.Metadata.Name, c.wantErr)
 			}
-			if err != nil && !strings.Contains(err.Error(), "429") {
-				t.Errorf("err = %v, want the 429", err)
+			if err != nil && (!strings.Contains(err.Error(), "429") || !errors.Is(err, ErrThrottled)) {
+				t.Errorf("err = %v, want the 429 as ErrThrottled", err)
 			}
 			if got := c.server.requests.Load(); got != c.wantRequests {
 				t.Errorf("the client sent %d requests, want %d", got, c.wantRequests)
@@ -476,5 +476,33 @@ func TestTheWaitAfterA429EndsWithTheContext(t *testing.T) {
 	}
 	if server.requests.Load() != 1 {
 		t.Errorf("the client sent %d requests, want 1", server.requests.Load())
+	}
+}
+
+// A client with a wait context ends only its wait after a 429 when the
+// context ends. A request already sent runs to its end, so a writer
+// that must know whether its write landed, such as an operator that
+// releases a Lease after its last write, still learns the answer.
+func TestAWaitContextEndsTheWaitAndNotTheRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	release := make(chan struct{})
+	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-release
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	time.AfterFunc(20*time.Millisecond, func() { close(release) })
+
+	if err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil); err != nil {
+		t.Errorf("err = %v, want the answer of the request that was sent", err)
+	}
+
+	throttled := &throttling{refusals: 100, retryAfter: "4"}
+	client, _ = testClient(t, throttled)
+	client.throttleUnit = time.Hour
+	began := time.Now()
+	err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
+	if !errors.Is(err, ErrThrottled) || time.Since(began) > 5*time.Second || throttled.requests.Load() != 1 {
+		t.Errorf("err = %v after %s and %d requests, want the 429 at once", err, time.Since(began), throttled.requests.Load())
 	}
 }

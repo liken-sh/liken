@@ -47,6 +47,12 @@ var (
 	ErrConflict = errors.New("conflict: something else wrote this object first")
 )
 
+// ErrThrottled is a 429 that lasted longer than the client waits for it
+// (maxThrottleWait), or past the end of the client's context. A caller
+// that must not give up, such as an operator's first read at start,
+// asks again until its own context ends.
+var ErrThrottled = errors.New("throttled: the API server asked the client to wait")
+
 // Stale reports whether a write failed because the copy it was made
 // from is not the API server's copy: another writer changed the
 // object, or deleted it.
@@ -67,6 +73,10 @@ type Client struct {
 	// ctx is the context every request carries (WithContext). Nil means
 	// no context ends a request.
 	ctx context.Context
+
+	// waits is the context that ends the wait after a 429
+	// (WithWaitContext). Nil means ctx ends it.
+	waits context.Context
 }
 
 // New builds a client from its three parts. InCluster reads them from
@@ -135,8 +145,29 @@ func InCluster(options InClusterOptions) (*Client, error) {
 // answers shares the connections of c.
 func (c *Client) WithContext(ctx context.Context) *Client {
 	bound := *c
-	bound.ctx = ctx
+	bound.ctx, bound.waits = ctx, nil
 	return &bound
+}
+
+// WithWaitContext answers a client whose wait after a 429 ends when ctx
+// ends, and which then answers the 429. A request already sent runs to
+// its end. A request that the client cut off may still land on the API
+// server, so a writer that must know whether its write landed uses this
+// in place of WithContext: an operator that releases its Lease after
+// its last write waits for each write in flight, and not for the API
+// server's advice to wait.
+func (c *Client) WithWaitContext(ctx context.Context) *Client {
+	bound := *c
+	bound.waits = ctx
+	return &bound
+}
+
+// waitContext answers the context that ends the wait after a 429.
+func (c *Client) waitContext() context.Context {
+	if c.waits != nil {
+		return c.waits
+	}
+	return c.context()
 }
 
 // context answers the context of each request.
@@ -172,7 +203,7 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 		}
 		timer := time.NewTimer(throttled.wait)
 		select {
-		case <-c.context().Done():
+		case <-c.waitContext().Done():
 			timer.Stop()
 			return err
 		case <-timer.C:
@@ -190,7 +221,8 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 // server that answers 429 for longer is overloaded, and the caller's
 // own retry, which waits longer, handles it.
 //
-// The wait ends when the context of a client from WithContext ends.
+// The wait ends when the context of a client from WithContext or
+// WithWaitContext ends.
 // Otherwise the limit bounds it: a request holds its caller for at most
 // ten seconds of waits, plus the request timeout of each send. A caller
 // that holds a lock across the request, such as memo.Versions.Send,
@@ -266,6 +298,9 @@ type throttledError struct {
 }
 
 func (e *throttledError) Error() string { return e.err.Error() }
+
+// Is makes a throttledError match ErrThrottled.
+func (e *throttledError) Is(target error) bool { return target == ErrThrottled }
 
 // retryAfter reads how long a 429 asks the client to wait: the
 // Retry-After header, or the retryAfterSeconds of the Status body, or
