@@ -56,6 +56,16 @@ type collectionServer struct {
 	mu          sync.Mutex
 	collections map[string]*servedCollection
 	requests    []string
+	// objectReadCount counts the requests for one object, which no
+	// collection path takes.
+	objectReadCount int
+}
+
+// objectReads answers how many requests for one object the server took.
+func (s *collectionServer) objectReads() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.objectReadCount
 }
 
 func newCollectionServer() *collectionServer {
@@ -174,6 +184,7 @@ func (s *collectionServer) handler() http.Handler {
 func (s *collectionServer) serveObject(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.objectReadCount++
 	for path, collection := range s.collections {
 		if collection.status != 0 {
 			continue

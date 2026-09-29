@@ -39,10 +39,13 @@ import (
 // objectSource is what the view reads of one collection: every object,
 // and one object by its key, namespace/name or name. A watch's store
 // answers both while it is ready, and the API server answers them
-// otherwise (watchedsource.go).
+// otherwise (watchedsource.go). Stored answers one object from the
+// store alone, whatever the watch's state, for a reader that must send
+// no request.
 type objectSource interface {
 	List() ([]any, error)
 	GetByKey(key string) (item any, exists bool, err error)
+	Stored(key string) (item any, exists bool)
 }
 
 // clusterView holds one source per collection a pass reads.
@@ -141,6 +144,21 @@ func (v *clusterView) MediaPreferences(name string) (*MediaPreferences, error) {
 
 func (v *clusterView) Pod(namespace, name string) (*Pod, error) {
 	return oneOf[Pod](v.pods, namespacedKey(namespace, name))
+}
+
+// StoredPod answers one pod from the pod store alone, and nil for a pod
+// the store does not hold or that does not convert. It sends no
+// request, even while the API server forbids the pod watch.
+func (v *clusterView) StoredPod(namespace, name string) *Pod {
+	item, held := v.pods.Stored(namespacedKey(namespace, name))
+	if !held {
+		return nil
+	}
+	pod, err := informer.Convert[Pod](item)
+	if err != nil {
+		return nil
+	}
+	return &pod
 }
 
 func (v *clusterView) ResourceClaim(namespace, name string) (*ResourceClaim, error) {

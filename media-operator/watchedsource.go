@@ -80,6 +80,15 @@ func (s watchedSource) GetByKey(key string) (any, bool, error) {
 	return &unstructured.Unstructured{Object: fields}, true, nil
 }
 
+// Stored answers one object from the watch's store alone.
+func (s watchedSource) Stored(key string) (any, bool) {
+	if s.view.Store == nil {
+		return nil, false
+	}
+	item, held, err := s.view.Store.GetByKey(key)
+	return item, held && err == nil
+}
+
 // collectionPath is the path that lists a collection in every
 // namespace, or a cluster-scoped collection.
 func collectionPath(resource schema.GroupVersionResource) string {

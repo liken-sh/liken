@@ -139,16 +139,17 @@ func (r *reports) keeping(namespace, name, pod string) {
 // before the watches have read the cluster, so until this call the desk
 // knows only the pods it recorded, and the mutex hands the store to the
 // bus reader's goroutine.
+//
+// The desk reads the store alone, even while the API server forbids the
+// pod watch. It reads a pod for each report, about one a second for each
+// playing run, under its mutex, so a read of the API server would cost a
+// request for each report and could hold the mutex through a 429. The
+// desk already takes a store that lags behind the API server
+// (runpod.go).
 func (r *reports) readPodsFrom(view *clusterView) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	r.pods.lookup = func(namespace, name string) *Pod {
-		pod, err := view.Pod(namespace, name)
-		if err != nil {
-			return nil
-		}
-		return pod
-	}
+	r.pods.lookup = view.StoredPod
 }
 
 // observe records the run's pod as the pass reads it from the pod store,

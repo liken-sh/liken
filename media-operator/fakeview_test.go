@@ -73,6 +73,11 @@ func (s fakeStore[T]) ListKeys() []string {
 	return keys
 }
 
+func (s fakeSource[T]) Stored(key string) (any, bool) {
+	item, held, _ := s.GetByKey(key)
+	return item, held
+}
+
 func (s fakeSource[T]) GetByKey(key string) (any, bool, error) {
 	namespace, name, namespaced := strings.Cut(key, "/")
 	if !namespaced {
