@@ -29,25 +29,37 @@ var templates = template.Must(template.New("").
 		"join":  strings.Join,
 		"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 		"goCache": func(mod, sum, family string, build bool) goCache {
-			return goCache{Mod: mod, Keys: []string{sum}, Family: family, Build: build}
+			return goCache{Mod: mod, Keys: []string{sum}, Family: family, Build: build, SavesModules: !build}
 		},
 	}).
 	ParseFS(templateFiles, "templates/*.tmpl"))
 
 // goCache is the data of the go-restore and go-save templates: the
 // go.mod that names the Go version, the files whose hash keys the
-// cache, the family whose entries a restore falls back to, and whether
-// the cache holds the build cache too.
+// cache, with `go.sum` first, and the family whose entries a restore
+// falls back to. Build is true when the job keeps a build cache of its
+// own, beside the modules. SavesModules is true when the job saves the
+// family's modules entry.
 type goCache struct {
-	Mod, Family string
-	Keys        []string
-	Build       bool
+	Mod, Family         string
+	Keys                []string
+	Build, SavesModules bool
 }
 
 // HashFiles is the GitHub expression that hashes the key files.
 func (g goCache) HashFiles() string {
-	quoted := make([]string, len(g.Keys))
-	for i, file := range g.Keys {
+	return hashFiles(g.Keys)
+}
+
+// SumHashFiles is the GitHub expression that hashes `go.sum` alone, the
+// key of the modules entry.
+func (g goCache) SumHashFiles() string {
+	return hashFiles(g.Keys[:1])
+}
+
+func hashFiles(files []string) string {
+	quoted := make([]string, len(files))
+	for i, file := range files {
 		quoted[i] = "'" + file + "'"
 	}
 	return "hashFiles(" + strings.Join(quoted, ", ") + ")"
@@ -273,36 +285,46 @@ func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 	return false, nil
 }
 
-// jobCache is the Go cache of one job. Every manual reads the same
-// modules, so the hugo jobs share one entry of modules, keyed on go.sum.
+// jobCache is the Go cache of one job. The repository's Actions cache
+// holds 10 GB, and GitHub evicts the oldest entries when the caches
+// pass that limit, so the downloaded modules are stored once for each
+// module and each `go.sum`, not once for each job and each commit.
 //
-// Any other job keeps a build cache of its own, whose key ends in the
-// commit. The build cache holds Go's test results and the compiled
-// packages of the job's own module, and most commits change both, so
-// each push to main saves a new entry and every run restores the
-// newest one. A key without the commit would save one entry when its
-// files last changed, and each later run would compile the module's
-// packages again and run the tests of every package. The cost is one
-// entry for each job on each push to main, and GitHub evicts the
-// oldest entries when the repository's caches pass 10 GB.
+// Every manual reads the same modules, so the hugo jobs share one
+// modules entry, keyed on `go.sum`, and each hugo job saves it when the
+// key misses. Any other job restores the modules entry of its own
+// module, and only the `go` job saves it: that job runs the module's
+// tests, so it reads every module that the other jobs of the module
+// read.
 //
-// Before the commit, the key holds the hash of go.sum and of the files
-// that choose what the job compiles and with which flags: the Makefile
-// where the job runs, the component's package.toml, which holds the
-// job's command, and its hooks, which a prek job runs. A restore takes the
-// newest entry with the same hash first, so a run starts from a build
-// made with the same flags when one exists.
+// Any job other than a hugo job also keeps a build cache of its own,
+// whose key ends in the commit. The build cache holds Go's test results
+// and the compiled packages of the job's own module, and most commits
+// change both, so each push to main saves a new entry and every run
+// restores the newest one. A key without the commit would save one
+// entry when its files last changed, and each later run would compile
+// the module's packages again and run the tests of every package. The
+// cost is one entry of compiled output for each job on each push to
+// main.
+//
+// Before the commit, the build cache's key holds the hash of go.sum
+// and of the files that choose what the job compiles and with which
+// flags: the Makefile where the job runs, the component's package.toml,
+// which holds the job's command, and its hooks, which a prek job runs.
+// A restore takes the newest entry with the same hash first, so a run
+// starts from a build made with the same flags when one exists.
 func jobCache(c *Component, d jobData) goCache {
 	sum := path.Join(d.ModuleDir, "go.sum")
 	if d.Toolchain == "hugo" {
-		return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Keys: []string{sum}, Family: "manuals"}
+		return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Keys: []string{sum}, Family: "manuals", SavesModules: true}
 	}
-	return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Family: d.ModuleDir, Build: true, Keys: []string{
-		sum,
-		path.Join(d.WorkDir, "Makefile"),
-		path.Join(c.Dir, "package.toml"),
-		path.Join(c.Dir, ".pre-commit-config.yaml"),
-	}}
+	return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Family: d.ModuleDir, Build: true,
+		SavesModules: d.Toolchain == "go", Keys: []string{
+			sum,
+			path.Join(d.WorkDir, "Makefile"),
+			path.Join(c.Dir, "package.toml"),
+			path.Join(c.Dir, ".pre-commit-config.yaml"),
+		}}
 }
 
 // WriteWorkflows writes the generated workflows under root, and

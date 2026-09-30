@@ -1,15 +1,52 @@
+{% define "go-module-paths" %}
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash{% end %}
 {% define "go-restore" %}
       - id: setup-go
         uses: actions/setup-go@v6
         with:
           go-version-file: {% .Mod %}
           cache: false
-{% if .Build %}
-      # Every run restores the Go cache, and only a push to main saves
-      # it, so a branch never writes an entry that pushes one of main's
-      # out of the repository's 10 GB. The cache holds the Go modules
-      # and the build cache.
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #{% if .Build %}
+      # The downloaded modules are one entry for each Go module, which
+      # every job of the module restores. The key follows the hash of
+      # `go.sum` alone, so the entry changes only when `go.sum` changes,
+      # and a push to main that does not change `go.sum` saves no
+      # modules.{% if .SavesModules %}
+      # This job saves the entry: it runs the module's tests, so it
+      # reads every module that another job of the module reads. A job
+      # that reads fewer modules would save an entry without the rest,
+      # and this job would download them again on each run until
+      # `go.sum` changes.{% else %} The
+      # module's `go` job saves the entry, because it runs the module's
+      # tests and reads every module that this job reads.{% end %}{% else %}
+      # The downloaded modules are one entry for the family `{% .Family %}`,
+      # saved when the key misses. The key follows the hash of
+      # `{% index .Keys 0 %}`.{% end %}
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same {% if .Build %}module{% else %}family{% end %}, which
+      # holds most of the modules that the job needs.
       #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |{% template "go-module-paths" %}
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ {% .SumHashFiles %} }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-{% if .Build %}
+
       # The build cache holds Go's test results and the compiled
       # packages of the job's own module, and most commits change both.
       # So the key ends in the commit: each push to main saves a new
@@ -18,8 +55,8 @@
       # entry would keep the test results and packages of that commit,
       # and each run would compile the module's packages again and run
       # the tests of every package. The cost is one entry for each job
-      # on each push to main, and GitHub evicts the oldest entries when
-      # the repository's caches pass 10 GB.
+      # on each push to main. The modules are not in this entry, so
+      # each of these entries holds only compiled output.
       #
       # Before the commit, the key holds the hash of these files:
       #{% range .Keys %}
@@ -34,45 +71,31 @@
       # job has entries of its own: a job that builds less would save
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
-      - id: go-cache
+      - id: go-build
         uses: actions/cache/restore@v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
+          path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ github.job }}-${{ {% .HashFiles %} }}-${{ github.sha }}
           restore-keys: |
             go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ github.job }}-${{ {% .HashFiles %} }}-
-            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ github.job }}-{% else %}
-      # Every run restores the Go modules, and only a push to main saves
-      # them, when the key missed, so a branch never writes an entry
-      # that pushes one of main's out of the repository's 10 GB. The key
-      # follows the hash of {% range .Keys %}`{% . %}`{% end %}. When no entry has that
-      # key, as on a branch that changes it, the restore takes the newest
-      # entry of the same family, which holds most of the modules that
-      # the job needs.
-      - id: go-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/go/pkg/mod
-          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ {% .HashFiles %} }}
-          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-{% end %}{% end %}
-{% define "go-save" %}
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ github.job }}-{% end %}{% end %}
+{% define "go-save" %}{% if .SavesModules %}
 
-      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
-          path: |
-            ~/go/pkg/mod{% if .Build %}
-            ~/.cache/go-build{% end %}
-          key: ${{ steps.go-cache.outputs.cache-primary-key }}{% end %}
+          path: |{% template "go-module-paths" %}
+          key: ${{ steps.go-modules.outputs.cache-primary-key }}{% end %}{% if .Build %}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.go-build.outputs.cache-primary-key }}{% end %}{% end %}
 {% define "os-go-save" %}
 
-      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-cache-hit != 'true' }}
+      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ steps.build-setup.outputs.go-cache-key }}{% end %}
+          path: ~/.cache/go-build
+          key: ${{ steps.build-setup.outputs.go-build-key }}{% end %}

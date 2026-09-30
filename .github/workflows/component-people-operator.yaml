@@ -68,11 +68,42 @@ jobs:
           go-version-file: people-operator/go.mod
           cache: false
 
-      # Every run restores the Go cache, and only a push to main saves
-      # it, so a branch never writes an entry that pushes one of main's
-      # out of the repository's 10 GB. The cache holds the Go modules
-      # and the build cache.
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
       #
+      # The downloaded modules are one entry for each Go module, which
+      # every job of the module restores. The key follows the hash of
+      # `go.sum` alone, so the entry changes only when `go.sum` changes,
+      # and a push to main that does not change `go.sum` saves no
+      # modules.
+      # This job saves the entry: it runs the module's tests, so it
+      # reads every module that another job of the module reads. A job
+      # that reads fewer modules would save an entry without the rest,
+      # and this job would download them again on each run until
+      # `go.sum` changes.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same module, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ hashFiles('people-operator/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-
+
       # The build cache holds Go's test results and the compiled
       # packages of the job's own module, and most commits change both.
       # So the key ends in the commit: each push to main saves a new
@@ -81,8 +112,8 @@ jobs:
       # entry would keep the test results and packages of that commit,
       # and each run would compile the module's packages again and run
       # the tests of every package. The cost is one entry for each job
-      # on each push to main, and GitHub evicts the oldest entries when
-      # the repository's caches pass 10 GB.
+      # on each push to main. The modules are not in this entry, so
+      # each of these entries holds only compiled output.
       #
       # Before the commit, the key holds the hash of these files:
       #
@@ -100,12 +131,10 @@ jobs:
       # job has entries of its own: a job that builds less would save
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
-      - id: go-cache
+      - id: go-build
         uses: actions/cache/restore@v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
+          path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-${{ hashFiles('people-operator/go.sum', 'people-operator/Makefile', 'people-operator/package.toml', 'people-operator/.pre-commit-config.yaml') }}-${{ github.sha }}
           restore-keys: |
             go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-${{ hashFiles('people-operator/go.sum', 'people-operator/Makefile', 'people-operator/package.toml', 'people-operator/.pre-commit-config.yaml') }}-
@@ -113,13 +142,21 @@ jobs:
 
       - run: make test-go
 
-      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: ${{ steps.go-modules.outputs.cache-primary-key }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.go-build.outputs.cache-primary-key }}
 
       # The site renders the coverage report from these files.
       - uses: actions/upload-artifact@v7
@@ -146,18 +183,32 @@ jobs:
           go-version-file: people-operator/docs/go.mod
           cache: false
 
-      # Every run restores the Go modules, and only a push to main saves
-      # them, when the key missed, so a branch never writes an entry
-      # that pushes one of main's out of the repository's 10 GB. The key
-      # follows the hash of `people-operator/docs/go.sum`. When no entry has that
-      # key, as on a branch that changes it, the restore takes the newest
-      # entry of the same family, which holds most of the modules that
-      # the job needs.
-      - id: go-cache
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are one entry for the family `manuals`,
+      # saved when the key misses. The key follows the hash of
+      # `people-operator/docs/go.sum`.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
         uses: actions/cache/restore@v6
         with:
           path: |
-            ~/go/pkg/mod
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
           key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('people-operator/docs/go.sum') }}
           restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-
 
@@ -179,12 +230,15 @@ jobs:
 
       - run: make test-docs
 
-      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: |
-            ~/go/pkg/mod
-          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: ${{ steps.go-modules.outputs.cache-primary-key }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -228,11 +282,39 @@ jobs:
           go-version-file: ci/go.mod
           cache: false
 
-      # Every run restores the Go cache, and only a push to main saves
-      # it, so a branch never writes an entry that pushes one of main's
-      # out of the repository's 10 GB. The cache holds the Go modules
-      # and the build cache.
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
       #
+      # The downloaded modules are one entry for each Go module, which
+      # every job of the module restores. The key follows the hash of
+      # `go.sum` alone, so the entry changes only when `go.sum` changes,
+      # and a push to main that does not change `go.sum` saves no
+      # modules. The
+      # module's `go` job saves the entry, because it runs the module's
+      # tests and reads every module that this job reads.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same module, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-
+
       # The build cache holds Go's test results and the compiled
       # packages of the job's own module, and most commits change both.
       # So the key ends in the commit: each push to main saves a new
@@ -241,8 +323,8 @@ jobs:
       # entry would keep the test results and packages of that commit,
       # and each run would compile the module's packages again and run
       # the tests of every package. The cost is one entry for each job
-      # on each push to main, and GitHub evicts the oldest entries when
-      # the repository's caches pass 10 GB.
+      # on each push to main. The modules are not in this entry, so
+      # each of these entries holds only compiled output.
       #
       # Before the commit, the key holds the hash of these files:
       #
@@ -254,12 +336,10 @@ jobs:
       # job has entries of its own: a job that builds less would save
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
-      - id: go-cache
+      - id: go-build
         uses: actions/cache/restore@v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
+          path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
           restore-keys: |
             go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-
@@ -283,10 +363,8 @@ jobs:
         working-directory: ci
         run: go run . publish -root .. -component people-operator -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"
 
-      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+          path: ~/.cache/go-build
+          key: ${{ steps.go-build.outputs.cache-primary-key }}

@@ -8,14 +8,14 @@ name: build setup
 description: Toolchain, KVM access, and vendored-input caches for building liken
 
 # A composite action has no step that runs after the job's own steps, so
-# the job saves the Go cache itself, with these outputs.
+# the job saves its Go build cache itself, with these outputs.
 outputs:
-  go-cache-key:
-    description: The key of the Go cache, for the job's save step
-    value: ${{ steps.go-cache.outputs.cache-primary-key }}
-  go-cache-hit:
-    description: Whether the Go cache's key matched exactly
-    value: ${{ steps.go-cache.outputs.cache-hit }}
+  go-build-key:
+    description: The key of the Go build cache, for the job's save step
+    value: ${{ steps.go-build.outputs.cache-primary-key }}
+  go-build-hit:
+    description: Whether the Go build cache's key matched exactly
+    value: ${{ steps.go-build.outputs.cache-hit }}
 
 runs:
   using: composite
@@ -26,30 +26,50 @@ runs:
         go-version-file: liken/go.mod
         cache: false
 
-    # Every run restores the Go cache, and only a push to main saves it,
-    # so a branch never writes an entry that pushes one of main's out of
-    # the repository's 10 GB. Each job that calls this action has
-    # entries of its own. This is the key format of the go-restore
-    # template in ci/templates/go.tmpl.
+    # The repository's Actions cache holds 10 GB, and GitHub evicts the
+    # oldest entries when the caches pass that limit. So every run
+    # restores the Go caches, and only a push to main saves them: a
+    # branch never writes an entry that pushes one of main's out. These
+    # are the key formats and the paths of the `go-restore` template in
+    # `ci/templates/go.tmpl`. The paths must be the same, because the
+    # cache version of an entry is a hash of its paths, and a restore
+    # with other paths misses.
     #
+    # The downloaded modules are one entry for `liken`, keyed on the
+    # hash of `liken/go.sum`, which the `go` job of `liken` saves: it
+    # runs the tests of `liken`, so it reads every module that these
+    # jobs read. The entry holds the extracted source and, from the
+    # download cache, only the `go.mod` files and the zip hashes, which
+    # `go` needs to build without the network. The zip files are about
+    # half of the compressed entry, and `go` does not read them after
+    # it extracts the source.
+    - id: go-modules
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/go/pkg/mod/*
+          !~/go/pkg/mod/cache
+          ~/go/pkg/mod/cache/download/**/*.mod
+          ~/go/pkg/mod/cache/download/**/*.ziphash
+        key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ hashFiles('liken/go.sum') }}
+        restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-
+
     # The build cache holds Go's test results and the compiled packages
     # of liken itself, and most commits change both. So the key ends in
     # the commit: each push to main saves a new entry, and every run
-    # restores the newest one. The cost is one entry for each job on
-    # each push to main, and GitHub evicts the oldest entries when the
-    # repository's caches pass 10 GB.
+    # restores the newest one. The cost is one entry of compiled output
+    # for each job on each push to main. Each job that calls this action
+    # has entries of its own.
     #
     # Before the commit, the key holds the hash of go.sum, the
     # Makefiles, and package.toml: they choose what the build compiles
     # and with which flags. A restore takes the newest entry with the
     # same hash, and when none exists, as on a branch that changes one
     # of those files, the newest entry of the same job.
-    - id: go-cache
+    - id: go-build
       uses: actions/cache/restore@v6
       with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
+        path: ~/.cache/go-build
         key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/*/Makefile', 'liken/package.toml') }}-${{ github.sha }}
         restore-keys: |
           go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/*/Makefile', 'liken/package.toml') }}-
