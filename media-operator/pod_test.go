@@ -63,7 +63,8 @@ func testResolution(t *testing.T) resolution {
 	resolved, err := resolvePlay("house", mediaItems(
 		"https://films.example/trailer.mkv",
 		"nfs://nas.example/export/films/film.mkv",
-	), nil)
+	), nil, frame{})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +559,7 @@ func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
 		Art:     "claim://house/library/shows/next.jpg",
 		Request: json.RawMessage(`{"library":"living-room/shows"}`),
 	}
-	resolved, err := resolvePlay("house", play.Spec.Items, play.Spec.Next)
+	resolved, err := resolvePlay("house", play.Spec.Items, play.Spec.Next, frame{})
 	mustSucceed(t, err)
 	pod := buildPod(play, buildClaim(play, testPlayer()), resolved,
 		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")

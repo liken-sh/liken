@@ -1,3 +1,46 @@
+## Test patterns
+
+A test pattern gives the display a known picture under it, so a check
+of the OSD, the scrims, or the colour does not depend on a scene in a
+film. The player image carries each pattern as a ten-minute file with a
+chapter each minute, so the scrubber, the chapter marks, and the time
+left behave as they do for a film. A pattern needs no storage and no
+network.
+
+    apiVersion: media.liken.sh/v1alpha1
+    kind: Play
+    metadata:
+      name: white
+    spec:
+      players: [theater]
+      items:
+        - uri: pattern://white
+
+| Pattern | What it shows |
+|---|---|
+| `white` | a white screen, the worst case for the dark scrims behind the OSD |
+| `bars` | the SMPTE HD colour bars, which show a colour or a range error |
+
+The URI can name a frame after the pattern, as in
+`pattern://bars/1920x1080`:
+
+| Frame | Shape | What it matches |
+|---|---|---|
+| `1280x720` | 16:9 | a 720p screen |
+| `1920x1080` | 16:9 | a 1080p screen |
+| `3840x2160` | 16:9 | a 4K screen |
+| `2560x1080` | 21:9 | a wide 1080-row screen |
+| `3840x1600` | 2.4:1 | a wide 1600-row screen |
+| `1920x804` | 2.39:1 | a scope film, which letterboxes on a 16:9 screen |
+
+A URI with no frame takes the frame of the `Player`'s screen: the
+largest frame of the screen's shape that fits on the compositor's
+canvas, which the screen's `Display` reports. A screen whose shape
+matches no frame, or a `Player` whose screen is not known yet, plays
+`1920x1080`, and mpv scales it. The operator chooses the frame when it
+creates the playback pod, so a `Display` that changes mode later does
+not change the run.
+
 ## On the bus
 
 The `plays` tree contains one run's commands, report, and availability.

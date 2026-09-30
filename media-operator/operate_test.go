@@ -607,7 +607,7 @@ func TestAPlayWithAURIItCannotResolveFailsAndCreatesNothing(t *testing.T) {
 		{
 			name: "an unknown scheme",
 			uri:  "rtsp://camera/front",
-			want: "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, and claim://",
+			want: "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, claim://, and pattern://",
 		},
 		{
 			name: "a claim in another namespace",

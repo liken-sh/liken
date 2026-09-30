@@ -1529,7 +1529,7 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 	}
 	prefs := resolvePreferences(&play.Spec, &player.Spec, defaultSpec)
 
-	resolved, resolveErr := resolvePlay(namespace, play.Spec.Items, play.Spec.Next)
+	resolved, resolveErr := resolvePlay(namespace, play.Spec.Items, play.Spec.Next, o.patternScreen(player))
 	if resolveErr != nil {
 		return o.writePlay(play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
 	}

@@ -69,6 +69,11 @@ COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droi
 
 COPY --from=build /media-operator-pod /media-operator-pod
 
+# The test patterns that a pattern:// URI plays. The files are committed
+# in patterns/, and the Makefile's patterns target makes them, so the
+# build runs no encoder and the image carries none.
+COPY patterns/*.mkv /usr/share/liken/patterns/
+
 # The brand's upright and italic faces, as files fontconfig finds when it
 # scans /usr/share/fonts, so libass resolves the family with no cache step
 # and no font package. They come from the build context named brand, which

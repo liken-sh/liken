@@ -1,5 +1,6 @@
 # The Go build reads the module files, the Go sources of the root package,
-# the embedded OpenAPI document, and the `edl/` package. An allowlist keeps
+# the embedded OpenAPI document, and the `edl/` package. The runtime
+# copies the committed test pattern files. An allowlist keeps
 # the Rust crates, the docs, and the deploy manifests out of this build
 # context, so a change to them does not rebuild this image.
 *
@@ -8,6 +9,7 @@
 !*.go
 !openapi.json
 !edl/
+!patterns/*.mkv
 # go build never reads a test file or testdata, so a test-only edit does not rebuild this image.
 **/*_test.go
 **/testdata/

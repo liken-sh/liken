@@ -2,8 +2,9 @@ package main
 
 // The resolver is the extension point the design names: a new
 // scheme becomes an entry here, and the Play spec never changes
-// shape. Of the three schemes today, https:// costs the pod nothing
-// but an argument, nfs:// costs it a volume the kubelet mounts with
+// shape. Of the four schemes today, https:// costs the pod nothing
+// but an argument, pattern:// costs it nothing but a path to a file the
+// player image carries (patterns.go), nfs:// costs it a volume the kubelet mounts with
 // the kernel's NFS client, and claim:// costs it a claim the kubelet
 // resolves to whatever storage backs it.
 //
@@ -72,11 +73,12 @@ type claimRef struct {
 // resolvedRef is one URI classified for the pod. A passthrough is an https://
 // URL, or an empty art field the pod uses as it is. An nfs reference rewrites
 // to a path under its server's mount, and a claim reference to a path under
-// its claim's mount.
+// its claim's mount. A pattern reference rewrites to a file in the image.
 type resolvedRef struct {
 	passthrough string
 	nfs         *nfsRef
 	claim       *claimRef
+	pattern     *patternRef
 }
 
 // mountKey names one mount the pod needs: an NFS server or a claim. Both
@@ -110,7 +112,10 @@ func (r resolvedRef) mount() (mountKey, []string, bool) {
 //
 // A claim URI must name the Play's own namespace, because a pod can mount
 // only a claim in its own namespace.
-func resolvePlay(namespace string, items []PlayItem, next *PlayNext) (resolution, error) {
+//
+// screen is the size of the Player's screen, which a pattern URI with no
+// frame fits. The zero frame is a screen whose size is not known.
+func resolvePlay(namespace string, items []PlayItem, next *PlayNext, screen frame) (resolution, error) {
 	mediaRefs := make([]resolvedRef, len(items))
 	logoRefs := make([]resolvedRef, len(items))
 	trickRefs := make([]resolvedRef, len(items))
@@ -161,7 +166,7 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext) (resolution
 			cover = item.Presentation.Art
 		}
 		if logo != "" {
-			art, err := parseRef(logo, namespace)
+			art, err := parseArt(logo, namespace)
 			if err != nil {
 				return resolution{}, err
 			}
@@ -169,7 +174,7 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext) (resolution
 			register(art)
 		}
 		if trickplay != "" {
-			trick, err := parseRef(trickplay, namespace)
+			trick, err := parseArt(trickplay, namespace)
 			if err != nil {
 				return resolution{}, err
 			}
@@ -177,7 +182,7 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext) (resolution
 			register(trick)
 		}
 		if cover != "" {
-			art, err := parseRef(cover, namespace)
+			art, err := parseArt(cover, namespace)
 			if err != nil {
 				return resolution{}, err
 			}
@@ -190,7 +195,7 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext) (resolution
 	// same claim as the media shares the media's mount.
 	var nextRef resolvedRef
 	if next != nil && next.Art != "" {
-		art, err := parseRef(next.Art, namespace)
+		art, err := parseArt(next.Art, namespace)
 		if err != nil {
 			return resolution{}, err
 		}
@@ -224,6 +229,9 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext) (resolution
 	}
 
 	rewrite := func(ref resolvedRef) string {
+		if ref.pattern != nil {
+			return ref.pattern.path(screen)
+		}
 		key, segments, ok := ref.mount()
 		if !ok {
 			return ref.passthrough
@@ -437,6 +445,12 @@ func parseRef(raw, namespace string) (resolvedRef, error) {
 	switch parsed.Scheme {
 	case "https":
 		return resolvedRef{passthrough: raw}, nil
+	case patternScheme:
+		ref, err := parsePattern(parsed, raw)
+		if err != nil {
+			return resolvedRef{}, err
+		}
+		return resolvedRef{pattern: ref}, nil
 	case schemeNFS:
 		ref, err := parseNFS(parsed, raw)
 		if err != nil {
@@ -455,12 +469,23 @@ func parseRef(raw, namespace string) (resolvedRef, error) {
 		}
 		return resolvedRef{claim: ref}, nil
 	case "":
-		return resolvedRef{}, fmt.Errorf("the URI %q carries no scheme; the operator resolves https://, nfs://, and claim://", raw)
+		return resolvedRef{}, fmt.Errorf("the URI %q carries no scheme; the operator resolves https://, nfs://, claim://, and pattern://", raw)
 	default:
 		return resolvedRef{}, fmt.Errorf(
-			"the scheme %s:// is not one the operator resolves; it resolves https://, nfs://, and claim://",
+			"the scheme %s:// is not one the operator resolves; it resolves https://, nfs://, claim://, and pattern://",
 			parsed.Scheme)
 	}
+}
+
+// parseArt classifies one art URI: a logo, a trickplay sheet, or a cover.
+// A pattern is a video to play, not a picture to draw, so an art field
+// that names one fails the Play.
+func parseArt(raw, namespace string) (resolvedRef, error) {
+	ref, err := parseRef(raw, namespace)
+	if err == nil && ref.pattern != nil {
+		return resolvedRef{}, fmt.Errorf("the URI %q names a pattern, which plays as an item and not as art", raw)
+	}
+	return ref, err
 }
 
 // parseNFS reads the server and the path segments from one nfs URI. A URI that

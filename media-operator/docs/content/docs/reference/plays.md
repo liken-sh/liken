@@ -87,7 +87,7 @@ One entry in the playlist: the URI to play and, optionally, how it should look.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path and claim://namespace/claim/path to a mount on the playback pod. A claim URI names the Play's own namespace, because a pod mounts only a claim in its own namespace. A URI whose scheme the operator does not know, or a claim URI that names no namespace or another namespace, fails the Play before any pod exists. |
+| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path and claim://namespace/claim/path to a mount on the playback pod. A claim URI names the Play's own namespace, because a pod mounts only a claim in its own namespace. pattern://white and pattern://bars play a test pattern the player image carries, at the frame the URI names, such as pattern://bars/1920x1080, or at the frame of the Player's screen when it names none. A URI whose scheme the operator does not know, a claim URI that names no namespace or another namespace, or a pattern or frame the image does not carry, fails the Play before any pod exists. |
 | <span id="specitems--presentation"></span>`presentation` | [object](#specitemspresentation) | no | How the item should look, for the fields the display cannot read from the file. The library that fed the item supplies these, and the display prefers them over the container's tags. Omit the block for a loose file, and the display falls back to the file's own tags. |
 
 #### spec.items[].presentation
@@ -179,6 +179,49 @@ The run's conditions. There is one, DisplayAlive, and it reports the playback po
 | <span id="statusconditions--message"></span>`message` | string | no | The restart count, with the reason and exit code of the last termination the kubelet recorded. |
 | <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | no | When the status last changed, so a reader can tell how long the display has been down or up. |
 | <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The Play's metadata.generation the condition was derived from, so a reader can tell a condition on the current spec from a stale one. |
+
+## Test patterns
+
+A test pattern gives the display a known picture under it, so a check
+of the OSD, the scrims, or the colour does not depend on a scene in a
+film. The player image carries each pattern as a ten-minute file with a
+chapter each minute, so the scrubber, the chapter marks, and the time
+left behave as they do for a film. A pattern needs no storage and no
+network.
+
+    apiVersion: media.liken.sh/v1alpha1
+    kind: Play
+    metadata:
+      name: white
+    spec:
+      players: [theater]
+      items:
+        - uri: pattern://white
+
+| Pattern | What it shows |
+|---|---|
+| `white` | a white screen, the worst case for the dark scrims behind the OSD |
+| `bars` | the SMPTE HD colour bars, which show a colour or a range error |
+
+The URI can name a frame after the pattern, as in
+`pattern://bars/1920x1080`:
+
+| Frame | Shape | What it matches |
+|---|---|---|
+| `1280x720` | 16:9 | a 720p screen |
+| `1920x1080` | 16:9 | a 1080p screen |
+| `3840x2160` | 16:9 | a 4K screen |
+| `2560x1080` | 21:9 | a wide 1080-row screen |
+| `3840x1600` | 2.4:1 | a wide 1600-row screen |
+| `1920x804` | 2.39:1 | a scope film, which letterboxes on a 16:9 screen |
+
+A URI with no frame takes the frame of the `Player`'s screen: the
+largest frame of the screen's shape that fits on the compositor's
+canvas, which the screen's `Display` reports. A screen whose shape
+matches no frame, or a `Player` whose screen is not known yet, plays
+`1920x1080`, and mpv scales it. The operator chooses the frame when it
+creates the playback pod, so a `Display` that changes mode later does
+not change the run.
 
 ## On the bus
 

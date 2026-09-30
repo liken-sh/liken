@@ -22,6 +22,57 @@ codes:
 	go run keycodegen.go $(INPUT_EVENT_CODES) keycodes.go
 	gofmt -w keycodes.go
 
+# The test patterns that a pattern:// URI plays are committed in
+# patterns/, one file for each pattern and frame, and the player image
+# copies them, so neither the image build nor CI runs an encoder. The
+# names and the frames match patterns.go. `make patterns` writes a file
+# that is missing, and `make -B -j2 patterns` writes them all again
+# after an edit here. Each encode holds up to 400 MB, so -j2 is a safe
+# speedup and a high -j is not.
+#
+# Each file is ten minutes of one still frame at one frame a second.
+# mpv reads the position and the duration from the timestamps, so the
+# scrubber advances as it does for a film. A chapter every minute gives
+# the scrubber its marks, and the title gives the header a name.
+#
+# The recipe encodes one minute and copies it ten times over, because
+# every minute is the same. The copy costs no encode, and each copy
+# starts on a keyframe, so a seek decodes at most one minute of frames.
+# The encode runs on one thread with no lookahead, because x264's
+# defaults held 4 GB of memory for one 3840x2160 encode, and one thread
+# holds under 400 MB.
+PATTERN_NAMES := white bars
+PATTERN_FRAMES := 1280x720 1920x1080 3840x2160 2560x1080 3840x1600 1920x804
+PATTERN_FILES := $(foreach name,$(PATTERN_NAMES),$(foreach frame,$(PATTERN_FRAMES),patterns/$(name)-$(frame).mkv))
+
+PATTERN_SOURCE_white := color=c=white:r=1
+PATTERN_TITLE_white := White
+PATTERN_SOURCE_bars := smptehdbars=r=1
+PATTERN_TITLE_bars := Colour bars
+
+.PHONY: patterns
+patterns: $(PATTERN_FILES)
+
+patterns/%.mkv: name = $(word 1,$(subst -, ,$*))
+patterns/%.mkv: frame = $(word 2,$(subst -, ,$*))
+patterns/%.mkv:
+	work=$$(mktemp -d) && trap 'rm -rf "$$work"' EXIT && \
+	{ echo ';FFMETADATA1'; for minute in 0 1 2 3 4 5 6 7 8 9; do \
+	  printf '[CHAPTER]\nTIMEBASE=1/1\nSTART=%d\nEND=%d\ntitle=Minute %d\n' \
+	    $$((minute * 60)) $$((minute * 60 + 60)) $$((minute + 1)); \
+	done; } >"$$work/chapters" && \
+	ffmpeg -nostdin -loglevel error -y \
+	  -f lavfi -i '$(PATTERN_SOURCE_$(name)):s=$(frame)' -t 60 \
+	  -c:v libx264 -preset veryfast -tune stillimage -g 60 -bf 0 \
+	  -threads 1 -rc-lookahead 0 -pix_fmt yuv420p \
+	  -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 \
+	  "$$work/minute.mkv" && \
+	ffmpeg -nostdin -loglevel error -y \
+	  -stream_loop 9 -i "$$work/minute.mkv" -i "$$work/chapters" \
+	  -map 0:v -map_chapters 1 -c copy \
+	  -metadata title='$(PATTERN_TITLE_$(name)), $(subst x,×,$(frame))' \
+	  $@
+
 # One run of the tests gives both the race check and the coverage
 # profile, because -race with -covermode=atomic does both.
 #

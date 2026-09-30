@@ -122,10 +122,15 @@ spec:
                           and claim://namespace/claim/path to a mount on the
                           playback pod. A claim URI names the Play's own
                           namespace, because a pod mounts only a claim in
-                          its own namespace. A URI whose scheme the operator
-                          does not know, or a claim URI that names no
-                          namespace or another namespace, fails the Play
-                          before any pod exists.
+                          its own namespace. pattern://white and
+                          pattern://bars play a test pattern the player
+                          image carries, at the frame the URI names, such as
+                          pattern://bars/1920x1080, or at the frame of the
+                          Player's screen when it names none. A URI whose
+                          scheme the operator does not know, a claim URI
+                          that names no namespace or another namespace, or a
+                          pattern or frame the image does not carry, fails
+                          the Play before any pod exists.
                       presentation:
                         type: object
                         description: >-

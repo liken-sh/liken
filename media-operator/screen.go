@@ -89,8 +89,17 @@ type displayApply struct {
 }
 
 type DisplayStatus struct {
+	Mode       DisplayMode        `json:"mode,omitempty"`
 	Observed   DisplayObserved    `json:"observed,omitempty"`
 	Conditions []DisplayCondition `json:"conditions,omitempty"`
+}
+
+// The mode the display-operator set: the kernel's, and the compositor's
+// canvas, such as 1920x1080@60. A pattern:// URI with no frame reads the
+// canvas, because the canvas is what mpv draws on.
+type DisplayMode struct {
+	Kernel string `json:"kernel,omitempty"`
+	Weston string `json:"weston,omitempty"`
 }
 
 // The one Display condition this operator reads. The display-operator
