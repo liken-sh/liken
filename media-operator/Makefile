@@ -60,11 +60,12 @@ test-go:
 #
 # The Rust checks: the format, the lints, and the tests under a coverage
 # gate. cargo-llvm-cov runs the tests itself and measures every line they
-# reach, so one command is both the test run and the gate. The unit tests
-# cover the parsers, the rules, the measurements, and the timeline; the
-# integration test runs the binary under cage on the headless backend, so
-# the frame loop and the graphics setup count too. That test needs cage,
-# wlr-randr, and a Vulkan device, and Mesa's lavapipe is enough of one.
+# reach, and `cargo llvm-cov report` applies each floor to that one
+# measurement. The unit tests cover the parsers, the rules, the
+# measurements, and the timeline; the integration test runs the binary
+# under cage on the headless backend, so the frame loop and the graphics
+# setup count too. That test needs cage, wlr-randr, and a Vulkan device,
+# and Mesa's lavapipe is enough of one.
 #
 # The two crates share a lock file and a target tree. Each crate keeps a
 # floor of its own, because they earn different numbers: the idle screen
@@ -85,24 +86,30 @@ test-rust:
 # too. The pass is the library and the binary alone, because the test
 # targets reach the flags and the measurements the feature carries.
 	cargo clippy -p idle-screen --no-default-features --lib --bins -- -D warnings
-# The two gates share one instrumented target tree. Each gate starts
-# from no profiles, so it measures its own tests alone, and the first
-# gate also starts from no objects, so no test binary of an earlier run
-# counts.
+# One instrumented build of the workspace runs the tests of both
+# crates, and one report per crate applies that crate's floor. The
+# build uses the features of the whole workspace, the same set the
+# first clippy pass lints, so each dependency compiles once. A separate
+# run for each crate resolves a different feature set for each one,
+# and so compiles the iced crates twice.
 #
-# Each gate is followed by a report of the same run, as a Cobertura
-# file at the workspace root. `cargo llvm-cov report` reads the
-# profiles the gate wrote, so it must run before the next clean
-# deletes them. A report after every gate would measure one crate
-# under another's tests. The two files are inputs to
-# `make coverage-report`, which draws the page the site publishes.
+# A report with `-p` counts the lines of that crate's files alone.
+# Neither crate links the other, so a line of the idle screen runs
+# only under the idle screen's tests, and a line of the display only
+# under the display's. So each crate's number comes from its own tests
+# alone.
+#
+# The run starts from no objects and no profiles, so no test binary of
+# an earlier run counts. The Cobertura files at the workspace root are
+# inputs to `make coverage-report`, which draws the page the site
+# publishes.
 	cargo llvm-cov clean --workspace
-	cargo llvm-cov -p idle-screen --all-targets \
+	cargo llvm-cov --workspace --all-targets --no-report
+	cargo llvm-cov report -p idle-screen \
 		--fail-under-lines $(IDLE_COVERAGE_FLOOR)
 	cargo llvm-cov report -p idle-screen \
 		--cobertura --output-path coverage-idle-screen.xml
-	cargo llvm-cov clean --profraw-only
-	cargo llvm-cov -p media-display --all-targets \
+	cargo llvm-cov report -p media-display \
 		--fail-under-lines $(DISPLAY_COVERAGE_FLOOR)
 	cargo llvm-cov report -p media-display \
 		--cobertura --output-path coverage-display.xml
