@@ -40,6 +40,9 @@ type node struct {
 	// how often it reads that anyway.
 	quiesce time.Duration
 	sweep   time.Duration
+	// clock is what each watch measures the quiesce and the sweep
+	// against.
+	clock clock
 	// How long a work tree nothing stages is kept, and how often
 	// the driver walks the store to find one.
 	sweepAfter time.Duration
@@ -84,6 +87,7 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 		base:       base,
 		quiesce:    defaultQuiesce,
 		sweep:      defaultSweep,
+		clock:      wallClock{},
 		sweepAfter: cfg.sweepAfter,
 		sweepEvery: defaultSweepEvery,
 		demandMin:  cfg.demandMin,

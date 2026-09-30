@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -166,6 +168,7 @@ func TestTheWatchReportsATreeItCannotRead(t *testing.T) {
 	holder := newStore(t.TempDir())
 	seeing := &watcher{
 		node:   answering,
+		clock:  answering.clock,
 		volume: &volume{id: "config", work: holder.workTree(holder.repository("file:///gone"), "config")},
 	}
 	seeing.scan(t.Context())
@@ -260,15 +263,42 @@ func TestAnUnarmedVolumeRestsForTheDriversOwnQuiesce(t *testing.T) {
 	}
 }
 
+// moveInto writes a file outside the tree and renames it into the tree.
+// The rename is one inotify event, so the watch reads the whole write
+// in one batch and restarts the quiesce once. A write in place sends a
+// create, a modify, and a close, and a batch that the watch reads after
+// the test advanced the clock would restart the quiesce at the new time.
+func moveInto(t *testing.T, tree, name, content string) {
+	t.Helper()
+	outside := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(outside, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", outside, err)
+	}
+	if err := os.Rename(outside, filepath.Join(tree, name)); err != nil {
+		t.Fatalf("moving %s into the tree: %v", name, err)
+	}
+}
+
+// A write restarts the quiesce, so the driver commits and pushes the
+// tree when the class's quiesce has passed since the write, not since
+// the watch started.
 func TestTheTreeIsCommittedAndPushedOnTheTimer(t *testing.T) {
 	remote := bareRemote(t, map[string]string{"a.txt": "one"})
 	answering, _ := testNode(t, io.Discard)
+	clock := newManualClock()
+	answering.clock = clock
+	// The sweep is an hour, so only the quiesce can commit within the
+	// test.
+	answering.sweep = time.Hour
 	held := armedVolume(t, answering, "config", fileURL(remote),
 		map[string]string{quiesceParameter: "5s"})
-	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+	clock.waitForTimer(t, 5*time.Second)
 
-	// The sweep reads the tree while the quiesce is still long, so the
-	// commit lands before the timer does.
+	clock.advance(time.Second)
+	moveInto(t, held.tree, "one.yaml", "1")
+	clock.waitForTimer(t, 6*time.Second)
+	clock.advance(5 * time.Second)
+
 	waitForPushed(t, held, 30*time.Second)
 	if got := remoteSubject(t, remote); got != "Update 1 paths" {
 		t.Errorf("the remote's main is at %q, want the driver's commit", got)

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -96,6 +97,23 @@ func TestAVolumeOnItsSideBranchKeepsPushingThere(t *testing.T) {
 	}
 }
 
+// waitForGauge waits until the claim is on the gauge, or fails on the
+// deadline. A stage labels no gauge, because the volume has no claim
+// until the loop that reads the claim finds it, and that loop runs
+// after the stage returns.
+func waitForGauge(t *testing.T, readings *metrics, name, namespace, claim string) float64 {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if value, found := gaugeOf(t, readings, name, namespace, claim); found {
+			return value
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s is not on %s/%s within 30s", name, namespace, claim)
+	return 0
+}
+
 func TestAStageHealsAVolumeUpstreamHasMerged(t *testing.T) {
 	answering, _, remote, request := divergedVolume(t, io.Discard)
 	mergeSideBranch(t, remote, "main.config")
@@ -121,9 +139,8 @@ func TestAStageHealsAVolumeUpstreamHasMerged(t *testing.T) {
 	if got := reasonsOf(t, answering); !strings.Contains(got, reasonHealed) {
 		t.Errorf("the events are %q, want %s in them", got, reasonHealed)
 	}
-	value, found := gaugeOf(t, answering.readings, "git_csi_diverged", "home", "config")
-	if !found || value != 0 {
-		t.Errorf("git_csi_diverged reads %v (found: %v), want 0", value, found)
+	if value := waitForGauge(t, answering.readings, "git_csi_diverged", "home", "config"); value != 0 {
+		t.Errorf("git_csi_diverged reads %v, want 0", value)
 	}
 	count, _, err := again.work.unpushed(t.Context(), "main")
 	if err != nil {

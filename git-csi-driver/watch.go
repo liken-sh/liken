@@ -38,6 +38,7 @@ type watcher struct {
 	volume  *volume
 	quiesce time.Duration
 	sweep   time.Duration
+	clock   clock
 	cancel  context.CancelFunc
 	changes chan struct{}
 	// arrived wakes the loop to push when a republish returns a
@@ -73,12 +74,13 @@ func (n *node) watch(published *volume) {
 		volume:  published,
 		quiesce: n.quiesce,
 		sweep:   n.sweep,
+		clock:   n.clock,
 		cancel:  cancel,
 		changes: make(chan struct{}, 1),
 		arrived: make(chan struct{}, 1),
 		classed: make(chan struct{}, 1),
 		watched: map[int32]string{},
-		written: time.Now(),
+		written: n.clock.Now(),
 	}
 	n.watchers[published.id] = seeing
 	seeing.running.Add(2)
@@ -198,7 +200,7 @@ func trimZeros(name []byte) []byte {
 // send never blocks, so a burst of writes costs one nudge.
 func (w *watcher) nudge() {
 	w.mu.Lock()
-	w.written = time.Now()
+	w.written = w.clock.Now()
 	w.mu.Unlock()
 	select {
 	case w.changes <- struct{}{}:
@@ -211,7 +213,7 @@ func (w *watcher) nudge() {
 func (w *watcher) quietFor() time.Duration {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return time.Since(w.written)
+	return w.clock.Now().Sub(w.written)
 }
 
 // rest is the quiesce in force. A class that arms the volume or sets a
@@ -252,9 +254,9 @@ func (n *node) classChanged(staged *volume) {
 // ended.
 func (w *watcher) run(ctx context.Context) {
 	defer w.running.Done()
-	quiesce := time.NewTimer(w.rest())
+	quiesce := w.clock.NewTimer(w.rest())
 	defer quiesce.Stop()
-	sweep := time.NewTicker(w.sweep)
+	sweep := w.clock.NewTimer(w.sweep)
 	defer sweep.Stop()
 
 	w.scan(ctx)
@@ -267,9 +269,10 @@ func (w *watcher) run(ctx context.Context) {
 			quiesce.Reset(w.rest())
 		case <-w.classed:
 			quiesce.Reset(max(0, w.rest()-w.quietFor()))
-		case <-quiesce.C:
+		case <-quiesce.Chan():
 			w.scan(ctx)
-		case <-sweep.C:
+		case <-sweep.Chan():
+			sweep.Reset(w.sweep)
 			w.scan(ctx)
 		case <-w.arrived:
 			w.pushArrived(ctx)
