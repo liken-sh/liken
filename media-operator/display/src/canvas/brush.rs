@@ -236,22 +236,11 @@ impl<'a> Brush<'a> {
     // call arrives, the way a shape does and a decoded picture does not, so
     // the shapes drawn after it land over it and so does every line of text.
     // It takes the brush's fade and no filtering, so each of its rows lands on
-    // the output row it was resolved for.
-    //
-    // The tile repeats from the left edge on whole output pixels, and the
-    // last repeat runs past the right edge, where the surface ends it.
+    // the output row it was resolved for, and its one column stretches across
+    // the width.
     pub fn scrim(&mut self, scrim: &Picture) {
-        let repeats = (scrim.bounds.width / scrim.tile).ceil() as usize;
-        for repeat in 0..repeats {
-            let x = scrim.bounds.x + repeat as f32 * scrim.tile;
-            self.frame.draw_image(
-                Rectangle::new(
-                    Point::new(x, scrim.bounds.y),
-                    Size::new(scrim.tile, scrim.bounds.height),
-                ),
-                picture(&scrim.handle, self.fade),
-            );
-        }
+        self.frame
+            .draw_image(scrim.bounds, picture(&scrim.handle, self.fade));
     }
 
     // How far the fade has moved, from 0 clear to 1 full.

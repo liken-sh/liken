@@ -157,17 +157,12 @@ pub const PANEL_BOTTOM: f32 = 876.0;
 /// The pitch of one line in the top-right column.
 pub const LINE_PITCH: f32 = type_scale::SMALL + 12.0;
 
-/// The heights of the scrim's top band and bottom band, in canvas pixels.
-pub const SCRIM_TOP_HEIGHT: f32 = 410.0;
-pub const SCRIM_BOTTOM_HEIGHT: f32 = 480.0;
-
-/// The dark plateau covers this fraction of the scrim height, at the screen
-/// edge, over the text. The fade softens its inner edge.
-pub const SCRIM_SOLID: f32 = 0.66;
-
-/// How far the fade carries the plateau inward, as a fraction of the scrim
-/// height.
-pub const SCRIM_REACH: f32 = 0.3;
+/// How far each scrim reaches from its screen edge, in canvas rows. It
+/// holds its peak over the text out to `HOLD`, and is clear at `CLEAR`.
+pub const SCRIM_TOP_HOLD: f32 = 200.0;
+pub const SCRIM_TOP_CLEAR: f32 = 440.0;
+pub const SCRIM_BOTTOM_HOLD: f32 = 250.0;
+pub const SCRIM_BOTTOM_CLEAR: f32 = 520.0;
 
 #[cfg(test)]
 mod tests {
