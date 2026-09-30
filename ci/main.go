@@ -11,7 +11,8 @@
 //	go run ./ci publish ...         push one component's outputs
 //	go run ./ci record -tag T       write the GitHub release for a tag
 //	go run ./ci sites               list each manual's directory and prefix
-//	go run ./ci reports             list each coverage report that no manual serves
+//	go run ./ci reports -site URL -dest DIR
+//	                                gather each coverage report's profiles, and list the reports to render
 package main
 
 import (
@@ -32,6 +33,7 @@ func main() {
 		Run:       ExecRunner,
 		Getenv:    os.Getenv,
 		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
 	}
 	if err := world.run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "ci:", err)
@@ -50,6 +52,7 @@ type World struct {
 	Run      Runner
 	Getenv   func(string) string
 	Stdout   io.Writer
+	Stderr   io.Writer
 }
 
 func (w World) run(args []string) error {
@@ -64,6 +67,8 @@ func (w World) run(args []string) error {
 	version := flags.String("version", "", "publish: the version")
 	mode := flags.String("mode", "", "publish: dev or release")
 	tag := flags.String("tag", "", "record: the release tag")
+	site := flags.String("site", "", "reports: the address of the site that serves the profiles now")
+	dest := flags.String("dest", "", "reports: the site's tree, where the profiles publish")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -93,18 +98,7 @@ func (w World) run(args []string) error {
 	case "record":
 		return w.record(*root, components, *tag)
 	case "reports":
-		for _, c := range sortedComponents(components) {
-			if c.Docs != nil {
-				continue
-			}
-			for _, job := range c.Jobs {
-				if len(job.Coverage) > 0 {
-					fmt.Fprintf(stdout, "%s:%s:%s\n", c.Dir, c.Name(), job.Coverage[0])
-					break
-				}
-			}
-		}
-		return nil
+		return gatherReports(*root, *site, *dest, w.Published.Client, components, stdout, w.Stderr)
 	case "sites":
 		for _, c := range sortedComponents(components) {
 			if c.Docs != nil && c.Docs.Prefix != "" {

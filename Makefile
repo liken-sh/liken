@@ -39,10 +39,6 @@ DOCS := $(CURDIR)/dist/docs
 # Each entry is a component's directory and its prefix in the site.
 SITES = $(shell cd ci && go run . sites -root ..)
 
-# Each entry is the directory, the name, and the first coverage file of
-# a component that has a coverage report and no manual to serve it.
-REPORTS = $(shell cd ci && go run . reports -root ..)
-
 # Each manual builds twice. The component's own `make -C docs build`
 # generates the reference pages, runs its own checks, and writes the
 # site for its address on liken.sh. Then Hugo builds the manual again
@@ -76,45 +72,35 @@ preview: docs
 # served site against.
 #
 # Each manual also serves its component's test coverage report at
-# coverage.html. A component whose tests ran in this CI run has its
-# profiles on disk, and the report renders from them. Every other
-# component keeps the report that the site serves now, so a push that
-# changes one component leaves the other reports as they are. A
-# component with a report and no manual serves it at
-# coverage/<name>.html, under the same rule.
+# coverage.html, and a component with a report and no manual serves it
+# at coverage/<name>.html. A report needs the profile of each of its
+# coverage jobs. A job that ran in this CI run left its profile on
+# disk. For a job that did not run, `ci reports` takes the profile
+# that the site serves now, from the run where the job last ran. It
+# publishes every profile under coverage/<component>/ for the next
+# deploy, and it lists the reports whose profiles are all at hand. A
+# report with a profile missing stays out of the site, because it
+# would show a lower coverage with no reason. ci/coverage.go gives the
+# reason that a served profile is still correct.
 .PHONY: site
 site:
 	rm -rf $(DOCS)
 	$(MAKE) -C liken/docs build
 	mkdir -p $(DOCS)
 	cp -R liken/docs/dist/site/. $(DOCS)/
-	@set -e; for site in liken: $(SITES); do \
+	@set -e; for site in $(SITES); do \
 		dir=$${site%%:*}; prefix=$${site##*:}; \
-		out=$(DOCS)$${prefix:+/$$prefix}; \
-		if [ -n "$$prefix" ]; then \
-			echo "building $$dir into /$$prefix/"; \
-			$(MAKE) -C $$dir/docs build; \
-			mkdir -p $$out; \
-			cp -R $$dir/docs/dist/site/. $$out/; \
-		fi; \
-		if [ -f $$dir/coverage.out ]; then \
-			$(MAKE) -C $$dir coverage-report; \
-			cp $$dir/coverage.html $$out/coverage.html; \
-		elif ! curl --fail --silent --show-error --retry 3 \
-			$(SITE_URL)$${prefix:+/$$prefix}/coverage.html -o $$out/coverage.html; then \
-			echo "$$dir has no coverage report yet"; \
-			rm -f $$out/coverage.html; \
-		fi; \
+		echo "building $$dir into /$$prefix/"; \
+		$(MAKE) -C $$dir/docs build; \
+		mkdir -p $(DOCS)/$$prefix; \
+		cp -R $$dir/docs/dist/site/. $(DOCS)/$$prefix/; \
 	done
-	@set -e; mkdir -p $(DOCS)/coverage; for report in $(REPORTS); do \
-		dir=$${report%%:*}; rest=$${report#*:}; name=$${rest%%:*}; input=$${rest#*:}; \
-		out=$(DOCS)/coverage/$$name.html; \
-		if [ -f $$dir/$$input ]; then \
-			$(MAKE) -C $$dir coverage-report; \
-			cp $$dir/coverage.html $$out; \
-		elif ! curl --fail --silent --show-error --retry 3 \
-			$(SITE_URL)/coverage/$$name.html -o $$out; then \
-			echo "$$dir has no coverage report yet"; \
-			rm -f $$out; \
-		fi; \
+	@set -e; reports="$$(cd ci && go run . reports -root .. \
+		-site $(SITE_URL) -dest $(DOCS))"; \
+	for report in $$reports; do \
+		dir=$${report%%:*}; out=$(DOCS)/$${report#*:}; \
+		echo "rendering $$dir's coverage report into $${report#*:}"; \
+		$(MAKE) -C $$dir coverage-report; \
+		mkdir -p $$(dirname $$out); \
+		cp $$dir/coverage.html $$out; \
 	done

@@ -208,8 +208,11 @@ jobs:
   # ran, the site's build changed, or every job runs. A push of plans
   # only starts no run, and the site holds no plan.
   #
-  # A job that did not run in this push has no new coverage profile,
-  # so its report is the one the site serves now.
+  # A job that did not run in this push wrote no coverage profile, and
+  # it has no artifact to download. The site serves each profile beside
+  # the reports, and `ci reports` takes that copy: the job's files did
+  # not change since the run that wrote it, so it is the profile of this
+  # commit. ci/coverage.go gives the whole argument.
   site:
     needs: [plan{% range .Components %}, {% .Name %}{% if .Publishes %}, {% .Name %}-publish{% end %}{% end %}]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
