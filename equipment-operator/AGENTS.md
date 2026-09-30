@@ -66,7 +66,13 @@ adapter speaks for that `Display` runs the wake in
 `cecnode_source.go`. The remote's power button turns the room off the
 same way: the session's `togglePower` asks the room for standby, the
 `Deployment` writes `status.session.standbyAt`, and the node workload
-sends the TV Standby in `cecnode_standby.go`.
+sends the TV Standby in `cecnode_standby.go`. While the session holds
+the room awake, the same adapter answers Request Active Source and
+Set Stream Path in `cecnode_answer.go`. A home press sends `input.show` on the
+`Receiver`'s commands topic: the `Deployment` writes
+`status.session.showAt` in `television_show.go`, and the node workload
+sends a TV that is on Image View On and Active Source in
+`cecnode_show.go`.
 
 ## Errors include their source's text
 

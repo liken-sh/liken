@@ -49,6 +49,12 @@ func (r *roomRecord) woke(trigger string) {
 	r.events = append(r.events, "woke: "+trigger)
 }
 
+func (r *roomRecord) show(trigger string) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	r.events = append(r.events, "show: "+trigger)
+}
+
 func (r *roomRecord) slept() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

@@ -24,6 +24,27 @@ func TestAPressAsksTheUnitsReceiverForItsInput(t *testing.T) {
 	mustMatch(t, string(published.payload), `{"command":"input.ensure"}`)
 }
 
+// A home press asks the receiver to show the unit: its input, and the
+// room's TV on the unit's input when the TV is on. A person who presses
+// home wants the unit's screen, and a TV that shows its own apps is on
+// another input that the receiver's input alone does not change.
+func TestAHomePressAsksTheReceiverToShowTheUnit(t *testing.T) {
+	for _, key := range []string{"KEY_HOMEPAGE", "KEY_WWW"} {
+		t.Run(key, func(t *testing.T) {
+			media, broker := focusBrokerOperator(t)
+			media.focus.setMark(controllerKey("media", "living-room-remote"), "living-room")
+			media.ensure.set(playerKey("media", "living-room"), "liken/equipment/den-receiver/commands")
+
+			media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "media", "living-room-remote"),
+				[]byte(`{"key":"`+key+`","value":1}`))
+
+			published := waitForPublish(t, broker.pubs)
+			mustMatch(t, published.topic, "liken/equipment/den-receiver/commands")
+			mustMatch(t, string(published.payload), `{"command":"input.show"}`)
+		})
+	}
+}
+
 // A power press asks nothing of the receiver. The power key is the
 // room's toggle, and the equipment operator answers it on the unit's
 // power topic; an input ask beside it would make the receiver select

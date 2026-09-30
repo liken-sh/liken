@@ -105,10 +105,10 @@ func TestTheWakeWakesTheTVAndShowsTheDisplay(t *testing.T) {
 		wakes   int
 		message string
 	}{
-		{"a TV in standby", televisionTV(cec.PowerStandby), 1,
-			"the TV reported On after the adapter on node-1 sent Image View On once; the adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 200 ms after; the last Active Source on the bus is 1.3.0.0"},
-		{"a TV that is on", televisionTV(cec.PowerOn), 0,
-			"the TV already reported On, so the adapter on node-1 sent no command; the adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 200 ms after; the last Active Source on the bus is 1.3.0.0"},
+		{"a TV in standby", televisionTV(cec.PowerStandby), 2,
+			"the TV reported On after the adapter on node-1 sent Image View On once; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 200 ms after; the last Active Source on the bus is 1.3.0.0"},
+		{"a TV that is on", televisionTV(cec.PowerOn), 1,
+			"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 200 ms after; the last Active Source on the bus is 1.3.0.0"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -145,9 +145,9 @@ func TestTheWakeTakesTheInputBackFromAPlayer(t *testing.T) {
 		message string
 	}{
 		{"a player that claims once", 1, []string{"4->f 82 13 00", "4->f 82 13 00"}, ConditionTrue, reasonConfirmed,
-			"the TV already reported On, so the adapter on node-1 sent no command; the adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, 2 times, because the source at 1.5.0.0 claimed the input once, first after <time>; the last Active Source on the bus is 1.3.0.0"},
+			"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, 2 times, because the source at 1.5.0.0 claimed the input once, first after <time>; the last Active Source on the bus is 1.3.0.0"},
 		{"a player that always claims", 10, []string{"4->f 82 13 00", "4->f 82 13 00", "4->f 82 13 00"}, ConditionFalse, reasonTaken,
-			"the TV already reported On, so the adapter on node-1 sent no command; the adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, 3 times, because the source at 1.5.0.0 claimed the input 3 times, first after <time>; the source at 1.5.0.0 holds the input, and the adapter sends Active Source at most 3 times for one wake"},
+			"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, 3 times, because the source at 1.5.0.0 claimed the input 3 times, first after <time>; the source at 1.5.0.0 holds the input, and the adapter sends the pair at most 3 times for one wake"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -230,7 +230,7 @@ func TestAWakeRunsOnce(t *testing.T) {
 	api.nudge()
 	time.Sleep(2 * cecWakeGuard)
 
-	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 2)
 	mustMatch(t, len(claimsOf(wire)), 1)
 }
 
@@ -248,7 +248,7 @@ func TestANewWakeWakesAgain(t *testing.T) {
 	api.putTelevision(waking(second))
 
 	wokeWith(t, api, second)
-	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 2)
+	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 4)
 	mustMatch(t, len(claimsOf(wire)), 2)
 }
 
@@ -413,7 +413,7 @@ func TestTheDisplaysAdapterRunsTheWake(t *testing.T) {
 		}
 	}
 	own := cec.LogicalAddress(*second.LogicalAddress)
-	mustDeepEqual(t, senders, []cec.LogicalAddress{own, own})
+	mustDeepEqual(t, senders, []cec.LogicalAddress{own, own, own})
 	mustDeepEqual(t, claimsOf(wire), []string{cec.ActiveSource(own, 0x1400).String()})
 }
 
@@ -478,7 +478,7 @@ func TestTheNodeLogsEachWakeOnce(t *testing.T) {
 		"Television lounge: Player media/den's session woke the room at " + session.WokeAt + "; the adapter on node-1 starts the wake",
 		"Television lounge: Player media/den's session woke the room at " + session.WokeAt +
 			"; the adapter on node-1 sent Image View On to the TV once; the TV reported On after <time>" +
-			"; the adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, 2 times, because the source at 1.5.0.0 claimed the input once, first after <time>; the last Active Source on the bus is 1.3.0.0" +
+			"; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, 2 times, because the source at 1.5.0.0 claimed the input once, first after <time>; the last Active Source on the bus is 1.3.0.0" +
 			"; the wake ended after <time>",
 	})
 }
@@ -574,7 +574,7 @@ func TestAWakeWaitsForAPendingPower(t *testing.T) {
 			order = append(order, opcode)
 		}
 	}
-	mustDeepEqual(t, order, []cec.Opcode{cec.OpStandby, cec.OpImageViewOn})
+	mustDeepEqual(t, order, []cec.Opcode{cec.OpStandby, cec.OpImageViewOn, cec.OpImageViewOn})
 	peer, _ := wire.Peer(0)
 	mustMatch(t, peer.Power, cec.PowerOn)
 	mustDeepEqual(t, linesWith(log, "waits for it"), []string{
@@ -601,7 +601,7 @@ func TestAStoppedWakeDoesNotRunAgain(t *testing.T) {
 	api.nudge()
 	time.Sleep(2 * cecWakeGuard)
 
-	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 2)
 	mustMatch(t, len(claimsOf(wire)), 1)
 	television, _ := api.television("lounge")
 	mustMatch(t, television.Status.WokeAt, session.WokeAt)
@@ -626,7 +626,7 @@ func TestAWakeWaitsForItsStartedMark(t *testing.T) {
 
 	startedAt(t, api, session)
 	wokeWith(t, api, session)
-	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 2)
 }
 
 // A Standby another device sent the TV is a recent command. The TV can
@@ -646,8 +646,10 @@ func TestAWakeAfterAHeardStandbySendsImageViewOn(t *testing.T) {
 	api.putTelevision(waking(session))
 
 	television := wokeWith(t, api, session)
-	mustMatch(t, conditionOf(television.Status.Conditions, conditionWakeApplied).Status, ConditionTrue)
-	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+	applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
+	mustMatch(t, applied.Status, ConditionTrue)
+	mustMatch(t, strings.HasPrefix(applied.Message, "the TV reported On after the adapter on node-1 sent Image View On once;"), true)
+	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 2)
 	peer, _ := wire.Peer(0)
 	mustMatch(t, peer.Power, cec.PowerOn)
 }
@@ -696,6 +698,6 @@ func TestAnotherAdaptersClaimEndsTheGuard(t *testing.T) {
 	applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
 	mustMatch(t, applied.Reason, reasonSuperseded)
 	mustMatch(t, timeless([]string{applied.Message})[0],
-		"the TV already reported On, so the adapter on node-1 sent no command; the adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, once, and the adapter on node-2 sent Active Source for 1.4.0.0 after <time>, so the guard ended")
+		"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and the adapter on node-2 sent Active Source for 1.4.0.0 after <time>, so the guard ended")
 	mustMatch(t, len(claimsOf(wire)), 1)
 }

@@ -564,6 +564,8 @@ func (n *cecNode) heard(message cec.Message) {
 		return
 	}
 	n.arrived(message, after, held)
+	n.followRoute(message, own)
+	n.answerRouting(message, after, own)
 	// The adapter reports its power as on for as long as its pod runs.
 	// The machine keeps running when the TV goes to standby, so a
 	// Standby broadcast does not change the answer.

@@ -33,7 +33,8 @@ type keyBinding struct {
 // reserved for a home surface this operator does not own.
 //
 // The two home names, KEY_HOMEPAGE and KEY_WWW, end the film and ask the
-// client under it for its home page.
+// client under it for its home page. They are homeKeys, the names
+// ensureInput asks the receiver to show the unit for.
 //
 // The power names end the film and ask the client under it to do what
 // power does between films. They are powerKeys, the names ensureInput

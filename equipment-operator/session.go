@@ -204,13 +204,15 @@ func (s *session) start(active, awake, adopting bool) {
 // off, and asks the TV for nothing. television answers the TV of the
 // room and the power it reports, empty when the room has none, and
 // standby asks that TV to go to standby: only the remote's power button
-// calls it.
+// calls it. show asks that TV to show the session's Display when it is
+// on: only a home press calls it.
 type roomEvents interface {
 	opened(awake bool, trigger string)
 	woke(trigger string)
 	slept()
 	television() (name, power string)
 	standby(trigger string)
+	show(trigger string)
 }
 
 // setFlags takes both flags as the media operator wrote them: active
@@ -819,39 +821,4 @@ func (s *session) selectTheInput(trigger string) {
 		}
 	}
 	s.log.confirm(line, began, mainZoneCheck(s.driver, "input "+s.spec.Input, inputWords))
-}
-
-// ensureInput asks the receiver for the session's input without
-// touching the power. A controller press reaches here, and a room that
-// already shows the player's input is left alone, so the press sends
-// the receiver nothing. A dark room is left dark too: the power key is
-// the one that wakes the equipment.
-func (s *session) ensureInput() {
-	if s.spec.Input == "" {
-		s.log.printf("the commands topic asks %s; sent nothing, because Player %s's session names no input", commandEnsureInput, s.spec.Player)
-		return
-	}
-	goWork(s.ctx, s.ensureInputOnce)
-}
-
-// ensureInputOnce is the ensure under the one-shot lock, serialized
-// against a toggle and a flag flip so the three never drive the
-// receiver at the same moment.
-func (s *session) ensureInputOnce() {
-	s.oneShot.Lock()
-	defer s.oneShot.Unlock()
-	if !s.waitForSurvey(s.ctx) {
-		return
-	}
-	trigger := "the commands topic asks " + commandEnsureInput
-	state := mainZone(s.driver.State())
-	if state.Power != equipment.PowerOn {
-		s.log.printf("%s; sent nothing, because the receiver reports %s", trigger, powerWords(state, 0))
-		return
-	}
-	if state.Input == s.spec.Input {
-		s.log.printf("%s; sent nothing, because the receiver reports %s", trigger, inputWords(state, 0))
-		return
-	}
-	s.selectTheInput(trigger)
 }

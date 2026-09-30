@@ -733,8 +733,12 @@ func (u *receiverUnit) handleCommand(payload []byte) {
 	if err := json.Unmarshal(payload, &message); err != nil || message.Command == "" {
 		return
 	}
-	if message.Command == commandEnsureInput {
+	switch message.Command {
+	case commandEnsureInput:
 		u.ensureInput()
+		return
+	case commandShowInput:
+		u.showInput()
 		return
 	}
 	asks := message.Command
@@ -765,18 +769,38 @@ func (u *receiverUnit) handleCommand(payload []byte) {
 // input, so no input name crosses the bus.
 const commandEnsureInput = "input.ensure"
 
+// commandShowInput is the receiver's generic player action for a home
+// press: the ensure, and the room's TV on the session's Display when
+// the TV is on. session_ensure.go says why a home press needs the TV.
+const commandShowInput = "input.show"
+
 // ensureInput hands one ensure ask to the session that holds the input.
 // A receiver with no session has no player listening, so the ask is
 // dropped.
 func (u *receiverUnit) ensureInput() {
+	if held := u.standing(commandEnsureInput); held != nil {
+		held.ensureInput()
+	}
+}
+
+// showInput hands one show ask to the session that holds the input,
+// and drops it the way ensureInput does.
+func (u *receiverUnit) showInput() {
+	if held := u.standing(commandShowInput); held != nil {
+		held.showInput()
+	}
+}
+
+// standing answers the session an ask reaches, and writes the line of
+// an ask that finds none.
+func (u *receiverUnit) standing(command string) *session {
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
 	if held == nil {
-		u.log.printf("the commands topic asks %s; sent nothing, because no session stands", commandEnsureInput)
-		return
+		u.log.printf("the commands topic asks %s; sent nothing, because no session stands", command)
 	}
-	held.ensureInput()
+	return held
 }
 
 // powerApplied answers the last power the operator settled on.

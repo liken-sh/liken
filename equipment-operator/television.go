@@ -61,6 +61,9 @@ type TelevisionSession struct {
 	// PowerReadAt asks the node workload to read the TV's power once, for
 	// a power press that decides from it. status.powerRead answers it.
 	PowerReadAt string `json:"powerReadAt,omitempty"`
+	// ShowAt asks the node workload to show the session's Display on a TV
+	// that is on, for a home press. Each new time is one ask.
+	ShowAt string `json:"showAt,omitempty"`
 }
 
 // TelevisionPowerRead is the node workload's answer to one

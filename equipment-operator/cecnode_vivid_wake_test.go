@@ -127,11 +127,14 @@ func TestVividTheWakeShowsTheDisplay(t *testing.T) {
 	t.Logf("the TV heard %q", seen)
 	entry, _ := api.entry("den", "node-1")
 	own := cec.LogicalAddress(*entry.LogicalAddress)
+	viewOn := cec.ImageViewOn(own, cec.AddressTV).String()
 	claimed := cec.ActiveSource(own, address).String()
 	mustDeepEqual(t, seen, []string{
-		cec.ImageViewOn(own, cec.AddressTV).String(),
+		viewOn,
+		viewOn,
 		claimed,
 		cec.ActiveSource(seenFrom(t, heard(), player), player).String(),
+		viewOn,
 		claimed,
 	})
 }

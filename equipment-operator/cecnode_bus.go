@@ -64,10 +64,11 @@ func (n *cecNode) pass(ctx context.Context) error {
 }
 
 // passTelevisions reads the bus's Television once for each of the
-// Television's intents: its session's power read, its spec.power, its
-// session's wake, and its session's standby. A list that fails leaves each for the next pass,
-// and cancels nothing, because the Television may still ask for what
-// runs.
+// Television's intents: its session's power read, the room its session
+// holds, its spec.power, its session's wake, its session's standby, and
+// a home press's ask to show the session's Display.
+// A list that fails leaves each for the next pass, and cancels nothing,
+// because the Television may still ask for what runs.
 func (n *cecNode) passTelevisions(bus *CECBus) {
 	list, err := readTelevisions(n.client, n.televisions)
 	if err != nil {
@@ -81,11 +82,13 @@ func (n *cecNode) passTelevisions(bus *CECBus) {
 	television := televisionFor(list.Items, bus.Metadata.Name)
 	// A power press waits for its read, so the read goes first.
 	n.passPowerRead(bus, television)
+	n.holdRoom(bus, television)
 	// The wake and standby passes go next: a new generation of
 	// spec.power stops a wake or a standby in progress there, so no
 	// session command follows the power pass's first command.
 	n.passWake(bus, television)
 	n.passStandby(bus, television)
+	n.passShow(bus, television)
 	n.passTelevision(bus, television)
 }
 

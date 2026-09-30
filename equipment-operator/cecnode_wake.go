@@ -91,6 +91,10 @@ type wakeJob struct {
 	// superseded says a new generation of spec.power stopped the wake,
 	// and the pass that stopped it writes its result.
 	superseded atomic.Bool
+	// claimed says the wake sent its first Active Source. Until then the
+	// adapter answers a Request Active Source for the wake's Display,
+	// whichever source the bus last named (cecnode_answer.go).
+	claimed atomic.Bool
 }
 
 // wakeRecord is one write of the wake's status: the started mark or
@@ -362,9 +366,9 @@ func (n *cecNode) writeWake() {
 	}
 }
 
-// runWake wakes the TV the way spec.power wakes it, then sends Active
-// Source, guards it, and reads the TV's power once more at the end of
-// the guard.
+// runWake wakes the TV the way spec.power wakes it, then sends Image
+// View On and Active Source, guards the claim, and reads the TV's power
+// once more at the end of the guard.
 func (n *cecNode) runWake(ctx context.Context, job *wakeJob, own cec.LogicalAddress, physical cec.PhysicalAddress) powerResult {
 	session := job.television.Status.Session
 	began := time.Now()
@@ -376,6 +380,13 @@ func (n *cecNode) runWake(ctx context.Context, job *wakeJob, own cec.LogicalAddr
 			power.log = fmt.Sprintf("the adapter on %s sent Image View On to the TV, and the wake stopped after %s", n.machine, elapsed(time.Since(began)))
 		}
 		return power
+	}
+	// A TV that already reports On got no Image View On from the power
+	// step, and the claim sends it one with its Active Source, so the
+	// line states the report alone.
+	if power.verdict.status == ConditionTrue && n.sendsFor(budget, job.key) == 0 {
+		power.verdict.message = "the TV already reported On"
+		power.log = power.verdict.message
 	}
 	claim := n.claimSource(ctx, job, own, physical, session.Display)
 	if claim.stopped {

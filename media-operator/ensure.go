@@ -11,6 +11,15 @@ package main
 // the input it already reports and sends the equipment nothing when the
 // room is where it should be. Nothing here wakes the room, either; the
 // power key is the one that does that, and it asks for no input.
+//
+// A home press asks for more. A TV that shows its own apps is on
+// another input, and the receiver's input alone does not bring the
+// unit back to the screen. So the home keys ask the receiver to show
+// the unit: its input, and the room's TV on the unit's input. The
+// equipment operator owns the TV's bus, so the media layer asks in the
+// same player terms and sends the TV nothing itself. The TV gets its
+// commands only when it is on, so home does not wake a room that is off
+// either.
 
 import (
 	"encoding/json"
@@ -22,6 +31,15 @@ import (
 // layer asks in these terms alone, so no receiver vocabulary reaches
 // this side.
 const theEnsureCommand = "input.ensure"
+
+// theShowCommand is the receiver's generic player action for a home
+// press: the ensure, and the room's TV on the unit's input when the TV
+// is on.
+const theShowCommand = "input.show"
+
+// homeKeys are the names a controller's home button reaches the bus
+// under, the same two the playback pod binds to home in keybindings.go.
+var homeKeys = []string{"KEY_HOMEPAGE", "KEY_WWW"}
 
 // powerKeys are the three names a controller's power button reaches
 // the bus under, the same three the idle screen answers as the room's
@@ -84,9 +102,10 @@ func pressOf(payload []byte) (string, bool) {
 // at a unit with no equipment, asks nothing. A power press asks nothing
 // either. The key is the name the standing pod publishes after the
 // Keymap's fold, so a button a Keymap maps to a power key is exempt too,
-// and a power button a Keymap maps to another key is not. An ask the operator sends
-// earns a line, and a press that asks nothing writes none, because the
-// pod the press reached writes its own.
+// and a power button a Keymap maps to another key is not. A home press
+// asks for theShowCommand in place of the ensure. An ask the operator
+// sends earns a line, and a press that asks nothing writes none,
+// because the pod the press reached writes its own.
 func (o *operator) ensureInput(namespace, controller string, payload []byte) {
 	key, pressed := pressOf(payload)
 	if !pressed || slices.Contains(powerKeys, key) {
@@ -100,13 +119,17 @@ func (o *operator) ensureInput(namespace, controller string, payload []byte) {
 	if !held {
 		return
 	}
-	ask, err := json.Marshal(ensureAsk{Command: theEnsureCommand})
+	command := theEnsureCommand
+	if slices.Contains(homeKeys, key) {
+		command = theShowCommand
+	}
+	ask, err := json.Marshal(ensureAsk{Command: command})
 	if err != nil {
 		return
 	}
 	o.bus.Publish(commands, ask, false)
 	logLine(o.log, "remote %s: %s pressed with focus on player %s, published %s to %s",
-		controllerKey(namespace, controller), key, player, theEnsureCommand, commands)
+		controllerKey(namespace, controller), key, player, command, commands)
 }
 
 // ensureAsk is the payload a receiver's commands topic carries.

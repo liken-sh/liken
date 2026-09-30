@@ -174,6 +174,9 @@ type cecNode struct {
 	// powerRead is what the node workload holds about the power reads a
 	// power press asked for.
 	powerRead powerReadMemory
+	// shown is what the node workload holds about the home presses it
+	// answered.
+	shown showMemory
 	// arrivals takes each device the adapter heard arrive in Control to
 	// the mode's work, which asks it for its facts. introduced maps each
 	// device the adapter found or introduced to the physical address it
@@ -201,6 +204,13 @@ type cecNode struct {
 	// another source's claim.
 	source  cec.PhysicalAddress
 	sources chan struct{}
+	// route is where the bus's routing messages last sent the TV's
+	// picture (cecnode_answer.go).
+	route routeState
+	// room is the room a Player's session holds through this adapter,
+	// and nil when none does. The adapter answers Request Active Source
+	// for it.
+	room *roomHold
 }
 
 // newCECNode reads the adapter's capabilities, which every later

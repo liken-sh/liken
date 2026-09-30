@@ -62,9 +62,11 @@ says who sends it and what answers it. The package uses four:
 - **One-touch play.** Image View On, Standby, and Active Source.
   `PowerCommand` is the generic command for a TV power state: Image
   View On for On, and Standby directed to the TV alone for Standby.
-  The node workload's wake sends Image View On and then Active Source
-  for its `Display`'s physical address, and reads every Active Source
-  the bus carries. `cectest` has a peer that claims Active Source
+  The node workload sends Image View On and then Active Source for its
+  `Display`'s physical address when it claims the input for a person,
+  in the wake and for a home press. It answers Request Active Source
+  and Set Stream Path with Active Source alone, and it reads every
+  Active Source and routing message the bus carries. `cectest` has a peer that claims Active Source
   after another device's claim, the way a streaming player did in the
   first drill.
 - **Remote control.** User Control Pressed and Released. The kernel
