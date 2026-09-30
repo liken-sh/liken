@@ -103,8 +103,8 @@ impl<S: Source, A: Art> Browser<S, A> {
             // The people key raises the picker over whatever screen is
             // up, the way home pops to the home page. A press that arrives
             // while the picker stands never reaches here: the picker took
-            // it above and binds no word for people, so it stands as it
-            // was. A browser that knows no people has an empty picker to
+            // it above and answers with whichever people are chosen. A
+            // browser that knows no people has an empty picker to
             // draw and nothing to ask, so the key moves nothing there, the
             // way the ask never raises one.
             "people" => match self.audience.known().is_empty() {

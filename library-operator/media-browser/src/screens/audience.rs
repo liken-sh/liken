@@ -213,8 +213,9 @@ impl Picker {
     /// Fold one press. The answer is the people the press chose, by their
     /// index in the known list, or nothing while the picker still stands.
     /// Enter on a person toggles them. Down reaches the link, and up returns
-    /// to the tile focus left. Enter on the link and back both answer
-    /// whichever people are chosen.
+    /// to the tile focus left. Enter on the link, back, and the people key
+    /// all answer whichever people are chosen. The people key raised the
+    /// picker, so the same button closes it without a walk to the link.
     pub fn key(&mut self, name: &str) -> Option<Vec<usize>> {
         match (name, self.on_link) {
             ("left", false) => {
@@ -239,7 +240,7 @@ impl Picker {
                 }
                 None
             }
-            ("enter", true) | ("escape" | "backspace", _) => Some(self.answer()),
+            ("enter", true) | ("escape" | "backspace" | "people", _) => Some(self.answer()),
             _ => None,
         }
     }

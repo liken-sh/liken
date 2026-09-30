@@ -8,10 +8,10 @@
 /// Select is enter and back is escape, so a press from a remote takes the
 /// path the keyboard and the script take. The three power names are the
 /// ones the kernel gives a remote's power button, and a remote sends one
-/// of them. Home pops to the home page, people raises the person picker,
-/// search opens the search wall, power asks for the shade, and a letter
-/// or a digit is the character itself, which is the word a typed key
-/// gives on a local run.
+/// of them. Home pops to the home page, people raises the person picker
+/// and answers it, search opens the search wall, power asks for the
+/// shade, and a letter or a digit is the character itself, which is the
+/// word a typed key gives on a local run.
 pub fn key_of(name: &str) -> Option<&'static str> {
     match name {
         "KEY_UP" => Some("up"),

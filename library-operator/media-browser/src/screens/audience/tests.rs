@@ -180,6 +180,17 @@ fn back_with_nobody_chosen_answers_the_empty_set() {
     assert_eq!(Picker::open(3, &[]).key("backspace"), Some(Vec::new()));
 }
 
+// The people key raises the picker, so the same button closes it: a
+// person who chose from the row never has to walk down to the link.
+#[test]
+fn the_people_key_answers_the_people_that_are_chosen() {
+    let mut picker = Picker::open(3, &[]);
+    picker.key("right");
+    picker.key("enter");
+
+    assert_eq!(picker.key("people"), Some(vec![1]));
+}
+
 #[test]
 fn a_press_the_picker_binds_nothing_for_changes_nothing() {
     let mut picker = Picker::open(2, &[]);

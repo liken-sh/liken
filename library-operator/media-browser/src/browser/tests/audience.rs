@@ -473,17 +473,17 @@ fn the_people_key_raises_the_picker_over_the_page() {
 }
 
 #[test]
-fn the_people_key_under_the_picker_leaves_it_as_it_stands() {
+fn the_people_key_under_the_picker_answers_who_is_chosen() {
     let mut browser = a_room_of_two();
     browser.tick(0.0);
     open_the_film(&mut browser);
     browser.key("people");
-    browser.key("right");
-    let raised = browser.picker.clone().expect("the picker stands");
+    browser.key("enter");
 
-    browser.key("people");
+    assert!(browser.key("people"));
 
-    assert_eq!(browser.picker, Some(raised));
+    assert!(browser.picker.is_none());
+    assert_eq!(browser.audience().current(0.0), ["second".to_string()]);
     assert_eq!(browser.stack.len(), 2);
 }
 
