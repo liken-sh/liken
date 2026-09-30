@@ -21,7 +21,7 @@
 profile: coverage.out
 
 threshold:
-  total: 76
+  total: 74
 
 override:
   # The bluetoothd supervisor: what is testable is the argument

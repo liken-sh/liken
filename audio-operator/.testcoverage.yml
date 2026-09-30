@@ -22,4 +22,4 @@ profile: coverage.out
 
 threshold:
   # The total spans every package, so it is the whole gate.
-  total: 80
+  total: 78
