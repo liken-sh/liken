@@ -173,6 +173,23 @@ connect time and keeps only the UUID:
   before sending any command. The check also guards a declared
   address, so an address swap never drives the wrong device.
 
+The `modelName` of the UPnP description tells a WiiM from another
+brand on the LinkPlay platform. Every LinkPlay device serves the
+description over plain HTTP at `/description.xml` on the port its mDNS
+`SRV` record names. Both measured devices named port 59152, and 49152
+answers too. An Arylic amp served it from the operator's node while it
+refused the HTTPS API there. The mDNS TXT records carry no model.
+
+| Device | `manufacturer` | `modelName` | `modelNumber` |
+| --- | --- | --- | --- |
+| WiiM Amp | Linkplay Technology Inc. | WiiM Amp | V01-Sep 22 2026 |
+| Arylic amp | Rakoit Technology(SZ) Co., Ltd. | A50 | V01-Apr 27 2022 |
+
+Discovery creates a `Receiver` only for a `modelName` that begins with
+`WiiM`, and the driver reads the same field for `status.model`. The
+manufacturer is no guide, because LinkPlay makes devices that other
+brands sell.
+
 A `PlayQueue:1` service in the UPnP description is the definitive
 marker for a LinkPlay device. The `SERVER` header is not, because
 LinkPlay and many unrelated devices send the same generic string.

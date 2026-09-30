@@ -77,6 +77,19 @@ func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
 	mustMatch(t, status.Driver, "denon")
 }
 
+// The model and the maker are what a driver read from the equipment,
+// in the maker's words, whichever driver read them.
+func TestBuildReceiverStatusCarriesTheModel(t *testing.T) {
+	t.Parallel()
+	state := testState(equipment.PowerOn, 100, 139)
+	state.Model, state.Manufacturer = "AVR-X1700H", "Denon"
+
+	status := buildReceiverStatus(state, nil, nil, "", 2, 1, nil, statusNow)
+
+	mustMatch(t, status.Model, "AVR-X1700H")
+	mustMatch(t, status.Manufacturer, "Denon")
+}
+
 func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
 	t.Parallel()
 	state := testState(equipment.PowerOn, 100, 139)
@@ -155,6 +168,10 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 	settledBlock.SettledSettings = map[string]string{zonesBlock: "0123456789abcdef"}
 	settledPower := held
 	settledPower.SettledPower = equipment.PowerOn
+	modelRead := held
+	modelRead.Model = "WiiM Amp"
+	manufacturerRead := held
+	manufacturerRead.Manufacturer = "Linkplay Technology Inc."
 
 	cases := []struct {
 		name string
@@ -169,6 +186,8 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 		{"condition dropped", noConditions, false},
 		{"a block settled", settledBlock, false},
 		{"a power settled", settledPower, false},
+		{"the model was read", modelRead, false},
+		{"the manufacturer was read", manufacturerRead, false},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

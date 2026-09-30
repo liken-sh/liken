@@ -426,12 +426,15 @@ type eqAnswer struct {
 	Status string `json:"status"`
 }
 
-// IsWiiM answers whether a getStatusEx project names a WiiM. Other
+// IsWiiM answers whether a name the device reports, a getStatusEx
+// project or the modelName of its UPnP description, names a WiiM. Other
 // brands build on LinkPlay's platform, advertise the same mDNS service,
 // and answer the same commands, so the API alone does not say whose
-// device it is. The WiiM projects seen begin with "WiiM", such as
-// WiiM_Amp_4layer, and another brand's begin with its own name, such as
-// ARYLIC_A50TE.
-func IsWiiM(project string) bool {
-	return len(project) >= 4 && strings.EqualFold(project[:4], "wiim")
+// device it is. The WiiM names seen begin with "WiiM", such as the
+// project WiiM_Amp_4layer and the model WiiM Amp, and another brand's
+// begin with its own name, such as the project ARYLIC_A50TE. The
+// comparison ignores letter case. The manufacturer is no guide, because
+// LinkPlay makes devices that other brands sell.
+func IsWiiM(name string) bool {
+	return len(name) >= 4 && strings.EqualFold(name[:4], "wiim")
 }

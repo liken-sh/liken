@@ -108,12 +108,14 @@ func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimSt
 		}
 	}
 	return ReceiverStatus{
-		Address:    address,
-		Zones:      zones,
-		Driver:     protocolName(settings, wiimStatus),
-		Denon:      settings,
-		Wiim:       wiimStatus,
-		Conditions: []Condition{reachable(state.Reachable, generation, previous, now)},
+		Address:      address,
+		Model:        state.Model,
+		Manufacturer: state.Manufacturer,
+		Zones:        zones,
+		Driver:       protocolName(settings, wiimStatus),
+		Denon:        settings,
+		Wiim:         wiimStatus,
+		Conditions:   []Condition{reachable(state.Reachable, generation, previous, now)},
 	}
 }
 
@@ -141,7 +143,7 @@ func sleepMinutes(minutes int) int {
 
 // sameStatus answers whether a write would change anything.
 func sameStatus(a, b ReceiverStatus) bool {
-	if a.Service != b.Service || a.Driver != b.Driver || a.SettledPower != b.SettledPower || !maps.Equal(a.SettledSettings, b.SettledSettings) || !reflect.DeepEqual(a.Denon, b.Denon) ||
+	if a.Service != b.Service || a.Driver != b.Driver || a.Model != b.Model || a.Manufacturer != b.Manufacturer || a.SettledPower != b.SettledPower || !maps.Equal(a.SettledSettings, b.SettledSettings) || !reflect.DeepEqual(a.Denon, b.Denon) ||
 		!reflect.DeepEqual(a.Wiim, b.Wiim) ||
 		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
 		return false

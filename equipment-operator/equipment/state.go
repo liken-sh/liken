@@ -86,6 +86,12 @@ const Unknown = -1
 type State struct {
 	Reachable ConditionStatus
 	Zones     map[string]ZoneState
+	// Model and Manufacturer name the equipment in its maker's words,
+	// such as "WiiM Amp" and "Linkplay Technology Inc.", so a person can
+	// tell which device a Receiver reaches. A driver that has not read
+	// them leaves them empty.
+	Model        string
+	Manufacturer string
 }
 
 // Zone returns one zone's state and whether the driver has reported it.
@@ -118,6 +124,9 @@ const (
 	// and a listener that waits for the survey would otherwise hear
 	// nothing.
 	EventSurveyed = "surveyed"
+	// EventModel says that the driver has read the equipment's model and
+	// maker, which reach the status and nothing else.
+	EventModel = "model"
 )
 
 // Driver is the one interface a protocol implements. Commands are

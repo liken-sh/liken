@@ -45,6 +45,11 @@ type denonState struct {
 	Zone2     zoneState
 	Zone3     zoneState
 
+	// model and manufacturer are what the receiver's UPnP description
+	// names (description.go), empty until the client has read it.
+	model        string
+	manufacturer string
+
 	mainFromZM bool
 }
 

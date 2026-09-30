@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liken-sh/equipment-operator/upnp"
 	"github.com/liken-sh/equipment-operator/wiim"
 )
 
@@ -72,6 +73,13 @@ type discovery struct {
 	// with a project that is not a WiiM, keyed by identity. Discovery
 	// creates no Receiver for it, and deletes the one it made.
 	foreign map[string]string
+	// descriptions holds the UPnP description of each device whose
+	// description discovery read, keyed by identity. The model it names
+	// is the verdict for the operator's lifetime
+	// (discovery_description.go). unread marks the devices whose last
+	// read failed, so the failure logs once.
+	descriptions map[string]upnp.Description
+	unread       map[string]bool
 	// searches counts the full searches since the start, and
 	// firstSearch and lastSearch stamp the first and the latest.
 	searches    int
@@ -90,14 +98,16 @@ const discoveryMisses = 3
 
 func newDiscovery(client *Client, wake func()) *discovery {
 	return &discovery{
-		client:      client,
-		wake:        wake,
-		log:         os.Stderr,
-		now:         time.Now,
-		devices:     map[string]wiim.Device{},
-		foreign:     map[string]string{},
-		foundIn:     map[string]int{},
-		missedSince: map[string]time.Time{},
+		client:       client,
+		wake:         wake,
+		log:          os.Stderr,
+		now:          time.Now,
+		devices:      map[string]wiim.Device{},
+		foreign:      map[string]string{},
+		descriptions: map[string]upnp.Description{},
+		unread:       map[string]bool{},
+		foundIn:      map[string]int{},
+		missedSince:  map[string]time.Time{},
 	}
 }
 
@@ -131,14 +141,6 @@ func (d *discovery) skip(uuid, project, address string) {
 	}
 }
 
-// notWiiM answers the project a device reported that is not a WiiM's,
-// and an empty string for a device that has reported none.
-func (d *discovery) notWiiM(uuid string) string {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	return d.foreign[uuid]
-}
-
 // run discovers until ctx ends.
 func (d *discovery) run(ctx context.Context) {
 	for ctx.Err() == nil {
@@ -151,7 +153,8 @@ func (d *discovery) run(ctx context.Context) {
 	}
 }
 
-// once is one search window and the Receiver reconcile that follows. A
+// once is one search window, the description reads of the devices it
+// found that have no verdict, and the Receiver reconcile that follows. A
 // search that ctx cut short did not run its full window, so it is no
 // evidence that an amp it missed left, and the operator does not count
 // it. The Receiver loop reads only the addresses from discovery, so a
@@ -164,6 +167,7 @@ func (d *discovery) once(ctx context.Context) {
 		return
 	}
 	moved := d.store(found)
+	d.judge(ctx, found)
 	if err := d.reconcile(); err != nil {
 		fmt.Fprintf(os.Stderr, "reconciling discovered receivers: %v\n", err)
 	}
@@ -280,7 +284,10 @@ func (d *discovery) reconcile() error {
 	// made for it.
 	for _, device := range d.held() {
 		if d.notWiiM(device.UUID) != "" {
-			// The device is another brand on LinkPlay's platform.
+			// The device is another brand on LinkPlay's platform. A
+			// device with no verdict, because its description could not
+			// be read, gets a Receiver, and the driver's getStatusEx
+			// check keeps it from being driven.
 			continue
 		}
 		if len(claimants[device.UUID]) > 0 {
@@ -315,16 +322,17 @@ func (d *discovery) reconcile() error {
 // one amp, and an empty string when the Receiver stands. A person's
 // Receiver that names the amp replaces the operator's copy at once. An
 // amp that full searches missed discoveryMisses times in a row is gone.
-// A device whose getStatusEx names a project that is not a WiiM is
-// another brand, and the operator deletes its copy at once.
+// A device whose UPnP description names a model that is not a WiiM, or
+// whose getStatusEx names such a project, is another brand, and the
+// operator deletes its copy at once.
 // An amp with fewer misses keeps its Receiver, which reports the amp
 // unreachable while discovery holds no address for it.
 func (d *discovery) pruneReason(uuid, name string, claimants []string) string {
 	if others := slices.DeleteFunc(slices.Clone(claimants), func(other string) bool { return other == name }); len(others) > 0 {
 		return fmt.Sprintf("Receiver %s names the WiiM %s", strings.Join(others, ", "), uuid)
 	}
-	if project := d.notWiiM(uuid); project != "" {
-		return fmt.Sprintf("the device %s reports the project %s, which is not a WiiM", uuid, project)
+	if reason := d.notWiiM(uuid); reason != "" {
+		return reason
 	}
 	misses, span := d.missed(uuid)
 	if misses < discoveryMisses {

@@ -116,6 +116,18 @@ The web setup page and port 23 disagree on ARC on the measured
 receiver. The page reports ARC as on and does not let a person change
 it, and `SSHOSCONARC` reports `OFF`.
 
+## The model
+
+Port 23 carries no command that names the model. The driver reads it
+once per connection, until one read succeeds, from the AIOS UPnP
+description at `http://<address>:60006/upnp/desc/aios_device/aios_device.xml`,
+and writes the `modelName` and the `manufacturer` to `status.model`
+and `status.manufacturer`. denonavr's `const.py` names that port and
+path for the AVR-X 2016 generation, and `/description.xml` on port
+8080 for older receivers, which the driver does not read. Not measured
+on the AVR-X1700H: whether its `modelName` carries a prefix such as
+`Denon`.
+
 ## What is not read
 
 The parser ignores the tuner (`TF`, `TM`, `TP`), the network player

@@ -59,6 +59,7 @@ func TestThePrinterColumns(t *testing.T) {
 			{"Applied", conditionReason("PowerApplied"), 1},
 		}},
 		{receiversCRD, []column{
+			{"Model", ".status.model", 0},
 			{"Power", ".status.zones.main.power", 0},
 			{"Input", ".status.zones.main.input", 0},
 			{"Volume", ".status.zones.main.volume", 0},

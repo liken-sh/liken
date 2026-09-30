@@ -130,31 +130,62 @@ Copy the `none` requirement into each term of your patch.
 
 Other brands build on the LinkPlay platform that WiiM uses. Their
 devices advertise the same `_linkplay._tcp.local.` mDNS service and
-answer the same `getStatusEx` request. The operator therefore reads
-the `project` field of the `getStatusEx` answer and drives a device
-only when the field begins with `WiiM`, in any letter case. A WiiM Amp
-reports `WiiM_Amp_4layer`. An Arylic amplifier reports
-`ARYLIC_A50TE`, so the operator does not drive it.
+answer the same `getStatusEx` request, and the mDNS answer names no
+model. The operator therefore checks each device in two places, and
+drives it only when neither check finds another brand.
 
-The operator already reads `getStatusEx` on every poll, so the check
-sends a WiiM no extra request. For a device whose `project` does not
-begin with `WiiM`, the operator sends `getStatusEx` and nothing else.
-It sends no setting, no command, and no event subscription. It writes
-one line to its log for each such device, with the project and the
-address:
+Discovery checks first, before it creates a `Receiver`. Every LinkPlay
+device serves a UPnP device description over plain HTTP at
+`/description.xml`, on the port that its mDNS `SRV` record names. When
+a search finds a device that discovery has not judged, discovery reads
+that description with one `GET`. It creates a `Receiver` only when the
+`modelName` begins with `WiiM`, in any letter case. The check reads the
+model and not the manufacturer, because LinkPlay also makes devices
+that other brands sell:
+
+| Device | `manufacturer` | `modelName` | Verdict |
+| --- | --- | --- | --- |
+| WiiM Amp | Linkplay Technology Inc. | WiiM Amp | a WiiM |
+| Arylic amplifier | Rakoit Technology(SZ) Co., Ltd. | A50 | not a WiiM |
+
+The description is on its own port over plain HTTP, so the check also
+works for a device that refuses the HTTPS control API. An Arylic
+amplifier refused HTTPS from the operator's address and still served
+its description. Discovery keeps each verdict until the operator
+restarts. For a device that is not a WiiM, discovery creates no
+`Receiver`, deletes the `Receiver` that it created for the device
+earlier, sends the device nothing more, and writes one line to its log:
+
+    discovery skipped the LinkPlay device <uuid> at <address>: its UPnP description names the manufacturer Rakoit Technology(SZ) Co., Ltd. and the model A50, which is not a WiiM
+
+A description that discovery cannot read or parse is not a verdict.
+Discovery writes one line with the cause, creates the `Receiver` as it
+does for a WiiM, and reads the description again on the next search
+that finds the device. The driver's check then decides:
+
+    discovery could not read the UPnP description of the LinkPlay device <uuid> at <address>, so its getStatusEx project decides whether it is a WiiM: <cause>
+
+The driver checks second, on every poll. It reads the `project` field
+of the `getStatusEx` answer and drives a device only when the field
+begins with `WiiM`, in any letter case. A WiiM Amp reports
+`WiiM_Amp_4layer`, and an Arylic amplifier reports `ARYLIC_A50TE`. This
+check covers a `Receiver` that exists before discovery reads the
+description, such as a `Receiver` that you declare. The operator
+already reads `getStatusEx` on every poll, so the check sends a WiiM no
+extra request. For a device whose `project` does not begin with
+`WiiM`, the operator sends `getStatusEx` and nothing else. It sends no
+setting, no command, no event subscription, and no read of the
+description. It writes one line to its log for each such device:
 
     discovery skipped the LinkPlay device <uuid> at <address>: its project is ARYLIC_A50TE, which is not a WiiM
 
-Discovery creates a `Receiver` for the device before the first
-`getStatusEx` answer arrives, because the mDNS answer carries no
-project. When the answer names another brand, the operator deletes
-that `Receiver`, and discovery creates no other for the device until
-the operator restarts. A `Receiver` that you declare is never deleted
-for this reason. It reports the device unreachable, and the operator
-still sends the device only `getStatusEx`. A device that does not
-answer `getStatusEx` is not judged: its `Receiver` stays and reports
-the amp unreachable. A device whose answer has no `project` field is
-not judged either.
+When the answer names another brand, the operator deletes the
+`Receiver` that discovery created for the device, and discovery
+creates no other for it until the operator restarts. Neither check
+deletes a `Receiver` that you declare. That `Receiver` reports the
+device unreachable, and the operator still sends the device only
+`getStatusEx`. The driver does not judge a device that does not answer
+`getStatusEx`, or a device whose answer has no `project` field.
 
 ## Turn network discovery off
 
@@ -199,7 +230,7 @@ reports the amp unreachable.
 
 The operator does not delete the `Receiver` objects that the search
 created before you turned it off, because only a search, or a device
-that reports another brand's `project`, deletes one.
+that the driver finds to be another brand, deletes one.
 So a discovered `Receiver` also stays when you declare a `Receiver` for
 the same amp, and the two objects then name one amp. Each discovered
 `Receiver` has the `equipment.liken.sh/discovered` label. List them,
@@ -243,11 +274,17 @@ that cable. The volume block is in the receiver's own scale. `max` is
 the loudest level a press may set the room to, and a Denon requires
 it, because the limit a Denon reports moves with the volume. `step`
 is how far one press moves the volume, and half steps are allowed.
-`kubectl get receivers` shows what the receiver last reported, and
-the `Player` whose session holds it:
+`kubectl get receivers` shows the receiver's model, what the receiver
+last reported, and the `Player` whose session holds it:
 
-    NAME          POWER   INPUT   VOLUME   PLAYER              REACHABLE   AGE
-    living-room   On      MPLAY   50.0     house/living-room   True        2m
+    NAME          MODEL        POWER   INPUT   VOLUME   PLAYER              REACHABLE   AGE
+    living-room   AVR-X1700H   On      MPLAY   50.0     house/living-room   True        2m
+
+The driver reads the model from the receiver's UPnP description, into
+`status.model`, and the maker into `status.manufacturer`. A WiiM serves
+its description on port 49152, and a Denon or Marantz receiver of the
+AVR-X 2016 generation or later serves one on port 60006. A receiver
+that serves none leaves the `MODEL` column empty.
 
 `kubectl get receivers -o wide` adds the driver, the address, whether
 a `Play` stands, and the sound mode.

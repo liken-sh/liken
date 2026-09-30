@@ -11,13 +11,15 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
-func TestIsWiiMComparesTheProjectPrefixWithoutCase(t *testing.T) {
+func TestIsWiiMComparesTheNamePrefixWithoutCase(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		project string
 		want    bool
 	}{
 		{"WiiM_Amp_4layer", true},
+		{"WiiM Amp", true},
+		{"A50", false},
 		{"WiiM_Mini", true},
 		{"WiiM_Pro_with_gc4a", true},
 		{"WIIM_ULTRA", true},

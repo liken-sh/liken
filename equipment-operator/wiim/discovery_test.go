@@ -110,6 +110,7 @@ func TestParseMDNSBuildsADevice(t *testing.T) {
 	mustMatch(t, devices[0].UUID, "FF98F2F7AABBCCDDEEFF0011")
 	mustMatch(t, devices[0].Name, "WiiM Amp")
 	mustMatch(t, devices[0].Address, "192.0.2.10")
+	mustMatch(t, devices[0].Description, "http://192.0.2.10:49152/description.xml")
 }
 
 // The mDNS parser assembles an instance whose records arrive in two
@@ -146,6 +147,7 @@ func TestParseSSDPReadsEitherHeaderCasing(t *testing.T) {
 	mustMatch(t, device.UUID, "FF98F2F7AABBCCDDEEFF0011")
 	mustMatch(t, device.Address, "192.0.2.10")
 	mustMatch(t, device.Name, "")
+	mustMatch(t, device.Description, "http://192.0.2.10:49152/device.xml")
 }
 
 // A response without an identity or without an address is not a device.
@@ -201,6 +203,17 @@ func TestMergeFillsMissingFields(t *testing.T) {
 	mustMatch(t, len(got), 1)
 	mustMatch(t, got[0].Name, "Amp")
 	mustMatch(t, got[0].Address, "192.0.2.11")
+}
+
+// The merge keeps the description URL the first source found, and
+// fills it from the other source when the first had none.
+func TestMergeFillsTheDescription(t *testing.T) {
+	devices := map[string]Device{}
+	mergeDevice(devices, Device{UUID: "FF98F2F7AABBCCDDEEFF0011", Address: "192.0.2.10"})
+	mergeDevice(devices, Device{UUID: "FF98F2F7AABBCCDDEEFF0011", Address: "192.0.2.10", Description: "http://192.0.2.10:59152/description.xml"})
+	mergeDevice(devices, Device{UUID: "FF98F2F7AABBCCDDEEFF0011", Address: "192.0.2.10", Description: "http://192.0.2.10:49152/description.xml"})
+
+	mustMatch(t, sorted(devices)[0].Description, "http://192.0.2.10:59152/description.xml")
 }
 
 // A record with no identity never enters the set.

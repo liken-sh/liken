@@ -27,6 +27,9 @@ spec:
       # columns with priority 1: the driver, the address, whether a Play
       # stands, and the sound mode.
       additionalPrinterColumns:
+        - name: Model
+          type: string
+          jsonPath: .status.model
         - name: Power
           type: string
           jsonPath: .status.zones.main.power
@@ -254,7 +257,7 @@ spec:
                 wiim:
                   type: object
                   required: [uuid]
-                  description: "The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything. The operator drives only a device whose getStatusEx project begins with WiiM, in any letter case. Another brand on the LinkPlay platform gets getStatusEx and nothing else."
+                  description: "The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything. The operator drives only a WiiM. Network discovery creates a Receiver only for a device whose UPnP description names a modelName that begins with WiiM, and the driver drives only a device whose getStatusEx project begins with WiiM, both in any letter case. Another brand on the LinkPlay platform gets getStatusEx and nothing else."
                   properties:
                     uuid:
                       type: string
@@ -453,6 +456,12 @@ spec:
                 address:
                   type: string
                   description: "The address the operator reached the receiver on: a WiiM's is its declared address, or the address discovery found when it declares none, and a Denon's is the declared address resolved. Empty until the operator builds the driver."
+                model:
+                  type: string
+                  description: "The receiver's model in its maker's words, such as WiiM Amp or AVR-X1700H, so a person can tell which device a Receiver reaches when its name is a discovered UUID. A WiiM driver reads it from the modelName of the amp's UPnP description on port 49152, once the amp has answered as a WiiM. A Denon driver reads it from the modelName of the receiver's AIOS description on port 60006, which a receiver of the AVR-X 2016 generation or later serves. Empty until the driver has read it, and for a receiver that serves no description."
+                manufacturer:
+                  type: string
+                  description: "The receiver's maker as the same UPnP description names it, such as Denon or Marantz. A WiiM reports Linkplay Technology Inc., the platform's maker, so the model and not this field says whether a device is a WiiM. Empty whenever status.model is empty."
                 driver:
                   type: string
                   description: "The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver."

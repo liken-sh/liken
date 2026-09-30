@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/equipment-operator/upnp"
 )
 
 // These bound one request and the wait between polls. A failed poll
@@ -100,6 +101,14 @@ type Client struct {
 	// controller knows the device's own facts are in hand before it
 	// applies a declared setting.
 	surveyed bool
+	// description is what the amp's UPnP description names, and
+	// describeRetry is the earliest moment the next read of a
+	// description that failed may start (description.go). The
+	// description is not under status.wiim: the model and the maker
+	// reach status.model and status.manufacturer through State, the
+	// same fields every driver fills.
+	description   upnp.Description
+	describeRetry time.Time
 
 	// The event side: the callback listener the device connects back to,
 	// the subscriptions it holds, and whether a loss has been reported.
@@ -140,7 +149,7 @@ func NewClient(address string, listener func(equipment.Event)) *Client {
 func (c *Client) State() equipment.State {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	return c.state.equipmentState(c.reachable)
+	return c.withDescription(c.state.equipmentState(c.reachable))
 }
 
 // Status returns the device's own typed snapshot, which the controller
@@ -180,10 +189,11 @@ func (c *Client) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		// The poll comes first: its getStatusEx read decides whether the
 		// device is a WiiM, and a device that is not gets no
-		// subscription.
+		// subscription and no read of its description.
 		wait := waits.after(c.poll(ctx))
 		if !c.isForeign() {
 			c.manageSubscriptions(ctx)
+			c.describe(ctx)
 		}
 		select {
 		case <-ctx.Done():

@@ -22,7 +22,8 @@ type clientHarness struct {
 
 // startClient runs a client against one address until the test ends,
 // and waits for its goroutines to stop before any earlier cleanup runs.
-func startClient(t *testing.T, address string) *clientHarness {
+// Each configure runs on the client before it starts.
+func startClient(t *testing.T, address string, configure ...func(*Client)) *clientHarness {
 	t.Helper()
 	events := make(chan equipment.Event, 256)
 	client := NewClient(address, func(event equipment.Event) {
@@ -31,6 +32,9 @@ func startClient(t *testing.T, address string) *clientHarness {
 		default:
 		}
 	})
+	for _, apply := range configure {
+		apply(client)
+	}
 	stopped := make(chan struct{})
 	ctx := t.Context()
 	go func() {

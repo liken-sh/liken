@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,11 +47,18 @@ var (
 	ssdpReadTimeout = ssdpMX*time.Second + 250*time.Millisecond
 )
 
-// Device is one WiiM found on the local network.
+// Device is one LinkPlay device found on the local network. It is not
+// yet known to be a WiiM: other brands advertise the same service, and
+// the UPnP description at Description names the model that tells them
+// apart.
 type Device struct {
 	UUID    string // normalized twelve-byte LinkPlay uuid, upper hex (use normalizeUUID)
 	Name    string // the device's friendly name, from the mDNS instance or the SSDP description
 	Address string // the IPv4 address it answers on
+	// Description is the URL of the device's UPnP description, served
+	// over plain HTTP. mDNS gives it as the port of the SRV record, and
+	// SSDP as the LOCATION header. It is empty when neither path gave it.
+	Description string
 }
 
 // Discover finds the LinkPlay devices on the local network. It browses
@@ -103,6 +111,9 @@ func mergeDevice(devices map[string]Device, device Device) {
 	if existing.Address == "" {
 		existing.Address = device.Address
 	}
+	if existing.Description == "" {
+		existing.Description = device.Description
+	}
 	devices[device.UUID] = existing
 }
 
@@ -117,6 +128,7 @@ const linkplayService = "_linkplay._tcp.local."
 type mdnsInstance struct {
 	name    string // the friendly name, the first label of the instance
 	host    string // the SRV target host
+	port    uint16 // the SRV port, where the device serves its UPnP description
 	uuid    string // the uuid= value from the TXT record
 	address string // the IPv4 address of the A record
 }
@@ -208,6 +220,7 @@ func handleMDNSResource(resource dnsmessage.Resource, instances map[string]*mdns
 	case *dnsmessage.SRVResource:
 		inst := instanceFor(instances, resource.Header.Name.String())
 		inst.host = body.Target.String()
+		inst.port = body.Port
 	case *dnsmessage.TXTResource:
 		inst := instanceFor(instances, resource.Header.Name.String())
 		for _, text := range body.TXT {
@@ -260,11 +273,17 @@ func assembleMDNS(instances map[string]*mdnsInstance) []Device {
 		if uuid == "" || inst.address == "" {
 			continue
 		}
-		devices = append(devices, Device{
+		device := Device{
 			UUID:    uuid,
 			Name:    inst.name,
 			Address: inst.address,
-		})
+		}
+		if inst.port != 0 {
+			// A LinkPlay device serves its description at this path on
+			// the port its SRV record names.
+			device.Description = "http://" + net.JoinHostPort(inst.address, strconv.Itoa(int(inst.port))) + "/description.xml"
+		}
+		devices = append(devices, device)
 	}
 	return devices
 }
@@ -306,8 +325,8 @@ func searchSSDP(ctx context.Context, devices map[string]Device) {
 }
 
 // parseSSDP reads one M-SEARCH answer into a device. The response
-// carries the identity in the USN header and the address in the
-// LOCATION header. It carries no name, so Name stays empty and the
+// carries the identity in the USN header, and the LOCATION header is
+// the URL of the description, which also gives the address. It carries no name, so Name stays empty and the
 // merge fills it from the mDNS path.
 func parseSSDP(response []byte) (Device, bool) {
 	headers := httpHeaders(response)
@@ -316,7 +335,7 @@ func parseSSDP(response []byte) (Device, bool) {
 	if uuid == "" || address == "" || !isLinkPlayUUID(uuid) {
 		return Device{}, false
 	}
-	return Device{UUID: normalizeUUID(uuid), Address: address}, true
+	return Device{UUID: normalizeUUID(uuid), Address: address, Description: headers["location"]}, true
 }
 
 // isLinkPlayUUID answers whether an SSDP uuid belongs to a LinkPlay

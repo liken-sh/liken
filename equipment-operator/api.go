@@ -228,7 +228,10 @@ type DenonProtocol struct {
 // is off (main.go), the driver can reach nothing and reports the
 // receiver unreachable. The driver drives only a device whose
 // getStatusEx project begins with WiiM (wiim.IsWiiM), because other
-// brands build on the same platform and answer the same API.
+// brands build on the same platform and answer the same API. Discovery
+// makes the same check earlier, on the model of the device's UPnP
+// description, so it creates no Receiver for another brand's device
+// (discovery_description.go).
 type WiimProtocol struct {
 	UUID     string        `json:"uuid"`
 	Address  string        `json:"address,omitempty"`
@@ -277,12 +280,17 @@ type ReceiverStatus struct {
 	// Address is the address the operator reached the receiver on. A
 	// receiver declared by name reports its resolved address, and a WiiM
 	// reports the address discovery found.
-	Address string                `json:"address,omitempty"`
-	Zones   map[string]ZoneStatus `json:"zones,omitempty"`
-	Driver  string                `json:"driver,omitempty"`
-	Denon   *denon.Settings       `json:"denon,omitempty"`
-	Wiim    *wiim.Status          `json:"wiim,omitempty"`
-	Service string                `json:"service,omitempty"`
+	Address string `json:"address,omitempty"`
+	// Model and Manufacturer name the equipment the way its maker does,
+	// as the driver read them. They are empty until the driver has read
+	// them, and for a driver that has no way to read them.
+	Model        string                `json:"model,omitempty"`
+	Manufacturer string                `json:"manufacturer,omitempty"`
+	Zones        map[string]ZoneStatus `json:"zones,omitempty"`
+	Driver       string                `json:"driver,omitempty"`
+	Denon        *denon.Settings       `json:"denon,omitempty"`
+	Wiim         *wiim.Status          `json:"wiim,omitempty"`
+	Service      string                `json:"service,omitempty"`
 	// SettledSettings holds a digest of each declared block the operator
 	// has sent, including the fields the receiver does not report, keyed
 	// by the block's path in the spec. After a restart the operator sends

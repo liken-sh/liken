@@ -81,6 +81,13 @@ type Client struct {
 	// the controller knows the receiver's own facts are in hand before
 	// it applies a declared setting.
 	surveyed bool
+	// describing is set while a read of the receiver's description is in
+	// flight, so a quick reconnect does not start a second one.
+	describing bool
+	// descriptionURL is where the receiver's description is read. Empty
+	// means the AIOS description on the address a connection answered
+	// from; a test points it at its own server.
+	descriptionURL string
 }
 
 // NewClient builds a client for one address. The listener reports every
@@ -122,7 +129,7 @@ func (d *Client) equipmentState(s denonState) equipment.State {
 	if s.Zone3.seen {
 		zones[zone3] = zoneFor(s.Zone3)
 	}
-	return equipment.State{Reachable: s.Reachable, Zones: zones}
+	return equipment.State{Reachable: s.Reachable, Zones: zones, Model: s.model, Manufacturer: s.manufacturer}
 }
 
 // zoneFor translates one Denon zone into the equipment contract.
@@ -354,6 +361,7 @@ func (d *Client) runSession(parent context.Context) (answered bool) {
 	if remote, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		d.recordAddress(remote.IP.String())
 	}
+	d.describe(parent)
 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
