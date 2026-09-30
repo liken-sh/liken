@@ -60,6 +60,21 @@ aliases = ["app-sidecar"]
 	}
 }
 
+func TestAnotherCheckoutInsideTheTreeHoldsNoComponent(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml":                         "[package]\nname = \"app\"\n",
+		".claude/worktrees/agent/.git":             "gitdir: /elsewhere\n",
+		".claude/worktrees/agent/app/package.toml": "[package]\nname = \"app\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 1 || components["app"].Dir != "app" {
+		t.Errorf("loaded %v", components)
+	}
+}
+
 // pinnedImage is the outputs table of a pinned component with one image.
 const pinnedImage = "[[outputs.images]]\nname = \"a\"\n"
 

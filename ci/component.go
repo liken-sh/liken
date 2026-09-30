@@ -185,6 +185,15 @@ func LoadComponents(root string) (map[string]*Component, error) {
 		if d.IsDir() && skipDirs[d.Name()] {
 			return filepath.SkipDir
 		}
+		// A directory with a .git of its own below the root is another
+		// checkout, such as a git worktree that an agent works in. Its
+		// package.toml files name the same components again, and the
+		// generator would refuse the duplicates.
+		if d.IsDir() && path != root {
+			if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
+				return filepath.SkipDir
+			}
+		}
 		if d.IsDir() || d.Name() != "package.toml" {
 			return nil
 		}
