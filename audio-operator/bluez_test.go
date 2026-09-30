@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -301,44 +302,48 @@ func (f *fakeSubscriptions) subscribe(context.Context) (<-chan struct{}, error) 
 // every change while it was closed. A connection that fails is tried
 // again.
 func TestTheMediaBusIsFollowedAcrossARestart(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	first, second := make(chan struct{}, 1), make(chan struct{}, 1)
-	bus := &fakeSubscriptions{next: []chan struct{}{first, nil, second}}
+	synctest.Test(t, func(t *testing.T) {
+		first, second := make(chan struct{}, 1), make(chan struct{}, 1)
+		bus := &fakeSubscriptions{next: []chan struct{}{first, nil, second}}
+		// The bus closes the subscription when the test ends, as it does
+		// when the operator stops.
+		t.Cleanup(func() { close(second) })
 
-	out := resubscribe(ctx, bus.subscribe, time.Millisecond, func(string) {})
-	waitForWake(t, out, testLimit)
+		out := resubscribe(t.Context(), bus.subscribe, busRetryDelay, func(string) {})
+		waitForWake(t, out)
 
-	first <- struct{}{}
-	waitForWake(t, out, testLimit)
+		first <- struct{}{}
+		waitForWake(t, out)
 
-	close(first)
-	waitForWake(t, out, testLimit)
-	second <- struct{}{}
-	waitForWake(t, out, testLimit)
-	bus.mu.Lock()
-	defer bus.mu.Unlock()
-	if bus.calls != 3 {
-		t.Errorf("the bus was subscribed %d times, want 3: the first, the refused one, and the one after it", bus.calls)
-	}
+		close(first)
+		closed := time.Now()
+		waitForWake(t, out)
+		if waited := time.Since(closed); waited != busRetryDelay {
+			t.Errorf("the refused subscription was tried again after %v, want %v", waited, busRetryDelay)
+		}
+		second <- struct{}{}
+		waitForWake(t, out)
+		bus.mu.Lock()
+		defer bus.mu.Unlock()
+		if bus.calls != 3 {
+			t.Errorf("the bus was subscribed %d times, want 3: the first, the refused one, and the one after it", bus.calls)
+		}
+	})
 }
 
 // The subscription ends with its context, and only then.
 func TestTheMediaBusFollowerEndsWithItsContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	bus := &fakeSubscriptions{}
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		bus := &fakeSubscriptions{}
 
-	out := resubscribe(ctx, bus.subscribe, time.Millisecond, func(string) {})
-	cancel()
+		out := resubscribe(ctx, bus.subscribe, busRetryDelay, func(string) {})
+		cancel()
 
-	select {
-	case _, open := <-out:
-		if open {
+		if _, open := <-out; open {
 			t.Fatal("the follower woke the loop with no subscription open")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the follower did not end with its context")
-	}
+	})
 }
 
 // A pass that runs while the bus is closed reads no paired set, and

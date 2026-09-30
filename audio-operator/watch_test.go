@@ -6,22 +6,27 @@ package main
 // copy it keeps and the decode of each object. What these tests prove
 // is that each change the API server sends reaches this program's
 // handlers, and that each watch carries its selector.
+//
+// Each test that runs a watch runs in a synctest bubble, against a
+// server from apiservertest. synctest.Wait returns once the reflector
+// has done all it can do at the present moment, and a time.Sleep
+// waits out its backoff on the fake clock.
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // holdOpen, as the last line of a script, keeps the stream open until
@@ -54,7 +59,6 @@ type watchServer struct {
 	readCount int
 	watches   int
 	queries   []string
-	opened    chan struct{}
 	released  chan struct{}
 }
 
@@ -65,7 +69,6 @@ func newWatchServer(collection, apiVersion, kind string, reads []string, scripts
 		kind:       kind,
 		reads:      reads,
 		scripts:    scripts,
-		opened:     make(chan struct{}, len(scripts)+8),
 		released:   make(chan struct{}, 1),
 	}
 }
@@ -117,11 +120,6 @@ func (s *watchServer) ServeHTTP(t testing.TB, w http.ResponseWriter, r *http.Req
 			s.apiVersion, s.kind, version)
 	}
 	w.(http.Flusher).Flush()
-	select {
-	case s.opened <- struct{}{}:
-	case <-r.Context().Done():
-		return
-	}
 
 	script := []string{holdOpen}
 	if connection < len(s.scripts) {
@@ -156,15 +154,6 @@ func (s *watchServer) requests() []string {
 	return append([]string{}, s.queries...)
 }
 
-// awaitWatches waits until the watcher has opened count more watch
-// connections.
-func (s *watchServer) awaitWatches(t *testing.T, count int) {
-	t.Helper()
-	for range count {
-		next(t, s.opened, "watch connection")
-	}
-}
-
 // serveCollections answers each watchServer's collection from that
 // server, and every other request from rest, or with a 404 when rest
 // is nil.
@@ -184,33 +173,21 @@ func serveCollections(t testing.TB, rest http.Handler, servers ...*watchServer) 
 	})
 }
 
-// testWatcher points a dynamic client at a test server.
+// testWatcher serves the handler, and points a dynamic client at it.
 func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	// Close waits for every request to finish, and a watch the server
-	// holds open finishes only when its connection closes. The cleanup
-	// can run before the watch's context ends, and the reflector opens
-	// a new watch at once when one closes, so the listener closes first
-	// and no new connection can start.
-	t.Cleanup(func() {
-		_ = server.Listener.Close()
-		server.CloseClientConnections()
-		server.Close()
-	})
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	return dynamicClient(t, apiservertest.Start(t, handler))
+}
+
+// dynamicClient points a dynamic client at a server that a test also
+// reaches with other clients.
+func dynamicClient(t *testing.T, server *apiservertest.Server) dynamic.Interface {
+	t.Helper()
+	client, err := dynamic.NewForConfig(server.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return client
-}
-
-// watchContext is a context that ends with the test.
-func watchContext(t *testing.T) context.Context {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	return ctx
 }
 
 // asObject is an object the way the informer hands it to a handler.
@@ -232,42 +209,25 @@ func encode(t *testing.T, item any) string {
 	return string(encoded)
 }
 
-// next waits for one value on a channel, for at most five seconds.
-func next[T any](t *testing.T, from chan T, what string) T {
-	t.Helper()
-	select {
-	case got := <-from:
-		return got
-	case <-time.After(5 * time.Second):
-		t.Fatalf("no %s within five seconds", what)
-		var none T
-		return none
-	}
-}
-
 // audio_watch_restarts_total counts a watch reopening, and not the
 // watch's first open: the first connection is the start of watching,
 // and only a connection the API server or a fault closed is a restart.
 func TestAWatchThatReopensCountsOneRestart(t *testing.T) {
-	sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`},
-		[]string{sinkEvent(t, "ADDED", sinkAt("1", 1)), sinkEvent(t, "MODIFIED", sinkAt("1", 2))})
-	sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
-	readings := newMetrics("test")
-	watchEndpoints(watchContext(t), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-		"liken-1", func() {}, readings)
+	synctest.Test(t, func(t *testing.T) {
+		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`},
+			[]string{sinkEvent(t, "ADDED", sinkAt("1", 1)), sinkEvent(t, "MODIFIED", sinkAt("1", 2))})
+		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
+		readings := newMetrics("test")
+		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
+			"liken-1", func() {}, readings)
+		time.Sleep(time.Minute)
+		synctest.Wait()
 
-	sinks.awaitWatches(t, 2)
-	// The count moves when the reflector has the server's answer, which
-	// is after the server opened the stream.
-	deadline := time.Now().Add(5 * time.Second)
-	for testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SinkKind)) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SinkKind)); got != 1 {
-		t.Errorf("audio_watch_restarts_total{kind=Sink} = %v, want 1", got)
-	}
-	if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SourceKind)); got != 0 {
-		t.Errorf("audio_watch_restarts_total{kind=Source} = %v, want 0", got)
-	}
+		if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SinkKind)); got != 1 {
+			t.Errorf("audio_watch_restarts_total{kind=Sink} = %v, want 1", got)
+		}
+		if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SourceKind)); got != 0 {
+			t.Errorf("audio_watch_restarts_total{kind=Source} = %v, want 0", got)
+		}
+	})
 }

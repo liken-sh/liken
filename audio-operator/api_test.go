@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // clusterFake stands in for the API server: the two reviews, the two
@@ -34,7 +34,7 @@ type clusterFake struct {
 	events   []event
 	accesses []accessReview
 
-	server *httptest.Server
+	server *apiservertest.Server
 }
 
 func newClusterFake(t *testing.T) *clusterFake {
@@ -51,8 +51,7 @@ func newClusterFake(t *testing.T) *clusterFake {
 		sinks:   map[string]Sink{},
 		sources: map[string]Source{},
 	}
-	fake.server = httptest.NewServer(http.HandlerFunc(fake.serve))
-	t.Cleanup(fake.server.Close)
+	fake.server = apiservertest.Start(t, http.HandlerFunc(fake.serve))
 	return fake
 }
 
@@ -130,7 +129,7 @@ type apiHarness struct {
 	cluster   *clusterFake
 	container *containerFake
 	server    *apiServer
-	serving   *httptest.Server
+	serving   *apiservertest.Server
 	lines     *loggedLines
 }
 
@@ -168,7 +167,7 @@ type containerFake struct {
 	requests []*url.URL
 	token    string
 	stream   func(http.ResponseWriter)
-	server   *httptest.Server
+	server   *apiservertest.Server
 }
 
 func newContainerFake(t *testing.T) *containerFake {
@@ -179,7 +178,7 @@ func newContainerFake(t *testing.T) *containerFake {
 		headers: http.Header{},
 		format:  captureFormatDocument{Rate: 48000, Channels: 2},
 	}
-	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fake.server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mu.Lock()
 		fake.requests = append(fake.requests, r.URL)
 		fake.token = r.Header.Get("Authorization")
@@ -214,7 +213,6 @@ func newContainerFake(t *testing.T) *containerFake {
 		w.WriteHeader(fake.status)
 		_, _ = w.Write(fake.body)
 	}))
-	t.Cleanup(fake.server.Close)
 	return fake
 }
 
@@ -249,7 +247,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 		t.Fatal(err)
 	}
 
-	client := apiclient.New(cluster.server.URL, cluster.server.Client(), "")
+	client := apiclient.New(apiservertest.Host, cluster.server.Client(), "")
 	server := &apiServer{
 		client:     client,
 		review:     newReviewer(client, apiAudience),
@@ -259,18 +257,13 @@ func newAPIHarness(t *testing.T) *apiHarness {
 		publicBase: "",
 		now:        time.Now,
 	}
-	// The private leg is the container's own httptest server, reached
+	// The private leg is the container's own test server, reached
 	// over plain HTTP: the TLS the real forwarder speaks is proved by
 	// the certificate tests, and this one proves the relay.
 	server.relay = &forwarder{tokenFile: tokenFile}
-	containerURL, err := url.Parse(container.server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
 	server.relay.client = container.server.Client()
 	server.relay.scheme = "http"
-	server.relay.port = 0
-	server.relay.address = containerURL.Host
+	server.relay.address = strings.TrimPrefix(apiservertest.Host, "http://")
 	server.event = func(kind, name, uid, aspect, format, who string, at time.Time) error {
 		return recordCapture(client, kind, name, uid, aspect, format, who, at)
 	}
@@ -284,8 +277,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 		server:    server,
 		lines:     harnessLines,
 	}
-	harness.serving = httptest.NewServer(server)
-	t.Cleanup(harness.serving.Close)
+	harness.serving = apiservertest.Start(t, server)
 	return harness
 }
 
@@ -328,7 +320,7 @@ const (
 
 func (h *apiHarness) call(t *testing.T, method, target string, headers http.Header) *http.Response {
 	t.Helper()
-	request, err := http.NewRequest(method, h.serving.URL+target, nil)
+	request, err := http.NewRequest(method, apiservertest.Host+target, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +426,7 @@ func TestAConfiguredPublicBaseWinsOverTheRequestsOrigin(t *testing.T) {
 
 func TestARequestWithNoTokenIsAChallengeWithTheRealmAlone(t *testing.T) {
 	harness := newAPIHarness(t)
-	request, _ := http.NewRequest(http.MethodGet, harness.serving.URL+"/v1/audio", nil)
+	request, _ := http.NewRequest(http.MethodGet, apiservertest.Host+"/v1/audio", nil)
 	answer, err := harness.serving.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -499,7 +491,7 @@ func TestEveryErrorCarriesVaryAndTheServiceLinks(t *testing.T) {
 			return h.call(t, http.MethodPost, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"a request with no token", http.StatusUnauthorized, func(h *apiHarness) *http.Response {
-			request, _ := http.NewRequest(http.MethodGet, h.serving.URL+"/v1/audio", nil)
+			request, _ := http.NewRequest(http.MethodGet, apiservertest.Host+"/v1/audio", nil)
 			answer, err := h.serving.Client().Do(request)
 			if err != nil {
 				t.Fatal(err)

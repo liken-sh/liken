@@ -602,11 +602,7 @@ func (s *captureServer) logTap(plan tapPlan, at time.Time, sent, discarded int64
 // the default sink's monitor, and either way the sound on the wire
 // would not be the sound that was asked for.
 func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID int) error {
-	wait := s.linkDeadline
-	if wait == 0 {
-		wait = linkDeadline
-	}
-	deadline := time.After(wait)
+	deadline := time.After(linkDeadline)
 	period := linkFirstPeriod
 	for {
 		document, err := s.graph(ctx)
@@ -630,7 +626,7 @@ func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID
 			return ctx.Err()
 		case <-deadline:
 			return fmt.Errorf("pw-record made no link to the node %d within %s",
-				targetNodeID, wait)
+				targetNodeID, linkDeadline)
 		case <-time.After(period):
 		}
 		if period *= 2; period > linkPeriod {

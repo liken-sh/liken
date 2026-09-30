@@ -420,7 +420,7 @@ func (p *draPlugin) codecSwitch() codecSwitch {
 		write:   p.setCodec,
 		read:    p.graph,
 		changes: p.changes,
-		timeout: p.codecTimeout,
+		timeout: codecSwitchTimeout,
 	}
 }
 

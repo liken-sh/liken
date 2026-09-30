@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -339,58 +341,58 @@ func TestAProcessThisContainerKilledReportsASignal(t *testing.T) {
 // itself to the time to the first body byte on every tap whose link
 // PipeWire had not built in the moment before it.
 func TestTheConfirmationLooksAgainSoonAndThenLessOften(t *testing.T) {
-	server := &captureServer{
-		version:      "dev",
-		readings:     newCaptureMetrics("dev"),
-		taps:         make(chan struct{}, 1),
-		now:          time.Now,
-		linkDeadline: 400 * time.Millisecond,
-	}
-	looks := 0
-	var at []time.Duration
-	started := time.Now()
-	server.graph = func(context.Context) ([]byte, error) {
-		looks++
-		at = append(at, time.Since(started))
-		return readGraphFixture(t, "graph-no-settings.json"), nil
-	}
-	if err := server.confirm(context.Background(), drillStream, 48); err == nil {
-		t.Fatal("a graph with no link confirmed")
-	}
-	if looks < 4 {
-		t.Errorf("the confirmation looked %d times in %s", looks, 400*time.Millisecond)
-	}
-	// The second look follows the first closely, rather than a quarter
-	// of a second later.
-	if len(at) > 1 && at[1] > 100*time.Millisecond {
-		t.Errorf("the second look came %s in, which is too late to help", at[1])
-	}
+	synctest.Test(t, func(t *testing.T) {
+		server := &captureServer{
+			version:  "dev",
+			readings: newCaptureMetrics("dev"),
+			taps:     make(chan struct{}, 1),
+			now:      time.Now,
+		}
+		var at []time.Duration
+		started := time.Now()
+		server.graph = func(context.Context) ([]byte, error) {
+			at = append(at, time.Since(started))
+			return readGraphFixture(t, "graph-no-settings.json"), nil
+		}
+		if err := server.confirm(t.Context(), drillStream, 48); err == nil {
+			t.Fatal("a graph with no link confirmed")
+		}
+		// The interval starts at 20 ms and doubles to a quarter of a
+		// second, and the deadline of three seconds ends the looks.
+		ms := time.Millisecond
+		want := []time.Duration{0, 20 * ms, 60 * ms, 140 * ms, 300 * ms, 550 * ms, 800 * ms, 1050 * ms,
+			1300 * ms, 1550 * ms, 1800 * ms, 2050 * ms, 2300 * ms, 2550 * ms, 2800 * ms}
+		if !slices.Equal(at, want) {
+			t.Errorf("the confirmation looked at %v, want %v", at, want)
+		}
+	})
 }
 
 func TestTheConfirmationStopsAtTheFirstLookWhenTheLinkIsThere(t *testing.T) {
-	server := &captureServer{
-		version:      "dev",
-		readings:     newCaptureMetrics("dev"),
-		taps:         make(chan struct{}, 1),
-		now:          time.Now,
-		linkDeadline: time.Second,
-	}
-	looks := 0
-	server.graph = func(context.Context) ([]byte, error) {
-		looks++
-		return readGraphFixture(t, "graph.json"), nil
-	}
-	started := time.Now()
-	if err := server.confirm(context.Background(), drillStream, 46); err != nil {
-		t.Fatalf("a link on the target did not confirm: %v", err)
-	}
-	if looks != 1 {
-		t.Errorf("the confirmation read the graph %d times for a link already there", looks)
-	}
-	// A tap whose link is already built waits for nothing.
-	if elapsed := time.Since(started); elapsed > 50*time.Millisecond {
-		t.Errorf("a confirmed link took %s", elapsed)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		server := &captureServer{
+			version:  "dev",
+			readings: newCaptureMetrics("dev"),
+			taps:     make(chan struct{}, 1),
+			now:      time.Now,
+		}
+		looks := 0
+		server.graph = func(context.Context) ([]byte, error) {
+			looks++
+			return readGraphFixture(t, "graph.json"), nil
+		}
+		started := time.Now()
+		if err := server.confirm(t.Context(), drillStream, 46); err != nil {
+			t.Fatalf("a link on the target did not confirm: %v", err)
+		}
+		if looks != 1 {
+			t.Errorf("the confirmation read the graph %d times for a link already there", looks)
+		}
+		// A tap whose link is already built waits for nothing.
+		if elapsed := time.Since(started); elapsed != 0 {
+			t.Errorf("a confirmed link took %s", elapsed)
+		}
+	})
 }
 
 // os/exec answers exec.ErrWaitDelay when a process exits well and its

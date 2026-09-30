@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
@@ -66,8 +65,7 @@ func testPlugin(t *testing.T, claim string, graph pwGraph) *draPlugin {
 			t.Error("the driver wrote a codec for a claim that stated none")
 			return nil
 		},
-		setVolumes:   func(context.Context, int, []float64) error { return nil },
-		codecTimeout: 200 * time.Millisecond,
+		setVolumes: func(context.Context, int, []float64) error { return nil },
 	}
 }
 

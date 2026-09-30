@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
@@ -489,7 +490,6 @@ func codecPlugin(t *testing.T, claim string, pipewire *fakePipeWire) *draPlugin 
 	plugin.setCodec = pipewire.writeCodec
 	plugin.setVolumes = pipewire.writeVolumes
 	plugin.changes = pipewire.changes
-	plugin.codecTimeout = 200 * time.Millisecond
 	return plugin
 }
 
@@ -684,6 +684,7 @@ func TestPrepareRefusesACodecItCannotDeliver(t *testing.T) {
 		config string
 		stuck  bool
 		says   string
+		waits  time.Duration
 	}{
 		{
 			name:   "a codec the speaker does not offer",
@@ -711,26 +712,33 @@ func TestPrepareRefusesACodecItCannotDeliver(t *testing.T) {
 			config: opaqueCodec(`{"codec": "aptx"}`),
 			stuck:  true,
 			says:   "did not report",
+			waits:  codecSwitchTimeout,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			dir := specDirectory(t)
-			pipewire := &fakePipeWire{sink: currentSink(), newNodeID: 99, stuck: c.stuck}
-			plugin := codecPlugin(t, claimWith(c.device, c.config), pipewire)
+			synctest.Test(t, func(t *testing.T) {
+				dir := specDirectory(t)
+				pipewire := &fakePipeWire{sink: currentSink(), newNodeID: 99, stuck: c.stuck}
+				plugin := codecPlugin(t, claimWith(c.device, c.config), pipewire)
 
-			entry := prepare(t, plugin, "claim-1")
-			if entry.Error == "" {
-				t.Fatalf("prepare accepted a codec it cannot deliver: %+v", entry.Devices)
-			}
-			if !strings.Contains(entry.Error, c.says) {
-				t.Errorf("error = %q, want it to say %q", entry.Error, c.says)
-			}
-			// A refusal delivers no node name, so no consumer plays
-			// through a codec nobody chose.
-			if left := specFiles(t, dir); len(left) != 0 {
-				t.Errorf("a refused claim left %v behind", left)
-			}
+				started := time.Now()
+				entry := prepare(t, plugin, "claim-1")
+				if waited := time.Since(started); waited != c.waits {
+					t.Errorf("prepare answered after %s, want %s", waited, c.waits)
+				}
+				if entry.Error == "" {
+					t.Fatalf("prepare accepted a codec it cannot deliver: %+v", entry.Devices)
+				}
+				if !strings.Contains(entry.Error, c.says) {
+					t.Errorf("error = %q, want it to say %q", entry.Error, c.says)
+				}
+				// A refusal delivers no node name, so no consumer plays
+				// through a codec nobody chose.
+				if left := specFiles(t, dir); len(left) != 0 {
+					t.Errorf("a refused claim left %v behind", left)
+				}
+			})
 		})
 	}
 }

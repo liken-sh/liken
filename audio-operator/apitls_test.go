@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // objectStore stands in for the API server's Secrets and ConfigMaps.
@@ -23,7 +23,7 @@ type objectStore struct {
 	mu         sync.Mutex
 	secrets    map[string]secret
 	configMaps map[string]configMap
-	server     *httptest.Server
+	server     *apiservertest.Server
 }
 
 func newObjectStore(t *testing.T) *objectStore {
@@ -32,8 +32,7 @@ func newObjectStore(t *testing.T) *objectStore {
 		secrets:    map[string]secret{},
 		configMaps: map[string]configMap{},
 	}
-	store.server = httptest.NewServer(http.HandlerFunc(store.serve))
-	t.Cleanup(store.server.Close)
+	store.server = apiservertest.Start(t, http.HandlerFunc(store.serve))
 	return store
 }
 
@@ -94,7 +93,7 @@ func (s *objectStore) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *objectStore) certificates() *certificates {
-	return newCertificates(apiclient.New(s.server.URL, s.server.Client(), ""), "liken-system", apiService)
+	return newCertificates(apiclient.New(apiservertest.Host, s.server.Client(), ""), "liken-system", apiService)
 }
 
 func (s *objectStore) holdsSecret(name string) bool {

@@ -98,11 +98,6 @@ type forwarder struct {
 	// dial is how the connection is made, a field for the same reason.
 	dial func(ctx context.Context, network, address string) (net.Conn, error)
 
-	// headers bounds the wait for the container's status line, over
-	// and above the span's own begin. It is a field so a test drives
-	// the bound without waiting the real ten seconds.
-	headers time.Duration
-
 	mu       sync.Mutex
 	anchored string
 	client   *http.Client
@@ -172,14 +167,6 @@ func (f *forwarder) transport() (*http.Client, error) {
 	return f.client, nil
 }
 
-// headerBound is how long this API waits for the container to answer.
-func (f *forwarder) headerBound() time.Duration {
-	if f.headers > 0 {
-		return f.headers
-	}
-	return headerTimeout
-}
-
 // forward makes one call. The caller owns the answer's body.
 func (f *forwarder) forward(ctx context.Context, held capturePod,
 	path, rawQuery string, begin time.Duration) (*http.Response, error) {
@@ -211,7 +198,7 @@ func (f *forwarder) forward(ctx context.Context, held capturePod,
 	// So the bound is a timer this code stops the moment the headers
 	// arrive.
 	headers, cancel := context.WithCancel(ctx)
-	bound := f.headerBound() + begin
+	bound := headerTimeout + begin
 	deadline := time.AfterFunc(bound, cancel)
 	answer, err := client.Do(request.WithContext(headers))
 	// Stop answers false when the timer has already run, which is the

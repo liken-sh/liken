@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -404,30 +405,31 @@ func TestAHeadOnTheInfoRouteMakesNoPrivateCall(t *testing.T) {
 	}
 }
 
+// hijacked hands the container's connection to one function, which
+// answers something other than HTTP.
+func hijacked(t *testing.T, answer func(net.Conn)) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) {
+		connection, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		answer(connection)
+		_ = connection.Close()
+	}
+}
+
 func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	// A listener that writes one line no transport can read as HTTP and
-	// closes. Go reports that as a malformed response, a peek failure,
-	// or an unexpected EOF depending on which side of the read the
-	// close lands, so the assertion is on the status and the problem
-	// type and never on the words.
-	broken, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = broken.Close() })
-	go func() {
-		for {
-			connection, err := broken.Accept()
-			if err != nil {
-				return
-			}
-			_, _ = connection.Write([]byte("this is not HTTP at all\n"))
-			_ = connection.Close()
-		}
-	}()
-	harness.server.relay.address = broken.Addr().String()
+	// A container that writes one line no transport can read as HTTP
+	// and closes. Go reports that as a malformed response, a peek
+	// failure, or an unexpected EOF depending on which side of the read
+	// the close lands, so the assertion is on the status and the
+	// problem type and never on the words.
+	harness.container.streams(hijacked(t, func(connection net.Conn) {
+		_, _ = connection.Write([]byte("this is not HTTP at all\n"))
+	}))
 
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusBadGateway {
@@ -447,22 +449,7 @@ func TestAContainerThatClosedBeforeAnsweringIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", drillMachine, drillPipeWireNode)
 	harness.server.pods.put(samplePod(drillMachine))
-
-	silent, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = silent.Close() })
-	go func() {
-		for {
-			connection, err := silent.Accept()
-			if err != nil {
-				return
-			}
-			_ = connection.Close()
-		}
-	}()
-	harness.server.relay.address = silent.Addr().String()
+	harness.container.streams(hijacked(t, func(net.Conn) {}))
 
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusBadGateway {
@@ -477,15 +464,9 @@ func TestAContainerThatClosedBeforeAnsweringIsABadGateway(t *testing.T) {
 func TestAContainerThatRefusedTheConnectionIsUnavailable(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	// A port nothing listens on: the connection is refused, which the
-	// rulings put at 503 with Retry-After.
-	closed, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := closed.Addr().String()
-	_ = closed.Close()
-	harness.server.relay.address = address
+	// A container that is down refuses the connection with
+	// ECONNREFUSED, which the rulings put at 503 with Retry-After.
+	harness.container.server.SetDown(true)
 
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusServiceUnavailable {
@@ -562,99 +543,106 @@ func TestTheInfoRouteTakesTheSameTwoNames(t *testing.T) {
 // A tap runs until the client hangs up or the span ends. The header
 // bound covers the wait for the container's status line and nothing
 // after it, so a stream that outlives the bound many times over is
-// what the route promises. The bound here stands in for the real ten
-// seconds, shortened so the test runs in a moment.
+// what the route promises.
 func TestATapOutlivesTheHeaderBound(t *testing.T) {
-	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.put(samplePod(drillMachine))
-	harness.server.relay.headers = 40 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		harness := newAPIHarness(t)
+		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.server.pods.put(samplePod(drillMachine))
 
-	// The container answers its headers at once and then delivers a
-	// block every 20 ms for well past the bound.
-	blocks := 30
-	harness.container.streams(func(w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "audio/wav")
-		w.WriteHeader(http.StatusOK)
-		w.(http.Flusher).Flush()
-		for range blocks {
-			time.Sleep(20 * time.Millisecond)
-			_, _ = w.Write([]byte("samples!"))
+		// The container answers its headers at once and then delivers a
+		// block every second for three times the bound.
+		blocks := 3 * int(headerTimeout/time.Second)
+		harness.container.streams(func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "audio/wav")
+			w.WriteHeader(http.StatusOK)
 			w.(http.Flusher).Flush()
+			for range blocks {
+				time.Sleep(time.Second)
+				_, _ = w.Write([]byte("samples!"))
+				w.(http.Flusher).Flush()
+			}
+		})
+
+		started := time.Now()
+		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		if answer.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(answer.Body)
+			t.Fatalf("the tap answered %s: %s", answer.Status, body)
+		}
+		body, err := io.ReadAll(answer.Body)
+		if err != nil {
+			t.Fatalf("the body ended early: %v", err)
+		}
+		if len(body) != blocks*len("samples!") {
+			t.Errorf("the tap delivered %d bytes of %d, and it was cut short",
+				len(body), blocks*len("samples!"))
+		}
+		if ran := time.Since(started); ran != time.Duration(blocks)*time.Second {
+			t.Errorf("the tap ran %s, want %s", ran, time.Duration(blocks)*time.Second)
 		}
 	})
-
-	started := time.Now()
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the tap answered %s: %s", answer.Status, body)
-	}
-	body, err := io.ReadAll(answer.Body)
-	if err != nil {
-		t.Fatalf("the body ended early: %v", err)
-	}
-	ran := time.Since(started)
-	if len(body) != blocks*len("samples!") {
-		t.Errorf("the tap delivered %d bytes of %d, and it was cut short",
-			len(body), blocks*len("samples!"))
-	}
-	if ran < 4*harness.server.relay.headers {
-		t.Errorf("the tap ran %s, which is too short to have outlived the bound", ran)
-	}
 }
 
 func TestHeadersThatArriveLateAreAGatewayTimeout(t *testing.T) {
-	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.put(samplePod(drillMachine))
-	harness.server.relay.headers = 40 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		harness := newAPIHarness(t)
+		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.server.pods.put(samplePod(drillMachine))
 
-	// The container takes longer than the bound to answer at all.
-	harness.container.streams(func(w http.ResponseWriter) {
-		time.Sleep(400 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
+		// The container takes longer than the bound to answer at all.
+		harness.container.streams(func(w http.ResponseWriter) {
+			time.Sleep(headerTimeout + time.Second)
+			w.WriteHeader(http.StatusOK)
+		})
+
+		started := time.Now()
+		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		if waited := time.Since(started); waited != headerTimeout {
+			t.Errorf("the API gave up after %s, want %s", waited, headerTimeout)
+		}
+		if answer.StatusCode != http.StatusGatewayTimeout {
+			body, _ := io.ReadAll(answer.Body)
+			t.Fatalf("late headers answered %s: %s", answer.Status, body)
+		}
+		document := readProblemBody(t, answer)
+		if document.Type != problemUpstreamFailed {
+			t.Errorf("the problem type is %q", document.Type)
+		}
+		if !strings.Contains(document.Detail, "sent no headers in time") {
+			t.Errorf("the detail is %q", document.Detail)
+		}
+		_, _ = io.Copy(io.Discard, answer.Body)
+		// The container finishes its late answer before the bubble ends.
+		time.Sleep(time.Second)
 	})
-
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusGatewayTimeout {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("late headers answered %s: %s", answer.Status, body)
-	}
-	document := readProblemBody(t, answer)
-	if document.Type != problemUpstreamFailed {
-		t.Errorf("the problem type is %q", document.Type)
-	}
-	if !strings.Contains(document.Detail, "sent no headers in time") {
-		t.Errorf("the detail is %q", document.Detail)
-	}
-	_, _ = io.Copy(io.Discard, answer.Body)
 }
 
 // The span's begin is added to the bound, so a tap that discards a
 // minute is not cut off before its first byte.
 func TestTheBoundAllowsForTheSpansOwnBegin(t *testing.T) {
-	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.put(samplePod(drillMachine))
-	harness.server.relay.headers = 10 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		harness := newAPIHarness(t)
+		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.server.pods.put(samplePod(drillMachine))
 
-	harness.container.streams(func(w http.ResponseWriter) {
-		time.Sleep(120 * time.Millisecond)
-		w.Header().Set("Content-Type", "audio/wav")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("samples!"))
+		harness.container.streams(func(w http.ResponseWriter) {
+			time.Sleep(headerTimeout + 100*time.Millisecond)
+			w.Header().Set("Content-Type", "audio/wav")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("samples!"))
+		})
+
+		// Without the begin the bound would cut this off 100 ms before
+		// the headers; t=0.2,0.3 adds 200 ms to it.
+		answer := harness.call(t, http.MethodGet,
+			"/v1/audio/sinks/kitchen/audio.wav?t=0.2,0.3", nil)
+		if answer.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(answer.Body)
+			t.Fatalf("a tap with a begin answered %s: %s", answer.Status, body)
+		}
+		_, _ = io.Copy(io.Discard, answer.Body)
 	})
-
-	// Without the begin the 10 ms bound would cut this off; t=0.2,0.3
-	// adds 200 ms to it.
-	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/kitchen/audio.wav?t=0.2,0.3", nil)
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("a tap with a begin answered %s: %s", answer.Status, body)
-	}
-	_, _ = io.Copy(io.Discard, answer.Body)
 }
 
 // The capture container ends a cut-short body without its terminating
@@ -737,66 +725,53 @@ func TestThePublicLegLogsEveryRequestWhateverBecameOfIt(t *testing.T) {
 // long as the discard runs, so a caller waiting on the headers would
 // otherwise have nothing to show for a minute.
 func TestTheRelayedHeadersReachTheCallerBeforeTheFirstBodyByte(t *testing.T) {
-	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
-	harness.server.pods.put(samplePod(drillMachine))
+	synctest.Test(t, func(t *testing.T) {
+		harness := newAPIHarness(t)
+		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.server.pods.put(samplePod(drillMachine))
 
-	const silent = 600 * time.Millisecond
-	harness.container.streams(func(w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "audio/flac")
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusOK)
-		_ = http.NewResponseController(w).Flush()
-		time.Sleep(silent)
-		_, _ = w.Write([]byte("fLaC"))
-		_ = http.NewResponseController(w).Flush()
+		const silent = time.Minute
+		harness.container.streams(func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "audio/flac")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			_ = http.NewResponseController(w).Flush()
+			time.Sleep(silent)
+			_, _ = w.Write([]byte("fLaC"))
+			_ = http.NewResponseController(w).Flush()
+		})
+
+		// Do returns when the headers arrive, so this is the wait a client
+		// sees before it knows what it is getting.
+		started := time.Now()
+		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac?t=60,61", nil)
+		if waited := time.Since(started); waited != 0 {
+			t.Errorf("the headers took %s, and the container sent them at once", waited)
+		}
+		if answer.StatusCode != http.StatusOK {
+			t.Fatalf("the tap answered %s", answer.Status)
+		}
+		// Everything the caller needs to act on is already there.
+		if got := answer.Header.Get("Content-Type"); got != "audio/flac" {
+			t.Errorf("the type is %q", got)
+		}
+		if answer.Header.Get("Content-Disposition") == "" {
+			t.Error("the save name is not in the headers")
+		}
+		if got := answer.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("the cache directive is %q", got)
+		}
+
+		// And the body still arrives, after the container's silence.
+		body, err := io.ReadAll(answer.Body)
+		if err != nil {
+			t.Fatalf("reading the body: %v", err)
+		}
+		if string(body) != "fLaC" {
+			t.Errorf("the body is %q", body)
+		}
+		if total := time.Since(started); total != silent {
+			t.Errorf("the whole tap took %s, want the container's silence of %s", total, silent)
+		}
 	})
-
-	// Do returns when the headers arrive, so this is the wait a client
-	// sees before it knows what it is getting.
-	request, err := http.NewRequest(http.MethodGet,
-		harness.serving.URL+"/v1/audio/sinks/kitchen/audio.flac?t=0.6,0.7", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer a.b.c")
-	started := time.Now()
-	answer, err := harness.serving.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = answer.Body.Close() }()
-	waited := time.Since(started)
-
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the tap answered %s", answer.Status)
-	}
-	if waited >= silent {
-		t.Errorf("the headers took %s, which is the whole of the container's silence", waited)
-	}
-	if waited > silent/3 {
-		t.Errorf("the headers took %s, and the container sent them at once", waited)
-	}
-	// Everything the caller needs to act on is already there.
-	if got := answer.Header.Get("Content-Type"); got != "audio/flac" {
-		t.Errorf("the type is %q", got)
-	}
-	if answer.Header.Get("Content-Disposition") == "" {
-		t.Error("the save name is not in the headers")
-	}
-	if got := answer.Header.Get("Cache-Control"); got != "no-store" {
-		t.Errorf("the cache directive is %q", got)
-	}
-
-	// And the body still arrives.
-	body, err := io.ReadAll(answer.Body)
-	if err != nil {
-		t.Fatalf("reading the body: %v", err)
-	}
-	if string(body) != "fLaC" {
-		t.Errorf("the body is %q", body)
-	}
-	if total := time.Since(started); total < silent {
-		t.Errorf("the whole tap took %s, so the container's silence never happened", total)
-	}
 }

@@ -34,7 +34,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"google.golang.org/grpc"
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
@@ -79,8 +78,6 @@ type draPlugin struct {
 	// fields for the same reason.
 	setCodec   func(ctx context.Context, device, codec int) error
 	setVolumes func(ctx context.Context, node int, volumes []float64) error
-	// codecTimeout bounds the wait for the rebuilt node.
-	codecTimeout time.Duration
 }
 
 // newDRAPlugin builds the plugin the kubelet talks to.
@@ -90,14 +87,13 @@ type draPlugin struct {
 // read and the two writes are named together.
 func newDRAPlugin(client *apiclient.Client, endpoints *endpointInventory, claims *preparedClaims, feed *graphFeed) *draPlugin {
 	return &draPlugin{
-		client:       client,
-		endpoints:    endpoints,
-		claims:       claims,
-		graph:        feed.read,
-		changes:      feed.changes,
-		setCodec:     setDeviceCodec,
-		setVolumes:   setNodeVolumes,
-		codecTimeout: codecSwitchTimeout,
+		client:     client,
+		endpoints:  endpoints,
+		claims:     claims,
+		graph:      feed.read,
+		changes:    feed.changes,
+		setCodec:   setDeviceCodec,
+		setVolumes: setNodeVolumes,
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -124,23 +125,20 @@ func TestASilentConnectionIsCutOffFromOutsideTheRead(t *testing.T) {
 	// A read on a connection that went silent blocks inside the
 	// transport, so the bound has to end the request rather than wait
 	// for a read to come back.
-	blocked := make(chan struct{})
-	reader := newIdleReader(blockingReader{until: blocked}, 20*time.Millisecond, time.Now())
-	ended := make(chan struct{})
-	reader.watch(func() {
-		close(blocked)
-		close(ended)
-	})
-	defer reader.stopWatching()
+	synctest.Test(t, func(t *testing.T) {
+		blocked := make(chan struct{})
+		started := time.Now()
+		reader := newIdleReader(blockingReader{until: blocked}, idleTimeout, started)
+		reader.watch(func() { close(blocked) })
+		defer reader.stopWatching()
 
-	if _, err := reader.Read(make([]byte, 8)); err == nil {
-		t.Fatal("a silent connection was not cut off")
-	}
-	select {
-	case <-ended:
-	case <-time.After(time.Second):
-		t.Fatal("the bound never ended the request")
-	}
+		if _, err := reader.Read(make([]byte, 8)); err == nil {
+			t.Fatal("a silent connection was not cut off")
+		}
+		if waited := time.Since(started); waited != idleTimeout {
+			t.Errorf("the bound ended the request after %s, want %s", waited, idleTimeout)
+		}
+	})
 }
 
 // blockingReader is a connection that went silent: it returns nothing

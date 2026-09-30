@@ -8,19 +8,18 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, handler)
 	// The credentials are empty, so the client sends no bearer token
 	// and reads no file from disk.
-	return apiclient.New(server.URL, server.Client(), "")
+	return apiclient.New(apiservertest.Host, server.Client(), "")
 }
 
 func testOwner() OwnerReference {

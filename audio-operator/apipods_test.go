@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -134,42 +135,43 @@ func podRead(t *testing.T, pods ...pod) string {
 func TestThePodWatchFollowsThePodsIntoTheIndex(t *testing.T) {
 	moved := samplePod("node-1")
 	moved.Status.PodIP = "10.42.0.9"
-	pods := newWatchServer("/api/v1/namespaces/liken-system/pods", "v1", "Pod",
-		[]string{podRead(t, samplePod("node-1"))},
-		[]string{pause, podEvent(t, "MODIFIED", moved, "2"), podEvent(t, "ADDED", samplePod("node-2"), "3"),
-			pause, podEvent(t, "DELETED", moved, "4"), holdOpen})
-	index := newPodIndex()
-	watchPods(watchContext(t), testWatcher(t, serveCollections(t, nil, pods)), "liken-system", index)
-	pods.awaitWatches(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		pods := newWatchServer("/api/v1/namespaces/liken-system/pods", "v1", "Pod",
+			[]string{podRead(t, samplePod("node-1"))},
+			[]string{pause, podEvent(t, "MODIFIED", moved, "2"), podEvent(t, "ADDED", samplePod("node-2"), "3"),
+				pause, podEvent(t, "DELETED", moved, "4"), holdOpen})
+		index := newPodIndex()
+		watchPods(t.Context(), testWatcher(t, serveCollections(t, nil, pods)), "liken-system", index)
+		synctest.Wait()
 
-	holds(t, index, "node-1", "10.42.0.7")
-	pods.release()
-	holds(t, index, "node-2", "10.42.0.7")
-	holds(t, index, "node-1", "10.42.0.9")
-	pods.release()
-	holds(t, index, "node-1", "")
+		holds(t, index, "node-1", "10.42.0.7")
+		pods.release()
+		synctest.Wait()
+		holds(t, index, "node-2", "10.42.0.7")
+		holds(t, index, "node-1", "10.42.0.9")
+		pods.release()
+		synctest.Wait()
+		holds(t, index, "node-1", "")
 
-	for _, query := range pods.requests() {
-		if !strings.Contains(query, "labelSelector=app%3Daudio-operator") {
-			t.Errorf("the request %q does not select the operator's pods", query)
+		if len(pods.requests()) == 0 {
+			t.Error("the watch sent no request")
 		}
-	}
+		for _, query := range pods.requests() {
+			if !strings.Contains(query, "labelSelector=app%3Daudio-operator") {
+				t.Errorf("the request %q does not select the operator's pods", query)
+			}
+		}
+	})
 }
 
-// holds waits until the index holds the pod at address for node, or
+// holds checks that the index holds the pod at address for node, or
 // holds no pod for node when address is empty.
 func holds(t *testing.T, index *podIndex, node, address string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		held, found := index.on(node)
-		if (address == "" && !found) || (found && held.IP == address) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 	held, found := index.on(node)
-	t.Fatalf("the index holds %+v, %v for %s, want the address %q", held, found, node, address)
+	if (address == "" && found) || (address != "" && (!found || held.IP != address)) {
+		t.Errorf("the index holds %+v, %v for %s, want the address %q", held, found, node, address)
+	}
 }
 
 // A pod deleted while the watch was down arrives as a tombstone, which
@@ -311,18 +313,22 @@ func TestAListWithTwoPodsOnANodeHoldsTheRunningOne(t *testing.T) {
 // Through the reflector: a pod that is gone when the watch reads the
 // pods again, after a 410, leaves the index.
 func TestAPodGoneFromANewReadLeavesTheIndex(t *testing.T) {
-	expired := `{"type":"ERROR","object":{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Expired","code":410,"message":"too old resource version"}}`
-	pods := newWatchServer("/api/v1/namespaces/liken-system/pods", "v1", "Pod",
-		[]string{podRead(t, samplePod("node-1"), samplePod("node-2")), podRead(t, samplePod("node-2"))},
-		[]string{pause, expired})
-	index := newPodIndex()
-	watchPods(watchContext(t), testWatcher(t, serveCollections(t, nil, pods)), "liken-system", index)
-	pods.awaitWatches(t, 1)
-	holds(t, index, "node-1", "10.42.0.7")
+	synctest.Test(t, func(t *testing.T) {
+		expired := `{"type":"ERROR","object":{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Expired","code":410,"message":"too old resource version"}}`
+		pods := newWatchServer("/api/v1/namespaces/liken-system/pods", "v1", "Pod",
+			[]string{podRead(t, samplePod("node-1"), samplePod("node-2")), podRead(t, samplePod("node-2"))},
+			[]string{pause, expired})
+		index := newPodIndex()
+		watchPods(t.Context(), testWatcher(t, serveCollections(t, nil, pods)), "liken-system", index)
+		synctest.Wait()
+		holds(t, index, "node-1", "10.42.0.7")
 
-	pods.release()
-	holds(t, index, "node-1", "")
-	holds(t, index, "node-2", "10.42.0.7")
+		pods.release()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		holds(t, index, "node-1", "")
+		holds(t, index, "node-2", "10.42.0.7")
+	})
 }
 
 // A pod that is leaving answers no tap, even when it is the only pod

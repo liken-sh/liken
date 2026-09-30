@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -100,6 +102,21 @@ func watchLeafEvery(t *testing.T, directory string, fallback time.Duration,
 	return held, reads
 }
 
+// next waits for one value on a channel, for at most five seconds. The
+// inotify watch reads a real descriptor, so these tests run on the real
+// clock.
+func next[T any](t *testing.T, from chan T, what string) T {
+	t.Helper()
+	select {
+	case got := <-from:
+		return got
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no %s within five seconds", what)
+		var none T
+		return none
+	}
+}
+
 // readsUntil waits on each read until the leaf has been loaded from
 // the files the given number of times. One update of the volume can
 // wake more than one read, so the test counts loads, not reads.
@@ -147,20 +164,26 @@ func TestAWatchedVolumeIsNotReadOnATimer(t *testing.T) {
 
 // A container whose inotify watch could not start, such as on a node
 // whose fs.inotify.max_user_instances is used up, still reads the
-// volume on the fallback interval, so a new leaf reaches it.
+// volume on the fallback interval, so a new leaf reaches it. A watch
+// that could not start runs no reader of its own, so the test runs in
+// a bubble at the production interval.
 func TestAVolumeWithNoWatchIsReadOnTheFallback(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "not-mounted")
-	complaints := make(chan error, 64)
-	_, reads := watchLeafEvery(t, missing, time.Millisecond, func(err error) {
-		select {
-		case complaints <- err:
-		default:
+	synctest.Test(t, func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "not-mounted")
+		var complaints atomic.Int64
+		_, reads := watchLeafEvery(t, missing, leafFallback, func(error) { complaints.Add(1) })
+		<-reads
+		for range 3 {
+			start := time.Now()
+			<-reads
+			if waited := time.Since(start); waited != leafFallback {
+				t.Errorf("the volume was read again after %v, want %v", waited, leafFallback)
+			}
+		}
+		if got := complaints.Load(); got != 4 {
+			t.Errorf("the watch complained %d times, want once for each of the 4 reads", got)
 		}
 	})
-	next(t, complaints, "complaint that the watch could not start")
-	for range 3 {
-		next(t, reads, "read on the fallback interval")
-	}
 }
 
 func TestADirectoryWithNoSecretStillAnswersAHandshake(t *testing.T) {

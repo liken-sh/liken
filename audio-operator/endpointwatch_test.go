@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"k8s.io/client-go/tools/cache"
@@ -105,49 +106,67 @@ func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
 // wakes every machine's operator for a write to any Sink in the
 // cluster.
 func TestTheWatchSelectsThisMachinesResourcesInBothCollections(t *testing.T) {
-	sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`})
-	sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
-	watchEndpoints(watchContext(t), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-		"liken-1", func() {}, nil)
+	synctest.Test(t, func(t *testing.T) {
+		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`})
+		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
+		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
+			"liken-1", func() {}, nil)
+		synctest.Wait()
 
-	sinks.awaitWatches(t, 1)
-	sources.awaitWatches(t, 1)
-
-	for _, server := range []*watchServer{sinks, sources} {
-		for _, query := range server.requests() {
-			if !strings.Contains(query, "fieldSelector=status.node%3Dliken-1") {
-				t.Errorf("the request %s?%s does not select this machine's resources", server.collection, query)
+		for _, server := range []*watchServer{sinks, sources} {
+			if len(server.requests()) == 0 {
+				t.Errorf("the watch sent no request for %s", server.collection)
+			}
+			for _, query := range server.requests() {
+				if !strings.Contains(query, "fieldSelector=status.node%3Dliken-1") {
+					t.Errorf("the request %s?%s does not select this machine's resources", server.collection, query)
+				}
 			}
 		}
+	})
+}
+
+// wakeCount drains the wakes that have arrived, and answers how many
+// there were.
+func wakeCount(wakes chan struct{}) int {
+	count := 0
+	for len(wakes) > 0 {
+		<-wakes
+		count++
 	}
+	return count
 }
 
 // Through the reflector: each watch wakes the loop when its first read
 // is done, even an empty one, and then a spec edit wakes it while the
 // operator's own status write before it does not.
 func TestASpecEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
-	sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind,
-		[]string{"[" + encode(t, sinkAt("1", 1)) + "]"},
-		[]string{pause, sinkEvent(t, "MODIFIED", sinkAt("2", 1)), pause,
-			sinkEvent(t, "MODIFIED", sinkAt("3", 2)), holdOpen})
-	sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
-	wakes := make(chan struct{}, 8)
-	watchEndpoints(watchContext(t), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-		"liken-1", func() { wakes <- struct{}{} }, nil)
+	synctest.Test(t, func(t *testing.T) {
+		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind,
+			[]string{"[" + encode(t, sinkAt("1", 1)) + "]"},
+			[]string{pause, sinkEvent(t, "MODIFIED", sinkAt("2", 1)), pause,
+				sinkEvent(t, "MODIFIED", sinkAt("3", 2)), holdOpen})
+		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
+		wakes := make(chan struct{}, 8)
+		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
+			"liken-1", func() { wakes <- struct{}{} }, nil)
+		synctest.Wait()
+		// The Sink's add and the two syncs.
+		if got := wakeCount(wakes); got != 3 {
+			t.Errorf("the first reads woke the loop %d times, want 3", got)
+		}
 
-	sinks.awaitWatches(t, 1)
-	sources.awaitWatches(t, 1)
-	// The Sink's add and the two syncs.
-	for range 3 {
-		next(t, wakes, "wake for the first reads")
-	}
-
-	sinks.release()
-	if woke(wakes, 200*time.Millisecond) {
-		t.Error("the operator's own status write woke the loop")
-	}
-	sinks.release()
-	next(t, wakes, "wake for the spec edit")
+		sinks.release()
+		synctest.Wait()
+		if got := wakeCount(wakes); got != 0 {
+			t.Errorf("the operator's own status write woke the loop %d times", got)
+		}
+		sinks.release()
+		synctest.Wait()
+		if got := wakeCount(wakes); got != 1 {
+			t.Errorf("the spec edit woke the loop %d times, want 1", got)
+		}
+	})
 }
 
 // Through the reflector: an edit made while the watch was down reaches
@@ -157,33 +176,35 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		again map[string]any
-		want  bool
+		want  int
 	}{
-		{"a status write", sinkAt("150", 1), false},
-		{"a spec edit", sinkAt("150", 2), true},
+		{"a status write", sinkAt("150", 1), 0},
+		{"a spec edit", sinkAt("150", 2), 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			// The first watch ends with a 410, so the reflector reads
-			// the collection again.
-			expired := `{"type":"ERROR","object":{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Expired","code":410,"message":"too old resource version"}}`
-			sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind,
-				[]string{"[" + encode(t, sinkAt("1", 1)) + "]", "[" + encode(t, c.again) + "]"},
-				[]string{pause, expired})
-			sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
-			wakes := make(chan struct{}, 8)
-			watchEndpoints(watchContext(t), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-				"liken-1", func() { wakes <- struct{}{} }, nil)
-			sinks.awaitWatches(t, 1)
-			sources.awaitWatches(t, 1)
-			for range 3 {
-				next(t, wakes, "wake for the first reads")
-			}
+			synctest.Test(t, func(t *testing.T) {
+				// The first watch ends with a 410, so the reflector reads
+				// the collection again.
+				expired := `{"type":"ERROR","object":{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Expired","code":410,"message":"too old resource version"}}`
+				sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind,
+					[]string{"[" + encode(t, sinkAt("1", 1)) + "]", "[" + encode(t, c.again) + "]"},
+					[]string{pause, expired})
+				sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
+				wakes := make(chan struct{}, 8)
+				watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
+					"liken-1", func() { wakes <- struct{}{} }, nil)
+				synctest.Wait()
+				if got := wakeCount(wakes); got != 3 {
+					t.Errorf("the first reads woke the loop %d times, want 3", got)
+				}
 
-			sinks.release()
-			sinks.awaitWatches(t, 1)
-			if got := woke(wakes, 300*time.Millisecond); got != c.want {
-				t.Errorf("woke = %v, want %v", got, c.want)
-			}
+				sinks.release()
+				time.Sleep(time.Minute)
+				synctest.Wait()
+				if got := wakeCount(wakes); got != c.want {
+					t.Errorf("the second read woke the loop %d times, want %d", got, c.want)
+				}
+			})
 		})
 	}
 }
@@ -191,35 +212,32 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 // Through the reflector: a Sink that enters the selection, and one
 // that leaves it, each wake the loop.
 func TestASinkThatEntersOrLeavesTheSelectionWakesTheLoop(t *testing.T) {
-	sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`},
-		[]string{pause, sinkEvent(t, "ADDED", sinkAt("2", 1)), pause,
-			sinkEvent(t, "DELETED", sinkAt("3", 1)), holdOpen})
-	sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
-	wakes := make(chan struct{}, 8)
-	watchEndpoints(watchContext(t), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-		"liken-1", func() { wakes <- struct{}{} }, nil)
-	sinks.awaitWatches(t, 1)
-	sources.awaitWatches(t, 1)
-	for range 2 {
-		next(t, wakes, "wake for the first reads")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`},
+			[]string{pause, sinkEvent(t, "ADDED", sinkAt("2", 1)), pause,
+				sinkEvent(t, "DELETED", sinkAt("3", 1)), holdOpen})
+		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
+		wakes := make(chan struct{}, 8)
+		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
+			"liken-1", func() { wakes <- struct{}{} }, nil)
+		synctest.Wait()
+		if got := wakeCount(wakes); got != 2 {
+			t.Errorf("the first reads woke the loop %d times, want 2", got)
+		}
 
-	sinks.release()
-	next(t, wakes, "wake for the Sink that entered")
-	sinks.release()
-	next(t, wakes, "wake for the Sink that left")
+		sinks.release()
+		synctest.Wait()
+		if got := wakeCount(wakes); got != 1 {
+			t.Errorf("the Sink that entered woke the loop %d times, want 1", got)
+		}
+		sinks.release()
+		synctest.Wait()
+		if got := wakeCount(wakes); got != 1 {
+			t.Errorf("the Sink that left woke the loop %d times, want 1", got)
+		}
 
-	if slices.ContainsFunc(sinks.requests(), func(query string) bool { return !strings.Contains(query, "status.node") }) {
-		t.Errorf("a request carried no selector: %v", sinks.requests())
-	}
-}
-
-// woke answers whether a wake arrives within the given time.
-func woke(wakes <-chan struct{}, within time.Duration) bool {
-	select {
-	case <-wakes:
-		return true
-	case <-time.After(within):
-		return false
-	}
+		if slices.ContainsFunc(sinks.requests(), func(query string) bool { return !strings.Contains(query, "status.node") }) {
+			t.Errorf("a request carried no selector: %v", sinks.requests())
+		}
+	})
 }

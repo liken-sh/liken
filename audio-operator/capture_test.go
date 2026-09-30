@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -490,25 +491,30 @@ func TestTheGraphIsReadBeforeTheTapAndAgainToConfirm(t *testing.T) {
 	// The resolution is one read and the confirmation is at least one
 	// more, so a fixture that never links reaches the deadline and a
 	// wrong-target answer.
-	server := &captureServer{
-		version:  "dev",
-		readings: newCaptureMetrics("dev"),
-		taps:     make(chan struct{}, 1),
-		now:      time.Now,
-	}
-	reads := 0
-	server.linkDeadline = 300 * time.Millisecond
-	server.graph = func(context.Context) ([]byte, error) {
-		reads++
-		return readGraphFixture(t, "graph-no-settings.json"), nil
-	}
-	err := server.confirm(context.Background(), "audio-capture-4242", 48)
-	if err == nil {
-		t.Fatal("a graph with no link at all confirmed")
-	}
-	if reads < 2 {
-		t.Errorf("the confirmation read the graph %d times", reads)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		server := &captureServer{
+			version:  "dev",
+			readings: newCaptureMetrics("dev"),
+			taps:     make(chan struct{}, 1),
+			now:      time.Now,
+		}
+		reads := 0
+		server.graph = func(context.Context) ([]byte, error) {
+			reads++
+			return readGraphFixture(t, "graph-no-settings.json"), nil
+		}
+		started := time.Now()
+		err := server.confirm(t.Context(), "audio-capture-4242", 48)
+		if err == nil {
+			t.Fatal("a graph with no link at all confirmed")
+		}
+		if waited := time.Since(started); waited != linkDeadline {
+			t.Errorf("the confirmation gave up after %s, want %s", waited, linkDeadline)
+		}
+		if reads < 2 {
+			t.Errorf("the confirmation read the graph %d times", reads)
+		}
+	})
 }
 
 func readProblemBody(t *testing.T, answer *http.Response) problem {
@@ -597,11 +603,10 @@ func TestAPipeWireThatDoesNotAnswerIsUnavailableAndNotAWrongTarget(t *testing.T)
 
 func TestAGraphThatWillNotReadIsNotAWrongTarget(t *testing.T) {
 	server := &captureServer{
-		version:      "dev",
-		readings:     newCaptureMetrics("dev"),
-		taps:         make(chan struct{}, 1),
-		now:          time.Now,
-		linkDeadline: 300 * time.Millisecond,
+		version:  "dev",
+		readings: newCaptureMetrics("dev"),
+		taps:     make(chan struct{}, 1),
+		now:      time.Now,
 	}
 	server.graph = func(context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("%w: running pw-dump: exit status 255", ErrGraphUnread)
@@ -629,7 +634,6 @@ func TestEveryTapWritesOneLineWhateverBecameOfIt(t *testing.T) {
 	}
 	for _, row := range cases {
 		harness := newCaptureHarness(t, row.graph, silence(0.5, 48000, 2))
-		harness.server.linkDeadline = 300 * time.Millisecond
 		answer := harness.call(t, http.MethodGet,
 			"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/"+row.target)
 		_, _ = io.Copy(io.Discard, answer.Body)

@@ -69,10 +69,6 @@ type captureServer struct {
 	// now is the accept instant, which is the span's zero.
 	now func() time.Time
 
-	// linkDeadline bounds the confirmation. It is a field so a test
-	// drives the no-link case without waiting the real three seconds.
-	linkDeadline time.Duration
-
 	// log is where the per-tap line goes. It is a field so a test
 	// reads the line rather than the process's own output.
 	log func(string)
