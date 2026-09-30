@@ -15,6 +15,18 @@ package main
 // leaf again when under a third of its life remains.
 // audio_api_certificate_expiry_seconds reports the nearest expiry.
 //
+// Every key the API mints is ECDSA on the P-256 curve, stored as
+// PKCS#8 under the PEM type "PRIVATE KEY". P-256 is the TLS default
+// for a new certificate, and a P-256 key takes well under a
+// millisecond to generate, where an RSA-2048 key takes tens of
+// milliseconds. The API still reads an RSA key, in PKCS#1 or PKCS#8,
+// because a Secret that an earlier release minted holds one. An RSA CA
+// stays in place until its own rotation, and signs the ECDSA leaves
+// that the API mints until then. The API serves an RSA leaf until
+// under a third of its life remains, and mints an ECDSA leaf to
+// replace it. A Secret that cert-manager issues can hold a key of any
+// type that crypto/tls reads, and the API serves it as it is.
+//
 // A create that loses the race reads the winner, so two API pods
 // during a rollout settle on one CA. The Deployment is strategy
 // Recreate for the same reason.
@@ -25,8 +37,10 @@ package main
 // a Certificate of the same name.
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -54,11 +68,6 @@ const (
 	leafRenewalShare = 3
 )
 
-// certificateBits is the RSA key size. 2048 bits is enough for a CA
-// that never leaves the cluster, and every client in this cluster
-// reads it.
-const certificateBits = 2048
-
 // keyPair is one certificate and its key, in the PEM the Kubernetes
 // tls shape carries.
 type keyPair struct {
@@ -70,14 +79,18 @@ type keyPair struct {
 type authority struct {
 	Pair        keyPair
 	certificate *x509.Certificate
-	key         *rsa.PrivateKey
+	key         crypto.Signer
 }
 
 // mintAuthority makes the domain's CA.
 func mintAuthority(now time.Time) (authority, error) {
-	key, err := rsa.GenerateKey(rand.Reader, certificateBits)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return authority{}, fmt.Errorf("making the certificate authority's key: %w", err)
+	}
+	keyPEM, err := encodeKey(key)
+	if err != nil {
+		return authority{}, err
 	}
 	serial, err := newSerial()
 	if err != nil {
@@ -101,7 +114,7 @@ func mintAuthority(now time.Time) (authority, error) {
 		return authority{}, err
 	}
 	return authority{
-		Pair:        keyPair{Certificate: encodeCertificate(body), Key: encodeKey(key)},
+		Pair:        keyPair{Certificate: encodeCertificate(body), Key: keyPEM},
 		certificate: certificate,
 		key:         key,
 	}, nil
@@ -120,9 +133,13 @@ func readAuthority(pair keyPair) (authority, error) {
 	return authority{Pair: pair, certificate: certificate, key: key}, nil
 }
 
-// mintLeaf signs one server certificate for the names given.
+// mintLeaf signs one server certificate for the names given. The key
+// usage is digital signature alone, because an ECDSA key signs the
+// handshake and never encrypts a key. The CA's own key decides the
+// signature algorithm: ECDSA with SHA-256 from an ECDSA CA, and RSA
+// with SHA-256 from an RSA CA of an earlier release.
 func (a authority) mintLeaf(commonName string, names []string, now time.Time) (keyPair, error) {
-	key, err := rsa.GenerateKey(rand.Reader, certificateBits)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return keyPair{}, fmt.Errorf("making the leaf's key: %w", err)
 	}
@@ -135,7 +152,7 @@ func (a authority) mintLeaf(commonName string, names []string, now time.Time) (k
 		Subject:      pkix.Name{CommonName: commonName},
 		NotBefore:    now.Add(-time.Hour),
 		NotAfter:     now.Add(leafLifetime),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     names,
 	}
@@ -143,7 +160,11 @@ func (a authority) mintLeaf(commonName string, names []string, now time.Time) (k
 	if err != nil {
 		return keyPair{}, fmt.Errorf("signing the leaf for %s: %w", commonName, err)
 	}
-	return keyPair{Certificate: encodeCertificate(body), Key: encodeKey(key)}, nil
+	keyPEM, err := encodeKey(key)
+	if err != nil {
+		return keyPair{}, err
+	}
+	return keyPair{Certificate: encodeCertificate(body), Key: keyPEM}, nil
 }
 
 // selfSigned makes a certificate of this process's own, signed by a
@@ -211,11 +232,12 @@ func encodeCertificate(body []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: body})
 }
 
-func encodeKey(key *rsa.PrivateKey) []byte {
-	return pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
+func encodeKey(key *ecdsa.PrivateKey) ([]byte, error) {
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("encoding the key: %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
 }
 
 func parseCertificate(body []byte) (*x509.Certificate, error) {
@@ -226,21 +248,30 @@ func parseCertificate(body []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func parseKey(body []byte) (*rsa.PrivateKey, error) {
+// parseKey reads a CA key in each form a Secret can hold: PKCS#8 from
+// this release, PKCS#1 "RSA PRIVATE KEY" from an earlier one, and SEC1
+// "EC PRIVATE KEY" from a CA that a person made with openssl.
+func parseKey(body []byte) (crypto.Signer, error) {
 	block, _ := pem.Decode(body)
 	if block == nil {
 		return nil, errors.New("the key is not PEM")
 	}
-	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return key, nil
+	var parsed any
+	var err error
+	switch block.Type {
+	case "RSA PRIVATE KEY":
+		parsed, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+	case "EC PRIVATE KEY":
+		parsed, err = x509.ParseECPrivateKey(block.Bytes)
+	default:
+		parsed, err = x509.ParsePKCS8PrivateKey(block.Bytes)
 	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return nil, err
 	}
-	key, ok := parsed.(*rsa.PrivateKey)
+	key, ok := parsed.(crypto.Signer)
 	if !ok {
-		return nil, errors.New("the key is not an RSA key")
+		return nil, fmt.Errorf("the key is %T, which cannot sign", parsed)
 	}
 	return key, nil
 }
