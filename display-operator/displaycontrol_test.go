@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -1033,33 +1034,36 @@ func TestARestoreThatWaitsHoldsUpNoOtherPanel(t *testing.T) {
 // One restore per connector. A pass that finds one running
 // leaves it alone, so a panel is never written by two restores.
 func TestTwoPassesRunOneRestoreForOneConnector(t *testing.T) {
-	panel := drillPanel(t, "lg-hdr-wqhd")
-	panel.stubborn[vcpBrightness] = 1000
-	fixture := newDisplayFixture(t, panel)
-	fixture.stall = true
-	fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Brightness: intOf(70)})
+	synctest.Test(t, func(t *testing.T) {
+		panel := drillPanel(t, "lg-hdr-wqhd")
+		panel.stubborn[vcpBrightness] = 1000
+		fixture := newDisplayFixture(t, panel)
+		fixture.stall = true
+		fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Brightness: intOf(70)})
 
-	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
-	}
-	<-fixture.waiting
-	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
-	}
+		if err := fixture.pass(); err != nil {
+			t.Fatal(err)
+		}
+		<-fixture.waiting
+		if err := fixture.pass(); err != nil {
+			t.Fatal(err)
+		}
 
-	// A second restore would take the wire and wait on it too,
-	// so the wait of one is the proof that only one runs.
-	select {
-	case <-fixture.waiting:
-		t.Error("a second restore started for a connector that already had one")
-	case <-time.After(200 * time.Millisecond):
-	}
-	if took := panel.took(vcpBrightness); len(took) != 1 {
-		t.Errorf("the panel took %d writes, want the one write of a single restore", len(took))
-	}
-	if captured := fixture.display().Status.Captured; captured.empty() {
-		t.Error("the capture was cleared while the restore had not landed")
-	}
+		// A second restore would take the wire and wait on it too,
+		// so the wait of one is the proof that only one runs.
+		synctest.Wait()
+		select {
+		case <-fixture.waiting:
+			t.Error("a second restore started for a connector that already had one")
+		default:
+		}
+		if took := panel.took(vcpBrightness); len(took) != 1 {
+			t.Errorf("the panel took %d writes, want the one write of a single restore", len(took))
+		}
+		if captured := fixture.display().Status.Captured; captured.empty() {
+			t.Error("the capture was cleared while the restore had not landed")
+		}
+	})
 }
 
 // The restore writes no status. It wakes the pass, and the pass

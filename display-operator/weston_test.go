@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -461,16 +462,6 @@ func servingSocket(t *testing.T, dir string) string {
 	return westonBenchOn(t, filepath.Join(dir, socketName), nil).path
 }
 
-// frozenSocket is the socket of a compositor whose event loop stopped:
-// the listener accepts the connect and nothing ever answers on it,
-// which is what a weston stopped with SIGSTOP leaves a client.
-func frozenSocket(t *testing.T, dir string) string {
-	t.Helper()
-	path := filepath.Join(dir, socketName)
-	listenOnSocket(t, path)
-	return path
-}
-
 // closingSocket accepts and closes at once, which is what the socket
 // of a compositor that is exiting does.
 func closingSocket(t *testing.T, dir string) string {
@@ -513,9 +504,6 @@ func staleSocket(t *testing.T, dir string) string {
 func TestProbeCompositorReadsWhatTheSocketAnswers(t *testing.T) {
 	// The bound is set for the whole test, so the frozen case waits
 	// 200 ms once in place of the 2 s the operator waits.
-	compositorReplyTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { compositorReplyTimeout = 2 * time.Second })
-
 	cases := []struct {
 		name    string
 		socket  func(t *testing.T, dir string) string
@@ -530,9 +518,6 @@ func TestProbeCompositorReadsWhatTheSocketAnswers(t *testing.T) {
 		// corpse a compositor, and prepare would deliver a path that
 		// refuses every client that connects to it.
 		{"the socket a dead compositor left", staleSocket, false, CompositorDownReason},
-		// The case the testbed drill found: the socket accepts, and
-		// the process behind it runs no event loop.
-		{"a socket that accepts and never answers", frozenSocket, false, CompositorHungReason},
 		{"a socket that closes on the handshake", closingSocket, false, CompositorDownReason},
 	}
 	for _, drill := range cases {
@@ -553,6 +538,32 @@ func TestProbeCompositorReadsWhatTheSocketAnswers(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The case the testbed drill found: the socket accepts, and the
+// process behind it runs no event loop. The compositor's end reads the
+// probe's request and answers nothing, the way a stopped process's
+// kernel buffers the request. The probe waits out
+// compositorReplyTimeout on the fake clock, and reads a freeze.
+func TestTheProbeReadsACompositorThatAcceptsAndNeverAnswersAsHung(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		probe, compositor := net.Pipe()
+		t.Cleanup(func() {
+			_ = probe.Close()
+			_ = compositor.Close()
+		})
+		go func() { _, _ = io.Copy(io.Discard, compositor) }()
+		start := time.Now()
+
+		live := probeConnection(probe)
+
+		if live.serving || live.reason != CompositorHungReason || live.detail == "" {
+			t.Errorf("the probe answers %+v, want not serving, %s, and the socket's words", live, CompositorHungReason)
+		}
+		if waited := time.Since(start); waited != compositorReplyTimeout {
+			t.Errorf("the probe waited %v for an answer, want %v", waited, compositorReplyTimeout)
+		}
+	})
 }
 
 // podWithRestarts is the pod this operator runs in, as the API server
@@ -646,11 +657,7 @@ func TestAnOperatorWithNoPodOfItsOwnCountsNothing(t *testing.T) {
 }
 
 func TestTheHungRepairWaitsForTheBoundAndRunsOnce(t *testing.T) {
-	compositorHungLimit = 10 * time.Second
 	start := time.Unix(0, 0).UTC()
-	hung := compositorLiveness{reason: CompositorHungReason, detail: "i/o timeout"}
-	down := compositorLiveness{reason: CompositorDownReason, detail: "connection refused"}
-	serving := compositorLiveness{serving: true, reason: CompositorServingReason}
 
 	steps := []struct {
 		name    string
@@ -659,20 +666,20 @@ func TestTheHungRepairWaitsForTheBoundAndRunsOnce(t *testing.T) {
 		due     bool
 		killed  bool
 	}{
-		{name: "the first reading of the freeze", live: hung, seconds: 0},
+		{name: "the first reading of the freeze", live: probeHung, seconds: 0},
 		// A freeze shorter than the bound is a compositor under load,
 		// and the operator ends nothing.
-		{name: "inside the bound", live: hung, seconds: 9},
-		{name: "the compositor answered again", live: serving, seconds: 10},
-		{name: "a second freeze starts its own clock", live: hung, seconds: 11},
-		{name: "inside the second bound", live: hung, seconds: 20},
-		{name: "the bound runs out", live: hung, seconds: 21, due: true, killed: true},
+		{name: "inside the bound", live: probeHung, seconds: 9},
+		{name: "the compositor answered again", live: probeServing, seconds: 10},
+		{name: "a second freeze starts its own clock", live: probeHung, seconds: 11},
+		{name: "inside the second bound", live: probeHung, seconds: 20},
+		{name: "the bound runs out", live: probeHung, seconds: 21, due: true, killed: true},
 		// The kill ran, so the rest of this outage orders no second
 		// kill.
-		{name: "still frozen after the kill", live: hung, seconds: 22},
-		{name: "the process died and the socket refuses", live: down, seconds: 23},
-		{name: "a freeze in a later outage", live: hung, seconds: 24},
-		{name: "that outage reaches the bound", live: hung, seconds: 34, due: true, killed: true},
+		{name: "still frozen after the kill", live: probeHung, seconds: 22},
+		{name: "the process died and the socket refuses", live: probeDown, seconds: 23},
+		{name: "a freeze in a later outage", live: probeHung, seconds: 24},
+		{name: "that outage reaches the bound", live: probeHung, seconds: 34, due: true, killed: true},
 	}
 	repair := &hungCompositor{}
 	for _, step := range steps {
@@ -689,32 +696,25 @@ func TestTheHungRepairWaitsForTheBoundAndRunsOnce(t *testing.T) {
 	}
 }
 
+// The watch ends a compositor that has answered nothing for
+// compositorHungLimit at the first tick that reaches the bound, and one
+// outage costs one kill.
 func TestTheWatchEndsACompositorThatAnswersNothing(t *testing.T) {
-	compositorReplyTimeout = 100 * time.Millisecond
-	compositorHungLimit = 0
-	ctx, cancel := context.WithCancel(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var kills []time.Duration
+		compositor := &scriptedProbe{live: probeHung}
+		watchSocket(t.Context(), filepath.Join(t.TempDir(), socketName), compositor.probe, func() error {
+			kills = append(kills, time.Since(start))
+			return nil
+		})
 
-	var kills atomic.Int64
-	wakes := watchSocket(ctx, frozenSocket(t, t.TempDir()), func() error {
-		kills.Add(1)
-		return nil
-	})
-	// The watch reads both bounds on every tick, so the test waits
-	// for the watch to end before it restores them.
-	t.Cleanup(func() {
-		cancel()
-		for range wakes {
+		// The compositor stays frozen long past the bound.
+		time.Sleep(3 * compositorHungLimit)
+		synctest.Wait()
+
+		if len(kills) != 1 || kills[0] != compositorHungLimit {
+			t.Errorf("the watch ended the compositor at %v, want once at %v", kills, compositorHungLimit)
 		}
-		compositorReplyTimeout = 2 * time.Second
-		compositorHungLimit = 10 * time.Second
 	})
-
-	waitUntil(t, "the operator ends the compositor that answers nothing", func() bool {
-		return kills.Load() == 1
-	})
-	// The compositor stays frozen, and one outage costs one kill.
-	time.Sleep(2 * socketWatchInterval)
-	if got := kills.Load(); got != 1 {
-		t.Errorf("the watch ended the compositor %d times in one outage", got)
-	}
 }

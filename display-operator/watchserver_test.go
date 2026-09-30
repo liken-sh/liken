@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -14,9 +13,9 @@ import (
 	"time"
 
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // objectStore is an API server that holds one collection. It answers a
@@ -30,8 +29,11 @@ import (
 // A field selector on metadata.name narrows a list and a watch to that
 // object. The store keeps every other selector a request carries, so a
 // test reads what the watch asked for, and it filters by none of them.
+//
+// The store answers over the in-memory connections of apiservertest,
+// so a test that runs a watch against it can run in a synctest bubble.
 type objectStore struct {
-	*httptest.Server
+	server     *apiservertest.Server
 	t          *testing.T
 	collection string
 	apiVersion string
@@ -69,8 +71,7 @@ func newObjectStore(t *testing.T, collection, apiVersion, kind string) *objectSt
 		t: t, collection: collection, apiVersion: apiVersion, kind: kind,
 		objects: map[string]map[string]any{},
 	}
-	store.Server = httptest.NewServer(http.HandlerFunc(store.serve))
-	t.Cleanup(store.Close)
+	store.server = apiservertest.Start(t, http.HandlerFunc(store.serve))
 	return store
 }
 
@@ -84,16 +85,12 @@ func newSecretStore(t *testing.T, namespace string) *objectStore {
 }
 
 func (o *objectStore) client() *apiclient.Client {
-	return apiclient.New(o.URL, o.Client(), "")
+	return apiclient.New(apiservertest.Host, o.server.Client(), "")
 }
 
 func (o *objectStore) watcher() dynamic.Interface {
 	o.t.Helper()
-	client, err := dynamic.NewForConfig(&rest.Config{Host: o.URL})
-	if err != nil {
-		o.t.Fatal(err)
-	}
-	return client
+	return dynamicClient(o.t, o.server)
 }
 
 // put stores an object under its name, the way a writer's create or
@@ -305,12 +302,16 @@ func (o *objectStore) stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// testWatcher points a dynamic client at a test server.
+// testWatcher serves the handler over in-memory connections, and
+// points a dynamic client at it.
 func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	return dynamicClient(t, apiservertest.Start(t, handler))
+}
+
+func dynamicClient(t *testing.T, server *apiservertest.Server) dynamic.Interface {
+	t.Helper()
+	client, err := dynamic.NewForConfig(server.Config())
 	if err != nil {
 		t.Fatal(err)
 	}

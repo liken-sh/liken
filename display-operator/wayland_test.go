@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -598,6 +599,29 @@ func readbackPlugin(watch *outputWatch) *draPlugin {
 	}
 }
 
+// timedReadback runs the readback against what the watch reports now,
+// at the operator's own bounds, in a synctest bubble. It answers the
+// readback's error and how long the readback waited on the fake clock.
+// The watch reads a real socket outside the bubble, so the readback
+// reads a copy of its report, with a change channel the bubble owns.
+// A test calls it once nothing changes the report any more.
+func timedReadback(t *testing.T, watch *outputWatch, connector, mode string, before uint64) (err error, waited time.Duration) {
+	t.Helper()
+	served := watch.served()
+	synctest.Test(t, func(t *testing.T) {
+		served.changed = make(chan struct{})
+		plugin := &draPlugin{
+			served:         func() servedOutputs { return served },
+			switchTimeout:  modeSwitchTimeout,
+			switchFallback: modeSwitchFallback,
+		}
+		start := time.Now()
+		err = plugin.awaitMode(t.Context(), connector, mode, before)
+		waited = time.Since(start)
+	})
+	return err, waited
+}
+
 // The mode the watch has recorded for one connector, once it
 // settles on what the test expects.
 func (b *watchBench) awaitMode(connector, want string) {
@@ -634,9 +658,12 @@ func TestTheReadbackFailsWithTheModeTheCompositorServesInstead(t *testing.T) {
 	server.client()
 	bench.awaitMode("HDMI-A-1", "3840x1600@60")
 
-	err := readbackPlugin(bench.watch).awaitMode(t.Context(), "HDMI-A-1", "1920x1080@60", 0)
+	err, waited := timedReadback(t, bench.watch, "HDMI-A-1", "1920x1080@60", 0)
 	if err == nil {
 		t.Fatal("the readback took a mode the compositor does not serve")
+	}
+	if waited != modeSwitchTimeout {
+		t.Errorf("the readback gave up after %v, want %v", waited, modeSwitchTimeout)
 	}
 	for _, want := range []string{"HDMI-A-1", "1920x1080@60", "3840x1600@60"} {
 		if !strings.Contains(err.Error(), want) {
@@ -696,9 +723,12 @@ func TestTheReadbackTakesNoAnswerFromTheCompositorItEnded(t *testing.T) {
 	bench.awaitMode("HDMI-A-1", "3840x1600@60")
 
 	standing := bench.watch.served().session
-	err := readbackPlugin(bench.watch).awaitMode(t.Context(), "HDMI-A-1", "3840x1600@60", standing)
+	err, waited := timedReadback(t, bench.watch, "HDMI-A-1", "3840x1600@60", standing)
 	if err == nil {
 		t.Fatal("the readback took the answer of the compositor the switch ended")
+	}
+	if waited != modeSwitchTimeout {
+		t.Errorf("the readback gave up after %v, want %v", waited, modeSwitchTimeout)
 	}
 }
 

@@ -14,13 +14,15 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// The cluster a test API reads is a real HTTP server answering the
-// real JSON, so the reviews, the reads, and the Event writes are the
-// ones a cluster would answer.
+// The cluster a test API reads is an HTTP server answering the real
+// JSON, so the reviews, the reads, and the Event writes are the ones a
+// cluster would answer. It answers over the in-memory connections of
+// apiservertest, so a test of the API can run in a synctest bubble.
 type testCluster struct {
-	*httptest.Server
+	server *apiservertest.Server
 
 	mu            sync.Mutex
 	authenticated bool
@@ -93,8 +95,7 @@ func newTestCluster(t *testing.T) *testCluster {
 			},
 		},
 	}
-	cluster.Server = httptest.NewServer(http.HandlerFunc(cluster.answer))
-	t.Cleanup(cluster.Close)
+	cluster.server = apiservertest.Start(t, http.HandlerFunc(cluster.answer))
 	return cluster
 }
 
@@ -170,9 +171,12 @@ func (c *testCluster) recorded() []Event {
 
 // The sidecar in a test is a real HTTPS server on the private leg,
 // so the API's own client makes a real handshake and carries a real
-// token to it.
+// token to it. The client reaches it at the pod address and port the
+// sidecar index holds.
 type sidecarFixture struct {
-	*httptest.Server
+	client *http.Client
+	host   string
+	port   int
 
 	mu     sync.Mutex
 	calls  int
@@ -182,15 +186,36 @@ type sidecarFixture struct {
 func newSidecarFixture(t *testing.T) *sidecarFixture {
 	t.Helper()
 	sidecar := &sidecarFixture{answer: servePNG}
-	sidecar.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sidecar.mu.Lock()
-		sidecar.calls++
-		answer := sidecar.answer
-		sidecar.mu.Unlock()
-		answer(w, r)
-	}))
-	t.Cleanup(sidecar.Close)
+	server := httptest.NewTLSServer(sidecar)
+	t.Cleanup(server.Close)
+	address, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Sscanf(address.Port(), "%d", &sidecar.port); err != nil {
+		t.Fatal(err)
+	}
+	sidecar.client, sidecar.host = server.Client(), address.Hostname()
 	return sidecar
+}
+
+// newPipedSidecar is the same sidecar over the in-memory connections
+// of apiservertest, with no TLS, for a test that runs in a synctest
+// bubble to measure the API's waits on the fake clock. The handshake
+// is the TLS fixture's to prove.
+func newPipedSidecar(t *testing.T) *sidecarFixture {
+	t.Helper()
+	sidecar := &sidecarFixture{answer: servePNG, host: "10.42.0.9", port: sidecarPort}
+	sidecar.client = apiservertest.Start(t, sidecar).Client()
+	return sidecar
+}
+
+func (s *sidecarFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.calls++
+	answer := s.answer
+	s.mu.Unlock()
+	answer(w, r)
 }
 
 func servePNG(w http.ResponseWriter, r *http.Request) {
@@ -217,17 +242,9 @@ func (s *sidecarFixture) answers(answer func(w http.ResponseWriter, r *http.Requ
 
 func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *apiServer {
 	t.Helper()
-	client := apiclient.New(cluster.URL, cluster.Client(), "")
+	client := apiclient.New(apiservertest.Host, cluster.server.Client(), "")
 	tokenFile := t.TempDir() + "/token"
 	if err := os.WriteFile(tokenFile, []byte("the-api-token"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	address, err := url.Parse(sidecar.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := 0
-	if _, err := fmt.Sscanf(address.Port(), "%d", &port); err != nil {
 		t.Fatal(err)
 	}
 	index := newSidecarIndex()
@@ -235,7 +252,7 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 		Metadata: PodMeta{Namespace: sidecarNamespace, Name: "display-operator-abc"},
 		Spec:     PodSpec{NodeName: "node-1"},
 		Status: PodStatus{
-			PodIP:      address.Hostname(),
+			PodIP:      sidecar.host,
 			Conditions: []PodCondition{{Type: "Ready", Status: conditionTrue}},
 		},
 	})
@@ -245,7 +262,7 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 		tokens: newTokenCache(func(token string) (*caller, *fault) {
 			return reviewToken(client, token, apiAudience)
 		}),
-		sidecar: &sidecarClient{http: sidecar.Client(), tokenPath: tokenFile, port: port},
+		sidecar: &sidecarClient{http: sidecar.client, tokenPath: tokenFile, port: sidecar.port},
 		record: func(screen *Display, subject, aspect, form string) {
 			recordCapture(client, screen, subject, aspect, form)
 		},

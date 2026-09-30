@@ -9,7 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // Every row of the manual's error table is answered here, in the
@@ -212,23 +215,30 @@ func answerProblem(status int, kind, detail, retry string) func(http.ResponseWri
 }
 
 // A sidecar that sends no headers in time is a 504 and never a
-// capture that hangs.
+// capture that hangs. The API gives up at headerDeadline exactly.
 func TestASlowSidecarIsAGatewayTimeout(t *testing.T) {
-	sidecar := newSidecarFixture(t)
-	sidecar.answers(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
+	synctest.Test(t, func(t *testing.T) {
+		sidecar := newPipedSidecar(t)
+		sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-time.After(2 * headerDeadline):
+			case <-r.Context().Done():
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+		server := newTestAPI(t, newTestCluster(t), sidecar)
+		start := time.Now()
+
+		resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
+
+		if resp.StatusCode != http.StatusGatewayTimeout {
+			t.Fatalf("a sidecar that sent no headers answered %d, want 504", resp.StatusCode)
+		}
+		if waited := time.Since(start); waited != headerDeadline {
+			t.Errorf("the API waited %v for the headers, want %v", waited, headerDeadline)
+		}
 	})
-	server := newTestAPI(t, newTestCluster(t), sidecar)
-
-	held := headerDeadline
-	headerDeadline = 10 * time.Millisecond
-	defer func() { headerDeadline = held }()
-
-	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
-	if resp.StatusCode != http.StatusGatewayTimeout {
-		t.Fatalf("a sidecar that sent no headers answered %d, want 504", resp.StatusCode)
-	}
 }
 
 // A node whose sidecar the API does not remember is a 503 with
@@ -432,29 +442,34 @@ func TestARefusalNamesTheDescriptionAndTheManual(t *testing.T) {
 }
 
 // A capture with a t= begin counts its idle time from that begin,
-// so a legal t=45,50 is not cut off before its first byte.
+// so a legal t=45,50 is not cut off before its first byte. The
+// sidecar's first byte comes half an idle bound after the begin, which
+// is longer than the idle bound itself.
 func TestTheIdleTimerCountsFromTheBeginning(t *testing.T) {
-	sidecar := newSidecarFixture(t)
-	sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "video/mp4")
-		w.WriteHeader(http.StatusOK)
-		http.NewResponseController(w).Flush()
-		time.Sleep(120 * time.Millisecond)
-		_, _ = w.Write([]byte("fragment"))
+	synctest.Test(t, func(t *testing.T) {
+		const begin = 45 * time.Second
+		sidecar := newPipedSidecar(t)
+		sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "video/mp4")
+			w.WriteHeader(http.StatusOK)
+			_ = http.NewResponseController(w).Flush()
+			select {
+			case <-time.After(begin + idleDeadline/2):
+			case <-r.Context().Done():
+				return
+			}
+			_, _ = w.Write([]byte("fragment"))
+		})
+		server := newTestAPI(t, newTestCluster(t), sidecar)
+
+		resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.mp4?t=45,50", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("the clip answered %d", resp.StatusCode)
+		}
+		if got := body(t, resp); got != "fragment" {
+			t.Errorf("the body carried %q, want the fragment that arrived after the beginning", got)
+		}
 	})
-	server := newTestAPI(t, newTestCluster(t), sidecar)
-
-	held := idleDeadline
-	idleDeadline = 30 * time.Millisecond
-	defer func() { idleDeadline = held }()
-
-	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.mp4?t=0.2,5", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the clip answered %d", resp.StatusCode)
-	}
-	if got := body(t, resp); got != "fragment" {
-		t.Errorf("the body carried %q, want the fragment that arrived after the beginning", got)
-	}
 }
 
 // A caller that hung up gets no problem document, because there is
@@ -752,51 +767,51 @@ func TestTheAPIAnswersTheTypeTheNodeEncodes(t *testing.T) {
 // the instant they arrive as this API's zero, and a delay there
 // reaches a composed stream as an offset the length of the lead-in.
 func TestTheAPIFlushesItsHeadersBeforeTheFirstByte(t *testing.T) {
-	const begin = 600 * time.Millisecond
-	sidecar := newSidecarFixture(t)
-	sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "video/mp4")
-		w.WriteHeader(http.StatusOK)
-		_ = http.NewResponseController(w).Flush()
-		select {
-		case <-time.After(begin):
-		case <-r.Context().Done():
-			return
+	synctest.Test(t, func(t *testing.T) {
+		const begin = 600 * time.Millisecond
+		sidecar := newPipedSidecar(t)
+		sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "video/mp4")
+			w.WriteHeader(http.StatusOK)
+			_ = http.NewResponseController(w).Flush()
+			select {
+			case <-time.After(begin):
+			case <-r.Context().Done():
+				return
+			}
+			_, _ = w.Write([]byte("fragment"))
+		})
+		api := apiservertest.Start(t, newTestAPI(t, newTestCluster(t), sidecar))
+
+		request, err := http.NewRequest(http.MethodGet,
+			apiservertest.Host+apiRoot+"/displays/HDMI-A-1/screen.mp4?t=0.6,2", nil)
+		if err != nil {
+			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte("fragment"))
+		request.Header.Set("Authorization", "Bearer a-caller-token")
+
+		sent := time.Now()
+		resp, err := api.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		headers := time.Since(sent)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("the clip answered %d", resp.StatusCode)
+		}
+		if headers != 0 {
+			t.Errorf("the headers reached the caller %s after the request, want at once", headers)
+		}
+		one := make([]byte, 1)
+		if _, err := io.ReadFull(resp.Body, one); err != nil {
+			t.Fatal(err)
+		}
+		if body := time.Since(sent); body != begin {
+			t.Errorf("the first body byte arrived %s after the request, want it at the %s beginning", body, begin)
+		}
 	})
-	api := httptest.NewServer(newTestAPI(t, newTestCluster(t), sidecar))
-	defer api.Close()
-
-	request, err := http.NewRequest(http.MethodGet,
-		api.URL+apiRoot+"/displays/HDMI-A-1/screen.mp4?t=0.6,2", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer a-caller-token")
-
-	sent := time.Now()
-	resp, err := api.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	headers := time.Since(sent)
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the clip answered %d", resp.StatusCode)
-	}
-	if headers >= begin/2 {
-		t.Errorf("the headers reached the caller %s after the request, want well inside the %s beginning",
-			headers, begin)
-	}
-	one := make([]byte, 1)
-	if _, err := io.ReadFull(resp.Body, one); err != nil {
-		t.Fatal(err)
-	}
-	if body := time.Since(sent); body < begin {
-		t.Errorf("the first body byte arrived %s after the request, want it at the %s beginning", body, begin)
-	}
 }
 
 // A retry cannot bring an unplugged monitor back, so the refusal of a

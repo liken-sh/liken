@@ -458,7 +458,7 @@ func operate() {
 	// is silent when nothing changed, so the prompt path costs nothing
 	// on a wake that carried no news.
 	settled := settle(ctx,
-		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath, plugin.killHungCompositor), connections, nil, nil),
+		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath, probeCompositor, plugin.killHungCompositor), connections, nil, nil),
 		settleWindow, settleLimit)
 	prompt := wakes(ctx, nil, nil, nil, nil, layout.reports, resources)
 
@@ -647,12 +647,18 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 // repair, which sends SIGKILL to the compositor, once per outage. A
 // nil repair ends nothing, which is what every test that drives the
 // watch alone passes.
-func watchSocket(ctx context.Context, socketPath string, repair func() error) <-chan struct{} {
+//
+// The operator passes probeCompositor as probe. The probe is a
+// parameter because a probe of a real socket waits on the kernel, and
+// a test of this watch runs the ticker on synctest's fake clock, which
+// advances only while nothing waits on the kernel.
+func watchSocket(ctx context.Context, socketPath string, probe func(socketPath string) compositorLiveness,
+	repair func() error) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	// The first reading is taken before the ticker starts, so it is
 	// the same state the caller's first pass publishes, and no change
 	// falls between the two.
-	live := probeCompositor(socketPath)
+	live := probe(socketPath)
 	serving := live.serving
 	frozen := &hungCompositor{}
 	frozen.due(live, time.Now())
@@ -665,7 +671,7 @@ func watchSocket(ctx context.Context, socketPath string, repair func() error) <-
 			case <-ctx.Done():
 				return
 			case at := <-tick.C:
-				live := probeCompositor(socketPath)
+				live := probe(socketPath)
 				if frozen.due(live, at) && repair != nil {
 					endHungCompositor(socketPath, frozen, repair)
 				}

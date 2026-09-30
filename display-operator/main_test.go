@@ -3,102 +3,135 @@ package main
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// The settle tests use short windows so that the whole file runs in
-// under a second. The assertions leave wide margins, because a test
-// that measures a timer measures the scheduler as well.
-const (
-	testWindow = 40 * time.Millisecond
-	testLimit  = 200 * time.Millisecond
-)
+// The settle tests run in synctest bubbles at the operator's own
+// window and limit, so each one checks the moment the wake arrives to
+// the nanosecond, and takes no real time.
+
+// emitted answers whether settle has emitted a wake, once every
+// goroutine in the bubble has done all it can do.
+func emitted(t *testing.T, out <-chan struct{}) bool {
+	t.Helper()
+	synctest.Wait()
+	select {
+	case _, open := <-out:
+		if !open {
+			t.Fatal("the settle channel closed instead of emitting")
+		}
+		return true
+	default:
+		return false
+	}
+}
 
 func TestSettleCollapsesABurst(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		in := make(chan struct{}, 16)
+		out := settle(t.Context(), in, settleWindow, settleLimit)
 
-	in := make(chan struct{}, 16)
-	out := settle(ctx, in, testWindow, testLimit)
-
-	// One monitor plugged in produces a burst of uevents, and one
-	// write must cover the whole burst. Every ResourceSlice write
-	// wakes every DRA-pending pod in the cluster.
-	for range 8 {
-		in <- struct{}{}
-		time.Sleep(testWindow / 4)
-	}
-	waitForWake(t, out, testLimit)
-	assertQuiet(t, out, 3*testWindow)
+		// A monitor plugged in produces a burst of uevents, and one
+		// write must cover the whole burst. Every ResourceSlice write
+		// wakes every DRA-pending pod in the cluster.
+		for range 8 {
+			in <- struct{}{}
+			time.Sleep(settleWindow / 4)
+		}
+		// The last event came a quarter window ago, so the wake comes
+		// one window after it.
+		time.Sleep(settleWindow*3/4 - 1)
+		if emitted(t, out) {
+			t.Fatal("settle emitted before the burst was quiet for a window")
+		}
+		time.Sleep(1)
+		if !emitted(t, out) {
+			t.Fatal("settle did not emit one window after the burst")
+		}
+		time.Sleep(10 * settleLimit)
+		if emitted(t, out) {
+			t.Fatal("settle emitted a second time for one burst")
+		}
+	})
 }
 
 func TestSettleWaitsForQuiet(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		in := make(chan struct{}, 16)
+		out := settle(t.Context(), in, settleWindow, settleLimit)
 
-	in := make(chan struct{}, 16)
-	out := settle(ctx, in, testWindow, testLimit)
-
-	in <- struct{}{}
-	// Nothing arrives before the window passes.
-	select {
-	case <-out:
-		t.Fatal("settle emitted before the window passed")
-	case <-time.After(testWindow / 2):
-	}
-	waitForWake(t, out, testLimit)
+		in <- struct{}{}
+		time.Sleep(settleWindow - 1)
+		if emitted(t, out) {
+			t.Fatal("settle emitted before the window passed")
+		}
+		time.Sleep(1)
+		if !emitted(t, out) {
+			t.Fatal("settle did not emit when the window passed")
+		}
+	})
 }
 
 func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		in := make(chan struct{})
+		out := settle(t.Context(), in, settleWindow, settleLimit)
 
-	in := make(chan struct{})
-	out := settle(ctx, in, testWindow, testLimit)
-
-	// A cable that flaps faster than the quiet window would restart
-	// the wait forever. The limit keeps the loop publishing.
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		tick := time.NewTicker(testWindow / 2)
-		defer tick.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-tick.C:
+		// A cable that flaps faster than the quiet window would restart
+		// the wait forever. The limit keeps the loop publishing.
+		go func() {
+			tick := time.NewTicker(settleWindow / 2)
+			defer tick.Stop()
+			for {
 				select {
-				case in <- struct{}{}:
-				case <-stop:
+				case <-t.Context().Done():
 					return
+				case <-tick.C:
+					select {
+					case in <- struct{}{}:
+					case <-t.Context().Done():
+						return
+					}
 				}
 			}
-		}
-	}()
+		}()
 
-	waitForWake(t, out, 2*testLimit)
+		// The first event arrives half a window in, and the limit runs
+		// from it.
+		time.Sleep(settleWindow/2 + settleLimit - 1)
+		if emitted(t, out) {
+			t.Fatal("settle emitted under the flap before the limit")
+		}
+		time.Sleep(1)
+		if !emitted(t, out) {
+			t.Fatal("settle did not emit when the limit passed")
+		}
+	})
 }
 
 func TestSettleStopsWithItsContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	in := make(chan struct{}, 1)
-	out := settle(ctx, in, testWindow, testLimit)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		in := make(chan struct{}, 1)
+		out := settle(ctx, in, settleWindow, settleLimit)
 
-	cancel()
-	select {
-	case _, ok := <-out:
-		if ok {
-			t.Fatal("settle emitted after its context ended")
+		cancel()
+		synctest.Wait()
+		select {
+		case _, open := <-out:
+			if open {
+				t.Fatal("settle emitted after its context ended")
+			}
+		default:
+			t.Fatal("settle did not close its channel")
 		}
-	case <-time.After(time.Second):
-		t.Fatal("settle did not close its channel")
-	}
+	})
 }
 
 func TestWakesCarriesAnEventThrough(t *testing.T) {
@@ -195,29 +228,74 @@ func TestEventsEnded(t *testing.T) {
 	}
 }
 
+// scriptedProbe answers the compositor's state that the test sets, in
+// place of a probe of a real socket, so the socket watch's ticker runs
+// on the bubble's fake clock. probeCompositor's own tests read real
+// sockets.
+type scriptedProbe struct {
+	mu    sync.Mutex
+	live  compositorLiveness
+	paths []string
+}
+
+func (p *scriptedProbe) set(live compositorLiveness) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.live = live
+}
+
+func (p *scriptedProbe) probe(socketPath string) compositorLiveness {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.paths = append(p.paths, socketPath)
+	return p.live
+}
+
+// The three readings a probe answers.
+var (
+	probeServing = compositorLiveness{serving: true, reason: CompositorServingReason}
+	probeDown    = compositorLiveness{reason: CompositorDownReason, detail: "connection refused"}
+	probeHung    = compositorLiveness{reason: CompositorHungReason, detail: "i/o timeout"}
+)
+
+// Each change of the probe's reading wakes the loop at the first tick
+// that reads it, and a tick that reads no change wakes nothing.
 func TestWatchSocketWakesWhenTheCompositorComesAndGoes(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		socket := filepath.Join(t.TempDir(), socketName)
+		compositor := &scriptedProbe{live: probeDown}
+		out := watchSocket(t.Context(), socket, compositor.probe, nil)
 
-	dir := t.TempDir()
-	socket := filepath.Join(dir, socketName)
-	out := watchSocket(ctx, socket, nil)
-
-	// The compositor's container started and the socket answers.
-	compositor := westonBenchOn(t, socket, nil)
-	waitForWake(t, out, 2*socketWatchInterval)
-
-	// The compositor died and left its socket file behind. Nothing
-	// answers on it, so the watch reports the compositor gone.
-	compositor.stop()
-	waitForWake(t, out, 2*socketWatchInterval)
-
-	// The kubelet restarted the container, which binds the path again.
-	if err := os.Remove(socket); err != nil {
-		t.Fatal(err)
-	}
-	westonBenchOn(t, socket, nil)
-	waitForWake(t, out, 2*socketWatchInterval)
+		for _, step := range []struct {
+			what string
+			live compositorLiveness
+		}{
+			// The compositor's container started and the socket answers.
+			{"the compositor started", probeServing},
+			// The compositor died and left its socket file behind.
+			{"the compositor died", probeDown},
+			// The kubelet restarted the container.
+			{"the compositor started again", probeServing},
+		} {
+			compositor.set(step.live)
+			if woke(out) {
+				t.Fatalf("%s: the watch woke before its next tick", step.what)
+			}
+			time.Sleep(socketWatchInterval)
+			if !woke(out) {
+				t.Fatalf("%s: the tick after it woke nothing", step.what)
+			}
+			time.Sleep(10 * socketWatchInterval)
+			if woke(out) {
+				t.Fatalf("%s: ticks that read no change woke the loop", step.what)
+			}
+		}
+		for _, path := range compositor.paths {
+			if path != socket {
+				t.Fatalf("the watch probed %s, want %s", path, socket)
+			}
+		}
+	})
 }
 
 func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
@@ -486,14 +564,5 @@ func waitForWake(t *testing.T, out <-chan struct{}, within time.Duration) {
 		}
 	case <-time.After(within + time.Second):
 		t.Fatal("settle never emitted")
-	}
-}
-
-func assertQuiet(t *testing.T, out <-chan struct{}, within time.Duration) {
-	t.Helper()
-	select {
-	case <-out:
-		t.Fatal("settle emitted a second time for one burst")
-	case <-time.After(within):
 	}
 }

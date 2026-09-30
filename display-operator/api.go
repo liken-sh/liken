@@ -66,9 +66,8 @@ const dispositionTimeLayout = "2006-01-02T15-04-05Z"
 // headerDeadline bounds how long the API waits for the sidecar's
 // response headers, plus the t= begin the caller asked for.
 // idleDeadline bounds the quiet a body may hold before the API ends
-// the capture. Both are variables so a test can shorten them, the
-// way this repository's other waits are.
-var (
+// the capture.
+const (
 	headerDeadline = 10 * time.Second
 	idleDeadline   = 30 * time.Second
 )

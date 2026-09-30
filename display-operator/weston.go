@@ -555,9 +555,8 @@ func waitForFile(ctx context.Context, path string, timeout time.Duration) error 
 
 // The bound on the compositor's answer to the probe. A running event
 // loop answers a sync in microseconds, so the whole two seconds is
-// margin for a loaded machine. It is a variable so a test can shorten
-// it.
-var compositorReplyTimeout = 2 * time.Second
+// margin for a loaded machine.
+const compositorReplyTimeout = 2 * time.Second
 
 // What one probe found. The reason is the reason the CompositorServing
 // condition carries, and the detail is the socket's own words for a
@@ -601,6 +600,16 @@ func probeCompositor(socketPath string) compositorLiveness {
 		return compositorLiveness{reason: CompositorDownReason, detail: err.Error()}
 	}
 	defer func() { _ = socket.Close() }()
+	return probeConnection(socket)
+}
+
+// probeConnection runs the probe's exchange on a connection that is
+// already open, and bounds the wait for the answer by
+// compositorReplyTimeout. The exchange is apart from the dial because
+// the deadline of a unix socket runs on the real clock. A test runs
+// the exchange on an in-memory connection, whose deadline runs on
+// synctest's fake clock.
+func probeConnection(socket net.Conn) compositorLiveness {
 	if err := socket.SetDeadline(time.Now().Add(compositorReplyTimeout)); err != nil {
 		return compositorLiveness{reason: CompositorDownReason, detail: err.Error()}
 	}
@@ -633,8 +642,7 @@ func failedProbe(err error) compositorLiveness {
 // answers late and then answers. One that has answered nothing for
 // 10 s is frozen, and nothing else in the pod ends it: the kubelet
 // restarts a process that exits, and a frozen process does not exit.
-// It is a variable so a test can shorten it.
-var compositorHungLimit = 10 * time.Second
+const compositorHungLimit = 10 * time.Second
 
 // HungCompositor is one outage as the socket watch reads it: when the
 // probe first read Hung, and whether the kill for this outage has run.
