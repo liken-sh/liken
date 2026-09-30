@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
@@ -354,26 +355,33 @@ func TestGateThroughDrainHoldsWhenPodsCannotBeListed(t *testing.T) {
 // API server, such as one whose etcd has no quorum, must not make a
 // machine reboot and kill its pods past their disruption budgets.
 func TestGateThroughDrainHoldsWhateverStopsThePodList(t *testing.T) {
-	closed := httptest.NewServer(http.NotFoundHandler())
-	closed.Close()
-	release := make(chan struct{})
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
-	t.Cleanup(slow.Close)
-	t.Cleanup(func() { close(release) })
 	cases := []struct {
 		name   string
-		client *apiclient.Client
+		client func(*testing.T) *apiclient.Client
 	}{
-		{"a server that refuses the dial", apiclient.New(closed.URL, http.DefaultClient, "")},
-		{"a server slower than the timeout", apiclient.New(slow.URL, &http.Client{Timeout: 50 * time.Millisecond}, "")},
-		{"a server that answers an error", testClient(t, (&drainAPI{listFail: true}).handler())},
+		{"a server that refuses the dial", func(t *testing.T) *apiclient.Client {
+			closed := apiservertest.Start(t, http.NotFoundHandler())
+			closed.SetDown(true)
+			return apiclient.New(apiservertest.Host, closed.Client(), "")
+		}},
+		// The in-cluster client gives up on a request after 15 seconds
+		// (kubernetes/apiclient.go), and this one does the same.
+		{"a server slower than the timeout", func(t *testing.T) *apiclient.Client {
+			slow := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+			return apiclient.New(apiservertest.Host, &http.Client{Transport: slow.Client().Transport, Timeout: 15 * time.Second}, "")
+		}},
+		{"a server that answers an error", func(t *testing.T) *apiclient.Client {
+			return testClient(t, (&drainAPI{listFail: true}).handler())
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			conv := gateThroughDrain(c.client, drainNode(true, true, drainNow.Format(time.RFC3339)), rebootingConvergence(), drainNow)
-			if conv.requestReboot || conv.condition.Reason != "Draining" {
-				t.Errorf("the reboot went ahead at %+v, want it held", conv.condition)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				conv := gateThroughDrain(c.client(t), drainNode(true, true, drainNow.Format(time.RFC3339)), rebootingConvergence(), drainNow)
+				if conv.requestReboot || conv.condition.Reason != "Draining" {
+					t.Errorf("the reboot went ahead at %+v, want it held", conv.condition)
+				}
+			})
 		})
 	}
 }

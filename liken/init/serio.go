@@ -57,7 +57,7 @@ const serioQuiet = 250 * time.Millisecond
 // a slow adapter settles inside it. The walk holds no lock while it
 // waits, so the hardware watch and the module loader never wait
 // behind it.
-var serioSettleTimeout = 15 * time.Second
+const serioSettleTimeout = 15 * time.Second
 
 // serioRegistry is the state that outlives the component: the
 // declared entries, the holders, and what the last walk reported.

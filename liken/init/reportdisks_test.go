@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -66,22 +67,26 @@ func TestAwaitInstallStickEndsTheMomentTheStickExists(t *testing.T) {
 	addDisk(t, sys, dev, "sdb", 1<<30, nil)
 	addPartition(t, sys, "sdb", "sdb1", "liken:install", 1<<30)
 
-	if found := awaitInstallStick(0); found.Disk != "sdb" {
+	if found := awaitInstallStick(); found.Disk != "sdb" {
 		t.Errorf("an already-present stick must be found at once: %+v", found)
 	}
 }
 
 func TestAwaitInstallStickGivesUpAtTheCeiling(t *testing.T) {
-	fakeMachine(t)
+	synctest.Test(t, func(t *testing.T) {
+		fakeMachine(t)
 
-	start := time.Now()
-	found := awaitInstallStick(time.Millisecond)
-	if found.Disk != "" {
-		t.Errorf("no stick must resolve to none: %+v", found)
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Error("the wait must stop at its ceiling")
-	}
+		start := time.Now()
+		found := awaitInstallStick()
+		if found.Disk != "" {
+			t.Errorf("no stick must resolve to none: %+v", found)
+		}
+		// The wait looks every 200ms, and gives up on the first look past
+		// its ceiling.
+		if elapsed := time.Since(start); elapsed != stickCeiling+200*time.Millisecond {
+			t.Errorf("the wait stopped after %s, want the first look past its ceiling of %s", elapsed, stickCeiling)
+		}
+	})
 }
 
 func TestReadReportDisksExcludesTheStick(t *testing.T) {

@@ -100,7 +100,6 @@ var operatorLeaseTiming = leaseTiming{
 type leadership struct {
 	elector  *leaderelection.LeaderElector
 	identity string
-	timing   leaseTiming
 	lock     *renewalClock
 
 	// leases reaches the Lease itself, for the release that follows
@@ -135,7 +134,7 @@ type leadership struct {
 // a random suffix, so a restarted container is a new candidate and
 // waits for the Lease its earlier process held to expire
 // (renewalClock.Get).
-func newLeadership(config *rest.Config, pod string, timing leaseTiming,
+func newLeadership(config *rest.Config, pod string,
 	setUnelected func(bool), exit func(int), report func(string)) (*leadership, error) {
 	leases, err := coordinationv1.NewForConfig(config)
 	if err != nil {
@@ -145,7 +144,6 @@ func newLeadership(config *rest.Config, pod string, timing leaseTiming,
 	_, _ = rand.Read(suffix)
 	l := &leadership{
 		identity:     pod + "_" + hex.EncodeToString(suffix),
-		timing:       timing,
 		leases:       leases,
 		started:      make(chan struct{}),
 		done:         make(chan struct{}),
@@ -160,7 +158,6 @@ func newLeadership(config *rest.Config, pod string, timing leaseTiming,
 			Client:     leases,
 			LockConfig: resourcelock.ResourceLockConfig{Identity: l.identity},
 		},
-		duration: timing.duration,
 		pod:      pod + "_",
 		answered: l.leaseAnswered,
 		leading:  l.leads,
@@ -168,9 +165,9 @@ func newLeadership(config *rest.Config, pod string, timing leaseTiming,
 	subject := "lease " + leaseNamespace + "/" + leaseName
 	l.elector, err = leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
 		Lock:          l.lock,
-		LeaseDuration: timing.duration,
-		RenewDeadline: timing.renewDeadline,
-		RetryPeriod:   timing.retryPeriod,
+		LeaseDuration: operatorLeaseTiming.duration,
+		RenewDeadline: operatorLeaseTiming.renewDeadline,
+		RetryPeriod:   operatorLeaseTiming.retryPeriod,
 		// The release writes the Lease with no holder when the election's
 		// context ends, so a waiting copy takes it on its next retry
 		// instead of after the Lease's duration. end follows it with a
@@ -224,9 +221,7 @@ type renewalClock struct {
 	// the prefix names this pod and no other.
 	pod string
 
-	// duration, answered, and leading serve the refusal check in
-	// unelected.go.
-	duration time.Duration
+	// answered and leading serve the refusal check in unelected.go.
 	answered func(refused bool)
 	leading  func() bool
 }
@@ -329,7 +324,7 @@ func (l *leadership) mayWrite() error {
 	if l.stepping.Load() {
 		return errNotLeading
 	}
-	if age := time.Since(l.lock.lastRenewal()); age >= l.timing.renewDeadline {
+	if age := time.Since(l.lock.lastRenewal()); age >= operatorLeaseTiming.renewDeadline {
 		return fmt.Errorf("%w: the last renewal was %s ago", errNotLeading, age.Round(time.Second))
 	}
 	return nil
@@ -384,10 +379,10 @@ func (l *leadership) end() {
 	l.cancel()
 	select {
 	case <-l.done:
-	case <-time.After(l.timing.renewDeadline + time.Second):
+	case <-time.After(operatorLeaseTiming.renewDeadline + time.Second):
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), l.timing.renewDeadline/2)
+	ctx, cancel := context.WithTimeout(context.Background(), operatorLeaseTiming.renewDeadline/2)
 	defer cancel()
 	l.clearIfHeld(ctx)
 }
@@ -459,7 +454,7 @@ func lead(stop context.Context, setUnelected func(bool)) *leadership {
 	if err != nil {
 		fatal("in-cluster config for the leader election: %v", err)
 	}
-	l, err := newLeadership(config, pod, operatorLeaseTiming, setUnelected, os.Exit,
+	l, err := newLeadership(config, pod, setUnelected, os.Exit,
 		func(line string) { fmt.Println(line) })
 	if err != nil {
 		fatal("leader election: %v", err)

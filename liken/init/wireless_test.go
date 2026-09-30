@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/liken/machine"
@@ -214,7 +215,7 @@ func TestAwaitAssociationEndsOnTheJoin(t *testing.T) {
 	pushEvent(t, r.control, "<3>CTRL-EVENT-SCAN-RESULTS ")
 	pushEvent(t, r.control, "<3>CTRL-EVENT-CONNECTED - Connection to 04:4a:2c:11:22:33 completed [id=0]")
 
-	awaitAssociation(r, time.Second)
+	awaitAssociation(r)
 	if r.state != machine.WirelessConnected {
 		t.Errorf("state = %q, message = %q", r.state, r.message)
 	}
@@ -224,29 +225,35 @@ func TestAwaitAssociationEndsOnARefusedPassphrase(t *testing.T) {
 	r := &radio{ifname: "wlan0", ssid: "homenet", state: machine.WirelessAssociating, control: stubControl()}
 	pushEvent(t, r.control, `<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=1 duration=10 reason=WRONG_KEY`)
 
-	awaitAssociation(r, time.Second)
+	awaitAssociation(r)
 	if r.state != machine.WirelessWrongKey || !r.deterministic() {
 		t.Errorf("state = %q", r.state)
 	}
 }
 
 func TestAwaitAssociationGivesUpWithoutCallingItAWrongKey(t *testing.T) {
-	// An access point that never answers is the case the plan says must
-	// never park a boot, so this wait must end in NoCarrier.
-	r := &radio{ifname: "wlan0", ssid: "homenet", state: machine.WirelessAssociating, control: stubControl()}
-	pushEvent(t, r.control, "<3>CTRL-EVENT-NETWORK-NOT-FOUND ")
+	synctest.Test(t, func(t *testing.T) {
+		// An access point that never answers is the case the plan says must
+		// never park a boot, so this wait must end in NoCarrier.
+		r := &radio{ifname: "wlan0", ssid: "homenet", state: machine.WirelessAssociating, control: stubControl()}
+		pushEvent(t, r.control, "<3>CTRL-EVENT-NETWORK-NOT-FOUND ")
 
-	awaitAssociation(r, 50*time.Millisecond)
-	if r.state != machine.WirelessNoCarrier || r.deterministic() {
-		t.Errorf("state = %q, message = %q", r.state, r.message)
-	}
+		start := time.Now()
+		awaitAssociation(r)
+		if r.state != machine.WirelessNoCarrier || r.deterministic() {
+			t.Errorf("state = %q, message = %q", r.state, r.message)
+		}
+		if elapsed := time.Since(start); elapsed != associationPatience {
+			t.Errorf("the wait gave up after %s, want its patience of %s", elapsed, associationPatience)
+		}
+	})
 }
 
 func TestAwaitAssociationEndsWhenTheSupplicantsStreamCloses(t *testing.T) {
 	r := &radio{ifname: "wlan0", ssid: "homenet", state: machine.WirelessAssociating, control: stubControl()}
 	close(r.control.out)
 
-	awaitAssociation(r, time.Second)
+	awaitAssociation(r)
 	if r.state != machine.WirelessNoCarrier {
 		t.Errorf("state = %q", r.state)
 	}

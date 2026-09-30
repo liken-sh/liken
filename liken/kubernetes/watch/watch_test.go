@@ -6,11 +6,13 @@ package watch
 // the watch itself. What these tests prove is that a ready store
 // answers reads, including the answer that an object is absent, and
 // that each change the API server sends wakes the loop by its rule.
+// Each test that runs a watch runs in a synctest bubble, so
+// synctest.Wait returns once the reflector has done all it can.
 
 import (
 	"context"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -57,29 +59,31 @@ func TestAStoreThatNeverStartedCannotAnswer(t *testing.T) {
 // absent name, a list, and a lookup by label, and it holds no
 // managedFields.
 func TestAReadyStoreAnswersReads(t *testing.T) {
-	a, b := newThing("a", "7", 1), newThing("b", "8", 1)
-	a.Metadata.Labels = map[string]string{"app": "one"}
-	b.Metadata.Labels = map[string]string{"app": "two"}
-	a.Metadata.ManagedFields = []any{map[string]any{"manager": "kubectl"}}
-	server := newWatchServer([][]thing{{b, a}})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	c := informer.Start(ctx, testWatcher(t, server), testSource, informer.Options{Indexers: cache.Indexers{"app": LabelIndex("app")}})
-	awaitReady(t, c)
+	synctest.Test(t, func(t *testing.T) {
+		a, b := newThing("a", "7", 1), newThing("b", "8", 1)
+		a.Metadata.Labels = map[string]string{"app": "one"}
+		b.Metadata.Labels = map[string]string{"app": "two"}
+		a.Metadata.ManagedFields = []any{map[string]any{"manager": "kubectl"}}
+		server := newWatchServer([][]thing{{b, a}})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		c := informer.Start(ctx, testWatcher(t, server), testSource, informer.Options{Indexers: cache.Indexers{"app": LabelIndex("app")}})
+		awaitReady(t, c)
 
-	got, found, ok := Get[thing](c.View(), "a")
-	if !ok || !found || got.Metadata.Name != "a" || got.Metadata.ManagedFields != nil {
-		t.Errorf("Get(a) = %+v, found %v, ok %v; want a with no managedFields", got, found, ok)
-	}
-	if _, found, ok := Get[thing](c.View(), "c"); !ok || found {
-		t.Errorf("Get(c) found %v, ok %v; want an answer that c is absent", found, ok)
-	}
-	if all, ok := List[thing](c.View()); !ok || len(all) != 2 || all[0].Metadata.Name != "a" {
-		t.Errorf("List = %+v, ok %v; want a, then b", all, ok)
-	}
-	if two, ok := ByIndex[thing](c.View(), "app", "two"); !ok || len(two) != 1 || two[0].Metadata.Name != "b" {
-		t.Errorf("ByIndex(app=two) = %+v, ok %v; want b", two, ok)
-	}
+		got, found, ok := Get[thing](c.View(), "a")
+		if !ok || !found || got.Metadata.Name != "a" || got.Metadata.ManagedFields != nil {
+			t.Errorf("Get(a) = %+v, found %v, ok %v; want a with no managedFields", got, found, ok)
+		}
+		if _, found, ok := Get[thing](c.View(), "c"); !ok || found {
+			t.Errorf("Get(c) found %v, ok %v; want an answer that c is absent", found, ok)
+		}
+		if all, ok := List[thing](c.View()); !ok || len(all) != 2 || all[0].Metadata.Name != "a" {
+			t.Errorf("List = %+v, ok %v; want a, then b", all, ok)
+		}
+		if two, ok := ByIndex[thing](c.View(), "app", "two"); !ok || len(two) != 1 || two[0].Metadata.Name != "b" {
+			t.Errorf("ByIndex(app=two) = %+v, ok %v; want b", two, ok)
+		}
+	})
 }
 
 // readyStore is a ready view of a store that holds the given objects,
@@ -173,19 +177,22 @@ func TestEachHandlerWakesTheLoopForItsChanges(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			server := newWatchServer([][]thing{{newThing("a", "7", 1)}}, []string{pause, c.line, holdOpen})
-			wakes := make(chan struct{}, 1)
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			informer.Start(ctx, testWatcher(t, server), testSource, informer.Options{Handler: c.handler(Signal(wakes))})
-			server.awaitWatches(t, 1)
-			settleWakes(wakes)
+			synctest.Test(t, func(t *testing.T) {
+				server := newWatchServer([][]thing{{newThing("a", "7", 1)}}, []string{pause, c.line, holdOpen})
+				wakes := make(chan struct{}, 1)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				informer.Start(ctx, testWatcher(t, server), testSource, informer.Options{Handler: c.handler(Signal(wakes))})
+				if !woke(wakes) {
+					t.Fatal("the first read did not wake the loop")
+				}
 
-			server.release()
+				server.release()
 
-			if woke := wokeWithin(wakes, time.Second); woke != c.wakes {
-				t.Errorf("woke = %v, want %v", woke, c.wakes)
-			}
+				if got := woke(wakes); got != c.wakes {
+					t.Errorf("woke = %v, want %v", got, c.wakes)
+				}
+			})
 		})
 	}
 }

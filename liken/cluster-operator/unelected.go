@@ -51,7 +51,7 @@ func (r *renewalClock) classifyRead(record *resourcelock.LeaderElectionRecord, e
 	case err != nil:
 		r.answered(false)
 	case record.HolderIdentity != "" && record.HolderIdentity != r.Identity() &&
-		time.Since(record.RenewTime.Time) < r.duration:
+		time.Since(record.RenewTime.Time) < operatorLeaseTiming.duration:
 		r.answered(false)
 	case record.HolderIdentity == r.Identity() && r.leading():
 		r.answered(false)

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -162,11 +163,13 @@ func TestEmitKmsgLineSplitsLongLines(t *testing.T) {
 // syncLogs is a bounded pause, and the bound is the contract: a
 // reboot path calls it, so the pause must never grow larger.
 func TestSyncLogsIsBounded(t *testing.T) {
-	start := time.Now()
-	syncLogs()
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("syncLogs took %v", elapsed)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		syncLogs()
+		if elapsed := time.Since(start); elapsed != 50*time.Millisecond {
+			t.Errorf("syncLogs took %v, want its 50ms pause", elapsed)
+		}
+	})
 }
 
 // A pin on the priority arithmetic: facility 1, severities 6 and 4,

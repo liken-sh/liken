@@ -4,21 +4,24 @@ package main
 // that answers both plain reads and the watches' streaming lists. They
 // count the requests a pass sends, and check that a pass over the
 // watches' copies reaches the same verdict as a pass that reads the API
-// server.
+// server. Each test that runs the watches runs in a synctest bubble, so
+// synctest.Wait returns once every watch has delivered what the fake
+// sent.
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
@@ -26,7 +29,6 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 // newPassAPI holds the objects one machine's pass reads.
@@ -86,30 +88,26 @@ func isolatePass(t *testing.T) {
 // client, both pointed at the fake.
 func passClients(t *testing.T, api *fakeapi.Server) (*apiclient.Client, dynamic.Interface) {
 	t.Helper()
-	server := httptest.NewServer(api)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, api)
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	watcher, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	watcher, err := dynamic.NewForConfig(server.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return apiclient.New(server.URL, server.Client(), credentials), watcher
+	return apiclient.New(apiservertest.Host, server.Client(), credentials), watcher
 }
 
-// awaitCopies waits until every watch of the reader holds its first
-// read.
-func awaitCopies(t *testing.T, r *reader, wakes <-chan struct{}) {
+// awaitCopies waits until the watches have done all they can, and
+// checks that every watch of the reader holds its first read.
+func awaitCopies(t *testing.T, r *reader) {
 	t.Helper()
-	for !(r.machines.Synced() && r.nodes.Synced() && r.clusters.Synced() &&
+	synctest.Wait()
+	if !(r.machines.Synced() && r.nodes.Synced() && r.clusters.Synced() &&
 		r.credentials.Synced() && r.ownPods.Synced() && r.slices.Synced()) {
-		select {
-		case <-wakes:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the watches never synced")
-		}
+		t.Fatal("the watches never synced")
 	}
 }
 
@@ -150,22 +148,16 @@ func runPasses(t *testing.T, api *fakeapi.Server, r *reader) ([]string, *machine
 	return requests, m
 }
 
-// awaitEcho waits until the reader's copy of the Machine holds the
-// first pass's status write, the way the loop's next pass would find
-// it after the watch delivered the write.
+// awaitEcho waits until the watches have done all they can, and checks
+// that the reader's copy of the Machine holds the first pass's status
+// write, the way the loop's next pass would find it after the watch
+// delivered the write.
 func awaitEcho(t *testing.T, api *fakeapi.Server, r *reader) {
 	t.Helper()
+	synctest.Wait()
 	written := api.ResourceVersion(kubernetes.MachinesPath, "node-1")
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		m, _, ok := watch.Get[machine.Machine](r.machines.View(), "node-1")
-		if ok && m.Metadata.ResourceVersion == written {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the copy never held the first pass's write")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if m, _, ok := watch.Get[machine.Machine](r.machines.View(), "node-1"); !ok || m.Metadata.ResourceVersion != written {
+		t.Fatal("the copy never held the first pass's write")
 	}
 }
 
@@ -175,45 +167,47 @@ func awaitEcho(t *testing.T, api *fakeapi.Server, r *reader) {
 // same status, so the copies decode each object the way a direct read
 // does.
 func TestASettledPassOverTheCopiesSendsNoReads(t *testing.T) {
-	isolatePass(t)
+	synctest.Test(t, func(t *testing.T) {
+		isolatePass(t)
 
-	direct := newPassAPI()
-	client, _ := passClients(t, direct)
-	directRequests, directMachine := runPasses(t, direct, &reader{client: client})
+		direct := newPassAPI()
+		client, _ := passClients(t, direct)
+		directRequests, directMachine := runPasses(t, direct, &reader{client: client})
 
-	watched := newPassAPI()
-	client, watcher := passClients(t, watched)
-	wakes := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	r := watchThisMachine(ctx, watcher, client, "node-1", "lab", func() {
-		select {
-		case wakes <- struct{}{}:
-		default:
+		watched := newPassAPI()
+		client, watcher := passClients(t, watched)
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchThisMachine(ctx, watcher, client, "node-1", "lab", func() {
+			select {
+			case wakes <- struct{}{}:
+			default:
+			}
+		}, func(string) {})
+		awaitCopies(t, r)
+		watchedRequests, watchedMachine := runPasses(t, watched, r)
+
+		wantDirect := []string{
+			"GET /apis/liken.sh/v1alpha1/machines/node-1",
+			"GET /api/v1/namespaces/liken-system/pods",
+			"GET /api/v1/nodes/node-1",
+			"GET /apis/resource.k8s.io/v1/resourceslices/node-1-liken.sh",
+			"GET /apis/liken.sh/v1alpha1/clusters/lab",
+			"GET /api/v1/namespaces/liken-system/secrets/registry-credentials",
 		}
-	}, func(string) {})
-	awaitCopies(t, r, wakes)
-	watchedRequests, watchedMachine := runPasses(t, watched, r)
-
-	wantDirect := []string{
-		"GET /apis/liken.sh/v1alpha1/machines/node-1",
-		"GET /api/v1/namespaces/liken-system/pods",
-		"GET /api/v1/nodes/node-1",
-		"GET /apis/resource.k8s.io/v1/resourceslices/node-1-liken.sh",
-		"GET /apis/liken.sh/v1alpha1/clusters/lab",
-		"GET /api/v1/namespaces/liken-system/secrets/registry-credentials",
-	}
-	if !slices.Equal(directRequests, wantDirect) {
-		t.Errorf("a pass that reads the API server sent %q, want %q", directRequests, wantDirect)
-	}
-	if len(watchedRequests) != 0 {
-		t.Errorf("a pass over the copies sent %q, want nothing", watchedRequests)
-	}
-	d, _ := json.Marshal(directMachine.Status)
-	w, _ := json.Marshal(watchedMachine.Status)
-	if string(d) != string(w) {
-		t.Errorf("the pass over the copies published\n%s\nwant the direct pass's\n%s", w, d)
-	}
+		if !slices.Equal(directRequests, wantDirect) {
+			t.Errorf("a pass that reads the API server sent %q, want %q", directRequests, wantDirect)
+		}
+		if len(watchedRequests) != 0 {
+			t.Errorf("a pass over the copies sent %q, want nothing", watchedRequests)
+		}
+		d, _ := json.Marshal(directMachine.Status)
+		w, _ := json.Marshal(watchedMachine.Status)
+		if string(d) != string(w) {
+			t.Errorf("the pass over the copies published\n%s\nwant the direct pass's\n%s", w, d)
+		}
+	})
 }
 
 // The pass writes the heartbeat lease with this machine's Machine as
@@ -240,42 +234,44 @@ func TestAPassNamesTheMachineAsItsLeaseOwner(t *testing.T) {
 // reads the Machine from the API server once, and after the watch
 // delivers the write, the store answers again with no request.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
-	isolatePass(t)
-	fake := newPassAPI()
-	client, watcher := passClients(t, fake)
-	wakes := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
-	awaitCopies(t, r, wakes)
-	current, err := r.machine("node-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	status := current.Status
-	status.Phase = "Ready"
-	fake.Hold()
-	if err := r.publishStatus(current, &status); err != nil {
-		t.Fatal(err)
-	}
-	fake.Forget()
+	synctest.Test(t, func(t *testing.T) {
+		isolatePass(t)
+		fake := newPassAPI()
+		client, watcher := passClients(t, fake)
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
+		awaitCopies(t, r)
+		current, err := r.machine("node-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status := current.Status
+		status.Phase = "Ready"
+		fake.Hold()
+		if err := r.publishStatus(current, &status); err != nil {
+			t.Fatal(err)
+		}
+		fake.Forget()
 
-	held, err := r.machine("node-1")
-	if err != nil || held.Status.Phase != "Ready" {
-		t.Errorf("the read after the write = %+v, %v; want the written status", held, err)
-	}
-	if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath + "/node-1"}) {
-		t.Errorf("the read after the write sent %q, want one read of the Machine", sent)
-	}
-	fake.Release()
-	awaitEcho(t, fake, r)
-	fake.Forget()
-	if _, err := r.machine("node-1"); err != nil {
-		t.Fatal(err)
-	}
-	if sent := fake.Requests(); len(sent) != 0 {
-		t.Errorf("the read after the watch delivered the write sent %q, want nothing", sent)
-	}
+		held, err := r.machine("node-1")
+		if err != nil || held.Status.Phase != "Ready" {
+			t.Errorf("the read after the write = %+v, %v; want the written status", held, err)
+		}
+		if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath + "/node-1"}) {
+			t.Errorf("the read after the write sent %q, want one read of the Machine", sent)
+		}
+		fake.Release()
+		awaitEcho(t, fake, r)
+		fake.Forget()
+		if _, err := r.machine("node-1"); err != nil {
+			t.Fatal(err)
+		}
+		if sent := fake.Requests(); len(sent) != 0 {
+			t.Errorf("the read after the watch delivered the write sent %q, want nothing", sent)
+		}
+	})
 }
 
 // failingWatches serves a fake API server whose watches fail with a 503
@@ -294,10 +290,12 @@ func (f *failingWatches) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // breakWatches makes every later watch fail and cuts the streams that
-// are open, so each reflector opens a watch again and meets the 503.
-func breakWatches(server *httptest.Server, watches *failingWatches) {
+// are open, the way a restart of the server does, so each reflector
+// opens a watch again and meets the 503.
+func breakWatches(server *apiservertest.Server, watches *failingWatches) {
 	watches.fail.Store(true)
-	server.CloseClientConnections()
+	server.SetDown(true)
+	server.SetDown(false)
 }
 
 // After a watch fails for any reason, such as an API server restart,
@@ -305,41 +303,42 @@ func breakWatches(server *httptest.Server, watches *failingWatches) {
 // can miss the writes made while its reflector waits out a backoff, and
 // a pass that staged a withdrawn rollout from it would reboot into it.
 func TestAPassReadsTheAPIServerAfterAWatchFails(t *testing.T) {
-	isolatePass(t)
-	fake := newPassAPI()
-	watches := &failingWatches{api: fake}
-	server := httptest.NewServer(watches)
-	t.Cleanup(server.Close)
-	client, _ := passClients(t, fake)
-	watcher, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wakes := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
-	awaitCopies(t, r, wakes)
-
-	breakWatches(server, watches)
-
-	copies := []*informer.Collection{r.machines, r.nodes, r.clusters, r.credentials, r.ownPods, r.slices}
-	deadline := time.Now().Add(10 * time.Second)
-	for slices.ContainsFunc(copies, func(c *informer.Collection) bool { return c.View().Ready() }) {
-		if time.Now().After(deadline) {
-			t.Fatal("a copy kept answering after its watch failed")
+	synctest.Test(t, func(t *testing.T) {
+		isolatePass(t)
+		fake := newPassAPI()
+		watches := &failingWatches{api: fake}
+		server := apiservertest.Start(t, watches)
+		client, _ := passClients(t, fake)
+		watcher, err := dynamic.NewForConfig(server.Config())
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	fake.Forget()
-	if _, err := r.cluster("lab"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.node("node-1"); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"GET " + kubernetes.ClustersPath + "/lab", "GET /api/v1/nodes/node-1"}
-	if sent := fake.Requests(); !slices.Equal(sent, want) {
-		t.Errorf("the reads sent %q, want %q", sent, want)
-	}
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
+		awaitCopies(t, r)
+
+		breakWatches(server, watches)
+
+		// Each reflector opens its watch again after its backoff, which
+		// starts under two seconds, and the fake refuses it.
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		copies := []*informer.Collection{r.machines, r.nodes, r.clusters, r.credentials, r.ownPods, r.slices}
+		if slices.ContainsFunc(copies, func(c *informer.Collection) bool { return c.View().Ready() }) {
+			t.Fatal("a copy kept answering ten seconds after its watch failed")
+		}
+		fake.Forget()
+		if _, err := r.cluster("lab"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.node("node-1"); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"GET " + kubernetes.ClustersPath + "/lab", "GET /api/v1/nodes/node-1"}
+		if sent := fake.Requests(); !slices.Equal(sent, want) {
+			t.Errorf("the reads sent %q, want %q", sent, want)
+		}
+	})
 }

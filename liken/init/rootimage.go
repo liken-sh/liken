@@ -125,13 +125,11 @@ func findSystemImage(slotParam, slotMount string) (imagePath string, err error) 
 	return filepath.Join(slotMount, slotImageName), nil
 }
 
-// The shape of the slot wait. These are variables rather than
-// constants for the same testing reason ramImage is one; a real boot
-// never points them anywhere else. The poll is short because the
-// wait runs in early boot against a card that attaches within tens
-// of milliseconds, and the deadline is long enough that reaching it
+// The shape of the slot wait. The poll is short because the wait
+// runs in early boot against a card that attaches within tens of
+// milliseconds, and the deadline is long enough that reaching it
 // means the disk is not coming, not that it is slow.
-var (
+const (
 	slotPoll     = 50 * time.Millisecond
 	slotDeadline = 10 * time.Second
 )

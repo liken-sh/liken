@@ -126,21 +126,21 @@ func joinWireless(ifc machine.InterfaceSpec, stateRoot string) *radio {
 	}
 	r.control = control
 
-	awaitAssociation(r, associationPatience)
+	awaitAssociation(r)
 	return r
 }
 
 // awaitAssociation reads the supplicant's events until one of them
-// settles the join, or until patience runs out. It writes the verdict
-// onto the radio.
+// settles the join, or until associationPatience runs out. It writes
+// the verdict onto the radio.
 //
 // A scan that finds nothing is not a verdict. An access point that is
 // off, rebooting, or out of range produces exactly these events, and
 // the plan's rule is that absence never parks a boot. The console
 // line still goes out for every event, because a person watching the
 // boot needs to know what the radio is doing.
-func awaitAssociation(r *radio, patience time.Duration) {
-	deadline := time.After(patience)
+func awaitAssociation(r *radio) {
+	deadline := time.After(associationPatience)
 	for {
 		select {
 		case event, ok := <-r.control.events():
@@ -158,7 +158,7 @@ func awaitAssociation(r *radio, patience time.Duration) {
 			}
 		case <-deadline:
 			r.state = machine.WirelessNoCarrier
-			r.message = fmt.Sprintf("no access point answered for %s; the supplicant keeps trying", patience)
+			r.message = fmt.Sprintf("no access point answered for %s; the supplicant keeps trying", associationPatience)
 			fmt.Fprintf(os.Stderr, "liken: wireless: %s: %s\n", r.ifname, r.message)
 			return
 		}

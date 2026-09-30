@@ -114,11 +114,8 @@ const requestTimeout = 15 * time.Second
 // together: every machine's operator meets the same not-yet-served
 // CRDs and dropped watches at the same moments, and identical retry
 // delays would keep every operator retrying at the same moments.
-// Randomizing the delay spreads that load over time. RetryPause is a
-// variable so tests can replace it with a function that does
-// nothing, the same seam init's disk code leaves open with sysBlock
-// and devRoot.
-var RetryPause = func() {
+// Randomizing the delay spreads that load over time.
+func RetryPause() {
 	base := 5 * time.Second
 	time.Sleep(base + rand.N(base/2))
 }

@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
@@ -90,17 +92,25 @@ func TestEnsureMachineReturnsAnExistingMachine(t *testing.T) {
 }
 
 func TestEnsureMachineWaitsOutAnUnservedCRD(t *testing.T) {
-	// k3s applies the Machine CRD around the same time it starts
-	// this pod, so the first creates can happen before the API
-	// serves it.
-	fake := &machineAPI{notServed: 2}
-	client := testClient(t, fake.handler())
-	if _, err := ensureMachine(client, seedMachine()); err != nil {
-		t.Fatal(err)
-	}
-	if fake.creates != 3 {
-		t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		// k3s applies the Machine CRD around the same time it starts
+		// this pod, so the first creates can happen before the API
+		// serves it.
+		fake := &machineAPI{notServed: 2}
+		client := testClient(t, fake.handler())
+		start := time.Now()
+		if _, err := ensureMachine(client, seedMachine()); err != nil {
+			t.Fatal(err)
+		}
+		if fake.creates != 3 {
+			t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
+		}
+		// Each of the two refused creates costs one retry pause of five
+		// seconds, increased at random by up to half again.
+		if waited := time.Since(start); waited < 10*time.Second || waited >= 15*time.Second {
+			t.Errorf("the loop waited %s for two refused creates, want two pauses of 5s to 7.5s", waited)
+		}
+	})
 }
 
 func TestEnsureMachineReturnsAHardCreateFailure(t *testing.T) {
@@ -199,14 +209,22 @@ func TestEnsureClusterTreatsLosingTheRaceAsSuccess(t *testing.T) {
 }
 
 func TestEnsureClusterWaitsOutAnUnservedCRD(t *testing.T) {
-	fake := &clusterAPI{notServed: 2}
-	client := testClient(t, fake.handler())
-	if err := ensureCluster(client, seedCluster()); err != nil {
-		t.Fatal(err)
-	}
-	if fake.creates != 3 {
-		t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		fake := &clusterAPI{notServed: 2}
+		client := testClient(t, fake.handler())
+		start := time.Now()
+		if err := ensureCluster(client, seedCluster()); err != nil {
+			t.Fatal(err)
+		}
+		if fake.creates != 3 {
+			t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
+		}
+		// Each of the two refused creates costs one retry pause of five
+		// seconds, increased at random by up to half again.
+		if waited := time.Since(start); waited < 10*time.Second || waited >= 15*time.Second {
+			t.Errorf("the loop waited %s for two refused creates, want two pauses of 5s to 7.5s", waited)
+		}
+	})
 }
 
 func TestEnsureClusterReturnsAHardCreateFailure(t *testing.T) {

@@ -78,14 +78,6 @@ type machinePlane struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// Restart pacing, matching the k3s supervisor's pacing: a
-	// component that keeps failing waits twice as long each time.
-	// The wait is capped, so a truly broken loop still retries every
-	// half minute, and a component that ran for a while before
-	// failing starts over at the initial delay.
-	backoff    time.Duration
-	maxBackoff time.Duration
-
 	// The names still running, so that a shutdown that times out can
 	// name which component ignored it. On a machine with no shell,
 	// the console message is the only place this fact can appear.
@@ -93,14 +85,22 @@ type machinePlane struct {
 	running map[string]bool
 }
 
+// Restart pacing, matching the k3s supervisor's pacing: a component
+// that keeps failing waits twice as long each time. The wait is
+// capped, so a truly broken loop still retries every half minute, and
+// a component that ran for a while before failing starts over at the
+// initial delay.
+const (
+	componentBackoff    = time.Second
+	componentMaxBackoff = 30 * time.Second
+)
+
 func newMachinePlane() *machinePlane {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &machinePlane{
-		ctx:        ctx,
-		cancel:     cancel,
-		backoff:    time.Second,
-		maxBackoff: 30 * time.Second,
-		running:    map[string]bool{},
+		ctx:     ctx,
+		cancel:  cancel,
+		running: map[string]bool{},
 	}
 }
 
@@ -124,7 +124,7 @@ func (p *machinePlane) start(name string, run func(context.Context) error) {
 			p.mu.Unlock()
 		}()
 
-		backoff := p.backoff
+		backoff := componentBackoff
 		for {
 			started := time.Now()
 			err := runComponent(p.ctx, run)
@@ -134,8 +134,8 @@ func (p *machinePlane) start(name string, run func(context.Context) error) {
 			fmt.Fprintf(os.Stderr, "liken: %s: %v\n", name, err)
 
 			if time.Since(started) > time.Minute {
-				backoff = p.backoff
-			} else if backoff < p.maxBackoff {
+				backoff = componentBackoff
+			} else if backoff < componentMaxBackoff {
 				backoff *= 2
 			}
 			delay := withJitter(backoff)

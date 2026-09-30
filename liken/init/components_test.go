@@ -3,136 +3,155 @@ package main
 // Tests for the machine plane's contract with its components: a
 // finished component stays finished, the code restarts a failed or
 // panicking component, and shutdown is prompt for a well-behaved
-// component and bounded for a stuck one.
+// component and bounded for a stuck one. Each test runs in a synctest
+// bubble, so the restart pacing runs at its real delays on the fake
+// clock, and a test checks each delay.
 
 import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
-// testPlane builds a machine plane with restart delays measured in
-// milliseconds, so a test can exercise several restarts without
-// slowing the suite down.
+// testPlane builds a machine plane that shuts down when the test ends,
+// so no component goroutine outlives the bubble.
 func testPlane(t *testing.T) *machinePlane {
 	t.Helper()
 	p := newMachinePlane()
-	p.backoff = time.Millisecond
-	p.maxBackoff = 4 * time.Millisecond
 	t.Cleanup(func() { p.shutdown(time.Second) })
 	return p
 }
 
-// awaitRuns fails the test unless the counter channel delivers n runs
-// before the deadline.
-func awaitRuns(t *testing.T, ran <-chan struct{}, n int) {
-	t.Helper()
-	for i := range n {
-		select {
-		case <-ran:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("saw only %d of %d runs", i, n)
-		}
+// runTimes waits until the plane has done all it can by the given time
+// from now, and answers the time of each run the component recorded.
+func runTimes(ran chan time.Time, by time.Duration) []time.Time {
+	time.Sleep(by)
+	synctest.Wait()
+	var times []time.Time
+	for len(ran) > 0 {
+		times = append(times, <-ran)
 	}
+	return times
 }
 
 func TestAComponentThatFinishesIsNotRestarted(t *testing.T) {
-	p := testPlane(t)
-	ran := make(chan struct{}, 8)
-	p.start("finisher", func(ctx context.Context) error {
-		ran <- struct{}{}
-		return nil
-	})
-	awaitRuns(t, ran, 1)
+	synctest.Test(t, func(t *testing.T) {
+		p := testPlane(t)
+		ran := make(chan time.Time, 8)
+		p.start("finisher", func(ctx context.Context) error {
+			ran <- time.Now()
+			return nil
+		})
 
-	select {
-	case <-ran:
-		t.Fatal("a component that returned nil was restarted")
-	case <-time.After(50 * time.Millisecond):
-	}
+		if runs := runTimes(ran, 2*componentMaxBackoff); len(runs) != 1 {
+			t.Fatalf("a component that returned nil ran %d times, want once", len(runs))
+		}
+	})
 }
 
+// A failed component restarts after a delay that doubles each time,
+// from twice the initial backoff, plus up to half again of jitter.
 func TestAComponentThatFailsIsRestarted(t *testing.T) {
-	p := testPlane(t)
-	ran := make(chan struct{}, 8)
-	p.start("failer", func(ctx context.Context) error {
-		ran <- struct{}{}
-		return errors.New("transient trouble")
+	synctest.Test(t, func(t *testing.T) {
+		p := testPlane(t)
+		ran := make(chan time.Time, 8)
+		p.start("failer", func(ctx context.Context) error {
+			ran <- time.Now()
+			return errors.New("transient trouble")
+		})
+
+		runs := runTimes(ran, 9*componentBackoff)
+		if len(runs) != 3 {
+			t.Fatalf("the component ran %d times in 9s, want 3", len(runs))
+		}
+		if first := runs[1].Sub(runs[0]); first < 2*componentBackoff || first >= 3*componentBackoff {
+			t.Errorf("the first restart came after %s, want 2s to 3s", first)
+		}
+		if second := runs[2].Sub(runs[1]); second < 4*componentBackoff || second >= 6*componentBackoff {
+			t.Errorf("the second restart came after %s, want 4s to 6s", second)
+		}
 	})
-	awaitRuns(t, ran, 3)
 }
 
 func TestAComponentThatPanicsIsRestarted(t *testing.T) {
-	p := testPlane(t)
-	ran := make(chan struct{}, 8)
-	p.start("panicker", func(ctx context.Context) error {
-		ran <- struct{}{}
-		panic("a bug, not a reboot")
+	synctest.Test(t, func(t *testing.T) {
+		p := testPlane(t)
+		ran := make(chan time.Time, 8)
+		p.start("panicker", func(ctx context.Context) error {
+			ran <- time.Now()
+			panic("a bug, not a reboot")
+		})
+
+		if runs := runTimes(ran, 9*componentBackoff); len(runs) != 3 {
+			t.Fatalf("the component ran %d times in 9s, want 3", len(runs))
+		}
 	})
-	awaitRuns(t, ran, 3)
 }
 
 func TestShutdownStopsAWellBehavedComponent(t *testing.T) {
-	p := newMachinePlane()
-	stopped := make(chan struct{})
-	p.start("listener", func(ctx context.Context) error {
-		<-ctx.Done()
-		close(stopped)
-		return nil
+	synctest.Test(t, func(t *testing.T) {
+		p := newMachinePlane()
+		stopped := make(chan struct{})
+		p.start("listener", func(ctx context.Context) error {
+			<-ctx.Done()
+			close(stopped)
+			return nil
+		})
+
+		begin := time.Now()
+		p.shutdown(time.Second)
+
+		select {
+		case <-stopped:
+		default:
+			t.Fatal("the component never saw the cancellation")
+		}
+		if elapsed := time.Since(begin); elapsed != 0 {
+			t.Errorf("the shutdown took %s, want no wait for a component that stops", elapsed)
+		}
 	})
-
-	p.shutdown(time.Second)
-
-	select {
-	case <-stopped:
-	case <-time.After(time.Second):
-		t.Fatal("the component never saw the cancellation")
-	}
 }
 
 func TestShutdownInterruptsARestartBackoff(t *testing.T) {
-	p := newMachinePlane()
-	p.backoff = time.Hour // shutdown must cut this restart wait short
-	p.maxBackoff = time.Hour
-	ran := make(chan struct{}, 8)
-	p.start("failer", func(ctx context.Context) error {
-		ran <- struct{}{}
-		return errors.New("transient trouble")
-	})
-	awaitRuns(t, ran, 1)
+	synctest.Test(t, func(t *testing.T) {
+		p := newMachinePlane()
+		ran := make(chan time.Time, 8)
+		p.start("failer", func(ctx context.Context) error {
+			ran <- time.Now()
+			return errors.New("transient trouble")
+		})
+		if runs := runTimes(ran, 0); len(runs) != 1 {
+			t.Fatalf("the component ran %d times, want once before the restart wait", len(runs))
+		}
 
-	done := make(chan struct{})
-	go func() {
+		begin := time.Now()
 		p.shutdown(10 * time.Second)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown waited out a backoff instead of interrupting it")
-	}
+
+		if elapsed := time.Since(begin); elapsed != 0 {
+			t.Errorf("the shutdown took %s; it waited out a backoff instead of interrupting it", elapsed)
+		}
+	})
 }
 
 func TestShutdownIsBoundedWhenAComponentIsStuck(t *testing.T) {
-	p := newMachinePlane()
-	forever := make(chan struct{})
-	p.start("stuck", func(ctx context.Context) error {
-		<-forever // ignores ctx, the misbehavior under test
-		return nil
-	})
+	synctest.Test(t, func(t *testing.T) {
+		p := newMachinePlane()
+		forever := make(chan struct{})
+		p.start("stuck", func(ctx context.Context) error {
+			<-forever // ignores ctx, the misbehavior under test
+			return nil
+		})
 
-	done := make(chan struct{})
-	go func() {
-		p.shutdown(20 * time.Millisecond)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown hung on a component that ignored cancellation")
-	}
-	close(forever)
+		begin := time.Now()
+		p.shutdown(20 * time.Second)
+
+		if elapsed := time.Since(begin); elapsed != 20*time.Second {
+			t.Errorf("the shutdown took %s, want its timeout of 20s", elapsed)
+		}
+		close(forever)
+	})
 }
 
 func TestSleepUnlessCancelledHearsTheShutdown(t *testing.T) {
@@ -144,7 +163,13 @@ func TestSleepUnlessCancelledHearsTheShutdown(t *testing.T) {
 }
 
 func TestSleepUnlessCancelledWakesNormally(t *testing.T) {
-	if !sleepUnlessCancelled(context.Background(), time.Millisecond) {
-		t.Error("an undisturbed sleep reports true")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		begin := time.Now()
+		if !sleepUnlessCancelled(t.Context(), time.Hour) {
+			t.Error("an undisturbed sleep reports true")
+		}
+		if elapsed := time.Since(begin); elapsed != time.Hour {
+			t.Errorf("the sleep took %s, want an hour", elapsed)
+		}
+	})
 }

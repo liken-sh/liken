@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -78,7 +78,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 		t.Fatal(err)
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/apis/resource.k8s.io/v1/namespaces/media/resourceclaims/stick" {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -99,7 +99,6 @@ func newDRAFixture(t *testing.T) *draFixture {
 			},
 		})
 	}))
-	t.Cleanup(server.Close)
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("t"), 0o600); err != nil {
 		t.Fatal(err)
@@ -110,7 +109,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 	draSysfsRoot, cdiDir = sysfs, cdi
 	t.Cleanup(func() { draSysfsRoot, cdiDir = origSysfs, origCDI })
 
-	fixture.plugin = &draPlugin{client: apiclient.New(server.URL, server.Client(), credentials)}
+	fixture.plugin = &draPlugin{client: apiclient.New(apiservertest.Host, server.Client(), credentials)}
 	fixture.cdi = cdi
 	return fixture
 }

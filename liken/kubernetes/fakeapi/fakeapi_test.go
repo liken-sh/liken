@@ -3,35 +3,36 @@ package fakeapi
 // These tests hold the fake to the answers the operators' tests rely
 // on: a list, a read by name, a 404, a create and an update that each
 // take a new resourceVersion, and a watch that receives each write.
+// The operators' tests serve the fake through apiservertest, and so do
+// these.
 
 import (
 	"bufio"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
-	"time"
+	"testing/synctest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-func newTestServer(t *testing.T) (*Server, *httptest.Server) {
+func newTestServer(t *testing.T) (*Server, *http.Client) {
 	t.Helper()
 	fake := New(map[string]*Collection{
 		"/api/v1/nodes": {APIVersion: "v1", Kind: "Node", Items: []map[string]any{Object("v1", "Node", "", "node-1", nil)}},
 	})
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
-	return fake, server
+	return fake, apiservertest.Start(t, fake).Client()
 }
 
-func request(t *testing.T, method, url, body string) *http.Response {
+func request(t *testing.T, client *http.Client, method, path, body string) *http.Response {
 	t.Helper()
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), method, apiservertest.Host+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,8 +57,8 @@ func TestTheFakeAnswersReadsAndWrites(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fake, server := newTestServer(t)
-			if got := request(t, c.method, server.URL+c.path, c.body).StatusCode; got != c.status {
+			fake, client := newTestServer(t)
+			if got := request(t, client, c.method, c.path, c.body).StatusCode; got != c.status {
 				t.Errorf("status = %d, want %d", got, c.status)
 			}
 			if want := []string{c.method + " " + c.path}; !slices.Equal(fake.Requests(), want) {
@@ -68,56 +69,58 @@ func TestTheFakeAnswersReadsAndWrites(t *testing.T) {
 }
 
 // A write takes the next resourceVersion, and an open watch receives
-// it after the initial events and the bookmark that ends them.
+// it after the initial events and the bookmark that ends them. A held
+// write sends nothing until the release.
 func TestAWatchReceivesEachWrite(t *testing.T) {
-	fake, server := newTestServer(t)
-	watch := request(t, http.MethodGet, server.URL+"/api/v1/nodes?watch=true", "")
-	lines := bufio.NewScanner(watch.Body)
-	events := make(chan string, 8)
-	go func() {
-		for lines.Scan() {
-			var event struct {
-				Type string `json:"type"`
+	synctest.Test(t, func(t *testing.T) {
+		fake, client := newTestServer(t)
+		watch := request(t, client, http.MethodGet, "/api/v1/nodes?watch=true", "")
+		lines := bufio.NewScanner(watch.Body)
+		events := make(chan string, 8)
+		go func() {
+			for lines.Scan() {
+				var event struct {
+					Type string `json:"type"`
+				}
+				_ = json.Unmarshal(lines.Bytes(), &event)
+				events <- event.Type
 			}
-			_ = json.Unmarshal(lines.Bytes(), &event)
-			events <- event.Type
+		}()
+		// sent waits until the watch has sent all it can, and answers the
+		// types of the events it sent since the last call.
+		sent := func() []string {
+			synctest.Wait()
+			var types []string
+			for len(events) > 0 {
+				types = append(types, <-events)
+			}
+			return types
 		}
-	}()
-	next := func() string {
-		select {
-		case e := <-events:
-			return e
-		case <-time.After(5 * time.Second):
-			t.Fatal("the watch sent no event")
-			return ""
+		if initial := sent(); !slices.Equal(initial, []string{"ADDED", "BOOKMARK"}) {
+			t.Fatalf("initial events = %q; want ADDED, BOOKMARK", initial)
 		}
-	}
-	if first, second := next(), next(); first != "ADDED" || second != "BOOKMARK" {
-		t.Fatalf("initial events = %s, %s; want ADDED, BOOKMARK", first, second)
-	}
 
-	request(t, http.MethodPut, server.URL+"/api/v1/nodes/node-1", `{"metadata":{"name":"node-1"}}`)
+		request(t, client, http.MethodPut, "/api/v1/nodes/node-1", `{"metadata":{"name":"node-1"}}`)
 
-	if got := next(); got != "MODIFIED" {
-		t.Errorf("event = %s, want MODIFIED", got)
-	}
-	if version := fake.ResourceVersion("/api/v1/nodes", "node-1"); version != "11" {
-		t.Errorf("resourceVersion = %q, want the next version, 11", version)
-	}
-	fake.Forget()
-	if len(fake.Requests()) != 0 {
-		t.Error("Forget left requests behind")
-	}
+		if got := sent(); !slices.Equal(got, []string{"MODIFIED"}) {
+			t.Errorf("events = %q, want MODIFIED", got)
+		}
+		if version := fake.ResourceVersion("/api/v1/nodes", "node-1"); version != "11" {
+			t.Errorf("resourceVersion = %q, want the next version, 11", version)
+		}
+		fake.Forget()
+		if len(fake.Requests()) != 0 {
+			t.Error("Forget left requests behind")
+		}
 
-	fake.Hold()
-	request(t, http.MethodPut, server.URL+"/api/v1/nodes/node-1", `{"metadata":{"name":"node-1"}}`)
-	select {
-	case e := <-events:
-		t.Fatalf("a held write sent %s", e)
-	case <-time.After(100 * time.Millisecond):
-	}
-	fake.Release()
-	if got := next(); got != "MODIFIED" {
-		t.Errorf("event after the release = %s, want MODIFIED", got)
-	}
+		fake.Hold()
+		request(t, client, http.MethodPut, "/api/v1/nodes/node-1", `{"metadata":{"name":"node-1"}}`)
+		if held := sent(); len(held) != 0 {
+			t.Fatalf("a held write sent %q", held)
+		}
+		fake.Release()
+		if got := sent(); !slices.Equal(got, []string{"MODIFIED"}) {
+			t.Errorf("events after the release = %q, want MODIFIED", got)
+		}
+	})
 }

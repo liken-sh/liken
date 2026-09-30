@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
@@ -55,13 +55,12 @@ func apiClient(t *testing.T, things ...thing) (*apiclient.Client, *thingAPI) {
 	for _, item := range things {
 		api.things[item.Metadata.Name] = item
 	}
-	server := httptest.NewServer(api)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, api)
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return apiclient.New(server.URL, server.Client(), credentials), api
+	return apiclient.New(apiservertest.Host, server.Client(), credentials), api
 }
 
 func read(t *testing.T, c *apiclient.Client, held informer.Held, key string) (*thing, error) {

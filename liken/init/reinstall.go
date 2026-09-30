@@ -41,7 +41,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -117,24 +116,17 @@ func reclaimManifestDisks() {
 // hits the same probe race an install does, so it waits the same way
 // (resolve.go). A device the manifest names is expected to exist, so
 // its continued absence at the deadline is an error, not a silent
-// skip.
+// skip. It resolves the declared string rather than opening it
+// directly, because a stable name is not a device node a wipe can
+// open.
 func awaitDevice(declared string) (string, error) {
-	return awaitDeviceDeadline(declared, declaredDiskDeadline)
-}
-
-// awaitDeviceDeadline is awaitDevice with its deadline exposed as an
-// argument, so a test can prove the timeout behavior in well under a
-// second instead of waiting out the real 30. It resolves the declared
-// string rather than opening it directly, because a stable name is not
-// a device node a wipe can open.
-func awaitDeviceDeadline(declared string, deadline time.Duration) (string, error) {
-	disk, err := awaitDeclaredDisk(declared, deadline,
+	disk, err := awaitDeclaredDisk(declared,
 		fmt.Sprintf("liken: reinstall: waiting for %s to attach", declared))
 	switch {
 	case err != nil:
 		return "", err
 	case disk == nil:
-		return "", fmt.Errorf("%s did not attach within %s", declared, deadline)
+		return "", fmt.Errorf("%s did not attach within %s", declared, declaredDiskDeadline)
 	}
 	return devicePath(*disk), nil
 }

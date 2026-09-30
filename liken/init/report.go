@@ -195,7 +195,7 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 	// only to reach the stick must not be recommended into the
 	// manifest, though it stayed loaded so the report can write its
 	// file.
-	stick := awaitInstallStick(stickCeiling)
+	stick := awaitInstallStick()
 	recommendations = withoutStickRecommendations(recommendations, stick.Disk)
 
 	// Which disks the loads above brought into existence is knowable

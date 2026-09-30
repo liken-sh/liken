@@ -133,7 +133,7 @@ func planAllClaims(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 		// drivers, so that one waits for the disk to attach.
 		disk, err := resolveDeclaredDisk(role.Device)
 		if !isFound && err == nil && disk == nil {
-			disk, err = awaitDeclaredDisk(role.Device, declaredDiskDeadline,
+			disk, err = awaitDeclaredDisk(role.Device,
 				fmt.Sprintf("liken: storage: waiting for %s to attach", role.Device))
 		}
 		switch {
@@ -252,7 +252,7 @@ func applyClaim(plan claimPlan) error {
 	if err := disks.Write(plan.device, plan.totalSectors, plan.parts); err != nil {
 		return fmt.Errorf("partitioning %s: %w", plan.device, err)
 	}
-	return waitForPartitions(plan.parts, 5*time.Second)
+	return waitForPartitions(plan.parts)
 }
 
 // planPartitions lays out a claimed disk's table. Sized roles pack
@@ -291,6 +291,11 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 	return parts, nil
 }
 
+// partitionPatience bounds the wait for a new table's partitions to
+// appear at their planned sizes, after a claim or a growth writes the
+// table.
+const partitionPatience = 5 * time.Second
+
 // waitForPartitions gives the kernel a moment to show the devices for
 // a table just written. BLKRRPART works synchronously, but the
 // devtmpfs nodes and sysfs entries appear slightly later. Each
@@ -299,8 +304,8 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 // geometry is as wrong as one that has not appeared. If the deadline
 // passes, the error names each partition that did not appear as
 // expected.
-func waitForPartitions(parts []disks.Partition, patience time.Duration) error {
-	deadline := time.Now().Add(patience)
+func waitForPartitions(parts []disks.Partition) error {
+	deadline := time.Now().Add(partitionPatience)
 	for {
 		visible := map[string]uint64{}
 		for _, p := range discoverPartitions() {

@@ -4,22 +4,26 @@ package main
 // both plain reads and the watches' streaming lists. They count the
 // requests a sweep sends, and check that a sweep over the watches'
 // copies reaches the same verdict as a sweep that reads the API server.
+// Each test that runs the watches runs in a synctest bubble, so
+// synctest.Wait returns once every watch has delivered what the fake
+// sent.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -28,7 +32,6 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 // newFleetAPI holds a two-machine fleet with fresh heartbeats, the
@@ -79,50 +82,42 @@ func newFleetAPI(now time.Time) *fakeapi.Server {
 	})
 }
 
+// fleetClients answers the client for plain reads and the client for
+// the watches, both of the given fake.
 func fleetClients(t *testing.T, api *fakeapi.Server) (*apiclient.Client, dynamic.Interface) {
 	t.Helper()
-	server := httptest.NewServer(api)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, api)
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	watcher, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	watcher, err := dynamic.NewForConfig(server.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return apiclient.New(server.URL, server.Client(), credentials), watcher
+	return apiclient.New(apiservertest.Host, server.Client(), credentials), watcher
 }
 
-// awaitFleetCopies waits until every watch of the reader holds its
-// first read.
-func awaitFleetCopies(t *testing.T, r *fleetReader, wakes <-chan struct{}) {
+// awaitFleetCopies waits until the watches have done all they can, and
+// checks that every watch of the reader holds its first read.
+func awaitFleetCopies(t *testing.T, r *fleetReader) {
 	t.Helper()
-	for !(r.machineCopy.Synced() && r.clusterCopy.Synced() && r.leaseCopy.Synced() &&
+	synctest.Wait()
+	if !(r.machineCopy.Synced() && r.clusterCopy.Synced() && r.leaseCopy.Synced() &&
 		r.daemonSetCopy.Synced() && r.podCopy.Synced()) {
-		select {
-		case <-wakes:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the watches never synced")
-		}
+		t.Fatal("the watches never synced")
 	}
 }
 
-// awaitClusterEcho waits until the reader's copy of the Cluster holds
-// the first sweep's status write.
+// awaitClusterEcho waits until the watches have done all they can, and
+// checks that the reader's copy of the Cluster holds the first sweep's
+// status write.
 func awaitClusterEcho(t *testing.T, api *fakeapi.Server, r *fleetReader) {
 	t.Helper()
+	synctest.Wait()
 	written := api.ResourceVersion(kubernetes.ClustersPath, "lab")
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		c, _, ok := watch.Get[cluster.Cluster](r.clusterCopy.View(), "lab")
-		if ok && c.Metadata.ResourceVersion == written {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the copy never held the first sweep's write")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if c, _, ok := watch.Get[cluster.Cluster](r.clusterCopy.View(), "lab"); !ok || c.Metadata.ResourceVersion != written {
+		t.Fatal("the copy never held the first sweep's write")
 	}
 }
 
@@ -160,49 +155,51 @@ func runSweeps(t *testing.T, api *fakeapi.Server, r *fleetReader) ([]string, *cl
 // fleet that does not declare flux. Both sweeps publish the same
 // Cluster status.
 func TestASettledSweepOverTheCopiesSendsOneRead(t *testing.T) {
-	now := time.Now()
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
 
-	direct := newFleetAPI(now)
-	client, _ := fleetClients(t, direct)
-	directRequests, directCluster := runSweeps(t, direct, &fleetReader{client: client})
+		direct := newFleetAPI(now)
+		client, _ := fleetClients(t, direct)
+		directRequests, directCluster := runSweeps(t, direct, &fleetReader{client: client})
 
-	watched := newFleetAPI(now)
-	client, watcher := fleetClients(t, watched)
-	wakes := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	r := watchFleet(ctx, watcher, client, func() {
-		select {
-		case wakes <- struct{}{}:
-		default:
+		watched := newFleetAPI(now)
+		client, watcher := fleetClients(t, watched)
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchFleet(ctx, watcher, client, func() {
+			select {
+			case wakes <- struct{}{}:
+			default:
+			}
+		}, func(string) {})
+		awaitFleetCopies(t, r)
+		watchedRequests, watchedCluster := runSweeps(t, watched, r)
+
+		wantDirect := []string{
+			"GET /apis/liken.sh/v1alpha1/clusters/lab",
+			"GET /apis/liken.sh/v1alpha1/machines",
+			"GET /apis/coordination.k8s.io/v1/namespaces/liken-system/leases",
+			"GET /apis/apps/v1/namespaces/liken-system/daemonsets/liken-machine-operator",
+			"GET /apis/apps/v1/namespaces/liken-system/daemonsets/liken-machine-operator",
+			"GET /api/v1/namespaces/liken-system/pods",
+			"GET /apis/apps/v1/namespaces/liken-system/daemonsets/machine-logs",
+			"GET /api/v1/namespaces/liken-system/pods",
+			"GET /apis/apps/v1/namespaces/liken-system/daemonsets",
+			"GET /api/v1/namespaces/flux-system",
 		}
-	}, func(string) {})
-	awaitFleetCopies(t, r, wakes)
-	watchedRequests, watchedCluster := runSweeps(t, watched, r)
-
-	wantDirect := []string{
-		"GET /apis/liken.sh/v1alpha1/clusters/lab",
-		"GET /apis/liken.sh/v1alpha1/machines",
-		"GET /apis/coordination.k8s.io/v1/namespaces/liken-system/leases",
-		"GET /apis/apps/v1/namespaces/liken-system/daemonsets/liken-machine-operator",
-		"GET /apis/apps/v1/namespaces/liken-system/daemonsets/liken-machine-operator",
-		"GET /api/v1/namespaces/liken-system/pods",
-		"GET /apis/apps/v1/namespaces/liken-system/daemonsets/machine-logs",
-		"GET /api/v1/namespaces/liken-system/pods",
-		"GET /apis/apps/v1/namespaces/liken-system/daemonsets",
-		"GET /api/v1/namespaces/flux-system",
-	}
-	if !slices.Equal(directRequests, wantDirect) {
-		t.Errorf("a sweep that reads the API server sent %q, want %q", directRequests, wantDirect)
-	}
-	if want := []string{"GET /api/v1/namespaces/flux-system"}; !slices.Equal(watchedRequests, want) {
-		t.Errorf("a sweep over the copies sent %q, want %q", watchedRequests, want)
-	}
-	d, _ := json.Marshal(directCluster.Status)
-	w, _ := json.Marshal(watchedCluster.Status)
-	if string(d) != string(w) {
-		t.Errorf("the sweep over the copies published\n%s\nwant the direct sweep's\n%s", w, d)
-	}
+		if !slices.Equal(directRequests, wantDirect) {
+			t.Errorf("a sweep that reads the API server sent %q, want %q", directRequests, wantDirect)
+		}
+		if want := []string{"GET /api/v1/namespaces/flux-system"}; !slices.Equal(watchedRequests, want) {
+			t.Errorf("a sweep over the copies sent %q, want %q", watchedRequests, want)
+		}
+		d, _ := json.Marshal(directCluster.Status)
+		w, _ := json.Marshal(watchedCluster.Status)
+		if string(d) != string(w) {
+			t.Errorf("the sweep over the copies published\n%s\nwant the direct sweep's\n%s", w, d)
+		}
+	})
 }
 
 // operate finds the Cluster, sweeps, and returns after the sweep in
@@ -238,48 +235,50 @@ func TestOperateFinishesTheSweepInFlightAtAShutdown(t *testing.T) {
 // count one fewer machine in flight. It reads that Machine from the API
 // server, sees the grant, and grants no second turn.
 func TestASweepRightAfterItsOwnGrantReadsThatMachineDirectly(t *testing.T) {
-	fake := newFleetAPI(time.Now())
-	client, watcher := fleetClients(t, fake)
-	waiting, err := kubernetes.GetMachine(client, "node-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	status := waiting.Status
-	status.Conditions = []api.Condition{{Type: "SpecConverged", Status: api.ConditionFalse, Reason: "AwaitingTurn"}}
-	if _, err := kubernetes.PublishStatus(client, waiting, &status); err != nil {
-		t.Fatal(err)
-	}
-	wakes := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	r := watchFleet(ctx, watcher, client, func() {
-		select {
-		case wakes <- struct{}{}:
-		default:
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFleetAPI(time.Now())
+		client, watcher := fleetClients(t, fake)
+		waiting, err := kubernetes.GetMachine(client, "node-2")
+		if err != nil {
+			t.Fatal(err)
 		}
-	}, func(string) {})
-	awaitFleetCopies(t, r, wakes)
-	cm, _ := fleetMetrics(t)
-	fake.Hold()
+		status := waiting.Status
+		status.Conditions = []api.Condition{{Type: "SpecConverged", Status: api.ConditionFalse, Reason: "AwaitingTurn"}}
+		if _, err := kubernetes.PublishStatus(client, waiting, &status); err != nil {
+			t.Fatal(err)
+		}
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchFleet(ctx, watcher, client, func() {
+			select {
+			case wakes <- struct{}{}:
+			default:
+			}
+		}, func(string) {})
+		awaitFleetCopies(t, r)
+		cm, _ := fleetMetrics(t)
+		fake.Hold()
 
-	if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(fake.Requests(), "PUT "+kubernetes.MachinesPath+"/node-2/status") {
-		t.Fatalf("the first sweep sent %q, want a grant to node-2", fake.Requests())
-	}
-	fake.Forget()
-	if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
-		t.Fatal(err)
-	}
+		if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(fake.Requests(), "PUT "+kubernetes.MachinesPath+"/node-2/status") {
+			t.Fatalf("the first sweep sent %q, want a grant to node-2", fake.Requests())
+		}
+		fake.Forget()
+		if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
+			t.Fatal(err)
+		}
 
-	sent := fake.Requests()
-	if !slices.Contains(sent, "GET "+kubernetes.MachinesPath+"/node-2") {
-		t.Errorf("the second sweep sent %q, want a direct read of node-2", sent)
-	}
-	if slices.ContainsFunc(sent, func(r string) bool { return strings.HasPrefix(r, "PUT "+kubernetes.MachinesPath) }) {
-		t.Errorf("the second sweep sent %q, want no second grant", sent)
-	}
+		sent := fake.Requests()
+		if !slices.Contains(sent, "GET "+kubernetes.MachinesPath+"/node-2") {
+			t.Errorf("the second sweep sent %q, want a direct read of node-2", sent)
+		}
+		if slices.ContainsFunc(sent, func(r string) bool { return strings.HasPrefix(r, "PUT "+kubernetes.MachinesPath) }) {
+			t.Errorf("the second sweep sent %q, want no second grant", sent)
+		}
+	})
 }
 
 // The copies answer only while their view of this program's own
@@ -299,17 +298,19 @@ func TestTheCopiesAnswerOnlyWhileTheLeaderLeaseInThemIsFresh(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fake := newFleetAPI(time.Now().Add(-c.renewed))
-			client, watcher := fleetClients(t, fake)
-			wakes := make(chan struct{}, 1)
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
-			awaitFleetCopies(t, r, wakes)
+			synctest.Test(t, func(t *testing.T) {
+				fake := newFleetAPI(time.Now().Add(-c.renewed))
+				client, watcher := fleetClients(t, fake)
+				wakes := make(chan struct{}, 1)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
+				awaitFleetCopies(t, r)
 
-			if got := r.current(r.machineCopy).Ready(); got != c.current {
-				t.Errorf("current = %v, want %v", got, c.current)
-			}
+				if got := r.current(r.machineCopy).Ready(); got != c.current {
+					t.Errorf("current = %v, want %v", got, c.current)
+				}
+			})
 		})
 	}
 }
@@ -329,44 +330,40 @@ func TestAFailedWriteCostsOneReadOfThatMachine(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fake := newFleetAPI(time.Now())
-			client, watcher := fleetClients(t, fake)
-			wakes := make(chan struct{}, 1)
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
-			awaitFleetCopies(t, r, wakes)
-			fake.Forget()
+			synctest.Test(t, func(t *testing.T) {
+				fake := newFleetAPI(time.Now())
+				client, watcher := fleetClients(t, fake)
+				wakes := make(chan struct{}, 1)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
+				awaitFleetCopies(t, r)
+				fake.Forget()
 
-			_ = r.machineVersions.Send("node-1", func() (string, error) { return "", c.err })
+				_ = r.machineVersions.Send("node-1", func() (string, error) { return "", c.err })
 
-			for range 2 {
-				if machines, err := r.machines(); err != nil || len(machines) != 2 {
-					t.Fatalf("machines = %d, %v; want both", len(machines), err)
+				for range 2 {
+					if machines, err := r.machines(); err != nil || len(machines) != 2 {
+						t.Fatalf("machines = %d, %v; want both", len(machines), err)
+					}
 				}
-			}
-			if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath + "/node-1"}) {
-				t.Errorf("two lists after the failed write sent %q, want one read of node-1", sent)
-			}
+				if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath + "/node-1"}) {
+					t.Errorf("two lists after the failed write sent %q, want one read of node-1", sent)
+				}
+			})
 		})
 	}
 }
 
-// awaitMachineCopy waits until the Machines' copy holds the version of
-// one Machine that the API server holds.
+// awaitMachineCopy waits until the watches have done all they can, and
+// checks that the Machines' copy holds the version of one Machine that
+// the API server holds.
 func awaitMachineCopy(t *testing.T, api *fakeapi.Server, r *fleetReader, name string) {
 	t.Helper()
+	synctest.Wait()
 	want := api.ResourceVersion(kubernetes.MachinesPath, name)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		m, _, ok := watch.Get[machine.Machine](r.machineCopy.View(), name)
-		if ok && m.Metadata.ResourceVersion == want {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the copy never held %s at %s", name, want)
-		}
-		time.Sleep(10 * time.Millisecond)
+	if m, _, ok := watch.Get[machine.Machine](r.machineCopy.View(), name); !ok || m.Metadata.ResourceVersion != want {
+		t.Fatalf("the copy never held %s at %s", name, want)
 	}
 }
 
@@ -374,45 +371,47 @@ func awaitMachineCopy(t *testing.T, api *fakeapi.Server, r *fleetReader, name st
 // record, so a later write from another writer, such as the machine's
 // own status write, costs the next list no read.
 func TestAWriteFromAnotherWriterAfterADeliveredGrantCostsNoRead(t *testing.T) {
-	fake := newFleetAPI(time.Now())
-	client, watcher := fleetClients(t, fake)
-	wakes := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
-	awaitFleetCopies(t, r, wakes)
-	granted, err := kubernetes.GetMachine(client, "node-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	status := granted.Status
-	status.Conditions = []api.Condition{{Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows"}}
-	if err := r.publishStatus(granted, &status); err != nil {
-		t.Fatal(err)
-	}
-	awaitMachineCopy(t, fake, r, "node-2")
-	if _, err := r.machines(); err != nil {
-		t.Fatal(err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFleetAPI(time.Now())
+		client, watcher := fleetClients(t, fake)
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
+		awaitFleetCopies(t, r)
+		granted, err := kubernetes.GetMachine(client, "node-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status := granted.Status
+		status.Conditions = []api.Condition{{Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows"}}
+		if err := r.publishStatus(granted, &status); err != nil {
+			t.Fatal(err)
+		}
+		awaitMachineCopy(t, fake, r, "node-2")
+		if _, err := r.machines(); err != nil {
+			t.Fatal(err)
+		}
 
-	own, err := kubernetes.GetMachine(client, "node-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	status = own.Status
-	status.Phase = api.PhaseUpdating
-	if _, err := kubernetes.PublishStatus(client, own, &status); err != nil {
-		t.Fatal(err)
-	}
-	awaitMachineCopy(t, fake, r, "node-2")
-	fake.Forget()
+		own, err := kubernetes.GetMachine(client, "node-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status = own.Status
+		status.Phase = api.PhaseUpdating
+		if _, err := kubernetes.PublishStatus(client, own, &status); err != nil {
+			t.Fatal(err)
+		}
+		awaitMachineCopy(t, fake, r, "node-2")
+		fake.Forget()
 
-	if _, err := r.machines(); err != nil {
-		t.Fatal(err)
-	}
-	if sent := fake.Requests(); len(sent) != 0 {
-		t.Errorf("a list after another writer's change sent %q, want nothing", sent)
-	}
+		if _, err := r.machines(); err != nil {
+			t.Fatal(err)
+		}
+		if sent := fake.Requests(); len(sent) != 0 {
+			t.Errorf("a list after another writer's change sent %q, want nothing", sent)
+		}
+	})
 }
 
 // failingWatches serves the watches of a fake API server, and fails
@@ -439,35 +438,37 @@ func (f *failingWatches) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // missed a machine's Degraded status would count it as available, and
 // the sweep could grant turns beyond the disruption budget.
 func TestASweepReadsTheFleetDirectlyAfterAWatchFails(t *testing.T) {
-	fake := newFleetAPI(time.Now())
-	watches := &failingWatches{api: fake}
-	server := httptest.NewServer(watches)
-	t.Cleanup(server.Close)
-	client, _ := fleetClients(t, fake)
-	watcher, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wakes := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
-	awaitFleetCopies(t, r, wakes)
-
-	watches.fail.Store(true)
-	server.CloseClientConnections()
-	deadline := time.Now().Add(10 * time.Second)
-	for r.machineCopy.View().Ready() {
-		if time.Now().After(deadline) {
-			t.Fatal("the Machines' copy kept answering after its watch failed")
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFleetAPI(time.Now())
+		watches := &failingWatches{api: fake}
+		client, _ := fleetClients(t, fake)
+		failing := apiservertest.Start(t, watches)
+		watcher, err := dynamic.NewForConfig(failing.Config())
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	fake.Forget()
-	if _, err := r.machines(); err != nil {
-		t.Fatal(err)
-	}
-	if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath}) {
-		t.Errorf("the list after the failed watch sent %q, want a direct read of the Machines", sent)
-	}
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchFleet(ctx, watcher, client, watch.Signal(wakes), func(string) {})
+		awaitFleetCopies(t, r)
+
+		watches.fail.Store(true)
+		failing.SetDown(true)
+		failing.SetDown(false)
+		// The reflector opens the watch again after its backoff, which
+		// starts under two seconds, and the fake refuses it.
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		if r.machineCopy.View().Ready() {
+			t.Fatal("the Machines' copy kept answering ten seconds after its watch failed")
+		}
+		fake.Forget()
+		if _, err := r.machines(); err != nil {
+			t.Fatal(err)
+		}
+		if sent := fake.Requests(); !slices.Equal(sent, []string{"GET " + kubernetes.MachinesPath}) {
+			t.Errorf("the list after the failed watch sent %q, want a direct read of the Machines", sent)
+		}
+	})
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -127,33 +128,32 @@ func TestALongHoldStartsTheBackoffOver(t *testing.T) {
 // like any other failed attach, and waits for its backoff before the
 // next open.
 func TestASlowAttachThatFailsIsRefused(t *testing.T) {
-	fakeSerioMachine(t)
-	loadSerioModules(t, "serport", "pulse8_cec")
-	adapter{port: "1-4", tty: "ttyACM0"}.plug(t)
-	old := serioSettleTimeout
-	serioSettleTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { serioSettleTimeout = old })
-	ttys := newFakeTTYs(t, &fakeLine{disciplineErr: unix.EPERM})
-	ttys.gate = make(chan struct{})
-	r, _ := clocked(ttys, pulse8Entry)
+	synctest.Test(t, func(t *testing.T) {
+		fakeSerioMachine(t)
+		loadSerioModules(t, "serport", "pulse8_cec")
+		adapter{port: "1-4", tty: "ttyACM0"}.plug(t)
+		ttys := newFakeTTYs(t, &fakeLine{disciplineErr: unix.EPERM})
+		ttys.gate = make(chan struct{})
+		r, _ := clocked(ttys, pulse8Entry)
 
-	waiting := walkOnce(r)
-	close(ttys.gate)
-	waitEnded(t, r, "ttyACM0")
-	refused := walkOnce(r)
-	again := walkOnce(r)
+		waiting := walkOnce(r)
+		close(ttys.gate)
+		waitEnded(t, r, "ttyACM0")
+		refused := walkOnce(r)
+		again := walkOnce(r)
 
-	if !strings.Contains(waiting[0].Message, "did not return") {
-		t.Errorf("first walk = %+v", waiting)
-	}
-	for _, got := range [][]machine.SerioStatus{refused, again} {
-		if got[0].State != machine.SerioRefused || got[0].Message != "TIOCSETD: operation not permitted" {
-			t.Errorf("walk = %+v", got)
+		if !strings.Contains(waiting[0].Message, "did not return") {
+			t.Errorf("first walk = %+v", waiting)
 		}
-	}
-	if ttys.openCount() != 1 {
-		t.Errorf("opens = %v", ttys.opens)
-	}
+		for _, got := range [][]machine.SerioStatus{refused, again} {
+			if got[0].State != machine.SerioRefused || got[0].Message != "TIOCSETD: operation not permitted" {
+				t.Errorf("walk = %+v", got)
+			}
+		}
+		if ttys.openCount() != 1 {
+			t.Errorf("opens = %v", ttys.opens)
+		}
+	})
 }
 
 // The walk waits for a new holder without the registry's lock, so the
@@ -207,15 +207,17 @@ func TestNextRetryNamesTheEarliestBackoff(t *testing.T) {
 // removes it, and a walk in between would report a refusal for one
 // walk.
 func TestANudgeSettlesBeforeTheWalk(t *testing.T) {
-	nudge := make(chan struct{}, 1)
-	nudge <- struct{}{}
-	started := time.Now()
+	synctest.Test(t, func(t *testing.T) {
+		nudge := make(chan struct{}, 1)
+		nudge <- struct{}{}
+		started := time.Now()
 
-	waitForSerioWork(t.Context(), make(chan struct{}), nudge, nil)
+		waitForSerioWork(t.Context(), make(chan struct{}), nudge, nil)
 
-	if elapsed := time.Since(started); elapsed < serioQuiet {
-		t.Errorf("the walk woke after %s", elapsed)
-	}
+		if elapsed := time.Since(started); elapsed != serioQuiet {
+			t.Errorf("the walk woke after %s, want the quiet interval of %s", elapsed, serioQuiet)
+		}
+	})
 }
 
 // A refusal whose backoff ran out, on a machine that then lost a

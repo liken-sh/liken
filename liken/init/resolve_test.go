@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/liken/disks"
@@ -105,59 +106,61 @@ func TestResolveDeclaredDiskRefusesOtherDiskTrees(t *testing.T) {
 	}
 }
 
-// declaredDiskTiming shortens the declared-disk wait for a
-// test and restores the boot's own timing afterwards. The timing lives
-// in package variables, so tests in this package must not run in
-// parallel.
-func declaredDiskTiming(t *testing.T, poll, deadline time.Duration) {
-	t.Helper()
-	oldPoll, oldDeadline := declaredDiskPoll, declaredDiskDeadline
-	declaredDiskPoll, declaredDiskDeadline = poll, deadline
-	t.Cleanup(func() { declaredDiskPoll, declaredDiskDeadline = oldPoll, oldDeadline })
-}
+// The declared-disk wait tests run in synctest bubbles with the boot's
+// own poll and deadline, so a wait's sleeps pass on the fake clock.
 
 // An install boot claims disks moments after the boot archive
 // loads its modules, and an eMMC card attaches on a workqueue up
 // to a second later. The claim path waits for a declared disk the
 // same bounded way a reinstall does.
 func TestPlanAllClaimsWaitsForALateDeclaredDisk(t *testing.T) {
-	sys, dev := fakeMachine(t)
-	declaredDiskTiming(t, time.Millisecond, 5*time.Second)
-	// The disk is built out of the way first, so the goroutine that
-	// attaches it does one rename and reports one error.
-	staged := t.TempDir()
-	addDisk(t, staged, dev, "mmcblk0", 2<<30, make([]byte, 2_048))
+	synctest.Test(t, func(t *testing.T) {
+		sys, dev := fakeMachine(t)
+		// The disk is built out of the way first, so the goroutine that
+		// attaches it does one rename and reports one error.
+		staged := t.TempDir()
+		addDisk(t, staged, dev, "mmcblk0", 2<<30, make([]byte, 2_048))
 
-	attached := make(chan error, 1)
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		attached <- os.Rename(filepath.Join(staged, "mmcblk0"), filepath.Join(sys, "mmcblk0"))
-	}()
+		attached := make(chan error, 1)
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			attached <- os.Rename(filepath.Join(staged, "mmcblk0"), filepath.Join(sys, "mmcblk0"))
+		}()
 
-	roles := []machine.DeclaredRole{declared("machineState", filepath.Join(dev, "mmcblk0"), "")}
-	claims, err := planAllClaims(roles, nil)
-	if err := <-attached; err != nil {
-		t.Fatal(err)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(claims) != 1 || claims[0].device != filepath.Join(dev, "mmcblk0") {
-		t.Errorf("got %+v, want one claim on the card", claims)
-	}
+		roles := []machine.DeclaredRole{declared("machineState", filepath.Join(dev, "mmcblk0"), "")}
+		begin := time.Now()
+		claims, err := planAllClaims(roles, nil)
+		if err := <-attached; err != nil {
+			t.Fatal(err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(claims) != 1 || claims[0].device != filepath.Join(dev, "mmcblk0") {
+			t.Errorf("got %+v, want one claim on the card", claims)
+		}
+		if elapsed := time.Since(begin); elapsed != declaredDiskPoll {
+			t.Errorf("the wait took %s, want the first poll after the disk attached, at %s", elapsed, declaredDiskPoll)
+		}
+	})
 }
 
 // A declared disk that never attaches fails with the message it
 // always failed with, after the wait rather than before it.
 func TestPlanAllClaimsFailsWhenADeclaredDiskNeverAttaches(t *testing.T) {
-	_, dev := fakeMachine(t)
-	declaredDiskTiming(t, time.Millisecond, 20*time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		_, dev := fakeMachine(t)
 
-	roles := []machine.DeclaredRole{declared("machineState", filepath.Join(dev, "mmcblk0"), "")}
-	_, err := planAllClaims(roles, nil)
-	if err == nil || !strings.Contains(err.Error(), "is not attached") {
-		t.Errorf("a disk that never attaches must fail as it always did: %v", err)
-	}
+		roles := []machine.DeclaredRole{declared("machineState", filepath.Join(dev, "mmcblk0"), "")}
+		begin := time.Now()
+		_, err := planAllClaims(roles, nil)
+		if err == nil || !strings.Contains(err.Error(), "is not attached") {
+			t.Errorf("a disk that never attaches must fail as it always did: %v", err)
+		}
+		if elapsed := time.Since(begin); elapsed != declaredDiskDeadline {
+			t.Errorf("the wait gave up after %s, want the deadline, %s", elapsed, declaredDiskDeadline)
+		}
+	})
 }
 
 func TestPlanAllClaimsGroupsTwoSpellingsOfOneDiskIntoOneClaim(t *testing.T) {

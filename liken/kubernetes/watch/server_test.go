@@ -6,15 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -91,7 +90,6 @@ type watchServer struct {
 	mu        sync.Mutex
 	readCount int
 	watches   int
-	opened    chan struct{}
 	released  chan struct{}
 }
 
@@ -99,7 +97,6 @@ func newWatchServer(reads [][]thing, scripts ...[]string) *watchServer {
 	return &watchServer{
 		reads:    reads,
 		scripts:  scripts,
-		opened:   make(chan struct{}, len(scripts)+8),
 		released: make(chan struct{}, 1),
 	}
 }
@@ -143,7 +140,6 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			testAPI, testKind, version)
 	}
 	w.(http.Flusher).Flush()
-	s.opened <- struct{}{}
 
 	script := []string{holdOpen}
 	if connection < len(s.scripts) {
@@ -170,18 +166,6 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // release lets a paused stream play the rest of its script.
 func (s *watchServer) release() { s.released <- struct{}{} }
 
-// awaitWatches waits until the watcher has opened count more watches.
-func (s *watchServer) awaitWatches(t *testing.T, count int) {
-	t.Helper()
-	for range count {
-		select {
-		case <-s.opened:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("the watcher opened fewer than %d watches", count)
-		}
-	}
-}
-
 // event is one line of a watch stream.
 func event(kind string, item thing) string {
 	object, _ := json.Marshal(item)
@@ -191,46 +175,32 @@ func event(kind string, item thing) string {
 // testWatcher points a dynamic client at a test server.
 func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	client, err := dynamic.NewForConfig(apiservertest.Start(t, handler).Config())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return client
 }
 
-// settleWakes reads wakes until none arrives for a while. A watch wakes
-// the loop at its start, and a test reads those wakes before the events
-// it scripts.
-func settleWakes(wakes <-chan struct{}) {
-	for {
-		select {
-		case <-wakes:
-		case <-time.After(200 * time.Millisecond):
-			return
-		}
-	}
-}
-
-func wokeWithin(wakes <-chan struct{}, within time.Duration) bool {
+// woke waits until the watch has done all it can, and answers whether
+// it woke the loop since the last call. The wake channel holds one
+// wake, so the wakes of one moment count once.
+func woke(wakes <-chan struct{}) bool {
+	synctest.Wait()
 	select {
 	case <-wakes:
 		return true
-	case <-time.After(within):
+	default:
 		return false
 	}
 }
 
-// awaitReady waits until the store holds the first read and the API
-// server accepted a watch.
+// awaitReady waits until the watch has done all it can, and checks that
+// the store holds the first read and the API server accepted a watch.
 func awaitReady(t *testing.T, c *informer.Collection) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !c.View().Ready() {
-		if time.Now().After(deadline) {
-			t.Fatal("the copy never became ready")
-		}
-		time.Sleep(10 * time.Millisecond)
+	synctest.Wait()
+	if !c.View().Ready() {
+		t.Fatal("the copy never became ready")
 	}
 }

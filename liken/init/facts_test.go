@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/liken/api"
@@ -142,25 +143,27 @@ func TestInterfaceFactsForALease(t *testing.T) {
 }
 
 func TestALeaseExpiryStaysWhereTheACKPutIt(t *testing.T) {
-	// A background radio rewrites the whole network subtree whenever
-	// it settles. That rewrite must repeat every wired lease's expiry,
-	// not derive a new one from the clock, or a machine with a radio
-	// would report a lease that never runs out.
-	conns := []*connection{fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP)}
+	synctest.Test(t, func(t *testing.T) {
+		// A background radio rewrites the whole network subtree whenever
+		// it settles. That rewrite must repeat every wired lease's expiry,
+		// not derive a new one from the clock, or a machine with a radio
+		// would report a lease that never runs out.
+		conns := []*connection{fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP)}
 
-	first := networkFacts(nil, conns)
-	time.Sleep(2 * time.Millisecond)
-	second := networkFacts(nil, conns)
+		first := networkFacts(nil, conns)
+		time.Sleep(time.Hour)
+		second := networkFacts(nil, conns)
 
-	if first.LeaseExpires == nil || second.LeaseExpires == nil {
-		t.Fatalf("a lease has an expiry: %v, %v", first.LeaseExpires, second.LeaseExpires)
-	}
-	if !first.LeaseExpires.Equal(*second.LeaseExpires) {
-		t.Errorf("the expiry moved from %v to %v", first.LeaseExpires, second.LeaseExpires)
-	}
-	if !first.LeaseExpires.Equal(factsNow.Add(time.Hour)) {
-		t.Errorf("the expiry is the one the ACK fixed, got %v", first.LeaseExpires)
-	}
+		if first.LeaseExpires == nil || second.LeaseExpires == nil {
+			t.Fatalf("a lease has an expiry: %v, %v", first.LeaseExpires, second.LeaseExpires)
+		}
+		if !first.LeaseExpires.Equal(*second.LeaseExpires) {
+			t.Errorf("the expiry moved from %v to %v", first.LeaseExpires, second.LeaseExpires)
+		}
+		if !first.LeaseExpires.Equal(factsNow.Add(time.Hour)) {
+			t.Errorf("the expiry is the one the ACK fixed, got %v", first.LeaseExpires)
+		}
+	})
 }
 
 func TestInterfaceFactsForAStaticAddress(t *testing.T) {

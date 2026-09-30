@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/liken/hardware"
@@ -80,17 +81,18 @@ func TestTransitionsNarrateARemoval(t *testing.T) {
 }
 
 // noisyChannel sends signals continuously, faster than any quiet
-// interval. This is the pattern of a node whose containers are
-// starting and stopping constantly.
+// interval, until the test ends. This is the pattern of a node whose
+// containers are starting and stopping constantly.
 func noisyChannel(t *testing.T) chan struct{} {
 	t.Helper()
 	ch := make(chan struct{}, 1)
-	stop := make(chan struct{})
-	t.Cleanup(func() { close(stop) })
+	done := make(chan struct{})
+	t.Cleanup(func() { <-done })
 	go func() {
+		defer close(done)
 		for {
 			select {
-			case <-stop:
+			case <-t.Context().Done():
 				return
 			case ch <- struct{}{}:
 			default:
@@ -102,22 +104,24 @@ func noisyChannel(t *testing.T) chan struct{} {
 }
 
 func TestSettleReturnsAtTheCeilingUnderConstantNoise(t *testing.T) {
-	started := time.Now()
-	settle(t.Context(), noisyChannel(t), 50*time.Millisecond, 200*time.Millisecond)
-	elapsed := time.Since(started)
-	if elapsed < 150*time.Millisecond || elapsed > time.Second {
-		t.Errorf("settle returned after %s, want about the 200ms ceiling", elapsed)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		settle(t.Context(), noisyChannel(t), time.Second, 5*time.Second)
+		if elapsed := time.Since(started); elapsed != 5*time.Second {
+			t.Errorf("settle returned after %s, want the 5s ceiling", elapsed)
+		}
+	})
 }
 
 func TestSettleReturnsAtQuietWhenTheStreamStops(t *testing.T) {
-	ch := make(chan struct{}, 1)
-	started := time.Now()
-	settle(t.Context(), ch, 50*time.Millisecond, 10*time.Second)
-	elapsed := time.Since(started)
-	if elapsed > time.Second {
-		t.Errorf("settle returned after %s, want about the 50ms quiet interval", elapsed)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		ch := make(chan struct{}, 1)
+		started := time.Now()
+		settle(t.Context(), ch, time.Second, 5*time.Second)
+		if elapsed := time.Since(started); elapsed != time.Second {
+			t.Errorf("settle returned after %s, want the 1s quiet interval", elapsed)
+		}
+	})
 }
 
 func TestTransitionsAreQuietWhenNothingChanged(t *testing.T) {

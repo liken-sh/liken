@@ -27,12 +27,10 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The shape of the declared-disk wait. These are variables so a
-// test can prove the timeout in milliseconds instead of waiting out
-// the real 30 seconds; a real boot never points them anywhere else.
-// The deadline is long enough that reaching it means the disk is
-// not coming, not that it is slow.
-var (
+// The shape of the declared-disk wait. The deadline is long enough
+// that reaching it means the disk is not coming, not that it is
+// slow.
+const (
 	declaredDiskPoll     = 500 * time.Millisecond
 	declaredDiskDeadline = 30 * time.Second
 )
@@ -46,13 +44,13 @@ var (
 // reports its continued absence at the deadline. Only the not-found
 // case waits: an ambiguity is two disks however long the code waits,
 // and a disk that attaches later cannot un-name them.
-func awaitDeclaredDisk(declared string, deadline time.Duration, notice string) (*machine.BlockDevice, error) {
+func awaitDeclaredDisk(declared string, notice string) (*machine.BlockDevice, error) {
 	disk, err := resolveDeclaredDisk(declared)
 	if err != nil || disk != nil {
 		return disk, err
 	}
 	fmt.Println(notice)
-	for begin := time.Now(); time.Since(begin) < deadline; {
+	for begin := time.Now(); time.Since(begin) < declaredDiskDeadline; {
 		time.Sleep(declaredDiskPoll)
 		disk, err = resolveDeclaredDisk(declared)
 		if err != nil || disk != nil {

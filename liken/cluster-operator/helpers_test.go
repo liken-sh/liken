@@ -1,8 +1,9 @@
 package main
 
-// This file provides a shared test fixture: a client wired to an
-// httptest server. The kubernetes package's own tests use the same
-// arrangement.
+// This file provides the shared test fixtures: a scrape of a metrics
+// registry, and a client wired to a fake API server that apiservertest
+// serves over in-memory connections, so a test in a synctest bubble
+// can use it.
 
 import (
 	"io"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 )
@@ -54,12 +56,11 @@ func scrapeHandler(t *testing.T, handler http.Handler) string {
 // mount one.
 func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, handler)
 
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return apiclient.New(server.URL, server.Client(), credentials)
+	return apiclient.New(apiservertest.Host, server.Client(), credentials)
 }

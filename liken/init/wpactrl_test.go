@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/liken/machine"
@@ -247,16 +248,24 @@ func TestAttachRefusedIsReported(t *testing.T) {
 }
 
 func TestAttachWaitsForTheSocketAndThenGivesUp(t *testing.T) {
-	// The supplicant creates its socket after it starts, so the wait
-	// exists. A socket that never appears must not hold the boot.
-	absent := filepath.Join(t.TempDir(), "wlan0")
-	err := waitForWPASocket(absent, 100*time.Millisecond)
-	if err == nil {
-		t.Fatal("a socket that never appears must be reported")
-	}
-	if !strings.Contains(err.Error(), absent) {
-		t.Errorf("the error must name the socket: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		// The supplicant creates its socket after it starts, so the wait
+		// exists. A socket that never appears must not hold the boot.
+		absent := filepath.Join(t.TempDir(), "wlan0")
+		start := time.Now()
+		err := waitForWPASocket(absent, wpaSocketPatience)
+		if err == nil {
+			t.Fatal("a socket that never appears must be reported")
+		}
+		// The wait looks every 50ms, and gives up on the first look past
+		// its patience.
+		if elapsed := time.Since(start); elapsed != wpaSocketPatience+50*time.Millisecond {
+			t.Errorf("the wait gave up after %s, want the first look past %s", elapsed, wpaSocketPatience)
+		}
+		if !strings.Contains(err.Error(), absent) {
+			t.Errorf("the error must name the socket: %v", err)
+		}
+	})
 }
 
 func TestClosingTheControlEndsTheEventStream(t *testing.T) {

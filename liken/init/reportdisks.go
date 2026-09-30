@@ -90,8 +90,8 @@ func resolveInstallStick() installStick {
 // expects a stick by construction: a person picked the entry from one.
 // A boot with no stick at all (a hand-typed liken.report) pays the
 // ceiling once, and its report stays on the console.
-func awaitInstallStick(ceiling time.Duration) installStick {
-	deadline := time.Now().Add(ceiling)
+func awaitInstallStick() installStick {
+	deadline := time.Now().Add(stickCeiling)
 	for {
 		stick := resolveInstallStick()
 		if len(stick.Candidates) > 0 || time.Now().After(deadline) {

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -412,31 +413,36 @@ func TestStopSupplicantEndsARealProcessThroughItsHandle(t *testing.T) {
 }
 
 func TestASupplicantThatNeverAttachesIsStoppedAndAwaited(t *testing.T) {
-	// The supplicant exits at once and never creates its control
-	// socket. The start marked its pid as expected, so a death nobody
-	// awaits would stay parked for the boot, and a later child that reuses the pid,
-	// k3s in the worst case, would read it at once as its own death.
-	aimWirelessRunDir(t)
-	orig := wpaSocketPatience
-	wpaSocketPatience = time.Millisecond
-	t.Cleanup(func() { wpaSocketPatience = orig })
-	starts := scriptStarts(t, 0)
-	starts.exitAtOnce = true
+	synctest.Test(t, func(t *testing.T) {
+		// The supplicant exits at once and never creates its control
+		// socket. The start marked its pid as expected, so a death nobody
+		// awaits would stay parked for the boot, and a later child that reuses the pid,
+		// k3s in the worst case, would read it at once as its own death.
+		aimWirelessRunDir(t)
+		starts := scriptStarts(t, 0)
+		starts.exitAtOnce = true
 
-	if _, err := superviseSupplicant("wlan0", "/run/liken/wireless/wlan0/wpa_supplicant.conf"); err == nil {
-		t.Fatal("a supplicant that never attached must be refused")
-	}
-	pid := starts.started(t)
+		begin := time.Now()
+		if _, err := superviseSupplicant("wlan0", "/run/liken/wireless/wlan0/wpa_supplicant.conf"); err == nil {
+			t.Fatal("a supplicant that never attached must be refused")
+		}
+		// The socket poll sleeps 50ms at a time, so the refusal comes on
+		// the first poll after the patience runs out.
+		if elapsed := time.Since(begin); elapsed <= wpaSocketPatience || elapsed > wpaSocketPatience+50*time.Millisecond {
+			t.Errorf("the refusal came after %s, want the first poll after the patience of %s", elapsed, wpaSocketPatience)
+		}
+		pid := starts.started(t)
 
-	// The next child with the same pid must wait for its own death.
-	deaths.expect(pid)
-	got := make(chan unix.WaitStatus, 1)
-	go func() { got <- deaths.await(pid) }()
-	select {
-	case status := <-got:
-		t.Fatalf("a later child with pid %d read the dead supplicant's status %v", pid, status)
-	case <-time.After(50 * time.Millisecond):
-	}
-	deaths.record(pid, 0)
-	<-got
+		// The next child with the same pid must wait for its own death.
+		deaths.expect(pid)
+		got := make(chan unix.WaitStatus, 1)
+		go func() { got <- deaths.await(pid) }()
+		select {
+		case status := <-got:
+			t.Fatalf("a later child with pid %d read the dead supplicant's status %v", pid, status)
+		case <-time.After(50 * time.Millisecond):
+		}
+		deaths.record(pid, 0)
+		<-got
+	})
 }

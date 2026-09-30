@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -287,33 +288,32 @@ func TestAWalkWithNothingDeclaredReportsNothing(t *testing.T) {
 // reports the wait, and the walk after the open returns reports the
 // holder attached.
 func TestAWalkBoundsTheWaitForTheAttachCalls(t *testing.T) {
-	fakeSerioMachine(t)
-	loadSerioModules(t, "serport", "pulse8_cec")
-	adapter{port: "1-4", tty: "ttyACM0"}.plug(t)
-	old := serioSettleTimeout
-	serioSettleTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { serioSettleTimeout = old })
-	ttys := newFakeTTYs(t)
-	ttys.gate = make(chan struct{})
-	r := declaredSerio(ttys, pulse8Entry)
+	synctest.Test(t, func(t *testing.T) {
+		fakeSerioMachine(t)
+		loadSerioModules(t, "serport", "pulse8_cec")
+		adapter{port: "1-4", tty: "ttyACM0"}.plug(t)
+		ttys := newFakeTTYs(t)
+		ttys.gate = make(chan struct{})
+		r := declaredSerio(ttys, pulse8Entry)
 
-	waiting := walkOnce(r)
-	close(ttys.gate)
-	// A walk reports a holder it did not start without waiting on it,
-	// so this waits for the attach calls the gate released.
-	r.mu.Lock()
-	h := r.holders["ttyACM0"]
-	r.mu.Unlock()
-	select {
-	case <-h.settled:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the holder never finished its attach calls")
-	}
-	attached := walkOnce(r)
+		waiting := walkOnce(r)
+		close(ttys.gate)
+		// A walk reports a holder it did not start without waiting on it,
+		// so this waits for the attach calls the gate released.
+		r.mu.Lock()
+		h := r.holders["ttyACM0"]
+		r.mu.Unlock()
+		select {
+		case <-h.settled:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the holder never finished its attach calls")
+		}
+		attached := walkOnce(r)
 
-	if waiting[0].State != machine.SerioRefused || attached[0].State != machine.SerioAttached || ttys.openCount() != 1 {
-		t.Errorf("walks = %+v, then %+v", waiting, attached)
-	}
+		if waiting[0].State != machine.SerioRefused || attached[0].State != machine.SerioAttached || ttys.openCount() != 1 {
+			t.Errorf("walks = %+v, then %+v", waiting, attached)
+		}
+	})
 }
 
 // publish writes serio/ only when the report changes, so an unchanged

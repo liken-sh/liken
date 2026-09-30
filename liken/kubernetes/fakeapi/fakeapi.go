@@ -5,6 +5,10 @@
 // update, and a watch that receives each write. It records every
 // request except the watches, so a test can count what a pass sends.
 //
+// A test serves it with apiservertest.Start, over in-memory
+// connections, so the test can run in a synctest bubble and wait out
+// the reflector's backoff on the fake clock.
+//
 // It is not a model of the API server. It ignores selectors, answers
 // every list with every object of the collection, and checks no
 // resourceVersion on an update. A test that needs one of those

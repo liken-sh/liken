@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/liken/disks"
@@ -477,45 +478,55 @@ func TestPlanClaimReportsUnreadableDevices(t *testing.T) {
 }
 
 func TestWaitForPartitionsReportsMissingPartitions(t *testing.T) {
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "vda", 1<<30, nil)
-	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
+	synctest.Test(t, func(t *testing.T) {
+		sys, dev := fakeMachine(t)
+		addDisk(t, sys, dev, "vda", 1<<30, nil)
+		addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
 
-	parts := []disks.Partition{
-		// clusterState's extent matches the 1 MiB the fixture reports.
-		{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (1<<20)/disks.SectorSize - 1},
-		{Name: "liken:podStorage", FirstLBA: 4_096, LastLBA: 8_191},
-	}
-	err := waitForPartitions(parts, 50*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected an error when a partition never appears")
-	}
-	if !strings.Contains(err.Error(), "liken:podStorage") {
-		t.Errorf("error should name the missing partition: %v", err)
-	}
-	if strings.Contains(err.Error(), "liken:clusterState") {
-		t.Errorf("error should not name the partition that did appear: %v", err)
-	}
+		parts := []disks.Partition{
+			// clusterState's extent matches the 1 MiB the fixture reports.
+			{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (1<<20)/disks.SectorSize - 1},
+			{Name: "liken:podStorage", FirstLBA: 4_096, LastLBA: 8_191},
+		}
+		begin := time.Now()
+		err := waitForPartitions(parts)
+		if err == nil {
+			t.Fatal("expected an error when a partition never appears")
+		}
+		// The wait looks every 100ms, and gives up on the first look past
+		// its patience.
+		if elapsed := time.Since(begin); elapsed != partitionPatience+100*time.Millisecond {
+			t.Errorf("the wait gave up after %s, want the first look past %s", elapsed, partitionPatience)
+		}
+		if !strings.Contains(err.Error(), "liken:podStorage") {
+			t.Errorf("error should name the missing partition: %v", err)
+		}
+		if strings.Contains(err.Error(), "liken:clusterState") {
+			t.Errorf("error should not name the partition that did appear: %v", err)
+		}
+	})
 }
 
 func TestWaitForPartitionsReportsStaleSizes(t *testing.T) {
-	// The partition exists, but sysfs still shows its old geometry.
-	// This is as wrong as no partition at all, and the error names it
-	// that way.
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "vda", 1<<30, nil)
-	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
+	synctest.Test(t, func(t *testing.T) {
+		// The partition exists, but sysfs still shows its old geometry.
+		// This is as wrong as no partition at all, and the error names it
+		// that way.
+		sys, dev := fakeMachine(t)
+		addDisk(t, sys, dev, "vda", 1<<30, nil)
+		addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
 
-	parts := []disks.Partition{
-		{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (2<<20)/disks.SectorSize - 1},
-	}
-	err := waitForPartitions(parts, 50*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected an error for a stale partition size")
-	}
-	if !strings.Contains(err.Error(), "liken:clusterState") || !strings.Contains(err.Error(), "still") {
-		t.Errorf("error should describe the stale size: %v", err)
-	}
+		parts := []disks.Partition{
+			{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (2<<20)/disks.SectorSize - 1},
+		}
+		err := waitForPartitions(parts)
+		if err == nil {
+			t.Fatal("expected an error for a stale partition size")
+		}
+		if !strings.Contains(err.Error(), "liken:clusterState") || !strings.Contains(err.Error(), "still") {
+			t.Errorf("error should describe the stale size: %v", err)
+		}
+	})
 }
 
 func TestNeedsFilesystemKeepsAFilesystemItRecognizes(t *testing.T) {
@@ -638,49 +649,53 @@ func TestWaitForPartitionsSucceedsWhenEverythingIsVisible(t *testing.T) {
 	parts := []disks.Partition{
 		{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (1<<20)/disks.SectorSize - 1},
 	}
-	if err := waitForPartitions(parts, 50*time.Millisecond); err != nil {
+	if err := waitForPartitions(parts); err != nil {
 		t.Errorf("every partition is already visible at size: %v", err)
 	}
 }
 
 func TestAwaitStorageDevicesEndsImmediatelyOnAnAmbiguousName(t *testing.T) {
-	// Two disks answer to the same WWN, so the declared by-id name can
-	// never resolve to one disk, however long the code waits: a third
-	// disk attaching cannot un-match the two that already do. The wait
-	// must give up at once instead of running out its 30-second
-	// deadline.
-	sys, _ := fakeMachine(t)
-	for _, name := range []string{"sda", "sdb"} {
-		dir := fakeDisk(t, sys, name, "pci0000:00", "0000:00:1f.2", "ata3", "host2",
-			"target2:0:0", "2:0:0:0", "block", name)
-		writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
-	}
-	roles := []machine.DeclaredRole{declared("clusterState", "/dev/disk/by-id/wwn-0x5002538d40a45c88", "")}
+	synctest.Test(t, func(t *testing.T) {
+		// Two disks answer to the same WWN, so the declared by-id name can
+		// never resolve to one disk, however long the code waits: a third
+		// disk attaching cannot un-match the two that already do. The wait
+		// must give up at once instead of running out its 30-second
+		// deadline.
+		sys, _ := fakeMachine(t)
+		for _, name := range []string{"sda", "sdb"} {
+			dir := fakeDisk(t, sys, name, "pci0000:00", "0000:00:1f.2", "ata3", "host2",
+				"target2:0:0", "2:0:0:0", "block", name)
+			writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
+		}
+		roles := []machine.DeclaredRole{declared("clusterState", "/dev/disk/by-id/wwn-0x5002538d40a45c88", "")}
 
-	start := time.Now()
-	awaitStorageDevices(roles)
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("an ambiguous name should end the wait at once, took %s", elapsed)
-	}
+		start := time.Now()
+		awaitStorageDevices(roles)
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Errorf("an ambiguous name should end the wait at once, took %s", elapsed)
+		}
+	})
 }
 
 func TestAwaitStorageDevicesEndsImmediatelyOnTwoPartitionsClaimingOneRole(t *testing.T) {
-	// Two partitions carry the same role's partition name, the way a
-	// cloned or moved disk would. recognizeRoles refuses to guess
-	// between them, and that refusal is no more fixable by waiting than
-	// a resolver's ambiguity is: another disk attaching cannot un-match
-	// two partitions that already share a name. The wait must give up
-	// at once instead of running out its 30-second deadline.
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "vda", 1<<30, nil)
-	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
-	addDisk(t, sys, dev, "vdb", 1<<30, nil)
-	addPartition(t, sys, "vdb", "vdb1", "liken:clusterState", 1<<20)
-	roles := []machine.DeclaredRole{declared("clusterState", filepath.Join(dev, "vda"), "")}
+	synctest.Test(t, func(t *testing.T) {
+		// Two partitions carry the same role's partition name, the way a
+		// cloned or moved disk would. recognizeRoles refuses to guess
+		// between them, and that refusal is no more fixable by waiting than
+		// a resolver's ambiguity is: another disk attaching cannot un-match
+		// two partitions that already share a name. The wait must give up
+		// at once instead of running out its 30-second deadline.
+		sys, dev := fakeMachine(t)
+		addDisk(t, sys, dev, "vda", 1<<30, nil)
+		addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
+		addDisk(t, sys, dev, "vdb", 1<<30, nil)
+		addPartition(t, sys, "vdb", "vdb1", "liken:clusterState", 1<<20)
+		roles := []machine.DeclaredRole{declared("clusterState", filepath.Join(dev, "vda"), "")}
 
-	start := time.Now()
-	awaitStorageDevices(roles)
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("two partitions claiming one role should end the wait at once, took %s", elapsed)
-	}
+		start := time.Now()
+		awaitStorageDevices(roles)
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Errorf("two partitions claiming one role should end the wait at once, took %s", elapsed)
+		}
+	})
 }

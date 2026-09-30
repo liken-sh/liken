@@ -33,7 +33,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/liken-sh/liken/liken/disks"
 	"github.com/liken-sh/liken/liken/machine"
@@ -220,5 +219,5 @@ func applyGrowth(plan growPlan) error {
 	for _, e := range plan.table.Entries {
 		expect = append(expect, disks.Partition{Name: e.Name, FirstLBA: e.FirstLBA, LastLBA: e.LastLBA})
 	}
-	return waitForPartitions(expect, 5*time.Second)
+	return waitForPartitions(expect)
 }
