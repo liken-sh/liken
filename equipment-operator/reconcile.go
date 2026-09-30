@@ -45,7 +45,7 @@ import (
 const backstopInterval = 30 * time.Second
 
 // How long a burst of lines is collected before one status write.
-var statusDebounce = 250 * time.Millisecond
+const statusDebounce = 250 * time.Millisecond
 
 // receiverUnit is one Receiver's running parts: the connection, the
 // status writer, the settings and zones it drives, and the session that
@@ -60,6 +60,7 @@ type receiverUnit struct {
 	commandsTopic string
 	client        *Client
 	busAddress    string
+	dial          dialFunc
 	now           func() time.Time
 	driver        equipment.Driver
 	denonClient   *denon.Client
@@ -218,7 +219,7 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 	}
 	u.log.printf("a session for Player %s started: input %s, volume topic %s, %s, active %t, awake %t%s",
 		spec.Player, spec.Input, spec.VolumeTopic, powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake, adopted)
-	started := newSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.volumeRule, u.inputSoundMode, u.applyPower, u.roomFor(spec))
+	started := newSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.dial, u.volumeRule, u.inputSoundMode, u.applyPower, u.roomFor(spec))
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
@@ -639,7 +640,7 @@ func (u *receiverUnit) startBus(ctx context.Context) {
 	}
 	// The bus lives and dies with this unit's context, so nothing here
 	// stores it: the goroutine owns the only reference.
-	bus := newBus(u.busAddress, "equipment-operator-"+u.name+"-bus", nil, nil, u.busMessage)
+	bus := newBus(u.busAddress, u.dial, "equipment-operator-"+u.name+"-bus", nil, nil, u.busMessage)
 	if u.settingsTopic != "" {
 		bus.Subscribe(u.settingsTopic)
 	}
@@ -886,10 +887,12 @@ func (u *receiverUnit) end(close func(*session)) {
 type controller struct {
 	client     *Client
 	busAddress string
-	wake       chan struct{}
-	now        func() time.Time
-	readings   *metrics
-	discovery  *discovery
+	// dial reaches the broker and each Denon receiver.
+	dial      dialFunc
+	wake      chan struct{}
+	now       func() time.Time
+	readings  *metrics
+	discovery *discovery
 	// networkDiscoveryOff keeps discovery from running at all, so the
 	// operator sends no search onto the LAN and creates no Receiver
 	// (main.go).
@@ -916,6 +919,7 @@ func newController(client *Client, busAddress string, readings *metrics) *contro
 	c := &controller{
 		client:     client,
 		busAddress: busAddress,
+		dial:       dialTCP,
 		wake:       make(chan struct{}, 1),
 		now:        time.Now,
 		readings:   readings,
@@ -1073,6 +1077,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		client:        c.client.withWaits(ctx),
 		sessions:      c.sessions,
 		busAddress:    c.busAddress,
+		dial:          c.dial,
 		now:           c.now,
 		readings:      c.readings,
 		log:           newReceiverLog(c.log, receiver.Metadata.Name),
@@ -1105,6 +1110,7 @@ func (u *receiverUnit) startDriver(receiver *Receiver, address string, report fu
 	case receiver.Spec.Denon != nil:
 		client := denon.NewClient(address, u.observe)
 		client.Reporter = report
+		client.Dial = u.dial
 		u.driver = client
 		u.denonClient = client
 	case receiver.Spec.Wiim != nil:
@@ -1253,6 +1259,9 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 	// serve returns only after the goroutines it started stop, so none
 	// of them reads the API after it.
 	operator := newController(client, config.busAddress, readings)
+	if config.dial != nil {
+		operator.dial = config.dial
+	}
 	operator.networkDiscoveryOff = config.networkDiscoveryOff
 	var started sync.WaitGroup
 	buses := newCECBusController(client)

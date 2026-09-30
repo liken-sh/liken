@@ -8,8 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/liken-sh/equipment-operator/denon"
-	"github.com/liken-sh/equipment-operator/equipment"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 func testMetrics(t *testing.T) *metrics {
@@ -26,19 +28,15 @@ func testMetrics(t *testing.T) *metrics {
 }
 
 // scrape reads a registry the way Prometheus reads it: one HTTP GET
-// against the real handler, and the text document that comes back.
+// that the real handler answers, and the text document that comes back.
+// The handler writes to a recorder, so a test in a synctest bubble
+// scrapes with no socket.
 func scrape(t *testing.T, m *metrics) string {
 	t.Helper()
-	server := httptest.NewServer(m.Handler())
-	t.Cleanup(server.Close)
-
-	resp, err := http.Get(server.URL + "/metrics")
-	mustSucceed(t, err)
-	defer resp.Body.Close()
-	mustMatch(t, resp.StatusCode, http.StatusOK)
-	body, err := io.ReadAll(resp.Body)
-	mustSucceed(t, err)
-	return string(body)
+	recorder := httptest.NewRecorder()
+	m.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	mustMatch(t, recorder.Code, http.StatusOK)
+	return recorder.Body.String()
 }
 
 // series returns every sample line in a scrape whose metric name is
@@ -357,38 +355,41 @@ func TestTheListenerStopsWhenItsContextEnds(t *testing.T) {
 // loop are what equipment_commands_total actually observes.
 func TestCommandsCountByOutcome(t *testing.T) {
 	t.Parallel()
-	m := testMetrics(t)
-	receiver := startFakeDenon(t)
-	client := denon.NewClient(receiver.address(), nil)
-	client.Reporter = m.reportCommand
+	synctest.Test(t, func(t *testing.T) {
+		m := testMetrics(t)
+		receiver := startFakeDenon(t)
+		client := denon.NewClient(receiver.address(), nil)
+		client.Dial = testNetwork.dial
+		client.Reporter = m.reportCommand
 
-	client.SetPower(equipment.MainZone, true)
-	requireSeries(t, scrape(t, m), `equipment_commands_total{status="failed"} 1`)
+		client.SetPower(equipment.MainZone, true)
+		requireSeries(t, scrape(t, m), `equipment_commands_total{status="failed"} 1`)
 
-	stopped := make(chan struct{})
-	ctx, cancel := context.WithCancel(t.Context())
-	go func() {
-		defer close(stopped)
-		client.Run(ctx)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-stopped
+		stopped := make(chan struct{})
+		ctx, cancel := context.WithCancel(t.Context())
+		go func() {
+			defer close(stopped)
+			client.Run(ctx)
+		}()
+		t.Cleanup(func() {
+			cancel()
+			<-stopped
+		})
+
+		receiver.waitForCommand(t)
+		wanted := fmt.Sprintf(`equipment_commands_total{status="ok"} %d`, len(denon.Queries))
+		deadline := time.After(testTimeout)
+		for {
+			if slices.Contains(series(scrape(t, m), "equipment_commands_total"), wanted) {
+				break
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("the connect queries never counted ok: %q", series(scrape(t, m), "equipment_commands_total"))
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
 	})
-
-	receiver.waitForCommand(t)
-	wanted := fmt.Sprintf(`equipment_commands_total{status="ok"} %d`, len(denon.Queries))
-	deadline := time.After(testTimeout)
-	for {
-		if slices.Contains(series(scrape(t, m), "equipment_commands_total"), wanted) {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("the connect queries never counted ok: %q", series(scrape(t, m), "equipment_commands_total"))
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
 }
 
 // connectedState is what a receiver reports once it has answered every

@@ -46,6 +46,13 @@ type access struct {
 	base        string
 	credentials string
 
+	// transport is the round tripper of the HTTP client that NewClient
+	// took, or nil for the default. The watches send their requests
+	// through it too, so they reach the same server as the Client's own
+	// requests, such as a test's fake API server on in-memory
+	// connections.
+	transport http.RoundTripper
+
 	// versions is the memo of each kind this process writes, which each
 	// write notes and each read from a store consults (objectcache.go).
 	versions objectVersions
@@ -57,12 +64,12 @@ type access struct {
 }
 
 // NewClient builds a client from its three parts. InClusterClient
-// reads them from the pod's environment; a test hands in an
-// httptest server's base and no credentials.
+// reads them from the pod's environment; a test hands in its fake API
+// server's address and client, and no credentials.
 func NewClient(base string, httpClient *http.Client, credentials string) *Client {
 	return &Client{
 		Client: apiclient.New(base, httpClient, credentials),
-		access: &access{base: base, credentials: credentials, versions: newObjectVersions()},
+		access: &access{base: base, credentials: credentials, transport: httpClient.Transport, versions: newObjectVersions()},
 	}
 }
 
@@ -97,13 +104,8 @@ func (c *Client) withWaits(ctx context.Context) *Client {
 }
 
 // startRetry is the shortest wait between two tries of a starting list
-// that met a 429 longer than the client waits. It is a variable so a
-// test holds it short.
-var startRetry = time.Second
-
-// retryAfterUnit is one second of the wait a 429 asks for. It is a
-// variable so a test waits milliseconds.
-var retryAfterUnit = time.Second
+// that met a 429 longer than the client waits.
+const startRetry = time.Second
 
 // untilAnswered makes a starting call until it answers something other
 // than a 429, or ctx ends. The API server answers 429 while it starts
@@ -120,7 +122,7 @@ func untilAnswered(ctx context.Context, call func() error) error {
 		if !errors.Is(err, apiclient.ErrThrottled) {
 			return err
 		}
-		wait := max(startRetry, time.Duration(apiclient.RetryAfterSeconds(err))*retryAfterUnit)
+		wait := max(startRetry, time.Duration(apiclient.RetryAfterSeconds(err))*time.Second)
 		fmt.Fprintf(os.Stderr, "%v; asking again in %s\n", err, wait)
 		select {
 		case <-ctx.Done():

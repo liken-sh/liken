@@ -43,11 +43,16 @@ import (
 // after the node workload first saw it sends nothing, such as one that
 // waited that long for spec.power or for the adapter to join: the room
 // may have gone dark since. The node workload measures that time on
-// its own clock, from when it first saw the wokeAt.
+// its own clock, from when it first saw the wokeAt. The guard and the
+// settle are variables because the tests on the kernel's vivid driver
+// run on the real clock, and shorten them.
 var (
-	cecWakeGuard    = 30 * time.Second
+	cecWakeGuard  = 30 * time.Second
+	cecWakeSettle = 2 * time.Second
+)
+
+const (
 	cecWakeReclaims = 2
-	cecWakeSettle   = 2 * time.Second
 	cecWakeFresh    = 2 * time.Minute
 )
 

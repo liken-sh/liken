@@ -26,12 +26,12 @@ import (
 // stale entry. The same tick tries again a status write the API server
 // refused. Every object a pass reads has a watch, so no change to one
 // waits for the tick.
-var cecBusClock = 30 * time.Second
+const cecBusClock = 30 * time.Second
 
 // cecBusRetry is how long the loop waits before it lists again after
 // a failed list, such as on a cluster where the CECBus definition is
 // not installed yet.
-var cecBusRetry = 30 * time.Second
+const cecBusRetry = 30 * time.Second
 
 type cecBusController struct {
 	client *Client

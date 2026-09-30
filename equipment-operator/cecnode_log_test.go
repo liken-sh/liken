@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
@@ -54,48 +55,53 @@ func loggedNode(t *testing.T, api *cecAPI, device *cec.Device) *logBuffer {
 }
 
 func TestTheNodeLogsWhatTheAdapterHeldAndEachStateChange(t *testing.T) {
-	shorten(t, &cecReportInterval, 10*time.Millisecond)
-	api := startCECAPI(t)
-	wire := cecRoom()
-	adapter, device := usbAdapter(wire)
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-	// A second handle on the same adapter stands for the previous pod,
-	// which left its claim in the kernel.
-	previous := cec.New(adapter)
-	mustSucceed(t, previous.Follow())
-	mustSucceed(t, previous.SetPhysicalAddress(0x1300))
-	mustSucceed(t, previous.Claim(cec.Claim{OSDName: "node-1"}))
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		wire := cecRoom()
+		adapter, device := usbAdapter(wire)
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+		// A second handle on the same adapter stands for the previous pod,
+		// which left its claim in the kernel.
+		previous := cec.New(adapter)
+		mustSucceed(t, previous.Follow())
+		mustSucceed(t, previous.SetPhysicalAddress(0x1300))
+		mustSucceed(t, previous.Claim(cec.Claim{OSDName: "node-1"}))
 
-	log := loggedNode(t, api, device)
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	settled := len(log.lines())
-	before := api.writesOf("node-1")
-	api.waitUntil(t, "a few steady reports", func() bool { return api.writesOf("node-1") >= before+3 })
+		log := loggedNode(t, api, device)
+		api.scanned(t, "node-1")
+		settled := len(log.lines())
+		before := api.writesOf("node-1")
+		time.Sleep(3*cecReportInterval + cecReportInterval/2)
+		mustMatch(t, api.writesOf("node-1"), before+3)
 
-	// The first pass can report Joined before the first scan ends, so
-	// the log holds one or two state changes before it settles.
-	lines := log.lines()
-	mustMatch(t, lines[0], `the adapter on node-1 (cectest) holds logical address 4 as "node-1" when the pod opens it`)
-	mustMatch(t, lines[1], "the adapter on node-1 moves from none to CECBus den")
-	mustMatch(t, lines[2][:len("CECBus den: the adapter on node-1 went from none to ")], "CECBus den: the adapter on node-1 went from none to ")
-	mustMatch(t, lines[len(lines)-1][len(lines[len(lines)-1])-len(" to Scanned"):], " to Scanned")
-	mustMatch(t, len(lines), settled)
+		// The first pass can report Joined before the first scan ends, so
+		// the log holds one or two state changes before it settles.
+		lines := log.lines()
+		mustMatch(t, lines[0], `the adapter on node-1 (cectest) holds logical address 4 as "node-1" when the pod opens it`)
+		mustMatch(t, lines[1], "the adapter on node-1 moves from none to CECBus den")
+		mustMatch(t, lines[2][:len("CECBus den: the adapter on node-1 went from none to ")], "CECBus den: the adapter on node-1 went from none to ")
+		mustMatch(t, lines[len(lines)-1][len(lines[len(lines)-1])-len(" to Scanned"):], " to Scanned")
+		mustMatch(t, len(lines), settled)
+	})
 }
 
 func TestTheNodeLogsAMessageWithTheState(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	_, device := usbAdapter(cecRoom())
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		_, device := usbAdapter(cecRoom())
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 
-	log := loggedNode(t, api, device)
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterJoining })
+		log := loggedNode(t, api, device)
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterJoining })
 
-	mustDeepEqual(t, log.lines(), []string{
-		`the adapter on node-1 (cectest) holds no logical address when the pod opens it`,
-		`the adapter on node-1 moves from none to CECBus den`,
-		`CECBus den: the adapter on node-1 went from none to Joining: reading Display acm-0001-receiver: not found`,
+		mustDeepEqual(t, log.lines(), []string{
+			`the adapter on node-1 (cectest) holds no logical address when the pod opens it`,
+			`the adapter on node-1 moves from none to CECBus den`,
+			`CECBus den: the adapter on node-1 went from none to Joining: reading Display acm-0001-receiver: not found`,
+		})
 	})
 }
 
@@ -114,27 +120,29 @@ func linesWith(log *logBuffer, text string) []string {
 // on every pass, and again only when the set changes.
 func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	for _, name := range []string{"study", "den"} {
-		api.putBus(listenBus(name))
-	}
-	_, device := usbAdapter(cecRoom())
-	log := loggedNode(t, api, device)
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		for _, name := range []string{"study", "den"} {
+			api.putBus(listenBus(name))
+		}
+		_, device := usbAdapter(cecRoom())
+		log := loggedNode(t, api, device)
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
-	for range 5 {
-		api.nudge()
-	}
-	api.putBus(listenBus("attic"))
-	api.waitForEntry(t, "attic", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	for range 5 {
-		api.nudge()
-	}
-	time.Sleep(50 * time.Millisecond)
+		for range 5 {
+			api.nudge()
+		}
+		api.putBus(listenBus("attic"))
+		api.waitForEntry(t, "attic", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		for range 5 {
+			api.nudge()
+		}
+		time.Sleep(50 * time.Millisecond)
 
-	mustDeepEqual(t, linesWith(log, "CECBuses name machine"), []string{
-		"2 CECBuses name machine node-1: den, study; the adapter follows den, the first by name",
-		"3 CECBuses name machine node-1: attic, den, study; the adapter follows attic, the first by name",
+		mustDeepEqual(t, linesWith(log, "CECBuses name machine"), []string{
+			"2 CECBuses name machine node-1: den, study; the adapter follows den, the first by name",
+			"3 CECBuses name machine node-1: attic, den, study; the adapter follows attic, the first by name",
+		})
 	})
 }
 
@@ -143,22 +151,24 @@ func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
 // old bus, which still exists and still names the machine.
 func TestAnAdapterThatMovesBusesLeavesTheOldOne(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(listenBus("lounge"))
-	_, device := usbAdapter(cecRoom())
-	log := loggedNode(t, api, device)
-	api.waitForEntry(t, "lounge", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(listenBus("lounge"))
+		_, device := usbAdapter(cecRoom())
+		log := loggedNode(t, api, device)
+		api.waitForEntry(t, "lounge", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
-	api.putBus(listenBus("living-room"))
+		api.putBus(listenBus("living-room"))
 
-	api.waitForEntry(t, "living-room", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	api.waitUntil(t, "the entry in the old bus to go", func() bool {
-		_, held := api.entry("lounge", "node-1")
-		return !held
-	})
-	mustDeepEqual(t, linesWith(log, "moves from"), []string{
-		"the adapter on node-1 moves from none to CECBus lounge",
-		"the adapter on node-1 moves from CECBus lounge to CECBus living-room",
+		api.waitForEntry(t, "living-room", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		api.waitUntil(t, "the entry in the old bus to go", func() bool {
+			_, held := api.entry("lounge", "node-1")
+			return !held
+		})
+		mustDeepEqual(t, linesWith(log, "moves from"), []string{
+			"the adapter on node-1 moves from none to CECBus lounge",
+			"the adapter on node-1 moves from CECBus lounge to CECBus living-room",
+		})
 	})
 }
 
@@ -171,19 +181,21 @@ func listenBus(name string) CECBus {
 // adapter no bus names, and one when a person's bus replaces it.
 func TestTheNodeLogsTheBusItCreatesAndDeletes(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	_, device := usbAdapter(cecRoom())
-	log := loggedNode(t, api, device)
-	api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		_, device := usbAdapter(cecRoom())
+		log := loggedNode(t, api, device)
+		api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
-	api.putBus(listenBus("den"))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	api.waitUntil(t, "the discovered bus to go", func() bool { return slices.Contains(api.deletedNames(), "node-1") })
-	api.nudge()
+		api.putBus(listenBus("den"))
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		api.waitUntil(t, "the discovered bus to go", func() bool { return slices.Contains(api.deletedNames(), "node-1") })
+		api.nudge()
 
-	mustDeepEqual(t, linesWith(log, "names machine node-1"), []string{
-		"no CECBus names machine node-1; created CECBus node-1 in Listen, which sends nothing on the wire",
-		"deleted the discovered CECBus node-1: CECBus den names machine node-1",
+		mustDeepEqual(t, linesWith(log, "names machine node-1"), []string{
+			"no CECBus names machine node-1; created CECBus node-1 in Listen, which sends nothing on the wire",
+			"deleted the discovered CECBus node-1: CECBus den names machine node-1",
+		})
 	})
 }
 
@@ -211,21 +223,24 @@ func TestTheNodeLogsEachApplicationOfThePower(t *testing.T) {
 			"Television lounge: generation 1 asks On; the adapter on node-1 sent Image View On 3 times, and the TV last reported Standby; the application ended after <time>",
 		},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			fastPower(t)
-			api := startCECAPI(t)
-			_, device := usbAdapter(roomWithTV(one.tv))
-			api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-			api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-			api.putTelevision(lounge(TelevisionOn))
-			log := loggedNode(t, api, device)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				_, device := usbAdapter(roomWithTV(one.tv))
+				api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+				api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+				api.putTelevision(lounge(TelevisionOn))
+				log := loggedNode(t, api, device)
 
-			appliedAt(t, api, "lounge", 1)
-			api.nudge()
-			time.Sleep(2 * cecPowerWindow)
+				appliedAt(t, api, "lounge", 1)
+				api.nudge()
+				time.Sleep(2 * cecPowerWindow)
 
-			mustDeepEqual(t, timeless(linesWith(log, "Television lounge")), []string{one.want})
+				mustDeepEqual(t, timeless(linesWith(log, "Television lounge")), []string{one.want})
+			})
 		})
 	}
 }
@@ -233,19 +248,21 @@ func TestTheNodeLogsEachApplicationOfThePower(t *testing.T) {
 // A new generation stops the application of the old one. The old one
 // sent a command, so its line says the application stopped.
 func TestTheNodeLogsAnApplicationThatANewGenerationStops(t *testing.T) {
-	fastPower(t)
-	api := startCECAPI(t)
-	wire := roomWithTV(stubbornTV())
-	_, device := usbAdapter(wire)
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-	api.putTelevision(lounge(TelevisionOn))
-	log := loggedNode(t, api, device)
-	api.waitUntil(t, "the first Image View On", func() bool { return sentOf(wire, cec.OpImageViewOn) == 1 })
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		wire := roomWithTV(stubbornTV())
+		_, device := usbAdapter(wire)
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+		api.putTelevision(lounge(TelevisionOn))
+		log := loggedNode(t, api, device)
+		api.waitUntil(t, "the first Image View On", func() bool { return sentOf(wire, cec.OpImageViewOn) == 1 })
 
-	api.putTelevision(lounge(TelevisionStandby))
+		api.putTelevision(lounge(TelevisionStandby))
 
-	mustDeepEqual(t, waitForLines(t, log, "generation 1", 1), []string{
-		"Television lounge: generation 1 asks On; the adapter on node-1 sent Image View On to the TV, and the application stopped after <time>, before the TV reported On",
+		mustDeepEqual(t, waitForLines(t, log, "generation 1", 1), []string{
+			"Television lounge: generation 1 asks On; the adapter on node-1 sent Image View On to the TV, and the application stopped after <time>, before the TV reported On",
+		})
 	})
 }

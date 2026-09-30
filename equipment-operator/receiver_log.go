@@ -23,7 +23,7 @@ import (
 // result. A Denon echoes a command within a fraction of a second, and a
 // WiiM reports a setting at its next poll, which is ten seconds away at
 // most.
-var receiverConfirmWait = 15 * time.Second
+const receiverConfirmWait = 15 * time.Second
 
 // receiverLog writes one receiver's lines, each with the Receiver's
 // name first, as the node workload writes each CECBus line.

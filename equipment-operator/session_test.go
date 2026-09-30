@@ -6,15 +6,17 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"github.com/liken-sh/equipment-operator/denon"
-	"github.com/liken-sh/equipment-operator/equipment"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 // The topic every session test holds, and the window a test watches for
@@ -127,6 +129,7 @@ func newSessionHarnessWith(t *testing.T, rule ReceiverVolume) *sessionHarness {
 	h.lines = newReceiverLog(h.log, "theater")
 	h.holder = &sessionHolder{lines: h.lines}
 	h.denon = denon.NewClient(h.equipment.address(), h.holder.observe)
+	h.denon.Dial = testNetwork.dial
 	go h.denon.Run(t.Context())
 	h.waitUntil(t, func(state equipment.State) bool {
 		return mainZone(state).Power != "" && mainZone(state).VolumeMax != equipment.Unknown
@@ -179,7 +182,7 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	h.drainCommands()
 	h.holder.forget()
 	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, PowerTopic: h.powerTopic, Active: active, Awake: awake}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.lines, h.brokers.address(), h.volumeRule, h.inputSoundMode, h.applyPower, h.room)
+	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.lines, h.brokers.address(), testNetwork.dial, h.volumeRule, h.inputSoundMode, h.applyPower, h.room)
 	h.holder.set(started)
 	return started
 }
@@ -214,58 +217,69 @@ func (h *sessionHarness) refuseCommands(t *testing.T, within time.Duration, unwa
 
 func TestTheSessionPowersOnThenSelectsTheInput(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
 
-	h.begin(t, "GAME")
+		h.begin(t, "GAME")
 
-	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
-	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+	})
 }
 
 func TestTheSessionSelectsTheInputOnAReceiverAlreadyOn(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.powerOn(t)
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.powerOn(t)
 
-	h.begin(t, "GAME")
+		h.begin(t, "GAME")
 
-	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+	})
 }
 
 // handOnTheRemote writes one line the way a person's own remote does,
-// with nothing in the cluster having asked.
+// with nothing in the cluster having asked. The receiver sends its
+// events to every connection, so the remote's connection reads and
+// drops them until the test ends.
 func handOnTheRemote(t *testing.T, equipment *fakeDenon, line string) {
 	t.Helper()
-	conn, err := net.Dial("tcp", equipment.address())
+	conn, err := testNetwork.dial(t.Context(), "tcp", equipment.address())
 	mustSucceed(t, err)
 	t.Cleanup(func() { conn.Close() })
+	go func() { _, _ = io.Copy(io.Discard, conn) }()
 	_, err = conn.Write([]byte(line + string(denon.Terminator)))
 	mustSucceed(t, err)
 }
 
 func TestTheSessionSelectsTheInputOnce(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.begin(t, "GAME")
-	h.equipment.waitForCommands(t, "SIGAME")
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.begin(t, "GAME")
+		h.equipment.waitForCommands(t, "SIGAME")
 
-	handOnTheRemote(t, h.equipment, "SIDVD")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
+		handOnTheRemote(t, h.equipment, "SIDVD")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 
-	h.refuseCommands(t, quietPeriod, "SIGAME")
+		h.refuseCommands(t, quietPeriod, "SIGAME")
+	})
 }
 
 func TestTheSessionMarksItselfTheOwnerOfTheLevel(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
 
-	h.begin(t, "GAME")
+		h.begin(t, "GAME")
 
-	broker := h.brokers.waitForSession(t)
-	mustMatch(t, waitForString(t, broker.subs), testVolumeTopic)
-	mark := broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	mustMatch(t, string(mark.payload), `{"owner":"receiver/theater"}`)
-	mustMatch(t, mark.retained, true)
+		broker := h.brokers.waitForSession(t)
+		mustMatch(t, waitForString(t, broker.subs), testVolumeTopic)
+		mark := broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		mustMatch(t, string(mark.payload), `{"owner":"receiver/theater"}`)
+		mustMatch(t, mark.retained, true)
+	})
 }
 
 // connectWill reads the will out of an MQTT CONNECT body. The payload
@@ -300,31 +314,26 @@ func waitForFrame(t *testing.T, frames <-chan []byte) []byte {
 
 func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 	t.Parallel()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	mustSucceed(t, err)
-	t.Cleanup(func() { listener.Close() })
-	frames := make(chan []byte, 1)
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		_, body, err := readPacket(bufio.NewReader(conn))
-		if err != nil {
-			return
-		}
-		frames <- body
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		frames := make(chan []byte, 1)
+		broker := testNetwork.listen(t, func(conn net.Conn) {
+			defer conn.Close()
+			_, body, err := readPacket(bufio.NewReader(conn))
+			if err != nil {
+				return
+			}
+			frames <- body
+		})
 
-	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
-	startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(io.Discard, "theater"), listener.Addr().String(),
-		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
+		spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
+		startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(io.Discard, "theater"), broker, testNetwork.dial,
+			func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
 
-	will := connectWill(t, waitForFrame(t, frames))
-	mustMatch(t, will.Topic, ownerTopic(testVolumeTopic))
-	mustMatch(t, will.Retained, true)
-	mustMatch(t, len(will.Payload), 0)
+		will := connectWill(t, waitForFrame(t, frames))
+		mustMatch(t, will.Topic, ownerTopic(testVolumeTopic))
+		mustMatch(t, will.Retained, true)
+		mustMatch(t, len(will.Payload), 0)
+	})
 }
 
 // listening is a harness whose session has selected its input and
@@ -402,50 +411,58 @@ func pressFrom(t *testing.T, h *sessionHarness, broker *fakeBroker, from, by int
 // receiver a single step from where it actually stands.
 func TestThreePressesMoveTheReceiverThreeSteps(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
-	first := pressFrom(t, h, broker, 72, 5, "MV51")
-	mustMatch(t, first, volumeState{Level: 73})
-	second := pressFrom(t, h, broker, first.Level, 5, "MV52")
-	mustMatch(t, second, volumeState{Level: 75})
-	third := pressFrom(t, h, broker, second.Level, 5, "MV53")
-	mustMatch(t, third, volumeState{Level: 76})
+		first := pressFrom(t, h, broker, 72, 5, "MV51")
+		mustMatch(t, first, volumeState{Level: 73})
+		second := pressFrom(t, h, broker, first.Level, 5, "MV52")
+		mustMatch(t, second, volumeState{Level: 75})
+		third := pressFrom(t, h, broker, second.Level, 5, "MV53")
+		mustMatch(t, third, volumeState{Level: 76})
 
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 106 })
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 106 })
+	})
 }
 
 // A press down moves the receiver down by the step a person declared.
 func TestAPressDownMovesTheReceiverDownOneStep(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 0.5}, 72)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 0.5}, 72)
 
-	mustMatch(t, pressFrom(t, h, broker, 72, -5, "MV495"), volumeState{Level: 71})
+		mustMatch(t, pressFrom(t, h, broker, 72, -5, "MV495"), volumeState{Level: 71})
+	})
 }
 
 // A step of two moves the receiver two units of its own scale.
 func TestAStepOfTwoMovesTheReceiverTwoUnits(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 2}, 72)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 2}, 72)
 
-	mustMatch(t, pressFrom(t, h, broker, 72, 5, "MV52"), volumeState{Level: 75})
+		mustMatch(t, pressFrom(t, h, broker, 72, 5, "MV52"), volumeState{Level: 75})
+	})
 }
 
 // Presses stop at the ceiling a person declared, and the topic then
 // carries the top of the bus scale.
 func TestPressesStopAtTheDeclaredCeiling(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 52, Step: 1}, 96)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 52, Step: 1}, 96)
 
-	mustMatch(t, pressFrom(t, h, broker, 96, 5, "MV51"), volumeState{Level: 98})
+		mustMatch(t, pressFrom(t, h, broker, 96, 5, "MV51"), volumeState{Level: 98})
 
-	// The press that reaches the ceiling already carries the top of the
-	// bus scale, so the session has nothing further to say about it.
-	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-	h.equipment.waitForCommands(t, "MV52")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 104 })
+		// The press that reaches the ceiling already carries the top of the
+		// bus scale, so the session has nothing further to say about it.
+		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+		h.equipment.waitForCommands(t, "MV52")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 104 })
 
-	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-	refuseVolumeSets(t, h.equipment, quietPeriod)
+		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+		refuseVolumeSets(t, h.equipment, quietPeriod)
+	})
 }
 
 // A hand can leave the receiver above the ceiling. The topic then reads
@@ -453,52 +470,60 @@ func TestPressesStopAtTheDeclaredCeiling(t *testing.T) {
 // steps.
 func TestAReceiverAboveTheCeilingStaysUntilAPressDown(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 45, Step: 1}, 100)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 45, Step: 1}, 100)
 
-	// The topic already reads the top of the scale, so a press up has
-	// nothing above it to ask for and the receiver stays where it is.
-	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-	refuseVolumeSets(t, h.equipment, quietPeriod)
+		// The topic already reads the top of the scale, so a press up has
+		// nothing above it to ask for and the receiver stays where it is.
+		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+		refuseVolumeSets(t, h.equipment, quietPeriod)
 
-	broker.push(testVolumeTopic, []byte(`{"level":95,"muted":false}`))
-	h.equipment.waitForCommands(t, "MV49")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 98 })
+		broker.push(testVolumeTopic, []byte(`{"level":95,"muted":false}`))
+		h.equipment.waitForCommands(t, "MV49")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 98 })
+	})
 }
 
 // The limit a Denon reports wanders while the room is playing, so the
 // session reads none of it and a new figure moves nothing.
 func TestAWanderingReportedLimitMovesNothing(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
-	h.equipment.driftLimit(141)
-	h.equipment.driftLimit(129)
+		h.equipment.driftLimit(141)
+		h.equipment.driftLimit(129)
 
-	refuseVolumeSets(t, h.equipment, quietPeriod)
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 100 })
-	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
+		refuseVolumeSets(t, h.equipment, quietPeriod)
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 100 })
+		broker.refuseTopic(t, testVolumeTopic, quietPeriod)
+	})
 }
 
 func TestAKnobTurnPublishesTheLevelBack(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listening(t)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listening(t)
 
-	h.equipment.turnKnob(120)
+		h.equipment.turnKnob(120)
 
-	published := broker.waitForTopic(t, testVolumeTopic)
-	mustMatch(t, string(published.payload), `{"level":86,"muted":false}`)
-	mustMatch(t, published.retained, true)
+		published := broker.waitForTopic(t, testVolumeTopic)
+		mustMatch(t, string(published.payload), `{"level":86,"muted":false}`)
+		mustMatch(t, published.retained, true)
+	})
 }
 
 func TestAMuteOnTheEquipmentPublishesBack(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listening(t)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listening(t)
 
-	h.equipment.setMute(true)
+		h.equipment.setMute(true)
 
-	published := broker.waitForTopic(t, testVolumeTopic)
-	mustMatch(t, string(published.payload), `{"level":72,"muted":true}`)
-	mustMatch(t, published.retained, true)
+		published := broker.waitForTopic(t, testVolumeTopic)
+		mustMatch(t, string(published.payload), `{"level":72,"muted":true}`)
+		mustMatch(t, published.retained, true)
+	})
 }
 
 // refusePublish fails the test if anything reaches the broker on the
@@ -506,34 +531,37 @@ func TestAMuteOnTheEquipmentPublishesBack(t *testing.T) {
 // and moves neither the receiver nor the topic again.
 func TestThePositionTheSessionPublishesMovesNothingWhenItComesBack(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
-	position := pressFrom(t, h, broker, 72, 5, "MV51")
-	payload, err := marshalVolumeState(position)
-	mustSucceed(t, err)
+		position := pressFrom(t, h, broker, 72, 5, "MV51")
+		payload, err := marshalVolumeState(position)
+		mustSucceed(t, err)
 
-	broker.push(testVolumeTopic, payload)
+		broker.push(testVolumeTopic, payload)
 
-	refuseVolumeSets(t, h.equipment, quietPeriod)
+		refuseVolumeSets(t, h.equipment, quietPeriod)
+	})
 }
 
 func TestStoppingTheSessionClearsTheOwnerMarkAndLeavesThePowerAlone(t *testing.T) {
 	t.Parallel()
-	h, broker, held := listening(t)
-	h.drainCommands()
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, held := listening(t)
+		h.drainCommands()
 
-	held.stop()
+		held.stop()
 
-	cleared := broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	mustMatch(t, len(cleared.payload), 0)
-	mustMatch(t, cleared.retained, true)
-	h.refuseCommands(t, quietPeriod, "PWSTANDBY", "PWOFF")
+		cleared := broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		mustMatch(t, len(cleared.payload), 0)
+		mustMatch(t, cleared.retained, true)
+		h.refuseCommands(t, quietPeriod, "PWSTANDBY", "PWOFF")
+	})
 }
 
 // A message the session cannot read leaves the receiver alone, so
 // another program's traffic on the broker never moves the room's level.
 func TestAMessageTheSessionCannotReadMovesNothing(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		topic   string
@@ -542,14 +570,17 @@ func TestAMessageTheSessionCannotReadMovesNothing(t *testing.T) {
 		{"another topic", testVolumeTopic + "/owner", `{"level":100}`},
 		{"a payload that is not a state", testVolumeTopic, `not json`},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			h, broker, _ := listening(t)
+			synctest.Test(t, func(t *testing.T) {
+				h, broker, _ := listening(t)
 
-			broker.push(one.topic, []byte(one.payload))
+				broker.push(one.topic, []byte(one.payload))
 
-			h.equipment.refuseCommand(t, "MV695", quietPeriod)
+				h.equipment.refuseCommand(t, "MV695", quietPeriod)
+			})
 		})
 	}
 }
@@ -560,18 +591,20 @@ func TestAMessageTheSessionCannotReadMovesNothing(t *testing.T) {
 // message back to it.
 func TestTheSessionsOwnWriteBackDoesNotMoveTheEquipment(t *testing.T) {
 	t.Parallel()
-	const knob, level, wrong = 119, 86, 120
-	h, broker, _ := listening(t)
+	synctest.Test(t, func(t *testing.T) {
+		const knob, level, wrong = 119, 86, 120
+		h, broker, _ := listening(t)
 
-	h.equipment.turnKnob(knob)
-	published := broker.waitForTopic(t, testVolumeTopic)
-	mustMatch(t, string(published.payload), `{"level":86,"muted":false}`)
+		h.equipment.turnKnob(knob)
+		published := broker.waitForTopic(t, testVolumeTopic)
+		mustMatch(t, string(published.payload), `{"level":86,"muted":false}`)
 
-	broker.push(testVolumeTopic, published.payload)
+		broker.push(testVolumeTopic, published.payload)
 
-	mustMatch(t, stepsForLevelOrZero(level), wrong)
-	h.equipment.refuseCommand(t, denon.VolumeCommand(wrong), quietPeriod)
-	mustMatch(t, mainZone(h.denon.State()).Volume, knob)
+		mustMatch(t, stepsForLevelOrZero(level), wrong)
+		h.equipment.refuseCommand(t, denon.VolumeCommand(wrong), quietPeriod)
+		mustMatch(t, mainZone(h.denon.State()).Volume, knob)
+	})
 }
 
 // stepsForLevelOrZero maps a bus level onto the fake receiver's scale,
@@ -586,23 +619,25 @@ func stepsForLevelOrZero(level int) int {
 // nothing until the broker delivers that message back to it.
 func TestASessionAdoptsTheReceiverBeforeItAppliesAnyLevel(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.begin(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.begin(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	adopted := broker.waitForTopic(t, testVolumeTopic)
-	mustMatch(t, string(adopted.payload), `{"level":72,"muted":false}`)
-	mustMatch(t, adopted.retained, true)
+		adopted := broker.waitForTopic(t, testVolumeTopic)
+		mustMatch(t, string(adopted.payload), `{"level":72,"muted":false}`)
+		mustMatch(t, adopted.retained, true)
 
-	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-	refuseVolumeSets(t, h.equipment, quietPeriod)
+		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+		refuseVolumeSets(t, h.equipment, quietPeriod)
 
-	broker.push(testVolumeTopic, adopted.payload)
-	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+		broker.push(testVolumeTopic, adopted.payload)
+		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 
-	h.equipment.waitForCommands(t, "MV51")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
+		h.equipment.waitForCommands(t, "MV51")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
+	})
 }
 
 // refuseVolumeSets fails the test if the session sets the receiver's
@@ -630,29 +665,33 @@ func refuseVolumeSets(t *testing.T, equipment *fakeDenon, within time.Duration) 
 // the first position on the topic is enough whichever path wrote it.
 func TestAPositionReportedBeforeTheAdoptIsTheAdoptLine(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	held := h.begin(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	h.equipment.turnKnob(60)
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		held := h.begin(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		h.equipment.turnKnob(60)
 
-	first := broker.waitForTopic(t, testVolumeTopic)
-	broker.push(testVolumeTopic, first.payload)
+		first := broker.waitForTopic(t, testVolumeTopic)
+		broker.push(testVolumeTopic, first.payload)
 
-	waitUntilAdopted(t, held)
-	h.equipment.waitForCommands(t, "SIGAME")
+		waitUntilAdopted(t, held)
+		h.equipment.waitForCommands(t, "SIGAME")
+	})
 }
 
 // A level published after the adopt is a press, and it moves the
 // receiver.
 func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listening(t)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listening(t)
 
-	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 
-	h.equipment.waitForCommands(t, "MV51")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
+		h.equipment.waitForCommands(t, "MV51")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
+	})
 }
 
 // A press that mutes the room is not a direction: the receiver is muted
@@ -660,19 +699,20 @@ func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
 // topic already carries what the equipment now reports.
 func TestAPressThatMutesTheRoomMutesTheReceiver(t *testing.T) {
 	t.Parallel()
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
+	synctest.Test(t, func(t *testing.T) {
+		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
-	broker.push(testVolumeTopic, []byte(`{"level":72,"muted":true}`))
+		broker.push(testVolumeTopic, []byte(`{"level":72,"muted":true}`))
 
-	h.equipment.waitForCommands(t, denon.MuteOnCommand)
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Mute })
-	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
+		h.equipment.waitForCommands(t, denon.MuteOnCommand)
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Mute })
+		broker.refuseTopic(t, testVolumeTopic, quietPeriod)
+	})
 }
 
 // A press is bounded at both ends of the scale, and a receiver a hand
 // left above the ceiling is not dragged back down by a press up.
 func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
-	t.Parallel()
 	press := func(rule ReceiverVolume, volume int, up bool) (int, bool) {
 		held := &session{
 			scale:  func() ReceiverVolume { return rule },
@@ -700,11 +740,15 @@ func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
 		{"no ceiling declared", ReceiverVolume{Step: 1}, 80, true, 0, false},
 		{"a volume the receiver has not reported", room, equipment.Unknown, true, 0, false},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			target, moves := press(one.rule, one.volume, one.up)
-			mustMatch(t, target, one.want)
-			mustMatch(t, moves, one.moves)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				target, moves := press(one.rule, one.volume, one.up)
+				mustMatch(t, target, one.want)
+				mustMatch(t, moves, one.moves)
+			})
 		})
 	}
 }
@@ -713,23 +757,25 @@ func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
 // adopt waits for one instead of giving up and ignoring every press.
 func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarnessWith(t, ReceiverVolume{})
-	held := h.begin(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarnessWith(t, ReceiverVolume{})
+		held := h.begin(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
+		broker.refuseTopic(t, testVolumeTopic, quietPeriod)
 
-	h.setRule(ReceiverVolume{Max: 72, Step: 1})
+		h.setRule(ReceiverVolume{Max: 72, Step: 1})
 
-	adopted := broker.waitForTopic(t, testVolumeTopic)
-	mustMatch(t, positionOf(t, adopted), volumeState{Level: 69})
-	broker.push(testVolumeTopic, adopted.payload)
-	waitUntilAdopted(t, held)
+		adopted := broker.waitForTopic(t, testVolumeTopic)
+		mustMatch(t, positionOf(t, adopted), volumeState{Level: 69})
+		broker.push(testVolumeTopic, adopted.payload)
+		waitUntilAdopted(t, held)
 
-	broker.push(testVolumeTopic, []byte(`{"level":80,"muted":false}`))
-	h.equipment.waitForCommands(t, "MV51")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
+		broker.push(testVolumeTopic, []byte(`{"level":80,"muted":false}`))
+		h.equipment.waitForCommands(t, "MV51")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
+	})
 }
 
 // A standby receiver whose session holds a power topic turns on and
@@ -737,80 +783,87 @@ func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
 // toggles.
 func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	h.soundModes = map[string]string{"GAME": "STEREO"}
-	h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		h.soundModes = map[string]string{"GAME": "STEREO"}
+		h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
-	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
-	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
-	mustMatch(t, h.equipment.waitForCommand(t), denon.SoundModeCommand("STEREO"))
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
+		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+		mustMatch(t, h.equipment.waitForCommand(t), denon.SoundModeCommand("STEREO"))
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
+	})
 }
 
 // A receiver that is already on goes to standby on a toggle, and selects
 // no input.
 func TestAToggleOnAReceiverAlreadyOnGoesToStandby(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	h.powerOn(t)
-	h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		h.powerOn(t)
+		h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
-	mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
-	h.refuseCommands(t, quietPeriod, "SIGAME")
+		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
+		h.refuseCommands(t, quietPeriod, "SIGAME")
+	})
 }
 
 // A second toggle on the receiver the first put to standby turns it back
 // on and selects the input again.
 func TestASecondTogglePowersTheReceiverBackOn(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	h.powerOn(t)
-	h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		h.powerOn(t)
+		h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
-	mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
-	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
-	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
+	})
 }
 
 // A session with no power topic subscribes to nothing and reads nothing
 // as a toggle.
 func TestASessionWithNoPowerTopicIgnoresAToggle(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	mustMatch(t, waitForString(t, broker.subs), testVolumeTopic)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		mustMatch(t, waitForString(t, broker.subs), testVolumeTopic)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
-	h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
+		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
+	})
 }
 
 // A message the session cannot read as a toggle leaves the receiver
 // alone, so another program's traffic on the power topic never moves the
 // room's power.
 func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		payload string
@@ -820,24 +873,28 @@ func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
 		{"a payload that is not a state", `not json`},
 		{"an empty payload", ``},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			h := newSessionHarness(t)
-			h.powerTopic = testPowerTopic
-			h.beginIdle(t, "GAME")
-			broker := h.brokers.waitForSession(t)
-			// The fake broker writes CONNACK before it reads a
-			// SUBSCRIBE, so a push after both subscriptions follows the
-			// CONNACK. A push before the CONNACK breaks the client's
-			// read of it, the bus connects again, and the payload
-			// reaches no session, so the test would pass with nothing
-			// read.
-			subscribed := map[string]bool{waitForString(t, broker.subs): true, waitForString(t, broker.subs): true}
-			mustMatch(t, subscribed[testPowerTopic], true)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				h := newSessionHarness(t)
+				h.powerTopic = testPowerTopic
+				h.beginIdle(t, "GAME")
+				broker := h.brokers.waitForSession(t)
+				// The fake broker writes CONNACK before it reads a
+				// SUBSCRIBE, so a push after both subscriptions follows the
+				// CONNACK. A push before the CONNACK breaks the client's
+				// read of it, the bus connects again, and the payload
+				// reaches no session, so the test would pass with nothing
+				// read.
+				subscribed := map[string]bool{waitForString(t, broker.subs): true, waitForString(t, broker.subs): true}
+				mustMatch(t, subscribed[testPowerTopic], true)
 
-			broker.push(testPowerTopic, []byte(one.payload))
+				broker.push(testPowerTopic, []byte(one.payload))
 
-			h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
+				h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
+			})
 		})
 	}
 }
@@ -846,37 +903,39 @@ func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
 // reconcile sees no change to re-assert.
 func TestAToggleWritesTheSpecsPower(t *testing.T) {
 	t.Parallel()
-	api := &cannedAPI{answers: map[string]any{
-		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{Metadata: ObjectMeta{Name: "theater"}},
-	}}
-	client := testAPIClient(t, api.handler())
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	applied := make(chan equipment.Power, 1)
-	h.applyPower = func(power equipment.Power) {
-		_, err := ApplyReceiverPower(client, "theater", power)
-		mustSucceed(t, err)
-		applied <- power
-	}
-	h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		api := &cannedAPI{answers: map[string]any{
+			"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{Metadata: ObjectMeta{Name: "theater"}},
+		}}
+		client := testAPIClient(t, api.handler())
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		applied := make(chan equipment.Power, 1)
+		h.applyPower = func(power equipment.Power) {
+			_, err := ApplyReceiverPower(client, "theater", power)
+			mustSucceed(t, err)
+			applied <- power
+		}
+		h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
-	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 
-	mustMatch(t, <-applied, equipment.PowerOn)
+		mustMatch(t, <-applied, equipment.PowerOn)
 
-	if len(api.requests) != 1 {
-		t.Fatalf("requests = %+v", api.requests)
-	}
-	sent := api.requests[0]
-	mustMatch(t, sent.Method, http.MethodPatch)
-	mustMatch(t, sent.Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
-	mustMatch(t, sent.Query.Get("fieldManager"), fieldManager)
-	mustMatch(t, sent.Query.Get("force"), "true")
-	body := map[string]any{}
-	mustSucceed(t, json.Unmarshal(sent.Body, &body))
-	spec, _ := body["spec"].(map[string]any)
-	mustMatch(t, spec["power"], any("On"))
+		if len(api.requests) != 1 {
+			t.Fatalf("requests = %+v", api.requests)
+		}
+		sent := api.requests[0]
+		mustMatch(t, sent.Method, http.MethodPatch)
+		mustMatch(t, sent.Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
+		mustMatch(t, sent.Query.Get("fieldManager"), fieldManager)
+		mustMatch(t, sent.Query.Get("force"), "true")
+		body := map[string]any{}
+		mustSucceed(t, json.Unmarshal(sent.Body, &body))
+		spec, _ := body["spec"].(map[string]any)
+		mustMatch(t, spec["power"], any("On"))
+	})
 }

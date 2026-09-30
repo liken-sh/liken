@@ -5,6 +5,7 @@ package denon
 
 import (
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 )
@@ -98,32 +99,38 @@ func TestStateBeforeTheReceiverAnswers(t *testing.T) {
 }
 
 func TestStateCarriesTheMainZoneInHalfSteps(t *testing.T) {
-	harness := startHarness(t)
-	waitForField(t, harness.events, equipment.EventSoundMode)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		waitForField(t, harness.events, equipment.EventSoundMode)
 
-	state := harness.client.State()
-	mustMatch(t, state.Reachable, equipment.ConditionTrue)
-	zone, _ := state.Zone(equipment.MainZone)
-	mustMatch(t, zone.Power, equipment.PowerStandby)
-	mustMatch(t, zone.Input, "MPLAY")
-	mustMatch(t, zone.SoundMode, "MULTI CH IN")
-	mustMatch(t, zone.Volume, 100)
-	mustMatch(t, zone.VolumeMax, 139)
+		state := harness.client.State()
+		mustMatch(t, state.Reachable, equipment.ConditionTrue)
+		zone, _ := state.Zone(equipment.MainZone)
+		mustMatch(t, zone.Power, equipment.PowerStandby)
+		mustMatch(t, zone.Input, "MPLAY")
+		mustMatch(t, zone.SoundMode, "MULTI CH IN")
+		mustMatch(t, zone.Volume, 100)
+		mustMatch(t, zone.VolumeMax, 139)
+	})
 }
 
 func TestSettingsCarriesTheParsedSnapshot(t *testing.T) {
-	harness := startHarness(t)
-	waitForField(t, harness.events, equipment.EventSoundMode)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		waitForField(t, harness.events, equipment.EventSoundMode)
 
-	// The noise lines arrive behind the sound mode, so poll until the
-	// folded snapshot holds them.
-	got := waitForSettings(t, harness.client, func(s Settings) bool {
-		return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
+		// The noise lines arrive behind the sound mode, so poll until the
+		// folded snapshot holds them.
+		got := waitForSettings(t, harness.client, func(s Settings) bool {
+			return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
+		})
+		mustMatch(t, got.System.Power, "Standby")
+		mustMatch(t, *got.System.VideoSelect, "off")
+		mustMatch(t, *got.Audio.DRC, "off")
+		mustMatch(t, *got.Audio.LFE, 0)
 	})
-	mustMatch(t, got.System.Power, "Standby")
-	mustMatch(t, *got.System.VideoSelect, "off")
-	mustMatch(t, *got.Audio.DRC, "off")
-	mustMatch(t, *got.Audio.LFE, 0)
 }
 
 // Every setter reaches the wire. The zone argument is main for now, and
@@ -156,12 +163,15 @@ func TestTheSettersSendEveryCommand(t *testing.T) {
 // A dropped connection is reported to the listener as a reachability
 // change, which is how the Receiver status learns the receiver is gone.
 func TestADroppedConnectionReportsUnreachable(t *testing.T) {
-	harness := startHarness(t)
-	waitForField(t, harness.events, equipment.EventSoundMode)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		waitForField(t, harness.events, equipment.EventSoundMode)
 
-	harness.receiver.dropConnections()
+		harness.receiver.dropConnections()
 
-	mustMatch(t, waitForField(t, harness.events, equipment.EventReachable).Reachable, equipment.ConditionFalse)
+		mustMatch(t, waitForField(t, harness.events, equipment.EventReachable).Reachable, equipment.ConditionFalse)
+	})
 }
 
 func TestACommandReportsItsOutcomeToTheWiredReporter(t *testing.T) {

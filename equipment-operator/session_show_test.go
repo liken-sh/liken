@@ -7,6 +7,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -17,23 +18,25 @@ import (
 // the TV, not the receiver, decides whether the room is on for it.
 func TestAShowAsksTheRoomAndTheReceiver(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
-	room := &roomRecord{}
-	h.room = room
-	held := h.beginIdle(t, "GAME")
-	held.setFlags(false, true)
-	h.equipment.waitForCommands(t, "SIGAME")
-	handOnTheRemote(t, h.equipment, "SIDVD")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+		room := &roomRecord{}
+		h.room = room
+		held := h.beginIdle(t, "GAME")
+		held.setFlags(false, true)
+		h.equipment.waitForCommands(t, "SIGAME")
+		handOnTheRemote(t, h.equipment, "SIDVD")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 
-	unit := &receiverUnit{session: held, log: h.lines}
-	unit.handleCommand([]byte(`{"command":"input.show"}`))
+		unit := &receiverUnit{session: held, log: h.lines}
+		unit.handleCommand([]byte(`{"command":"input.show"}`))
 
-	h.equipment.waitForCommands(t, "SIGAME")
-	mustDeepEqual(t, room.waitFor(t, 3), []string{
-		"opened (awake false)",
-		"woke: the screen of Player theater woke",
-		"show: the commands topic asks input.show",
+		h.equipment.waitForCommands(t, "SIGAME")
+		mustDeepEqual(t, room.waitFor(t, 3), []string{
+			"opened (awake false)",
+			"woke: the screen of Player theater woke",
+			"show: the commands topic asks input.show",
+		})
 	})
 }
 
@@ -41,13 +44,15 @@ func TestAShowAsksTheRoomAndTheReceiver(t *testing.T) {
 // on, and turns the receiver on no more than the ensure does.
 func TestAShowInStandbyTurnsNothingOn(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
-	room := &roomRecord{}
-	h.room = room
-	held := h.beginIdle(t, "GAME")
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+		room := &roomRecord{}
+		h.room = room
+		held := h.beginIdle(t, "GAME")
 
-	held.showInput()
+		held.showInput()
 
-	mustDeepEqual(t, room.waitFor(t, 2), []string{"opened (awake false)", "show: the commands topic asks input.show"})
-	h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
+		mustDeepEqual(t, room.waitFor(t, 2), []string{"opened (awake false)", "show: the commands topic asks input.show"})
+		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
+	})
 }

@@ -7,6 +7,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -18,6 +19,7 @@ import (
 func loggedController(t *testing.T, api *fakeAPI, brokerAddress string) (*controller, *logBuffer) {
 	t.Helper()
 	operator := newController(api.client, brokerAddress, testMetrics(t))
+	operator.dial = testNetwork.dial
 	operator.now = func() time.Time { return statusNow }
 	log := &logBuffer{}
 	operator.log = log
@@ -41,7 +43,6 @@ func reachedController(t *testing.T, receiver Receiver, brokerAddress string) (*
 // Each declared change is one line when the operator sends it, and a
 // later pass with the same spec adds none.
 func TestADeclaredChangeIsOneLine(t *testing.T) {
-	t.Parallel()
 	drc, lfe, volume, last := "low", 0, 40.0, "last"
 	cases := []struct {
 		name    string
@@ -96,24 +97,27 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 			`Receiver theater: generation 4 declares zone zone2 {"input":"CD","volume":40}; sent it; the receiver reported no value that differs after <time>`,
 		},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			fake := startFakeDenon(t)
-			receiver := testReceiver("theater", fake.address())
-			one.declare(&receiver)
-			_, operator, log := reachedController(t, receiver, "127.0.0.1:1")
-			one.prepare(t, fake, operator)
+			synctest.Test(t, func(t *testing.T) {
+				fake := startFakeDenon(t)
+				receiver := testReceiver("theater", fake.address())
+				one.declare(&receiver)
+				_, operator, log := reachedController(t, receiver, "127.0.0.1:1")
+				one.prepare(t, fake, operator)
 
-			mustSucceed(t, operator.pass(t.Context()))
-			fake.waitForCommands(t, one.command)
-			got := waitForLines(t, log, "generation 4", 1)
-			mustSucceed(t, operator.pass(t.Context()))
-			mustSucceed(t, operator.pass(t.Context()))
-			time.Sleep(quietPeriod)
+				mustSucceed(t, operator.pass(t.Context()))
+				fake.waitForCommands(t, one.command)
+				got := waitForLines(t, log, "generation 4", 1)
+				mustSucceed(t, operator.pass(t.Context()))
+				mustSucceed(t, operator.pass(t.Context()))
+				time.Sleep(quietPeriod)
 
-			mustDeepEqual(t, got, []string{one.want})
-			mustMatch(t, len(linesWith(log, "generation 4")), 1)
+				mustDeepEqual(t, got, []string{one.want})
+				mustMatch(t, len(linesWith(log, "generation 4")), 1)
+			})
 		})
 	}
 }
@@ -122,18 +126,20 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 // sends nothing, so it writes no line.
 func TestARestartAgainstASettledReceiverWritesNoLine(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	drc := "off"
-	receiver.Spec.Denon.Settings = denon.Settings{Audio: denon.AudioSettings{DRC: &drc}}
-	_, operator, log := reachedController(t, receiver, "127.0.0.1:1")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool { return s.Audio.DRC != nil })
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		drc := "off"
+		receiver.Spec.Denon.Settings = denon.Settings{Audio: denon.AudioSettings{DRC: &drc}}
+		_, operator, log := reachedController(t, receiver, "127.0.0.1:1")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool { return s.Audio.DRC != nil })
 
-	mustSucceed(t, operator.pass(t.Context()))
-	mustSucceed(t, operator.pass(t.Context()))
-	time.Sleep(quietPeriod)
+		mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
+		time.Sleep(quietPeriod)
 
-	mustMatch(t, len(linesWith(log, "generation 4")), 0)
+		mustMatch(t, len(linesWith(log, "generation 4")), 0)
+	})
 }
 
 // A command the driver refuses states the driver's own error.
@@ -155,7 +161,6 @@ func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
 // A message on the receiver's settings or commands topic is a person's
 // command, and each one is a line.
 func TestAMessageOnTheReceiversTopicsIsOneLine(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		topic   string
@@ -187,22 +192,25 @@ func TestAMessageOnTheReceiversTopicsIsOneLine(t *testing.T) {
 			"Receiver theater: the commands topic asks input.ensure; sent nothing, because no session stands",
 		},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			fake := startFakeDenon(t)
-			brokers := startFakeBrokerServer(t)
-			receiver := testReceiver("theater", fake.address())
-			receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-			receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
-			_, _, log := reachedController(t, receiver, brokers.address())
-			broker := brokers.waitForSession(t)
-			waitForString(t, broker.subs)
-			waitForString(t, broker.subs)
+			synctest.Test(t, func(t *testing.T) {
+				fake := startFakeDenon(t)
+				brokers := startFakeBrokerServer(t)
+				receiver := testReceiver("theater", fake.address())
+				receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+				receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
+				_, _, log := reachedController(t, receiver, brokers.address())
+				broker := brokers.waitForSession(t)
+				waitForString(t, broker.subs)
+				waitForString(t, broker.subs)
 
-			broker.push(one.topic, []byte(one.payload))
+				broker.push(one.topic, []byte(one.payload))
 
-			mustDeepEqual(t, waitForLines(t, log, "topic asks", 1), []string{one.want})
+				mustDeepEqual(t, waitForLines(t, log, "topic asks", 1), []string{one.want})
+			})
 		})
 	}
 }
@@ -228,26 +236,28 @@ func TestAWiimSettingsMessageStatesTheDevicesAnswer(t *testing.T) {
 // line each, and a pass that changes nothing adds none.
 func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	idle := idleReceiver(fake.address(), ReceiverVolume{Max: 69.5})
-	api, operator, log := reachedController(t, idle, brokers.address())
-	brokers.waitForSession(t).waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		idle := idleReceiver(fake.address(), ReceiverVolume{Max: 69.5})
+		api, operator, log := reachedController(t, idle, brokers.address())
+		brokers.waitForSession(t).waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	api.setReceivers(playingReceiver(fake.address(), ReceiverVolume{Max: 69.5}))
-	mustSucceed(t, operator.pass(t.Context()))
-	mustSucceed(t, operator.pass(t.Context()))
-	api.setReceivers(testReceiver("theater", fake.address()))
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(playingReceiver(fake.address(), ReceiverVolume{Max: 69.5}))
+		mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(testReceiver("theater", fake.address()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	mustDeepEqual(t, linesWith(log, "session for Player"), []string{
-		"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active false, awake false; the operator found it when it started, so it sends nothing for these flags",
-		"Receiver theater: the session for Player house/theater: active went from false to true",
-		"Receiver theater: the session for Player house/theater ended",
-	})
-	mustDeepEqual(t, linesWith(log, "owner mark"), []string{
-		`Receiver theater: published the owner mark {"owner":"receiver/theater"} on liken/players/theater/volume/owner`,
-		"Receiver theater: cleared the owner mark on liken/players/theater/volume/owner",
+		mustDeepEqual(t, linesWith(log, "session for Player"), []string{
+			"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active false, awake false; the operator found it when it started, so it sends nothing for these flags",
+			"Receiver theater: the session for Player house/theater: active went from false to true",
+			"Receiver theater: the session for Player house/theater ended",
+		})
+		mustDeepEqual(t, linesWith(log, "owner mark"), []string{
+			`Receiver theater: published the owner mark {"owner":"receiver/theater"} on liken/players/theater/volume/owner`,
+			"Receiver theater: cleared the owner mark on liken/players/theater/volume/owner",
+		})
 	})
 }
 

@@ -2,6 +2,7 @@ package upnp
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,6 +45,31 @@ func serve(t *testing.T, code int, body string) string {
 	}))
 	t.Cleanup(server.Close)
 	return server.URL + "/description.xml"
+}
+
+// FetchVia opens its connection through the dialer it takes, so the
+// read goes where the caller's own connection to the device goes.
+func TestFetchViaDialsThroughTheDialerItTakes(t *testing.T) {
+	t.Parallel()
+	url := serve(t, http.StatusOK, wiimAmpDescription)
+	var dialed []string
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = append(dialed, network+" "+address)
+		return (&net.Dialer{}).DialContext(ctx, network, address)
+	}
+
+	got, err := FetchVia(context.Background(), dial, url)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != "WiiM Amp" {
+		t.Fatalf("got %+v", got)
+	}
+	host := strings.TrimPrefix(strings.TrimSuffix(url, "/description.xml"), "http://")
+	if len(dialed) != 1 || dialed[0] != "tcp "+host {
+		t.Fatalf("dialed %v, want one dial of tcp %s", dialed, host)
+	}
 }
 
 func TestFetchReadsTheManufacturerAndTheModel(t *testing.T) {

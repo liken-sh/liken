@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -83,7 +84,6 @@ func (r *roomRecord) waitFor(t *testing.T, count int) []string {
 // A session that starts, even with both flags on, is adopted and wakes
 // nothing; a flag that turns on later is a wake.
 func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name   string
 		begin  [2]bool
@@ -102,20 +102,24 @@ func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
 			"slept",
 		}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := newSessionHarness(t)
-			room := &roomRecord{}
-			h.room = room
-			started := h.beginSession(t, "GAME", c.begin[0], c.begin[1])
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				h := newSessionHarness(t)
+				room := &roomRecord{}
+				h.room = room
+				started := h.beginSession(t, "GAME", c.begin[0], c.begin[1])
 
-			for _, flags := range c.flags {
-				started.setFlags(flags[0], flags[1])
-			}
+				for _, flags := range c.flags {
+					started.setFlags(flags[0], flags[1])
+				}
 
-			mustDeepEqual(t, room.waitFor(t, len(c.events)), c.events)
-			time.Sleep(quietPeriod)
-			mustDeepEqual(t, room.waitFor(t, len(c.events)), c.events)
+				mustDeepEqual(t, room.waitFor(t, len(c.events)), c.events)
+				time.Sleep(quietPeriod)
+				mustDeepEqual(t, room.waitFor(t, len(c.events)), c.events)
+			})
 		})
 	}
 }
@@ -125,24 +129,26 @@ func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
 // receiver off.
 func TestAToggleWakesAndSleepsTheRoom(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	room := &roomRecord{}
-	h.room = room
-	h.powerOn(t)
-	h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		room := &roomRecord{}
+		h.room = room
+		h.powerOn(t)
+		h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
-	mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
-	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 
-	mustDeepEqual(t, room.waitFor(t, 3), []string{
-		"opened (awake false)",
-		"slept",
-		"woke: the power topic asks toggle, and the receiver reports power Standby",
+		mustDeepEqual(t, room.waitFor(t, 3), []string{
+			"opened (awake false)",
+			"slept",
+			"woke: the power topic asks toggle, and the receiver reports power Standby",
+		})
 	})
 }

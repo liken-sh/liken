@@ -6,6 +6,7 @@ package denon
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -164,16 +165,20 @@ func TestApplySettingsRoundTripsEveryHDMIField(t *testing.T) {
 		{"power saving", HDMISettings{PowerSaving: boolPtr(true)}, "SSHOSCONPSV ON", "SSHOS ?",
 			func(h HDMISettings) bool { return h.PowerSaving != nil && *h.PowerSaving }},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			harness := startHarness(t)
-			drainQueries(t, harness)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				harness := startHarness(t)
+				drainQueries(t, harness)
 
-			mustSucceed(t, harness.client.ApplySettings(Settings{HDMI: one.want}))
-			sent := harness.receiver.waitForCommands(t, one.query)
-			mustMatch(t, sent[0], one.command)
+				mustSucceed(t, harness.client.ApplySettings(Settings{HDMI: one.want}))
+				sent := harness.receiver.waitForCommands(t, one.query)
+				mustMatch(t, sent[0], one.command)
 
-			waitForSettings(t, harness.client, func(s Settings) bool { return one.check(s.HDMI) })
+				waitForSettings(t, harness.client, func(s Settings) bool { return one.check(s.HDMI) })
+			})
 		})
 	}
 }
@@ -181,44 +186,53 @@ func TestApplySettingsRoundTripsEveryHDMIField(t *testing.T) {
 // Several HDMI fields in one apply send one read-back per family, after
 // every set.
 func TestApplySettingsAsksForTheHDMIFamiliesOnce(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	want := Settings{HDMI: HDMISettings{
-		AudioOut:          strPtr("avr"),
-		PassThroughSource: strPtr("last"),
-		Control:           boolPtr(true),
-	}}
-	mustSucceed(t, harness.client.ApplySettings(want))
+		want := Settings{HDMI: HDMISettings{
+			AudioOut:          strPtr("avr"),
+			PassThroughSource: strPtr("last"),
+			Control:           boolPtr(true),
+		}}
+		mustSucceed(t, harness.client.ApplySettings(want))
 
-	sent := harness.receiver.waitForCommands(t, "SSHOS ?")
-	mustMatch(t, strings.Join(sent, " | "), "VSAUDIO AMP | SSHOSCONSTS LAS | SSHOSCON ON | VSAUDIO ? | SSHOS ?")
+		sent := harness.receiver.waitForCommands(t, "SSHOS ?")
+		mustMatch(t, strings.Join(sent, " | "), "VSAUDIO AMP | SSHOSCONSTS LAS | SSHOSCON ON | VSAUDIO ? | SSHOS ?")
+	})
 }
 
 // A keyed bus write to an HDMI id sends the set and then the read-back.
 func TestSetRoutesAnHDMIIdToTheWireAndReadsItBack(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	mustSucceed(t, harness.client.Set("hdmi.passThroughSource", equipment.StringSettingValue("hdmi4")))
+		mustSucceed(t, harness.client.Set("hdmi.passThroughSource", equipment.StringSettingValue("hdmi4")))
 
-	sent := harness.receiver.waitForCommands(t, "SSHOS ?")
-	mustMatch(t, strings.Join(sent, " | "), "SSHOSCONSTS HD4 | SSHOS ?")
-	got := waitForSettings(t, harness.client, func(s Settings) bool {
-		return s.HDMI.PassThroughSource != nil && *s.HDMI.PassThroughSource == "hdmi4"
+		sent := harness.receiver.waitForCommands(t, "SSHOS ?")
+		mustMatch(t, strings.Join(sent, " | "), "SSHOSCONSTS HD4 | SSHOS ?")
+		got := waitForSettings(t, harness.client, func(s Settings) bool {
+			return s.HDMI.PassThroughSource != nil && *s.HDMI.PassThroughSource == "hdmi4"
+		})
+		mustMatch(t, *got.HDMI.PassThroughSource, "hdmi4")
 	})
-	mustMatch(t, *got.HDMI.PassThroughSource, "hdmi4")
 }
 
 // A set that sends no HDMI command sends no HDMI read-back.
 func TestSetOutsideTheHDMIFamilySendsNoReadBack(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	mustSucceed(t, harness.client.Set("tone.bass", equipment.NumberSettingValue(3)))
-	mustMatch(t, harness.receiver.waitForCommand(t), "PSBAS 53")
+		mustSucceed(t, harness.client.Set("tone.bass", equipment.NumberSettingValue(3)))
+		mustMatch(t, harness.receiver.waitForCommand(t), "PSBAS 53")
 
-	mustStaySilentCommands(t, harness.receiver.commands, 100*time.Millisecond)
+		mustStaySilentCommands(t, harness.receiver.commands, 100*time.Millisecond)
+	})
 }
 
 // A read-back that cannot be delivered is reported, the way a set that

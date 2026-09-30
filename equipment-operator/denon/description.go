@@ -42,7 +42,7 @@ func (d *Client) describe(ctx context.Context) {
 	d.mutex.Unlock()
 
 	go func() {
-		description, err := upnp.Fetch(ctx, url)
+		description, err := upnp.FetchVia(ctx, d.dialer(), url)
 		d.mutex.Lock()
 		d.describing = false
 		if err != nil {

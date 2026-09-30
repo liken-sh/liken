@@ -40,7 +40,7 @@ var discover = wiim.Discover
 // queries and two SSDP searches over the window. The amps answer the
 // mDNS query on the group, and every UPnP media renderer on the LAN
 // answers each search.
-var (
+const (
 	discoveryWindow   = 4 * time.Second
 	discoveryInterval = 30 * time.Second
 )

@@ -83,7 +83,7 @@ func TestNetworkDiscoveryOffSearchesForNothing(t *testing.T) {
 			api := startFakeAPI(t)
 			equipment := startFakeDenon(t)
 			api.setReceivers(testReceiver("theater", equipment.address()))
-			config := settings{busAddress: "127.0.0.1:1", networkDiscoveryOff: one.off}
+			config := settings{busAddress: "127.0.0.1:1", networkDiscoveryOff: one.off, dial: testNetwork.dial}
 
 			runServeUntil(t, api, config, func() { one.settled(t, api) })
 

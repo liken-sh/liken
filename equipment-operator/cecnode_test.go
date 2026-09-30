@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
@@ -59,84 +60,94 @@ func controlBus(name string, adapters ...CECBusAdapter) CECBus {
 
 func TestANewAdapterMakesABusInListen(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	_, device := usbAdapter(cecRoom())
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		_, device := usbAdapter(cecRoom())
 
-	startNode(t, api, "node-1", device)
+		startNode(t, api, "node-1", device)
 
-	entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	bus, _ := api.bus("node-1")
-	mustMatch(t, bus.Metadata.Labels[discoveredLabel], "cec")
-	mustMatch(t, bus.Spec.Mode, CECListen)
-	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-1"}})
-	mustMatch(t, entry.Driver, "cectest")
-	if entry.LogicalAddress != nil {
-		t.Errorf("a listening adapter holds logical address %d", *entry.LogicalAddress)
-	}
+		entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		bus, _ := api.bus("node-1")
+		mustMatch(t, bus.Metadata.Labels[discoveredLabel], "cec")
+		mustMatch(t, bus.Spec.Mode, CECListen)
+		mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-1"}})
+		mustMatch(t, entry.Driver, "cectest")
+		if entry.LogicalAddress != nil {
+			t.Errorf("a listening adapter holds logical address %d", *entry.LogicalAddress)
+		}
+	})
 }
 
 func TestAListeningAdapterReportsWhatItHears(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	wire := cecRoom()
-	_, device := usbAdapter(wire)
-	startNode(t, api, "node-1", device)
-	api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		wire := cecRoom()
+		_, device := usbAdapter(wire)
+		startNode(t, api, "node-1", device)
+		api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
-	wire.Send(cec.ActiveSource(8, 0x1500))
-	wire.Send(cec.GiveDevicePowerStatus(0, 5))
+		wire.Send(cec.ActiveSource(8, 0x1500))
+		wire.Send(cec.GiveDevicePowerStatus(0, 5))
 
-	entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return len(entry.Devices) == 2 })
-	mustDeepEqual(t, entry.Devices, []CECDevice{
-		{LogicalAddress: 0, Type: "TV"},
-		{LogicalAddress: 8, Type: "Playback", PhysicalAddress: "1.5.0.0"},
+		entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return len(entry.Devices) == 2 })
+		mustDeepEqual(t, entry.Devices, []CECDevice{
+			{LogicalAddress: 0, Type: "TV"},
+			{LogicalAddress: 8, Type: "Playback", PhysicalAddress: "1.5.0.0"},
+		})
+		if sent := wire.Sent(); len(sent) != 0 {
+			t.Errorf("a listening adapter sent %v", sent)
+		}
 	})
-	if sent := wire.Sent(); len(sent) != 0 {
-		t.Errorf("a listening adapter sent %v", sent)
-	}
 }
 
 func TestAListeningAdapterWithoutCapNetAdminIsRefused(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	_, device := cecRoom().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress})
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		_, device := cecRoom().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress})
 
-	startNode(t, api, "node-1", device)
+		startNode(t, api, "node-1", device)
 
-	entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterRefused })
-	mustMatch(t, entry.Message, "CEC_S_MODE: operation not permitted; the kernel allows a monitor only to a process with CAP_NET_ADMIN")
+		entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterRefused })
+		mustMatch(t, entry.Message, "CEC_S_MODE: operation not permitted; the kernel allows a monitor only to a process with CAP_NET_ADMIN")
+	})
 }
 
 func TestAPersonsBusTakesOverFromTheDiscoveredOne(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	_, device := usbAdapter(cecRoom())
-	startNode(t, api, "node-1", device)
-	api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		_, device := usbAdapter(cecRoom())
+		startNode(t, api, "node-1", device)
+		api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
 
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	api.waitUntil(t, "the discovered bus to go", func() bool { return slices.Contains(api.deletedNames(), "node-1") })
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		api.waitUntil(t, "the discovered bus to go", func() bool { return slices.Contains(api.deletedNames(), "node-1") })
+	})
 }
 
 func TestABusOfTheMachinesNameThatNamesAnotherMachineIsLeftAlone(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
-	_, device := usbAdapter(cecRoom())
-	node, err := newCECNode(api.client, "node-1", device)
-	mustSucceed(t, err)
-	list, err := ListCECBuses(api.client)
-	mustSucceed(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
+		_, device := usbAdapter(cecRoom())
+		node, err := newCECNode(api.client, "node-1", device)
+		mustSucceed(t, err)
+		list, err := ListCECBuses(api.client)
+		mustSucceed(t, err)
 
-	chosen := node.choose(list)
+		chosen := node.choose(list)
 
-	if chosen != nil {
-		t.Errorf("chose %s", chosen.Metadata.Name)
-	}
-	bus, _ := api.bus("node-1")
-	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+		if chosen != nil {
+			t.Errorf("chose %s", chosen.Metadata.Name)
+		}
+		bus, _ := api.bus("node-1")
+		mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+	})
 }
 
 // A list can leave out a bus that exists: the pass reads each bus it
@@ -146,19 +157,21 @@ func TestABusOfTheMachinesNameThatNamesAnotherMachineIsLeftAlone(t *testing.T) {
 // adapter's own.
 func TestABusOfTheMachinesNameThatAListMissedIsLeftAlone(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
-	_, device := usbAdapter(cecRoom())
-	node, err := newCECNode(api.client, "node-1", device)
-	mustSucceed(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
+		_, device := usbAdapter(cecRoom())
+		node, err := newCECNode(api.client, "node-1", device)
+		mustSucceed(t, err)
 
-	chosen := node.choose(&CECBusList{})
+		chosen := node.choose(&CECBusList{})
 
-	if chosen != nil {
-		t.Errorf("chose %s", chosen.Metadata.Name)
-	}
-	bus, _ := api.bus("node-1")
-	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+		if chosen != nil {
+			t.Errorf("chose %s", chosen.Metadata.Name)
+		}
+		bus, _ := api.bus("node-1")
+		mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+	})
 }
 
 // A person can create a bus of the machine's name after the pass read
@@ -166,38 +179,42 @@ func TestABusOfTheMachinesNameThatAListMissedIsLeftAlone(t *testing.T) {
 // bus of the name exists, so it leaves the person's bus alone.
 func TestABusCreatedAfterTheReadIsLeftAlone(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
-	api.mutex.Lock()
-	api.createdUnseen = "node-1"
-	api.mutex.Unlock()
-	_, device := usbAdapter(cecRoom())
-	node, err := newCECNode(api.client, "node-1", device)
-	mustSucceed(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
+		api.mutex.Lock()
+		api.createdUnseen = "node-1"
+		api.mutex.Unlock()
+		_, device := usbAdapter(cecRoom())
+		node, err := newCECNode(api.client, "node-1", device)
+		mustSucceed(t, err)
 
-	chosen := node.choose(&CECBusList{})
+		chosen := node.choose(&CECBusList{})
 
-	if chosen != nil {
-		t.Errorf("chose %s", chosen.Metadata.Name)
-	}
-	bus, _ := api.bus("node-1")
-	mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+		if chosen != nil {
+			t.Errorf("chose %s", chosen.Metadata.Name)
+		}
+		bus, _ := api.bus("node-1")
+		mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
+	})
 }
 
 // A machine that a bus stops naming removes its entry from that bus.
 func TestAMachineThatLeavesABusRemovesItsEntry(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	_, device := usbAdapter(cecRoom())
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
-	startNode(t, api, "node-1", device)
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		_, device := usbAdapter(cecRoom())
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
+		startNode(t, api, "node-1", device)
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
 
-	api.waitUntil(t, "the entry to go", func() bool {
-		_, held := api.entry("den", "node-1")
-		return !held
+		api.waitUntil(t, "the entry to go", func() bool {
+			_, held := api.entry("den", "node-1")
+			return !held
+		})
 	})
 }
 
@@ -205,21 +222,23 @@ func TestAMachineThatLeavesABusRemovesItsEntry(t *testing.T) {
 // node workload ends and the kubelet restarts it.
 func TestTheNodeWorkloadEndsWhenTheAdapterLeaves(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	adapter, device := usbAdapter(cecRoom())
-	done := startNode(t, api, "node-1", device)
-	api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		adapter, device := usbAdapter(cecRoom())
+		done := startNode(t, api, "node-1", device)
+		api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
-	adapter.Unplug()
+		adapter.Unplug()
 
-	select {
-	case err := <-done:
-		if !cec.IsGone(err) {
-			t.Errorf("ended with %v, want ENODEV", err)
+		select {
+		case err := <-done:
+			if !cec.IsGone(err) {
+				t.Errorf("ended with %v, want ENODEV", err)
+			}
+		case <-time.After(testTimeout):
+			t.Fatal("the node workload did not end")
 		}
-	case <-time.After(testTimeout):
-		t.Fatal("the node workload did not end")
-	}
+	})
 }
 
 func TestFindAdapterTakesTheNodeTheClaimDelivered(t *testing.T) {
@@ -265,8 +284,10 @@ func TestFindAdapterFailsWithNoNode(t *testing.T) {
 // such as one stored before the field existed.
 func TestTheOSDNameIsTheBusesOrLiken(t *testing.T) {
 	t.Parallel()
-	mustMatch(t, osdName(CECBusSpec{OSDName: "Den TV"}), "Den TV")
-	mustMatch(t, osdName(CECBusSpec{}), "liken")
+	synctest.Test(t, func(t *testing.T) {
+		mustMatch(t, osdName(CECBusSpec{OSDName: "Den TV"}), "Den TV")
+		mustMatch(t, osdName(CECBusSpec{}), "liken")
+	})
 }
 
 // Each failure before the node workload runs is the process's last
@@ -315,55 +336,65 @@ func TestServeCECNamesAnAdapterItCannotOpen(t *testing.T) {
 // to that bus alone.
 func TestTheAdapterFollowsTheFirstOfTwoPersonsBuses(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	for _, name := range []string{"study", "den"} {
-		api.putBus(CECBus{Metadata: ObjectMeta{Name: name}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
-	}
-	_, device := usbAdapter(cecRoom())
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		for _, name := range []string{"study", "den"} {
+			api.putBus(CECBus{Metadata: ObjectMeta{Name: name}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
+		}
+		_, device := usbAdapter(cecRoom())
 
-	startNode(t, api, "node-1", device)
+		startNode(t, api, "node-1", device)
 
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	if _, held := api.entry("study", "node-1"); held {
-		t.Error("the adapter reports to two buses")
-	}
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		if _, held := api.entry("study", "node-1"); held {
+			t.Error("the adapter reports to two buses")
+		}
+	})
 }
 
 // An adapter whose driver has no monitor-all mode listens to the
 // broadcasts, and its entry says so.
 func TestAnAdapterWithoutMonitorAllHearsBroadcasts(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	_, device := cecRoom().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress, Monitor: true, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		_, device := cecRoom().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress, Monitor: true, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
 
-	startNode(t, api, "node-1", device)
+		startNode(t, api, "node-1", device)
 
-	entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	mustMatch(t, entry.Message, "the adapter's driver has no monitor-all mode, so the adapter hears only broadcasts")
+		entry := api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		mustMatch(t, entry.Message, "the adapter's driver has no monitor-all mode, so the adapter hears only broadcasts")
+	})
 }
 
 func TestTheNodeWorkloadStopsWhereItCannotStart(t *testing.T) {
 	t.Parallel()
 	t.Run("an adapter that left before the start", func(t *testing.T) {
-		adapter, device := usbAdapter(cecRoom())
-		adapter.Unplug()
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			adapter, device := usbAdapter(cecRoom())
+			adapter.Unplug()
 
-		_, err := newCECNode(startCECAPI(t).client, "node-1", device)
+			_, err := newCECNode(startCECAPI(t).client, "node-1", device)
 
-		if !cec.IsGone(err) {
-			t.Errorf("got %v, want ENODEV", err)
-		}
+			if !cec.IsGone(err) {
+				t.Errorf("got %v, want ENODEV", err)
+			}
+		})
 	})
 	t.Run("a cluster with no CECBus definition", func(t *testing.T) {
-		_, device := usbAdapter(cecRoom())
-		node, err := newCECNode(testAPIClient(t, (&cannedAPI{}).handler()), "node-1", device)
-		mustSucceed(t, err)
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			_, device := usbAdapter(cecRoom())
+			node, err := newCECNode(testAPIClient(t, (&cannedAPI{}).handler()), "node-1", device)
+			mustSucceed(t, err)
 
-		err = node.run(t.Context())
+			err = node.run(t.Context())
 
-		if err == nil || !strings.HasPrefix(err.Error(), "listing CECBuses: ") {
-			t.Errorf("got %v", err)
-		}
+			if err == nil || !strings.HasPrefix(err.Error(), "listing CECBuses: ") {
+				t.Errorf("got %v", err)
+			}
+		})
 	})
 }
 
@@ -371,22 +402,24 @@ func TestTheNodeWorkloadStopsWhereItCannotStart(t *testing.T) {
 // the report, and the report arrives once the server answers again.
 func TestTheEntryArrivesAfterTheAPIServerRecovers(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	wire := cecRoom()
-	_, device := usbAdapter(wire)
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
-	startNode(t, api, "node-1", device)
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
-	api.refuse(true)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		wire := cecRoom()
+		_, device := usbAdapter(wire)
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
+		startNode(t, api, "node-1", device)
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+		api.refuse(true)
 
-	wire.Send(cec.ActiveSource(8, 0x1500))
-	time.Sleep(50 * time.Millisecond)
-	api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
-	time.Sleep(50 * time.Millisecond)
-	api.refuse(false)
-	wire.Send(cec.ReportPowerStatus(8, 15, cec.PowerOn))
+		wire.Send(cec.ActiveSource(8, 0x1500))
+		time.Sleep(50 * time.Millisecond)
+		api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
+		time.Sleep(50 * time.Millisecond)
+		api.refuse(false)
+		wire.Send(cec.ReportPowerStatus(8, 15, cec.PowerOn))
 
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
-		return len(entry.Devices) == 1 && entry.Devices[0].PhysicalAddress == "1.5.0.0" && entry.Devices[0].Power == "On"
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
+			return len(entry.Devices) == 1 && entry.Devices[0].PhysicalAddress == "1.5.0.0" && entry.Devices[0].Power == "On"
+		})
 	})
 }

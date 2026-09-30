@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -58,7 +59,6 @@ func pressPower(t *testing.T, h *sessionHarness) {
 // so the press asks the TV for standby and puts the receiver in standby
 // when it is on.
 func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name     string
 		on       bool
@@ -67,28 +67,32 @@ func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
 		{"a receiver that is on", true, "sent power Standby; the receiver reported power Standby after <time>"},
 		{"a receiver in standby", false, "sent the receiver nothing, because it reports power Standby"},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := newSessionHarness(t)
-			h.powerTopic = testPowerTopic
-			if c.on {
-				h.powerOn(t)
-			}
-			api, room := televisionRoom(t, h.lines, "On")
-			h.room = room
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				h := newSessionHarness(t)
+				h.powerTopic = testPowerTopic
+				if c.on {
+					h.powerOn(t)
+				}
+				api, room := televisionRoom(t, h.lines, "On")
+				h.room = room
 
-			pressPower(t, h)
+				pressPower(t, h)
 
-			session := loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
-			mustMatch(t, session.Awake, false)
-			if c.on {
-				mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
-			}
-			h.refuseCommands(t, quietPeriod, "PWSTANDBY", denon.PowerOnCommand)
-			press := "Receiver theater: the power topic asks toggle, and Television lounge reports power On; "
-			mustDeepEqual(t, waitForLines(t, h.log, "asks toggle", 2), []string{
-				press + "asked Television lounge to go to standby",
-				press + c.receiver,
+				session := loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
+				mustMatch(t, session.Awake, false)
+				if c.on {
+					mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+				}
+				h.refuseCommands(t, quietPeriod, "PWSTANDBY", denon.PowerOnCommand)
+				press := "Receiver theater: the power topic asks toggle, and Television lounge reports power On; "
+				mustDeepEqual(t, waitForLines(t, h.log, "asks toggle", 2), []string{
+					press + "asked Television lounge to go to standby",
+					press + c.receiver,
+				})
 			})
 		})
 	}
@@ -97,7 +101,6 @@ func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
 // A TV in standby means the room is off, whatever the receiver reports,
 // so the press wakes the TV and turns the receiver on when it is not.
 func TestAPowerPressTurnsARoomWithTheTVInStandbyOn(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		on    bool
@@ -106,28 +109,31 @@ func TestAPowerPressTurnsARoomWithTheTVInStandbyOn(t *testing.T) {
 		{"a receiver that is on", true, nil},
 		{"a receiver in standby", false, []string{denon.PowerOnCommand}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			h := newSessionHarness(t)
-			h.powerTopic = testPowerTopic
-			if c.on {
-				h.powerOn(t)
-			}
-			api, room := televisionRoom(t, h.lines, "Standby")
-			h.room = room
+			synctest.Test(t, func(t *testing.T) {
+				h := newSessionHarness(t)
+				h.powerTopic = testPowerTopic
+				if c.on {
+					h.powerOn(t)
+				}
+				api, room := televisionRoom(t, h.lines, "Standby")
+				h.room = room
 
-			pressPower(t, h)
+				pressPower(t, h)
 
-			session := loungeSession(t, api, func(session TelevisionSession) bool { return session.WokeAt != "" })
-			mustMatch(t, session.Awake, true)
-			mustMatch(t, session.StandbyAt, "")
-			var sent []string
-			for command := h.equipment.waitForCommand(t); command != "SIGAME"; command = h.equipment.waitForCommand(t) {
-				sent = append(sent, command)
-			}
-			mustDeepEqual(t, sent, c.power)
-			h.refuseCommands(t, quietPeriod, "PWSTANDBY")
+				session := loungeSession(t, api, func(session TelevisionSession) bool { return session.WokeAt != "" })
+				mustMatch(t, session.Awake, true)
+				mustMatch(t, session.StandbyAt, "")
+				var sent []string
+				for command := h.equipment.waitForCommand(t); command != "SIGAME"; command = h.equipment.waitForCommand(t) {
+					sent = append(sent, command)
+				}
+				mustDeepEqual(t, sent, c.power)
+				h.refuseCommands(t, quietPeriod, "PWSTANDBY")
+			})
 		})
 	}
 }
@@ -136,34 +142,38 @@ func TestAPowerPressTurnsARoomWithTheTVInStandbyOn(t *testing.T) {
 // receiver decides, and the press still reaches the TV.
 func TestAPowerPressWithATVThatDoesNotAnswerFollowsTheReceiver(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	h.powerOn(t)
-	api, room := televisionRoom(t, h.lines, "")
-	h.room = room
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		h.powerOn(t)
+		api, room := televisionRoom(t, h.lines, "")
+		h.room = room
 
-	pressPower(t, h)
+		pressPower(t, h)
 
-	loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
-	mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
-	mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0],
-		"Receiver theater: the power topic asks toggle, and the receiver reports power On; asked Television lounge to go to standby")
+		loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
+		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+		mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0],
+			"Receiver theater: the power topic asks toggle, and the receiver reports power On; asked Television lounge to go to standby")
+	})
 }
 
 // A session that sleeps asks the TV for nothing: the TV of a living
 // room shows other inputs while the room's player is idle.
 func TestASessionThatSleepsAsksTheTVForNothing(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	api, room := televisionRoom(t, h.lines, "On")
-	h.room = room
-	started := h.beginSession(t, "GAME", true, true)
-	loungeSession(t, api, func(session TelevisionSession) bool { return session.Awake })
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		api, room := televisionRoom(t, h.lines, "On")
+		h.room = room
+		started := h.beginSession(t, "GAME", true, true)
+		loungeSession(t, api, func(session TelevisionSession) bool { return session.Awake })
 
-	started.setFlags(false, false)
+		started.setFlags(false, false)
 
-	session := loungeSession(t, api, func(session TelevisionSession) bool { return !session.Awake })
-	mustMatch(t, session.StandbyAt, "")
+		session := loungeSession(t, api, func(session TelevisionSession) bool { return !session.Awake })
+		mustMatch(t, session.StandbyAt, "")
+	})
 }
 
 // A WiiM has no standby. The press still turns the room off: the TV
@@ -179,7 +189,7 @@ func TestAPowerPressInAWiimRoomTurnsTheTVOff(t *testing.T) {
 	api, room := televisionRoom(t, lines, "On")
 	applied := make(chan equipment.Power, 4)
 	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic, PowerTopic: testPowerTopic}
-	startSession(t.Context(), "studio", spec, client, nil, lines, brokers.address(),
+	startSession(t.Context(), "studio", spec, client, nil, lines, brokers.address(), testNetwork.dial,
 		func() ReceiverVolume { return ReceiverVolume{} }, nil, func(power equipment.Power) { applied <- power }, room)
 	broker := brokers.waitForSession(t)
 	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
@@ -217,7 +227,6 @@ func (d *unreachableDriver) SetInput(_ string, input string) error {
 // the TV still decides the room and turns off or on. With no TV power
 // to decide, the press is dropped.
 func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		power string
@@ -229,31 +238,35 @@ func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
 		{"a TV in standby", "Standby", func(session TelevisionSession) bool { return session.WokeAt != "" && session.Awake },
 			"asked Television lounge to wake and show Display acm-0001-receiver"},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			driver := &unreachableDriver{fixedDriver: fixedDriver{state: equipment.State{Reachable: equipment.ConditionFalse}}, sent: make(chan string, 4)}
-			brokers := startFakeBrokerServer(t)
-			log := &logBuffer{}
-			lines := newReceiverLog(log, "studio")
-			api, room := televisionRoom(t, lines, c.power)
-			applied := make(chan equipment.Power, 4)
-			spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic, PowerTopic: testPowerTopic}
-			startSession(t.Context(), "studio", spec, driver, nil, lines, brokers.address(),
-				func() ReceiverVolume { return ReceiverVolume{} }, nil, func(power equipment.Power) { applied <- power }, room)
-			broker := brokers.waitForSession(t)
-			broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				driver := &unreachableDriver{fixedDriver: fixedDriver{state: equipment.State{Reachable: equipment.ConditionFalse}}, sent: make(chan string, 4)}
+				brokers := startFakeBrokerServer(t)
+				log := &logBuffer{}
+				lines := newReceiverLog(log, "studio")
+				api, room := televisionRoom(t, lines, c.power)
+				applied := make(chan equipment.Power, 4)
+				spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic, PowerTopic: testPowerTopic}
+				startSession(t.Context(), "studio", spec, driver, nil, lines, brokers.address(), testNetwork.dial,
+					func() ReceiverVolume { return ReceiverVolume{} }, nil, func(power equipment.Power) { applied <- power }, room)
+				broker := brokers.waitForSession(t)
+				broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-			broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+				broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
-			loungeSession(t, api, c.ready)
-			press := "Receiver studio: the power topic asks toggle, and Television lounge reports power " + c.power + "; "
-			mustDeepEqual(t, waitForLines(t, log, "asks toggle", 2), []string{
-				press + c.line,
-				press + "sent the receiver nothing, because the operator cannot reach it",
+				loungeSession(t, api, c.ready)
+				press := "Receiver studio: the power topic asks toggle, and Television lounge reports power " + c.power + "; "
+				mustDeepEqual(t, waitForLines(t, log, "asks toggle", 2), []string{
+					press + c.line,
+					press + "sent the receiver nothing, because the operator cannot reach it",
+				})
+				time.Sleep(quietPeriod)
+				mustMatch(t, len(driver.sent), 0)
+				mustMatch(t, len(applied), 0)
 			})
-			time.Sleep(quietPeriod)
-			mustMatch(t, len(driver.sent), 0)
-			mustMatch(t, len(applied), 0)
 		})
 	}
 }
@@ -262,22 +275,24 @@ func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
 // receiver is dropped: nothing reaches the TV or the receiver.
 func TestAPowerPressWithAnUnreachableReceiverAndNoTVPowerIsDropped(t *testing.T) {
 	t.Parallel()
-	driver := &unreachableDriver{fixedDriver: fixedDriver{state: equipment.State{Reachable: equipment.ConditionFalse}}, sent: make(chan string, 4)}
-	brokers := startFakeBrokerServer(t)
-	log := &logBuffer{}
-	lines := newReceiverLog(log, "studio")
-	api, room := televisionRoom(t, lines, "")
-	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic, PowerTopic: testPowerTopic}
-	startSession(t.Context(), "studio", spec, driver, nil, lines, brokers.address(),
-		func() ReceiverVolume { return ReceiverVolume{} }, nil, nil, room)
-	broker := brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	written := api.sessionWriteCount()
+	synctest.Test(t, func(t *testing.T) {
+		driver := &unreachableDriver{fixedDriver: fixedDriver{state: equipment.State{Reachable: equipment.ConditionFalse}}, sent: make(chan string, 4)}
+		brokers := startFakeBrokerServer(t)
+		log := &logBuffer{}
+		lines := newReceiverLog(log, "studio")
+		api, room := televisionRoom(t, lines, "")
+		spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic, PowerTopic: testPowerTopic}
+		startSession(t.Context(), "studio", spec, driver, nil, lines, brokers.address(), testNetwork.dial,
+			func() ReceiverVolume { return ReceiverVolume{} }, nil, nil, room)
+		broker := brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		written := api.sessionWriteCount()
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
-	time.Sleep(quietPeriod)
-	mustMatch(t, api.sessionWriteCount(), written)
-	mustMatch(t, len(driver.sent), 0)
-	mustDeepEqual(t, linesWith(log, "asks toggle"), []string(nil))
+		time.Sleep(quietPeriod)
+		mustMatch(t, api.sessionWriteCount(), written)
+		mustMatch(t, len(driver.sent), 0)
+		mustDeepEqual(t, linesWith(log, "asks toggle"), []string(nil))
+	})
 }

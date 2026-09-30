@@ -23,6 +23,7 @@ func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver))
 	api := startFakeAPI(t)
 	brokers := startFakeBrokerServer(t)
 	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.dial = testNetwork.dial
 	operator.now = func() time.Time { return statusNow }
 	log := &logBuffer{}
 	operator.log = log
@@ -41,7 +42,6 @@ func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver))
 }
 
 func TestARewiredUnitKeepsTheSessionThatStands(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name     string
 		receiver func(*testing.T) Receiver
@@ -71,8 +71,10 @@ func TestARewiredUnitKeepsTheSessionThatStands(t *testing.T) {
 			},
 		},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
 			log := rewired(t, one.receiver(t), one.move(t))
 
 			mustDeepEqual(t, linesWith(log, "cleared the owner mark"), []string(nil))

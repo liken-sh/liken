@@ -12,6 +12,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -44,6 +45,21 @@ var client = &http.Client{
 // cannot read, or one that names no model, is an error that carries the
 // device's own answer, so a log line states why the device was not read.
 func Fetch(ctx context.Context, url string) (Description, error) {
+	return fetch(ctx, client, url)
+}
+
+// FetchVia reads the description the way Fetch does, over a connection
+// that dial opens. A driver that reaches its device through a dialer of
+// its own reads the description through the same dialer, so the read
+// goes where the driver's connection goes.
+func FetchVia(ctx context.Context, dial func(ctx context.Context, network, address string) (net.Conn, error), url string) (Description, error) {
+	return fetch(ctx, &http.Client{
+		Timeout:   timeout,
+		Transport: &http.Transport{DisableKeepAlives: true, DialContext: dial},
+	}, url)
+}
+
+func fetch(ctx context.Context, client *http.Client, url string) (Description, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Description{}, err

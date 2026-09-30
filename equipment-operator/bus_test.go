@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -43,8 +44,8 @@ func newFakeBroker(conn net.Conn) *fakeBroker {
 	broker := &fakeBroker{
 		conn:         conn,
 		reader:       bufio.NewReader(conn),
-		subs:         make(chan string, 8),
-		pubs:         make(chan brokerPublish, 8),
+		subs:         make(chan string, 256),
+		pubs:         make(chan brokerPublish, 256),
 		disconnected: make(chan struct{}),
 	}
 	go broker.serve()
@@ -121,8 +122,6 @@ func readTopicFilter(body []byte) (int, string, bool) {
 // the test's context ends.
 func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus, []*fakeBroker, <-chan *Bus) {
 	t.Helper()
-	shorterBackoff(t)
-
 	conns := make(chan net.Conn, count)
 	brokers := make([]*fakeBroker, count)
 	for index := range brokers {
@@ -136,7 +135,7 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 	}
 
 	connected := make(chan *Bus, count)
-	bus := newBus("pipe", "equipment-operator", will, func(b *Bus) { connected <- b }, handler)
+	bus := newBus("pipe", testNetwork.dial, "equipment-operator", will, func(b *Bus) { connected <- b }, handler)
 	bus.dial = func(ctx context.Context) (net.Conn, error) {
 		select {
 		case conn := <-conns:
@@ -150,14 +149,6 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 	t.Cleanup(cancel)
 	go bus.Run(ctx)
 	return bus, brokers, connected
-}
-
-func shorterBackoff(t *testing.T) {
-	t.Helper()
-	minWas, maxWas := busMinBackoff.Load(), busMaxBackoff.Load()
-	t.Cleanup(func() { busMinBackoff.Store(minWas); busMaxBackoff.Store(maxWas) })
-	busMinBackoff.Store(int64(5 * time.Millisecond))
-	busMaxBackoff.Store(int64(20 * time.Millisecond))
 }
 
 func waitForConnect(t *testing.T, connected <-chan *Bus) {
@@ -194,184 +185,212 @@ func waitForPublish(t *testing.T, values <-chan brokerPublish) brokerPublish {
 // The client connects, calls onConnect, and re-sends every remembered
 // subscription on that connection.
 func TestBusConnectsAndSendsRememberedSubscriptions(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	bus.Subscribe("liken/equipment/receivers/+/volume")
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		bus.Subscribe("liken/equipment/receivers/+/volume")
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[0].subs); got != "liken/equipment/receivers/+/volume" {
-		t.Errorf("subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[0].subs); got != "liken/equipment/receivers/+/volume" {
+			t.Errorf("subscription = %q", got)
+		}
+	})
 }
 
 // A publish from the caller reaches the broker with its topic, its
 // payload, and its retain flag.
 func TestBusPublishesToTheBroker(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
 
-	bus.Publish("liken/equipment/receivers/theater/volume", []byte(`{"item":1}`), true)
+		bus.Publish("liken/equipment/receivers/theater/volume", []byte(`{"item":1}`), true)
 
-	got := waitForPublish(t, brokers[0].pubs)
-	if got.topic != "liken/equipment/receivers/theater/volume" {
-		t.Errorf("topic = %q", got.topic)
-	}
-	if string(got.payload) != `{"item":1}` {
-		t.Errorf("payload = %q", got.payload)
-	}
-	if !got.retained {
-		t.Error("the publish was not retained")
-	}
+		got := waitForPublish(t, brokers[0].pubs)
+		if got.topic != "liken/equipment/receivers/theater/volume" {
+			t.Errorf("topic = %q", got.topic)
+		}
+		if string(got.payload) != `{"item":1}` {
+			t.Errorf("payload = %q", got.payload)
+		}
+		if !got.retained {
+			t.Error("the publish was not retained")
+		}
+	})
 }
 
 // A message the broker pushes reaches the handler with its topic and
 // payload.
 func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
-	received := make(chan brokerPublish, 1)
-	handler := func(topic string, payload []byte) {
-		received <- brokerPublish{topic: topic, payload: append([]byte(nil), payload...)}
-	}
-	_, brokers, connected := startBus(t, 1, nil, handler)
-	waitForConnect(t, connected)
-
-	brokers[0].push("liken/equipment/receivers/theater/volume", []byte(`{"paused":true}`))
-
-	select {
-	case got := <-received:
-		if got.topic != "liken/equipment/receivers/theater/volume" {
-			t.Errorf("topic = %q", got.topic)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		received := make(chan brokerPublish, 1)
+		handler := func(topic string, payload []byte) {
+			received <- brokerPublish{topic: topic, payload: append([]byte(nil), payload...)}
 		}
-		if string(got.payload) != `{"paused":true}` {
-			t.Errorf("payload = %q", got.payload)
+		_, brokers, connected := startBus(t, 1, nil, handler)
+		waitForConnect(t, connected)
+
+		brokers[0].push("liken/equipment/receivers/theater/volume", []byte(`{"paused":true}`))
+
+		select {
+		case got := <-received:
+			if got.topic != "liken/equipment/receivers/theater/volume" {
+				t.Errorf("topic = %q", got.topic)
+			}
+			if string(got.payload) != `{"paused":true}` {
+				t.Errorf("payload = %q", got.payload)
+			}
+		case <-time.After(busTestTimeout):
+			t.Fatal("the handler read nothing the broker pushed")
 		}
-	case <-time.After(busTestTimeout):
-		t.Fatal("the handler read nothing the broker pushed")
-	}
+	})
 }
 
 // A dropped connection reconnects, and the remembered subscription
 // goes out again on the new connection with no second Subscribe call.
 func TestBusResendsSubscriptionsAfterAReconnect(t *testing.T) {
-	bus, brokers, connected := startBus(t, 2, nil, nil)
-	bus.Subscribe("liken/equipment/receivers/+/volume")
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 2, nil, nil)
+		bus.Subscribe("liken/equipment/receivers/+/volume")
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[0].subs); got != "liken/equipment/receivers/+/volume" {
-		t.Fatalf("first subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[0].subs); got != "liken/equipment/receivers/+/volume" {
+			t.Fatalf("first subscription = %q", got)
+		}
 
-	// Drop the first connection. The client reconnects onto the second
-	// broker and re-sends the filter it remembers.
-	brokers[0].conn.Close()
+		// Drop the first connection. The client reconnects onto the second
+		// broker and re-sends the filter it remembers.
+		brokers[0].conn.Close()
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[1].subs); got != "liken/equipment/receivers/+/volume" {
-		t.Errorf("resent subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[1].subs); got != "liken/equipment/receivers/+/volume" {
+			t.Errorf("resent subscription = %q", got)
+		}
+	})
 }
 
 // A publish made while the client is disconnected is dropped at QoS 0,
 // and the caller re-publishes from onConnect once the connection
 // returns.
 func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
-	shorterBackoff(t)
-	bus := newBus("pipe", "equipment-operator", nil, nil, nil)
-	// No connection is ever dialed, so out stays nil and the publish
-	// has nowhere to go.
-	bus.Publish("liken/equipment/receivers/theater/volume", []byte("x"), true)
-	// The test proves only that the call returns and panics on nothing.
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		bus := newBus("pipe", testNetwork.dial, "equipment-operator", nil, nil, nil)
+		// No connection is ever dialed, so out stays nil and the publish
+		// has nowhere to go.
+		bus.Publish("liken/equipment/receivers/theater/volume", []byte("x"), true)
+		// The test proves only that the call returns and panics on nothing.
+	})
 }
 
-// The client newBus builds dials the address over TCP. Nothing answers
-// this port, so the dial fails rather than reaching some other broker.
+// The client newBus builds dials its address over TCP, through the
+// dialFunc it takes.
 func TestNewBusDialsTheAddressOverTCP(t *testing.T) {
 	t.Parallel()
-	bus := newBus("127.0.0.1:1", "equipment-operator", nil, nil, nil)
+	var network, address string
+	refuse := func(_ context.Context, n, a string) (net.Conn, error) {
+		network, address = n, a
+		return nil, errors.New("connection refused")
+	}
+	bus := newBus("mosquitto.example:1883", refuse, "equipment-operator", nil, nil, nil)
 
 	_, err := bus.dial(context.Background())
 
-	if err == nil {
-		t.Fatal("the dial reached something on a port nothing listens on")
-	}
+	mustFail(t, err)
+	mustMatch(t, network, "tcp")
+	mustMatch(t, address, "mosquitto.example:1883")
+}
+
+// A running operator dials the broker and the receivers over TCP. The
+// test runs on the real clock, because it opens a real socket.
+func TestDialTCPReachesAListener(t *testing.T) {
+	t.Parallel()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	mustSucceed(t, err)
+	t.Cleanup(func() { listener.Close() })
+
+	conn, err := dialTCP(t.Context(), "tcp", listener.Addr().String())
+
+	mustSucceed(t, err)
+	mustMatch(t, conn.RemoteAddr().String(), listener.Addr().String())
+	conn.Close()
 }
 
 // A broker that never answers is retried ever more slowly, up to the
 // ceiling, so a broker that is down does not become a tight reconnect loop.
 func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
-	shorterBackoff(t)
-	waits := make(chan time.Duration, 16)
-	last := time.Now()
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		waits := make(chan time.Duration, 16)
+		last := time.Now()
 
-	bus := newBus("pipe", "equipment-operator", nil, nil, nil)
-	bus.dial = func(ctx context.Context) (net.Conn, error) {
-		waits <- time.Since(last)
-		last = time.Now()
-		return nil, errors.New("the broker is down")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		bus.Run(ctx)
-	}()
-
-	// The first dial is immediate. Each wait after it is twice the
-	// one before, up to the ceiling the third wait already reaches.
-	floors := []time.Duration{0,
-		time.Duration(busMinBackoff.Load()),
-		2 * time.Duration(busMinBackoff.Load()),
-		time.Duration(busMaxBackoff.Load()),
-		time.Duration(busMaxBackoff.Load())}
-	for dial, floor := range floors {
-		select {
-		case waited := <-waits:
-			if waited < floor {
-				t.Errorf("dial %d came %v after the one before, want at least %v", dial+1, waited, floor)
-			}
-		case <-time.After(busTestTimeout):
-			t.Fatal("the client stopped dialing")
+		bus := newBus("pipe", testNetwork.dial, "equipment-operator", nil, nil, nil)
+		bus.dial = func(ctx context.Context) (net.Conn, error) {
+			waits <- time.Since(last)
+			last = time.Now()
+			return nil, errors.New("the broker is down")
 		}
-	}
-	cancel()
 
-	select {
-	case <-stopped:
-	case <-time.After(busTestTimeout):
-		t.Fatal("Run did not return when its context ended")
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			bus.Run(ctx)
+		}()
+
+		// The first dial is immediate. Each wait after it is twice the
+		// one before, up to the ceiling.
+		wanted := []time.Duration{0, busMinBackoff, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, busMaxBackoff, busMaxBackoff}
+		var dialed []time.Duration
+		for range wanted {
+			select {
+			case waited := <-waits:
+				dialed = append(dialed, waited)
+			case <-time.After(2 * busMaxBackoff):
+				t.Fatal("the client stopped dialing")
+			}
+		}
+		mustDeepEqual(t, dialed, wanted)
+		cancel()
+
+		select {
+		case <-stopped:
+		case <-time.After(busTestTimeout):
+			t.Fatal("Run did not return when its context ended")
+		}
+	})
 }
 
 // Run returns while it waits out a backoff, so a pod that is shutting
 // down does not sit through the whole wait.
 func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
-	minWas, maxWas := busMinBackoff.Load(), busMaxBackoff.Load()
-	t.Cleanup(func() { busMinBackoff.Store(minWas); busMaxBackoff.Store(maxWas) })
-	busMinBackoff.Store(int64(time.Minute))
-	busMaxBackoff.Store(int64(time.Minute))
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		dialed := make(chan struct{}, 1)
+		bus := newBus("pipe", testNetwork.dial, "equipment-operator", nil, nil, nil)
+		bus.dial = func(ctx context.Context) (net.Conn, error) {
+			dialed <- struct{}{}
+			return nil, errors.New("the broker is down")
+		}
 
-	dialed := make(chan struct{}, 1)
-	bus := newBus("pipe", "equipment-operator", nil, nil, nil)
-	bus.dial = func(ctx context.Context) (net.Conn, error) {
-		dialed <- struct{}{}
-		return nil, errors.New("the broker is down")
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			bus.Run(ctx)
+		}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		bus.Run(ctx)
-	}()
+		<-dialed
+		began := time.Now()
+		cancel()
 
-	<-dialed
-	cancel()
-
-	select {
-	case <-stopped:
-	case <-time.After(busTestTimeout):
-		t.Fatal("Run waited out the whole backoff")
-	}
+		<-stopped
+		mustMatch(t, time.Since(began), 0)
+	})
 }
 
 // A client that stops on purpose sends DISCONNECT before it closes the
@@ -379,19 +398,21 @@ func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
 // none, and the broker publishes the will.
 func TestABusThatStopsDisconnectsCleanly(t *testing.T) {
 	t.Parallel()
-	brokers := startFakeBrokerServer(t)
-	connected := make(chan struct{}, 1)
-	bus := newBus(brokers.address(), "equipment-operator", &busWill{Topic: "owner", Retained: true}, func(*Bus) { connected <- struct{}{} }, nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	go bus.Run(ctx)
-	broker := brokers.waitForSession(t)
-	select {
-	case <-connected:
-	case <-time.After(testTimeout):
-		t.Fatal("the client never connected")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		brokers := startFakeBrokerServer(t)
+		connected := make(chan struct{}, 1)
+		bus := newBus(brokers.address(), testNetwork.dial, "equipment-operator", &busWill{Topic: "owner", Retained: true}, func(*Bus) { connected <- struct{}{} }, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		go bus.Run(ctx)
+		broker := brokers.waitForSession(t)
+		select {
+		case <-connected:
+		case <-time.After(testTimeout):
+			t.Fatal("the client never connected")
+		}
 
-	cancel()
+		cancel()
 
-	broker.waitForDisconnect(t)
+		broker.waitForDisconnect(t)
+	})
 }

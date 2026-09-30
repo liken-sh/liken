@@ -46,7 +46,12 @@ func TestVividAnIdleBusHearsNothingAfterTheJoinScan(t *testing.T) {
 	if os.Getenv(vividTVVariable) != "" {
 		t.Skipf("%s names another player for the TV, and this test plays the TV itself", vividTVVariable)
 	}
-	fastClocks(t)
+	// The kernel's vivid driver runs on the real clock, so the test
+	// shortens the heartbeat and the retry, and sees many of each in two
+	// seconds.
+	report, retry := cecReportInterval, cecAPIRetry
+	cecReportInterval, cecAPIRetry = 5*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { cecReportInterval, cecAPIRetry = report, retry })
 	tv, output, address := vividPair(t, true)
 	heard := playCountingTV(t, tv)
 	api := startCECAPI(t)

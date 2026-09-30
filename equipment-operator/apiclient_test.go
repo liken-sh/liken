@@ -20,15 +20,15 @@ import (
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // The credentials are empty, so the client sends no bearer token and
 // reads nothing from disk.
 func testAPIClient(t *testing.T, handler http.Handler) *Client {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	server := apiservertest.Start(t, handler)
+	return NewClient(apiservertest.Host, server.Client(), "")
 }
 
 // One recorded request: what the client sent, where, and how.

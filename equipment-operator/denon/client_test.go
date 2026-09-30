@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -32,6 +33,7 @@ func startClient(t *testing.T, address string, configure ...func(*Client)) *clie
 		default:
 		}
 	})
+	client.Dial = testNetwork.dial
 	for _, apply := range configure {
 		apply(client)
 	}
@@ -88,28 +90,32 @@ func drainQueries(t *testing.T, harness *clientHarness) {
 // a queue nobody drains. The writer nils out under the send mutex
 // before it stops, so once Run has returned there is no live queue.
 func TestSendAfterTheWriterStopsReportsFailure(t *testing.T) {
-	receiver := startFakeReceiver(t)
-	client := NewClient(receiver.address(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		client.Run(ctx)
-	}()
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		receiver := startFakeReceiver(t)
+		client := NewClient(receiver.address(), nil)
+		client.Dial = testNetwork.dial
+		ctx, cancel := context.WithCancel(context.Background())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			client.Run(ctx)
+		}()
 
-	receiver.waitForCommands(t, Queries[len(Queries)-1])
-	cancel()
-	<-stopped
+		receiver.waitForCommands(t, Queries[len(Queries)-1])
+		cancel()
+		<-stopped
 
-	client.mutex.Lock()
-	live := client.out
-	client.mutex.Unlock()
-	if live != nil {
-		t.Fatal("the writer stopped but the queue is still named")
-	}
-	if err := client.send("PSBAS 53"); err == nil {
-		t.Fatal("a send after the writer stopped did not error")
-	}
+		client.mutex.Lock()
+		live := client.out
+		client.mutex.Unlock()
+		if live != nil {
+			t.Fatal("the writer stopped but the queue is still named")
+		}
+		if err := client.send("PSBAS 53"); err == nil {
+			t.Fatal("a send after the writer stopped did not error")
+		}
+	})
 }
 
 // connectedState is the state the fake receiver reports once it has
@@ -132,85 +138,90 @@ func connectedState() equipment.State {
 }
 
 func TestTheClientAsksEveryQueryOnConnect(t *testing.T) {
-	harness := startHarness(t)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
 
-	sent := harness.receiver.waitForCommands(t, Queries[len(Queries)-1])
+		sent := harness.receiver.waitForCommands(t, Queries[len(Queries)-1])
 
-	mustMatch(t, strings.Join(sent, " "), strings.Join(Queries, " "))
+		mustMatch(t, strings.Join(sent, " "), strings.Join(Queries, " "))
+	})
 }
 
 func TestTheClientReportsWhatTheReceiverSaid(t *testing.T) {
-	harness := startHarness(t)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
 
-	waitForField(t, harness.events, equipment.EventSoundMode)
-	state := harness.client.State()
+		waitForField(t, harness.events, equipment.EventSoundMode)
+		state := harness.client.State()
 
-	mustMatchState(t, state, connectedState())
-	zone, _ := state.Zone(equipment.MainZone)
-	mustMatch(t, FormatHalfSteps(zone.Volume), "50")
-	mustMatch(t, FormatHalfSteps(zone.VolumeMax), "69.5")
+		mustMatchState(t, state, connectedState())
+		zone, _ := state.Zone(equipment.MainZone)
+		mustMatch(t, FormatHalfSteps(zone.Volume), "50")
+		mustMatch(t, FormatHalfSteps(zone.VolumeMax), "69.5")
+	})
 }
 
 // The noise arrives behind the sound mode and ahead of the mute the
 // test asks for, so a state that still reads right after the mute is a
 // state the noise left alone.
 func TestTheNoiseLinesChangeNothing(t *testing.T) {
-	harness := startHarness(t)
-	waitForField(t, harness.events, equipment.EventSoundMode)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		waitForField(t, harness.events, equipment.EventSoundMode)
 
-	harness.receiver.setMute(true)
-	waitForField(t, harness.events, equipment.EventMute)
+		harness.receiver.setMute(true)
+		waitForField(t, harness.events, equipment.EventMute)
 
-	want := connectedState()
-	zone := want.Zones[equipment.MainZone]
-	zone.Mute = true
-	want.Zones[equipment.MainZone] = zone
-	mustMatchState(t, harness.client.State(), want)
+		want := connectedState()
+		zone := want.Zones[equipment.MainZone]
+		zone.Mute = true
+		want.Zones[equipment.MainZone] = zone
+		mustMatchState(t, harness.client.State(), want)
+	})
 }
 
 func TestReachableIsUnknownBeforeTheReceiverAnswers(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		client := NewClient("192.0.2.1", nil)
 
-	mustMatch(t, client.State().Reachable, equipment.ConditionUnknown)
-}
-
-// shortenBackoff shortens the wait between sessions so a reconnect
-// happens inside a test, and restores it once the client has stopped.
-func shortenBackoff(t *testing.T) {
-	t.Helper()
-	minimum, maximum := minBackoff, maxBackoff
-	t.Cleanup(func() {
-		minBackoff, maxBackoff = minimum, maximum
+		mustMatch(t, client.State().Reachable, equipment.ConditionUnknown)
 	})
-	minBackoff = 5 * time.Millisecond
-	maxBackoff = 20 * time.Millisecond
 }
 
 func TestTheClientReconnectsAfterTheConnectionDrops(t *testing.T) {
-	shortenBackoff(t)
-	harness := startHarness(t)
-	waitForField(t, harness.events, equipment.EventSoundMode)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		waitForField(t, harness.events, equipment.EventSoundMode)
 
-	harness.receiver.dropConnections()
-	mustMatch(t, waitForField(t, harness.events, equipment.EventReachable).Reachable, equipment.ConditionFalse)
+		harness.receiver.dropConnections()
+		mustMatch(t, waitForField(t, harness.events, equipment.EventReachable).Reachable, equipment.ConditionFalse)
 
-	mustMatchState(t, waitForField(t, harness.events, equipment.EventSoundMode), connectedState())
-	mustMatchState(t, harness.client.State(), connectedState())
+		mustMatchState(t, waitForField(t, harness.events, equipment.EventSoundMode), connectedState())
+		mustMatchState(t, harness.client.State(), connectedState())
+	})
 }
 
 func TestAKnobTurnReachesTheStateAndTheListener(t *testing.T) {
-	harness := startHarness(t)
-	waitForField(t, harness.events, equipment.EventSoundMode)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		waitForField(t, harness.events, equipment.EventSoundMode)
 
-	harness.receiver.turnKnob(111)
+		harness.receiver.turnKnob(111)
 
-	event := waitForField(t, harness.events, equipment.EventVolume)
-	zone, _ := event.Zone(equipment.MainZone)
-	mustMatch(t, zone.Volume, 111)
-	state := harness.client.State()
-	zone, _ = state.Zone(equipment.MainZone)
-	mustMatch(t, zone.Volume, 111)
-	mustMatch(t, FormatHalfSteps(zone.Volume), "55.5")
+		event := waitForField(t, harness.events, equipment.EventVolume)
+		zone, _ := event.Zone(equipment.MainZone)
+		mustMatch(t, zone.Volume, 111)
+		state := harness.client.State()
+		zone, _ = state.Zone(equipment.MainZone)
+		mustMatch(t, zone.Volume, 111)
+		mustMatch(t, FormatHalfSteps(zone.Volume), "55.5")
+	})
 }
 
 // mustStaySilent fails the test if any event arrives inside the window.
@@ -226,43 +237,39 @@ func mustStaySilent(t *testing.T, events <-chan equipment.Event, window time.Dur
 // The verdict is announced once and not once per retry, so an address
 // that never answers writes one status and not a stream of them.
 func TestAnAddressThatAnswersNothingIsNeverReachable(t *testing.T) {
-	shortenBackoff(t)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	mustSucceed(t, err)
-	address := listener.Addr().String()
-	mustSucceed(t, listener.Close())
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startClient(t, "127.0.0.1:1")
 
-	harness := startClient(t, address)
-
-	mustMatch(t, waitForField(t, harness.events, equipment.EventReachable).Reachable, equipment.ConditionFalse)
-	mustStaySilent(t, harness.events, 100*time.Millisecond)
-	mustMatch(t, harness.client.State().Reachable, equipment.ConditionFalse)
-}
-
-// shortenHeartbeat shortens the idle query so the heartbeat lands
-// inside a test, and restores it once the client has stopped.
-func shortenHeartbeat(t *testing.T) {
-	t.Helper()
-	hb := heartbeat
-	t.Cleanup(func() { heartbeat = hb })
-	heartbeat = 20 * time.Millisecond
+		mustMatch(t, waitForField(t, harness.events, equipment.EventReachable).Reachable, equipment.ConditionFalse)
+		mustStaySilent(t, harness.events, 3*maxBackoff)
+		mustMatch(t, harness.client.State().Reachable, equipment.ConditionFalse)
+	})
 }
 
 func TestTheHeartbeatKeepsAskingOnAnIdleConnection(t *testing.T) {
-	shortenHeartbeat(t)
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
+		asked := time.Now()
 
-	mustMatch(t, harness.receiver.waitForCommand(t), "PW?")
+		mustMatch(t, harness.receiver.waitForCommandWithin(t, 2*heartbeat), "PW?")
+		mustMatch(t, time.Since(asked), heartbeat)
+	})
 }
 
 func TestACommandOnADisconnectedClientDropsIt(t *testing.T) {
-	receiver := startFakeReceiver(t)
-	client := NewClient(receiver.address(), nil)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		receiver := startFakeReceiver(t)
+		client := NewClient(receiver.address(), nil)
+		client.Dial = testNetwork.dial
 
-	client.SetVolume(equipment.MainZone, 101)
+		client.SetVolume(equipment.MainZone, 101)
 
-	mustMatch(t, client.State().Reachable, equipment.ConditionUnknown)
+		mustMatch(t, client.State().Reachable, equipment.ConditionUnknown)
+	})
 }
 
 // The wire carries at most the top of the receiver's own scale, so a
@@ -277,14 +284,18 @@ func TestSetVolumeHoldsTheReceiverToItsOwnScale(t *testing.T) {
 		{"below the floor", -4, "MV00"},
 		{"at the top", 196, "MV98"},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			harness := startHarness(t)
-			drainQueries(t, harness)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				harness := startHarness(t)
+				drainQueries(t, harness)
 
-			harness.client.SetVolume(equipment.MainZone, one.halves)
+				harness.client.SetVolume(equipment.MainZone, one.halves)
 
-			mustMatch(t, harness.receiver.waitForCommand(t), one.want)
+				mustMatch(t, harness.receiver.waitForCommand(t), one.want)
+			})
 		})
 	}
 }
@@ -294,22 +305,63 @@ func TestSetVolumeHoldsTheReceiverToItsOwnScale(t *testing.T) {
 // reported and not against an empty state. The survey completes on a
 // timer with no line, so the client sends an event for it.
 func TestASurveyCompletesAfterTheConnectReplies(t *testing.T) {
-	harness := startHarness(t)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
 
-	mustMatch(t, harness.client.Surveyed(), false)
-	drainQueries(t, harness)
+		mustMatch(t, harness.client.Surveyed(), false)
+		drainQueries(t, harness)
 
-	waitForField(t, harness.events, equipment.EventSurveyed)
-	mustMatch(t, harness.client.Surveyed(), true)
+		waitForField(t, harness.events, equipment.EventSurveyed)
+		mustMatch(t, harness.client.Surveyed(), true)
+	})
+}
+
+// peerConn is a connection that reports the TCP address it reached, the
+// way a socket to a receiver does.
+type peerConn struct {
+	net.Conn
+	peer *net.TCPAddr
+}
+
+func (c peerConn) RemoteAddr() net.Addr { return c.peer }
+
+// A client with no Dial reaches its receiver over TCP. The test runs on
+// the real clock, because it opens a real socket.
+func TestAClientWithNoDialDialsOverTCP(t *testing.T) {
+	t.Parallel()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	mustSucceed(t, err)
+	t.Cleanup(func() { listener.Close() })
+	address := listener.Addr().String()
+
+	conn, err := NewClient(address, nil).dialer()(t.Context(), "tcp", address)
+
+	mustSucceed(t, err)
+	mustMatch(t, conn.RemoteAddr().String(), address)
+	conn.Close()
 }
 
 // The address is the peer the receiver answered from, so a receiver
-// declared by name still reports an address.
+// declared by name still reports an address, and it is the address the
+// connection reached rather than the one the declared name resolves to.
 func TestTheAddressIsThePeer(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		receiver := startFakeReceiver(t)
+		peer := &net.TCPAddr{IP: net.ParseIP("192.0.2.30"), Port: 23}
+		harness := startClient(t, receiver.address(), func(client *Client) {
+			client.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+				conn, err := testNetwork.dial(ctx, network, address)
+				if err != nil {
+					return nil, err
+				}
+				return peerConn{Conn: conn, peer: peer}, nil
+			}
+		})
+		harness.receiver = receiver
+		drainQueries(t, harness)
 
-	host, _, err := net.SplitHostPort(harness.receiver.address())
-	mustSucceed(t, err)
-	mustMatch(t, harness.client.Address(), host)
+		mustMatch(t, harness.client.Address(), "192.0.2.30")
+	})
 }

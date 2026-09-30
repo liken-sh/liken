@@ -6,12 +6,12 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 func TestZoneSpecPendingKeepsOnlyTheControlsToSend(t *testing.T) {
-	t.Parallel()
 	forty, thirty := 40.0, 30.0
 	on, off := true, false
 	half, hour := 30, 60
@@ -57,10 +57,14 @@ func TestZoneSpecPendingKeepsOnlyTheControlsToSend(t *testing.T) {
 			equipment.ZoneState{}, false, ZoneSpec{}, true,
 			ZoneSpec{Mute: &on}},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := one.want.Pending(one.observed, one.reported, one.previous, one.known, 2)
-			mustMatch(t, zoneJSON(t, got), zoneJSON(t, one.pending))
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				got := one.want.Pending(one.observed, one.reported, one.previous, one.known, 2)
+				mustMatch(t, zoneJSON(t, got), zoneJSON(t, one.pending))
+			})
 		})
 	}
 }

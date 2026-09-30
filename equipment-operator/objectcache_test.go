@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"testing/synctest"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -39,28 +40,30 @@ func snapshot(t *testing.T, api *cecAPI, path string) *watchStore {
 // CECBus and no Television again, and creates no Television again.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice, receiverDevice))
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
-	controller := newCECBusController(api.client)
-	log := &logBuffer{}
-	controller.log = log
-	controller.buses = snapshot(t, api, cecBusesPath)
-	controller.televisions = snapshot(t, api, televisionsPath)
-	controller.displays = snapshot(t, api, displaysPath)
-	controller.receivers = snapshot(t, api, receiversPath)
-	mustSucceed(t, controller.pass())
-	mustSucceed(t, controller.pass())
-	busWrites, televisionWrites := api.busWrites, api.derivedWrites
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice, receiverDevice))
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
+		controller := newCECBusController(api.client)
+		log := &logBuffer{}
+		controller.log = log
+		controller.buses = snapshot(t, api, cecBusesPath)
+		controller.televisions = snapshot(t, api, televisionsPath)
+		controller.displays = snapshot(t, api, displaysPath)
+		controller.receivers = snapshot(t, api, receiversPath)
+		mustSucceed(t, controller.pass())
+		mustSucceed(t, controller.pass())
+		busWrites, televisionWrites := api.busWrites, api.derivedWrites
 
-	mustSucceed(t, controller.pass())
+		mustSucceed(t, controller.pass())
 
-	mustMatch(t, api.busWrites, busWrites)
-	mustMatch(t, api.derivedWrites, televisionWrites)
-	mustDeepEqual(t, api.created, []string{"den"})
-	mustDeepEqual(t, log.lines(), []string{
-		`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`,
+		mustMatch(t, api.busWrites, busWrites)
+		mustMatch(t, api.derivedWrites, televisionWrites)
+		mustDeepEqual(t, api.created, []string{"den"})
+		mustDeepEqual(t, log.lines(), []string{
+			`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`,
+		})
 	})
 }
 
@@ -71,17 +74,19 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 // API server's copy.
 func TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putReceiver(receiverAt("uid-1", 1, "10.0.0.8"))
-	held := snapshot(t, api, receiversPath)
-	_, err := ApplyReceiverStatus(api.client, "theater", ReceiverStatus{Address: "10.0.0.9"})
-	mustSucceed(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putReceiver(receiverAt("uid-1", 1, "10.0.0.8"))
+		held := snapshot(t, api, receiversPath)
+		_, err := ApplyReceiverStatus(api.client, "theater", ReceiverStatus{Address: "10.0.0.9"})
+		mustSucceed(t, err)
 
-	list, err := readReceivers(api.client, held)
+		list, err := readReceivers(api.client, held)
 
-	mustSucceed(t, err)
-	mustMatch(t, len(list.Items), 1)
-	mustMatch(t, list.Items[0].Status.Address, "10.0.0.9")
+		mustSucceed(t, err)
+		mustMatch(t, len(list.Items), 1)
+		mustMatch(t, list.Items[0].Status.Address, "10.0.0.9")
+	})
 }
 
 // A pass reads a Television from the API server when the store's copy
@@ -90,17 +95,19 @@ func TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite(t *testing.T) {
 // tries again. Once the API server answers, the read answers the write.
 func TestARefusedReadOfACopyOlderThanItsOwnWriteIsAnError(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	held := snapshot(t, api, televisionsPath)
-	mustSucceed(t, ApplyTelevisionSession(api.client, "lounge", &TelevisionSession{Player: "den"}))
-	api.refuseTelevisions(true)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		held := snapshot(t, api, televisionsPath)
+		mustSucceed(t, ApplyTelevisionSession(api.client, "lounge", &TelevisionSession{Player: "den"}))
+		api.refuseTelevisions(true)
 
-	_, refused := readTelevisions(api.client, held)
-	api.refuseTelevisions(false)
-	list, answered := readTelevisions(api.client, held)
+		_, refused := readTelevisions(api.client, held)
+		api.refuseTelevisions(false)
+		list, answered := readTelevisions(api.client, held)
 
-	mustMatch(t, refused != nil, true)
-	mustSucceed(t, answered)
-	mustMatch(t, list.Items[0].Status.Session.Player, "den")
+		mustMatch(t, refused != nil, true)
+		mustSucceed(t, answered)
+		mustMatch(t, list.Items[0].Status.Session.Player, "den")
+	})
 }

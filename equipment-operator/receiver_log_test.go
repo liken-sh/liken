@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -48,60 +49,109 @@ func switchCheck(confirmed *atomic.Bool) func() (string, bool) {
 
 func TestACommandsLineWaitsForTheReportAndPrintsOnce(t *testing.T) {
 	t.Parallel()
-	log := &logBuffer{}
-	lines := newReceiverLog(log, "den")
-	var confirmed atomic.Bool
+	synctest.Test(t, func(t *testing.T) {
+		log := &logBuffer{}
+		lines := newReceiverLog(log, "den")
+		var confirmed atomic.Bool
 
-	lines.confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
-	lines.observe()
-	mustDeepEqual(t, linesWith(log, "Receiver"), []string(nil))
+		lines.confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
+		lines.observe()
+		mustDeepEqual(t, linesWith(log, "Receiver"), []string(nil))
 
-	confirmed.Store(true)
-	lines.observe()
-	lines.observe()
+		confirmed.Store(true)
+		lines.observe()
+		lines.observe()
 
-	mustDeepEqual(t, timeless(log.lines()), []string{
-		"Receiver den: generation 2 asks power on; sent power on; the receiver reported power on after <time>",
+		mustDeepEqual(t, timeless(log.lines()), []string{
+			"Receiver den: generation 2 asks power on; sent power on; the receiver reported power on after <time>",
+		})
 	})
 }
 
 func TestACommandTheReceiverAlreadyReportsPrintsAtOnce(t *testing.T) {
 	t.Parallel()
-	log := &logBuffer{}
-	var confirmed atomic.Bool
-	confirmed.Store(true)
+	synctest.Test(t, func(t *testing.T) {
+		log := &logBuffer{}
+		var confirmed atomic.Bool
+		confirmed.Store(true)
 
-	newReceiverLog(log, "den").confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
+		newReceiverLog(log, "den").confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
 
-	mustDeepEqual(t, timeless(log.lines()), []string{
-		"Receiver den: generation 2 asks power on; sent power on; the receiver reported power on after <time>",
+		mustDeepEqual(t, timeless(log.lines()), []string{
+			"Receiver den: generation 2 asks power on; sent power on; the receiver reported power on after <time>",
+		})
 	})
 }
 
 func TestACommandTheReceiverNeverReportsPrintsWhenTheWaitEnds(t *testing.T) {
-	shorten(t, &receiverConfirmWait, 20*time.Millisecond)
-	log := &logBuffer{}
-	lines := newReceiverLog(log, "den")
-	var confirmed atomic.Bool
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		log := &logBuffer{}
+		lines := newReceiverLog(log, "den")
+		var confirmed atomic.Bool
 
-	lines.confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
+		lines.confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
+		time.Sleep(receiverConfirmWait - time.Millisecond)
+		synctest.Wait()
+		mustMatch(t, log.lines()[0], "")
+		time.Sleep(time.Millisecond)
 
-	mustDeepEqual(t, waitForLines(t, log, "Receiver den", 1), []string{
-		"Receiver den: generation 2 asks power on; sent power on; the receiver did not report it in 20 ms, and it reports power standby",
+		mustDeepEqual(t, waitForLines(t, log, "Receiver den", 1), []string{
+			"Receiver den: generation 2 asks power on; sent power on; the receiver did not report it in 15 s, and it reports power standby",
+		})
+		confirmed.Store(true)
+		lines.observe()
+		mustMatch(t, len(log.lines()), 1)
 	})
-	confirmed.Store(true)
-	lines.observe()
-	mustMatch(t, len(log.lines()), 1)
+}
+
+// A report that arrives as the wait ends prints no second line: the
+// report's check is still reading the receiver when the timer prints
+// the line, and the report then finds the line gone.
+func TestAReportThatMeetsTheEndOfTheWaitPrintsOnce(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		log := &logBuffer{}
+		lines := newReceiverLog(log, "den")
+		reading, release := make(chan struct{}), make(chan struct{})
+		var checks atomic.Int32
+		check := func() (string, bool) {
+			if checks.Add(1) == 2 {
+				close(reading)
+				<-release
+				return "power on", true
+			}
+			return "power standby", false
+		}
+		lines.confirm("generation 2 asks power on; sent power on", time.Now(), check)
+		reported := make(chan struct{})
+		go func() {
+			defer close(reported)
+			lines.observe()
+		}()
+		<-reading
+
+		time.Sleep(receiverConfirmWait)
+		synctest.Wait()
+		close(release)
+		<-reported
+
+		mustDeepEqual(t, log.lines(), []string{
+			"Receiver den: generation 2 asks power on; sent power on; the receiver did not report it in 15 s, and it reports power standby",
+		})
+	})
 }
 
 func TestARefusedCommandStatesTheDriversError(t *testing.T) {
 	t.Parallel()
-	log := &logBuffer{}
+	synctest.Test(t, func(t *testing.T) {
+		log := &logBuffer{}
 
-	newReceiverLog(log, "den").refused("generation 2 asks power off; sent power standby", errors.New(`no connection to send "PWSTANDBY"`))
+		newReceiverLog(log, "den").refused("generation 2 asks power off; sent power standby", errors.New(`no connection to send "PWSTANDBY"`))
 
-	mustDeepEqual(t, log.lines(), []string{
-		`Receiver den: generation 2 asks power off; sent power standby; the command failed: no connection to send "PWSTANDBY"`,
+		mustDeepEqual(t, log.lines(), []string{
+			`Receiver den: generation 2 asks power off; sent power standby; the command failed: no connection to send "PWSTANDBY"`,
+		})
 	})
 }
 
@@ -109,51 +159,57 @@ func TestARefusedCommandStatesTheDriversError(t *testing.T) {
 // line; a new value is.
 func TestFreshAnswersOncePerValue(t *testing.T) {
 	t.Parallel()
-	lines := newReceiverLog(&logBuffer{}, "den")
-	steps := []struct {
-		key   string
-		value any
-		want  bool
-	}{
-		{"spec.zones.zone2", ZoneSpec{Input: "CD"}, true},
-		{"spec.zones.zone2", ZoneSpec{Input: "CD"}, false},
-		{"spec.zones.zone3", ZoneSpec{Input: "CD"}, true},
-		{"spec.zones.zone2", ZoneSpec{Input: "TV"}, true},
-		{"spec.zones.zone2", ZoneSpec{Input: "CD"}, true},
-	}
-	for _, step := range steps {
-		mustMatch(t, lines.fresh(step.key, step.value), step.want)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		lines := newReceiverLog(&logBuffer{}, "den")
+		steps := []struct {
+			key   string
+			value any
+			want  bool
+		}{
+			{"spec.zones.zone2", ZoneSpec{Input: "CD"}, true},
+			{"spec.zones.zone2", ZoneSpec{Input: "CD"}, false},
+			{"spec.zones.zone3", ZoneSpec{Input: "CD"}, true},
+			{"spec.zones.zone2", ZoneSpec{Input: "TV"}, true},
+			{"spec.zones.zone2", ZoneSpec{Input: "CD"}, true},
+		}
+		for _, step := range steps {
+			mustMatch(t, lines.fresh(step.key, step.value), step.want)
+		}
+	})
 }
 
 func TestElapsedReadsTheWayAPersonDoes(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		duration time.Duration
-		want     string
-	}{
-		{40 * time.Millisecond, "40 ms"},
-		{999 * time.Millisecond, "999 ms"},
-		{2140 * time.Millisecond, "2.1 s"},
-		{25400 * time.Millisecond, "25 s"},
-	}
-	for _, one := range cases {
-		mustMatch(t, elapsed(one.duration), one.want)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cases := []struct {
+			duration time.Duration
+			want     string
+		}{
+			{40 * time.Millisecond, "40 ms"},
+			{999 * time.Millisecond, "999 ms"},
+			{2140 * time.Millisecond, "2.1 s"},
+			{25400 * time.Millisecond, "25 s"},
+		}
+		for _, one := range cases {
+			mustMatch(t, elapsed(one.duration), one.want)
+		}
+	})
 }
 
 func TestDeclaredNamesOnlyTheDeclaredValues(t *testing.T) {
 	t.Parallel()
-	volume, mute := 40.0, true
-	cases := []struct {
-		block any
-		want  string
-	}{
-		{ZoneSpec{Power: "On", Volume: &volume, Mute: &mute}, `{"mute":true,"power":"On","volume":40}`},
-		{map[string]any{"system": map[string]any{}, "tone": map[string]any{"bass": 3}}, `{"tone":{"bass":3}}`},
-		{map[string]any{"number": 3}, `{"number":3}`},
-	}
-	for _, one := range cases {
-		mustMatch(t, declared(one.block), one.want)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		volume, mute := 40.0, true
+		cases := []struct {
+			block any
+			want  string
+		}{
+			{ZoneSpec{Power: "On", Volume: &volume, Mute: &mute}, `{"mute":true,"power":"On","volume":40}`},
+			{map[string]any{"system": map[string]any{}, "tone": map[string]any{"bass": 3}}, `{"tone":{"bass":3}}`},
+			{map[string]any{"number": 3}, `{"number":3}`},
+		}
+		for _, one := range cases {
+			mustMatch(t, declared(one.block), one.want)
+		}
+	})
 }

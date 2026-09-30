@@ -19,8 +19,8 @@ import (
 var noiseLines = []string{"SVOFF", "PSDRC OFF", "PSLFE 00"}
 
 type fakeReceiver struct {
-	listener net.Listener
-	commands chan string
+	listening string
+	commands  chan string
 
 	mutex     sync.Mutex
 	power     string
@@ -49,15 +49,11 @@ func houseHDMI() map[string]string {
 	}
 }
 
-// startFakeReceiver listens on the loopback and answers until the test
-// ends.
+// startFakeReceiver listens on the test network and answers until the
+// test ends.
 func startFakeReceiver(t *testing.T) *fakeReceiver {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	mustSucceed(t, err)
-
 	receiver := &fakeReceiver{
-		listener:  listener,
 		commands:  make(chan string, 64),
 		power:     "PWSTANDBY",
 		volume:    100,
@@ -66,32 +62,19 @@ func startFakeReceiver(t *testing.T) *fakeReceiver {
 		soundMode: "MULTI CH IN",
 		hdmi:      houseHDMI(),
 	}
-	t.Cleanup(func() {
-		listener.Close()
-		receiver.dropConnections()
-	})
-	go receiver.accept()
+	receiver.listening = testNetwork.listen(t, receiver.serve)
+	t.Cleanup(receiver.dropConnections)
 	return receiver
 }
 
 func (f *fakeReceiver) address() string {
-	return f.listener.Addr().String()
-}
-
-func (f *fakeReceiver) accept() {
-	for {
-		conn, err := f.listener.Accept()
-		if err != nil {
-			return
-		}
-		f.mutex.Lock()
-		f.conns = append(f.conns, conn)
-		f.mutex.Unlock()
-		go f.serve(conn)
-	}
+	return f.listening
 }
 
 func (f *fakeReceiver) serve(conn net.Conn) {
+	f.mutex.Lock()
+	f.conns = append(f.conns, conn)
+	f.mutex.Unlock()
 	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadString('\r')
@@ -241,10 +224,17 @@ func (f *fakeReceiver) dropConnections() {
 // test rather than hanging when none arrives.
 func (f *fakeReceiver) waitForCommand(t *testing.T) string {
 	t.Helper()
+	return f.waitForCommandWithin(t, testTimeout)
+}
+
+// waitForCommandWithin reads the next command the client sends within
+// the window.
+func (f *fakeReceiver) waitForCommandWithin(t *testing.T, window time.Duration) string {
+	t.Helper()
 	select {
 	case command := <-f.commands:
 		return command
-	case <-time.After(testTimeout):
+	case <-time.After(window):
 		t.Fatal("the client sent no command")
 		return ""
 	}

@@ -22,7 +22,7 @@ import (
 // ends a session after the socket carries no reply, even if the TCP
 // socket remains open. A half-open socket can accept writes without
 // delivering them, so an open socket alone does not prove reachability.
-var (
+const (
 	dialTimeout  = 5 * time.Second
 	heartbeat    = 30 * time.Second
 	silenceLimit = 75 * time.Second
@@ -30,14 +30,10 @@ var (
 	maxBackoff   = 30 * time.Second
 )
 
-// SurveyQuiet is how long the reply stream must stand still after the
+// surveyQuiet is how long the reply stream must stand still after the
 // connect queries before the survey counts as complete. The replies
-// arrive in one burst, so a quiet stretch ends it. It is exported
-// because the root package's tests wait for the survey in almost every
-// test against a fake receiver on loopback, and shorten it once in
-// TestMain, before any client starts. A client reads it after it
-// connects and again on each line it folds.
-var SurveyQuiet = time.Second
+// arrive in one burst, so a quiet stretch ends it.
+const surveyQuiet = time.Second
 
 // The write queue for one connection. It holds every connect query and
 // a burst of commands. A command that would overflow it is dropped,
@@ -69,6 +65,9 @@ type Client struct {
 	address  string
 	listener func(equipment.Event)
 	Reporter func(status string)
+	// Dial opens the connection to the receiver and the read of its
+	// description. Nil dials over TCP, bounded by dialTimeout.
+	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 
 	mutex sync.Mutex
 	state denonState
@@ -312,6 +311,14 @@ func (d *Client) send(command string) error {
 	}
 }
 
+// dialer answers Dial, or a TCP dialer when Dial is nil.
+func (d *Client) dialer() func(ctx context.Context, network, address string) (net.Conn, error) {
+	if d.Dial != nil {
+		return d.Dial
+	}
+	return (&net.Dialer{Timeout: dialTimeout}).DialContext
+}
+
 // Run keeps reconnecting until ctx ends and waits between sessions. A
 // session that receives a recognized reply resets the backoff. A
 // session that does not receive a recognized reply increases the
@@ -346,14 +353,13 @@ func (d *Client) Run(ctx context.Context) {
 // recognized reply arrived. Run uses that result to reset or increase
 // the reconnect backoff.
 func (d *Client) runSession(parent context.Context) (answered bool) {
-	dialer := &net.Dialer{Timeout: dialTimeout}
 	// The declared address may be a name, and the status reports an
 	// address, so it is resolved beside the dial. A failure leaves the
 	// name as the fallback.
 	if ip := resolveHost(d.address); ip != "" {
 		d.recordAddress(ip)
 	}
-	conn, err := dialer.DialContext(parent, "tcp", d.address)
+	conn, err := d.dialer()(parent, "tcp", d.address)
 	if err != nil {
 		return false
 	}
@@ -456,7 +462,7 @@ func (d *Client) readLoop(conn net.Conn) (answered bool) {
 	reader := bufio.NewReader(conn)
 	// The connect queries were just written, and their replies arrive in
 	// one burst. The survey is complete once that burst stops.
-	survey := time.AfterFunc(SurveyQuiet, d.recordSurveyed)
+	survey := time.AfterFunc(surveyQuiet, d.recordSurveyed)
 	defer survey.Stop()
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(silenceLimit)); err != nil {
@@ -472,7 +478,7 @@ func (d *Client) readLoop(conn net.Conn) (answered bool) {
 		}
 		if d.fold(line) {
 			answered = true
-			survey.Reset(SurveyQuiet)
+			survey.Reset(surveyQuiet)
 		}
 	}
 }

@@ -11,6 +11,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -41,14 +42,16 @@ func asking(fake *fakeDenon, power, settled equipment.Power) Receiver {
 // turned the receiver on since the operator put it in standby.
 func TestARestartAtTheSettledPowerSendsNoPower(t *testing.T) {
 	t.Parallel()
-	fake := switchedOn(t)
-	_, operator, log := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
+	synctest.Test(t, func(t *testing.T) {
+		fake := switchedOn(t)
+		_, operator, log := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, "PWSTANDBY", quietPeriod)
-	mustDeepEqual(t, linesWith(log, "asks power"), []string{
-		"Receiver theater: generation 4 asks power Standby; the operator found it when it started, so it sent nothing",
+		fake.refuseCommand(t, "PWSTANDBY", quietPeriod)
+		mustDeepEqual(t, linesWith(log, "asks power"), []string{
+			"Receiver theater: generation 4 asks power Standby; the operator found it when it started, so it sent nothing",
+		})
 	})
 }
 
@@ -64,86 +67,96 @@ func TestARestartAtTheSettledPowerSendsNoPower(t *testing.T) {
 // it as its PascalCase value.
 func TestAnUpgradeAdoptsTheSpecPower(t *testing.T) {
 	t.Parallel()
-	fake := switchedOn(t)
-	stored := asking(fake, "", "")
-	stored.Status.PowerGeneration = 3
-	stored.Spec.Power = decodedPower(t, `"standby"`)
-	api, operator, log := reachedController(t, stored, "127.0.0.1:1")
+	synctest.Test(t, func(t *testing.T) {
+		fake := switchedOn(t)
+		stored := asking(fake, "", "")
+		stored.Status.PowerGeneration = 3
+		stored.Spec.Power = decodedPower(t, `"standby"`)
+		api, operator, log := reachedController(t, stored, "127.0.0.1:1")
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, "PWSTANDBY", quietPeriod)
-	mustDeepEqual(t, linesWith(log, "asks power"), []string{
-		"Receiver theater: generation 4 asks power Standby; the operator found it when it started, so it sent nothing",
+		fake.refuseCommand(t, "PWSTANDBY", quietPeriod)
+		mustDeepEqual(t, linesWith(log, "asks power"), []string{
+			"Receiver theater: generation 4 asks power Standby; the operator found it when it started, so it sent nothing",
+		})
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerStandby })
 	})
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerStandby })
 }
 
 // A spec.power that differs from status.settledPower at a restart is an
 // edit no operator settled, so it goes out once.
 func TestASpecPowerEditedWhileTheOperatorWasDownSendsOnce(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
 
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, denon.PowerOnCommand)
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, denon.PowerOnCommand)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
-	mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
-		"Receiver theater: generation 4 asks power On; sent power On; the receiver reported power On after <time>",
+		fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+		mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
+			"Receiver theater: generation 4 asks power On; sent power On; the receiver reported power On after <time>",
+		})
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
 	})
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
 }
 
 // The same edit sends nothing when the receiver already reports it.
 func TestASpecPowerEditedWhileTheOperatorWasDownSendsNothingTheReceiverReports(t *testing.T) {
 	t.Parallel()
-	fake := switchedOn(t)
-	api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
+	synctest.Test(t, func(t *testing.T) {
+		fake := switchedOn(t)
+		api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
-	mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
-		"Receiver theater: generation 4 asks power On; sent nothing, because the receiver reports power On",
+		fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+		mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
+			"Receiver theater: generation 4 asks power On; sent nothing, because the receiver reports power On",
+		})
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
 	})
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
 }
 
 // A spec.power that changes while the operator runs goes out once.
 func TestALiveSpecPowerChangeSendsOnce(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	api, operator, _ := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		api, operator, _ := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
 
-	changed := asking(fake, equipment.PowerOn, "")
-	changed.Metadata.Generation = 5
-	api.setReceivers(changed)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, denon.PowerOnCommand)
-	mustSucceed(t, operator.pass(t.Context()))
+		changed := asking(fake, equipment.PowerOn, "")
+		changed.Metadata.Generation = 5
+		api.setReceivers(changed)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, denon.PowerOnCommand)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
+		fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
+	})
 }
 
 // A live change compares spec.power with the power the receiver
 // reports, and sends nothing when they agree.
 func TestALiveChangeSendsNoPowerTheReceiverReports(t *testing.T) {
 	t.Parallel()
-	fake := switchedOn(t)
-	api, operator, log := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
+	synctest.Test(t, func(t *testing.T) {
+		fake := switchedOn(t)
+		api, operator, log := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
 
-	changed := asking(fake, equipment.PowerOn, "")
-	changed.Metadata.Generation = 5
-	api.setReceivers(changed)
-	mustSucceed(t, operator.pass(t.Context()))
+		changed := asking(fake, equipment.PowerOn, "")
+		changed.Metadata.Generation = 5
+		api.setReceivers(changed)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
-	mustDeepEqual(t, linesWith(log, "asks power"), []string{
-		"Receiver theater: generation 5 asks power On; sent nothing, because the receiver reports power On",
+		fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+		mustDeepEqual(t, linesWith(log, "asks power"), []string{
+			"Receiver theater: generation 5 asks power On; sent nothing, because the receiver reports power On",
+		})
 	})
 }
 
@@ -152,22 +165,24 @@ func TestALiveChangeSendsNoPowerTheReceiverReports(t *testing.T) {
 // reported.
 func TestAReceiverCreatedWhileRunningSendsItsPowerOnce(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	api := startFakeAPI(t)
-	operator, log := loggedController(t, api, "127.0.0.1:1")
-	mustSucceed(t, operator.pass(t.Context()))
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		api := startFakeAPI(t)
+		operator, log := loggedController(t, api, "127.0.0.1:1")
+		mustSucceed(t, operator.pass(t.Context()))
 
-	api.setReceivers(asking(fake, equipment.PowerOn, ""))
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, denon.PowerOnCommand)
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(asking(fake, equipment.PowerOn, ""))
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, denon.PowerOnCommand)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
-	mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
-		"Receiver theater: generation 4 asks power On; sent power On; the receiver reported power On after <time>",
+		fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+		mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
+			"Receiver theater: generation 4 asks power On; sent power On; the receiver reported power On after <time>",
+		})
 	})
 }
 
@@ -176,20 +191,22 @@ func TestAReceiverCreatedWhileRunningSendsItsPowerOnce(t *testing.T) {
 // a person turned the receiver on after it.
 func TestAnotherFieldsGenerationSendsNoPower(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	api, operator, _ := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerStandby })
-	handOnTheRemote(t, fake, denon.PowerOnCommand)
-	waitForMainPower(t, operator, equipment.PowerOn)
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		api, operator, _ := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerStandby })
+		handOnTheRemote(t, fake, denon.PowerOnCommand)
+		waitForMainPower(t, operator, equipment.PowerOn)
 
-	edited := asking(fake, equipment.PowerStandby, equipment.PowerStandby)
-	edited.Metadata.Generation = 5
-	edited.Metadata.Labels = map[string]string{"room": "den"}
-	api.setReceivers(edited)
-	mustSucceed(t, operator.pass(t.Context()))
+		edited := asking(fake, equipment.PowerStandby, equipment.PowerStandby)
+		edited.Metadata.Generation = 5
+		edited.Metadata.Labels = map[string]string{"room": "den"}
+		api.setReceivers(edited)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, "PWSTANDBY", quietPeriod)
+		fake.refuseCommand(t, "PWSTANDBY", quietPeriod)
+	})
 }
 
 // decodedPower reads a power the way the operator reads it from an
@@ -218,15 +235,17 @@ func waitForMainPower(t *testing.T, operator *controller, power equipment.Power)
 // spec.power.
 func TestANewAddressSendsNoPower(t *testing.T) {
 	t.Parallel()
-	first := startFakeDenon(t)
-	api, operator, _ := reachedController(t, asking(first, equipment.PowerStandby, ""), "127.0.0.1:1")
-	moved := switchedOn(t)
+	synctest.Test(t, func(t *testing.T) {
+		first := startFakeDenon(t)
+		api, operator, _ := reachedController(t, asking(first, equipment.PowerStandby, ""), "127.0.0.1:1")
+		moved := switchedOn(t)
 
-	api.setReceivers(asking(moved, equipment.PowerStandby, equipment.PowerStandby))
-	mustSucceed(t, operator.pass(t.Context()))
-	waitForMainPower(t, operator, equipment.PowerOn)
-	waitForSurvey(t, operator)
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(asking(moved, equipment.PowerStandby, equipment.PowerStandby))
+		mustSucceed(t, operator.pass(t.Context()))
+		waitForMainPower(t, operator, equipment.PowerOn)
+		waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	moved.refuseCommand(t, "PWSTANDBY", quietPeriod)
+		moved.refuseCommand(t, "PWSTANDBY", quietPeriod)
+	})
 }

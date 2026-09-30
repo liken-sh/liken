@@ -42,7 +42,7 @@ import (
 // writes again, such as while a Player's idle pod restarts, finds it
 // still there. A removal the API server refuses is tried again after
 // sessionLiftRetry.
-var (
+const (
 	sessionLiftDelay = 60 * time.Second
 	sessionLiftRetry = 10 * time.Second
 )
@@ -277,7 +277,7 @@ func (r *roomTelevision) wake(trigger, display string, television *Television) b
 // cecPowerReadWait bounds the wait of a power press for the node
 // workload's read of the TV's power. The read is one question that the
 // TV answers within a second, and two writes to the API server.
-var cecPowerReadWait = 3 * time.Second
+const cecPowerReadWait = 3 * time.Second
 
 // television answers the Television that shows the session's input
 // and its power, for a power press that decides whether the room is on.

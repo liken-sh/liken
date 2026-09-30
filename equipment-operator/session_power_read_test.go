@@ -9,6 +9,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
@@ -81,21 +82,24 @@ func TestAPowerPressReadsTheTVsPowerFirst(t *testing.T) {
 			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
 			func(session TelevisionSession) bool { return session.StandbyAt != "" }},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fastPower(t)
-			wire := roomWithTV(televisionTV(c.actual))
-			api := controlling(t, wire, lounge(""))
-			api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-			answeringAs(api, c.stale, c.reachable)
-			h := newSessionHarness(t)
-			h.powerTopic = testPowerTopic
-			h.room = theaterRoom(t, api, h)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				wire := roomWithTV(televisionTV(c.actual))
+				api := controlling(t, wire, lounge(""))
+				api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+				answeringAs(api, c.stale, c.reachable)
+				h := newSessionHarness(t)
+				h.powerTopic = testPowerTopic
+				h.room = theaterRoom(t, api, h)
 
-			pressPower(t, h)
+				pressPower(t, h)
 
-			loungeSession(t, api, c.asked)
-			mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0], c.line)
+				loungeSession(t, api, c.asked)
+				mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0], c.line)
+			})
 		})
 	}
 }
@@ -103,22 +107,23 @@ func TestAPowerPressReadsTheTVsPowerFirst(t *testing.T) {
 // A press whose read gets no answer, such as while the node workload
 // restarts, decides from status.power after cecPowerReadWait.
 func TestAPowerPressWithNoReadDecidesFromTheStatus(t *testing.T) {
-	wait := cecPowerReadWait
-	cecPowerReadWait = 100 * time.Millisecond
-	t.Cleanup(func() { cecPowerReadWait = wait })
-	api := startCECAPI(t)
-	api.showing(lounge(""), "acm-0001-receiver")
-	answering(api, "On")
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	h.room = theaterRoom(t, api, h)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.showing(lounge(""), "acm-0001-receiver")
+		answering(api, "On")
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		h.room = theaterRoom(t, api, h)
 
-	pressPower(t, h)
+		pressPower(t, h)
+		time.Sleep(cecPowerReadWait)
 
-	session := loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
-	mustMatch(t, session.PowerReadAt, "")
-	mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0],
-		"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby")
+		session := loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
+		mustMatch(t, session.PowerReadAt, "")
+		mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0],
+			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby")
+	})
 }
 
 // A press waits on the Television watch the Deployment already runs,
@@ -127,28 +132,30 @@ func TestAPowerPressWithNoReadDecidesFromTheStatus(t *testing.T) {
 // got no answer would decide from the receiver's power instead, and the
 // second press finds the standby the first one sent.
 func TestAPowerPressOpensNoWatch(t *testing.T) {
-	fastPower(t)
-	wire := roomWithTV(televisionTV(cec.PowerOn))
-	api := controlling(t, wire, lounge(""))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	answeringAs(api, "", noPower)
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	h.room = theaterRoom(t, api, h)
-	api.waitUntil(t, "the writer's Television watch to open", func() bool { return api.watchesOf(televisionsPath) == 2 })
-	h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		api := controlling(t, wire, lounge(""))
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+		answeringAs(api, "", noPower)
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		h.room = theaterRoom(t, api, h)
+		api.waitUntil(t, "the writer's Television watch to open", func() bool { return api.watchesOf(televisionsPath) == 2 })
+		h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
-	api.waitUntil(t, "the TV to take Standby", func() bool { return sentOf(wire, cec.OpStandby) == 1 })
-	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		api.waitUntil(t, "the TV to take Standby", func() bool { return sentOf(wire, cec.OpStandby) == 1 })
+		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
-	mustDeepEqual(t, waitForLines(t, h.log, "asked Television lounge to", 2), []string{
-		"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
-		"Receiver theater: the power topic asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
+		mustDeepEqual(t, waitForLines(t, h.log, "asked Television lounge to", 2), []string{
+			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
+			"Receiver theater: the power topic asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
+		})
+		mustMatch(t, api.watchesOf(televisionsPath), 2)
 	})
-	mustMatch(t, api.watchesOf(televisionsPath), 2)
 }
 
 // watchesOf counts the watches opened on one collection.

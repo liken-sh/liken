@@ -35,12 +35,13 @@ var (
 
 // restConfig answers the client-go configuration that reaches the same
 // API server with the same credentials as the Client's own requests:
-// the ServiceAccount's CA and token in a pod, and nothing in a test.
+// the ServiceAccount's CA and token in a pod, and in a test the
+// transport of the fake API server, with no credentials.
 // client-go reads the token file again as the kubelet renews it, the
 // way the shared client does. The watches and the Deployment's leader
 // election both use it.
 func (c *Client) restConfig() *rest.Config {
-	config := &rest.Config{Host: c.base}
+	config := &rest.Config{Host: c.base, Transport: c.transport}
 	if c.credentials != "" {
 		config.TLSClientConfig.CAFile = c.credentials + "/ca.crt"
 		config.BearerTokenFile = c.credentials + "/token"
@@ -106,8 +107,7 @@ func watchCollection(ctx context.Context, client *Client, resource schema.GroupV
 
 // optionalRecheck is how long the watch of an absent collection waits
 // before it asks the API server again (informer.Options.AbsentRecheck).
-// It is a variable so a test waits milliseconds instead.
-var optionalRecheck = 5 * time.Minute
+const optionalRecheck = 5 * time.Minute
 
 // wakeOnEvery wakes the loop on every change the informer reports. A
 // loop that reads the whole object, its status included, uses it. The

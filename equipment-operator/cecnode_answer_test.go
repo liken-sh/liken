@@ -11,6 +11,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
@@ -55,20 +56,23 @@ func TestTheAdapterAnswersARequestForTheActiveSource(t *testing.T) {
 			},
 			[]string{"4->f 82 13 00"}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fastWake(t)
-			wire := roomWithTV(televisionTV(cec.PowerOn))
-			askedAfterTheWake(t, wire, c.after)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				wire := roomWithTV(televisionTV(cec.PowerOn))
+				askedAfterTheWake(t, wire, c.after)
 
-			askForTheSource(wire)
-			time.Sleep(quietPeriod)
+				askForTheSource(wire)
+				time.Sleep(quietPeriod)
 
-			mustDeepEqual(t, claimsOf(wire), c.claims)
-			// The answer is Active Source alone. The asker can be the
-			// receiver while the TV is off, and Image View On would wake a
-			// TV a person turned off.
-			mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+				mustDeepEqual(t, claimsOf(wire), c.claims)
+				// The answer is Active Source alone. The asker can be the
+				// receiver while the TV is off, and Image View On would wake a
+				// TV a person turned off.
+				mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+			})
 		})
 	}
 }
@@ -77,15 +81,17 @@ func TestTheAdapterAnswersARequestForTheActiveSource(t *testing.T) {
 // choice, and that source is the active source now. It answers the TV
 // itself, so the adapter sends nothing.
 func TestTheAdapterLeavesTheRequestToTheSourceAPersonChose(t *testing.T) {
-	fastWake(t)
-	wire := roomWithTV(televisionTV(cec.PowerOn))
-	askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { return session })
-	wire.Send(cec.ActiveSource(8, 0x1500))
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { return session })
+		wire.Send(cec.ActiveSource(8, 0x1500))
 
-	askForTheSource(wire)
-	time.Sleep(quietPeriod)
+		askForTheSource(wire)
+		time.Sleep(quietPeriod)
 
-	mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00"})
+		mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00"})
+	})
 }
 
 // A TV that boots slowly asks for the active source before it reports
@@ -93,49 +99,52 @@ func TestTheAdapterLeavesTheRequestToTheSourceAPersonChose(t *testing.T) {
 // Active Source the adapter heard is then from an earlier evening, and
 // the wake answers anyway, because it is claiming the input.
 func TestTheWakeAnswersARequestBeforeItsOwnClaim(t *testing.T) {
-	fastWake(t)
-	// The TV stays in its transition past the end of the test, so the
-	// wake's own Active Source never goes out, and the one on the wire is
-	// the answer.
-	cecPowerWindow = time.Minute
-	wire := roomWithTV(televisionTV(cec.PowerStandby))
-	api := controlling(t, wire, lounge(""))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	wire.Send(cec.ActiveSource(8, 0x1500))
-	booting := televisionTV(cec.PowerStandby)
-	booting.Transition = 1000
-	wire.Add(booting)
-	session := wokeNow()
-	api.putTelevision(waking(session))
-	api.waitUntil(t, "Image View On", func() bool { return sentOf(wire, cec.OpImageViewOn) == 1 })
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		// The TV stays in its transition past the end of the test, so the
+		// wake's own Active Source never goes out, and the one on the wire is
+		// the answer.
+		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		api := controlling(t, wire, lounge(""))
+		api.scanned(t, "node-1")
+		wire.Send(cec.ActiveSource(8, 0x1500))
+		booting := televisionTV(cec.PowerStandby)
+		booting.Transition = 1000
+		wire.Add(booting)
+		session := wokeNow()
+		api.putTelevision(waking(session))
+		api.waitUntil(t, "Image View On", func() bool { return sentOf(wire, cec.OpImageViewOn) == 1 })
 
-	askForTheSource(wire)
+		askForTheSource(wire)
 
-	api.waitUntil(t, "the answer", func() bool { return len(claimsOf(wire)) == 1 })
-	mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00"})
+		api.waitUntil(t, "the answer", func() bool { return len(claimsOf(wire)) == 1 })
+		mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00"})
+	})
 }
 
 // The answer is an operation a person notices, so it writes one line
 // that names the session it answers for.
 func TestTheAnswerWritesALine(t *testing.T) {
-	fastWake(t)
-	api := startCECAPI(t)
-	wire := roomWithTV(televisionTV(cec.PowerOn))
-	_, device := usbAdapter(wire)
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-	api.putTelevision(lounge(""))
-	log := loggedNode(t, api, device)
-	session := wokeNow()
-	wakeLive(t, api, session)
-	wokeWith(t, api, session)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		_, device := usbAdapter(wire)
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+		api.putTelevision(lounge(""))
+		log := loggedNode(t, api, device)
+		session := wokeNow()
+		wakeLive(t, api, session)
+		wokeWith(t, api, session)
 
-	askForTheSource(wire)
+		askForTheSource(wire)
 
-	api.waitUntil(t, "the answer", func() bool { return len(linesWith(log, "Request Active Source")) == 2 })
-	mustDeepEqual(t, linesWith(log, "Request Active Source"), []string{
-		`CECBus den: "TV" (logical 0, 0.0.0.0) broadcast Request Active Source`,
-		`Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Request Active Source; the adapter on node-1 answered with Active Source for 1.3.0.0, Display acm-0001-receiver, because Player media/den's session holds the room awake`,
+		api.waitUntil(t, "the answer", func() bool { return len(linesWith(log, "Request Active Source")) == 2 })
+		mustDeepEqual(t, linesWith(log, "Request Active Source"), []string{
+			`CECBus den: "TV" (logical 0, 0.0.0.0) broadcast Request Active Source`,
+			`Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Request Active Source; the adapter on node-1 answered with Active Source for 1.3.0.0, Display acm-0001-receiver, because Player media/den's session holds the room awake`,
+		})
 	})
 }
 
@@ -153,21 +162,24 @@ func TestTheAdapterAnswersASetStreamPathToTheDisplay(t *testing.T) {
 		{"another source's address", 0x1500, true, []string{"4->f 82 13 00"}},
 		{"a session that went to sleep", 0x1300, false, []string{"4->f 82 13 00"}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fastWake(t)
-			wire := roomWithTV(televisionTV(cec.PowerOn))
-			askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { session.Awake = c.awake; return session })
-			// A streaming player's claim after the guard does not stop the
-			// answer: the TV chose the Display by its address.
-			wire.Send(cec.ActiveSource(8, 0x1500))
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				wire := roomWithTV(televisionTV(cec.PowerOn))
+				askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { session.Awake = c.awake; return session })
+				// A streaming player's claim after the guard does not stop the
+				// answer: the TV chose the Display by its address.
+				wire.Send(cec.ActiveSource(8, 0x1500))
 
-			wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, byte(c.address>>8), byte(c.address)))
-			time.Sleep(quietPeriod)
+				wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, byte(c.address>>8), byte(c.address)))
+				time.Sleep(quietPeriod)
 
-			mustDeepEqual(t, claimsOf(wire), c.claims)
-			// The TV asked for the Display, so it needs no Image View On.
-			mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+				mustDeepEqual(t, claimsOf(wire), c.claims)
+				// The TV asked for the Display, so it needs no Image View On.
+				mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+			})
 		})
 	}
 }
@@ -202,17 +214,20 @@ func TestARouteThatMovesAwayEndsTheAnswer(t *testing.T) {
 			cec.NewMessage(5, cec.AddressBroadcast, cec.OpRoutingInformation, 0x10, 0x00),
 			[]string{"4->f 82 13 00", "4->f 82 13 00"}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fastWake(t)
-			wire := roomWithTV(televisionTV(cec.PowerOn))
-			askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { return session })
-			wire.Send(c.message)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				wire := roomWithTV(televisionTV(cec.PowerOn))
+				askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { return session })
+				wire.Send(c.message)
 
-			askForTheSource(wire)
-			time.Sleep(quietPeriod)
+				askForTheSource(wire)
+				time.Sleep(quietPeriod)
 
-			mustDeepEqual(t, claimsOf(wire), c.claims)
+				mustDeepEqual(t, claimsOf(wire), c.claims)
+			})
 		})
 	}
 }

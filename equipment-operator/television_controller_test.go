@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/wiim"
@@ -36,37 +37,41 @@ func passes(t *testing.T, api *cecAPI, count int) {
 
 func TestTheDeploymentDiscoversTheTVOfABusInControl(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice, receiverDevice))
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice, receiverDevice))
 
-	passes(t, api, 2)
+		passes(t, api, 2)
 
-	television, held := api.television("den")
-	if !held {
-		t.Fatal("no Television for the bus's TV")
-	}
-	mustMatch(t, television.Metadata.Labels[discoveredLabel], "cec")
-	mustDeepEqual(t, television.Spec, TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}})
-	mustMatch(t, television.Status.Power, "Standby")
-	mustMatch(t, conditionOf(television.Status.Conditions, conditionReachable).Status, ConditionTrue)
+		television, held := api.television("den")
+		if !held {
+			t.Fatal("no Television for the bus's TV")
+		}
+		mustMatch(t, television.Metadata.Labels[discoveredLabel], "cec")
+		mustDeepEqual(t, television.Spec, TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}})
+		mustMatch(t, television.Status.Power, "Standby")
+		mustMatch(t, conditionOf(television.Status.Conditions, conditionReachable).Status, ConditionTrue)
+	})
 }
 
 // Discovery creates with a create, not an apply, so an object that
 // already has the bus's name is left as it is.
 func TestDiscoveryCreatesAndLeavesAnExistingName(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
 
-	passes(t, api, 3)
+		passes(t, api, 3)
 
-	mustDeepEqual(t, api.created, []string{"den"})
-	created, err := CreateDiscoveredTelevision(api.client, "den")
-	mustSucceed(t, err)
-	if created {
-		t.Error("the name already existed, so this call created nothing")
-	}
-	mustDeepEqual(t, api.created, []string{"den"})
+		mustDeepEqual(t, api.created, []string{"den"})
+		created, err := CreateDiscoveredTelevision(api.client, "den")
+		mustSucceed(t, err)
+		if created {
+			t.Error("the name already existed, so this call created nothing")
+		}
+		mustDeepEqual(t, api.created, []string{"den"})
+	})
 }
 
 // A person adopts the discovered Television by applying their own spec
@@ -74,52 +79,58 @@ func TestDiscoveryCreatesAndLeavesAnExistingName(t *testing.T) {
 // because no other Television names the bus.
 func TestAPersonAdoptsTheDiscoveredTelevisionUnderItsName(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
-	passes(t, api, 1)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
+		passes(t, api, 1)
 
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "den"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}, Power: TelevisionOn}})
-	passes(t, api, 2)
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "den"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}, Power: TelevisionOn}})
+		passes(t, api, 2)
 
-	television, held := api.television("den")
-	if !held || television.Spec.Power != TelevisionOn {
-		t.Fatalf("the adopted Television is %+v (held %v)", television, held)
-	}
-	mustMatch(t, television.Metadata.Labels[discoveredLabel], "cec")
-	mustDeepEqual(t, api.deletedTelevisionNames(), []string(nil))
-	mustMatch(t, conditionOf(television.Status.Conditions, conditionInCharge).Status, ConditionTrue)
+		television, held := api.television("den")
+		if !held || television.Spec.Power != TelevisionOn {
+			t.Fatalf("the adopted Television is %+v (held %v)", television, held)
+		}
+		mustMatch(t, television.Metadata.Labels[discoveredLabel], "cec")
+		mustDeepEqual(t, api.deletedTelevisionNames(), []string(nil))
+		mustMatch(t, conditionOf(television.Status.Conditions, conditionInCharge).Status, ConditionTrue)
+	})
 }
 
 func TestAPersonsTelevisionTakesOverFromTheDiscoveredOne(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
-	passes(t, api, 1)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
+		passes(t, api, 1)
 
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	passes(t, api, 1)
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		passes(t, api, 1)
 
-	if !slices.Contains(api.deletedTelevisionNames(), "den") {
-		t.Error("the discovered Television is still there")
-	}
-	television, _ := api.television("lounge")
-	mustMatch(t, television.Status.Power, "Standby")
+		if !slices.Contains(api.deletedTelevisionNames(), "den") {
+			t.Error("the discovered Television is still there")
+		}
+		television, _ := api.television("lounge")
+		mustMatch(t, television.Status.Power, "Standby")
+	})
 }
 
 func TestTheDeploymentWritesWhatTheBusFound(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice, receiverDevice))
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice, receiverDevice))
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
 
-	passes(t, api, 1)
+		passes(t, api, 1)
 
-	television, _ := api.television("lounge")
-	mustDeepEqual(t, television.Status.CEC, &TelevisionCECStatus{PhysicalAddress: "0.0.0.0", LogicalAddress: 0, OSDName: "TV"})
-	mustDeepEqual(t, television.Status.Displays, []TelevisionDisplay{
-		{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0", Via: &EquipmentRef{Kind: "Receiver", Name: "den"}},
+		television, _ := api.television("lounge")
+		mustDeepEqual(t, television.Status.CEC, &TelevisionCECStatus{PhysicalAddress: "0.0.0.0", LogicalAddress: 0, OSDName: "TV"})
+		mustDeepEqual(t, television.Status.Displays, []TelevisionDisplay{
+			{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0", Via: &EquipmentRef{Kind: "Receiver", Name: "den"}},
+		})
 	})
 }
 
@@ -127,55 +138,61 @@ func TestTheDeploymentWritesWhatTheBusFound(t *testing.T) {
 // Deployment's clock costs the API server no write.
 func TestAnUnchangedTelevisionIsNotWrittenAgain(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	passes(t, api, 1)
-	before, _ := api.writes()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		passes(t, api, 1)
+		before, _ := api.writes()
 
-	passes(t, api, 2)
+		passes(t, api, 2)
 
-	after, _ := api.writes()
-	mustMatch(t, after, before)
+		after, _ := api.writes()
+		mustMatch(t, after, before)
+	})
 }
 
 // A TV that stops answering loses its power, because a power the TV
 // did not state now would be a guess.
 func TestATVThatStopsAnsweringLosesItsPower(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	passes(t, api, 1)
-	silent := tvDevice
-	silent.Power = ""
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		passes(t, api, 1)
+		silent := tvDevice
+		silent.Power = ""
 
-	api.putBus(scannedBus("den", silent))
-	passes(t, api, 1)
+		api.putBus(scannedBus("den", silent))
+		passes(t, api, 1)
 
-	television, _ := api.television("lounge")
-	mustMatch(t, television.Status.Power, "")
-	mustMatch(t, conditionOf(television.Status.Conditions, conditionReachable).Reason, reasonNoPower)
+		television, _ := api.television("lounge")
+		mustMatch(t, television.Status.Power, "")
+		mustMatch(t, conditionOf(television.Status.Conditions, conditionReachable).Reason, reasonNoPower)
+	})
 }
 
 // The Deployment's loop wakes on a new Television and writes its
 // status with no wait for the clock.
 func TestTheDeploymentLoopFollowsTheTelevisions(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		newCECBusController(api.client).run(ctx, newMetrics("test"))
-	}()
-	t.Cleanup(func() { cancel(); <-done })
-	api.waitForTelevision(t, "den", func(Television) bool { return true })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			newCECBusController(api.client).run(ctx, newMetrics("test"))
+		}()
+		t.Cleanup(func() { cancel(); <-done })
+		api.waitForTelevision(t, "den", func(Television) bool { return true })
 
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
 
-	api.waitForTelevision(t, "lounge", func(television Television) bool { return television.Status.Power == "Standby" })
+		api.waitForTelevision(t, "lounge", func(television Television) bool { return television.Status.Power == "Standby" })
+	})
 }
 
 // runDeploymentLoop runs the Deployment's CECBus loop until the test
@@ -222,7 +239,7 @@ func runServe(t *testing.T, api *cecAPI) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = serve(ctx, api.client, settings{busAddress: "127.0.0.1:1"}, testMetrics(t))
+		_ = serve(ctx, api.client, settings{busAddress: "127.0.0.1:1", dial: testNetwork.dial}, testMetrics(t))
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -244,20 +261,24 @@ func TestTheDeploymentLoopFollowsAReceiversSpec(t *testing.T) {
 		{"the CECBus loop alone", runDeploymentLoop},
 		{"the whole Deployment", runServe},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := startCECAPI(t)
-			api.putBus(scannedBus("den", tvDevice, receiverDevice))
-			api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-			api.putReceiver(wiredReceiver("den", "node-2", "acm-0001-receiver"))
-			api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-			c.run(t, api)
-			api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				api.putBus(scannedBus("den", tvDevice, receiverDevice))
+				api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+				api.putReceiver(wiredReceiver("den", "node-2", "acm-0001-receiver"))
+				api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+				c.run(t, api)
+				api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
 
-			api.editReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
+				api.editReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
 
-			api.waitForTelevision(t, "lounge", func(television Television) bool {
-				return len(television.Status.Displays) == 1 && television.Status.Displays[0].Via != nil
+				api.waitForTelevision(t, "lounge", func(television Television) bool {
+					return len(television.Status.Displays) == 1 && television.Status.Displays[0].Via != nil
+				})
 			})
 		})
 	}
@@ -266,25 +287,27 @@ func TestTheDeploymentLoopFollowsAReceiversSpec(t *testing.T) {
 // The Deployment's Receiver loop and CECBus loop share one watch of the
 // Receivers, so the process holds each Receiver once.
 func TestTheDeploymentWatchesTheReceiversOnce(t *testing.T) {
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice, receiverDevice))
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	runServe(t, api)
-	api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
-	time.Sleep(watchQuiet)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice, receiverDevice))
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		runServe(t, api)
+		api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
+		time.Sleep(watchQuiet)
 
-	api.mutex.Lock()
-	defer api.mutex.Unlock()
-	mustMatch(t, api.watches[receiversPath], 1)
+		api.mutex.Lock()
+		defer api.mutex.Unlock()
+		mustMatch(t, api.watches[receiversPath], 1)
+	})
 }
 
 // A read that fails skips the Television pass, because a status
 // derived from a partial read would remove facts that are still true.
 // A write the API server refuses is logged and left for the next pass.
 func TestTheTelevisionPassSkipsAFailedReadAndSurvivesARefusedWrite(t *testing.T) {
-	t.Parallel()
 	buses := CECBusList{Items: []CECBus{*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))}}
 	televisions := TelevisionList{Items: []Television{*tvOn("den")}}
 	everything := map[string]any{
@@ -315,28 +338,31 @@ func TestTheTelevisionPassSkipsAFailedReadAndSurvivesARefusedWrite(t *testing.T)
 		{"no Display collection", without(displaysPath), nil, true},
 		{"every write refused", everything, nil, true},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := &cannedAPI{answers: c.answers, statuses: c.statuses}
-			controller := newCECBusController(testAPIClient(t, api.handler()))
-			controller.now = func() time.Time { return derivedAt }
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := &cannedAPI{answers: c.answers, statuses: c.statuses}
+				controller := newCECBusController(testAPIClient(t, api.handler()))
+				controller.now = func() time.Time { return derivedAt }
 
-			mustSucceed(t, controller.pass())
+				mustSucceed(t, controller.pass())
 
-			wrote := slices.ContainsFunc(api.requests, func(request recordedRequest) bool {
-				return request.Method == http.MethodPatch && strings.HasPrefix(request.Path, televisionsPath)
+				wrote := slices.ContainsFunc(api.requests, func(request recordedRequest) bool {
+					return request.Method == http.MethodPatch && strings.HasPrefix(request.Path, televisionsPath)
+				})
+				mustMatch(t, wrote, c.writes)
+				wroteBus := slices.ContainsFunc(api.requests, func(request recordedRequest) bool {
+					return request.Method == http.MethodPatch && strings.HasPrefix(request.Path, cecBusesPath)
+				})
+				mustMatch(t, wroteBus, true)
 			})
-			mustMatch(t, wrote, c.writes)
-			wroteBus := slices.ContainsFunc(api.requests, func(request recordedRequest) bool {
-				return request.Method == http.MethodPatch && strings.HasPrefix(request.Path, cecBusesPath)
-			})
-			mustMatch(t, wroteBus, true)
 		})
 	}
 }
 
 func TestDeleteTelevisionSettlesOnGoneAndReportsARefusal(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		status  int
@@ -346,15 +372,19 @@ func TestDeleteTelevisionSettlesOnGoneAndReportsARefusal(t *testing.T) {
 		{"already gone", http.StatusNotFound, false},
 		{"refused", http.StatusForbidden, true},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := &cannedAPI{statuses: map[string]int{"DELETE " + televisionPath("den"): c.status}}
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := &cannedAPI{statuses: map[string]int{"DELETE " + televisionPath("den"): c.status}}
 
-			err := DeleteTelevision(testAPIClient(t, api.handler()), "den")
+				err := DeleteTelevision(testAPIClient(t, api.handler()), "den")
 
-			if (err != nil) != c.wantErr {
-				t.Errorf("got %v, want an error: %v", err, c.wantErr)
-			}
+				if (err != nil) != c.wantErr {
+					t.Errorf("got %v, want an error: %v", err, c.wantErr)
+				}
+			})
 		})
 	}
 }
@@ -376,18 +406,20 @@ func loggedPasses(t *testing.T, api *cecAPI, count int) *logBuffer {
 // it deletes it, and later passes write none.
 func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
-	created := loggedPasses(t, api, 3)
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
+		created := loggedPasses(t, api, 3)
 
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	deleted := loggedPasses(t, api, 3)
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		deleted := loggedPasses(t, api, 3)
 
-	mustDeepEqual(t, created.lines(), []string{
-		`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`,
-	})
-	mustDeepEqual(t, deleted.lines(), []string{
-		"deleted the discovered Television den: Television lounge names CECBus den",
+		mustDeepEqual(t, created.lines(), []string{
+			`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`,
+		})
+		mustDeepEqual(t, deleted.lines(), []string{
+			"deleted the discovered Television den: Television lounge names CECBus den",
+		})
 	})
 }
 
@@ -395,7 +427,6 @@ func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
 // reached the API server as a 201. A 409 means a name another writer
 // already took, which this call did not create, so it gets no line.
 func TestCreateDiscoveredTelevisionLogsOnlyWhatItCreated(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name      string
 		preexists bool
@@ -412,21 +443,25 @@ func TestCreateDiscoveredTelevisionLogsOnlyWhatItCreated(t *testing.T) {
 			[]string{""},
 		},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			api := startCECAPI(t)
-			if one.preexists {
-				api.putTelevision(Television{Metadata: ObjectMeta{Name: "den"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-			}
-			bus := scannedBus("den", tvDevice)
-			bus.Status.Devices, _ = deriveCECBus(&bus, time.Now())
-			controller := newCECBusController(api.client)
-			log := &logBuffer{}
-			controller.log = log
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				if one.preexists {
+					api.putTelevision(Television{Metadata: ObjectMeta{Name: "den"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+				}
+				bus := scannedBus("den", tvDevice)
+				bus.Status.Devices, _ = deriveCECBus(&bus, time.Now())
+				controller := newCECBusController(api.client)
+				log := &logBuffer{}
+				controller.log = log
 
-			controller.createDiscoveredTelevision("den", &bus)
+				controller.createDiscoveredTelevision("den", &bus)
 
-			mustDeepEqual(t, log.lines(), one.want)
+				mustDeepEqual(t, log.lines(), one.want)
+			})
 		})
 	}
 }

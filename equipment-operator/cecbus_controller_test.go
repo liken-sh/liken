@@ -6,84 +6,88 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 func TestTheLoopWritesWhatItDerives(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	bus := *busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))
-	api.putBus(bus)
-	controller := newCECBusController(api.client)
-	controller.now = func() time.Time { return derivedAt }
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		bus := *busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))
+		api.putBus(bus)
+		controller := newCECBusController(api.client)
+		controller.now = func() time.Time { return derivedAt }
 
-	mustSucceed(t, controller.pass())
+		mustSucceed(t, controller.pass())
 
-	written, _ := api.bus("den")
-	mustDeepEqual(t, written.Status.Devices, []CECDevice{tvDevice})
-	mustMatch(t, conditionOf(written.Status.Conditions, conditionScanned).Status, ConditionTrue)
+		written, _ := api.bus("den")
+		mustDeepEqual(t, written.Status.Devices, []CECDevice{tvDevice})
+		mustMatch(t, conditionOf(written.Status.Conditions, conditionScanned).Status, ConditionTrue)
+	})
 }
 
 func TestASecondPassWritesNothing(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
-	controller := newCECBusController(api.client)
-	controller.now = func() time.Time { return derivedAt }
-	// The bus has a TV, so the first pass creates the Television that
-	// discovery owns, and the second pass writes that Television's status.
-	mustSucceed(t, controller.pass())
-	mustSucceed(t, controller.pass())
-	api.mutex.Lock()
-	before := api.version
-	api.mutex.Unlock()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
+		controller := newCECBusController(api.client)
+		controller.now = func() time.Time { return derivedAt }
+		// The bus has a TV, so the first pass creates the Television that
+		// discovery owns, and the second pass writes that Television's status.
+		mustSucceed(t, controller.pass())
+		mustSucceed(t, controller.pass())
+		api.mutex.Lock()
+		before := api.version
+		api.mutex.Unlock()
 
-	mustSucceed(t, controller.pass())
+		mustSucceed(t, controller.pass())
 
-	api.mutex.Lock()
-	defer api.mutex.Unlock()
-	mustMatch(t, api.version, before)
+		api.mutex.Lock()
+		defer api.mutex.Unlock()
+		mustMatch(t, api.version, before)
+	})
 }
 
 func TestTheLoopFollowsAnAdaptersReport(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(*busWith(CECControl, []string{"node-1"}))
-	ctx, cancel := context.WithCancel(context.Background())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		newCECBusController(api.client).run(ctx, testMetrics(t))
-	}()
-	t.Cleanup(func() { cancel(); <-stopped })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(*busWith(CECControl, []string{"node-1"}))
+		ctx, cancel := context.WithCancel(context.Background())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			newCECBusController(api.client).run(ctx, testMetrics(t))
+		}()
+		t.Cleanup(func() { cancel(); <-stopped })
 
-	mustSucceed(t, ApplyCECAdapterStatus(api.client, "den", "node-1", &CECAdapterStatus{Machine: "node-1", State: AdapterScanned, PhysicalAddress: "1.3.0.0", LogicalAddress: logical(4), Devices: []CECDevice{tvDevice}, ReportedAt: timestamp(time.Now())}))
+		mustSucceed(t, ApplyCECAdapterStatus(api.client, "den", "node-1", &CECAdapterStatus{Machine: "node-1", State: AdapterScanned, PhysicalAddress: "1.3.0.0", LogicalAddress: logical(4), Devices: []CECDevice{tvDevice}, ReportedAt: timestamp(time.Now())}))
 
-	api.waitUntil(t, "the derived devices", func() bool {
-		bus, _ := api.bus("den")
-		return len(bus.Status.Devices) == 1 && conditionOf(bus.Status.Conditions, conditionJoined).Status == ConditionTrue
+		api.waitUntil(t, "the derived devices", func() bool {
+			bus, _ := api.bus("den")
+			return len(bus.Status.Devices) == 1 && conditionOf(bus.Status.Conditions, conditionJoined).Status == ConditionTrue
+		})
 	})
 }
 
 // A cluster without the CECBus definition answers the list with an
 // error, and the loop waits and lists again until its context ends.
 func TestTheLoopWaitsForTheDefinition(t *testing.T) {
-	was := cecBusRetry
-	cecBusRetry = time.Millisecond
-	t.Cleanup(func() { cecBusRetry = was })
-	api := &cannedAPI{}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := &cannedAPI{}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*cecBusRetry+time.Second)
+		defer cancel()
 
-	newCECBusController(testAPIClient(t, api.handler())).run(ctx, testMetrics(t))
+		newCECBusController(testAPIClient(t, api.handler())).run(ctx, testMetrics(t))
 
-	if sent := api.sent(); sent < 2 {
-		t.Errorf("the loop listed %d times", sent)
-	}
+		mustMatch(t, api.sent(), 3)
+	})
 }
 
 func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		status  int
@@ -93,15 +97,19 @@ func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
 		{"already gone", http.StatusNotFound, false},
 		{"refused", http.StatusForbidden, true},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := &cannedAPI{statuses: map[string]int{"DELETE " + cecBusPath("node-1"): c.status}}
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := &cannedAPI{statuses: map[string]int{"DELETE " + cecBusPath("node-1"): c.status}}
 
-			err := DeleteCECBus(testAPIClient(t, api.handler()), "node-1")
+				err := DeleteCECBus(testAPIClient(t, api.handler()), "node-1")
 
-			if (err != nil) != c.wantErr {
-				t.Errorf("got %v, want an error: %v", err, c.wantErr)
-			}
+				if (err != nil) != c.wantErr {
+					t.Errorf("got %v, want an error: %v", err, c.wantErr)
+				}
+			})
 		})
 	}
 }
@@ -109,7 +117,6 @@ func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
 // A failed list is the pass's error, and a refused write is logged and
 // left for the next pass.
 func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		answers map[string]any
@@ -118,15 +125,19 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 		{"no collection", map[string]any{}, true},
 		{"a refused write", map[string]any{"GET " + cecBusesPath: CECBusList{Items: []CECBus{*busWith(CECListen, []string{"node-1"})}}}, false},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := &cannedAPI{answers: c.answers}
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := &cannedAPI{answers: c.answers}
 
-			err := newCECBusController(testAPIClient(t, api.handler())).pass()
+				err := newCECBusController(testAPIClient(t, api.handler())).pass()
 
-			if (err != nil) != c.wantErr {
-				t.Errorf("got %v, want an error: %v", err, c.wantErr)
-			}
+				if (err != nil) != c.wantErr {
+					t.Errorf("got %v, want an error: %v", err, c.wantErr)
+				}
+			})
 		})
 	}
 }
@@ -135,16 +146,18 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 // entry stale.
 func TestTheClockFindsAnEntryGoneStale(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
-	controller := newCECBusController(api.client)
-	controller.now = func() time.Time { return derivedAt }
-	mustSucceed(t, controller.pass())
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
+		controller := newCECBusController(api.client)
+		controller.now = func() time.Time { return derivedAt }
+		mustSucceed(t, controller.pass())
 
-	controller.now = func() time.Time { return derivedAt.Add(2 * time.Minute) }
-	mustSucceed(t, controller.pass())
+		controller.now = func() time.Time { return derivedAt.Add(2 * time.Minute) }
+		mustSucceed(t, controller.pass())
 
-	bus, _ := api.bus("den")
-	mustMatch(t, conditionOf(bus.Status.Conditions, conditionJoined).Reason, reasonStale)
-	mustDeepEqual(t, bus.Status.Devices, []CECDevice(nil))
+		bus, _ := api.bus("den")
+		mustMatch(t, conditionOf(bus.Status.Conditions, conditionJoined).Reason, reasonStale)
+		mustDeepEqual(t, bus.Status.Devices, []CECDevice(nil))
+	})
 }

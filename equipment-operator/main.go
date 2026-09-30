@@ -54,6 +54,9 @@ type settings struct {
 	// networkDiscoveryOff is true when the Deployment turned network
 	// discovery off. The zero value is on, the default.
 	networkDiscoveryOff bool
+	// dial reaches the broker and the Denon receivers. Nil, which
+	// readSettings leaves, dials over TCP.
+	dial dialFunc
 }
 
 // readSettings takes the configuration from the environment alone.

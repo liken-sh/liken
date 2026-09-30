@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -33,7 +34,6 @@ func heldStore(t *testing.T, synced bool, objects ...*unstructured.Unstructured)
 // the store that does not convert is read from the API server, so the
 // pass leaves out no object.
 func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
-	t.Parallel()
 	theater, lounge := asObject(t, receiverAt("uid-1", 1, "")), asObject(t, receiverAt("uid-2", 1, ""))
 	lounge.SetName("lounge")
 	mistyped := asObject(t, receiverAt("uid-3", 1, ""))
@@ -54,26 +54,30 @@ func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
 		{"a watch that has read", heldStore(t, true, theater, lounge), 0, 0, []string{"lounge", "theater"}},
 		{"an object that does not convert", heldStore(t, true, theater, mistyped), 0, 1, []string{"attic", "theater"}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := startCECAPI(t)
-			for _, name := range []string{"attic", "lounge", "theater"} {
-				receiver := receiverAt("uid-"+name, 1, "")
-				receiver.Metadata.Name = name
-				api.putReceiver(receiver)
-			}
-			lists, gets := api.readCountOf(receiversPath), api.readsUnder(receiversPath)-api.readCountOf(receiversPath)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				for _, name := range []string{"attic", "lounge", "theater"} {
+					receiver := receiverAt("uid-"+name, 1, "")
+					receiver.Metadata.Name = name
+					api.putReceiver(receiver)
+				}
+				lists, gets := api.readCountOf(receiversPath), api.readsUnder(receiversPath)-api.readCountOf(receiversPath)
 
-			list, err := readReceivers(api.client, c.held)
+				list, err := readReceivers(api.client, c.held)
 
-			mustSucceed(t, err)
-			var names []string
-			for _, item := range list.Items {
-				names = append(names, item.Metadata.Name)
-			}
-			mustDeepEqual(t, names, c.names)
-			mustMatch(t, api.readCountOf(receiversPath)-lists, c.lists)
-			mustMatch(t, api.readsUnder(receiversPath)-api.readCountOf(receiversPath)-gets, c.gets)
+				mustSucceed(t, err)
+				var names []string
+				for _, item := range list.Items {
+					names = append(names, item.Metadata.Name)
+				}
+				mustDeepEqual(t, names, c.names)
+				mustMatch(t, api.readCountOf(receiversPath)-lists, c.lists)
+				mustMatch(t, api.readsUnder(receiversPath)-api.readCountOf(receiversPath)-gets, c.gets)
+			})
 		})
 	}
 }
@@ -214,7 +218,6 @@ func delivered(t *testing.T, held *watchStore, versions *memo.Versions) {
 // that runs after the watches delivered the last pass's writes, sends
 // the API server no request.
 func TestTheCECBusPassReadsTheStores(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		watched bool
@@ -223,38 +226,42 @@ func TestTheCECBusPassReadsTheStores(t *testing.T) {
 		{"no watch", false, map[string]int{cecBusesPath: 1, televisionsPath: 1, displaysPath: 1, receiversPath: 1}},
 		{"the watches have read", true, map[string]int{cecBusesPath: 0, televisionsPath: 0, displaysPath: 0, receiversPath: 0}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := startCECAPI(t)
-			api.putBus(scannedBus("den", tvDevice, receiverDevice))
-			api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-			api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
-			api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-			controller := newCECBusController(api.client)
-			if c.watched {
-				startWatches(t, api.client, map[*watchStore]watchFunc{
-					controller.buses: watchCECBuses, controller.televisions: watchTelevisions,
-					controller.displays: watchDisplays, controller.receivers: watchReceiverSpecs,
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				api.putBus(scannedBus("den", tvDevice, receiverDevice))
+				api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+				api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
+				api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+				controller := newCECBusController(api.client)
+				if c.watched {
+					startWatches(t, api.client, map[*watchStore]watchFunc{
+						controller.buses: watchCECBuses, controller.televisions: watchTelevisions,
+						controller.displays: watchDisplays, controller.receivers: watchReceiverSpecs,
+					})
+				}
+				mustSucceed(t, controller.pass())
+				delivered(t, controller.buses, api.client.versions.cecBuses)
+				delivered(t, controller.televisions, api.client.versions.televisions)
+				before := map[string]int{}
+				for path := range c.reads {
+					before[path] = api.readsUnder(path)
+				}
+				writes := api.derivedWrites
+
+				mustSucceed(t, controller.pass())
+
+				for path, want := range c.reads {
+					mustMatch(t, api.readsUnder(path)-before[path], want)
+				}
+				mustMatch(t, api.derivedWrites, writes)
+				television, _ := api.television("lounge")
+				mustDeepEqual(t, television.Status.Displays, []TelevisionDisplay{
+					{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0", Via: &EquipmentRef{Kind: "Receiver", Name: "den"}},
 				})
-			}
-			mustSucceed(t, controller.pass())
-			delivered(t, controller.buses, api.client.versions.cecBuses)
-			delivered(t, controller.televisions, api.client.versions.televisions)
-			before := map[string]int{}
-			for path := range c.reads {
-				before[path] = api.readsUnder(path)
-			}
-			writes := api.derivedWrites
-
-			mustSucceed(t, controller.pass())
-
-			for path, want := range c.reads {
-				mustMatch(t, api.readsUnder(path)-before[path], want)
-			}
-			mustMatch(t, api.derivedWrites, writes)
-			television, _ := api.television("lounge")
-			mustDeepEqual(t, television.Status.Displays, []TelevisionDisplay{
-				{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0", Via: &EquipmentRef{Kind: "Receiver", Name: "den"}},
 			})
 		})
 	}
@@ -278,7 +285,7 @@ func runNode(t *testing.T, api *cecAPI) *cecNode {
 		cancel()
 		<-stopped
 	})
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	api.scanned(t, "node-1")
 	awaitStores(t, node.buses, node.displays)
 	return node
 }
@@ -291,19 +298,21 @@ func runNode(t *testing.T, api *cecAPI) *cecNode {
 // CECBus from the API server once, so those reads are not counted.
 func TestTheNodePassReadsFromTheStores(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-	runNode(t, api)
-	lists := func() []int {
-		return []int{api.readCountOf(cecBusesPath), api.readCountOf(televisionsPath), api.readsUnder(displaysPath)}
-	}
-	before := lists()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+		runNode(t, api)
+		lists := func() []int {
+			return []int{api.readCountOf(cecBusesPath), api.readCountOf(televisionsPath), api.readsUnder(displaysPath)}
+		}
+		before := lists()
 
-	api.moveDisplay("acm-0001-receiver", "2.0.0.0")
+		api.moveDisplay("acm-0001-receiver", "2.0.0.0")
 
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.PhysicalAddress == "2.0.0.0" })
-	mustDeepEqual(t, lists(), before)
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.PhysicalAddress == "2.0.0.0" })
+		mustDeepEqual(t, lists(), before)
+	})
 }
 
 // The node workload watches the Displays of its own machine, by the
@@ -311,16 +320,18 @@ func TestTheNodePassReadsFromTheStores(t *testing.T) {
 // Display.
 func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putDisplay("acm-0002-receiver", "node-2", "2.0.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putDisplay("acm-0002-receiver", "node-2", "2.0.0.0")
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 
-	node := runNode(t, api)
+		node := runNode(t, api)
 
-	view := node.displays.view()
-	mustDeepEqual(t, view.Store.ListKeys(), []string{"acm-0001-receiver"})
-	mustMatch(t, view.Whole, false)
+		view := node.displays.view()
+		mustDeepEqual(t, view.Store.ListKeys(), []string{"acm-0001-receiver"})
+		mustMatch(t, view.Whole, false)
+	})
 }
 
 // An API server whose Display definition declares no selectable field
@@ -329,14 +340,16 @@ func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
 // API server.
 func TestTheNodeStartsWhenTheDisplayListIsRefused(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.noDisplayNodeField = true
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-	_, device := usbAdapter(cecRoom())
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.noDisplayNodeField = true
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+		_, device := usbAdapter(cecRoom())
 
-	startNode(t, api, "node-1", device)
+		startNode(t, api, "node-1", device)
 
-	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	mustMatch(t, entry.PhysicalAddress, "1.3.0.0")
+		entry := api.scanned(t, "node-1")
+		mustMatch(t, entry.PhysicalAddress, "1.3.0.0")
+	})
 }

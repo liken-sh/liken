@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/wiim"
@@ -128,42 +129,37 @@ func TestDiscoveredNameIsTheLowercasedIdentity(t *testing.T) {
 	mustMatch(t, discoveredName("FF98F2F78136CE45A780D8A1"), "ff98f2f78136ce45a780d8a1")
 }
 
-// run searches, reconciles, and stops with its context.
+// run searches once at its start and again at each interval, and stops
+// with its context. The test stubs the search, a package variable, so
+// it runs alone.
 func TestDiscoveryRunStopsWithItsContext(t *testing.T) {
-	api, client := startDiscoveryAPI(t)
-	api.list = receiversWith()
-
-	restoreDiscover := discover
-	restoreInterval := discoveryInterval
-	t.Cleanup(func() { discover, discoveryInterval = restoreDiscover, restoreInterval })
+	restore := discover
+	t.Cleanup(func() { discover = restore })
 	discovered := atomic.Int64{}
 	discover = func(context.Context, time.Duration) []wiim.Device {
 		discovered.Add(1)
 		return []wiim.Device{{UUID: secondUUID, Address: "192.0.2.2"}}
 	}
-	discoveryInterval = 2 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		api, client := startDiscoveryAPI(t)
+		api.list = receiversWith()
+		held := newDiscovery(client, func() {})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			held.run(ctx)
+			close(done)
+		}()
 
-	held := newDiscovery(client, func() {})
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		held.run(ctx)
-		close(done)
-	}()
-	deadline := time.After(2 * time.Second)
-	for discovered.Load() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("discovery never ran")
-		case <-time.After(time.Millisecond):
-		}
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("discovery did not stop with its context")
-	}
+		synctest.Wait()
+		mustMatch(t, discovered.Load(), 1)
+		time.Sleep(discoveryInterval)
+		synctest.Wait()
+		mustMatch(t, discovered.Load(), 2)
+
+		cancel()
+		<-done
+	})
 }
 
 // firstSpellOf spells one identity the way mDNS does, so a test proves

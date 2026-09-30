@@ -7,12 +7,13 @@ package main
 
 import (
 	"bufio"
-	"github.com/liken-sh/equipment-operator/denon"
 	"net"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/denon"
 )
 
 // The lines the real receiver volunteered after the queries, which this
@@ -20,8 +21,8 @@ import (
 var denonNoise = []string{"SVOFF", "PSDRC OFF", "PSLFE 00"}
 
 type fakeDenon struct {
-	listener net.Listener
-	commands chan string
+	listening string
+	commands  chan string
 
 	mutex       sync.Mutex
 	power       string
@@ -40,15 +41,11 @@ type fakeDenon struct {
 	conns        []net.Conn
 }
 
-// startFakeDenon listens on the loopback and answers until the test
-// ends.
+// startFakeDenon listens on the test network and answers until the
+// test ends.
 func startFakeDenon(t *testing.T) *fakeDenon {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	mustSucceed(t, err)
-
 	receiver := &fakeDenon{
-		listener:  listener,
 		commands:  make(chan string, 64),
 		power:     "PWSTANDBY",
 		volume:    100,
@@ -56,32 +53,26 @@ func startFakeDenon(t *testing.T) *fakeDenon {
 		input:     "MPLAY",
 		soundMode: "MULTI CH IN",
 	}
-	t.Cleanup(func() {
-		listener.Close()
-		receiver.dropConnections()
-	})
-	go receiver.accept()
+	receiver.listening = testNetwork.listen(t, receiver.serve)
+	t.Cleanup(receiver.dropConnections)
 	return receiver
 }
 
 func (f *fakeDenon) address() string {
-	return f.listener.Addr().String()
+	return f.listening
 }
 
-func (f *fakeDenon) accept() {
-	for {
-		conn, err := f.listener.Accept()
-		if err != nil {
-			return
-		}
-		f.mutex.Lock()
-		f.conns = append(f.conns, conn)
-		f.mutex.Unlock()
-		go f.serve(conn)
-	}
+// alias answers a second address that reaches the same receiver, the
+// way a name and an address in a Receiver's spec can name one device.
+func (f *fakeDenon) alias(t *testing.T) string {
+	t.Helper()
+	return testNetwork.listen(t, f.serve)
 }
 
 func (f *fakeDenon) serve(conn net.Conn) {
+	f.mutex.Lock()
+	f.conns = append(f.conns, conn)
+	f.mutex.Unlock()
 	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadString('\r')

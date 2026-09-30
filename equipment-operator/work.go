@@ -45,9 +45,8 @@ func goWork(ctx context.Context, work func()) {
 // ended. Such a request ends within the shared client's request
 // timeout, 30 seconds, which is longer than this wait. A request that
 // the API server holds past this wait makes serve answer
-// errStillWriting, and the process leaves its Lease to expire. It is a
-// variable so a test holds it short.
-var workStopWait = 5 * time.Second
+// errStillWriting, and the process leaves its Lease to expire.
+const workStopWait = 5 * time.Second
 
 // errStillWriting says that a goroutine that can write did not stop
 // within workStopWait, so the process must not release its Lease.

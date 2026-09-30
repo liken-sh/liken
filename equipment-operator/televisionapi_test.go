@@ -52,16 +52,9 @@ func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool
 	case path == displaysPath && r.URL.Query().Get("watch") == "true":
 		a.serveWatch(w, r)
 	case path == displaysPath:
-		node := nodeOf(r)
-		a.serveJSON(w, func() any {
-			list := DisplayList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
-			for _, name := range sortedKeys(a.displays) {
-				if node == "" || a.displays[name].Status.Node == node {
-					list.Items = append(list.Items, *a.displays[name])
-				}
-			}
-			return list
-		})
+		a.mutex.Lock()
+		a.serveCollection(w, displaysPath, nodeOf(r))
+		a.mutex.Unlock()
 	case path == receiversPath && r.URL.Query().Get("watch") == "true":
 		a.serveWatch(w, r)
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, receiversPath+"/") && strings.HasSuffix(path, "/status"):
@@ -71,25 +64,17 @@ func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool
 		a.serveStored(w, receiversPath, strings.TrimPrefix(path, receiversPath+"/"))
 		a.mutex.Unlock()
 	case path == receiversPath:
-		a.serveJSON(w, func() any {
-			list := ReceiverList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
-			for _, name := range sortedKeys(a.receivers) {
-				list.Items = append(list.Items, a.receivers[name])
-			}
-			return list
-		})
+		a.mutex.Lock()
+		a.serveCollection(w, receiversPath, "")
+		a.mutex.Unlock()
 	case path == televisionsPath && r.URL.Query().Get("watch") == "true":
 		a.serveWatch(w, r)
 	case path == televisionsPath && r.Method == http.MethodPost:
 		a.createTelevision(w, r)
 	case path == televisionsPath:
-		a.serveJSON(w, func() any {
-			list := TelevisionList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
-			for _, name := range sortedKeys(a.televisions) {
-				list.Items = append(list.Items, copyTelevision(a.televisions[name]))
-			}
-			return list
-		})
+		a.mutex.Lock()
+		a.serveCollection(w, televisionsPath, "")
+		a.mutex.Unlock()
 	case strings.HasPrefix(path, televisionsPath+"/"):
 		a.serveTelevision(w, r, strings.TrimPrefix(path, televisionsPath+"/"))
 	default:
@@ -130,13 +115,6 @@ func (a *cecAPI) store(television Television) {
 	television.Metadata.Generation = 1
 	television.Status = TelevisionStatus{Session: television.Status.Session}
 	a.televisions[television.Metadata.Name] = &television
-}
-
-// serveJSON encodes what build answers under the mutex.
-func (a *cecAPI) serveJSON(w http.ResponseWriter, build func() any) {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-	_ = json.NewEncoder(w).Encode(build())
 }
 
 func sortedKeys[V any](held map[string]V) []string {
@@ -381,16 +359,16 @@ func (a *cecAPI) waitForTelevision(t *testing.T, name string, ready func(Televis
 
 func (a *cecAPI) waitForTelevisionWithin(t *testing.T, name string, within time.Duration, ready func(Television) bool) Television {
 	t.Helper()
-	deadline := time.Now().Add(within)
+	deadline := time.After(within)
 	for {
+		moved := a.nextMove()
 		television, held := a.television(name)
 		if held && ready(television) {
 			return television
 		}
-		if time.Now().After(deadline) {
+		if !awaitMove(moved, deadline) {
 			t.Fatalf("Television %s never held the wanted status; the last was %+v (held %v)", name, television, held)
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 

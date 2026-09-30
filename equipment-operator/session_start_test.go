@@ -11,6 +11,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -44,33 +45,37 @@ func (d *staleDriver) State() equipment.State {
 // so nothing else reads the driver while the test swaps it in.
 func TestALineDuringTheSessionStartReachesTheSession(t *testing.T) {
 	t.Parallel()
-	amp := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	api := startFakeAPI(t)
-	unit := &receiverUnit{
-		name:       "theater",
-		client:     api.client,
-		busAddress: brokers.address(),
-		readings:   testMetrics(t),
-		log:        newReceiverLog(&logBuffer{}, "theater"),
-		dirty:      make(chan struct{}, 1),
-	}
-	unit.setVolume(&ReceiverVolume{Max: 69.5})
-	real := denon.NewClient(amp.address(), unit.observe)
-	go real.Run(t.Context())
-	deadline := time.Now().Add(testTimeout)
-	for real.State().Reachable != equipment.ConditionTrue {
-		if time.Now().After(deadline) {
-			t.Fatal("the client never reached the receiver")
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		api := startFakeAPI(t)
+		unit := &receiverUnit{
+			name:       "theater",
+			client:     api.client,
+			busAddress: brokers.address(),
+			dial:       testNetwork.dial,
+			readings:   testMetrics(t),
+			log:        newReceiverLog(&logBuffer{}, "theater"),
+			dirty:      make(chan struct{}, 1),
 		}
-		time.Sleep(time.Millisecond)
-	}
-	unit.driver = &staleDriver{Client: real, deliver: func() {
-		unit.observe(equipment.Event{State: real.State()})
-	}}
-	t.Cleanup(func() { unit.setSession(context.Background(), nil, "") })
+		unit.setVolume(&ReceiverVolume{Max: 69.5})
+		real := denon.NewClient(amp.address(), unit.observe)
+		real.Dial = testNetwork.dial
+		go real.Run(t.Context())
+		deadline := time.Now().Add(testTimeout)
+		for real.State().Reachable != equipment.ConditionTrue {
+			if time.Now().After(deadline) {
+				t.Fatal("the client never reached the receiver")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		unit.driver = &staleDriver{Client: real, deliver: func() {
+			unit.observe(equipment.Event{State: real.State()})
+		}}
+		t.Cleanup(func() { unit.setSession(context.Background(), nil, "") })
 
-	unit.setSession(t.Context(), playingReceiver(amp.address(), ReceiverVolume{Max: 69.5}).Spec.Session, "")
+		unit.setSession(t.Context(), playingReceiver(amp.address(), ReceiverVolume{Max: 69.5}).Spec.Session, "")
 
-	amp.waitForCommands(t, "SIGAME")
+		amp.waitForCommands(t, "SIGAME")
+	})
 }

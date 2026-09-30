@@ -9,6 +9,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -46,40 +47,41 @@ func denRoom(api *cecAPI, log *logBuffer) *roomTelevision {
 
 func TestTheWakeReachesTheTelevisionThatListsTheDisplay(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	log := &logBuffer{}
-	api.showing(lounge(""), "acm-0001-receiver")
-	api.showing(study(nil), "bnq-0002-monitor")
-	began := time.Now()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		log := &logBuffer{}
+		api.showing(lounge(""), "acm-0001-receiver")
+		api.showing(study(nil), "bnq-0002-monitor")
+		began := time.Now()
 
-	denRoom(api, log).woke("a Play started on Player media/den")
+		denRoom(api, log).woke("a Play started on Player media/den")
 
-	television, _ := api.television("lounge")
-	session := television.Status.Session
-	if session == nil {
-		t.Fatal("the Television holds no session")
-	}
-	mustMatch(t, session.Player, "media/den")
-	mustMatch(t, session.Display, "acm-0001-receiver")
-	mustMatch(t, session.Awake, true)
-	woke, err := time.Parse(time.RFC3339, session.WokeAt)
-	mustSucceed(t, err)
-	if woke.Before(began.Add(-time.Millisecond)) || woke.After(time.Now()) {
-		t.Errorf("wokeAt %s is not the time of the wake", session.WokeAt)
-	}
-	other, _ := api.television("study")
-	if other.Status.Session != nil {
-		t.Errorf("Television study holds %+v", other.Status.Session)
-	}
-	mustDeepEqual(t, linesWith(log, "Receiver den"), []string{
-		"Receiver den: a Play started on Player media/den; asked Television lounge to wake and show Display acm-0001-receiver",
+		television, _ := api.television("lounge")
+		session := television.Status.Session
+		if session == nil {
+			t.Fatal("the Television holds no session")
+		}
+		mustMatch(t, session.Player, "media/den")
+		mustMatch(t, session.Display, "acm-0001-receiver")
+		mustMatch(t, session.Awake, true)
+		woke, err := time.Parse(time.RFC3339, session.WokeAt)
+		mustSucceed(t, err)
+		if woke.Before(began.Add(-time.Millisecond)) || woke.After(time.Now()) {
+			t.Errorf("wokeAt %s is not the time of the wake", session.WokeAt)
+		}
+		other, _ := api.television("study")
+		if other.Status.Session != nil {
+			t.Errorf("Television study holds %+v", other.Status.Session)
+		}
+		mustDeepEqual(t, linesWith(log, "Receiver den"), []string{
+			"Receiver den: a Play started on Player media/den; asked Television lounge to wake and show Display acm-0001-receiver",
+		})
 	})
 }
 
 // A wake writes nothing when no Television lists the input's Display,
 // or when the input names no Display.
 func TestAWakeThatWritesNothing(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name     string
 		input    string
@@ -88,18 +90,22 @@ func TestAWakeThatWritesNothing(t *testing.T) {
 		{"no Television lists the Display", "MPLAY", []string{"bnq-0002-monitor"}},
 		{"the input names no Display", "TUNER", []string{"acm-0001-receiver"}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := startCECAPI(t)
-			log := &logBuffer{}
-			api.showing(lounge(""), c.displays...)
-			room := denRoom(api, log)
-			room.input = c.input
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				log := &logBuffer{}
+				api.showing(lounge(""), c.displays...)
+				room := denRoom(api, log)
+				room.input = c.input
 
-			room.woke("a Play started on Player media/den")
+				room.woke("a Play started on Player media/den")
 
-			mustMatch(t, api.sessionWriteCount(), 0)
-			mustDeepEqual(t, linesWith(log, "Receiver den"), []string(nil))
+				mustMatch(t, api.sessionWriteCount(), 0)
+				mustDeepEqual(t, linesWith(log, "Receiver den"), []string(nil))
+			})
 		})
 	}
 }
@@ -110,7 +116,6 @@ func TestAWakeThatWritesNothing(t *testing.T) {
 // again, and for a session a person slept or turned off before the
 // restart. Nothing wakes, and nothing goes to standby.
 func TestAStartingSessionAdoptsAndWakesNothing(t *testing.T) {
-	t.Parallel()
 	held := wokeAt(time.Now().Add(-time.Hour))
 	slept := *held
 	slept.Awake = false
@@ -136,17 +141,21 @@ func TestAStartingSessionAdoptsAndWakesNothing(t *testing.T) {
 		{"another Player's session", other, true,
 			TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", Awake: true}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := startCECAPI(t)
-			log := &logBuffer{}
-			api.showing(waking(c.held), "acm-0001-receiver")
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				log := &logBuffer{}
+				api.showing(waking(c.held), "acm-0001-receiver")
 
-			denRoom(api, log).opened(c.awake, "a Play started on Player media/den")
+				denRoom(api, log).opened(c.awake, "a Play started on Player media/den")
 
-			television, _ := api.television("lounge")
-			mustDeepEqual(t, *television.Status.Session, c.want)
-			mustDeepEqual(t, linesWith(log, "Receiver den"), []string(nil))
+				television, _ := api.television("lounge")
+				mustDeepEqual(t, *television.Status.Session, c.want)
+				mustDeepEqual(t, linesWith(log, "Receiver den"), []string(nil))
+			})
 		})
 	}
 }
@@ -155,85 +164,95 @@ func TestAStartingSessionAdoptsAndWakesNothing(t *testing.T) {
 // nothing.
 func TestAnAdoptedSessionThatStandsWritesNothing(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.showing(waking(wokeNow()), "acm-0001-receiver")
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.showing(waking(wokeNow()), "acm-0001-receiver")
 
-	denRoom(api, &logBuffer{}).opened(true, "a Play started on Player media/den")
+		denRoom(api, &logBuffer{}).opened(true, "a Play started on Player media/den")
 
-	mustMatch(t, api.sessionWriteCount(), 0)
+		mustMatch(t, api.sessionWriteCount(), 0)
+	})
 }
 
 // A session that starts on another Display takes the Player's session
 // off the TV that showed the old Display.
 func TestASessionOnAnotherDisplayLeavesTheOldTelevision(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.showing(waking(wokeNow()), "acm-0001-receiver")
-	api.showing(study(nil), "bnq-0002-monitor")
-	room := denRoom(api, &logBuffer{})
-	room.input = "GAME"
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.showing(waking(wokeNow()), "acm-0001-receiver")
+		api.showing(study(nil), "bnq-0002-monitor")
+		room := denRoom(api, &logBuffer{})
+		room.input = "GAME"
 
-	room.opened(true, "a Play started on Player media/den")
+		room.opened(true, "a Play started on Player media/den")
 
-	old, _ := api.television("lounge")
-	if old.Status.Session != nil {
-		t.Errorf("the old Television holds %+v", old.Status.Session)
-	}
-	moved, _ := api.television("study")
-	mustDeepEqual(t, *moved.Status.Session, TelevisionSession{Player: "media/den", Display: "bnq-0002-monitor", Awake: true})
+		old, _ := api.television("lounge")
+		if old.Status.Session != nil {
+			t.Errorf("the old Television holds %+v", old.Status.Session)
+		}
+		moved, _ := api.television("study")
+		mustDeepEqual(t, *moved.Status.Session, TelevisionSession{Player: "media/den", Display: "bnq-0002-monitor", Awake: true})
+	})
 }
 
 // Of two Televisions on one bus, the one in charge gets the session.
 func TestTheWakeReachesTheTelevisionInCharge(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.showing(discoveredTV("den"), "acm-0001-receiver")
-	api.showing(lounge(""), "acm-0001-receiver")
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.showing(discoveredTV("den"), "acm-0001-receiver")
+		api.showing(lounge(""), "acm-0001-receiver")
 
-	denRoom(api, &logBuffer{}).woke("a Play started on Player media/den")
+		denRoom(api, &logBuffer{}).woke("a Play started on Player media/den")
 
-	lounge, _ := api.television("lounge")
-	discovered, _ := api.television("den")
-	if lounge.Status.Session == nil || discovered.Status.Session != nil {
-		t.Errorf("lounge holds %+v, den holds %+v", lounge.Status.Session, discovered.Status.Session)
-	}
+		lounge, _ := api.television("lounge")
+		discovered, _ := api.television("den")
+		if lounge.Status.Session == nil || discovered.Status.Session != nil {
+			t.Errorf("lounge holds %+v, den holds %+v", lounge.Status.Session, discovered.Status.Session)
+		}
+	})
 }
 
 // A sleep marks the session asleep and keeps its wake, once, and leaves
 // another Player's session alone.
 func TestASleepReachesOnlyThePlayersSession(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	held := wokeNow()
-	api.showing(waking(held), "acm-0001-receiver")
-	other := wokeNow()
-	other.Player = "media/study"
-	api.showing(study(other))
-	room := denRoom(api, &logBuffer{})
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		held := wokeNow()
+		api.showing(waking(held), "acm-0001-receiver")
+		other := wokeNow()
+		other.Player = "media/study"
+		api.showing(study(other))
+		room := denRoom(api, &logBuffer{})
 
-	room.slept()
-	room.slept()
+		room.slept()
+		room.slept()
 
-	asleep, _ := api.television("lounge")
-	mustDeepEqual(t, asleep.Status.Session, &TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", WokeAt: held.WokeAt})
-	mustMatch(t, api.sessionWriteCount(), 1)
-	untouched, _ := api.television("study")
-	mustDeepEqual(t, untouched.Status.Session, other)
+		asleep, _ := api.television("lounge")
+		mustDeepEqual(t, asleep.Status.Session, &TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", WokeAt: held.WokeAt})
+		mustMatch(t, api.sessionWriteCount(), 1)
+		untouched, _ := api.television("study")
+		mustDeepEqual(t, untouched.Status.Session, other)
+	})
 }
 
 // A write the API server refuses is one line with the server's words.
 func TestARefusedSessionWriteIsLogged(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	log := &logBuffer{}
-	api.showing(lounge(""), "acm-0001-receiver")
-	api.noSessionWrites = true
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		log := &logBuffer{}
+		api.showing(lounge(""), "acm-0001-receiver")
+		api.noSessionWrites = true
 
-	denRoom(api, log).woke("a Play started on Player media/den")
+		denRoom(api, log).woke("a Play started on Player media/den")
 
-	mustDeepEqual(t, linesWith(log, "Receiver den"), []string{
-		"Receiver den: a Play started on Player media/den; asked Television lounge to wake and show Display acm-0001-receiver; the command failed: PATCH " +
-			televisionPath("lounge") + "/status?fieldManager=" + sessionFieldManager + "&force=true: 500 Internal Server Error:",
+		mustDeepEqual(t, linesWith(log, "Receiver den"), []string{
+			"Receiver den: a Play started on Player media/den; asked Television lounge to wake and show Display acm-0001-receiver; the command failed: PATCH " +
+				televisionPath("lounge") + "/status?fieldManager=" + sessionFieldManager + "&force=true: 500 Internal Server Error:",
+		})
 	})
 }
 
@@ -242,19 +261,21 @@ func TestARefusedSessionWriteIsLogged(t *testing.T) {
 // API server refuses writes nothing either.
 func TestARoomWithNoTelevisionIsQuiet(t *testing.T) {
 	t.Parallel()
-	for _, refused := range []bool{false, true} {
-		api := startCECAPI(t)
-		api.showing(waking(wokeNow()), "acm-0001-receiver")
-		api.noTelevisionDefinition = !refused
-		api.refuseTelevisions(refused)
-		log := &logBuffer{}
-		room := denRoom(api, log)
+	synctest.Test(t, func(t *testing.T) {
+		for _, refused := range []bool{false, true} {
+			api := startCECAPI(t)
+			api.showing(waking(wokeNow()), "acm-0001-receiver")
+			api.noTelevisionDefinition = !refused
+			api.refuseTelevisions(refused)
+			log := &logBuffer{}
+			room := denRoom(api, log)
 
-		room.opened(true, "a Play started on Player media/den")
-		room.woke("a Play started on Player media/den")
-		room.slept()
+			room.opened(true, "a Play started on Player media/den")
+			room.woke("a Play started on Player media/den")
+			room.slept()
 
-		mustMatch(t, api.sessionWriteCount(), 0)
-		mustDeepEqual(t, linesWith(log, "Receiver den"), []string(nil))
-	}
+			mustMatch(t, api.sessionWriteCount(), 0)
+			mustDeepEqual(t, linesWith(log, "Receiver den"), []string(nil))
+		}
+	})
 }

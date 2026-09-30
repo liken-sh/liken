@@ -7,6 +7,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
@@ -39,22 +40,24 @@ func settle() {
 // too.
 func TestATVAskedOnceIsAskedAgainAfterItsPowerIsUnknownAgain(t *testing.T) {
 	t.Parallel()
-	wire := roomWithTV(televisionTV(cec.PowerUnknown))
-	api := controlling(t, wire, lounge(""))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	wire.Add(televisionTV(cec.PowerStandby))
-	wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.Devices[0].Power == "Standby" })
-	wire.Add(televisionTV(cec.PowerUnknown))
-	askPowerRead(t, api, "2026-09-27T18:04:05.123Z")
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.Devices[0].Power == "" })
-	wire.Add(televisionTV(cec.PowerOn))
-	before := powerQuestions(wire)
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerUnknown))
+		api := controlling(t, wire, lounge(""))
+		api.scanned(t, "node-1")
+		wire.Add(televisionTV(cec.PowerStandby))
+		wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.Devices[0].Power == "Standby" })
+		wire.Add(televisionTV(cec.PowerUnknown))
+		askPowerRead(t, api, "2026-09-27T18:04:05.123Z")
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.Devices[0].Power == "" })
+		wire.Add(televisionTV(cec.PowerOn))
+		before := powerQuestions(wire)
 
-	wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
+		wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
 
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.Devices[0].Power == "On" })
-	mustMatch(t, powerQuestions(wire)-before, 1)
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.Devices[0].Power == "On" })
+		mustMatch(t, powerQuestions(wire)-before, 1)
+	})
 }
 
 // A TV that joins after the scan is new to the adapter. Its first
@@ -64,22 +67,24 @@ func TestATVAskedOnceIsAskedAgainAfterItsPowerIsUnknownAgain(t *testing.T) {
 // sends nothing.
 func TestANewTVIsAskedItsPowerOnce(t *testing.T) {
 	t.Parallel()
-	wire := cectest.NewBus()
-	wire.Add(cectest.Peer{Logical: 5, Physical: 0x1000, PrimaryType: 5, OSDName: "AVR", Vendor: 0x0005cd, Version: cec.Version14, Power: cec.PowerOn})
-	api := controlling(t, wire, lounge(""))
-	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	slow := televisionTV(cec.PowerOn)
-	slow.Slow = 50 * time.Millisecond
-	wire.Add(slow)
+	synctest.Test(t, func(t *testing.T) {
+		wire := cectest.NewBus()
+		wire.Add(cectest.Peer{Logical: 5, Physical: 0x1000, PrimaryType: 5, OSDName: "AVR", Vendor: 0x0005cd, Version: cec.Version14, Power: cec.PowerOn})
+		api := controlling(t, wire, lounge(""))
+		entry := api.scanned(t, "node-1")
+		slow := televisionTV(cec.PowerOn)
+		slow.Slow = 50 * time.Millisecond
+		wire.Add(slow)
 
-	wire.Send(cec.SetOSDName(0, cec.LogicalAddress(*entry.LogicalAddress), "TV"))
-	wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
+		wire.Send(cec.SetOSDName(0, cec.LogicalAddress(*entry.LogicalAddress), "TV"))
+		wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
 
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
-		return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == "On"
+		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
+			return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == "On"
+		})
+		settle()
+		mustMatch(t, powerQuestions(wire), 1)
 	})
-	settle()
-	mustMatch(t, powerQuestions(wire), 1)
 }
 
 // A press that reads the TV while the adapter already asks it for its
@@ -89,20 +94,22 @@ func TestANewTVIsAskedItsPowerOnce(t *testing.T) {
 // press would decide from no power.
 func TestAPressReadSharesAQuestionInFlight(t *testing.T) {
 	t.Parallel()
-	wire := roomWithTV(televisionTV(cec.PowerUnknown))
-	api := controlling(t, wire, lounge(""))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	slow := televisionTV(cec.PowerOn)
-	slow.Slow = 500 * time.Millisecond
-	wire.Add(slow)
-	before := powerQuestions(wire)
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerUnknown))
+		api := controlling(t, wire, lounge(""))
+		api.scanned(t, "node-1")
+		slow := televisionTV(cec.PowerOn)
+		slow.Slow = 500 * time.Millisecond
+		wire.Add(slow)
+		before := powerQuestions(wire)
 
-	wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
-	askPowerRead(t, api, "2026-09-27T18:04:05.123Z")
+		wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
+		askPowerRead(t, api, "2026-09-27T18:04:05.123Z")
 
-	television := api.waitForTelevision(t, "lounge", func(television Television) bool { return television.Status.PowerRead != nil })
-	mustMatch(t, television.Status.PowerRead.Power, "On")
-	mustMatch(t, powerQuestions(wire)-before, 1)
+		television := api.waitForTelevision(t, "lounge", func(television Television) bool { return television.Status.PowerRead != nil })
+		mustMatch(t, television.Status.PowerRead.Power, "On")
+		mustMatch(t, powerQuestions(wire)-before, 1)
+	})
 }
 
 // The join scan and a TV's introduction ask the TV its power through
@@ -145,20 +152,24 @@ func pressWhileTheTVAnswers(t *testing.T, wire *cectest.Bus, api *cecAPI) {
 
 func TestAPressSharesTheJoinScansQuestion(t *testing.T) {
 	t.Parallel()
-	wire := roomWithAReceiver()
-	wire.Add(slowTV())
-	api := controlling(t, wire, lounge(""))
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithAReceiver()
+		wire.Add(slowTV())
+		api := controlling(t, wire, lounge(""))
 
-	pressWhileTheTVAnswers(t, wire, api)
+		pressWhileTheTVAnswers(t, wire, api)
+	})
 }
 
 func TestAPressSharesAnIntroductionsQuestion(t *testing.T) {
 	t.Parallel()
-	wire := roomWithAReceiver()
-	api := controlling(t, wire, lounge(""))
-	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	wire.Add(slowTV())
-	wire.Send(cec.SetOSDName(0, cec.LogicalAddress(*entry.LogicalAddress), "TV"))
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithAReceiver()
+		api := controlling(t, wire, lounge(""))
+		entry := api.scanned(t, "node-1")
+		wire.Add(slowTV())
+		wire.Send(cec.SetOSDName(0, cec.LogicalAddress(*entry.LogicalAddress), "TV"))
 
-	pressWhileTheTVAnswers(t, wire, api)
+		pressWhileTheTVAnswers(t, wire, api)
+	})
 }

@@ -8,29 +8,33 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 func TestAShutdownKeepsTheOwnerMark(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	amp := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
-	api.setReceivers(idleReceiver(amp.address(), ReceiverVolume{Max: 69.5}))
-	mustSucceed(t, operator.pass(t.Context()))
-	broker := brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		amp := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
+		api.setReceivers(idleReceiver(amp.address(), ReceiverVolume{Max: 69.5}))
+		mustSucceed(t, operator.pass(t.Context()))
+		broker := brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 
-	operator.stopAll()
+		operator.stopAll()
 
-	broker.waitForDisconnect(t)
-	for _, published := range broker.drained() {
-		if published.topic == ownerTopic(testVolumeTopic) {
-			t.Errorf("the shutdown published %q on the owner topic", published.payload)
+		broker.waitForDisconnect(t)
+		for _, published := range broker.drained() {
+			if published.topic == ownerTopic(testVolumeTopic) {
+				t.Errorf("the shutdown published %q on the owner topic", published.payload)
+			}
 		}
-	}
+	})
 }
 
 // drained answers the publishes the broker read and no test took yet.

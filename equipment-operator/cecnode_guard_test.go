@@ -9,7 +9,7 @@ package main
 
 import (
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/cec"
 )
@@ -31,24 +31,26 @@ func TestAPersonsChoiceEndsTheGuard(t *testing.T) {
 			cec.ActiveSource(cec.AddressTV, 0x0000),
 		}},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fastWake(t)
-			cecWakeGuard = time.Second
-			wire := roomWithTV(televisionTV(cec.PowerOn))
-			session := wokeNow()
-			api := awakeRoom(t, wire, session)
-			api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				wire := roomWithTV(televisionTV(cec.PowerOn))
+				session := wokeNow()
+				api := awakeRoom(t, wire, session)
+				api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
 
-			for _, message := range c.choice {
-				wire.Send(message)
-			}
+				for _, message := range c.choice {
+					wire.Send(message)
+				}
 
-			television := wokeWith(t, api, session)
-			applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
-			mustMatch(t, applied.Status, ConditionFalse)
-			mustMatch(t, applied.Reason, reasonChosen)
-			mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00"})
+				television := wokeWith(t, api, session)
+				applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
+				mustMatch(t, applied.Status, ConditionFalse)
+				mustMatch(t, applied.Reason, reasonChosen)
+				mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00"})
+			})
 		})
 	}
 }
@@ -56,17 +58,19 @@ func TestAPersonsChoiceEndsTheGuard(t *testing.T) {
 // A Set Stream Path for the Display itself is no choice of another
 // source. The adapter answers it, and the wake ends Confirmed.
 func TestARouteToTheDisplayKeepsTheGuard(t *testing.T) {
-	fastWake(t)
-	wire := roomWithTV(televisionTV(cec.PowerOn))
-	session := wokeNow()
-	api := awakeRoom(t, wire, session)
-	api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		session := wokeNow()
+		api := awakeRoom(t, wire, session)
+		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
 
-	wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x13, 0x00))
+		wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x13, 0x00))
 
-	television := wokeWith(t, api, session)
-	mustMatch(t, conditionOf(television.Status.Conditions, conditionWakeApplied).Reason, reasonConfirmed)
-	mustMatch(t, len(claimsOf(wire)), 2)
+		television := wokeWith(t, api, session)
+		mustMatch(t, conditionOf(television.Status.Conditions, conditionWakeApplied).Reason, reasonConfirmed)
+		mustMatch(t, len(claimsOf(wire)), 2)
+	})
 }
 
 // A switch sends Routing Information when it comes out of standby or
@@ -75,33 +79,35 @@ func TestARouteToTheDisplayKeepsTheGuard(t *testing.T) {
 // person's choice: the guard goes on, and a streaming player's claim
 // after it is still taken back.
 func TestRoutingInformationKeepsTheGuard(t *testing.T) {
-	fastWake(t)
-	cecWakeGuard = time.Second
-	wire := roomWithTV(televisionTV(cec.PowerOn))
-	session := wokeNow()
-	api := awakeRoom(t, wire, session)
-	api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		session := wokeNow()
+		api := awakeRoom(t, wire, session)
+		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
 
-	wire.Send(cec.NewMessage(5, cec.AddressBroadcast, cec.OpRoutingInformation, 0x15, 0x00))
-	wire.Send(cec.ActiveSource(8, 0x1500))
+		wire.Send(cec.NewMessage(5, cec.AddressBroadcast, cec.OpRoutingInformation, 0x15, 0x00))
+		wire.Send(cec.ActiveSource(8, 0x1500))
 
-	television := wokeWith(t, api, session)
-	mustMatch(t, conditionOf(television.Status.Conditions, conditionWakeApplied).Reason, reasonConfirmed)
-	mustMatch(t, len(claimsOf(wire)), 2)
+		television := wokeWith(t, api, session)
+		mustMatch(t, conditionOf(television.Status.Conditions, conditionWakeApplied).Reason, reasonConfirmed)
+		mustMatch(t, len(claimsOf(wire)), 2)
+	})
 }
 
 // A Routing Information that a waking receiver sends does not stop the
 // adapter from answering the TV's Request Active Source during the wake.
 func TestRoutingInformationDuringAWakeKeepsTheAnswer(t *testing.T) {
-	fastWake(t)
-	cecWakeGuard = time.Second
-	wire := roomWithTV(televisionTV(cec.PowerOn))
-	session := wokeNow()
-	api := awakeRoom(t, wire, session)
-	api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		session := wokeNow()
+		api := awakeRoom(t, wire, session)
+		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
 
-	wire.Send(cec.NewMessage(5, cec.AddressBroadcast, cec.OpRoutingInformation, 0x15, 0x00))
-	askForTheSource(wire)
+		wire.Send(cec.NewMessage(5, cec.AddressBroadcast, cec.OpRoutingInformation, 0x15, 0x00))
+		askForTheSource(wire)
 
-	api.waitUntil(t, "the answer", func() bool { return len(claimsOf(wire)) == 2 })
+		api.waitUntil(t, "the answer", func() bool { return len(claimsOf(wire)) == 2 })
+	})
 }

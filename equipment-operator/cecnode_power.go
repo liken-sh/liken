@@ -32,7 +32,7 @@ import (
 // A TV answers its old state for a while after a command, so a read
 // within cecPowerSettle of the adapter's last command is not a reason
 // to send nothing: the new state may not show yet.
-var (
+const (
 	cecPowerReadEvery = time.Second
 	cecPowerWindow    = 10 * time.Second
 	cecPowerSends     = 3

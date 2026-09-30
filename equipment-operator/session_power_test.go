@@ -9,6 +9,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/denon"
 )
@@ -31,24 +32,27 @@ func askPower(t *testing.T, on bool, ask string) *sessionHarness {
 
 func TestAnOffAskTurnsAnOnRoomOff(t *testing.T) {
 	t.Parallel()
-	h := askPower(t, true, "off")
+	synctest.Test(t, func(t *testing.T) {
+		h := askPower(t, true, "off")
 
-	mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
-	h.refuseCommands(t, quietPeriod, "SIGAME")
+		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+		h.refuseCommands(t, quietPeriod, "SIGAME")
+	})
 }
 
 func TestAnOnAskTurnsAnOffRoomOn(t *testing.T) {
 	t.Parallel()
-	h := askPower(t, false, "on")
+	synctest.Test(t, func(t *testing.T) {
+		h := askPower(t, false, "on")
 
-	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
-	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+	})
 }
 
 // A room already in the state the ask names stays in it, and the line
 // says why the session sent nothing.
 func TestAnAskForTheStateTheRoomHoldsSendsNothing(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name string
 		on   bool
@@ -60,13 +64,16 @@ func TestAnAskForTheStateTheRoomHoldsSendsNothing(t *testing.T) {
 		{"on in a room that is on", true, "on",
 			"Receiver theater: the power topic asks on, and the receiver reports power On; sent nothing, because the room is already on"},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			h := askPower(t, c.on, c.ask)
+			synctest.Test(t, func(t *testing.T) {
+				h := askPower(t, c.on, c.ask)
 
-			mustDeepEqual(t, waitForLines(t, h.log, "the power topic asks", 1), []string{c.line})
-			h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY", "SIGAME")
+				mustDeepEqual(t, waitForLines(t, h.log, "the power topic asks", 1), []string{c.line})
+				h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY", "SIGAME")
+			})
 		})
 	}
 }

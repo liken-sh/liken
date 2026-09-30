@@ -83,7 +83,7 @@ func (n *cecNode) desired(spec CECBusSpec, display string) adapterConfig {
 // both can change with no change to the spec. The wait doubles after
 // each failed try up to its bound, so an adapter that cannot join does
 // not claim on the wire every pass.
-var (
+const (
 	cecRetryFirst = 30 * time.Second
 	cecRetryMax   = 10 * time.Minute
 )

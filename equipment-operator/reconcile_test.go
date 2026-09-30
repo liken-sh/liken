@@ -1,7 +1,7 @@
 package main
 
 // The controller against a fake receiver and a fake API server, both on
-// real sockets.
+// in-memory connections, on the fake clock of a synctest bubble.
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -20,14 +21,16 @@ import (
 
 func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
 	t.Parallel()
-	wake := make(chan struct{}, 1)
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 1)
 
-	poke(wake)
-	poke(wake)
-	mustMatch(t, len(wake), 1)
+		poke(wake)
+		poke(wake)
+		mustMatch(t, len(wake), 1)
 
-	drainPokes(wake)
-	mustMatch(t, len(wake), 0)
+		drainPokes(wake)
+		mustMatch(t, len(wake), 0)
+	})
 }
 
 // fakeAPI is an API server that answers the collection a test sets and
@@ -283,6 +286,7 @@ func testReceiver(name, address string) Receiver {
 func startController(t *testing.T, api *fakeAPI) *controller {
 	t.Helper()
 	operator := newController(api.client, "127.0.0.1:1", testMetrics(t))
+	operator.dial = testNetwork.dial
 	operator.now = func() time.Time { return statusNow }
 	return operator
 }
@@ -320,80 +324,88 @@ func connected(status ReceiverStatus) bool {
 
 func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	status := api.waitForStatus(t, func(status ReceiverStatus) bool {
-		return connected(status) && status.Zones["main"].SoundMode != ""
+		status := api.waitForStatus(t, func(status ReceiverStatus) bool {
+			return connected(status) && status.Zones["main"].SoundMode != ""
+		})
+		mustMatch(t, status.Zones["main"].Power, "Standby")
+		mustMatch(t, status.Zones["main"].Input, "MPLAY")
+		mustMatch(t, status.Zones["main"].Volume, "50")
+		mustMatch(t, status.Zones["main"].VolumeMax, "69.5")
+		mustMatch(t, status.Zones["main"].Mute, false)
+		mustMatch(t, status.Zones["main"].SoundMode, "MULTI CH IN")
+		mustMatch(t, status.Service, "")
+		mustMatch(t, status.Conditions[0].Reason, reasonConnected)
+		mustMatch(t, status.Conditions[0].ObservedGeneration, int64(4))
 	})
-	mustMatch(t, status.Zones["main"].Power, "Standby")
-	mustMatch(t, status.Zones["main"].Input, "MPLAY")
-	mustMatch(t, status.Zones["main"].Volume, "50")
-	mustMatch(t, status.Zones["main"].VolumeMax, "69.5")
-	mustMatch(t, status.Zones["main"].Mute, false)
-	mustMatch(t, status.Zones["main"].SoundMode, "MULTI CH IN")
-	mustMatch(t, status.Service, "")
-	mustMatch(t, status.Conditions[0].Reason, reasonConnected)
-	mustMatch(t, status.Conditions[0].ObservedGeneration, int64(4))
 }
 
 // The connect answers nine lines this operator reads, and they make one
 // status write.
 func TestTheConnectBurstMakesOneStatusWrite(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	api.waitForStatus(t, func(status ReceiverStatus) bool {
-		return connected(status) && status.Zones["main"].SoundMode != ""
+		api.waitForStatus(t, func(status ReceiverStatus) bool {
+			return connected(status) && status.Zones["main"].SoundMode != ""
+		})
+		mustMatch(t, api.writeCount(), 1)
 	})
-	mustMatch(t, api.writeCount(), 1)
 }
 
 func TestABurstOfKnobTurnsMakesOneStatusWrite(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
 
-	before := api.writeCount()
-	equipment.turnKnob(110)
-	equipment.turnKnob(120)
-	equipment.turnKnob(130)
+		before := api.writeCount()
+		equipment.turnKnob(110)
+		equipment.turnKnob(120)
+		equipment.turnKnob(130)
 
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.Zones["main"].Volume == "65" })
-	mustMatch(t, api.writeCount(), before+1)
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return status.Zones["main"].Volume == "65" })
+		mustMatch(t, api.writeCount(), before+1)
+	})
 }
 
 func TestASecondPassWritesNothingFurther(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	// The first pass after the survey settles the declared blocks and
-	// records them, which is a write. The pass after that has nothing
-	// left to write.
-	waitForSurvey(t, operator)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		// The first pass after the survey settles the declared blocks and
+		// records them, which is a write. The pass after that has nothing
+		// left to write.
+		waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	api.refuseStatus(t, 2*statusDebounce)
+		api.refuseStatus(t, 2*statusDebounce)
+	})
 }
 
 // A receiver repeats a line whenever its own menu or remote touches a
@@ -401,70 +413,80 @@ func TestASecondPassWritesNothingFurther(t *testing.T) {
 // starts builds the same status, so the operator writes nothing.
 func TestALineThatRepeatsTheStateWritesNoStatus(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-	mustSucceed(t, operator.pass(t.Context()))
-	settled := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
+		settled := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
 
-	equipment.volunteer("PW" + strings.ToUpper(settled.Zones["main"].Power))
+		equipment.volunteer("PW" + strings.ToUpper(settled.Zones["main"].Power))
 
-	api.refuseStatus(t, 2*statusDebounce)
+		api.refuseStatus(t, 2*statusDebounce)
+	})
 }
 
 func TestARemovedReceiverStopsItsClient(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
 
-	api.setReceivers()
-	mustSucceed(t, operator.pass(t.Context()))
-	equipment.turnKnob(130)
+		api.setReceivers()
+		mustSucceed(t, operator.pass(t.Context()))
+		equipment.turnKnob(130)
 
-	api.refuseStatus(t, 2*statusDebounce)
+		api.refuseStatus(t, 2*statusDebounce)
+	})
 }
 
 func TestAChangedAddressGetsANewConnection(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	first, second := startFakeDenon(t), startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", first.address()))
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		first, second := startFakeDenon(t), startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", first.address()))
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
 
-	api.setReceivers(testReceiver("theater", second.address()))
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(testReceiver("theater", second.address()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	mustMatch(t, second.waitForCommand(t), "PW?")
+		mustMatch(t, second.waitForCommand(t), "PW?")
+	})
 }
 
 func TestAReceiverWithNoProtocolStartsNothing(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	api.setReceivers(Receiver{Metadata: ObjectMeta{Name: "theater", Generation: 1}})
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		api.setReceivers(Receiver{Metadata: ObjectMeta{Name: "theater", Generation: 1}})
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	api.refuseStatus(t, 2*statusDebounce)
+		api.refuseStatus(t, 2*statusDebounce)
+	})
 }
 
 func TestPassAnswersTheErrorWhenTheListFails(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	api.breakTheList()
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		api.breakTheList()
+		operator := startController(t, api)
 
-	mustFail(t, operator.pass(t.Context()))
+		mustFail(t, operator.pass(t.Context()))
+	})
 }
 
 // sessionedReceiver is a Receiver that names a session on one input,
@@ -485,70 +507,77 @@ func sessionedReceiver(name, address, input string) Receiver {
 // further.
 func TestASessionThatChangesSelectsTheNewInput(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
 
-	api.setReceivers(sessionedReceiver("theater", equipment.address(), "GAME"))
-	mustSucceed(t, operator.pass(t.Context()))
-	equipment.waitForCommands(t, "SIGAME")
+		api.setReceivers(sessionedReceiver("theater", equipment.address(), "GAME"))
+		mustSucceed(t, operator.pass(t.Context()))
+		equipment.waitForCommands(t, "SIGAME")
 
-	api.setReceivers(sessionedReceiver("theater", equipment.address(), "TV"))
-	mustSucceed(t, operator.pass(t.Context()))
-	equipment.waitForCommands(t, "SITV")
+		api.setReceivers(sessionedReceiver("theater", equipment.address(), "TV"))
+		mustSucceed(t, operator.pass(t.Context()))
+		equipment.waitForCommands(t, "SITV")
 
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		mustSucceed(t, operator.pass(t.Context()))
+	})
 }
 
 // A session the pass reads again is left alone, because power and input
 // are one-shots the receiver answers once.
 func TestASessionThatHasNotChangedIsLeftAlone(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	api.setReceivers(sessionedReceiver("theater", equipment.address(), "GAME"))
-	mustSucceed(t, operator.pass(t.Context()))
-	equipment.waitForCommands(t, "SIGAME")
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(sessionedReceiver("theater", equipment.address(), "GAME"))
+		mustSucceed(t, operator.pass(t.Context()))
+		equipment.waitForCommands(t, "SIGAME")
+		mustSucceed(t, operator.pass(t.Context()))
 
-	equipment.turnKnob(120)
-	equipment.refuseCommand(t, "SIGAME", 4*statusDebounce)
+		equipment.turnKnob(120)
+		equipment.refuseCommand(t, "SIGAME", 4*statusDebounce)
+	})
 }
 
 // The loop reconciles before any event arrives, answers a wake, and
 // stops every unit when its context ends.
 func TestTheLoopRunsUntilItsContextEndsAndStopsEveryUnit(t *testing.T) {
-	noDiscovery(t)
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
+		operator.networkDiscoveryOff = true
 
-	ctx, cancel := context.WithCancel(t.Context())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		operator.run(ctx)
-	}()
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			operator.run(ctx)
+		}()
 
-	api.waitForStatus(t, connected)
-	poke(operator.wake)
-	cancel()
+		api.waitForStatus(t, connected)
+		poke(operator.wake)
+		cancel()
 
-	select {
-	case <-stopped:
-	case <-time.After(testTimeout):
-		t.Fatal("the loop did not stop")
-	}
-	mustMatch(t, len(operator.units), 0)
+		select {
+		case <-stopped:
+		case <-time.After(testTimeout):
+			t.Fatal("the loop did not stop")
+		}
+		mustMatch(t, len(operator.units), 0)
+	})
 }
 
 // A status write the API server refuses is not recorded, so the next
@@ -556,53 +585,59 @@ func TestTheLoopRunsUntilItsContextEndsAndStopsEveryUnit(t *testing.T) {
 // already applied.
 func TestARefusedStatusWriteIsTriedAgain(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.breakTheStatus(true)
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.breakTheStatus(true)
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 0 })
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 0 })
 
-	api.breakTheStatus(false)
-	equipment.turnKnob(120)
+		api.breakTheStatus(false)
+		equipment.turnKnob(120)
 
-	mustMatch(t, api.waitForStatus(t, connected).Zones["main"].Volume, "60")
+		mustMatch(t, api.waitForStatus(t, connected).Zones["main"].Volume, "60")
+	})
 }
 
 // serve reads the collection once before it runs, and answers the error
 // when that read fails.
 func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	api.breakTheList()
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		api.breakTheList()
 
-	mustFail(t, serve(t.Context(), api.client, settings{busAddress: "127.0.0.1:1"}, testMetrics(t)))
+		mustFail(t, serve(t.Context(), api.client, settings{busAddress: "127.0.0.1:1", dial: testNetwork.dial}, testMetrics(t)))
+	})
 }
 
 // serve runs the loop until its context ends.
 func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
-	noDiscovery(t)
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	api.setReceivers(testReceiver("theater", equipment.address()))
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", equipment.address()))
 
-	ctx, cancel := context.WithCancel(t.Context())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		mustSucceed(t, serve(ctx, api.client, settings{busAddress: "127.0.0.1:1"}, testMetrics(t)))
-	}()
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			mustSucceed(t, serve(ctx, api.client, settings{busAddress: "127.0.0.1:1", networkDiscoveryOff: true, dial: testNetwork.dial}, testMetrics(t)))
+		}()
 
-	api.waitForStatus(t, connected)
-	cancel()
+		api.waitForStatus(t, connected)
+		cancel()
 
-	select {
-	case <-stopped:
-	case <-time.After(testTimeout):
-		t.Fatal("serve did not stop")
-	}
+		select {
+		case <-stopped:
+		case <-time.After(testTimeout):
+			t.Fatal("serve did not stop")
+		}
+	})
 }
 
 // An edit to spec.volume reaches a session that is already standing, so
@@ -610,67 +645,70 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 // its input selected again.
 func TestAVolumeEditReachesAStandingSession(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
 
-	api.setReceivers(testReceiver("theater", equipment.address()))
-	mustSucceed(t, operator.pass(t.Context()))
-	api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 1}))
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(testReceiver("theater", equipment.address()))
+		mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 1}))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	broker := brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	adopted := broker.waitForTopic(t, testVolumeTopic)
-	broker.push(testVolumeTopic, adopted.payload)
-	waitUntilSessionAdopted(t, operator, "theater")
-	equipment.waitForCommands(t, "SIGAME")
+		broker := brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		adopted := broker.waitForTopic(t, testVolumeTopic)
+		broker.push(testVolumeTopic, adopted.payload)
+		waitUntilSessionAdopted(t, operator, "theater")
+		equipment.waitForCommands(t, "SIGAME")
 
-	broker.push(testVolumeTopic, []byte(`{"level":77,"muted":false}`))
-	equipment.waitForCommands(t, "MV51")
+		broker.push(testVolumeTopic, []byte(`{"level":77,"muted":false}`))
+		equipment.waitForCommands(t, "MV51")
 
-	api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 2}))
-	mustSucceed(t, operator.pass(t.Context()))
-	equipment.refuseCommand(t, "SIGAME", quietPeriod)
+		api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 2}))
+		mustSucceed(t, operator.pass(t.Context()))
+		equipment.refuseCommand(t, "SIGAME", quietPeriod)
 
-	broker.push(testVolumeTopic, []byte(`{"level":85,"muted":false}`))
-	equipment.waitForCommands(t, "MV53")
+		broker.push(testVolumeTopic, []byte(`{"level":85,"muted":false}`))
+		equipment.waitForCommands(t, "MV53")
+	})
 }
 
 // A Play that starts on a waking screen turns both flags on in one
 // write, and the session selects the input once and at once.
 func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
-	waited := sessionPowerWait
-	sessionPowerWait = 500 * time.Millisecond
-	t.Cleanup(func() { sessionPowerWait = waited })
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
 
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
+		rule := ReceiverVolume{Max: 69.5, Step: 1}
+		api.setReceivers(idleReceiver(equipment.address(), rule))
+		mustSucceed(t, operator.pass(t.Context()))
+		broker := brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		adopted := broker.waitForTopic(t, testVolumeTopic)
+		broker.push(testVolumeTopic, adopted.payload)
+		waitUntilSessionAdopted(t, operator, "theater")
+		waitForSurvey(t, operator)
 
-	rule := ReceiverVolume{Max: 69.5, Step: 1}
-	api.setReceivers(idleReceiver(equipment.address(), rule))
-	mustSucceed(t, operator.pass(t.Context()))
-	broker := brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	adopted := broker.waitForTopic(t, testVolumeTopic)
-	broker.push(testVolumeTopic, adopted.payload)
-	waitUntilSessionAdopted(t, operator, "theater")
-	waitForSurvey(t, operator)
+		woken := playingReceiver(equipment.address(), rule)
+		woken.Spec.Session.Awake = true
+		api.setReceivers(woken)
+		flipped := time.Now()
+		mustSucceed(t, operator.pass(t.Context()))
 
-	woken := playingReceiver(equipment.address(), rule)
-	woken.Spec.Session.Awake = true
-	api.setReceivers(woken)
-	flipped := time.Now()
-	mustSucceed(t, operator.pass(t.Context()))
-
-	equipment.waitForCommands(t, "SIGAME")
-	mustMatch(t, time.Since(flipped) < sessionPowerWait/2, true)
-	equipment.refuseCommand(t, "SIGAME", 2*sessionPowerWait)
+		equipment.waitForCommands(t, "SIGAME")
+		mustMatch(t, time.Since(flipped) < sessionPowerWait/2, true)
+		equipment.refuseCommand(t, "SIGAME", 2*sessionPowerWait)
+	})
 }
 
 // playingReceiver is one Denon with a Play standing on it and a
@@ -721,44 +759,49 @@ func heldSession(t *testing.T, operator *controller, name string) *session {
 // second adopt.
 func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	equipment := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
-	rule := ReceiverVolume{Max: 69.5, Step: 1}
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		equipment := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
+		rule := ReceiverVolume{Max: 69.5, Step: 1}
 
-	api.setReceivers(idleReceiver(equipment.address(), rule))
-	mustSucceed(t, operator.pass(t.Context()))
-	broker := brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	adopted := broker.waitForTopic(t, testVolumeTopic)
-	broker.push(testVolumeTopic, adopted.payload)
-	waitUntilSessionAdopted(t, operator, "theater")
-	equipment.refuseCommand(t, "SIGAME", quietPeriod)
-	before := heldSession(t, operator, "theater")
+		api.setReceivers(idleReceiver(equipment.address(), rule))
+		mustSucceed(t, operator.pass(t.Context()))
+		broker := brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		adopted := broker.waitForTopic(t, testVolumeTopic)
+		broker.push(testVolumeTopic, adopted.payload)
+		waitUntilSessionAdopted(t, operator, "theater")
+		equipment.refuseCommand(t, "SIGAME", quietPeriod)
+		before := heldSession(t, operator, "theater")
 
-	api.setReceivers(playingReceiver(equipment.address(), rule))
-	mustSucceed(t, operator.pass(t.Context()))
+		api.setReceivers(playingReceiver(equipment.address(), rule))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	equipment.waitForCommands(t, "SIGAME")
-	mustMatch(t, heldSession(t, operator, "theater"), before)
-	broker.refuseTopic(t, ownerTopic(testVolumeTopic), quietPeriod)
-	mustMatch(t, len(brokers.sessions), 0)
+		equipment.waitForCommands(t, "SIGAME")
+		mustMatch(t, heldSession(t, operator, "theater"), before)
+		broker.refuseTopic(t, ownerTopic(testVolumeTopic), quietPeriod)
+		mustMatch(t, len(brokers.sessions), 0)
+	})
 }
 
 // The sound-mode lookup reads the declared inputs and answers nothing
 // for an input the wiring does not name.
 func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
 	t.Parallel()
-	unit := &receiverUnit{}
-	unit.setInputs([]ReceiverInput{{Name: "MPLAY", SoundMode: "STEREO"}})
+	synctest.Test(t, func(t *testing.T) {
+		unit := &receiverUnit{}
+		unit.setInputs([]ReceiverInput{{Name: "MPLAY", SoundMode: "STEREO"}})
 
-	mustMatch(t, unit.inputSoundMode("MPLAY"), "STEREO")
-	mustMatch(t, unit.inputSoundMode("GAME"), "")
+		mustMatch(t, unit.inputSoundMode("MPLAY"), "STEREO")
+		mustMatch(t, unit.inputSoundMode("GAME"), "")
 
-	empty := &receiverUnit{}
-	mustMatch(t, empty.inputSoundMode("MPLAY"), "")
+		empty := &receiverUnit{}
+		mustMatch(t, empty.inputSoundMode("MPLAY"), "")
+	})
 }
 
 // A declarative spec.power change the operator sees while it runs is
@@ -767,31 +810,33 @@ func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
 // field and never re-asserts it.
 func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	api.setReceivers(receiver)
-	operator := startController(t, api)
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		api.setReceivers(receiver)
+		operator := startController(t, api)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
 
-	// Once surveyed, the change applies once.
-	receiver.Spec.Power = equipment.PowerOn
-	receiver.Metadata.Generation = 5
-	api.setReceivers(receiver)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, denon.PowerOnCommand)
-	mustMatch(t, <-api.powers, equipment.PowerOn)
+		// Once surveyed, the change applies once.
+		receiver.Spec.Power = equipment.PowerOn
+		receiver.Metadata.Generation = 5
+		api.setReceivers(receiver)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, denon.PowerOnCommand)
+		mustMatch(t, <-api.powers, equipment.PowerOn)
 
-	// A re-list with the same value sends nothing.
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
-	select {
-	case power := <-api.powers:
-		t.Fatalf("the operator re-applied power %q", power)
-	case <-time.After(quietPeriod):
-	}
+		// A re-list with the same value sends nothing.
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+		select {
+		case power := <-api.powers:
+			t.Fatalf("the operator re-applied power %q", power)
+		case <-time.After(quietPeriod):
+		}
+	})
 }
 
 // A declared setting the receiver reports at another value is applied
@@ -799,40 +844,41 @@ func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 // declared value, a re-list with the same settings sends nothing.
 func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	bass := 3
-	receiver.Spec.Denon.Settings = denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		bass := 3
+		receiver.Spec.Denon.Settings = denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
+		api.setReceivers(receiver)
+		operator := startController(t, api)
 
-	// The first pass starts the driver, which connects asynchronously, so
-	// the change waits for a reachable receiver.
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-	fake.holdSetting("PSBAS 53", "PSBAS 53")
-	fake.volunteer("PSBAS 50")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
-		return s.Tone.Bass != nil && *s.Tone.Bass == 0
+		// The first pass starts the driver, which connects asynchronously, so
+		// the change waits for a reachable receiver.
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
+		fake.holdSetting("PSBAS 53", "PSBAS 53")
+		fake.volunteer("PSBAS 50")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+			return s.Tone.Bass != nil && *s.Tone.Bass == 0
+		})
+
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "PSBAS 53")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+			return *s.Tone.Bass == 3
+		})
+
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseCommand(t, "PSBAS 53", quietPeriod)
 	})
-
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "PSBAS 53")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
-		return *s.Tone.Bass == 3
-	})
-
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseCommand(t, "PSBAS 53", quietPeriod)
 }
 
 // Declared zone controls the zone reports at other values reach the
 // right wire lines for each non-main zone, and once the zone reports
 // them, a re-list with the same zones sends nothing further.
 func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		zone    string
@@ -854,40 +900,43 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 			[]string{"Z3OFF", "Z3TV", "Z3MV30", "Z3MUOFF", "Z3SLP030"},
 			[]string{"Z3OFF", "Z3TV", "Z330", "Z3MUOFF", "Z3SLP030"}},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			api := startFakeAPI(t)
-			fake := startFakeDenon(t)
-			receiver := testReceiver("theater", fake.address())
-			receiver.Spec.Zones = map[string]ZoneSpec{
-				one.zone: {Power: one.power, Input: one.input, Volume: &one.volume, Mute: &one.mute, Sleep: &one.sleep},
-			}
-			api.setReceivers(receiver)
-			operator := startController(t, api)
+			synctest.Test(t, func(t *testing.T) {
+				api := startFakeAPI(t)
+				fake := startFakeDenon(t)
+				receiver := testReceiver("theater", fake.address())
+				receiver.Spec.Zones = map[string]ZoneSpec{
+					one.zone: {Power: one.power, Input: one.input, Volume: &one.volume, Mute: &one.mute, Sleep: &one.sleep},
+				}
+				api.setReceivers(receiver)
+				operator := startController(t, api)
 
-			mustSucceed(t, operator.pass(t.Context()))
-			api.waitForStatus(t, connected)
-			waitForSurvey(t, operator)
-			for index, command := range one.want {
-				fake.holdSetting(command, one.reports[index])
-			}
-			fake.volunteer(one.before...)
-			waitForObservedZone(t, operator, "theater", one.zone, 40)
+				mustSucceed(t, operator.pass(t.Context()))
+				api.waitForStatus(t, connected)
+				waitForSurvey(t, operator)
+				for index, command := range one.want {
+					fake.holdSetting(command, one.reports[index])
+				}
+				fake.volunteer(one.before...)
+				waitForObservedZone(t, operator, "theater", one.zone, 40)
 
-			mustSucceed(t, operator.pass(t.Context()))
-			for _, want := range one.want {
-				fake.waitForCommands(t, want)
-			}
-			// The sleep is the last report of the burst, so once it arrives
-			// the receiver has reported every control.
-			waitFor(t, func() bool {
-				zone, _ := operator.units["theater"].driver.State().Zone(one.zone)
-				return zone.Volume == int(one.volume*2) && zone.Sleep == one.sleep
+				mustSucceed(t, operator.pass(t.Context()))
+				for _, want := range one.want {
+					fake.waitForCommands(t, want)
+				}
+				// The sleep is the last report of the burst, so once it arrives
+				// the receiver has reported every control.
+				waitFor(t, func() bool {
+					zone, _ := operator.units["theater"].driver.State().Zone(one.zone)
+					return zone.Volume == int(one.volume*2) && zone.Sleep == one.sleep
+				})
+
+				mustSucceed(t, operator.pass(t.Context()))
+				fake.refuseAnySet(t, quietPeriod)
 			})
-
-			mustSucceed(t, operator.pass(t.Context()))
-			fake.refuseAnySet(t, quietPeriod)
 		})
 	}
 }
@@ -896,18 +945,21 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 // never has two writers: spec.power and spec.zones.
 func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	receiver.Spec.Zones = map[string]ZoneSpec{"main": {Power: equipment.PowerOn}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		receiver.Spec.Zones = map[string]ZoneSpec{"main": {Power: equipment.PowerOn}}
+		api.setReceivers(receiver)
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseCommand(t, "PWON", quietPeriod)
+		fake.refuseCommand(t, "PWON", quietPeriod)
+	})
 }
 
 // zonesApplied returns a copy and setZones stores a fresh map, so a
@@ -915,38 +967,40 @@ func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
 // never share a backing map.
 func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	volume := 30.0
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		volume := 30.0
+		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+		api.setReceivers(receiver)
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-	fake.holdSetting("Z2MV30", "Z230")
-	fake.volunteer("Z220")
-	waitForObservedZone(t, operator, "theater", "zone2", 40)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "Z2MV30")
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
+		fake.holdSetting("Z2MV30", "Z230")
+		fake.volunteer("Z220")
+		waitForObservedZone(t, operator, "theater", "zone2", 40)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "Z2MV30")
 
-	unit := operator.units["theater"]
-	snapshot, _ := unit.zonesApplied()
+		unit := operator.units["theater"]
+		snapshot, _ := unit.zonesApplied()
 
-	// A later setZones drives a second zone and must not reach back into
-	// the snapshot read before it.
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}, "zone3": {Power: equipment.PowerOn}}
-	api.setReceivers(receiver)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "Z3ON")
+		// A later setZones drives a second zone and must not reach back into
+		// the snapshot read before it.
+		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}, "zone3": {Power: equipment.PowerOn}}
+		api.setReceivers(receiver)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "Z3ON")
 
-	if _, held := snapshot["zone3"]; held {
-		t.Errorf("a later setZones mutated an earlier snapshot")
-	}
-	mustMatch(t, len(snapshot), 1)
-	mustMatch(t, *snapshot["zone2"].Volume, volume)
+		if _, held := snapshot["zone3"]; held {
+			t.Errorf("a later setZones mutated an earlier snapshot")
+		}
+		mustMatch(t, len(snapshot), 1)
+		mustMatch(t, *snapshot["zone2"].Volume, volume)
+	})
 }
 
 // The unit's own bus opens and subscribes to the settings and commands
@@ -954,24 +1008,27 @@ func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 // receiver no Player is using.
 func TestTheReceiverBusSubscribesWithoutASession(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	receiver := testReceiver("theater", fake.address())
-	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-	receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
-	api.setReceivers(receiver)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		receiver := testReceiver("theater", fake.address())
+		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+		receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
+		api.setReceivers(receiver)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	broker := brokers.waitForSession(t)
-	seen := map[string]bool{}
-	seen[waitForString(t, broker.subs)] = true
-	seen[waitForString(t, broker.subs)] = true
-	mustMatch(t, seen[receiver.Spec.SettingsTopic], true)
-	mustMatch(t, seen[receiver.Spec.CommandsTopic], true)
+		broker := brokers.waitForSession(t)
+		seen := map[string]bool{}
+		seen[waitForString(t, broker.subs)] = true
+		seen[waitForString(t, broker.subs)] = true
+		mustMatch(t, seen[receiver.Spec.SettingsTopic], true)
+		mustMatch(t, seen[receiver.Spec.CommandsTopic], true)
+	})
 }
 
 // A settings bus message sends the value to the receiver and writes the
@@ -979,117 +1036,127 @@ func TestTheReceiverBusSubscribesWithoutASession(t *testing.T) {
 // that one leaf, so a manifest-declared neighbor is untouched.
 func TestASettingsMessageSendsAndWritesTheLeafBack(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	receiver := testReceiver("theater", fake.address())
-	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-	api.setReceivers(receiver)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		receiver := testReceiver("theater", fake.address())
+		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+		api.setReceivers(receiver)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	broker := brokers.waitForSession(t)
-	waitForString(t, broker.subs)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		broker := brokers.waitForSession(t)
+		waitForString(t, broker.subs)
 
-	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
-	fake.waitForCommands(t, "PSBAS 53")
+		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
+		fake.waitForCommands(t, "PSBAS 53")
 
-	body := <-api.settings
-	decoded := map[string]any{}
-	mustSucceed(t, json.Unmarshal(body, &decoded))
-	spec := decoded["spec"].(map[string]any)
-	denonBlock := spec["denon"].(map[string]any)
-	settings := denonBlock["settings"].(map[string]any)
-	tone := settings["tone"].(map[string]any)
-	mustMatch(t, tone["bass"].(float64), float64(3))
-	mustMatch(t, len(tone), 1)
-	mustMatch(t, len(settings), 1)
-	mustMatch(t, len(denonBlock), 1)
-	mustMatch(t, len(spec), 1)
+		body := <-api.settings
+		decoded := map[string]any{}
+		mustSucceed(t, json.Unmarshal(body, &decoded))
+		spec := decoded["spec"].(map[string]any)
+		denonBlock := spec["denon"].(map[string]any)
+		settings := denonBlock["settings"].(map[string]any)
+		tone := settings["tone"].(map[string]any)
+		mustMatch(t, tone["bass"].(float64), float64(3))
+		mustMatch(t, len(tone), 1)
+		mustMatch(t, len(settings), 1)
+		mustMatch(t, len(denonBlock), 1)
+		mustMatch(t, len(spec), 1)
+	})
 }
 
 // A declared setting the receiver cannot carry is logged and not
 // recorded, so the next pass tries again; a later valid change lands.
 func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	eco := "turbo"
-	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		eco := "turbo"
+		receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
+		api.setReceivers(receiver)
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	// ApplySettings errors on the word no command can carry, so nothing
-	// is recorded and the value stays pending.
-	bass := 3
-	receiver.Spec.Denon.Settings = denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
-	api.setReceivers(receiver)
-	mustSucceed(t, operator.pass(t.Context()))
+		// ApplySettings errors on the word no command can carry, so nothing
+		// is recorded and the value stays pending.
+		bass := 3
+		receiver.Spec.Denon.Settings = denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
+		api.setReceivers(receiver)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.waitForCommands(t, "PSBAS 53")
+		fake.waitForCommands(t, "PSBAS 53")
+	})
 }
 
 // A zone control the receiver cannot carry is logged and not recorded,
 // so the next pass tries again; a later valid change lands.
 func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	sleep := 200
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Sleep: &sleep}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		sleep := 200
+		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Sleep: &sleep}}
+		api.setReceivers(receiver)
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	// SetSleep rejects the timer past the receiver's range, so nothing
-	// is recorded and the value stays pending.
-	volume := 40.0
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
-	api.setReceivers(receiver)
-	mustSucceed(t, operator.pass(t.Context()))
+		// SetSleep rejects the timer past the receiver's range, so nothing
+		// is recorded and the value stays pending.
+		volume := 40.0
+		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+		api.setReceivers(receiver)
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.waitForCommands(t, "Z2MV40")
+		fake.waitForCommands(t, "Z2MV40")
+	})
 }
 
 // A settings message that does not parse, or that names an unknown id,
 // changes nothing: the error is logged and no leaf is written.
 func TestASettingsMessageThatFailsChangesNothing(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	receiver := testReceiver("theater", fake.address())
-	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-	api.setReceivers(receiver)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		receiver := testReceiver("theater", fake.address())
+		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+		api.setReceivers(receiver)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
 
-	mustSucceed(t, operator.pass(t.Context()))
-	broker := brokers.waitForSession(t)
-	waitForString(t, broker.subs)
+		mustSucceed(t, operator.pass(t.Context()))
+		broker := brokers.waitForSession(t)
+		waitForString(t, broker.subs)
 
-	broker.push(receiver.Spec.SettingsTopic, []byte(`not json`))
-	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bogus","value":3}`))
+		broker.push(receiver.Spec.SettingsTopic, []byte(`not json`))
+		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bogus","value":3}`))
 
-	select {
-	case body := <-api.settings:
-		t.Fatalf("a failing settings message wrote a leaf: %s", body)
-	case <-time.After(quietPeriod):
-	}
-	fake.refuseCommand(t, "PSBAS", quietPeriod)
+		select {
+		case body := <-api.settings:
+			t.Fatalf("a failing settings message wrote a leaf: %s", body)
+		case <-time.After(quietPeriod):
+		}
+		fake.refuseCommand(t, "PSBAS", quietPeriod)
+	})
 }
 
 // A slow settings patch on one message does not block the reader, so
@@ -1097,42 +1164,45 @@ func TestASettingsMessageThatFailsChangesNothing(t *testing.T) {
 // handler runs on its own goroutine.
 func TestASlowSettingsPatchDoesNotBlockTheReader(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	receiver := testReceiver("theater", fake.address())
-	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-	api.setReceivers(receiver)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		receiver := testReceiver("theater", fake.address())
+		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+		api.setReceivers(receiver)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	broker := brokers.waitForSession(t)
-	waitForString(t, broker.subs)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		broker := brokers.waitForSession(t)
+		waitForString(t, broker.subs)
 
-	// Hold the API write of the first message open, then push a second.
-	// A reader that stalled on the patch would never read the second.
-	api.gateSettings()
-	defer api.releaseSettings()
+		// Hold the API write of the first message open, then push a second.
+		// A reader that stalled on the patch would never read the second.
+		api.gateSettings()
+		defer api.releaseSettings()
 
-	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
-	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.treble","value":1}`))
+		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
+		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.treble","value":1}`))
 
-	// Both handlers run on their own goroutines while the first message's
-	// API write is still blocked, so both settings reach the receiver. The
-	// two run concurrently, so collect until each one has landed.
-	var sawBass, sawTreble bool
-	deadline := time.After(testTimeout)
-	for !sawBass || !sawTreble {
-		select {
-		case command := <-fake.commands:
-			sawBass = sawBass || command == "PSBAS 53"
-			sawTreble = sawTreble || command == "PSTRE 51"
-		case <-deadline:
-			t.Fatalf("a slow settings patch blocked the reader: bass=%v treble=%v", sawBass, sawTreble)
+		// Both handlers run on their own goroutines while the first message's
+		// API write is still blocked, so both settings reach the receiver. The
+		// two run concurrently, so collect until each one has landed.
+		var sawBass, sawTreble bool
+		deadline := time.After(testTimeout)
+		for !sawBass || !sawTreble {
+			select {
+			case command := <-fake.commands:
+				sawBass = sawBass || command == "PSBAS 53"
+				sawTreble = sawTreble || command == "PSTRE 51"
+			case <-deadline:
+				t.Fatalf("a slow settings patch blocked the reader: bass=%v treble=%v", sawBass, sawTreble)
+			}
 		}
-	}
+	})
 }
 
 // waitForObservedSettings waits for the driver's reported settings to
@@ -1179,49 +1249,51 @@ func waitForObservedZone(t *testing.T, operator *controller, name, zone string, 
 // then the operator stops.
 func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	eco := "on"
-	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		eco := "on"
+		receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
+		api.setReceivers(receiver)
+		operator := startController(t, api)
 
-	// The first pass starts the driver, which connects asynchronously, so
-	// the change waits for a reachable receiver.
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
+		// The first pass starts the driver, which connects asynchronously, so
+		// the change waits for a reachable receiver.
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
 
-	// The receiver is in standby, so it takes the eco command but keeps
-	// reporting the standby value.
-	fake.holdSetting("ECOON", "ECOOFF")
-	fake.volunteer("ECOOFF")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
-		return s.System.Eco != nil && *s.System.Eco == "off"
+		// The receiver is in standby, so it takes the eco command but keeps
+		// reporting the standby value.
+		fake.holdSetting("ECOON", "ECOOFF")
+		fake.volunteer("ECOOFF")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+			return s.System.Eco != nil && *s.System.Eco == "off"
+		})
+
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "ECOON")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+			return s.System.Eco != nil && *s.System.Eco == "off"
+		})
+
+		// The receiver still has not reported the declared value, so the
+		// operator sends the command again on the next pass.
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "ECOON")
+
+		// Once the receiver reports the declared value, the operator sends
+		// once more and then stops.
+		fake.holdSetting("ECOON", "ECOON")
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "ECOON")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+			return s.System.Eco != nil && *s.System.Eco == "on"
+		})
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseCommand(t, "ECOON", quietPeriod)
 	})
-
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "ECOON")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
-		return s.System.Eco != nil && *s.System.Eco == "off"
-	})
-
-	// The receiver still has not reported the declared value, so the
-	// operator sends the command again on the next pass.
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "ECOON")
-
-	// Once the receiver reports the declared value, the operator sends
-	// once more and then stops.
-	fake.holdSetting("ECOON", "ECOON")
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "ECOON")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
-		return s.System.Eco != nil && *s.System.Eco == "on"
-	})
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseCommand(t, "ECOON", quietPeriod)
 }
 
 // A declared zone control the receiver accepts but does not apply is
@@ -1229,40 +1301,42 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 // value, then the operator stops.
 func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	volume := 40.0
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		volume := 40.0
+		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+		api.setReceivers(receiver)
+		operator := startController(t, api)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		waitForSurvey(t, operator)
 
-	// The zone takes the volume command but keeps reporting its old
-	// volume, so the operator re-sends until the zone reports the
-	// declared level. The set command is Z2MV40, and the receiver
-	// reports a volume as Z2 followed by the digits.
-	fake.holdSetting("Z2MV40", "Z230")
-	fake.volunteer("Z230")
-	waitForObservedZone(t, operator, "theater", "zone2", 60)
+		// The zone takes the volume command but keeps reporting its old
+		// volume, so the operator re-sends until the zone reports the
+		// declared level. The set command is Z2MV40, and the receiver
+		// reports a volume as Z2 followed by the digits.
+		fake.holdSetting("Z2MV40", "Z230")
+		fake.volunteer("Z230")
+		waitForObservedZone(t, operator, "theater", "zone2", 60)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "Z2MV40")
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "Z2MV40")
 
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "Z2MV40")
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "Z2MV40")
 
-	// The zone starts reporting the declared volume, so the operator
-	// sends once more and then stops.
-	fake.holdSetting("Z2MV40", "Z240")
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "Z2MV40")
-	waitForObservedZone(t, operator, "theater", "zone2", 80)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseCommand(t, "Z2MV40", quietPeriod)
+		// The zone starts reporting the declared volume, so the operator
+		// sends once more and then stops.
+		fake.holdSetting("Z2MV40", "Z240")
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "Z2MV40")
+		waitForObservedZone(t, operator, "theater", "zone2", 80)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseCommand(t, "Z2MV40", quietPeriod)
+	})
 }
 
 // A command bus message reaches Do, and the error Do returns for every
@@ -1270,27 +1344,30 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 // messages.
 func TestACommandMessageErrorIsLoggedAndNotFatal(t *testing.T) {
 	t.Parallel()
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	brokers := startFakeBrokerServer(t)
-	receiver := testReceiver("theater", fake.address())
-	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-	receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
-	api.setReceivers(receiver)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
-	operator.now = func() time.Time { return statusNow }
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		fake := startFakeDenon(t)
+		brokers := startFakeBrokerServer(t)
+		receiver := testReceiver("theater", fake.address())
+		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+		receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
+		api.setReceivers(receiver)
+		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator.dial = testNetwork.dial
+		operator.now = func() time.Time { return statusNow }
 
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	broker := brokers.waitForSession(t)
-	waitForString(t, broker.subs)
-	waitForString(t, broker.subs)
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, connected)
+		broker := brokers.waitForSession(t)
+		waitForString(t, broker.subs)
+		waitForString(t, broker.subs)
 
-	// Do errors for every id; the handler logs and the reader moves on,
-	// so the settings message that follows still lands. A payload that
-	// does not parse changes nothing either.
-	broker.push(receiver.Spec.CommandsTopic, []byte(`not json`))
-	broker.push(receiver.Spec.CommandsTopic, []byte(`{"command":"quick.3","args":{}}`))
-	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
-	fake.waitForCommands(t, "PSBAS 53")
+		// Do errors for every id; the handler logs and the reader moves on,
+		// so the settings message that follows still lands. A payload that
+		// does not parse changes nothing either.
+		broker.push(receiver.Spec.CommandsTopic, []byte(`not json`))
+		broker.push(receiver.Spec.CommandsTopic, []byte(`{"command":"quick.3","args":{}}`))
+		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
+		fake.waitForCommands(t, "PSBAS 53")
+	})
 }

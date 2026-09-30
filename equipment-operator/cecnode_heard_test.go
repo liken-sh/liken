@@ -7,6 +7,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/cec"
 	"github.com/liken-sh/equipment-operator/cec/cectest"
@@ -65,7 +66,6 @@ func listeningOnDen(t *testing.T) (*logBuffer, *cectest.Bus) {
 }
 
 func TestTheNodeLogsEachMessageAPersonNotices(t *testing.T) {
-	t.Parallel()
 	const tv = "the TV (logical 0, 0.0.0.0, name not known yet)"
 	cases := []struct {
 		name     string
@@ -133,12 +133,15 @@ func TestTheNodeLogsEachMessageAPersonNotices(t *testing.T) {
 			cec.Poll(8, 5),
 		}, nil},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			log, wire := listeningOnDen(t)
+			synctest.Test(t, func(t *testing.T) {
+				log, wire := listeningOnDen(t)
 
-			mustDeepEqual(t, heardLines(t, log, wire, one.messages...), one.want)
+				mustDeepEqual(t, heardLines(t, log, wire, one.messages...), one.want)
+			})
 		})
 	}
 }
@@ -149,30 +152,32 @@ func TestTheNodeLogsEachMessageAPersonNotices(t *testing.T) {
 // answers go to the scan. The adapter's own Image View On gets the
 // command's line and no heard line.
 func TestAControllingNodeLogsWhatTheFollowerHears(t *testing.T) {
-	fastPower(t)
-	api := startCECAPI(t)
-	wire := roomWithTV(televisionTV(cec.PowerStandby))
-	_, device := usbAdapter(wire)
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-	api.putTelevision(lounge(TelevisionOn))
-	log := loggedNode(t, api, device)
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	waitForLines(t, log, "Television lounge", 1)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		_, device := usbAdapter(wire)
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+		api.putTelevision(lounge(TelevisionOn))
+		log := loggedNode(t, api, device)
+		api.scanned(t, "node-1")
+		waitForLines(t, log, "Television lounge", 1)
 
-	heard := heardLines(t, log, wire,
-		cec.ActiveSource(8, 0x1500),
-		cec.ImageViewOn(8, 0),
-		cec.NewMessage(0, 4, cec.OpUserControlPressed, 0x41),
-		cec.NewMessage(0, 4, cec.OpUserControlReleased),
-		cec.NewMessage(0, 8, cec.OpUserControlPressed, 0x42),
-	)
+		heard := heardLines(t, log, wire,
+			cec.ActiveSource(8, 0x1500),
+			cec.ImageViewOn(8, 0),
+			cec.NewMessage(0, 4, cec.OpUserControlPressed, 0x41),
+			cec.NewMessage(0, 4, cec.OpUserControlReleased),
+			cec.NewMessage(0, 8, cec.OpUserControlPressed, 0x42),
+		)
 
-	mustDeepEqual(t, heard, []string{
-		`CECBus den: a playback device (logical 8, 1.5.0.0, name not known yet) broadcast Active Source 1.5.0.0`,
-		`CECBus den: "TV" (logical 0, 0.0.0.0) sent User Control Pressed Volume Up to this adapter (logical 4)`,
+		mustDeepEqual(t, heard, []string{
+			`CECBus den: a playback device (logical 8, 1.5.0.0, name not known yet) broadcast Active Source 1.5.0.0`,
+			`CECBus den: "TV" (logical 0, 0.0.0.0) sent User Control Pressed Volume Up to this adapter (logical 4)`,
+		})
+		if sent := linesWith(log, "Image View On"); len(sent) != 1 || !strings.HasPrefix(sent[0], "Television lounge:") {
+			t.Errorf("the lines that name Image View On are %q, want the Television's line alone", sent)
+		}
 	})
-	if sent := linesWith(log, "Image View On"); len(sent) != 1 || !strings.HasPrefix(sent[0], "Television lounge:") {
-		t.Errorf("the lines that name Image View On are %q, want the Television's line alone", sent)
-	}
 }

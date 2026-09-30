@@ -32,7 +32,7 @@ func TestReadSettingsTakesTheEnvironment(t *testing.T) {
 		config, err := readSettings()
 
 		mustSucceed(t, err)
-		mustMatch(t, config, settings{})
+		mustDeepEqual(t, config, settings{})
 	})
 }
 

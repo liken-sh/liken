@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -82,8 +83,6 @@ func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T
 // is more than the client waits, so the client answers it at once, and
 // the starting list asks again after the wait the 429 asked for.
 func TestTheStartingListsWaitOutA429(t *testing.T) {
-	shorten(t, &startRetry, time.Millisecond)
-	shorten(t, &retryAfterUnit, time.Millisecond)
 	cases := []struct {
 		name   string
 		busy   int
@@ -92,26 +91,32 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 		{"a 429 the client waits out", 1, ""},
 		{"a 429 longer than the client waits", 3, "11"},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name+", the Deployment", func(t *testing.T) {
-			noDiscovery(t)
-			api := &busyAPI{busy: c.busy, header: c.header, body: initializingBody}
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-			defer cancel()
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := &busyAPI{busy: c.busy, header: c.header, body: initializingBody}
+				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+				defer cancel()
 
-			err := serve(ctx, testAPIClient(t, http.HandlerFunc(api.handle)), settings{busAddress: "127.0.0.1:1"}, testMetrics(t))
+				err := serve(ctx, testAPIClient(t, http.HandlerFunc(api.handle)), settings{busAddress: "127.0.0.1:1", networkDiscoveryOff: true, dial: testNetwork.dial}, testMetrics(t))
 
-			mustSucceed(t, err)
+				mustSucceed(t, err)
+			})
 		})
 		t.Run(c.name+", the node workload", func(t *testing.T) {
-			api := &busyAPI{busy: c.busy, header: c.header, body: initializingBody}
-			_, device := usbAdapter(cecRoom())
-			node, err := newCECNode(testAPIClient(t, http.HandlerFunc(api.handle)), "node-1", device)
-			mustSucceed(t, err)
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-			defer cancel()
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := &busyAPI{busy: c.busy, header: c.header, body: initializingBody}
+				_, device := usbAdapter(cecRoom())
+				node, err := newCECNode(testAPIClient(t, http.HandlerFunc(api.handle)), "node-1", device)
+				mustSucceed(t, err)
+				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+				defer cancel()
 
-			mustSucceed(t, node.run(ctx))
+				mustSucceed(t, node.run(ctx))
+			})
 		})
 	}
 }
@@ -120,19 +125,18 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 // again only after the wait the API server asked for, and not once a
 // second with a log line each time.
 func TestAStartingListWaitsWhatTheAPIServerAskedFor(t *testing.T) {
-	shorten(t, &startRetry, time.Millisecond)
-	shorten(t, &retryAfterUnit, 10*time.Millisecond)
-	api := &busyAPI{busy: 2, header: "11", body: initializingBody}
-	client := testAPIClient(t, http.HandlerFunc(api.handle))
-	began := time.Now()
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := &busyAPI{busy: 2, header: "11", body: initializingBody}
+		client := testAPIClient(t, http.HandlerFunc(api.handle))
+		began := time.Now()
 
-	err := untilAnswered(t.Context(), func() error {
-		_, err := ListCECBuses(client)
-		return err
+		err := untilAnswered(t.Context(), func() error {
+			_, err := ListCECBuses(client)
+			return err
+		})
+
+		mustSucceed(t, err)
+		mustMatch(t, time.Since(began), 2*11*time.Second)
 	})
-
-	mustSucceed(t, err)
-	if took := time.Since(began); took < 2*11*retryAfterUnit {
-		t.Errorf("the list asked again after %s, want at least %s", took, 2*11*retryAfterUnit)
-	}
 }

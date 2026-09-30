@@ -38,15 +38,16 @@ const (
 // The time of each write is the entry's reportedAt, and the Deployment
 // treats an entry as stale once it is three intervals old, so a pod
 // that dies without a word stops counting within a few minutes. The
-// write goes to the API server and sends nothing on the CEC wire.
+// write goes to the API server and sends nothing on the CEC wire. It
+// is a variable because the tests on the kernel's vivid driver run on
+// the real clock, and shorten it.
 var cecReportInterval = 30 * time.Second
 
 // cecStopWrite bounds the write of the Stopped entry after the node
 // workload's context ends. The kubelet gives a pod 30 seconds after
 // SIGTERM, and a write that waits out a 429 would otherwise take up to
-// the shared client's limit of ten seconds. It is a variable so a test
-// holds it short.
-var cecStopWrite = 5 * time.Second
+// the shared client's limit of ten seconds.
+const cecStopWrite = 5 * time.Second
 
 // findAdapter answers the one CEC node the pod's claim delivered. The
 // claim is exclusive and names one device, so the container's /dev
@@ -435,7 +436,8 @@ func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <
 
 // cecAPIRetry is how long the loop waits before it runs a pass again
 // after an API call failed with no event to follow, such as a list the
-// API server refused or a result it did not accept.
+// API server refused or a result it did not accept. It is a variable
+// for the same reason as cecReportInterval.
 var cecAPIRetry = 10 * time.Second
 
 // retryLater asks the loop for a pass after cecAPIRetry, because an API

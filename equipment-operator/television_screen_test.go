@@ -9,6 +9,7 @@ package main
 import (
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -43,30 +44,31 @@ func askedOf(screen, at string) Television {
 // it. Each new ask after that goes out once.
 func TestTheDeploymentRelaysEachNewScreenAskOnce(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice))
-	api.putTelevision(askedOf(screenWake, "2026-09-29T20:00:00.000Z"))
-	calls := &screenCalls{}
-	controller := newCECBusController(api.client)
-	controller.screens = calls
-	mustSucceed(t, controller.pass())
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice))
+		api.putTelevision(askedOf(screenWake, "2026-09-29T20:00:00.000Z"))
+		calls := &screenCalls{}
+		controller := newCECBusController(api.client)
+		controller.screens = calls
+		mustSucceed(t, controller.pass())
 
-	api.putTelevision(askedOf(screenWake, "2026-09-29T21:00:00.000Z"))
-	mustSucceed(t, controller.pass())
-	mustSucceed(t, controller.pass())
-	api.putTelevision(askedOf(screenSleep, "2026-09-29T22:00:00.000Z"))
-	mustSucceed(t, controller.pass())
+		api.putTelevision(askedOf(screenWake, "2026-09-29T21:00:00.000Z"))
+		mustSucceed(t, controller.pass())
+		mustSucceed(t, controller.pass())
+		api.putTelevision(askedOf(screenSleep, "2026-09-29T22:00:00.000Z"))
+		mustSucceed(t, controller.pass())
 
-	mustDeepEqual(t, calls.all(), []string{
-		`media/den Wake: Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Set Stream Path 1.3.0.0`,
-		`media/den Sleep: Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Set Stream Path 1.3.0.0`,
+		mustDeepEqual(t, calls.all(), []string{
+			`media/den Wake: Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Set Stream Path 1.3.0.0`,
+			`media/den Sleep: Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Set Stream Path 1.3.0.0`,
+		})
 	})
 }
 
 // The session of the Player the ask names publishes it on its power
 // topic, which the Player's screen client reads.
 func TestTheSessionAsksItsScreenOnThePowerTopic(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		screen  string
 		payload string
@@ -74,24 +76,27 @@ func TestTheSessionAsksItsScreenOnThePowerTopic(t *testing.T) {
 		{screenWake, `{"action":"wake"}`},
 		{screenSleep, `{"action":"sleep"}`},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.screen, func(t *testing.T) {
 			t.Parallel()
-			h := newSessionHarness(t)
-			h.powerTopic = testPowerTopic
-			started := h.beginIdle(t, "GAME")
-			broker := h.brokers.waitForSession(t)
-			broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-			sessions := newTelevisionSessions(nil)
-			t.Cleanup(sessions.stop)
-			sessions.attach("theater", started)
+			synctest.Test(t, func(t *testing.T) {
+				h := newSessionHarness(t)
+				h.powerTopic = testPowerTopic
+				started := h.beginIdle(t, "GAME")
+				broker := h.brokers.waitForSession(t)
+				broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+				sessions := newTelevisionSessions(nil)
+				t.Cleanup(sessions.stop)
+				sessions.attach("theater", started)
 
-			sessions.askScreen("theater", c.screen, "Television lounge: the TV asked")
+				sessions.askScreen("theater", c.screen, "Television lounge: the TV asked")
 
-			published := broker.waitForTopic(t, testPowerTopic)
-			mustMatch(t, string(published.payload), c.payload)
-			mustDeepEqual(t, waitForLines(t, h.log, "the TV asked", 1), []string{
-				"Receiver theater: Television lounge: the TV asked; published " + c.payload + " to " + testPowerTopic,
+				published := broker.waitForTopic(t, testPowerTopic)
+				mustMatch(t, string(published.payload), c.payload)
+				mustDeepEqual(t, waitForLines(t, h.log, "the TV asked", 1), []string{
+					"Receiver theater: Television lounge: the TV asked; published " + c.payload + " to " + testPowerTopic,
+				})
 			})
 		})
 	}
@@ -100,17 +105,19 @@ func TestTheSessionAsksItsScreenOnThePowerTopic(t *testing.T) {
 // A session that ended asks nothing, and the Deployment says why.
 func TestAScreenAskWithNoSessionAsksNothing(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	h.powerTopic = testPowerTopic
-	started := h.beginIdle(t, "GAME")
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	sessions := newTelevisionSessions(nil)
-	t.Cleanup(sessions.stop)
-	sessions.attach("theater", started)
-	sessions.detach("theater", started)
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		h.powerTopic = testPowerTopic
+		started := h.beginIdle(t, "GAME")
+		broker := h.brokers.waitForSession(t)
+		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		sessions := newTelevisionSessions(nil)
+		t.Cleanup(sessions.stop)
+		sessions.attach("theater", started)
+		sessions.detach("theater", started)
 
-	sessions.askScreen("theater", screenWake, "Television lounge: the TV asked")
+		sessions.askScreen("theater", screenWake, "Television lounge: the TV asked")
 
-	broker.refuseTopic(t, testPowerTopic, 100*time.Millisecond)
+		broker.refuseTopic(t, testPowerTopic, 100*time.Millisecond)
+	})
 }

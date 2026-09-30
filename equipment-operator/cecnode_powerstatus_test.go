@@ -7,6 +7,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
@@ -40,7 +41,7 @@ func TestTheAdapterReportsItsPowerFromTheSession(t *testing.T) {
 	}{
 		{"no session", func(t *testing.T, wire *cectest.Bus) *cecAPI {
 			api := controlling(t, wire, lounge(""))
-			api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+			api.scanned(t, "node-1")
 			return api
 		}, cec.PowerStandby},
 		{"a session that sleeps", func(t *testing.T, wire *cectest.Bus) *cecAPI {
@@ -60,13 +61,16 @@ func TestTheAdapterReportsItsPowerFromTheSession(t *testing.T) {
 			return api
 		}, cec.PowerToOn},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fastWake(t)
-			wire := roomWithTV(televisionTV(cec.PowerOn))
-			api := c.room(t, wire)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				wire := roomWithTV(televisionTV(cec.PowerOn))
+				api := c.room(t, wire)
 
-			mustMatch(t, reportedPower(t, api, wire), c.power)
+				mustMatch(t, reportedPower(t, api, wire), c.power)
+			})
 		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -30,61 +31,71 @@ func driftedWhileListening(t *testing.T) (*sessionHarness, *session) {
 // A press after the room drifted off the player's input brings it back.
 func TestAnEnsureSelectsTheInputAfterADrift(t *testing.T) {
 	t.Parallel()
-	h, held := driftedWhileListening(t)
+	synctest.Test(t, func(t *testing.T) {
+		h, held := driftedWhileListening(t)
 
-	held.ensureInput()
+		held.ensureInput()
 
-	h.equipment.waitForCommands(t, "SIGAME")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
+		h.equipment.waitForCommands(t, "SIGAME")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
+	})
 }
 
 // A press while the room already shows the player's input sends nothing
 // to the receiver: the check is what keeps every press off the wire.
 func TestAnEnsureOnTheRightInputSendsNothing(t *testing.T) {
 	t.Parallel()
-	h, held := driftedWhileListening(t)
-	held.ensureInput()
-	h.equipment.waitForCommands(t, "SIGAME")
-	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
+	synctest.Test(t, func(t *testing.T) {
+		h, held := driftedWhileListening(t)
+		held.ensureInput()
+		h.equipment.waitForCommands(t, "SIGAME")
+		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
 
-	held.ensureInput()
+		held.ensureInput()
 
-	h.refuseCommands(t, quietPeriod, "SIGAME", "SIDVD", denon.PowerOnCommand)
+		h.refuseCommands(t, quietPeriod, "SIGAME", "SIDVD", denon.PowerOnCommand)
+	})
 }
 
 // A press on a dark room turns nothing on. The power key is the one that
 // wakes the equipment, so the input ensure never powers a room on.
 func TestAnEnsureInStandbySendsNothing(t *testing.T) {
 	t.Parallel()
-	h, _, held := idleListening(t)
+	synctest.Test(t, func(t *testing.T) {
+		h, _, held := idleListening(t)
 
-	held.ensureInput()
+		held.ensureInput()
 
-	h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
+		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
+	})
 }
 
 // The ask travels in player terms on the receiver's commands topic, and
 // the receiver resolves the input from the session it already holds.
 func TestTheEnsureCommandReachesTheStandingSession(t *testing.T) {
 	t.Parallel()
-	h, held := driftedWhileListening(t)
-	unit := &receiverUnit{session: held, log: h.lines}
+	synctest.Test(t, func(t *testing.T) {
+		h, held := driftedWhileListening(t)
+		unit := &receiverUnit{session: held, log: h.lines}
 
-	unit.handleCommand([]byte(`{"command":"input.ensure"}`))
+		unit.handleCommand([]byte(`{"command":"input.ensure"}`))
 
-	h.equipment.waitForCommands(t, "SIGAME")
+		h.equipment.waitForCommands(t, "SIGAME")
+	})
 }
 
 // A receiver with no session has no player listening, so the ask is
 // dropped rather than sent to a room nobody asked for.
 func TestTheEnsureCommandWithNoSessionSendsNothing(t *testing.T) {
 	t.Parallel()
-	h := newSessionHarness(t)
-	unit := &receiverUnit{log: h.lines}
+	synctest.Test(t, func(t *testing.T) {
+		h := newSessionHarness(t)
+		unit := &receiverUnit{log: h.lines}
 
-	unit.handleCommand([]byte(`{"command":"input.ensure"}`))
+		unit.handleCommand([]byte(`{"command":"input.ensure"}`))
 
-	h.refuseCommands(t, quietPeriod, "SIGAME", denon.PowerOnCommand)
+		h.refuseCommands(t, quietPeriod, "SIGAME", denon.PowerOnCommand)
+	})
 }
 
 // The ensure compares the room with what the receiver reported, so it
@@ -93,16 +104,18 @@ func TestTheEnsureCommandWithNoSessionSendsNothing(t *testing.T) {
 // written nothing.
 func TestAnEnsureTheReceiverNeverAnsweredEndsWithTheSession(t *testing.T) {
 	t.Parallel()
-	var group sync.WaitGroup
-	ctx, cancel := context.WithCancel(withWork(t.Context(), &group))
-	log := &logBuffer{}
-	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
-	held := startSession(ctx, "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(log, "theater"), startFakeBrokerServer(t).address(),
-		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
+	synctest.Test(t, func(t *testing.T) {
+		var group sync.WaitGroup
+		ctx, cancel := context.WithCancel(withWork(t.Context(), &group))
+		log := &logBuffer{}
+		spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
+		held := startSession(ctx, "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(log, "theater"), startFakeBrokerServer(t).address(), testNetwork.dial,
+			func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
 
-	held.ensureInput()
-	cancel()
+		held.ensureInput()
+		cancel()
 
-	mustMatch(t, awaitWork(&group, testTimeout), true)
-	mustMatch(t, len(linesWith(log, "input.ensure")), 0)
+		mustMatch(t, awaitWork(&group, testTimeout), true)
+		mustMatch(t, len(linesWith(log, "input.ensure")), 0)
+	})
 }

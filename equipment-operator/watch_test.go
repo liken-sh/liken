@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/informer"
@@ -46,7 +47,6 @@ func displayAt(uid, node, physicalAddress string) Display {
 // object deleted while the watch was down, converts as the object it
 // holds.
 func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
-	t.Parallel()
 	good := receiverAt("uid-1", 2, "192.0.2.10")
 	mistyped := asObject(t, good)
 	if err := unstructured.SetNestedField(mistyped.Object, "two", "metadata", "generation"); err != nil {
@@ -62,19 +62,23 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 		{name: "a field of the wrong type", object: mistyped, wantErr: "Receiver theater does not convert"},
 		{name: "a tombstone with no copy", object: cache.DeletedFinalStateUnknown{Key: "theater"}, wantErr: "the tombstone for theater holds no copy"},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := informer.Convert[Receiver](c.object)
-			if c.wantErr == "" {
-				mustSucceed(t, err)
-				mustMatch(t, got.Metadata.Generation, 2)
-				mustMatch(t, got.Status.Address, "192.0.2.10")
-				mustMatch(t, got.Spec.Inputs[0].Name, "GAME")
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
-				t.Fatalf("convert error = %v, want one that says %q", err, c.wantErr)
-			}
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				got, err := informer.Convert[Receiver](c.object)
+				if c.wantErr == "" {
+					mustSucceed(t, err)
+					mustMatch(t, got.Metadata.Generation, 2)
+					mustMatch(t, got.Status.Address, "192.0.2.10")
+					mustMatch(t, got.Spec.Inputs[0].Name, "GAME")
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+					t.Fatalf("convert error = %v, want one that says %q", err, c.wantErr)
+				}
+			})
 		})
 	}
 }
@@ -84,7 +88,6 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 // that does not convert wakes it too, because nothing says what
 // changed.
 func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
-	t.Parallel()
 	receivers := func(wake chan<- struct{}) cache.ResourceEventHandler {
 		return markHandler[Receiver, specMark]{what: "the Receivers", wake: wake, mark: receiverSpecMark}.handler()
 	}
@@ -136,13 +139,17 @@ func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
 			h.OnUpdate(asObject(t, displayAt("uid-1", "node-1", "1.0.0.0")), asObject(t, displayAt("uid-1", "node-2", "1.0.0.0")))
 		}, 1},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wake := make(chan struct{}, 1)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				wake := make(chan struct{}, 1)
 
-			c.send(c.handler(wake))
+				c.send(c.handler(wake))
 
-			mustMatch(t, len(wake), c.wakes)
+				mustMatch(t, len(wake), c.wakes)
+			})
 		})
 	}
 }
@@ -152,7 +159,6 @@ func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
 // collection before the watch does, and an object removed between the
 // two reads is in neither the watch's read nor any event.
 func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
-	t.Parallel()
 	const displayAPIVersion = "display.liken.sh/v1alpha1"
 	cases := []struct {
 		name       string
@@ -170,15 +176,18 @@ func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 		{"the Displays", displaysPath, displayAPIVersion, "Display", watchDisplays},
 		{"the Displays of one machine", displaysPath, displayAPIVersion, "Display", nodeDisplays("node-1")},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			server := newWatchServer(c.path, c.apiVersion, c.kind, []string{"[]"})
+			synctest.Test(t, func(t *testing.T) {
+				server := newWatchServer(c.path, c.apiVersion, c.kind, []string{"[]"})
 
-			wakes := runWatch(t, startWatchServer(t, server), c.watch, nil)
+				wakes := runWatch(t, startWatchServer(t, server), c.watch, nil)
 
-			server.awaitWatches(t, 1)
-			awaitWake(t, wakes, testTimeout)
+				server.awaitWatches(t, 1)
+				awaitWake(t, wakes, testTimeout)
+			})
 		})
 	}
 }
@@ -197,7 +206,6 @@ func sharedSpecWake(t *testing.T) watchFunc {
 // Deployment's shared watch wakes the CECBus loop as the spec watch
 // does.
 func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		after Receiver
@@ -212,21 +220,24 @@ func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 		{"a status write, to the shared watch's CECBus wake", receiverAt("uid-1", 1, "192.0.2.10"), sharedSpecWake(t), false},
 		{"a spec edit, to the shared watch's CECBus wake", receiverAt("uid-1", 2, ""), sharedSpecWake(t), true},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			changed := c.after
-			changed.Metadata.ResourceVersion = "150"
-			server := newWatchServer(receiversPath, equipmentAPIVersion, "Receiver",
-				[]string{encodeAll(t, receiverAt("uid-1", 1, ""))},
-				[]string{pause, event(t, "MODIFIED", changed), holdOpen})
-			wakes := runWatch(t, startWatchServer(t, server), c.watch, nil)
-			server.awaitWatches(t, 1)
-			settleWakes(wakes, watchQuiet)
+			synctest.Test(t, func(t *testing.T) {
+				changed := c.after
+				changed.Metadata.ResourceVersion = "150"
+				server := newWatchServer(receiversPath, equipmentAPIVersion, "Receiver",
+					[]string{encodeAll(t, receiverAt("uid-1", 1, ""))},
+					[]string{pause, event(t, "MODIFIED", changed), holdOpen})
+				wakes := runWatch(t, startWatchServer(t, server), c.watch, nil)
+				server.awaitWatches(t, 1)
+				settleWakes(wakes, watchQuiet)
 
-			server.release()
+				server.release()
 
-			mustMatch(t, wokeWithin(wakes, watchQuiet), c.want)
+				mustMatch(t, wokeWithin(wakes, watchQuiet), c.want)
+			})
 		})
 	}
 }
@@ -237,7 +248,6 @@ func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 // the watch was down wakes the loop, and a status write made in the
 // same time does not.
 func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		after Receiver
@@ -247,18 +257,21 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 		{"a spec edit", receiverAt("uid-1", 2, ""), true},
 		{"a Receiver created again with the same name", receiverAt("uid-2", 1, ""), true},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			reads := []string{encodeAll(t, receiverAt("uid-1", 1, "")), encodeAll(t, c.after)}
-			server := newWatchServer(receiversPath, equipmentAPIVersion, "Receiver", reads, []string{}, []string{holdOpen})
-			wakes := runWatch(t, startWatchServer(t, server), watchReceiverSpecs, nil)
-			server.awaitWatches(t, 1)
-			settleWakes(wakes, watchQuiet)
+			synctest.Test(t, func(t *testing.T) {
+				reads := []string{encodeAll(t, receiverAt("uid-1", 1, "")), encodeAll(t, c.after)}
+				server := newWatchServer(receiversPath, equipmentAPIVersion, "Receiver", reads, []string{}, []string{holdOpen})
+				wakes := runWatch(t, startWatchServer(t, server), watchReceiverSpecs, nil)
+				server.awaitWatches(t, 1)
+				settleWakes(wakes, watchQuiet)
 
-			server.awaitWatches(t, 1)
+				server.awaitWatches(t, 1)
 
-			mustMatch(t, wokeWithin(wakes, watchQuiet), c.want)
+				mustMatch(t, wokeWithin(wakes, watchQuiet), c.want)
+			})
 		})
 	}
 }
@@ -266,7 +279,6 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 // Through the reflector: a watch that ends is opened again, and each
 // watch opened after the first is counted.
 func TestAWatchThatEndsIsOpenedAgainAndCounted(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		path  string
@@ -278,21 +290,24 @@ func TestAWatchThatEndsIsOpenedAgainAndCounted(t *testing.T) {
 		{"Display", displaysPath, "Display", nodeDisplays("node-1")},
 		{"Receiver spec", receiversPath, "Receiver", watchReceiverSpecs},
 	}
+	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			server := newWatchServer(c.path, equipmentAPIVersion, c.kind, []string{"[]"}, []string{}, []string{holdOpen})
-			restarts := make(chan struct{}, 64)
+			synctest.Test(t, func(t *testing.T) {
+				server := newWatchServer(c.path, equipmentAPIVersion, c.kind, []string{"[]"}, []string{}, []string{holdOpen})
+				restarts := make(chan struct{}, 64)
 
-			runWatch(t, startWatchServer(t, server), c.watch, func() { restarts <- struct{}{} })
+				runWatch(t, startWatchServer(t, server), c.watch, func() { restarts <- struct{}{} })
 
-			server.awaitWatches(t, 2)
-			select {
-			case <-restarts:
-			case <-time.After(testTimeout):
-				t.Fatal("the reopened watch was not counted")
-			}
-			mustMatch(t, len(restarts), 0)
+				server.awaitWatches(t, 2)
+				select {
+				case <-restarts:
+				case <-time.After(testTimeout):
+					t.Fatal("the reopened watch was not counted")
+				}
+				mustMatch(t, len(restarts), 0)
+			})
 		})
 	}
 }
@@ -333,7 +348,8 @@ func TestTheWatchesUseTheServiceAccount(t *testing.T) {
 // it as one.
 func TestAReceiverFromTheWatchIsTheReceiverAListGives(t *testing.T) {
 	t.Parallel()
-	const stored = `{
+	synctest.Test(t, func(t *testing.T) {
+		const stored = `{
 		"apiVersion": "equipment.liken.sh/v1alpha1", "kind": "Receiver",
 		"metadata": {"name": "theater", "uid": "uid-1", "generation": 4, "resourceVersion": "812", "labels": {"liken.sh/discovered": "wiim"}},
 		"spec": {
@@ -353,13 +369,14 @@ func TestAReceiverFromTheWatchIsTheReceiverAListGives(t *testing.T) {
 			"conditions": [{"type": "Connected", "status": "True", "reason": "Answered", "lastTransitionTime": "2026-09-27T12:00:00Z"}]
 		}
 	}`
-	var listed Receiver
-	mustSucceed(t, json.Unmarshal([]byte(stored), &listed))
-	watched := &unstructured.Unstructured{}
-	mustSucceed(t, watched.UnmarshalJSON([]byte(stored)))
+		var listed Receiver
+		mustSucceed(t, json.Unmarshal([]byte(stored), &listed))
+		watched := &unstructured.Unstructured{}
+		mustSucceed(t, watched.UnmarshalJSON([]byte(stored)))
 
-	converted, err := informer.Convert[Receiver](watched)
+		converted, err := informer.Convert[Receiver](watched)
 
-	mustSucceed(t, err)
-	mustDeepEqual(t, converted, listed)
+		mustSucceed(t, err)
+		mustDeepEqual(t, converted, listed)
+	})
 }

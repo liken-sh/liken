@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -165,9 +164,7 @@ func (s *watchServer) awaitWatches(t *testing.T, count int) {
 // startWatchServer serves s and answers a Client whose watches reach it.
 func startWatchServer(t *testing.T, s *watchServer) *Client {
 	t.Helper()
-	server := httptest.NewServer(s.handler(t))
-	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	return testAPIClient(t, s.handler(t))
 }
 
 // watchFunc is the shape of each watch this operator runs.

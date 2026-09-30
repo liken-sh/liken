@@ -5,9 +5,9 @@ package main
 // These tests cover what this operator adds to client-go's election:
 // the order of a shutdown, the exit on a lost Lease, the prompt
 // takeover a release gives a waiting copy, and a waiting copy that does
-// nothing. They run against the fake
-// API server in leaseserver_test.go, with durations short enough that a
-// loss or a takeover happens in a few seconds.
+// nothing. They run against the fake API server in leaseserver_test.go,
+// at the durations the operator runs with, on the fake clock of a
+// synctest bubble.
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/wiim"
@@ -24,24 +25,19 @@ import (
 
 const testLeaseNamespace = "liken-system"
 
-// client-go writes the duration in whole seconds, so the shortest
-// duration a waiting copy can read is one second.
-var testLeaseTiming = leaseTiming{
-	duration:      2 * time.Second,
-	renewDeadline: 1 * time.Second,
-	retryPeriod:   200 * time.Millisecond,
-}
-
 // heldPastItsDuration is how long a test watches a waiting copy while
 // another copy holds the Lease. A holder that did not renew would lose
 // the Lease at its duration, and the waiting copy would take it on its
 // next retry, so the wait runs two retries past the duration.
-var heldPastItsDuration = testLeaseTiming.duration + 2*testLeaseTiming.retryPeriod
+func heldPastItsDuration(timing leaseTiming) time.Duration {
+	return timing.duration + 2*timing.retryPeriod
+}
 
-// candidate is one operator process under test, with the exit code it
-// would have ended with, or -1.
+// candidate is one operator process under test, with the timing of its
+// election and the exit code it would have ended with, or -1.
 type candidate struct {
 	*leadership
+	timing   leaseTiming
 	exitCode atomic.Int32
 }
 
@@ -49,7 +45,7 @@ func (c *candidate) exited() bool { return c.exitCode.Load() >= 0 }
 
 func newCandidate(t *testing.T, server *leaseServer, pod string) *candidate {
 	t.Helper()
-	c := &candidate{}
+	c := &candidate{timing: server.timing}
 	c.exitCode.Store(-1)
 	// The lines go to a buffer the test prints when it ends, because
 	// client-go can call back after the test's last assertion.
@@ -60,7 +56,7 @@ func newCandidate(t *testing.T, server *leaseServer, pod string) *candidate {
 		defer lines.Unlock()
 		reported = append(reported, line)
 	}
-	l, err := newLeadership(server.config(t), testLeaseNamespace, pod, testLeaseTiming,
+	l, err := newLeadership(server.config(t), testLeaseNamespace, pod, c.timing,
 		func(code int) { c.exitCode.Store(int32(code)) }, report)
 	mustSucceed(t, err)
 	c.leadership = l
@@ -70,7 +66,7 @@ func newCandidate(t *testing.T, server *leaseServer, pod string) *candidate {
 		c.cancel()
 		select {
 		case <-c.done:
-		case <-time.After(3 * testLeaseTiming.duration):
+		case <-time.After(3 * c.timing.duration):
 			t.Error("the election never ended")
 		}
 		lines.Lock()
@@ -96,12 +92,12 @@ func awaitWithin(c *candidate, spell time.Duration) bool {
 // deadline.
 func exitsWithin(t *testing.T, c *candidate, complaint string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * testLeaseTiming.duration)
+	deadline := time.Now().Add(3 * c.timing.duration)
 	for !c.exited() {
 		if time.Now().After(deadline) {
 			t.Fatal(complaint)
 		}
-		time.Sleep(testLeaseTiming.retryPeriod / 4)
+		time.Sleep(c.timing.retryPeriod / 4)
 	}
 }
 
@@ -129,19 +125,19 @@ func leading(t *testing.T, c *candidate, act func() error) (started <-chan struc
 		select {
 		case r := <-results:
 			return r.led, r.err
-		case <-time.After(3 * testLeaseTiming.duration):
+		case <-time.After(3 * c.timing.duration):
 			t.Fatal("actWhileLeading did not return")
 			return false, nil
 		}
 	}
 }
 
-// awaitStart waits for act to start.
-func awaitStart(t *testing.T, started <-chan struct{}) {
+// awaitStart waits for the candidate's act to start.
+func awaitStart(t *testing.T, c *candidate, started <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-started:
-	case <-time.After(3 * testLeaseTiming.duration):
+	case <-time.After(3 * c.timing.duration):
 		t.Fatal("the copy never took the Lease")
 	}
 }
@@ -151,22 +147,24 @@ func awaitStart(t *testing.T, started <-chan struct{}) {
 // lands once another copy can lead. A shutdown is not a loss.
 func TestTheLeaseIsReleasedOnlyAfterTheOperatorStops(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	leader := newCandidate(t, server, "equipment-operator-a")
-	holderWhileActing := ""
-	started, finish := leading(t, leader, func() error {
-		holderWhileActing = server.holder()
-		return nil
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := newCandidate(t, server, "equipment-operator-a")
+		holderWhileActing := ""
+		started, finish := leading(t, leader, func() error {
+			holderWhileActing = server.holder()
+			return nil
+		})
+		awaitStart(t, leader, started)
+
+		led, err := finish()
+
+		mustSucceed(t, err)
+		mustMatch(t, led, true)
+		mustMatch(t, holderWhileActing, leader.identity)
+		mustMatch(t, server.holder(), "")
+		mustMatch(t, leader.exited(), false)
 	})
-	awaitStart(t, started)
-
-	led, err := finish()
-
-	mustSucceed(t, err)
-	mustMatch(t, led, true)
-	mustMatch(t, holderWhileActing, leader.identity)
-	mustMatch(t, server.holder(), "")
-	mustMatch(t, leader.exited(), false)
 }
 
 // A renewal the shutdown cancelled can still land on the API server
@@ -175,18 +173,20 @@ func TestTheLeaseIsReleasedOnlyAfterTheOperatorStops(t *testing.T) {
 // waiting copy does not wait out the Lease's duration.
 func TestAStepDownReleasesTheLeaseAfterALateRenewal(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	leader := newCandidate(t, server, "equipment-operator-a")
-	started, finish := leading(t, leader, func() error {
-		server.landAWriteAfterTheNextRead()
-		return nil
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := newCandidate(t, server, "equipment-operator-a")
+		started, finish := leading(t, leader, func() error {
+			server.landAWriteAfterTheNextRead()
+			return nil
+		})
+		awaitStart(t, leader, started)
+
+		_, err := finish()
+
+		mustSucceed(t, err)
+		mustMatch(t, server.holder(), "")
 	})
-	awaitStart(t, started)
-
-	_, err := finish()
-
-	mustSucceed(t, err)
-	mustMatch(t, server.holder(), "")
 }
 
 // A waiting copy takes a released Lease on its next retry, well inside
@@ -194,97 +194,107 @@ func TestAStepDownReleasesTheLeaseAfterALateRenewal(t *testing.T) {
 // old one stops.
 func TestAWaitingCopyTakesAReleasedLeaseAtOnce(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	old := newCandidate(t, server, "equipment-operator-old")
-	started, finish := leading(t, old, func() error { return nil })
-	awaitStart(t, started)
-	replacement := newCandidate(t, server, "equipment-operator-new")
-	select {
-	case <-replacement.started:
-		t.Fatal("the new copy took a Lease the old copy holds")
-	case <-time.After(heldPastItsDuration):
-	}
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		old := newCandidate(t, server, "equipment-operator-old")
+		started, finish := leading(t, old, func() error { return nil })
+		awaitStart(t, old, started)
+		replacement := newCandidate(t, server, "equipment-operator-new")
+		select {
+		case <-replacement.started:
+			t.Fatal("the new copy took a Lease the old copy holds")
+		case <-time.After(heldPastItsDuration(operatorLeaseTiming)):
+		}
 
-	_, _ = finish()
-	released := time.Now()
+		_, _ = finish()
+		released := time.Now()
 
-	if !awaitWithin(replacement, 3*testLeaseTiming.duration) {
-		t.Fatal("the new copy never took the released Lease")
-	}
-	if waited := time.Since(released); waited >= testLeaseTiming.duration {
-		t.Errorf("took the released Lease after %s, want less than %s", waited, testLeaseTiming.duration)
-	}
+		if !awaitWithin(replacement, 3*operatorLeaseTiming.duration) {
+			t.Fatal("the new copy never took the released Lease")
+		}
+		if waited := time.Since(released); waited >= operatorLeaseTiming.duration {
+			t.Errorf("took the released Lease after %s, want less than %s", waited, operatorLeaseTiming.duration)
+		}
+	})
 }
 
 func TestALeaderThatCannotRenewExits(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	leader := newCandidate(t, server, "equipment-operator-a")
-	if !awaitWithin(leader, 3*testLeaseTiming.duration) {
-		t.Fatal("the copy never took the Lease")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := newCandidate(t, server, "equipment-operator-a")
+		if !awaitWithin(leader, 3*operatorLeaseTiming.duration) {
+			t.Fatal("the copy never took the Lease")
+		}
 
-	server.setRefusal(http.MethodPut, http.StatusInternalServerError)
+		server.setRefusal(http.MethodPut, http.StatusInternalServerError)
 
-	exitsWithin(t, leader, "the leader kept acting with no renewal")
-	if code := leader.exitCode.Load(); code != 1 {
-		t.Errorf("exit code = %d, want 1", code)
-	}
+		exitsWithin(t, leader, "the leader kept acting with no renewal")
+		if code := leader.exitCode.Load(); code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+	})
 }
 
 func TestALeaderWhoseLeaseAnotherProcessTookExits(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	leader := newCandidate(t, server, "equipment-operator-a")
-	if !awaitWithin(leader, 3*testLeaseTiming.duration) {
-		t.Fatal("the copy never took the Lease")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := newCandidate(t, server, "equipment-operator-a")
+		if !awaitWithin(leader, 3*operatorLeaseTiming.duration) {
+			t.Fatal("the copy never took the Lease")
+		}
 
-	server.holdAs("equipment-operator-b")
+		server.holdAs("equipment-operator-b")
 
-	exitsWithin(t, leader, "the leader kept acting after another process took the Lease")
+		exitsWithin(t, leader, "the leader kept acting after another process took the Lease")
+	})
 }
 
 // A shutdown that arrives while the copy waits ends the wait with no
 // Lease, runs nothing, and leaves the holder alone.
 func TestAStopWhileWaitingLeavesTheHolderAlone(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	server.holdAs("equipment-operator-old")
-	waiting := newCandidate(t, server, "equipment-operator-new")
-	stop, cancel := context.WithCancel(context.Background())
-	cancel()
-	acted := false
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		server.holdAs("equipment-operator-old")
+		waiting := newCandidate(t, server, "equipment-operator-new")
+		stop, cancel := context.WithCancel(context.Background())
+		cancel()
+		acted := false
 
-	led, err := waiting.actWhileLeading(stop, func() error {
-		acted = true
-		return nil
+		led, err := waiting.actWhileLeading(stop, func() error {
+			acted = true
+			return nil
+		})
+
+		mustSucceed(t, err)
+		mustMatch(t, led, false)
+		mustMatch(t, acted, false)
+		mustMatch(t, server.holder(), "equipment-operator-old")
+		mustMatch(t, waiting.exited(), false)
 	})
-
-	mustSucceed(t, err)
-	mustMatch(t, led, false)
-	mustMatch(t, acted, false)
-	mustMatch(t, server.holder(), "equipment-operator-old")
-	mustMatch(t, waiting.exited(), false)
 }
 
 // The leader renews from the version it wrote last, so a steady leader
 // sends updates and does not read the Lease before each one.
 func TestASteadyLeaderRenewsWithNoRead(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	leader := newCandidate(t, server, "equipment-operator-a")
-	if !awaitWithin(leader, 3*testLeaseTiming.duration) {
-		t.Fatal("the copy never took the Lease")
-	}
-	reads := server.count(http.MethodGet)
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := newCandidate(t, server, "equipment-operator-a")
+		if !awaitWithin(leader, 3*operatorLeaseTiming.duration) {
+			t.Fatal("the copy never took the Lease")
+		}
+		reads := server.count(http.MethodGet)
 
-	time.Sleep(5 * testLeaseTiming.retryPeriod)
+		time.Sleep(5 * operatorLeaseTiming.retryPeriod)
 
-	if server.count(http.MethodPut) < 3 || server.count(http.MethodGet) != reads {
-		t.Errorf("%d updates and %d reads while leading, want at least 3 updates and no read",
-			server.count(http.MethodPut), server.count(http.MethodGet)-reads)
-	}
+		if server.count(http.MethodPut) < 3 || server.count(http.MethodGet) != reads {
+			t.Errorf("%d updates and %d reads while leading, want at least 3 updates and no read",
+				server.count(http.MethodPut), server.count(http.MethodGet)-reads)
+		}
+	})
 }
 
 func TestTheIdentityIsNewForEachProcess(t *testing.T) {
@@ -333,22 +343,29 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 	t.Cleanup(func() { discover = restore })
 	api := startFakeAPI(t)
 	api.setReceivers()
+	// The copy that takes the Lease binds a real port for its metrics,
+	// and a goroutine that waits in a socket's accept keeps a synctest
+	// bubble's clock still. So this test runs on the real clock, with a
+	// Lease short enough that a takeover happens in two seconds. client-go
+	// writes the duration in whole seconds, so one second is the shortest
+	// duration a waiting copy can read.
 	server := newLeaseServer()
+	server.timing = leaseTiming{duration: 2 * time.Second, renewDeadline: time.Second, retryPeriod: 200 * time.Millisecond}
 	old := newCandidate(t, server, "equipment-operator-old")
 	oldStarted, oldFinish := leading(t, old, func() error { return nil })
-	awaitStart(t, oldStarted)
+	awaitStart(t, old, oldStarted)
 	waiting := newCandidate(t, server, "equipment-operator-new")
 	metricsAddress := freeAddress(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
 		_, err := waiting.actWhileLeading(ctx, func() error {
-			return operateAsLeader(ctx, api.client, settings{busAddress: "127.0.0.1:1", metricsAddress: metricsAddress})
+			return operateAsLeader(ctx, api.client, settings{busAddress: "127.0.0.1:1", metricsAddress: metricsAddress, dial: testNetwork.dial})
 		})
 		done <- err
 	}()
 
-	time.Sleep(heldPastItsDuration)
+	time.Sleep(heldPastItsDuration(server.timing))
 	api.mutex.Lock()
 	listsWhileWaiting := api.lists
 	api.mutex.Unlock()
@@ -357,7 +374,7 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 	mustMatch(t, bound(metricsAddress), false)
 
 	_, _ = oldFinish()
-	deadline := time.Now().Add(3 * testLeaseTiming.duration)
+	deadline := time.Now().Add(3 * server.timing.duration)
 	for {
 		api.mutex.Lock()
 		lists := api.lists
@@ -368,7 +385,7 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("after the Lease: %d lists, %d searches, metrics bound %t", lists, searches.Load(), bound(metricsAddress))
 		}
-		time.Sleep(testLeaseTiming.retryPeriod / 4)
+		time.Sleep(server.timing.retryPeriod / 4)
 	}
 	cancel()
 	select {
@@ -384,14 +401,16 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 // after the process exits.
 func TestAStillWritingOperatorKeepsTheLease(t *testing.T) {
 	t.Parallel()
-	server := newLeaseServer()
-	leader := newCandidate(t, server, "equipment-operator-a")
-	started, finish := leading(t, leader, func() error { return errStillWriting })
-	awaitStart(t, started)
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := newCandidate(t, server, "equipment-operator-a")
+		started, finish := leading(t, leader, func() error { return errStillWriting })
+		awaitStart(t, leader, started)
 
-	led, err := finish()
+		led, err := finish()
 
-	mustMatch(t, led, true)
-	mustMatch(t, err, errStillWriting)
-	mustMatch(t, server.holder(), leader.identity)
+		mustMatch(t, led, true)
+		mustMatch(t, err, errStillWriting)
+		mustMatch(t, server.holder(), leader.identity)
+	})
 }

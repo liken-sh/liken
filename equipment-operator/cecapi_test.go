@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -44,9 +45,13 @@ type cecAPI struct {
 	wakeWrites    int
 	sessionWrites int
 	version       int
-	watchers      []*fakeWatcher
-	deleted       []string
-	client        *Client
+	// moved closes at each change of an object, and a new channel takes
+	// its place, so a test that waits for an object's state wakes at each
+	// change and not on a timer.
+	moved    chan struct{}
+	watchers []*fakeWatcher
+	deleted  []string
+	client   *Client
 	// refusing makes every list and every status write fail with a
 	// 500, the way an API server answers while it is unhealthy.
 	// refusingTelevisions does the same for the Television list alone.
@@ -169,6 +174,7 @@ func (a *cecAPI) selectedIn(path, node string) map[string]map[string]any {
 // collection. The caller holds the mutex.
 func (a *cecAPI) changed() {
 	a.version++
+	a.move()
 	for _, watcher := range a.watchers {
 		a.send(watcher)
 	}
@@ -179,10 +185,47 @@ func (a *cecAPI) changed() {
 // the mutex.
 func (a *cecAPI) changedIn(path string) {
 	a.version++
+	a.move()
 	for _, watcher := range a.watchers {
 		if watcher.path == path {
 			a.send(watcher)
 		}
+	}
+}
+
+// move wakes each wait on the fake's objects. The caller holds the
+// mutex.
+func (a *cecAPI) move() {
+	close(a.movement())
+	a.moved = make(chan struct{})
+}
+
+// movement answers the channel that closes at the next change. The
+// caller holds the mutex.
+func (a *cecAPI) movement() chan struct{} {
+	if a.moved == nil {
+		a.moved = make(chan struct{})
+	}
+	return a.moved
+}
+
+// nextMove answers the channel that closes at the next change. A wait
+// takes it before it reads the state, so a change between the read and
+// the wait still wakes it.
+func (a *cecAPI) nextMove() <-chan struct{} {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.movement()
+}
+
+// awaitMove waits for the next change, and answers false when the
+// deadline comes first.
+func awaitMove(moved <-chan struct{}, deadline <-chan time.Time) bool {
+	select {
+	case <-moved:
+		return true
+	case <-deadline:
+		return false
 	}
 }
 
@@ -388,16 +431,26 @@ func (a *cecAPI) serveDisplay(w http.ResponseWriter, name string) {
 func (a *cecAPI) serveList(w http.ResponseWriter) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	list := CECBusList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
-	names := make([]string, 0, len(a.buses))
-	for name := range a.buses {
-		names = append(names, name)
+	a.serveCollection(w, cecBusesPath, "")
+}
+
+// serveCollection answers a list the way the API server does: each item
+// carries its own resourceVersion, and the list carries the
+// collection's. A client that notes the versions it read then compares
+// them with the watch's copies. The caller holds the mutex.
+func (a *cecAPI) serveCollection(w http.ResponseWriter, path, node string) {
+	selected := a.selectedIn(path, node)
+	items := make([]map[string]any, 0, len(selected))
+	for _, name := range sortedKeys(selected) {
+		items = append(items, selected[name])
 	}
-	slices.Sort(names)
-	for _, name := range names {
-		list.Items = append(list.Items, copyBus(a.buses[name]))
-	}
-	_ = json.NewEncoder(w).Encode(list)
+	kind := fakeKinds[path]
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"apiVersion": kind[0],
+		"kind":       kind[1] + "List",
+		"metadata":   map[string]string{"resourceVersion": fmt.Sprint(a.version)},
+		"items":      items,
+	})
 }
 
 // serveWatch answers a watch the way the API server does. A streaming
@@ -652,6 +705,20 @@ func (a *cecAPI) waitForEntry(t *testing.T, bus, machine string, ready func(CECA
 	return a.waitForEntryWithin(t, bus, machine, testTimeout, ready)
 }
 
+// scanned waits until a machine's adapter on the den bus has finished
+// its join scan, and then until every goroutine in the test's bubble
+// waits. The node workload then holds a whole copy of each collection
+// it watches, so a change the test makes next reaches it as a watch
+// event. Before that, the node workload reads a collection with a
+// list, and the list can be newer than the first copy the watch hands
+// it. It answers the entry.
+func (a *cecAPI) scanned(t *testing.T, machine string) CECAdapterStatus {
+	t.Helper()
+	entry := a.waitForEntry(t, "den", machine, func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	synctest.Wait()
+	return entry
+}
+
 // vividScanTime bounds a scan on the kernel's vivid driver, which
 // sends each message at the speed of a real CEC wire, so a scan takes
 // a few seconds.
@@ -659,16 +726,16 @@ const vividScanTime = 20 * time.Second
 
 func (a *cecAPI) waitForEntryWithin(t *testing.T, bus, machine string, within time.Duration, ready func(CECAdapterStatus) bool) CECAdapterStatus {
 	t.Helper()
-	deadline := time.Now().Add(within)
+	deadline := time.After(within)
 	for {
+		moved := a.nextMove()
 		entry, held := a.entry(bus, machine)
 		if held && ready(entry) {
 			return entry
 		}
-		if time.Now().After(deadline) {
+		if !awaitMove(moved, deadline) {
 			t.Fatalf("CECBus %s never held the wanted entry for %s; the last was %+v (held %v)", bus, machine, entry, held)
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 

@@ -20,7 +20,7 @@ import (
 
 // How long the operator waits for the receiver to answer PWON before it
 // selects the input anyway.
-var sessionPowerWait = 10 * time.Second
+const sessionPowerWait = 10 * time.Second
 
 // How often the adopt looks again for a ceiling. The adopt waits on
 // channels for the receiver's first volume and for the broker, and
@@ -32,11 +32,11 @@ var sessionPowerWait = 10 * time.Second
 // driver's last state, and sends nothing to the receiver or the API
 // server. For a Denon with no spec.volume.max the tick runs for the
 // whole session, which costs two reads of memory a second.
-var sessionAdoptRetry = 500 * time.Millisecond
+const sessionAdoptRetry = 500 * time.Millisecond
 
 // How long a stop waits for the cleared owner mark to reach the broker
 // before it closes the connection.
-var sessionStopGrace = 200 * time.Millisecond
+const sessionStopGrace = 200 * time.Millisecond
 
 // session is one live session: the connection to the broker, the level
 // it last sent the receiver, and the marks that tell an echo of its own
@@ -123,8 +123,8 @@ type session struct {
 // either flag on, and once only when both are on at the start. A session
 // that starts with both off owns the level and sends the equipment
 // nothing.
-func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
-	s := newSession(ctx, receiver, spec, driver, readings, log, busAddress, scale, inputSoundMode, applyPower, room)
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, dial dialFunc, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
+	s := newSession(ctx, receiver, spec, driver, readings, log, busAddress, dial, scale, inputSoundMode, applyPower, room)
 	s.start(spec.Active, spec.Awake, false)
 	return s
 }
@@ -134,7 +134,7 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, dr
 // from start on reaches it. A line that reached no session could be the
 // one that says the receiver is reachable, and a session that missed it
 // would never run its one-shot.
-func newSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
+func newSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, dial dialFunc, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	if inputSoundMode == nil {
 		inputSoundMode = func(string) string { return "" }
@@ -160,7 +160,7 @@ func newSession(ctx context.Context, receiver string, spec ReceiverSession, driv
 	// The will clears the mark, so an operator that dies hands the level
 	// back to the pods that were leaving it alone.
 	will := &busWill{Topic: ownerTopic(spec.VolumeTopic), Retained: true}
-	s.bus = newBus(busAddress, "equipment-operator-"+receiver, will, s.claim, s.receive)
+	s.bus = newBus(busAddress, dial, "equipment-operator-"+receiver, will, s.claim, s.receive)
 	s.bus.Subscribe(spec.VolumeTopic)
 	// The remote's power button publishes its toggle on the power topic,
 	// and the session subscribes to it only when the media operator

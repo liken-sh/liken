@@ -10,6 +10,7 @@ import (
 	"maps"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -59,17 +60,18 @@ func settledFolded(operator *controller) bool {
 
 func TestARestartAgainstASettledReceiverSendsNothing(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
 
-	mustSucceed(t, operator.pass(t.Context()))
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	fake.refuseAnySet(t, quietPeriod)
+		fake.refuseAnySet(t, quietPeriod)
+	})
 }
 
 func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		reports []string
@@ -79,23 +81,26 @@ func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
 		{"an HDMI setting", []string{"SSHOSCON OFF", "Z2PHONO", "Z240"}, "SSHOSCON ON"},
 		{"a zone control", []string{"SSHOSCON ON", "Z2CD", "Z240"}, "Z2PHONO"},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			fake := startFakeDenon(t)
-			_, operator := settledOperator(t, fake, settledReceiver(fake), one.reports, func(operator *controller) bool {
-				unit := operator.units["theater"]
-				zone, reported := unit.driver.State().Zone("zone2")
-				return unit.denonClient.Settings().HDMI.Control != nil && reported && zone.Volume == 80
-			})
+			synctest.Test(t, func(t *testing.T) {
+				fake := startFakeDenon(t)
+				_, operator := settledOperator(t, fake, settledReceiver(fake), one.reports, func(operator *controller) bool {
+					unit := operator.units["theater"]
+					zone, reported := unit.driver.State().Zone("zone2")
+					return unit.denonClient.Settings().HDMI.Control != nil && reported && zone.Volume == 80
+				})
 
-			mustSucceed(t, operator.pass(t.Context()))
-			sent := fake.waitForCommands(t, one.want)
-			for _, command := range sent[:len(sent)-1] {
-				if !strings.HasSuffix(command, "?") && (isDenonSetting(command) || strings.HasPrefix(command, "Z2")) {
-					t.Fatalf("the operator sent %q beside %q", command, one.want)
+				mustSucceed(t, operator.pass(t.Context()))
+				sent := fake.waitForCommands(t, one.want)
+				for _, command := range sent[:len(sent)-1] {
+					if !strings.HasSuffix(command, "?") && (isDenonSetting(command) || strings.HasPrefix(command, "Z2")) {
+						t.Fatalf("the operator sent %q beside %q", command, one.want)
+					}
 				}
-			}
+			})
 		})
 	}
 }
@@ -104,20 +109,22 @@ func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
 // the next pass sends the declared value back.
 func TestAChangeAtTheReceiverIsDrivenBack(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseAnySet(t, quietPeriod)
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseAnySet(t, quietPeriod)
 
-	fake.volunteer("PSDRC LOW", "Z230")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
-		return s.Audio.DRC != nil && *s.Audio.DRC == "low"
+		fake.volunteer("PSDRC LOW", "Z230")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+			return s.Audio.DRC != nil && *s.Audio.DRC == "low"
+		})
+		waitForObservedZone(t, operator, "theater", "zone2", 60)
+
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "PSDRC OFF")
+		fake.waitForCommands(t, "Z2MV40")
 	})
-	waitForObservedZone(t, operator, "theater", "zone2", 60)
-
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "PSDRC OFF")
-	fake.waitForCommands(t, "Z2MV40")
 }
 
 // unreportedReceiver declares a setting, a channel volume, and a zone
@@ -150,7 +157,6 @@ func recordedBlocks(receiver Receiver) map[string]string {
 // so does an upgrade that finds the earlier operator's
 // status.settingsGeneration and no status.settledSettings.
 func TestAnUnreportedFieldIsSentOnlyForABlockTheStatusDoesNotRecord(t *testing.T) {
-	t.Parallel()
 	edited := func(receiver *Receiver) {
 		receiver.Status.SettledSettings = map[string]string{
 			denonSettingsBlock: digest(denon.Settings{}),
@@ -164,29 +170,31 @@ func TestAnUnreportedFieldIsSentOnlyForABlockTheStatusDoesNotRecord(t *testing.T
 		{"a new Receiver", func(*Receiver) {}},
 		{"blocks edited while the operator was down", edited},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			fake := startFakeDenon(t)
-			receiver := unreportedReceiver(fake)
-			one.store(&receiver)
-			api, operator := settledOperator(t, fake, receiver, nil, func(*controller) bool { return true })
+			synctest.Test(t, func(t *testing.T) {
+				fake := startFakeDenon(t)
+				receiver := unreportedReceiver(fake)
+				one.store(&receiver)
+				api, operator := settledOperator(t, fake, receiver, nil, func(*controller) bool { return true })
 
-			mustSucceed(t, operator.pass(t.Context()))
-			fake.waitForCommands(t, "ECOON")
-			fake.waitForCommands(t, "Z3SLP030")
-			api.waitForStatus(t, func(status ReceiverStatus) bool {
-				return maps.Equal(status.SettledSettings, recordedBlocks(receiver))
+				mustSucceed(t, operator.pass(t.Context()))
+				fake.waitForCommands(t, "ECOON")
+				fake.waitForCommands(t, "Z3SLP030")
+				api.waitForStatus(t, func(status ReceiverStatus) bool {
+					return maps.Equal(status.SettledSettings, recordedBlocks(receiver))
+				})
+
+				mustSucceed(t, operator.pass(t.Context()))
+				fake.refuseAnySet(t, quietPeriod)
 			})
-
-			mustSucceed(t, operator.pass(t.Context()))
-			fake.refuseAnySet(t, quietPeriod)
 		})
 	}
 }
 
 func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		store func(*Receiver)
@@ -199,19 +207,22 @@ func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
 		{"an upgrade at the recorded generation", func(receiver *Receiver) { receiver.Status.SettingsGeneration = 4 }},
 		{"an upgrade after a session flag moved the generation", func(receiver *Receiver) { receiver.Status.SettingsGeneration = 3 }},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			fake := startFakeDenon(t)
-			receiver := unreportedReceiver(fake)
-			one.store(&receiver)
-			api, operator := settledOperator(t, fake, receiver, nil, func(*controller) bool { return true })
+			synctest.Test(t, func(t *testing.T) {
+				fake := startFakeDenon(t)
+				receiver := unreportedReceiver(fake)
+				one.store(&receiver)
+				api, operator := settledOperator(t, fake, receiver, nil, func(*controller) bool { return true })
 
-			mustSucceed(t, operator.pass(t.Context()))
-			mustSucceed(t, operator.pass(t.Context()))
+				mustSucceed(t, operator.pass(t.Context()))
+				mustSucceed(t, operator.pass(t.Context()))
 
-			fake.refuseAnySet(t, quietPeriod)
-			mustDeepEqual(t, api.lastStatus().SettledSettings, recordedBlocks(receiver))
+				fake.refuseAnySet(t, quietPeriod)
+				mustDeepEqual(t, api.lastStatus().SettledSettings, recordedBlocks(receiver))
+			})
 		})
 	}
 }
@@ -221,31 +232,33 @@ func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
 // does not send it.
 func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	receiver := unreportedReceiver(fake)
-	receiver.Status.SettledSettings = recordedBlocks(receiver)
-	api, operator := settledOperator(t, fake, receiver, nil, func(*controller) bool { return true })
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		receiver := unreportedReceiver(fake)
+		receiver.Status.SettledSettings = recordedBlocks(receiver)
+		api, operator := settledOperator(t, fake, receiver, nil, func(*controller) bool { return true })
 
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseAnySet(t, quietPeriod)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseAnySet(t, quietPeriod)
 
-	receiver.Metadata.Generation = 5
-	receiver.Spec.Volume = &ReceiverVolume{Max: 60}
-	api.setReceivers(receiver)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseAnySet(t, quietPeriod)
+		receiver.Metadata.Generation = 5
+		receiver.Spec.Volume = &ReceiverVolume{Max: 60}
+		api.setReceivers(receiver)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseAnySet(t, quietPeriod)
 
-	eco, sleep := "off", 60
-	receiver.Metadata.Generation = 6
-	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone3": {Sleep: &sleep}}
-	api.setReceivers(receiver)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "ECOOFF")
-	fake.waitForCommands(t, "Z3SLP060")
+		eco, sleep := "off", 60
+		receiver.Metadata.Generation = 6
+		receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
+		receiver.Spec.Zones = map[string]ZoneSpec{"zone3": {Sleep: &sleep}}
+		api.setReceivers(receiver)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.waitForCommands(t, "ECOOFF")
+		fake.waitForCommands(t, "Z3SLP060")
 
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseAnySet(t, quietPeriod)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseAnySet(t, quietPeriod)
+	})
 }
 
 // A field the receiver takes but never reports at the declared value is
@@ -256,70 +269,74 @@ func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
 // driven back.
 func TestAFieldTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	arc := true
-	receiver.Spec.Denon.Settings = denon.Settings{HDMI: denon.HDMISettings{ARC: &arc}}
-	fake.holdSetting("SSHOSCONARC ON", "SSHOSCONARC OFF")
-	api, operator := settledOperator(t, fake, receiver, []string{"SSHOSCONARC OFF"}, func(operator *controller) bool {
-		return operator.units["theater"].denonClient.Settings().HDMI.ARC != nil
-	})
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		arc := true
+		receiver.Spec.Denon.Settings = denon.Settings{HDMI: denon.HDMISettings{ARC: &arc}}
+		fake.holdSetting("SSHOSCONARC ON", "SSHOSCONARC OFF")
+		api, operator := settledOperator(t, fake, receiver, []string{"SSHOSCONARC OFF"}, func(operator *controller) bool {
+			return operator.units["theater"].denonClient.Settings().HDMI.ARC != nil
+		})
 
-	for range sendLimit {
+		for range sendLimit {
+			mustSucceed(t, operator.pass(t.Context()))
+			fake.waitForCommands(t, "SSHOSCONARC ON")
+		}
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseAnySet(t, quietPeriod)
+
+		status := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 2 })
+		mustMatch(t, status.Conditions[1], Condition{
+			Type:               settingsConfirmedConditionType,
+			Status:             ConditionFalse,
+			ObservedGeneration: receiver.Metadata.Generation,
+			Reason:             reasonNotConfirmed,
+			Message:            "the receiver did not report the declared value after 3 sends: spec.denon.settings.hdmi.arc",
+			LastTransitionTime: timestamp(statusNow),
+		})
+
+		receiver.Metadata.Generation++
+		api.setReceivers(receiver)
+		mustSucceed(t, operator.pass(t.Context()))
+		fake.refuseAnySet(t, quietPeriod)
+
+		fake.volunteer("SSHOSCONARC ON")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool { return *s.HDMI.ARC })
+		mustSucceed(t, operator.pass(t.Context()))
+		api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 1 })
+		fake.volunteer("SSHOSCONARC OFF")
+		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool { return !*s.HDMI.ARC })
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.waitForCommands(t, "SSHOSCONARC ON")
-	}
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseAnySet(t, quietPeriod)
-
-	status := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 2 })
-	mustMatch(t, status.Conditions[1], Condition{
-		Type:               settingsConfirmedConditionType,
-		Status:             ConditionFalse,
-		ObservedGeneration: receiver.Metadata.Generation,
-		Reason:             reasonNotConfirmed,
-		Message:            "the receiver did not report the declared value after 3 sends: spec.denon.settings.hdmi.arc",
-		LastTransitionTime: timestamp(statusNow),
 	})
-
-	receiver.Metadata.Generation++
-	api.setReceivers(receiver)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseAnySet(t, quietPeriod)
-
-	fake.volunteer("SSHOSCONARC ON")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool { return *s.HDMI.ARC })
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 1 })
-	fake.volunteer("SSHOSCONARC OFF")
-	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool { return !*s.HDMI.ARC })
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "SSHOSCONARC ON")
 }
 
 // A zone control the zone never reports at the declared value stops
 // after three sends the same way.
 func TestAZoneControlTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 	t.Parallel()
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	volume := 40.0
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
-	fake.holdSetting("Z2MV40", "Z230")
-	api, operator := settledOperator(t, fake, receiver, []string{"Z230"}, func(operator *controller) bool {
-		zone, reported := operator.units["theater"].driver.State().Zone("zone2")
-		return reported && zone.Volume == 60
-	})
+	synctest.Test(t, func(t *testing.T) {
+		fake := startFakeDenon(t)
+		receiver := testReceiver("theater", fake.address())
+		volume := 40.0
+		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+		fake.holdSetting("Z2MV40", "Z230")
+		api, operator := settledOperator(t, fake, receiver, []string{"Z230"}, func(operator *controller) bool {
+			zone, reported := operator.units["theater"].driver.State().Zone("zone2")
+			return reported && zone.Volume == 60
+		})
 
-	for range sendLimit {
+		for range sendLimit {
+			mustSucceed(t, operator.pass(t.Context()))
+			fake.waitForCommands(t, "Z2MV40")
+		}
 		mustSucceed(t, operator.pass(t.Context()))
-		fake.waitForCommands(t, "Z2MV40")
-	}
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseAnySet(t, quietPeriod)
+		fake.refuseAnySet(t, quietPeriod)
 
-	status := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 2 })
-	mustMatch(t, status.Conditions[1].Message, "the receiver did not report the declared value after 3 sends: spec.zones.zone2.volume")
+		status := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 2 })
+		mustMatch(t, status.Conditions[1].Message, "the receiver did not report the declared value after 3 sends: spec.zones.zone2.volume")
+	})
 }
 
 // waitFor polls the check until it passes, and fails the test instead

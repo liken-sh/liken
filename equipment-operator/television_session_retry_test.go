@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 )
 
 // sessionOperator is the Deployment over one Receiver whose idle
@@ -23,6 +24,7 @@ func sessionOperator(t *testing.T, api *cecAPI) *controller {
 	api.putReceiver(receiver)
 	api.showing(lounge(""), "acm-0001-receiver")
 	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.dial = testNetwork.dial
 	operator.log = &logBuffer{}
 	t.Cleanup(operator.stopAll)
 	return operator
@@ -32,16 +34,19 @@ func sessionOperator(t *testing.T, api *cecAPI) *controller {
 var adoptedSession = &TelevisionSession{Player: "house/theater", Display: "acm-0001-receiver"}
 
 func TestAThrottledTelevisionListStillAdoptsTheSession(t *testing.T) {
-	api := startCECAPI(t)
-	operator := sessionOperator(t, api)
-	api.mutex.Lock()
-	api.throttledTelevisionLists = 1
-	api.mutex.Unlock()
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		operator := sessionOperator(t, api)
+		api.mutex.Lock()
+		api.throttledTelevisionLists = 1
+		api.mutex.Unlock()
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	television, _ := api.television("lounge")
-	mustDeepEqual(t, television.Status.Session, adoptedSession)
+		television, _ := api.television("lounge")
+		mustDeepEqual(t, television.Status.Session, adoptedSession)
+	})
 }
 
 // A session write the API server refuses is written on the next pass,
@@ -49,20 +54,22 @@ func TestAThrottledTelevisionListStillAdoptsTheSession(t *testing.T) {
 // is live, and it still wakes nothing.
 func TestARefusedSessionWriteIsWrittenOnALaterPass(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	operator := sessionOperator(t, api)
-	api.mutex.Lock()
-	api.noSessionWrites = true
-	api.mutex.Unlock()
-	mustSucceed(t, operator.pass(t.Context()))
-	api.mutex.Lock()
-	api.noSessionWrites = false
-	api.mutex.Unlock()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		operator := sessionOperator(t, api)
+		api.mutex.Lock()
+		api.noSessionWrites = true
+		api.mutex.Unlock()
+		mustSucceed(t, operator.pass(t.Context()))
+		api.mutex.Lock()
+		api.noSessionWrites = false
+		api.mutex.Unlock()
 
-	mustSucceed(t, operator.pass(t.Context()))
+		mustSucceed(t, operator.pass(t.Context()))
 
-	television, _ := api.television("lounge")
-	mustDeepEqual(t, television.Status.Session, adoptedSession)
+		television, _ := api.television("lounge")
+		mustDeepEqual(t, television.Status.Session, adoptedSession)
+	})
 }
 
 // A stop ends the sessions' requests: a list or a write after stop
@@ -70,16 +77,18 @@ func TestARefusedSessionWriteIsWrittenOnALaterPass(t *testing.T) {
 // shutdown writes nothing after the Deployment gave up its Lease.
 func TestNoSessionRequestLeavesAfterStop(t *testing.T) {
 	t.Parallel()
-	api := &cannedAPI{}
-	sessions := newTelevisionSessions(testAPIClient(t, api.handler()))
+	synctest.Test(t, func(t *testing.T) {
+		api := &cannedAPI{}
+		sessions := newTelevisionSessions(testAPIClient(t, api.handler()))
 
-	sessions.stop()
+		sessions.stop()
 
-	if _, err := sessions.list(); !errors.Is(err, context.Canceled) {
-		t.Errorf("list after stop answered %v, want the stop", err)
-	}
-	if err := sessions.apply("lounge", adoptedSession); !errors.Is(err, context.Canceled) {
-		t.Errorf("apply after stop answered %v, want the stop", err)
-	}
-	mustMatch(t, api.sent(), 0)
+		if _, err := sessions.list(); !errors.Is(err, context.Canceled) {
+			t.Errorf("list after stop answered %v, want the stop", err)
+		}
+		if err := sessions.apply("lounge", adoptedSession); !errors.Is(err, context.Canceled) {
+			t.Errorf("apply after stop answered %v, want the stop", err)
+		}
+		mustMatch(t, api.sent(), 0)
+	})
 }

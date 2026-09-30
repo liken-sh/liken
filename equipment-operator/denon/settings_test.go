@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -287,29 +288,35 @@ func TestConfirmedByHandlesTheChannelVolumes(t *testing.T) {
 }
 
 func TestApplySettingsSendsEveryDeclaredField(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	want := Settings{
-		System:         SystemSettings{Eco: strPtr("auto"), Dimmer: strPtr("bright")},
-		Tone:           ToneSettings{Control: boolPtr(true), Bass: intPtr(3)},
-		Audio:          AudioSettings{LFE: intPtr(-10), GraphicEq: strPtr("on")},
-		ChannelVolumes: map[string]float64{"FL": 0.5},
-	}
-	mustSucceed(t, harness.client.ApplySettings(want))
+		want := Settings{
+			System:         SystemSettings{Eco: strPtr("auto"), Dimmer: strPtr("bright")},
+			Tone:           ToneSettings{Control: boolPtr(true), Bass: intPtr(3)},
+			Audio:          AudioSettings{LFE: intPtr(-10), GraphicEq: strPtr("on")},
+			ChannelVolumes: map[string]float64{"FL": 0.5},
+		}
+		mustSucceed(t, harness.client.ApplySettings(want))
 
-	sent := harness.receiver.waitForCommands(t, "CVFL 505")
-	expected := "ECOAUTO DIM BRI PSTONE CTRL ON PSBAS 53 PSLFE 10 PSGEQ ON CVFL 505"
-	mustMatch(t, strings.Join(sent, " "), expected)
+		sent := harness.receiver.waitForCommands(t, "CVFL 505")
+		expected := "ECOAUTO DIM BRI PSTONE CTRL ON PSBAS 53 PSLFE 10 PSGEQ ON CVFL 505"
+		mustMatch(t, strings.Join(sent, " "), expected)
+	})
 }
 
 func TestApplySettingsSendsNothingForUndeclaredFields(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	mustSucceed(t, harness.client.ApplySettings(Settings{}))
+		mustSucceed(t, harness.client.ApplySettings(Settings{}))
 
-	mustStaySilentCommands(t, harness.receiver.commands, 100*time.Millisecond)
+		mustStaySilentCommands(t, harness.receiver.commands, 100*time.Millisecond)
+	})
 }
 
 // mustStaySilentCommands fails the test if any command arrives inside
@@ -326,63 +333,72 @@ func mustStaySilentCommands(t *testing.T, commands <-chan string, window time.Du
 // A declared setting reaches the receiver, echoes back, and folds into
 // the state the next Settings() reads.
 func TestApplySettingsRoundTripsThroughTheReceiver(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	want := Settings{
-		System:         SystemSettings{Eco: strPtr("auto"), Dimmer: strPtr("bright")},
-		Tone:           ToneSettings{Bass: intPtr(3)},
-		Audio:          AudioSettings{LFE: intPtr(-10), DRC: strPtr("low")},
-		ChannelVolumes: map[string]float64{"FL": 0.5},
-	}
-	mustSucceed(t, harness.client.ApplySettings(want))
-	harness.receiver.waitForCommands(t, "CVFL 505")
+		want := Settings{
+			System:         SystemSettings{Eco: strPtr("auto"), Dimmer: strPtr("bright")},
+			Tone:           ToneSettings{Bass: intPtr(3)},
+			Audio:          AudioSettings{LFE: intPtr(-10), DRC: strPtr("low")},
+			ChannelVolumes: map[string]float64{"FL": 0.5},
+		}
+		mustSucceed(t, harness.client.ApplySettings(want))
+		harness.receiver.waitForCommands(t, "CVFL 505")
 
-	got := waitForSettings(t, harness.client, func(s Settings) bool {
-		return s.System.Eco != nil && *s.System.Eco == "auto" &&
-			s.System.Dimmer != nil && *s.System.Dimmer == "bright" &&
-			s.Tone.Bass != nil && *s.Tone.Bass == 3 &&
-			s.Audio.LFE != nil && *s.Audio.LFE == -10 &&
-			s.Audio.DRC != nil && *s.Audio.DRC == "low" &&
-			s.ChannelVolumes["FL"] == 0.5
+		got := waitForSettings(t, harness.client, func(s Settings) bool {
+			return s.System.Eco != nil && *s.System.Eco == "auto" &&
+				s.System.Dimmer != nil && *s.System.Dimmer == "bright" &&
+				s.Tone.Bass != nil && *s.Tone.Bass == 3 &&
+				s.Audio.LFE != nil && *s.Audio.LFE == -10 &&
+				s.Audio.DRC != nil && *s.Audio.DRC == "low" &&
+				s.ChannelVolumes["FL"] == 0.5
+		})
+		mustMatch(t, *got.System.Eco, "auto")
+		mustMatch(t, *got.System.Dimmer, "bright")
+		mustMatch(t, *got.Tone.Bass, 3)
+		mustMatch(t, *got.Audio.LFE, -10)
+		mustMatch(t, *got.Audio.DRC, "low")
+		mustMatch(t, got.ChannelVolumes["FL"], 0.5)
 	})
-	mustMatch(t, *got.System.Eco, "auto")
-	mustMatch(t, *got.System.Dimmer, "bright")
-	mustMatch(t, *got.Tone.Bass, 3)
-	mustMatch(t, *got.Audio.LFE, -10)
-	mustMatch(t, *got.Audio.DRC, "low")
-	mustMatch(t, got.ChannelVolumes["FL"], 0.5)
 }
 
 func TestSetRoutesOneIdToTheWire(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	mustSucceed(t, harness.client.Set("tone.bass", equipment.NumberSettingValue(3)))
+		mustSucceed(t, harness.client.Set("tone.bass", equipment.NumberSettingValue(3)))
 
-	mustMatch(t, harness.receiver.waitForCommand(t), "PSBAS 53")
+		mustMatch(t, harness.receiver.waitForCommand(t), "PSBAS 53")
 
-	// The live setting moves on the receiver's echo, not on the write:
-	// a command the receiver never took must not change what the status
-	// reports.
-	got := waitForSettings(t, harness.client, func(s Settings) bool {
-		return s.Tone.Bass != nil && *s.Tone.Bass == 3
+		// The live setting moves on the receiver's echo, not on the write:
+		// a command the receiver never took must not change what the status
+		// reports.
+		got := waitForSettings(t, harness.client, func(s Settings) bool {
+			return s.Tone.Bass != nil && *s.Tone.Bass == 3
+		})
+		mustMatch(t, *got.Tone.Bass, 3)
 	})
-	mustMatch(t, *got.Tone.Bass, 3)
 }
 
 func TestSetRoutesAChannelIdToTheWire(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	mustSucceed(t, harness.client.Set("channel.FL", equipment.NumberSettingValue(0.5)))
+		mustSucceed(t, harness.client.Set("channel.FL", equipment.NumberSettingValue(0.5)))
 
-	mustMatch(t, harness.receiver.waitForCommand(t), "CVFL 505")
+		mustMatch(t, harness.receiver.waitForCommand(t), "CVFL 505")
 
-	got := waitForSettings(t, harness.client, func(s Settings) bool {
-		return s.ChannelVolumes["FL"] == 0.5
+		got := waitForSettings(t, harness.client, func(s Settings) bool {
+			return s.ChannelVolumes["FL"] == 0.5
+		})
+		mustMatch(t, got.ChannelVolumes["FL"], 0.5)
 	})
-	mustMatch(t, got.ChannelVolumes["FL"], 0.5)
 }
 
 func TestSetUnknownIdIsAnErrorThatNamesIt(t *testing.T) {
@@ -461,19 +477,22 @@ func TestSetChannelStartsTheChannelMap(t *testing.T) {
 // ApplySettings must not report success for a declared field no command
 // can carry; it errors naming the setting id and the value instead.
 func TestApplySettingsErrorsWhenADeclaredFieldCannotBeEncoded(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	err := harness.client.ApplySettings(Settings{System: SystemSettings{Eco: strPtr("turbo")}})
-	if err == nil {
-		t.Fatal("a declared field no command can carry did not error")
-	}
-	if !strings.Contains(err.Error(), "system.eco") {
-		t.Errorf("the error does not name the id: %v", err)
-	}
-	if !strings.Contains(err.Error(), "turbo") {
-		t.Errorf("the error does not name the value: %v", err)
-	}
+		err := harness.client.ApplySettings(Settings{System: SystemSettings{Eco: strPtr("turbo")}})
+		if err == nil {
+			t.Fatal("a declared field no command can carry did not error")
+		}
+		if !strings.Contains(err.Error(), "system.eco") {
+			t.Errorf("the error does not name the id: %v", err)
+		}
+		if !strings.Contains(err.Error(), "turbo") {
+			t.Errorf("the error does not name the value: %v", err)
+		}
+	})
 }
 
 // waitForSettings polls the client's settings until the check passes,
@@ -602,27 +621,30 @@ func TestSetAChannelWithWhitespaceIsAnError(t *testing.T) {
 // Mutating a returned Settings must not change the next Settings():
 // every pointer and the channel map are deep-copied.
 func TestSettingsDoesNotAliasTheLiveState(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		harness := startHarness(t)
+		drainQueries(t, harness)
 
-	// The fake reports SVOFF, PSDRC OFF, and PSLFE 00, so these are
-	// live pointers a shallow copy would share. Wait until they have
-	// folded, since they arrive after the queries the test drains.
-	waitForSettings(t, harness.client, func(s Settings) bool {
-		return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
+		// The fake reports SVOFF, PSDRC OFF, and PSLFE 00, so these are
+		// live pointers a shallow copy would share. Wait until they have
+		// folded, since they arrive after the queries the test drains.
+		waitForSettings(t, harness.client, func(s Settings) bool {
+			return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
+		})
+		first := harness.client.Settings()
+		*first.System.VideoSelect = "mutated"
+		*first.Audio.DRC = "mutated"
+		*first.Audio.LFE = 99
+		first.ChannelVolumes["FL"] = 99
+
+		second := harness.client.Settings()
+		mustMatch(t, *second.System.VideoSelect, "off")
+		mustMatch(t, *second.Audio.DRC, "off")
+		mustMatch(t, *second.Audio.LFE, 0)
+		_, held := second.ChannelVolumes["FL"]
+		mustMatch(t, held, false)
 	})
-	first := harness.client.Settings()
-	*first.System.VideoSelect = "mutated"
-	*first.Audio.DRC = "mutated"
-	*first.Audio.LFE = 99
-	first.ChannelVolumes["FL"] = 99
-
-	second := harness.client.Settings()
-	mustMatch(t, *second.System.VideoSelect, "off")
-	mustMatch(t, *second.Audio.DRC, "off")
-	mustMatch(t, *second.Audio.LFE, 0)
-	_, held := second.ChannelVolumes["FL"]
-	mustMatch(t, held, false)
 }
 
 // A command that cannot be delivered is reported to the caller, so a
@@ -688,15 +710,19 @@ func TestApplySettingsRoundTripsEveryRemainingField(t *testing.T) {
 		{"tone control", Settings{Tone: ToneSettings{Control: boolPtr(true)}}, "PSTONE CTRL ON",
 			func(s Settings) bool { return s.Tone.Control != nil && *s.Tone.Control }},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			harness := startHarness(t)
-			drainQueries(t, harness)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				harness := startHarness(t)
+				drainQueries(t, harness)
 
-			mustSucceed(t, harness.client.ApplySettings(one.want))
-			harness.receiver.waitForCommands(t, one.command)
+				mustSucceed(t, harness.client.ApplySettings(one.want))
+				harness.receiver.waitForCommands(t, one.command)
 
-			waitForSettings(t, harness.client, one.check)
+				waitForSettings(t, harness.client, one.check)
+			})
 		})
 	}
 }

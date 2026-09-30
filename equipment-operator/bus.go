@@ -12,7 +12,6 @@ import (
 	"net"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -33,18 +32,20 @@ const busDisconnectWait = time.Second
 
 // The reconnect backoff bounds. The client waits busMinBackoff after
 // the first failure and doubles the wait up to busMaxBackoff, so a
-// broker that is down does not become a tight reconnect loop. A test
-// shortens both to drive a reconnect in milliseconds, and the client it
-// built can outlive the test, so the bounds are atomics: a leaked client
-// goroutine reading them never races the next test's write.
-var (
-	busMinBackoff atomic.Int64
-	busMaxBackoff atomic.Int64
+// broker that is down does not become a tight reconnect loop.
+const (
+	busMinBackoff = time.Second
+	busMaxBackoff = 30 * time.Second
 )
 
-func init() {
-	busMinBackoff.Store(int64(time.Second))
-	busMaxBackoff.Store(int64(30 * time.Second))
+// dialFunc opens one connection, the way net.Dialer.DialContext does.
+// The operator reaches the broker and each receiver through one, so a
+// test hands in a dialFunc that connects to its fakes in memory.
+type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+// dialTCP is the dialFunc of a running operator.
+func dialTCP(ctx context.Context, network, address string) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, network, address)
 }
 
 // busHandler receives one inbound message's topic and payload. The Bus
@@ -80,11 +81,11 @@ type Bus struct {
 	packetID uint16
 }
 
-// newBus builds a client that dials the address over TCP. The address,
-// the client identifier, the will, the connect callback, and the
-// inbound handler are fixed for the client's life; the connection they
-// drive is not.
-func newBus(address, clientID string, will *busWill, onConnect func(*Bus), handler busHandler) *Bus {
+// newBus builds a client that dials the address through dial. The
+// address, the client identifier, the will, the connect callback, and
+// the inbound handler are fixed for the client's life; the connection
+// they drive is not.
+func newBus(address string, dial dialFunc, clientID string, will *busWill, onConnect func(*Bus), handler busHandler) *Bus {
 	bus := &Bus{
 		clientID:  clientID,
 		will:      will,
@@ -93,8 +94,7 @@ func newBus(address, clientID string, will *busWill, onConnect func(*Bus), handl
 		filters:   map[string]struct{}{},
 	}
 	bus.dial = func(ctx context.Context) (net.Conn, error) {
-		dialer := &net.Dialer{}
-		return dialer.DialContext(ctx, "tcp", address)
+		return dial(ctx, "tcp", address)
 	}
 	return bus
 }
@@ -105,16 +105,14 @@ func newBus(address, clientID string, will *busWill, onConnect func(*Bus), handl
 // connection that drops after an hour reconnects at once, while a
 // broker that never answers is retried ever more slowly.
 func (b *Bus) Run(ctx context.Context) {
-	floor := time.Duration(busMinBackoff.Load())
-	ceiling := time.Duration(busMaxBackoff.Load())
-	backoff := floor
+	backoff := busMinBackoff
 	for ctx.Err() == nil {
 		connected := b.runSession(ctx)
 		if ctx.Err() != nil {
 			return
 		}
 		if connected {
-			backoff = floor
+			backoff = busMinBackoff
 		}
 		select {
 		case <-ctx.Done():
@@ -123,8 +121,8 @@ func (b *Bus) Run(ctx context.Context) {
 		}
 		if !connected {
 			backoff *= 2
-			if backoff > ceiling {
-				backoff = ceiling
+			if backoff > busMaxBackoff {
+				backoff = busMaxBackoff
 			}
 		}
 	}
