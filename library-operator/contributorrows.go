@@ -155,6 +155,7 @@ func readContributorFolder(root, library, dir string, result *walkResult) {
 	readLikenDir(likenDir{
 		root: root, dir: dir, library: library, item: path, facts: contributorLedgerFacts,
 	}, result)
+	result.settleFacts()
 }
 
 // The credits of one title, lifted out of the ledger the credits fact wrote.

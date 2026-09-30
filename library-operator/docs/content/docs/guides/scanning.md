@@ -113,9 +113,10 @@ title folder, `season02-poster.jpg` beside `tvshow.nfo`, and
 Beside a title, a dot-named directory holds the data that the `.nfo` file has
 no element for: one YAML file per fact, named for the fact. `identity.yaml`
 holds the provider ids, or the candidates left for a person to choose
-from. `arrival.yaml` holds when each video file was first seen. Every
-other `<fact>.yaml` holds what that fact wrote, which provider answered,
-and its attempts. One file per writer lets the phases of a `Job` run at
+from. `arrival.yaml` holds when each video file was first seen.
+`probe.yaml` holds what the probe read of each file, its size included.
+Every other `<fact>.yaml` holds what that fact wrote, which provider
+answered, and its attempts. One file per writer lets the phases of a `Job` run at
 once on a network mount with no locks. The scan reads these files and
 never writes them.
 
@@ -131,6 +132,42 @@ only `mergedInto` is one that a merge of two entries removed. The walk
 records the merge and no person for it. The
 [enrichment guide](/docs/guides/enrichment/#people) describes the
 merge.
+
+### A file replaced at the same path
+
+A download manager that upgrades a title imports the new file under
+the old name, and it often gives the new file the old modified time.
+So the walk compares each video's size with the size in its
+`probe.yaml` record. A file of another size is a new file:
+
+- The walk stops counting the `probe`, `trickplay`, `episode-thumb`, and
+  `marks` attempts at that path, and it drops the file's marks from the
+  catalog. The file's length and codecs are empty until the probe reads
+  the new file.
+- The tile directory and the thumbnail beside the file were made from
+  the earlier file, so the walk no longer counts them as this file's.
+  The `trickplay` and `art` phases make them again and replace the old
+  ones. A tile directory or a thumbnail made after the new file arrived,
+  by Jellyfin or by any other writer, is this file's, and the phases
+  keep it.
+- `arrival.yaml` keeps the path's first arrival, so an upgrade does not
+  put an old title back on the recently added rail.
+
+The `trickplay` and `marks` gaps open once the probe has measured the
+new file, because both phases need its length. A new modified time on a
+file of the same size opens only the probe.
+
+A found attempt also needs its output. When the walk finds no tile
+directory beside a video whose `trickplay` attempt found one, or no
+thumbnail beside an episode, poster, season art, trailer file, headshot,
+or biography that its fact recorded, that fact's gap opens. So a person
+who deletes an output gets it back on the next walk or webhook rescan.
+
+The walk logs each replaced file with both sizes, and one count of what
+it opened:
+
+    replaced file path:6f1c2a90d3b4: 3345988372 bytes in the probe record, 3362396196 on the volume
+    reopened the facts of 16 replaced files and 32 missing outputs
 
 ## When a scan runs
 
@@ -287,4 +324,5 @@ A finished walk logs its counts:
 `status.waiting` counts the titles a provider returned candidates for,
 and the identity phase does not retry those until a person names the
 right `uniqueid` in the `.nfo`. `status.gaps` counts, per fact, the
-rows the phases still have to fill.
+rows the phases still have to fill, including the facts of a replaced
+file and the outputs that are gone.

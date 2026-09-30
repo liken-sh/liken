@@ -40,6 +40,14 @@ next pass. That `Job` walks the folder and runs every phase the
 file, its art, and its tiles in the same `Job`, as each phase before
 them finishes the title.
 
+An upgrade imports a new file under the old name, and the download
+manager removes the old file's thumbnail and tiles. The rescan compares
+the file's size with its probe record, finds a new file, and opens the
+facts of that file: the probe, the marks, the tiles, and the thumbnail.
+The file keeps its first arrival. The
+[scanning guide](https://liken.sh/library/docs/guides/scanning/#a-file-replaced-at-the-same-path)
+says what the walk opens and what it keeps.
+
 A `Library` runs one `Job` at a time. A webhook that arrives while a
 `Job` runs waits for it, and every folder the webhooks named in the
 meantime goes into the next `Job`. So five imports during one run start

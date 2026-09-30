@@ -6,7 +6,10 @@ package main
 // stream. The walk never writes the ledger, because the scan Job mounts the
 // volume read-only.
 
-import "math"
+import (
+	"math"
+	"path/filepath"
+)
 
 // The records of one ledger, keyed by the entry path the probe fact wrote
 // each of them under.
@@ -44,14 +47,33 @@ func (l *probeLedgers) of(dir string) (folderProbes, error) {
 
 // fill writes the technical columns of one file row from the record the
 // ledger holds for it, and returns one stream row per stream. A file with no
-// record keeps what the .nfo file and the name gave it.
+// record keeps what the .nfo file and the name gave it. The file's identity
+// against the record goes into identities, where the folder read settles
+// its facts.
 //
 // A record whose modified stamp is not the file's own describes an earlier
-// file at that path. It fills only the probed column. The probe gap compares
+// state of the file. It fills only the probed column. The probe gap compares
 // probed with modified and reads the difference as work to do.
-func (p folderProbes) fill(row *fileRow, entry string) []streamRow {
+//
+// A record whose size is not the file's own describes an earlier file. The
+// row takes nothing from it, and nothing from the .nfo stream details, which
+// the probe or another tool wrote for that file. So the probed column is
+// zero, which opens the probe gap whatever the modified time says, and the
+// length is zero until the probe measures the new file, which holds the
+// phases that need the length until then.
+func (p folderProbes) fill(row *fileRow, entry, absolute string, identities fileIdentities) []streamRow {
 	record, held := p[entry]
 	if !held {
+		return nil
+	}
+	identity := identityOf(record, row.SizeBytes, row.Modified, lazyChangeTime(absolute))
+	if identities != nil {
+		identities[row.Path] = identity
+	}
+	if identity.sizeChanged {
+		row.Probed, row.Bitrate = 0, 0
+		row.Container, row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.DurationMs =
+			fileAttributes(filepath.Base(absolute), nil)
 		return nil
 	}
 	row.Probed = record.Modified

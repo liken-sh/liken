@@ -61,14 +61,24 @@ func (e *enricher) artGap(ctx context.Context, fact string, line *artLine) error
 // that landed since the last walk is the answer already and costs no call.
 // Then one image is chosen, downloaded, and created, and the ledger records
 // which provider answered.
+//
+// An episode's thumbnail older than the second a new file took the episode's
+// path is the exception: it is a frame of the earlier encode, so the phase
+// asks again and writes the new still over it.
 func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap artGap) bool {
 	folder := filepath.Join(e.root, gap.folder())
 	target := filepath.Join(folder, art.fileFor(gap))
+	earlier, err := e.earlierArt(art, gap)
+	if err != nil {
+		e.logf("could not read the probe record of %s: %v", e.named(gap.key), err)
+		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
+		return false
+	}
 	if held, err := fileExists(target); err != nil {
 		e.logf("could not read %s: %v", e.named(target), err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
-	} else if held {
+	} else if held && !madeBefore(target, earlier) {
 		e.recordArt(folder, art.fact, gap.entry(), artProviderExisting, attemptFound)
 		return false
 	}
@@ -85,7 +95,17 @@ func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap a
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptNothing)
 		return false
 	}
-	return e.writeArt(ctx, answerer, art, gap, folder, target, image)
+	return e.writeArt(ctx, answerer, art, gap, folder, target, image, earlier)
+}
+
+// The second before which an art file belongs to an earlier file at the path
+// it goes beside. Only an episode's thumbnail goes beside a video file, and
+// the art of a title or a season shows the work and not one encode of it.
+func (e *enricher) earlierArt(art artType, gap artGap) (int64, error) {
+	if art.fact != factEpisodeThumb {
+		return 0, nil
+	}
+	return earlierFileAt(e.kind, filepath.Join(e.root, gap.key))
 }
 
 // A fact reads the ids it asks with from the .nfo file, because the identity
@@ -106,14 +126,19 @@ func (e *enricher) artTitle(gap artGap) titleRef {
 // and no longer. A create that finds the file there answers as the read above
 // does, because another writer reached it first.
 func (e *enricher) writeArt(ctx context.Context, answerer artAnswerer, art artType, gap artGap,
-	folder, target string, image artCandidate) bool {
+	folder, target string, image artCandidate, earlier int64) bool {
 	data, err := answerer.fetchFile(ctx, image.URL)
 	if err != nil {
 		e.logf("could not read %s: %v", opaqueText(image.URL), err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
 	}
-	written, err := e.writer.createOnce(target, data)
+	var written bool
+	if art.fact == factEpisodeThumb {
+		written, err = e.writer.replaceEarlierFile(target, data, earlier)
+	} else {
+		written, err = e.writer.createOnce(target, data)
+	}
 	if err != nil {
 		e.logf("could not write %s: %v", e.named(target), err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)

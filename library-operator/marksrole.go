@@ -74,16 +74,24 @@ func (e *enricher) marksGap(ctx context.Context, line *markLine) error {
 // episode would name the wrong times in a file that holds two. It records
 // nothing found, so the gap does not name it again until the window passes.
 func (e *enricher) marksOne(ctx context.Context, line *markLine, path string, file markFile) bool {
-	folder, entry := likenFolderFor(e.kind, filepath.Join(e.root, path))
+	absolute := filepath.Join(e.root, path)
+	folder, entry := likenFolderFor(e.kind, absolute)
+	// A probe record the fact cannot read tells it of no earlier file, so the
+	// answer replaces spans by the ordinary rule, and the next walk, which
+	// reads the same record, still holds back any span of an earlier file.
+	earlier, err := earlierFileAt(e.kind, absolute)
+	if err != nil {
+		e.logf("could not read the probe record of %s: %v", e.named(path), err)
+	}
 	if file.episodes > 1 {
-		e.recordMarks(folder, entry, markAnswer{complete: true}, attemptNothing)
+		e.recordMarks(folder, entry, markAnswer{complete: true}, attemptNothing, earlier)
 		return false
 	}
 	answer := line.ask(ctx, file)
 	if answer.failure != nil {
 		e.logf("could not read the marks of %s: %v", e.named(path), answer.failure)
 	}
-	e.recordMarks(folder, entry, answer, answer.result())
+	e.recordMarks(folder, entry, answer, answer.result(), earlier)
 	return len(answer.entries) > 0
 }
 
@@ -93,10 +101,18 @@ func (e *enricher) marksOne(ctx context.Context, line *markLine, path string, fi
 // the providers hold now. A block that failed or was not asked leaves its
 // spans as they are, because its silence says nothing about where the
 // credits are. The spans of the folder's other files stay as they are.
-func (e *enricher) recordMarks(folder, entry string, answer markAnswer, result string) {
+//
+// A file whose last attempt came before the second a new file took its path
+// is the exception. Every span it holds, from every source, was placed on
+// the earlier file, so they all go before the answer lands, and a source
+// that did not answer holds no span of the new file until it answers.
+func (e *enricher) recordMarks(folder, entry string, answer markAnswer, result string, earlier int64) {
 	e.tallies.add(tallyAttempts, 1, "fact", factMarks, "result", result)
 	now := time.Now().UTC()
 	err := e.writer.updateLikenLedger(folder, factMarks, func(ledger *likenLedger) {
+		if earlier > 0 && !ledger.attemptedSince(entry, earlier) {
+			ledger.Marks = slices.DeleteFunc(ledger.Marks, func(mark markEntry) bool { return mark.Path == entry })
+		}
 		ledger.Marks = replacedMarks(ledger.Marks, entry, answer.answered, answer.entries)
 		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result, Provider: answer.held})
 	})

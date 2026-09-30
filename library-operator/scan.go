@@ -394,6 +394,7 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 	// the walk reads and not from the batch its members landed in.
 	sets := setFold{}
 	buffered, items, titles, unidentified := 0, 0, 0, 0
+	var reopened reopenedFacts
 	readError := false
 	var unidentifiedNames []string
 	flush := func() error {
@@ -422,6 +423,8 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		for _, failure := range folder.readFailures {
 			s.logf("could not read %s: %v", s.named(failure.path), failure.err)
 		}
+		s.logReplaced(folder.reopened)
+		reopened = reopened.add(folder.reopened)
 		appendFolder(buffer, folder)
 		sets.add(folder.movies)
 		found := len(folder.movies) + len(folder.series) + len(folder.episodes)
@@ -450,6 +453,7 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		if person.readError {
 			readError = true
 		}
+		reopened = reopened.add(person.reopened)
 		appendFolder(buffer, person)
 		buffered += len(person.contributors)
 		if buffered >= scanFlushBatch {
@@ -486,6 +490,7 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		return s.walkFailed("write the sets", err)
 	}
 
+	s.logReopened(reopened)
 	s.settleWalk(ctx, epoch, before, titles, unidentified, unidentifiedNames, started)
 	return nil
 }
@@ -668,10 +673,12 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	defer s.walkMutex.Unlock()
 
 	named := s.named(folder)
-	written, removed, err := rescanFolder(ctx, s.catalog, s.folderScan(), folder)
+	written, removed, reopened, err := rescanFolder(ctx, s.catalog, s.folderScan(), folder)
 	if err != nil {
 		return s.walkFailed("rescan "+named, err)
 	}
+	s.logReplaced(reopened)
+	s.logReopened(reopened)
 
 	if written == 0 && removed == 0 {
 		s.logf("rescanned %s: no change", named)
@@ -700,22 +707,22 @@ type folderScan struct {
 // folder's rows the read did not produce. It is the body of a webhook rescan,
 // and the identity fact calls it after it writes a title's ids, because the
 // id keys every other row of the title.
-func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder string) (int, int, error) {
+func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder string) (int, int, reopenedFacts, error) {
 	relative := relativePath(scan.root, folder)
 	if err := catalog.ensureSeen(ctx); err != nil {
-		return 0, 0, fmt.Errorf("ensure the seen table: %w", err)
+		return 0, 0, reopenedFacts{}, fmt.Errorf("ensure the seen table: %w", err)
 	}
 	epoch := time.Now().UnixNano()
 	result := readFolder(scan, folder)
 	if result == nil {
-		return 0, 0, nil
+		return 0, 0, reopenedFacts{}, nil
 	}
 	// A read that failed describes only part of the folder, so the rescan
 	// writes nothing and prunes nothing. It is the rule the full walk
 	// follows, and it is what keeps a share that refuses one directory
 	// from emptying a title's rows.
 	if result.readError {
-		return 0, 0, fmt.Errorf("could not read %s in full", opaquePath(scan.root, folder))
+		return 0, 0, reopenedFacts{}, fmt.Errorf("could not read %s in full", opaquePath(scan.root, folder))
 	}
 
 	// The sets this folder's movies named are read before the upsert, so a
@@ -725,28 +732,28 @@ func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder
 	if scan.kind == libraryKindMovies {
 		held, err := catalog.setIDsUnder(ctx, scan.library, relative)
 		if err != nil {
-			return 0, 0, fmt.Errorf("read the sets of a rescan: %w", err)
+			return 0, 0, reopenedFacts{}, fmt.Errorf("read the sets of a rescan: %w", err)
 		}
 		affected = append(held, setIDsOf(result.movies)...)
 	}
 
 	if err := flushWalk(ctx, catalog, result, epoch); err != nil {
-		return 0, 0, fmt.Errorf("write a rescan: %w", err)
+		return 0, 0, reopenedFacts{}, fmt.Errorf("write a rescan: %w", err)
 	}
 
 	removed, err := pruneScope(ctx, catalog, scan.library, relative, epoch)
 	if err != nil {
-		return 0, removed, fmt.Errorf("prune a rescan: %w", err)
+		return 0, removed, reopenedFacts{}, fmt.Errorf("prune a rescan: %w", err)
 	}
 
 	// A rescan reads one folder and not a set's other members, so each
 	// affected set derives again from the movie rows the catalog holds, after
 	// the prune has taken the rows this folder lost.
 	if err := reconcileSets(ctx, catalog, scan.library, affected); err != nil {
-		return 0, removed, fmt.Errorf("write the sets of a rescan: %w", err)
+		return 0, removed, reopenedFacts{}, fmt.Errorf("write the sets of a rescan: %w", err)
 	}
 	written := len(result.movies) + len(result.series) + len(result.episodes) + len(result.files)
-	return written, removed, nil
+	return written, removed, result.reopened, nil
 }
 
 // One title or series folder as rows, through the reader the walk uses for
@@ -769,6 +776,7 @@ func readFolder(scan folderScan, folder string) *walkResult {
 	default:
 		return nil
 	}
+	result.settleFacts()
 	return result
 }
 

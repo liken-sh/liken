@@ -381,7 +381,7 @@ func TestAnArtFactKeepsAFileThatArrivedBeforeTheWrite(t *testing.T) {
 	gap := artGap{key: "Some Film (2014)/poster.jpg", tmdb: "1001"}
 	image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
 	if work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
-		gap, folder, target, image) {
+		gap, folder, target, image, 0) {
 		t.Error("the fact reported a write, want none")
 	}
 
@@ -408,7 +408,7 @@ func TestAWriteTheVolumeRefusesIsAnErrorAttempt(t *testing.T) {
 	gap := artGap{key: "Some Film (2014)/poster.jpg", tmdb: "1001"}
 	image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
 	if work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
-		gap, folder, filepath.Join(folder, "poster.jpg"), image) {
+		gap, folder, filepath.Join(folder, "poster.jpg"), image, 0) {
 		t.Error("the fact reported a write into a folder that is not there")
 	}
 

@@ -287,7 +287,7 @@ func (e *enricher) rescanTitle(folder string) {
 		return
 	}
 	title := e.titleFolder(folder)
-	if _, _, err := rescanFolder(context.Background(), e.catalog, e.folderScan(), title); err != nil {
+	if _, _, _, err := rescanFolder(context.Background(), e.catalog, e.folderScan(), title); err != nil {
 		e.logf("could not rescan %s after its identity: %v", e.named(folder), err)
 	}
 }

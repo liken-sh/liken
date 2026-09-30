@@ -110,22 +110,40 @@ func (e *enricher) trickplayFact(ctx context.Context) error {
 // One file. The volume is read before ffmpeg runs, because a directory that
 // landed since the last walk is the answer already and costs no decode, and
 // the ledger records that the tiles were already there.
+//
+// A directory older than the second a new file took this path is the
+// exception. Jellyfin writes its tiles after it reads a file, and so does
+// this phase, so a directory made at or after that second was made from the
+// file that is here now, whoever made it, and the phase keeps it. A directory
+// made before it was made from the earlier file, and its thumbnails sit at
+// that encode's times, so the phase decodes this file and replaces the whole
+// directory.
 func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 	absolute := filepath.Join(e.root, gap.path)
 	folder, entry := likenFolderFor(e.kind, absolute)
 	target := trickplayDirectory(absolute)
-	if dirExists(target) {
+	earlier, err := earlierFileAt(e.kind, absolute)
+	if err != nil {
+		e.logf("could not read the probe record of %s: %v", e.named(absolute), err)
+		e.recordArt(folder, factTrickplay, entry, "", attemptError)
+		return false
+	}
+	replacing := madeBefore(target, earlier)
+	if dirExists(target) && !replacing {
 		if e.dropTrickplayMap(filepath.Join(target, trickplayTilesFolder())) {
 			e.logf("removed the trickplay map beside the sheets of %s", e.named(absolute))
 		}
 		e.recordArt(folder, factTrickplay, entry, artProviderExisting, attemptFound)
 		return false
 	}
+	if replacing {
+		e.logf("replacing the trickplay of %s, which was made from the file its path held before", e.named(absolute))
+	}
 	// The line goes out before the decode, because a decode of a feature
 	// runs for minutes with nothing else to say, and it names the decoder,
 	// because nothing else in the log says whether the GPU took the work.
 	e.logf("tiling %s, %s long, %s", e.named(absolute), gap.duration.Round(time.Second), decoderName())
-	result := e.buildTrickplay(ctx, absolute, target)
+	result := e.buildTrickplay(ctx, absolute, target, earlier)
 	e.recordArt(folder, factTrickplay, entry, "", result)
 	return result == attemptFound
 }
@@ -134,8 +152,10 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 // carries the temporary mark, and one rename lands the whole tree, so the
 // directory a player reads holds every sheet of the title or does not exist. A
 // run that ends before the rename leaves the staging alone on the volume, and
-// the run that follows it clears that staging first.
-func (e *enricher) buildTrickplay(ctx context.Context, input, target string) string {
+// the run that follows it clears that staging first. The landing takes the
+// place of a directory older than earlier, the tiles of the file the path
+// held before, and keeps any other.
+func (e *enricher) buildTrickplay(ctx context.Context, input, target string, earlier int64) string {
 	staging, err := e.writer.stageTree(target)
 	if err != nil {
 		e.logf("could not stage the trickplay of %s: %v", e.named(input), err)
@@ -151,7 +171,7 @@ func (e *enricher) buildTrickplay(ctx context.Context, input, target string) str
 	if result != attemptFound {
 		return result
 	}
-	landed, err := e.writer.createTree(target)
+	landed, err := e.writer.replaceEarlierTree(target, earlier)
 	if err != nil {
 		e.logf("could not write %s: %v", e.named(target), err)
 		return attemptError

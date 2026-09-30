@@ -98,7 +98,8 @@ func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute s
 	record.Size, record.Modified = size, modified
 	record.Container = containerFromExtension(absolute)
 	err = e.writer.updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
-		ledger.noteProbe(record)
+		held, found := ledger.probeAt(entry)
+		ledger.noteProbe(record.replacing(held, found, lazyChangeTime(absolute)))
 	})
 	if err != nil {
 		return err

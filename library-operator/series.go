@@ -187,13 +187,14 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, fold
 	probes, err := ledgers.of(dir)
 	result.noteReadError(err)
 	rows, streams, subdirectories, err := folderFiles{
-		root:    root,
-		dir:     dir,
-		library: library,
-		place:   filePlace{kind: libraryKindSeries},
-		item:    constantItem(seriesID),
-		held:    folders.videos[dir],
-		probes:  probes,
+		root:       root,
+		dir:        dir,
+		library:    library,
+		place:      filePlace{kind: libraryKindSeries},
+		item:       constantItem(seriesID),
+		held:       folders.videos[dir],
+		probes:     probes,
+		identities: result.fileIdentities(),
 	}.read()
 	result.noteReadError(err)
 	result.files = append(result.files, rows...)
@@ -213,13 +214,14 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, fold
 		probes, err := ledgers.of(child)
 		result.noteReadError(err)
 		rows, streams, _, err := folderFiles{
-			root:    root,
-			dir:     child,
-			library: library,
-			place:   place,
-			item:    episodeItem(folders.episodes[child], seriesID),
-			held:    folders.videos[child],
-			probes:  probes,
+			root:       root,
+			dir:        child,
+			library:    library,
+			place:      place,
+			item:       episodeItem(folders.episodes[child], seriesID),
+			held:       folders.videos[child],
+			probes:     probes,
+			identities: result.fileIdentities(),
 		}.read()
 		result.noteReadError(err)
 		result.files = append(result.files, rows...)
@@ -406,7 +408,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 		Arrived:    arrival.arrived,
 		Items:      episodeItemIDs,
 	}
-	result.streams = append(result.streams, probes.fill(&row, episode.file)...)
+	result.streams = append(result.streams, probes.fill(&row, episode.file, absolute, result.fileIdentities())...)
 	result.files = append(result.files, row)
 	return episodeItemIDs
 }

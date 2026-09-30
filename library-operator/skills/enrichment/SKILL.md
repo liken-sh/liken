@@ -208,7 +208,15 @@ software. With a render block on a cluster where no node offers such a
 device, the pod stays `Pending`, and its events say so.
 
 The tile directory is the one Jellyfin reads and writes. So the phase
-accepts a directory Jellyfin made first and leaves it alone.
+accepts a directory Jellyfin made first and leaves it alone. The one
+exception is a directory older than the file beside it: when a new
+file replaced the video at the same path, tiles made before it arrived
+place each thumbnail at the earlier file's times. The phase decodes the
+new file and replaces the whole directory. The
+[scanning guide](https://liken.sh/library/docs/guides/scanning/#a-file-replaced-at-the-same-path)
+says how the walk finds a replaced file. To make the tiles of any
+title again, delete its `.trickplay` directory, and the next walk opens
+its gap.
 
 ### Identification
 
@@ -244,7 +252,11 @@ fact records a fight and does not write the group. `status.fights`
 counts the fights.
 
 An art file that already exists is never replaced. The fact records it
-as answered and downloads nothing.
+as answered and downloads nothing. The one exception is an episode's
+thumbnail that is older than the episode's file, where a new file
+replaced the video at the same path. That thumbnail is a frame of the
+earlier file, so the fact downloads the still again and writes it over
+the old one.
 
 ### People
 
@@ -524,7 +536,11 @@ the files from IMDb.
 A miss lasts for thirty days and an error for one day, then the fact
 asks again. The `marks` fact asks about a new work sooner, as the
 section above describes. An attempt made before a title's release date
-lasts only until that date. To ask one fact again for every title now, set its
+lasts only until that date. An attempt also stops counting when the walk finds that a new file
+replaced the video at its path, or that the file or directory the
+attempt wrote is gone. The
+[scanning guide](https://liken.sh/library/docs/guides/scanning/#a-file-replaced-at-the-same-path)
+describes both. To ask one fact again for every title now, set its
 time in `spec.refresh`:
 
     spec:

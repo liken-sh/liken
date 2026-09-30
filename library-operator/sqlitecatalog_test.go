@@ -825,7 +825,7 @@ func TestTheRescanReportsTheStepItsCatalogRefused(t *testing.T) {
 			scan, agent := sqliteScanner(t, root)
 			agent.transactionsLeft = step
 
-			_, _, err := rescanFolder(t.Context(), scan.catalog, scan.folderScan(),
+			_, _, _, err := rescanFolder(t.Context(), scan.catalog, scan.folderScan(),
 				filepath.Join(root, "One (2001)"))
 
 			if err == nil {
@@ -873,7 +873,7 @@ func TestARescanSweepsNothingForAFolderItCannotStat(t *testing.T) {
 	writeFile(t, filepath.Join(root, "One (2001)", "movie.mkv"), "x")
 	scan, agent := sqliteScanner(t, root)
 	folder := filepath.Join(root, "One (2001)")
-	if _, _, err := rescanFolder(t.Context(), scan.catalog, scan.folderScan(), folder); err != nil {
+	if _, _, _, err := rescanFolder(t.Context(), scan.catalog, scan.folderScan(), folder); err != nil {
 		t.Fatal(err)
 	}
 	if held := agent.rowsFor(t, "movies", "house/movies"); held != 1 {
@@ -886,7 +886,7 @@ func TestARescanSweepsNothingForAFolderItCannotStat(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
-	_, removed, err := rescanFolder(t.Context(), scan.catalog, scan.folderScan(), folder)
+	_, removed, _, err := rescanFolder(t.Context(), scan.catalog, scan.folderScan(), folder)
 
 	if err == nil {
 		t.Error("the rescan reported no error for a folder it could not read")

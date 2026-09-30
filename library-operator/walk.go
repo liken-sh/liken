@@ -68,6 +68,7 @@ func (r folderRule) read(dir walkDirectory) (*walkResult, []walkDirectory) {
 	if dir.depth > 0 && r.isTitle(dir.path) {
 		folder := &walkResult{}
 		r.scan(dir.path, folder)
+		folder.settleFacts()
 		return folder, nil
 	}
 	if dir.depth > r.maxDepth {

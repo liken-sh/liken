@@ -82,8 +82,13 @@ type walkResult struct {
 	franchises       []franchiseRow
 	franchiseMembers []franchiseMemberRow
 	franchiseRuns    []franchiseRunRow
-	titles           int
-	unidentified     int
+	// Each media file's identity against its probe record, which the folder
+	// read settles its attempts with and then drops.
+	identities fileIdentities
+	// What the settle reopened, which the walk and a rescan log.
+	reopened     reopenedFacts
+	titles       int
+	unidentified int
 	// the paths of the folders this walk could not identify, so a
 	// full walk names a sample of them in its log without holding every
 	// one. It carries one path per unidentified folder.

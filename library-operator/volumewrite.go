@@ -3,17 +3,16 @@ package main
 // volumewrite.go is the one door every enricher write to a library volume
 // goes through. On the lab that volume is the production copy, so the rules
 // here are what keep a bad write from losing a file a person cares about: a
-// temporary and a rename, an edit of one element, a remove that refuses
-// every name but a temporary's, a remove that takes one file this
-// operator wrote and nothing else reads, the trickplay map, and the move and
-// the remove a merge of two .contributors/ entries makes.
+// temporary and a rename, a remove that refuses every name but a
+// temporary's, a remove that takes one file this operator wrote and nothing
+// else reads, the trickplay map, the move and the remove a merge of two
+// .contributors/ entries makes, and the replace of a thumbnail or a tile
+// directory made from the file a path held before. The edit of one element
+// in an .nfo file is in xmledit.go.
 
 import (
-	"bytes"
-	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -283,164 +282,6 @@ func (w *volumeWriter) createInto(directory, name string, data []byte) (bool, er
 	return w.createOnce(filepath.Join(directory, name), data)
 }
 
-// The element an edit inserts or replaces, and the attribute that tells one
-// uniqueid from another where a document holds several.
-type xmlElement struct {
-	name      string
-	attribute string
-	value     string
-}
-
-// The surgical edit: one element in, every other byte as it was, so nothing
-// another tool wrote is lost. The whole document is never parsed into values
-// and written back, because a round trip drops every element the parser does
-// not model.
-func editElement(document []byte, element xmlElement, replacement []byte) ([]byte, error) {
-	spans, err := elementSpans(document, element)
-	if err != nil {
-		return nil, err
-	}
-	if spans.start >= 0 {
-		return splice(document, spans.start, spans.end, replacement), nil
-	}
-	if spans.rootEnd < 0 {
-		return nil, errors.New("the document has no root element to insert into")
-	}
-	return splice(document, spans.rootEnd, spans.rootEnd, spans.insertion(document, replacement)), nil
-}
-
-// hasRootElement reports whether a document holds an element to edit. An
-// empty file, or an XML declaration with nothing under it, holds none. A
-// document the parser stops on counts as holding one here, so the edit itself
-// names the error and the bytes stay as they were.
-func hasRootElement(document []byte) bool {
-	decoder := lenientXML(document)
-	for {
-		token, err := decoder.Token()
-		if errors.Is(err, io.EOF) {
-			return false
-		}
-		if err != nil {
-			return true
-		}
-		if _, isStart := token.(xml.StartElement); isStart {
-			return true
-		}
-	}
-}
-
-// An inserted element takes the indentation the document's own children
-// carry, so the edit reads as the same hand wrote it. The indentation the
-// replacement already carries is dropped first, so the block is indented once
-// and not twice.
-func (s documentSpans) insertion(document, replacement []byte) []byte {
-	lead := trailingWhitespace(document[:s.rootEnd])
-	block := append([]byte{}, replacement...)
-	if len(afterLastNewline(lead)) == 0 && s.firstChild >= 0 {
-		indent := afterLastNewline(trailingWhitespace(document[:s.firstChild]))
-		block = append(append([]byte{}, indent...), bytes.TrimLeft(replacement, " \t")...)
-	}
-	return append(block, lead...)
-}
-
-// Only the run after the last newline counts as indentation. Blank lines
-// above it belong to the document's spacing, not to the child's margin.
-func afterLastNewline(space []byte) []byte {
-	if at := bytes.LastIndexByte(space, '\n'); at >= 0 {
-		return space[at+1:]
-	}
-	return space
-}
-
-// The result is a new slice, so the caller's document is never written over.
-func splice(document []byte, start, end int, replacement []byte) []byte {
-	out := make([]byte, 0, len(document)-(end-start)+len(replacement))
-	out = append(out, document[:start]...)
-	out = append(out, replacement...)
-	return append(out, document[end:]...)
-}
-
-// The run of whitespace before the root's end tag is repeated after an
-// inserted element, so the indentation the document already had holds.
-func trailingWhitespace(document []byte) []byte {
-	at := len(document)
-	for at > 0 && isXMLSpace(document[at-1]) {
-		at--
-	}
-	return document[at:]
-}
-
-func isXMLSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-}
-
-// The three places in a document an edit reads: the element it may replace,
-// where the root's end tag begins, and where the first child begins.
-type documentSpans struct {
-	start      int
-	end        int
-	rootEnd    int
-	firstChild int
-}
-
-// Reads those three places in one pass over the document, so the edit needs
-// no parse of the whole tree into values. Only the root's direct children are
-// candidates, because every element the facts edit sits there.
-func elementSpans(document []byte, element xmlElement) (documentSpans, error) {
-	spans := documentSpans{start: -1, end: -1, rootEnd: -1, firstChild: -1}
-	decoder := lenientXML(document)
-	depth := 0
-	for {
-		before := int(decoder.InputOffset())
-		token, err := decoder.Token()
-		if errors.Is(err, io.EOF) {
-			return spans, nil
-		}
-		if err != nil {
-			return spans, err
-		}
-		switch typed := token.(type) {
-		case xml.StartElement:
-			depth++
-			if depth != 2 {
-				continue
-			}
-			if spans.firstChild < 0 {
-				spans.firstChild = before
-			}
-			if spans.start >= 0 || !elementMatches(typed, element) {
-				continue
-			}
-			if err := decoder.Skip(); err != nil {
-				return spans, err
-			}
-			spans.start, spans.end, depth = before, int(decoder.InputOffset()), depth-1
-		case xml.EndElement:
-			depth--
-			if depth == 0 && spans.rootEnd < 0 {
-				spans.rootEnd = before
-			}
-		}
-	}
-}
-
-// An element with no attribute named matches by its name alone, which is the
-// ordinary case.
-func elementMatches(token xml.StartElement, element xmlElement) bool {
-	if token.Name.Local != element.name {
-		return false
-	}
-	if element.attribute == "" {
-		return true
-	}
-	for _, attribute := range token.Attr {
-		if attribute.Name.Local == element.attribute && attribute.Value == element.value {
-			return true
-		}
-	}
-	return false
-}
-
 // Whether a directory is one entry of a .contributors/ store: the entry, under
 // its two-character bucket, under the store.
 func isContributorEntry(dir string) bool {
@@ -483,4 +324,82 @@ func (w *volumeWriter) removeMergedEntry(dir string) error {
 			dir, contributorsDirectory)
 	}
 	return os.RemoveAll(dir)
+}
+
+// The suffix of the one file name replaceEarlierFile takes: an episode's
+// thumbnail, which the art phase names for the episode file it goes beside.
+const episodeThumbSuffix = "-thumb.jpg"
+
+// The replace door for an episode's thumbnail that shows an earlier file at
+// the episode's path. A thumbnail is a frame of one encode, and a new encode
+// can place that frame at another time or crop it another way, so the still
+// of the earlier file is not this file's still. The door writes the new
+// bytes over the file only while the file on the volume is older than
+// before, the second the new file took the path. A thumbnail at or after
+// that second was made for this file by some writer, and the door keeps it.
+// It refuses every name but a thumbnail's, so no other file a person kept is
+// in its reach. The answer says whether this call wrote the file.
+func (w *volumeWriter) replaceEarlierFile(target string, data []byte, before int64) (bool, error) {
+	if !strings.HasSuffix(filepath.Base(target), episodeThumbSuffix) {
+		return false, fmt.Errorf("refusing to replace %s: it is no %s", target, episodeThumbSuffix)
+	}
+	info, err := os.Lstat(target)
+	if errors.Is(err, fs.ErrNotExist) {
+		return w.createOnce(target, data)
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || info.ModTime().Unix() >= before {
+		return false, nil
+	}
+	return true, w.write(target, data)
+}
+
+// The replace door for a tile directory that shows an earlier file, which
+// the trickplay phase staged a new tree for. The tiles of an earlier encode
+// place each thumbnail at that encode's times, so they are not this file's
+// tiles. The door takes the directory only while it is older than before,
+// the second the new file took the path. A directory at or after that
+// second was made for this file, by Jellyfin or by an earlier run, and the
+// door keeps it and clears the staging. It refuses every name but a
+// trickplay directory's.
+//
+// The earlier tree moves aside under a temporary name, the staged tree takes
+// the real name, and then the earlier tree goes. A failure between the two
+// renames moves the earlier tree back, so a reader finds a whole directory
+// at the real name at every step except the moment between the renames.
+func (w *volumeWriter) replaceEarlierTree(target string, before int64) (bool, error) {
+	if !strings.EqualFold(filepath.Ext(target), trickplayExtension) {
+		return false, fmt.Errorf("refusing to replace %s: it is no %s directory", target, trickplayExtension)
+	}
+	staging := w.temporary(target)
+	info, err := os.Lstat(target)
+	if errors.Is(err, fs.ErrNotExist) {
+		return w.createTree(target)
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() || info.ModTime().Unix() >= before {
+		return false, w.removeTemporaryTree(staging)
+	}
+	if err := syncTree(staging); err != nil {
+		_ = w.removeTemporaryTree(staging)
+		return false, err
+	}
+	earlier := w.temporary(target + ".earlier")
+	if err := w.removeTemporaryTree(earlier); err != nil {
+		return false, err
+	}
+	if err := os.Rename(target, earlier); err != nil {
+		_ = w.removeTemporaryTree(staging)
+		return false, err
+	}
+	if err := os.Rename(staging, target); err != nil {
+		_ = os.Rename(earlier, target)
+		_ = w.removeTemporaryTree(staging)
+		return false, err
+	}
+	return true, w.removeTemporaryTree(earlier)
 }

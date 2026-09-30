@@ -32,6 +32,9 @@ type folderFiles struct {
 	// The probe records of the ledger that names this directory's files. The
 	// caller reads the ledger once and hands it to every read of the folder.
 	probes folderProbes
+	// Where the read records each media file's identity against its probe
+	// record, which the caller's result holds.
+	identities fileIdentities
 }
 
 // The stream rows come back beside the file rows, one set per file a probe
@@ -106,7 +109,7 @@ func (f folderFiles) row(name string, class fileClass) (fileRow, []streamRow, er
 	var streams []streamRow
 	if class.Type == fileTypeVideo || class.Type == fileTypeAudio {
 		_, entry := likenFolderFor(f.place.kind, absolute)
-		streams = f.probes.fill(&row, entry)
+		streams = f.probes.fill(&row, entry, absolute, f.identities)
 	}
 	if items := f.item(name); len(items) > 0 {
 		row.Items = items

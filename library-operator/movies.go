@@ -136,7 +136,7 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 		if err != nil {
 			continue
 		}
-		result.streams = append(result.streams, probes.fill(&row, video)...)
+		result.streams = append(result.streams, probes.fill(&row, video, filepath.Join(dir, video), result.fileIdentities())...)
 		result.files = append(result.files, row)
 	}
 
@@ -241,13 +241,14 @@ func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, l
 	probes, err := ledgers.of(dir)
 	result.noteReadError(err)
 	rows, streams, subdirectories, err := folderFiles{
-		root:    root,
-		dir:     dir,
-		library: library,
-		place:   filePlace{kind: libraryKindMovies},
-		item:    constantItem(itemID),
-		held:    videos,
-		probes:  probes,
+		root:       root,
+		dir:        dir,
+		library:    library,
+		place:      filePlace{kind: libraryKindMovies},
+		item:       constantItem(itemID),
+		held:       videos,
+		probes:     probes,
+		identities: result.fileIdentities(),
 	}.read()
 	result.noteReadError(err)
 	result.files = append(result.files, rows...)
@@ -262,12 +263,13 @@ func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, l
 		probes, err := ledgers.of(child)
 		result.noteReadError(err)
 		rows, streams, _, err := folderFiles{
-			root:    root,
-			dir:     child,
-			library: library,
-			place:   filePlace{kind: libraryKindMovies, extras: extras},
-			item:    constantItem(itemID),
-			probes:  probes,
+			root:       root,
+			dir:        child,
+			library:    library,
+			place:      filePlace{kind: libraryKindMovies, extras: extras},
+			item:       constantItem(itemID),
+			probes:     probes,
+			identities: result.fileIdentities(),
 		}.read()
 		result.noteReadError(err)
 		result.files = append(result.files, rows...)

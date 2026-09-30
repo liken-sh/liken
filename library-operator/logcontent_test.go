@@ -83,7 +83,7 @@ func TestAnArtLineNamesTheFileByItsPath(t *testing.T) {
 	image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
 
 	work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
-		gap, folder, filepath.Join(folder, "poster.jpg"), image)
+		gap, folder, filepath.Join(folder, "poster.jpg"), image, 0)
 
 	named := opaquePath(root, "Some Film (2014)/poster.jpg")
 	wantOpaque(t, logged.String(),

@@ -32,6 +32,12 @@ type probedFile struct {
 	Duration  float64        `yaml:"duration"`
 	Bitrate   int64          `yaml:"bitrate"`
 	Streams   []probedStream `yaml:"streams"`
+	// The change time of the file when a probe found it at a size the record
+	// before it did not hold, which is when a new file took this path. An
+	// attempt of a file fact made before it, and a thumbnail or a tile
+	// directory older than it, belong to the earlier file. It is empty where
+	// no probe has seen the path hold another file.
+	Replaced time.Time `yaml:"replaced,omitempty"`
 }
 
 // One stream of one file, in ffprobe's own order and with ffprobe's own
