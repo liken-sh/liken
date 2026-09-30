@@ -189,6 +189,35 @@ func staleCache(t *testing.T, api *endpointAPI, control *endpointControl) {
 	}
 }
 
+// A list before the Sink watch finished its first read comes from the
+// API server. The store can then become ready at an older copy, because
+// the watch's first read can come from the API server's watch cache.
+// The next list must not answer that older copy: a pass that read a
+// claim on the Sink from the first list would read the copy from before
+// the claim, and act as if the Sink were free.
+func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	api.sinks[testSinkName] = &Sink{Metadata: EndpointMeta{Name: testSinkName, ResourceVersion: api.nextVersion()},
+		Status: EndpointStatus{Node: "liken-1"}}
+	older := cacheOf(t, api).sinks.View
+	api.sinks[testSinkName].Status.Claim = &EndpointClaim{Namespace: "media", Name: "den"}
+	api.sinks[testSinkName].Metadata.ResourceVersion = api.nextVersion()
+	ready := false
+	control.cache.sinks = informer.Held{View: informer.View{Store: older.Store, Synced: func() bool { return ready }}, Versions: memo.New()}
+
+	listed, err := control.readSinks()
+	if err != nil || len(listed) != 1 || listed[0].Status.Claim == nil {
+		t.Fatalf("the list before the store is ready = %+v, %v; want the claim", listed, err)
+	}
+	ready = true
+	read, err := control.readSinks()
+
+	if err != nil || len(read) != 1 || read[0].Status.Claim == nil {
+		t.Errorf("the list from the ready store = %+v, %v; want the claim, not the store's older copy", read, err)
+	}
+}
+
 // A claim on the analog sink changes its status. The write from the
 // store's older copy is refused, and the pass reads the Sink again and
 // writes the claim.

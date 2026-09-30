@@ -65,10 +65,6 @@ type Sink struct {
 	Status     EndpointStatus `json:"status,omitempty"`
 }
 
-type SinkList struct {
-	Items []Sink `json:"items"`
-}
-
 // Source is one capture endpoint.
 type Source struct {
 	APIVersion string         `json:"apiVersion,omitempty"`
@@ -76,10 +72,6 @@ type Source struct {
 	Metadata   EndpointMeta   `json:"metadata"`
 	Spec       SourceSpec     `json:"spec"`
 	Status     EndpointStatus `json:"status,omitempty"`
-}
-
-type SourceList struct {
-	Items []Source `json:"items"`
 }
 
 type EndpointMeta struct {
@@ -283,22 +275,10 @@ func machineSelector(machine string) string {
 	return "status.node=" + machine
 }
 
-// listSinks and listSources read the resources whose status.node is
-// one machine.
-func listSinks(c *apiclient.Client, machine string) ([]Sink, error) {
-	list, err := apiclient.Get[SinkList](c, SinksPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
-	if err != nil {
-		return nil, err
-	}
-	return list.Items, nil
-}
-
-func listSources(c *apiclient.Client, machine string) ([]Source, error) {
-	list, err := apiclient.Get[SourceList](c, SourcesPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
-	if err != nil {
-		return nil, err
-	}
-	return list.Items, nil
+// byMachine narrows a list of Sinks or Sources to the ones whose
+// status.node is one machine, the selection the watches hold.
+func byMachine(path, machine string) string {
+	return path + "?fieldSelector=" + url.QueryEscape(machineSelector(machine))
 }
 
 // The create carries an empty spec. The operator declares nothing

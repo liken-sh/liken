@@ -53,6 +53,16 @@ func (a *endpointAPI) handler(t *testing.T) http.Handler {
 	})
 }
 
+// SinkList and SourceList are the lists the fake answers, the way the
+// API server wraps a collection's items.
+type SinkList struct {
+	Items []Sink `json:"items"`
+}
+
+type SourceList struct {
+	Items []Source `json:"items"`
+}
+
 func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -173,9 +183,13 @@ func TestCreateCarriesAnEmptySpec(t *testing.T) {
 	}
 }
 
+// Before the watches finish their first read, the pass lists this
+// machine's Sinks and Sources from the API server by the watches'
+// field selector, so it reads no other machine's resources.
 func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 	api := newEndpointAPI()
-	client := testClient(t, api.handler(t))
+	control := testEndpointControl(t, api, &writeRecord{})
+	withMemos(control)
 	api.sinks[testSinkName] = &Sink{Metadata: EndpointMeta{Name: testSinkName},
 		Status: EndpointStatus{Node: "liken-1"}}
 	api.sinks["stick-1-pci-0000-00-0e-0-hdmi-0"] = &Sink{
@@ -184,14 +198,14 @@ func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 	api.sources[testSourceName] = &Source{Metadata: EndpointMeta{Name: testSourceName},
 		Status: EndpointStatus{Node: "liken-1"}}
 
-	sinks, err := listSinks(client, "liken-1")
+	sinks, err := control.readSinks()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sinks) != 1 || sinks[0].Metadata.Name != testSinkName {
 		t.Errorf("sinks = %+v", sinks)
 	}
-	sources, err := listSources(client, "liken-1")
+	sources, err := control.readSources()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,19 +6,14 @@ package main
 import "github.com/liken-sh/liken/kubernetes/informer"
 
 // readSinks answers this machine's Sinks, from the store once it holds
-// its first read.
+// its first read, and from the API server by the watch's field selector
+// before then (informer.List).
 func (e *endpointControl) readSinks() ([]Sink, error) {
-	if e.cache.sinks.View.Ready() {
-		return informer.CurrentList[Sink](e.client, e.cache.sinks, sinkPath)
-	}
-	return listSinks(e.client, e.machine)
+	return informer.List[Sink](e.client, e.cache.sinks, byMachine(SinksPath, e.machine), sinkPath)
 }
 
 func (e *endpointControl) readSources() ([]Source, error) {
-	if e.cache.sources.View.Ready() {
-		return informer.CurrentList[Source](e.client, e.cache.sources, sourcePath)
-	}
-	return listSources(e.client, e.machine)
+	return informer.List[Source](e.client, e.cache.sources, byMachine(SourcesPath, e.machine), sourcePath)
 }
 
 // createSink creates one Sink and notes the version the API server
