@@ -3,7 +3,8 @@
 Built on 2026-09-30. A `Play` can name a test pattern, a white screen
 or colour bars, with a `pattern://` URI. The player image carries the
 pattern files, so a pattern plays on any `Player` with no storage, no
-network, and no film. No drill has run on `liken-1` yet.
+network, and no film. On `liken-1`, `pattern://white` played on
+`lab-portable`, a 1920x1080 panel; the results are at the end.
 
 ## The problem
 
@@ -126,3 +127,18 @@ On `liken-1`, on the `Player` named `lab-portable`, a 1920x1080 panel.
 * `pattern://white/1920x804` letterboxes.
 * `pattern://purple` fails the `Play` with a message that lists the
   patterns.
+
+## What the lab measured
+
+On 2026-09-30, on `liken-1`, `pattern://white` on `lab-portable`
+resolved to `white-1920x1080.mkv`. Paused at 2:40, the OSD read
+"White, 1920×1080", showed ten minutes with ten chapter marks, and
+read "Minute 3 · 3 of 10" and "7 minutes remaining". A screenshot
+through `display-api` measured one column from the top of the screen
+to the foot: the scrims fade from 52 to 253 and back to 52 with no
+flat steps. The white reads 253, not 255.
+
+The frame 1920x1080 is also the fallback, so this run does not prove
+that the operator read the `Display`. A run on a 3840x1600 screen is
+still owed, and so are the scope frame and the refusal of an unknown
+pattern on a cluster.
