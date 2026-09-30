@@ -9,12 +9,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // One provider block that answers a marks ask with what a test names, and
@@ -391,7 +393,7 @@ func TestTheMarkLineTakesTheBlocksThatCanAnswer(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			line := newMarkLine(test.blocks, func(name string) string { return test.env[name] }, nil)
+			line := newMarkLine(test.blocks, func(name string) string { return test.env[name] }, nil, nil)
 
 			var blocks []string
 			for _, one := range line.answerers {
@@ -407,20 +409,20 @@ func TestTheMarkLineTakesTheBlocksThatCanAnswer(t *testing.T) {
 // The key that reached the container travels on every ask of the line's
 // TheIntroDB answerer.
 func TestTheMarkLineCarriesTheTheIntroDBKey(t *testing.T) {
-	fake := &fakeTheIntroDB{status: http.StatusOK, body: `{"tmdb_id":1001,"type":"movie"}`}
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
-	line := newMarkLine([]string{providerBlockTheIntroDB}, func(name string) string {
-		return map[string]string{providerTokenVariable(providerBlockTheIntroDB): "a-key"}[name]
-	}, nil)
-	line.answerers[0].(theintrodbMarkAnswerer).client.base = server.URL
+	synctest.Test(t, func(t *testing.T) {
+		fake := &fakeTheIntroDB{status: http.StatusOK, body: `{"tmdb_id":1001,"type":"movie"}`}
+		server := apiservertest.Start(t, fake)
+		line := newMarkLine([]string{providerBlockTheIntroDB}, func(name string) string {
+			return map[string]string{providerTokenVariable(providerBlockTheIntroDB): "a-key"}[name]
+		}, server, nil)
 
-	if answer := line.ask(t.Context(), markFile{movie: true, ids: providerIDs{"tmdb": "1001"}}); answer.failure != nil {
-		t.Fatal(answer.failure)
-	}
-	if got := fake.requests[0].Header.Get("Authorization"); got != "Bearer a-key" {
-		t.Errorf("Authorization = %q, want the key that reached the container", got)
-	}
+		if answer := line.ask(t.Context(), markFile{movie: true, ids: providerIDs{"tmdb": "1001"}}); answer.failure != nil {
+			t.Fatal(answer.failure)
+		}
+		if got := fake.requests[0].Header.Get("Authorization"); got != "Bearer a-key" {
+			t.Errorf("Authorization = %q, want the key that reached the container", got)
+		}
+	})
 }
 
 // A container whose line holds no answerer is a manifest to repair.

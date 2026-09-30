@@ -43,8 +43,7 @@ func newFakeProvider(t *testing.T, answer func(int) (int, string)) (*providerReq
 		_, _ = io.WriteString(w, body)
 	}))
 
-	requests := newProviderRequests(providerBlockTMDb, apiservertest.Host, nil)
-	requests.http = server.Client()
+	requests := newProviderRequests(providerBlockTMDb, apiservertest.Host, server, nil)
 	return &requests, fake
 }
 
@@ -183,7 +182,7 @@ func TestThePaceEachProviderBlockHoldsTo(t *testing.T) {
 		t.Run(one.block, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 
-				requests := newProviderRequests(one.block, "https://example.test", nil)
+				requests := newProviderRequests(one.block, "https://example.test", nil, nil)
 
 				if requests.interval != one.want {
 					t.Errorf("the %s block paces at %v, want %v", one.block, requests.interval, one.want)
@@ -237,7 +236,7 @@ func TestEveryRequestCountsUnderItsStatusClass(t *testing.T) {
 // that cannot be reached is the same fault to a reader.
 func TestARequestWithNoAnswerCountsAsAnError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		requests := newProviderRequests(providerBlockTMDb, "http://127.0.0.1:1", nil)
+		requests := newProviderRequests(providerBlockTMDb, "http://127.0.0.1:1", http.DefaultTransport, nil)
 		record := newTallies(nil, "house/movies", workerEnrich, "enrich-1", nfoContainerName, time.Now())
 		requests.recordTo(record)
 

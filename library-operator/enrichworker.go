@@ -60,6 +60,11 @@ type enricher struct {
 	// Whether the rating.imdb gap holds episodes, and which old ratings it
 	// opens, from the environment.
 	ratingScope ratingGapScope
+	// The transport every provider client of this container sends through,
+	// and the transport of the IMDb dataset reads. A test names the transport
+	// of its own fake server here.
+	providerTransport http.RoundTripper
+	datasetTransport  http.RoundTripper
 	// The IMDb dataset reads the nfo container starts when it starts: the
 	// rating's and the credits'.
 	datasets *datasetReads
@@ -109,22 +114,27 @@ func newEnricher(log io.Writer) (*enricher, error) {
 	container := os.Getenv(libraryContainerVariable)
 
 	work := &enricher{
-		library:     libraryKey(namespace, name),
-		kind:        os.Getenv(libraryKindVariable),
-		root:        mountRoot,
-		scanPaths:   scanPathsOf(os.Getenv(scanPathsVariable), os.Getenv(scanPathVariable)),
-		job:         job,
-		container:   container,
-		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
-		writer:      newVolumeWriter(writerName(job, container)),
-		log:         log,
-		needs:       phaseNeeds(os.Getenv(libraryPhaseNeedsVariable)),
-		sync:        syncTargetOf(os.Getenv(syncActorVariable), os.Getenv(syncVersionVariable)),
-		ignore:      parseIgnore(os.Getenv(libraryIgnoreVariable)),
-		refresh:     parseRefresh(os.Getenv(libraryRefreshVariable)),
-		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
-		worker:      worker,
-		ratingScope: ratingScopeFromEnvironment(time.Now().UTC()),
+		library:           libraryKey(namespace, name),
+		kind:              os.Getenv(libraryKindVariable),
+		root:              mountRoot,
+		scanPaths:         scanPathsOf(os.Getenv(scanPathsVariable), os.Getenv(scanPathVariable)),
+		job:               job,
+		container:         container,
+		catalog:           NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
+		writer:            newVolumeWriter(writerName(job, container)),
+		log:               log,
+		needs:             phaseNeeds(os.Getenv(libraryPhaseNeedsVariable)),
+		sync:              syncTargetOf(os.Getenv(syncActorVariable), os.Getenv(syncVersionVariable)),
+		ignore:            parseIgnore(os.Getenv(libraryIgnoreVariable)),
+		refresh:           parseRefresh(os.Getenv(libraryRefreshVariable)),
+		syncTimeout:       syncTimeout(os.Getenv(syncTimeoutVariable)),
+		worker:            worker,
+		ratingScope:       ratingScopeFromEnvironment(time.Now().UTC()),
+		providerTransport: http.DefaultTransport,
+		// The dataset reads wait a minute for the headers of an answer, and
+		// set no bound on the body, because the largest file downloads in
+		// minutes on a slow link.
+		datasetTransport: &http.Transport{ResponseHeaderTimeout: time.Minute},
 	}
 	if work.board = boardOf(os.Getenv(libraryPhasesVariable)); work.board != nil {
 		work.writer.locks = work.board.dir

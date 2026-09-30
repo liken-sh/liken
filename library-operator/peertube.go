@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"strconv"
 )
@@ -29,8 +30,8 @@ type peertubeClient struct {
 	providerRequests
 }
 
-func newPeertubeClient(base string) *peertubeClient {
-	return &peertubeClient{newProviderRequests(providerBlockPeerTube, base, nil)}
+func newPeertubeClient(base string, transport http.RoundTripper) *peertubeClient {
+	return &peertubeClient{newProviderRequests(providerBlockPeerTube, base, transport, nil)}
 }
 
 // One video an instance holds: the long and the short id it answers on,

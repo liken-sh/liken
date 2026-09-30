@@ -15,9 +15,9 @@ import (
 	"strconv"
 )
 
-// The provider's own address, which only a test replaces. The API is under
+// The provider's own address. The API is under
 // /v3, and the service's own health path is at the root.
-var theintrodbAPIBase = "https://api.theintrodb.org"
+const theintrodbAPIBase = "https://api.theintrodb.org"
 
 // The path the fact asks, and the path the check reads. The health path
 // carries no rate limit and no daily allowance, so the check spends none of
@@ -35,8 +35,8 @@ type theintrodbClient struct {
 	providerRequests
 }
 
-func newTheIntroDBClient(base, token string) *theintrodbClient {
-	return &theintrodbClient{newProviderRequests(providerBlockTheIntroDB, base,
+func newTheIntroDBClient(base, token string, transport http.RoundTripper) *theintrodbClient {
+	return &theintrodbClient{newProviderRequests(providerBlockTheIntroDB, base, transport,
 		func(request *http.Request) { authorizeTheIntroDB(request, token) })}
 }
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,19 +34,19 @@ type answerLine struct {
 
 // The answerer of each block the nfo facts can ask. TVmaze is built with no
 // key, because it takes no account.
-var nfoAnswerers = map[string]func(base, token string, record *tallies) answerer{
-	providerBlockTMDb: func(base, token string, record *tallies) answerer {
-		client := newTMDbClient(base, token)
+var nfoAnswerers = map[string]func(base, token string, transport http.RoundTripper, record *tallies) answerer{
+	providerBlockTMDb: func(base, token string, transport http.RoundTripper, record *tallies) answerer {
+		client := newTMDbClient(base, token, transport)
 		client.recordTo(record)
 		return tmdbAnswerer{client: client}
 	},
-	providerBlockOMDb: func(base, token string, record *tallies) answerer {
-		client := newOMDbClient(base, token)
+	providerBlockOMDb: func(base, token string, transport http.RoundTripper, record *tallies) answerer {
+		client := newOMDbClient(base, token, transport)
 		client.recordTo(record)
 		return newOMDbAnswerer(client)
 	},
-	providerBlockTVmaze: func(base, _ string, record *tallies) answerer {
-		client := newTVmazeClient(base)
+	providerBlockTVmaze: func(base, _ string, transport http.RoundTripper, record *tallies) answerer {
+		client := newTVmazeClient(base, transport)
 		client.recordTo(record)
 		return newTVmazeAnswerer(client)
 	},
@@ -53,9 +54,10 @@ var nfoAnswerers = map[string]func(base, token string, record *tallies) answerer
 
 // The line the two rules for who answers read, in the order the Library's own
 // spec.sources names the blocks.
-func newAnswerLine(blocks []string, value func(string) string, record *tallies) *answerLine {
+func newAnswerLine(blocks []string, value func(string) string,
+	transport http.RoundTripper, record *tallies) *answerLine {
 	return &answerLine{
-		answerers: recordingAnswerers(blocks, value, record, nfoAnswerers),
+		answerers: recordingAnswerers(blocks, value, transport, record, nfoAnswerers),
 		spent:     map[string]bool{},
 	}
 }
@@ -103,7 +105,8 @@ func (l *answerLine) ask(ctx context.Context, fact string, title titleRef) ([]pr
 func (e *enricher) nfoFact(ctx context.Context, fact string) error {
 	if e.providers == nil {
 		e.providers = e.nfoAnswerLine()
-		e.personFinder = newPersonFinder(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
+		e.personFinder = newPersonFinder(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv,
+			e.providerTransport, e.tallies)
 	}
 	if len(e.providers.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", fact)

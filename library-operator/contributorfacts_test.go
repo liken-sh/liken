@@ -25,15 +25,12 @@ func personAnswer(birthday, deathday, biography, profile string) string {
 		`","deathday":"` + deathday + `","profile_path":"` + profile + `"}`
 }
 
-// The client the contributor tests run against, with the image host pointed at
-// the fake itself, so a headshot in a test reaches no other server.
+// The client the contributor tests run against. Its transport answers every
+// address, so a headshot at TMDb's image host reaches the fake and no other
+// server.
 func newPersonTMDb(t *testing.T, answers map[string]string) (*tmdbClient, *fakeTMDb) {
 	t.Helper()
-	client, fake := newFakeTMDb(t, answers)
-	held := tmdbImageBase
-	tmdbImageBase = client.base + "/t/p/"
-	t.Cleanup(func() { tmdbImageBase = held })
-	return client, fake
+	return newFakeTMDb(t, answers)
 }
 
 // One person's directory on the volume, with the entry the credits fact would

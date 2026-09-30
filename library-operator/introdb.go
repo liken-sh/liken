@@ -12,8 +12,8 @@ import (
 	"strconv"
 )
 
-// The provider's own address, which only a test replaces.
-var introdbAPIBase = "https://api.introdb.app"
+// The provider's own address.
+const introdbAPIBase = "https://api.introdb.app"
 
 // The path the fact asks, and the path the check reads.
 const (
@@ -27,8 +27,8 @@ type introdbClient struct {
 	providerRequests
 }
 
-func newIntroDBClient(base string) *introdbClient {
-	return &introdbClient{newProviderRequests(providerBlockIntroDB, base, nil)}
+func newIntroDBClient(base string, transport http.RoundTripper) *introdbClient {
+	return &introdbClient{newProviderRequests(providerBlockIntroDB, base, transport, nil)}
 }
 
 // IntroDB's answer: one span or null per kind. IntroDB calls the end credits

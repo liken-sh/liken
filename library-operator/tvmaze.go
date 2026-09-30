@@ -13,8 +13,8 @@ import (
 	"strconv"
 )
 
-// The provider's own address, which only a test replaces.
-var tvmazeAPIBase = "https://api.tvmaze.com"
+// The provider's own address.
+const tvmazeAPIBase = "https://api.tvmaze.com"
 
 // The paths TVmaze answers on, and the show the check reads, which is the
 // first show TVmaze holds.
@@ -36,8 +36,8 @@ type tvmazeClient struct {
 	providerRequests
 }
 
-func newTVmazeClient(base string) *tvmazeClient {
-	return &tvmazeClient{newProviderRequests(providerBlockTVmaze, base, nil)}
+func newTVmazeClient(base string, transport http.RoundTripper) *tvmazeClient {
+	return &tvmazeClient{newProviderRequests(providerBlockTVmaze, base, transport, nil)}
 }
 
 // One show, with what the overview fact reads beside the ids the identity

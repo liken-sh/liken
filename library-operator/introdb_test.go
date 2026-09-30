@@ -36,8 +36,7 @@ func newFakeIntroDB(t *testing.T, status int, body string) (*introdbClient, *fak
 	t.Helper()
 	fake := &fakeIntroDB{status: status, body: body}
 	server := apiservertest.Start(t, fake)
-	client := newIntroDBClient(apiservertest.Host)
-	client.http = server.Client()
+	client := newIntroDBClient(apiservertest.Host, server)
 	return client, fake
 }
 

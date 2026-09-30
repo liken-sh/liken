@@ -258,7 +258,7 @@ func TestACooldownThatEndsOnTheContextIsAnError(t *testing.T) {
 
 func TestAnAddressTheClientCannotBuildIsAnError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client := newTMDbClient("http://\x7f", "a-token")
+		client := newTMDbClient("http://\x7f", "a-token", nil)
 
 		if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
 			t.Error("the search reported no error, want one")

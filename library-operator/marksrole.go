@@ -22,7 +22,7 @@ const marksContainerName = "marks"
 // are read once. A container with no answerer at all is a manifest to repair,
 // because the operator creates it only where a source serves the fact.
 func (e *enricher) marksFact(ctx context.Context) error {
-	line := newMarkLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
+	line := newMarkLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.providerTransport, e.tallies)
 	if len(line.answerers) == 0 {
 		return fmt.Errorf("no provider reached this container, and the %s fact cannot ask without one", factMarks)
 	}

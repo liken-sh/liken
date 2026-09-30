@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net/http"
 	"os"
 	"slices"
 	"time"
@@ -47,7 +48,7 @@ type trailerSource struct {
 // the container, and how to build the source out of them.
 type trailerFetcherEntry struct {
 	block string
-	build func(base, token string, record *tallies) trailerSource
+	build func(base, token string, transport http.RoundTripper, record *tallies) trailerSource
 }
 
 // Every site this fact can fetch from, keyed by the site its trailers rows
@@ -56,8 +57,8 @@ type trailerFetcherEntry struct {
 var trailerFetchers = map[string]trailerFetcherEntry{
 	trailerSiteArchive: {
 		block: providerBlockArchive,
-		build: func(base, _ string, record *tallies) trailerSource {
-			client := newArchiveClient(base)
+		build: func(base, _ string, transport http.RoundTripper, record *tallies) trailerSource {
+			client := newArchiveClient(base, transport)
 			client.recordTo(record)
 			return trailerSource{fetcher: archiveTrailerFetcher{client: client},
 				requests: &client.providerRequests}
@@ -65,8 +66,8 @@ var trailerFetchers = map[string]trailerFetcherEntry{
 	},
 	trailerSitePeerTube: {
 		block: providerBlockPeerTube,
-		build: func(base, _ string, record *tallies) trailerSource {
-			client := newPeertubeClient(base)
+		build: func(base, _ string, transport http.RoundTripper, record *tallies) trailerSource {
+			client := newPeertubeClient(base, transport)
 			client.recordTo(record)
 			return trailerSource{fetcher: peertubeTrailerFetcher{client: client},
 				requests: &client.providerRequests}
@@ -99,14 +100,14 @@ type trailerFetchLine struct {
 // under. Every client the line builds counts its requests into the recorder
 // the container holds.
 func newTrailerFetchLine(blocks []string, value func(string) string,
-	record *tallies) *trailerFetchLine {
-	byBlock := make(map[string]func(base, token string, record *tallies) trailerSource,
+	transport http.RoundTripper, record *tallies) *trailerFetchLine {
+	byBlock := make(map[string]func(base, token string, transport http.RoundTripper, record *tallies) trailerSource,
 		len(trailerFetchers))
 	for _, entry := range trailerFetchers {
 		byBlock[entry.block] = entry.build
 	}
 	line := &trailerFetchLine{sources: map[string]trailerSource{}}
-	for _, source := range recordingAnswerers(blocks, value, record, byBlock) {
+	for _, source := range recordingAnswerers(blocks, value, transport, record, byBlock) {
 		line.sources[source.fetcher.site()] = source
 	}
 	return line

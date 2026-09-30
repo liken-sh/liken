@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,27 +30,28 @@ type trailerLine struct {
 // built on the address that reached the container. The archive takes no key
 // and no address of its own, so the block's presence in the source order is
 // the whole account.
-var trailerAnswerers = map[string]func(base, token string, record *tallies) trailerAnswerer{
-	providerBlockTMDb: func(base, token string, record *tallies) trailerAnswerer {
-		client := newTMDbClient(base, token)
+var trailerAnswerers = map[string]func(base, token string, transport http.RoundTripper, record *tallies) trailerAnswerer{
+	providerBlockTMDb: func(base, token string, transport http.RoundTripper, record *tallies) trailerAnswerer {
+		client := newTMDbClient(base, token, transport)
 		client.recordTo(record)
 		return newTMDbTrailerAnswerer(client)
 	},
-	providerBlockPeerTube: func(base, _ string, record *tallies) trailerAnswerer {
-		client := newPeertubeClient(base)
+	providerBlockPeerTube: func(base, _ string, transport http.RoundTripper, record *tallies) trailerAnswerer {
+		client := newPeertubeClient(base, transport)
 		client.recordTo(record)
 		return newPeertubeTrailerAnswerer(client)
 	},
-	providerBlockArchive: func(base, _ string, record *tallies) trailerAnswerer {
-		client := newArchiveClient(base)
+	providerBlockArchive: func(base, _ string, transport http.RoundTripper, record *tallies) trailerAnswerer {
+		client := newArchiveClient(base, transport)
 		client.recordTo(record)
 		return newArchiveTrailerAnswerer(client)
 	},
 }
 
 // The line, in the order the Library's own spec.sources names the blocks.
-func newTrailerLine(blocks []string, value func(string) string, record *tallies) *trailerLine {
-	return &trailerLine{answerers: recordingAnswerers(blocks, value, record, trailerAnswerers)}
+func newTrailerLine(blocks []string, value func(string) string,
+	transport http.RoundTripper, record *tallies) *trailerLine {
+	return &trailerLine{answerers: recordingAnswerers(blocks, value, transport, record, trailerAnswerers)}
 }
 
 // One title's ask: every answerer, because the trailers of a title are the
@@ -102,7 +104,7 @@ func (l *trailerLine) ask(ctx context.Context, title trailerTitle) ([]trailerEnt
 // because the operator creates it only where a source serves the fact.
 func (e *enricher) trailerFact(ctx context.Context) error {
 	if e.trailers == nil {
-		e.trailers = newTrailerLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
+		e.trailers = newTrailerLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.providerTransport, e.tallies)
 	}
 	if len(e.trailers.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", factTrailer)

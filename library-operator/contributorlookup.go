@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"path/filepath"
 	"slices"
 )
@@ -96,7 +97,8 @@ func (e *enricher) findCreditedTMDb(ids providerIDs) string {
 // The TMDb client the credits fact asks for a person's TMDb id: the TMDb
 // account the Library's sources reach, or none. LIBRARY_SOURCES names only the
 // blocks of Ready providers, and the key arrives as TMDB_TOKEN.
-func newPersonFinder(sources []string, value func(string) string, record *tallies) *tmdbClient {
+func newPersonFinder(sources []string, value func(string) string,
+	transport http.RoundTripper, record *tallies) *tmdbClient {
 	if !slices.Contains(sources, providerBlockTMDb) {
 		return nil
 	}
@@ -104,7 +106,7 @@ func newPersonFinder(sources []string, value func(string) string, record *tallie
 	if token == "" {
 		return nil
 	}
-	client := newTMDbClient(tmdbAPIBase, token)
+	client := newTMDbClient(tmdbAPIBase, token, transport)
 	client.recordTo(record)
 	return client
 }

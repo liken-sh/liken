@@ -87,8 +87,7 @@ func newFakeTMDb(t *testing.T, answers map[string]string) (*tmdbClient, *fakeTMD
 	fake := &fakeTMDb{answers: answers, statuses: map[string]int{}, served: map[string]int{}}
 	server := apiservertest.Start(t, fake)
 
-	client := newTMDbClient(apiservertest.Host, "a-token")
-	client.http = server.Client()
+	client := newTMDbClient(apiservertest.Host, "a-token", server)
 	return client, fake
 }
 
@@ -230,7 +229,7 @@ func TestAnAnswerThatIsNotJSONIsAnError(t *testing.T) {
 
 func TestAProviderThatDoesNotAnswerIsAnError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client := newTMDbClient("http://127.0.0.1:1", "a-token")
+		client := newTMDbClient("http://127.0.0.1:1", "a-token", http.DefaultTransport)
 		client.http = &http.Client{Timeout: time.Second}
 
 		if _, err := client.runtime(t.Context(), libraryKindMovies, 1002); err == nil {

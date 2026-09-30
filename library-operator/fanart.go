@@ -10,8 +10,8 @@ import (
 	"net/http"
 )
 
-// The provider's own address, which only a test replaces.
-var fanartAPIBase = "https://webservice.fanart.tv"
+// The provider's own address.
+const fanartAPIBase = "https://webservice.fanart.tv"
 
 // The two paths, and the parameter the key travels in. The check calls a
 // movie every Fanart.tv account can read, so a key that answers it is a key
@@ -31,9 +31,9 @@ type fanartClient struct {
 	key string
 }
 
-func newFanartClient(base, key string) *fanartClient {
+func newFanartClient(base, key string, transport http.RoundTripper) *fanartClient {
 	client := &fanartClient{key: key}
-	client.providerRequests = newProviderRequests(providerBlockFanart, base,
+	client.providerRequests = newProviderRequests(providerBlockFanart, base, transport,
 		func(request *http.Request) { queryKey(fanartAPIKeyParam, client.key)(request) })
 	return client
 }

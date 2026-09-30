@@ -20,8 +20,8 @@ const tmdbCertificationCountry = "US"
 // person takes.
 const tmdbProfileSize = "original"
 
-// The host every image path hangs off, which only a test replaces.
-var tmdbImageBase = "https://image.tmdb.org/t/p/"
+// The host every image path hangs off.
+const tmdbImageBase = "https://image.tmdb.org/t/p/"
 
 // Why the cast is cut: a title has a hundred credited people at TMDb, and the
 // scanner reads the .nfo file on every walk, so the fact writes the billed cast

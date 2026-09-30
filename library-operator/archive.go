@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -46,8 +47,8 @@ type archiveClient struct {
 	providerRequests
 }
 
-func newArchiveClient(base string) *archiveClient {
-	return &archiveClient{newProviderRequests(providerBlockArchive, base, nil)}
+func newArchiveClient(base string, transport http.RoundTripper) *archiveClient {
+	return &archiveClient{newProviderRequests(providerBlockArchive, base, transport, nil)}
 }
 
 // One item of the collection, with the fields the search asked for.

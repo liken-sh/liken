@@ -23,12 +23,6 @@ import (
 // a server of its own. An empty value is IMDb's own address.
 const imdbEndpointVariable = "IMDB_ENDPOINT"
 
-// The transport the dataset reads go through. It waits a minute for the
-// headers of an answer, and sets no bound on the body, because the largest
-// file downloads in minutes on a slow link. A test replaces it with the
-// transport of its own server, the way it replaces the address.
-var datasetTransport http.RoundTripper = &http.Transport{ResponseHeaderTimeout: time.Minute}
-
 // One title of the gap: a movie or a series by its own IMDb id, or an episode
 // by its own IMDb id or by its place under a series that has one.
 type imdbTarget struct {
@@ -149,7 +143,7 @@ func (e *enricher) datasetFetcher() *datasetFetcher {
 	return &datasetFetcher{
 		base:   strings.TrimSuffix(base, "/"),
 		cache:  os.Getenv(datasetsCacheVariable),
-		client: &http.Client{Transport: datasetTransport},
+		client: &http.Client{Transport: e.datasetTransport},
 		writer: e.writer,
 		logf:   e.logf,
 		pace:   blockOf(providerBlockIMDb).pace,

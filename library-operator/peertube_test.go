@@ -34,8 +34,7 @@ func newFakePeerTube(t *testing.T, body string) (*peertubeClient, *fakePeerTube)
 		_, _ = io.WriteString(w, body)
 	}))
 
-	client := newPeertubeClient(apiservertest.Host)
-	client.http = server.Client()
+	client := newPeertubeClient(apiservertest.Host, server)
 	return client, fake
 }
 

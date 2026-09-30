@@ -78,8 +78,7 @@ func newFakeArchive(t *testing.T, body string) (*archiveClient, *fakeArchive) {
 		_, _ = io.WriteString(w, item.body)
 	}))
 
-	client := newArchiveClient(apiservertest.Host)
-	client.http = server.Client()
+	client := newArchiveClient(apiservertest.Host, server)
 	return client, fake
 }
 
@@ -186,7 +185,7 @@ func TestAnArchiveClientHoldsToItsOwnPace(t *testing.T) {
 // states for the archive block.
 func TestAnArchiveClientTakesThePaceTheTableStates(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client := newArchiveClient(archiveAPIBase)
+		client := newArchiveClient(archiveAPIBase, nil)
 
 		if client.interval != archiveTestPace {
 			t.Errorf("the client paces at %v, want four requests a second", client.interval)
@@ -542,8 +541,7 @@ func TestTheArchiveAnswererReadsTwoAmbiguousItemsAtOnce(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, trailer)
 		}))
-		client := newArchiveClient(apiservertest.Host)
-		client.http = server.Client()
+		client := newArchiveClient(apiservertest.Host, server)
 
 		entries, err := newArchiveTrailerAnswerer(client).trailers(ctx,
 			trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
@@ -605,8 +603,7 @@ func TestAnArchiveSearchThatCannotBeRead(t *testing.T) {
 						w.WriteHeader(one.status)
 						_, _ = io.WriteString(w, one.body)
 					}))
-				client := newArchiveClient(apiservertest.Host)
-				client.http = server.Client()
+				client := newArchiveClient(apiservertest.Host, server)
 
 				_, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
 					trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})

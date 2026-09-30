@@ -33,8 +33,7 @@ func newFakeTVmaze(t *testing.T, status int, answers map[string]string) (*tvmaze
 		_, _ = io.WriteString(w, answers[r.URL.Path])
 	}))
 
-	client := newTVmazeClient(apiservertest.Host)
-	client.http = server.Client()
+	client := newTVmazeClient(apiservertest.Host, server)
 	return client, fake
 }
 

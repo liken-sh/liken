@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -68,15 +69,16 @@ func (a imdbAnswerer) answer(ctx context.Context, fact string, title titleRef) (
 // block bound to this container's reads.
 func (e *enricher) nfoAnswerLine() *answerLine {
 	table := maps.Clone(nfoAnswerers)
-	table[providerBlockIMDb] = func(string, string, *tallies) answerer {
+	table[providerBlockIMDb] = func(string, string, http.RoundTripper, *tallies) answerer {
 		return imdbAnswerer{
 			reads:   func() *datasetReads { return e.datasets },
 			credits: func() *creditReads { return e.credits },
 		}
 	}
 	return &answerLine{
-		answerers: recordingAnswerers(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies, table),
-		spent:     map[string]bool{},
+		answerers: recordingAnswerers(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv,
+			e.providerTransport, e.tallies, table),
+		spent: map[string]bool{},
 	}
 }
 

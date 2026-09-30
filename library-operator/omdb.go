@@ -14,8 +14,8 @@ import (
 	"sync"
 )
 
-// The provider's own address, which only a test replaces.
-var omdbAPIBase = "https://www.omdbapi.com"
+// The provider's own address.
+const omdbAPIBase = "https://www.omdbapi.com"
 
 // OMDb serves one path. The parameters say which title and how much of the
 // plot. The full plot is the one the nfo writes.
@@ -52,9 +52,9 @@ type omdbClient struct {
 	limited bool
 }
 
-func newOMDbClient(base, key string) *omdbClient {
+func newOMDbClient(base, key string, transport http.RoundTripper) *omdbClient {
 	client := &omdbClient{key: key}
-	client.providerRequests = newProviderRequests(providerBlockOMDb, base,
+	client.providerRequests = newProviderRequests(providerBlockOMDb, base, transport,
 		func(request *http.Request) { queryKey(omdbAPIKeyParameter, client.key)(request) })
 	return client
 }

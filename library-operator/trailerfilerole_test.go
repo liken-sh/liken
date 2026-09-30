@@ -60,8 +60,7 @@ func trailerFetchLineOfFiles(t *testing.T, body string, files []trailerFile,
 		_, _ = io.WriteString(w, body)
 	}))
 
-	client := newArchiveClient(apiservertest.Host)
-	client.http = server.Client()
+	client := newArchiveClient(apiservertest.Host, server)
 
 	held := slices.Clone(files)
 	for at := range held {
@@ -347,16 +346,15 @@ func TestTheTrailerFileFactBuildsItsLineOutOfTheEnvironment(t *testing.T) {
 		standInFFmpegRemux(t)
 		standInProbe(t, 1, 120)
 		// The line reaches archive.org at its own address, so the fake
-		// archive answers through the transport every provider sends on.
+		// archive answers through the transport the container hands its
+		// provider clients.
 		archive, _ := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
-		held := providerTransport
-		providerTransport = archive.http.Transport
-		t.Cleanup(func() { providerTransport = held })
 		catalog, _ := newSQLiteCatalog(t)
 		root := t.TempDir()
 		seedTrailerFileRun(t, catalog, root)
 		t.Setenv(librarySourcesVariable, providerBlockArchive)
 		work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+		work.providerTransport = archive.http.Transport
 
 		if err := work.trailerFileFact(t.Context()); err != nil {
 			t.Fatal(err)

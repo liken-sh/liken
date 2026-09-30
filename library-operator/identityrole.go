@@ -19,7 +19,7 @@ func (e *enricher) identityFact(ctx context.Context) error {
 	if token == "" {
 		return fmt.Errorf("%s is empty, and the identity fact cannot ask a provider without it", tmdbTokenVariable)
 	}
-	client := newTMDbClient(tmdbAPIBase, token)
+	client := newTMDbClient(tmdbAPIBase, token, e.providerTransport)
 	client.recordTo(e.tallies)
 	return e.identityGap(ctx, client)
 }

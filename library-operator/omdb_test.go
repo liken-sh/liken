@@ -46,8 +46,7 @@ func newFakeOMDb(t *testing.T, answer func(url.Values) (int, string)) (*omdbClie
 		_, _ = io.WriteString(w, body)
 	}))
 
-	client := newOMDbClient(apiservertest.Host, "a-key")
-	client.http = server.Client()
+	client := newOMDbClient(apiservertest.Host, "a-key", server)
 	return client, fake
 }
 

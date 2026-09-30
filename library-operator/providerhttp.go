@@ -38,11 +38,6 @@ const providerAttempts = 3
 // container open.
 const providerRequestTimeout = 30 * time.Second
 
-// The transport every provider client sends through. A test replaces it
-// with the transport of its fake provider, the way it replaces each
-// provider's address.
-var providerTransport = http.DefaultTransport
-
 // One answer's bound, so a provider that streams without end cannot grow the
 // container.
 const providerAnswerLimit = 1 << 20
@@ -55,8 +50,8 @@ type providerSlot struct {
 }
 
 // What every client is made of: the block name, which names the provider in
-// an error; the address, which only a test replaces; and the form the key
-// travels in.
+// an error; the address; the transport its requests go through; and the form
+// the key travels in.
 // It holds the pace as well: the interval between two of its requests, out
 // of the table, and the slot the next one takes.
 type providerRequests struct {
@@ -141,13 +136,15 @@ func (r *providerRequests) roundTripBytes(request *http.Request, limit int64) (i
 	return status, cooldown, body, nil
 }
 
-// The requests one account makes. A provider that needs no key authorizes
-// nothing.
-func newProviderRequests(provider, base string, authorize func(*http.Request)) providerRequests {
+// The requests one account makes, through the transport the caller names. The
+// containers name `http.DefaultTransport`, and a test names its fake
+// provider. A provider that needs no key authorizes nothing.
+func newProviderRequests(provider, base string, transport http.RoundTripper,
+	authorize func(*http.Request)) providerRequests {
 	return providerRequests{
 		provider:  provider,
 		base:      base,
-		http:      &http.Client{Timeout: providerRequestTimeout, Transport: providerTransport},
+		http:      &http.Client{Timeout: providerRequestTimeout, Transport: transport},
 		authorize: authorize,
 		interval:  blockOf(provider).pace,
 		slot:      &providerSlot{},

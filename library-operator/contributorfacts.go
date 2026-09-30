@@ -43,7 +43,7 @@ func (e *enricher) contributorFact(ctx context.Context, fact string) error {
 		return fmt.Errorf("%s is empty, and the %s fact cannot ask a provider without it",
 			tmdbTokenVariable, fact)
 	}
-	client := newTMDbClient(tmdbAPIBase, token)
+	client := newTMDbClient(tmdbAPIBase, token, e.providerTransport)
 	client.recordTo(e.tallies)
 	return e.contributorGap(ctx, fact, client)
 }

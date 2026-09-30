@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// The provider's own address, which only a test replaces.
-var tmdbAPIBase = "https://api.themoviedb.org"
+// The provider's own address.
+const tmdbAPIBase = "https://api.themoviedb.org"
 
 // One account with TMDb.
 type tmdbClient struct {
@@ -22,9 +22,9 @@ type tmdbClient struct {
 	key string
 }
 
-func newTMDbClient(base, key string) *tmdbClient {
+func newTMDbClient(base, key string, transport http.RoundTripper) *tmdbClient {
 	client := &tmdbClient{key: key}
-	client.providerRequests = newProviderRequests(providerBlockTMDb, base,
+	client.providerRequests = newProviderRequests(providerBlockTMDb, base, transport,
 		func(request *http.Request) { authorizeTMDb(request, client.key) })
 	return client
 }

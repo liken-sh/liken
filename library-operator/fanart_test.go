@@ -35,8 +35,7 @@ func newFakeFanart(t *testing.T, status int, body string) (*fanartClient, *fakeF
 		_, _ = io.WriteString(w, body)
 	}))
 
-	client := newFanartClient(apiservertest.Host, "a-key")
-	client.http = server.Client()
+	client := newFanartClient(apiservertest.Host, "a-key", server)
 	return client, fake
 }
 

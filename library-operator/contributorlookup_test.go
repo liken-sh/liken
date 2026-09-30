@@ -194,7 +194,7 @@ func TestThePersonFinderNeedsATMDbSourceAndItsKey(t *testing.T) {
 					}
 					return ""
 				}
-				if got := newPersonFinder(test.sources, value, nil) != nil; got != test.want {
+				if got := newPersonFinder(test.sources, value, nil, nil) != nil; got != test.want {
 					t.Errorf("finder = %v, want %v", got, test.want)
 				}
 			})

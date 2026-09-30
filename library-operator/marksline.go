@@ -21,22 +21,23 @@ type markLine struct {
 
 // The answerer of each block the marks fact can ask. TheIntroDB takes the
 // token where one reached the container, and IntroDB takes none.
-var markAnswerers = map[string]func(base, token string, record *tallies) markAnswerer{
-	providerBlockTheIntroDB: func(base, token string, record *tallies) markAnswerer {
-		client := newTheIntroDBClient(base, token)
+var markAnswerers = map[string]func(base, token string, transport http.RoundTripper, record *tallies) markAnswerer{
+	providerBlockTheIntroDB: func(base, token string, transport http.RoundTripper, record *tallies) markAnswerer {
+		client := newTheIntroDBClient(base, token, transport)
 		client.recordTo(record)
 		return newTheIntroDBMarkAnswerer(client)
 	},
-	providerBlockIntroDB: func(base, _ string, record *tallies) markAnswerer {
-		client := newIntroDBClient(base)
+	providerBlockIntroDB: func(base, _ string, transport http.RoundTripper, record *tallies) markAnswerer {
+		client := newIntroDBClient(base, transport)
 		client.recordTo(record)
 		return newIntroDBMarkAnswerer(client)
 	},
 }
 
 // The line, in the order the Library's own spec.sources names the blocks.
-func newMarkLine(blocks []string, value func(string) string, record *tallies) *markLine {
-	return &markLine{answerers: recordingAnswerers(blocks, value, record, markAnswerers)}
+func newMarkLine(blocks []string, value func(string) string,
+	transport http.RoundTripper, record *tallies) *markLine {
+	return &markLine{answerers: recordingAnswerers(blocks, value, transport, record, markAnswerers)}
 }
 
 // What one file's ask learned. entries are every span, in the line's order.

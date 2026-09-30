@@ -31,7 +31,7 @@ func testTrailerSources(t *testing.T) map[string]trailerSource {
 				return "https://videos.example"
 			}
 			return ""
-		}, nil).sources
+		}, nil, nil).sources
 }
 
 // Every fetcher answers for the site it is keyed under, so the gap query's
@@ -40,7 +40,7 @@ func TestEveryFetcherAnswersForTheSiteItIsKeyedUnder(t *testing.T) {
 	for site, entry := range trailerFetchers {
 		t.Run(site, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				if answered := entry.build("https://one.example", "", nil).fetcher.site(); answered != site {
+				if answered := entry.build("https://one.example", "", nil, nil).fetcher.site(); answered != site {
 					t.Errorf("the fetcher answers for %q, want %q", answered, site)
 				}
 			})
@@ -61,7 +61,7 @@ func TestANewSitePlugsInThroughTheFetcherTable(t *testing.T) {
 		if held := trailerFileGapQuery(); !strings.Contains(held, "'"+site+"'") {
 			t.Errorf("the gap reads %q, want the new site among its sites", held)
 		}
-		line := newTrailerFetchLine([]string{block}, func(string) string { return "" }, nil)
+		line := newTrailerFetchLine([]string{block}, func(string) string { return "" }, nil, nil)
 		source, held := line.sources[site]
 		if !held {
 			t.Fatalf("the line holds %v, want the new site", line.sources)
@@ -78,8 +78,8 @@ func registerTrailerFetcher(t *testing.T, site, block string) {
 	t.Helper()
 	trailerFetchers[site] = trailerFetcherEntry{
 		block: block,
-		build: func(base, _ string, record *tallies) trailerSource {
-			client := newArchiveClient(base)
+		build: func(base, _ string, transport http.RoundTripper, record *tallies) trailerSource {
+			client := newArchiveClient(base, transport)
 			client.recordTo(record)
 			return trailerSource{fetcher: drillFetcher{name: site},
 				requests: &client.providerRequests}
@@ -132,7 +132,7 @@ func TestTheFetchLineTakesTheSitesItCanReach(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				line := newTrailerFetchLine(test.blocks,
-					func(name string) string { return test.env[name] }, nil)
+					func(name string) string { return test.env[name] }, nil, nil)
 
 				sites := []string{}
 				for site := range line.sources {
@@ -148,8 +148,8 @@ func TestTheFetchLineTakesTheSitesItCanReach(t *testing.T) {
 }
 
 // One instance that answers the video its own file is on, so a line built
-// from the environment reaches it for both calls.
-func fakeTrailerInstance(t *testing.T, status int) string {
+// on its transport reaches it for both calls.
+func fakeTrailerInstance(t *testing.T, status int) *apiservertest.Server {
 	t.Helper()
 	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, peertubeVideoPath) {
@@ -160,10 +160,7 @@ func fakeTrailerInstance(t *testing.T, status int) string {
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, "video bytes")
 	}))
-	held := providerTransport
-	providerTransport = server
-	t.Cleanup(func() { providerTransport = held })
-	return apiservertest.Host
+	return server
 }
 
 // Every request of a line built with a recorder counts under the provider
@@ -183,13 +180,13 @@ func TestAFetchLineCountsTheRequestsOfItsSite(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				address := fakeTrailerInstance(t, test.status)
+				server := fakeTrailerInstance(t, test.status)
 				record := newTallies(nil, "house/movies", workerEnrich, "enrich-1",
 					trailerFileContainerName, time.Now())
 				line := newTrailerFetchLine([]string{providerBlockPeerTube}, func(name string) string {
 					return map[string]string{
-						providerEndpointVariable(providerBlockPeerTube): address}[name]
-				}, record)
+						providerEndpointVariable(providerBlockPeerTube): apiservertest.Host}[name]
+				}, server, record)
 				source := line.sources[trailerSitePeerTube]
 
 				files, err := source.fetcher.files(t.Context(),
@@ -332,8 +329,7 @@ func newFakeDownload(t *testing.T, download *fakeDownload) (trailerSource, strin
 		_, _ = io.WriteString(w, download.body)
 	}))
 
-	client := newArchiveClient(apiservertest.Host)
-	client.http = server.Client()
+	client := newArchiveClient(apiservertest.Host, server)
 	source := trailerSource{fetcher: archiveTrailerFetcher{client: client},
 		requests: &client.providerRequests}
 	return source, apiservertest.Host + "/download/one/one.mp4"
@@ -375,8 +371,7 @@ func TestAPullTakesTheSitesCooldownAndAsksAgain(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, "a whole trailer")
 		}))
-		client := newArchiveClient(apiservertest.Host)
-		client.http = server.Client()
+		client := newArchiveClient(apiservertest.Host, server)
 		source := trailerSource{fetcher: archiveTrailerFetcher{client: client},
 			requests: &client.providerRequests}
 		path := filepath.Join(t.TempDir(), ".pull")

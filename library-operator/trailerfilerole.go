@@ -36,7 +36,7 @@ const trailerFileWorkers = 2
 func (e *enricher) trailerFileFact(ctx context.Context) error {
 	sources := os.Getenv(librarySourcesVariable)
 	if e.trailerFiles == nil {
-		e.trailerFiles = newTrailerFetchLine(commaNames(sources), os.Getenv, e.tallies)
+		e.trailerFiles = newTrailerFetchLine(commaNames(sources), os.Getenv, e.providerTransport, e.tallies)
 	}
 	if len(e.trailerFiles.sources) == 0 {
 		// The error names the sources the container received, because the

@@ -39,10 +39,8 @@ func imdbEnricherOnAgent(t *testing.T, kind string) (*enricher, *Catalog, *sqlit
 	server := newDatasetServer(t, datasetsModified)
 	t.Setenv(librarySourcesVariable, providerBlockIMDb)
 	t.Setenv(imdbEndpointVariable, server.URL)
-	held := datasetTransport
-	datasetTransport = server
-	t.Cleanup(func() { datasetTransport = held })
 	work, _ := testEnricher(t, kind, root, catalog)
+	work.datasetTransport = server
 	work.ratingScope = ratingGapScope{reopen: datasetsModified.Unix(), episodes: true}
 	return work, catalog, agent, server, root
 }
@@ -296,6 +294,7 @@ func TestALaterRunTakesTheEpisodeIDFromItsLedger(t *testing.T) {
 		}
 		next, _ := testEnricher(t, libraryKindSeries, root, catalog)
 		next.ratingScope = work.ratingScope
+		next.datasetTransport = server
 
 		runIMDbRating(t, next)
 

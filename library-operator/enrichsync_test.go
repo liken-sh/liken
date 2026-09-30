@@ -217,13 +217,12 @@ func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	})
 }
 
-// the provider the identity fact asks, answered by a fake TMDb for the life
-// of one test.
-func answeringTMDb(t *testing.T, client *tmdbClient) {
+// The provider the identity fact asks, answered by a fake TMDb. The fake's
+// transport answers every address, so the container's client reaches it at
+// TMDb's own address.
+func answeringTMDb(t *testing.T, work *enricher, client *tmdbClient) {
 	t.Helper()
-	was, transportWas := tmdbAPIBase, providerTransport
-	t.Cleanup(func() { tmdbAPIBase, providerTransport = was, transportWas })
-	tmdbAPIBase, providerTransport = client.base, client.http.Transport
+	work.providerTransport = client.http.Transport
 	t.Setenv(tmdbTokenVariable, "a-token")
 }
 
@@ -239,7 +238,7 @@ func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 			tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
 				tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
 		})
-		answeringTMDb(t, client)
+		answeringTMDb(t, work, client)
 
 		if err := work.runFacts(t.Context(), []string{factIdentity}); err != nil {
 			t.Fatalf("the identity container failed: %v", err)

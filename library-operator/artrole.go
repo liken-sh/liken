@@ -20,7 +20,7 @@ import (
 // only where a source serves one of its facts.
 func (e *enricher) artFact(ctx context.Context, fact string) error {
 	if e.art == nil {
-		e.art = newArtLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
+		e.art = newArtLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.providerTransport, e.tallies)
 	}
 	if len(e.art.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", fact)
