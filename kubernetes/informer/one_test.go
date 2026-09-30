@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -108,95 +109,106 @@ func watchThing(t *testing.T, server *watchServer, seen *reports, synced func())
 // matches a list and a watch against a Role's resourceNames only
 // through that field selector.
 func TestAWatchOfOneObjectReportsEachChange(t *testing.T) {
-	server := newWatchServer(thingsPath, [][]thing{{sized("a", "7", 1)}}, []string{
-		event("MODIFIED", sized("a", "8", 2)),
-		event("DELETED", sized("a", "9", 2)),
-		event("ADDED", sized("a", "10", 3)),
-		holdOpen,
-	})
-	seen := &reports{}
-	watchThing(t, server, seen, nil)
+	synctest.Test(t, func(t *testing.T) {
+		server := newWatchServer(thingsPath, [][]thing{{sized("a", "7", 1)}}, []string{
+			event("MODIFIED", sized("a", "8", 2)),
+			event("DELETED", sized("a", "9", 2)),
+			event("ADDED", sized("a", "10", 3)),
+			holdOpen,
+		})
+		seen := &reports{}
+		watchThing(t, server, seen, nil)
+		synctest.Wait()
 
-	eventually(t, "the owner takes each change", func() bool { return len(seen.all()) == 4 })
-	if got, want := seen.all(), []string{"1", "2", "absent", "3"}; !slices.Equal(got, want) {
-		t.Errorf("reports = %q, want %q", got, want)
-	}
-	for _, query := range server.sent() {
-		if query != "labelSelector= fieldSelector=metadata.name=a" {
-			t.Errorf("a request asked for %q, want the field selector metadata.name=a", query)
+		if got, want := seen.all(), []string{"1", "2", "absent", "3"}; !slices.Equal(got, want) {
+			t.Errorf("reports = %q, want %q", got, want)
 		}
-	}
+		for _, query := range server.sent() {
+			if query != "labelSelector= fieldSelector=metadata.name=a" {
+				t.Errorf("a request asked for %q, want the field selector metadata.name=a", query)
+			}
+		}
+	})
 }
 
 // An object absent from the first read has no event, so the watch
 // reports it absent once that read is done, and then runs synced.
 func TestAWatchOfOneObjectReportsAnAbsentObjectBeforeSynced(t *testing.T) {
-	server := newWatchServer(thingsPath, [][]thing{{}})
-	seen := &reports{}
-	synced := make(chan []string, 1)
-	watchThing(t, server, seen, func() { synced <- seen.all() })
+	synctest.Test(t, func(t *testing.T) {
+		server := newWatchServer(thingsPath, [][]thing{{}})
+		seen := &reports{}
+		synced := make(chan []string, 1)
+		watchThing(t, server, seen, func() { synced <- seen.all() })
 
-	if got, want := <-synced, []string{"absent"}; !slices.Equal(got, want) {
-		t.Errorf("reports at synced = %q, want %q", got, want)
-	}
+		if got, want := <-synced, []string{"absent"}; !slices.Equal(got, want) {
+			t.Errorf("reports at synced = %q, want %q", got, want)
+		}
+	})
 }
 
 // An object absent from the first read is reported absent, and when
 // it is created after that read, the owner takes it.
 func TestAWatchOfOneObjectReportsAnAbsentObjectAndItsArrival(t *testing.T) {
-	server := newWatchServer(thingsPath, [][]thing{{}}, []string{awaitGate, event("ADDED", sized("a", "8", 5)), holdOpen})
-	seen := &reports{}
-	watchThing(t, server, seen, func() { close(server.gate) })
+	synctest.Test(t, func(t *testing.T) {
+		server := newWatchServer(thingsPath, [][]thing{{}}, []string{awaitGate, event("ADDED", sized("a", "8", 5)), holdOpen})
+		seen := &reports{}
+		watchThing(t, server, seen, func() { close(server.gate) })
+		synctest.Wait()
 
-	eventually(t, "the owner takes the new object", func() bool { return len(seen.all()) == 2 })
-	if got, want := seen.all(), []string{"absent", "5"}; !slices.Equal(got, want) {
-		t.Errorf("reports = %q, want %q", got, want)
-	}
+		if got, want := seen.all(), []string{"absent", "5"}; !slices.Equal(got, want) {
+			t.Errorf("reports = %q, want %q", got, want)
+		}
+	})
 }
 
 // A copy that does not convert is logged, and the owner keeps the copy
 // it holds, because the next version of the object can be valid.
 func TestAWatchOfOneObjectSkipsACopyThatDoesNotConvert(t *testing.T) {
-	server := newWatchServer(thingsPath, [][]thing{{sized("a", "7", 1)}}, []string{
-		unconvertible("MODIFIED", "a", "8"),
-		event("MODIFIED", sized("a", "9", 4)),
-		holdOpen,
-	})
-	seen := &reports{}
-	watchThing(t, server, seen, nil)
+	synctest.Test(t, func(t *testing.T) {
+		server := newWatchServer(thingsPath, [][]thing{{sized("a", "7", 1)}}, []string{
+			unconvertible("MODIFIED", "a", "8"),
+			event("MODIFIED", sized("a", "9", 4)),
+			holdOpen,
+		})
+		seen := &reports{}
+		watchThing(t, server, seen, nil)
+		synctest.Wait()
 
-	eventually(t, "the owner takes the valid copy", func() bool { return len(seen.all()) == 2 })
-	if got, want := seen.all(), []string{"1", "4"}; !slices.Equal(got, want) {
-		t.Errorf("reports = %q, want %q", got, want)
-	}
+		if got, want := seen.all(), []string{"1", "4"}; !slices.Equal(got, want) {
+			t.Errorf("reports = %q, want %q", got, want)
+		}
+	})
 }
 
 // An owner that reads the object itself takes it as Unstructured, which
 // every copy converts to.
 func TestAWatchOfOneObjectHandsOverAnUnstructuredCopy(t *testing.T) {
-	server := newWatchServer(thingsPath, [][]thing{{}}, []string{unconvertible("ADDED", "a", "8"), holdOpen})
-	var mu sync.Mutex
-	var sizes []any
-	ctx, stop := context.WithCancel(t.Context())
-	watch := WatchOne(ctx, testWatcher(t, server), One{Resource: thingResource, Name: "a", What: "the thing a"},
-		func(held *unstructured.Unstructured) {
-			mu.Lock()
-			defer mu.Unlock()
-			if held == nil {
-				sizes = append(sizes, nil)
-				return
-			}
-			size, _, _ := unstructured.NestedFieldNoCopy(held.Object, "spec", "size")
-			sizes = append(sizes, size)
-		}, nil)
-	t.Cleanup(func() {
-		stop()
-		<-watch.Done()
-	})
+	synctest.Test(t, func(t *testing.T) {
+		server := newWatchServer(thingsPath, [][]thing{{}}, []string{unconvertible("ADDED", "a", "8"), holdOpen})
+		var mu sync.Mutex
+		var sizes []any
+		ctx, stop := context.WithCancel(t.Context())
+		watch := WatchOne(ctx, testWatcher(t, server), One{Resource: thingResource, Name: "a", What: "the thing a"},
+			func(held *unstructured.Unstructured) {
+				mu.Lock()
+				defer mu.Unlock()
+				if held == nil {
+					sizes = append(sizes, nil)
+					return
+				}
+				size, _, _ := unstructured.NestedFieldNoCopy(held.Object, "spec", "size")
+				sizes = append(sizes, size)
+			}, nil)
+		t.Cleanup(func() {
+			stop()
+			<-watch.Done()
+		})
+		synctest.Wait()
 
-	eventually(t, "the owner takes the copy", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(sizes) > 0 && sizes[len(sizes)-1] == "large"
+		if len(sizes) == 0 || sizes[len(sizes)-1] != "large" {
+			t.Errorf("the owner took sizes %v, want the last to be large", sizes)
+		}
 	})
 }

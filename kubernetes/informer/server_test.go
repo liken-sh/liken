@@ -1,15 +1,14 @@
 package informer
 
 // The test kind, and the scripted API server that the tests run the
-// real reflector against.
+// real reflector against. The server answers over the in-memory
+// connections of apiservertest, so each test runs in a synctest bubble
+// and waits out the reflector's backoff on the fake clock.
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 const (
@@ -74,8 +74,9 @@ func asObject(t *testing.T, item thing) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: fields}
 }
 
-// serverDown, as a failure, refuses each connection to the server, the
-// way a client finds an API server that restarts.
+// serverDown, as a failure, takes the server down, so it closes each
+// connection and refuses each new one, the way an API server that
+// restarts does.
 const serverDown = -1
 
 // holdOpen, as the last line of a script, keeps the stream open until
@@ -90,8 +91,8 @@ const awaitGate = "gate"
 
 // watchServer is an API server for one collection. Each read of the
 // collection answers the next of reads, and the last one again after
-// that. Each watch connection plays the next script of events. While
-// refuse is set, the server answers every watch with 403.
+// that. Each watch connection plays the next script of events. While a
+// failure is set, the server fails every watch with it.
 //
 // The reflector reads a collection with a streaming list: a watch that
 // asks for the initial events. The server answers it the way the API
@@ -103,31 +104,21 @@ type watchServer struct {
 	path    string
 	reads   [][]thing
 	scripts [][]string
+	gate    chan struct{}
+
+	// server serves the collection to the test's client (testWatcher).
+	server *apiservertest.Server
 
 	mu        sync.Mutex
 	failure   int
-	spared    int
+	failures  int
 	readCount int
 	watches   int
 	queries   []string
-	opened    chan struct{}
-	failed    chan struct{}
-	gate      chan struct{}
-
-	// refused is a port that no process listens on.
-	refused string
 }
 
 func newWatchServer(path string, reads [][]thing, scripts ...[]string) *watchServer {
-	return &watchServer{path: path, reads: reads, scripts: scripts, opened: make(chan struct{}, len(scripts)+8), failed: make(chan struct{}, 1),
-		gate: make(chan struct{})}
-}
-
-// fails reports whether the server fails now with the failure.
-func (s *watchServer) fails(failure int) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.failure == failure && s.watches >= s.spared
+	return &watchServer{path: path, reads: reads, scripts: scripts, gate: make(chan struct{})}
 }
 
 func (s *watchServer) read() ([]thing, string) {
@@ -138,12 +129,27 @@ func (s *watchServer) read() ([]thing, string) {
 	return s.reads[index], fmt.Sprint(100 * s.readCount)
 }
 
-// failing sets how the server fails each watch after the first spared
-// watches it accepted. A failure of 0 accepts every watch.
-func (s *watchServer) failing(failure, spared int) {
+// failing sets how the server fails each watch from now on: with an
+// HTTP status, or by going down. A failure of 0 accepts every watch,
+// and brings a server that was down up again.
+func (s *watchServer) failing(failure int) {
+	s.mu.Lock()
+	s.failure = failure
+	s.mu.Unlock()
+	s.server.SetDown(failure == serverDown)
+}
+
+// failed answers how many watches and connections the server refused.
+func (s *watchServer) failed() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.failure, s.spared = failure, spared
+	return s.failures
+}
+
+func (s *watchServer) countFailure() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failures++
 }
 
 func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +161,6 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.queries = append(s.queries, "labelSelector="+query.Get("labelSelector")+" fieldSelector="+query.Get("fieldSelector"))
 	failure := s.failure
-	fail := failure > 0 && s.watches >= s.spared
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 
@@ -168,7 +173,7 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if fail {
+	if failure > 0 {
 		s.fail(w, failure)
 		return
 	}
@@ -186,7 +191,6 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			testAPI, testKind, version)
 	}
 	w.(http.Flusher).Flush()
-	s.opened <- struct{}{}
 
 	script := []string{holdOpen}
 	if connection < len(s.scripts) {
@@ -218,51 +222,10 @@ func (s *watchServer) fail(w http.ResponseWriter, status int) {
 	s.countFailure()
 }
 
-func (s *watchServer) countFailure() {
-	select {
-	case s.failed <- struct{}{}:
-	default:
-	}
-}
-
-// dial connects a client to the server, or to the refused port while
-// the server is down.
-func (s *watchServer) dial(ctx context.Context, network, address string) (net.Conn, error) {
-	if s.fails(serverDown) {
-		address = s.refused
-		defer s.countFailure()
-	}
-	return (&net.Dialer{}).DialContext(ctx, network, address)
-}
-
 func (s *watchServer) sent() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string{}, s.queries...)
-}
-
-// awaitWatches waits until the watcher has opened count more watches.
-func (s *watchServer) awaitWatches(t *testing.T, count int) {
-	t.Helper()
-	for range count {
-		select {
-		case <-s.opened:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("the watcher opened fewer than %d watches", count)
-		}
-	}
-}
-
-// awaitFailures waits until the server has failed count more watches.
-func (s *watchServer) awaitFailures(t *testing.T, count int) {
-	t.Helper()
-	for range count {
-		select {
-		case <-s.failed:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("the server failed fewer than %d watches", count)
-		}
-	}
 }
 
 // event is one line of a watch stream.
@@ -271,44 +234,36 @@ func event(kind string, item thing) string {
 	return fmt.Sprintf(`{"type":%q,"object":%s}`, kind, object)
 }
 
-// testWatcher points a dynamic client at a test server.
+// testWatcher serves the collection, and points a dynamic client at it.
+// The server counts each connection it refuses while it is down as a
+// failure. A test that calls it runs in a synctest bubble, because its
+// cleanup sleeps for a minute.
+//
+// client-go's reflector waits out its backoff after a refused streaming
+// list without reading its context. The backoff is at most 30 seconds
+// with full jitter, so the wait lasts less than a minute. The cleanup
+// sleeps past it, so the reflector returns before the bubble ends.
 func testWatcher(t *testing.T, script *watchServer) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewUnstartedServer(script)
-	server.Config.SetKeepAlivesEnabled(false)
-	server.Start()
-	t.Cleanup(server.Close)
-	script.refused = refusedAddress(t)
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL, Dial: script.dial})
+	script.server = apiservertest.Start(t, script)
+	t.Cleanup(func() { time.Sleep(time.Minute) })
+	config := script.server.Config()
+	config.Transport = countRefusals{script}
+	client, err := dynamic.NewForConfig(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return client
 }
 
-// refusedAddress is a local port that no process listens on, so the
-// kernel refuses each connection to it.
-func refusedAddress(t *testing.T) string {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return address
-}
+// countRefusals sends each request to the script's server, and counts
+// each connection the server refuses while it is down as a failure.
+type countRefusals struct{ script *watchServer }
 
-// eventually waits until the condition holds.
-func eventually(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("%s: not within 5s", what)
-		}
-		time.Sleep(10 * time.Millisecond)
+func (c countRefusals) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := c.script.server.RoundTrip(req)
+	if err != nil {
+		c.script.countFailure()
 	}
+	return resp, err
 }

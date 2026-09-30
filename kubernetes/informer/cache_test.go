@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
@@ -90,9 +90,8 @@ func (api *fakeAPI) sent() []string {
 
 func testClient(t *testing.T, api *fakeAPI) *apiclient.Client {
 	t.Helper()
-	server := httptest.NewServer(api)
-	t.Cleanup(server.Close)
-	return apiclient.New(server.URL, server.Client(), "")
+	server := apiservertest.Start(t, api)
+	return apiclient.New(apiservertest.Host, server.Client(), "")
 }
 
 // storeOf is a store that holds the objects, the way a watch's store

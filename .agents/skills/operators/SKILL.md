@@ -303,11 +303,13 @@ runs them through the real reflector. `liken/kubernetes/watch` holds
   pods of `audio-operator`, `display-operator`, and `media-operator`
   follow their certificate Secrets and CA ConfigMaps this way.
 - **Test the handlers, not the reflector.** Point the dynamic client
-  at an `httptest` server that answers a streaming list: an `ADDED`
-  event for each object, then a `BOOKMARK` whose annotations hold
-  `k8s.io/initial-events-end: "true"`, then the script's events on the
-  same stream. Test the wake rule through that server, and leave the
-  reflector's faults to upstream.
+  at a server from `kubernetes/apiservertest` that answers a streaming
+  list: an `ADDED` event for each object, then a `BOOKMARK` whose
+  annotations hold `k8s.io/initial-events-end: "true"`, then the
+  script's events on the same stream. Test the wake rule through that
+  server, and leave the reflector's faults to upstream. The server
+  answers over in-memory connections, so the test runs in a
+  `synctest` bubble and waits out a backoff on the fake clock.
 
 ## Read from the cache
 

@@ -66,10 +66,6 @@ type Client struct {
 	http        *http.Client
 	credentials string
 
-	// throttleUnit is one second of the wait that a 429 asks for. The
-	// tests make it shorter, so a test of the retry waits milliseconds.
-	throttleUnit time.Duration
-
 	// ctx is the context every request carries (WithContext). Nil means
 	// no context ends a request.
 	ctx context.Context
@@ -84,10 +80,10 @@ type Client struct {
 }
 
 // New builds a client from its three parts. InCluster reads them from
-// the pod's environment, and a test takes them from an httptest
+// the pod's environment, and a test takes them from its fake API
 // server. An empty credentials directory sends no token.
 func New(base string, httpClient *http.Client, credentials string) *Client {
-	return &Client{base: base, http: httpClient, credentials: credentials, throttleUnit: time.Second}
+	return &Client{base: base, http: httpClient, credentials: credentials}
 }
 
 // InClusterOptions are the optional parts of an in-cluster client.
@@ -243,7 +239,7 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 	for {
 		err := c.send(method, path, contentType, body, out)
 		var throttled *throttledError
-		if !errors.As(err, &throttled) || waited+throttled.wait > maxThrottleWait*c.throttleUnit {
+		if !errors.As(err, &throttled) || waited+throttled.wait > maxThrottleWait*time.Second {
 			return err
 		}
 		timer := time.NewTimer(throttled.wait)
@@ -314,7 +310,7 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) er
 		err := fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			seconds := retryAfter(resp.Header.Get("Retry-After"), message)
-			return &throttledError{err: err, wait: time.Duration(seconds) * c.throttleUnit, seconds: seconds}
+			return &throttledError{err: err, wait: time.Duration(seconds) * time.Second, seconds: seconds}
 		}
 		return err
 	case out == nil:
