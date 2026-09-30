@@ -93,9 +93,9 @@ pub struct Options {
     /// Every `Person` the cluster holds. An empty list means no name is
     /// checked against it.
     pub people: Vec<audience::Person>,
-    /// Where that list was read from, so the browser reads it again each
-    /// time it asks who is watching. A list in a pod is a projected
-    /// ConfigMap that the kubelet rewrites when a `Person` is added.
+    /// Where that list was read from, so the browser watches the file and
+    /// reads it again on each change. A list in a pod is a mounted
+    /// `ConfigMap` that the kubelet rewrites when a `Person` changes.
     pub people_file: Option<PathBuf>,
     /// The people watching at the start of the run, by `Person` name. An
     /// empty audience reads the plays that name nobody.

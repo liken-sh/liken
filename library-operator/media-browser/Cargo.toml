@@ -53,6 +53,14 @@ base64 = "=0.22.1"
 # allocator's mmap and trim thresholds. Without the pin, image decodes
 # dirty heap arenas the process never returns.
 libc = "=0.2.189"
+# rustix opens the inotify watch on the directory the `Person` list is
+# mounted in, through a safe interface over the system calls. The Wayland
+# client and the process metrics already build this version with the
+# `fs` feature, so naming it here adds nothing to the build.
+rustix = { version = "=1.1.4", default-features = false, features = [
+    "fs",
+    "std",
+] }
 # serde_json writes the measurements file.
 serde_json = "=1.0.151"
 # SHA-256 gives each disk cache key a stable file name across processes

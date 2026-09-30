@@ -3,9 +3,10 @@ package main
 // The people file a screen reads: the namespace's Person list, cut to
 // the fields the browser draws, written as one ConfigMap per screen
 // namespace and mounted into every screen pod there. The browser holds
-// no API credential, so the list reaches it as a file, and the kubelet
-// rewrites the file within its sync period when the map changes, so a
-// Person added later shows on the next ask with no pod restart.
+// no API credential, so the list reaches it as a file. The kubelet
+// rewrites the file within its sync period when the map changes, and the
+// browser watches the mount directory, so a Person added, removed, or
+// changed later shows on the screen with no pod restart.
 
 import (
 	"context"

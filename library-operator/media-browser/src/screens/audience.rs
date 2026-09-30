@@ -164,7 +164,7 @@ pub enum Focus {
 /// The picker's own state: which of the known people are chosen, which
 /// tile focus was last on, and whether it stands on the link. The people
 /// themselves stay with the browser's audience, so the picker names them
-/// by index alone.
+/// by index, and a new list maps the picker across by `Person` name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Picker {
     chosen: Vec<bool>,
@@ -187,6 +187,30 @@ impl Picker {
             tile: 0,
             on_link: false,
         }
+    }
+
+    /// The same picker over a new list. A chosen person stays chosen, and
+    /// focus stays on the same person, both by `Person` name, so a list
+    /// that grows, shrinks, or reorders under a person part way through an
+    /// answer keeps what they did. A chosen person the new list dropped is
+    /// no longer chosen. Focus on a person the new list dropped stays at
+    /// the same index, moved back onto the last tile where the row is now
+    /// shorter.
+    pub fn relisted(&self, before: &[Person], after: &[Person]) -> Self {
+        let index_in = |name: &str| after.iter().position(|person| person.name == name);
+        let chosen: Vec<usize> = before
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.holds(*index))
+            .filter_map(|(_, person)| index_in(&person.name))
+            .collect();
+        let mut picker = Self::open(after.len(), &chosen);
+        picker.tile = before
+            .get(self.tile)
+            .and_then(|person| index_in(&person.name))
+            .unwrap_or_else(|| self.tile.min(after.len().saturating_sub(1)));
+        picker.on_link = self.on_link;
+        picker
     }
 
     /// How many tiles the row holds: one per known person.

@@ -6,6 +6,8 @@ use serde_json::Value;
 
 // The picture a person's entry carries.
 pub mod thumbnail;
+// The inotify watch that keeps the list current from its file.
+pub mod watch;
 
 pub use thumbnail::Thumbnail;
 
@@ -115,13 +117,13 @@ impl Audience {
         &self.known
     }
 
-    /// Replace the `Person` list. The answer stands: a person who was
-    /// chosen stays chosen, and one the new list dropped is filtered out
-    /// of what a play records the next time an answer is taken. The list
-    /// on disk changes when a `Person` is added, which is rare and never
-    /// worth a restart.
-    pub fn learn(&mut self, known: Vec<Person>) {
-        self.known = known;
+    /// Replace the `Person` list, and answer the list it replaces. The
+    /// answer stands: a person who was chosen stays chosen, and one the
+    /// new list dropped is filtered out of what a play records the next
+    /// time an answer is taken. Until then the dropped name draws its own
+    /// first letter, because no display name is left for it.
+    pub fn learn(&mut self, known: Vec<Person>) -> Vec<Person> {
+        std::mem::replace(&mut self.known, known)
     }
 
     /// Set who is watching, as of this second. A name outside the known

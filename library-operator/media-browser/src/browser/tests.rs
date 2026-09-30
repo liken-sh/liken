@@ -21,6 +21,7 @@ mod marks;
 mod moments;
 mod pages;
 mod paging;
+mod people;
 mod pickup;
 mod plays;
 mod prefetch;

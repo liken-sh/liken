@@ -1943,6 +1943,7 @@ dependencies = [
  "metrics-process",
  "metrics-util",
  "rusqlite",
+ "rustix 1.1.4",
  "serde_json",
  "sha2",
  "tempfile",

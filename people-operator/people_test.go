@@ -111,7 +111,7 @@ func TestCRDPrinterColumns(t *testing.T) {
 		names = append(names, column.Name)
 	}
 
-	for _, name := range []string{"Name", "Nickname", "UID", "Avatar", "Age"} {
+	for _, name := range []string{"Display Name", "Nickname", "UID", "Picture", "Age", "Message"} {
 		t.Run(name, func(t *testing.T) {
 			if !slices.Contains(names, name) {
 				t.Errorf("printer columns %v, want one named %q", names, name)

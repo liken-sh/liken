@@ -34,6 +34,8 @@ mod keys;
 mod lines;
 // The marks a person sets on a title, and where they are published.
 mod marks;
+// The `Person` list as it changes under a running browser.
+mod people;
 // One press and the line it prints.
 mod press;
 mod reader;
@@ -102,9 +104,9 @@ pub struct Browser<S: Source, A: Art> {
     // request is recorded against them, and every progress read is for
     // them.
     audience: Audience,
-    // Where the `Person` list is read from again each time the picker
-    // opens, or nothing on a run that named no file.
-    people_file: Option<std::path::PathBuf>,
+    // The watch that keeps the `Person` list current from its file, or
+    // nothing on a run that named no file.
+    people: Option<audience::watch::Watch>,
     // The refresh policy. It holds the shade and the cover, and the
     // browser decides neither: it asks for the shade, the crate decides,
     // and the moment comes back here; the bus says in every status
@@ -210,7 +212,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             marks: Marks::default(),
             now: clock::seconds,
             audience: Audience::default(),
-            people_file: None,
+            people: None,
             refresh: Refresh::default(),
             activity: Activity::Idle,
             returning: false,
@@ -287,10 +289,11 @@ impl<S: Source, A: Art> Browser<S, A> {
         self
     }
 
-    /// Read the `Person` list again from this file each time the picker
-    /// opens.
+    /// Keep the `Person` list current from this file while the browser
+    /// runs. A change reaches every place the browser draws people on the
+    /// next pass of the loop.
     pub fn with_people_file(mut self, path: Option<std::path::PathBuf>) -> Self {
-        self.people_file = path;
+        self.people = path.map(audience::watch::Watch::start);
         self
     }
 
@@ -300,26 +303,6 @@ impl<S: Source, A: Art> Browser<S, A> {
         &self.audience
     }
 
-    // Read the `Person` list from its file again, so a picker opened after
-    // a `Person` was added draws them. A file that cannot be read leaves
-    // the list the browser holds, because a list that was good at the
-    // start is better than none.
-    fn learn_people(&mut self) {
-        let Some(path) = &self.people_file else {
-            return;
-        };
-        let people = std::fs::read(path)
-            .ok()
-            .and_then(|bytes| crate::audience::people_from_json(&bytes).ok());
-        match people {
-            Some(people) => self.audience.learn(people),
-            None => eprintln!(
-                "media-browser: the people file could not be read: {}",
-                path.display()
-            ),
-        }
-    }
-
     /// Whether the shade is down. The frame is black while it is.
     pub fn asleep(&self) -> bool {
         self.refresh.asleep()
@@ -327,11 +310,11 @@ impl<S: Source, A: Art> Browser<S, A> {
 
     // The picker goes up as a layer over the stack and pops nothing, so
     // the screen under it is the one that comes back when the answer is
-    // taken. The list is read again first, and the people of the current
-    // answer start chosen. An audience that needs an answer holds none,
-    // so a picker raised by the ask starts with nobody.
+    // taken. The people of the current answer start chosen. An audience
+    // that needs an answer holds none, so a picker raised by the ask
+    // starts with nobody. The faces are cut here, because the panel's
+    // scale can change between two raises.
     fn raise_picker(&mut self) {
-        self.learn_people();
         self.faces.refresh(self.audience.known(), self.scale);
         let chosen = self.audience.chosen(self.clock);
         self.picker = Some(screens::audience::Picker::open(
@@ -943,6 +926,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // the film, which is already spent.
         self.clock = at;
         let folded = self.drain_bus();
+        let relisted = self.follow_people();
         let delivered = self.store.get_mut().delivered();
         let landed = self.landed_home();
         // The source names what changed. A catalog change, and a progress
@@ -976,7 +960,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         let refreshed = self.refresh.shown() && !self.reader.reading() && self.refresh_home();
         let row = self.refresh.shown() && !self.reader.reading() && self.refresh_row();
         let asked = self.ask();
-        folded || delivered || landed || caught_up || live || refreshed || row || asked
+        folded || relisted || delivered || landed || caught_up || live || refreshed || row || asked
     }
 
     // The page's backdrop is decoded at the logical size of the window,
@@ -993,11 +977,14 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         views::ramp::density(scale);
     }
 
-    // The source, the art store, the home page's reader, and the bus
-    // deliver on threads of their own, so all four take the handle that
-    // wakes the loop.
+    // The source, the art store, the home page's reader, the bus, and the
+    // watch on the `Person` list deliver on threads of their own, so all
+    // five take the handle that wakes the loop.
     fn wake_by(&mut self, wake: Waker) {
         self.source.wake_by(wake.clone());
+        if let Some(people) = &self.people {
+            people.wake_by(wake.clone());
+        }
         if let Some(bus) = &self.bus {
             bus.wake_on_delivery(wake.clone());
         }

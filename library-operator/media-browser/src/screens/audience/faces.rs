@@ -3,11 +3,13 @@
 // shape. The picker cuts it to the circle a tile draws, with the edge
 // antialiased, and decodes it at the panel's pixels for that circle.
 //
-// The decode and the cut run when the picker goes up, and never in a
-// frame, because a frame draws every tile each time it is drawn. The browser reads the people file again each time
-// the picker goes up, so a face whose picture and size are unchanged is
-// kept from the last look, and its handle with it. The renderer keys its
-// uploads by the handle, so a kept face is not uploaded again either.
+// The decode and the cut run when the picker goes up, and when the
+// `Person` list changes under a picker that stands, and never in a frame,
+// because a frame draws every tile each time it is drawn. A face whose
+// picture and size are unchanged is kept from the last look, and its
+// handle with it, so a new list decodes only the pictures that changed.
+// The renderer keys its uploads by the handle, so a kept face is not
+// uploaded again either.
 
 use std::io::Cursor;
 

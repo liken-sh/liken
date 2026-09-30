@@ -201,6 +201,67 @@ fn a_press_the_picker_binds_nothing_for_changes_nothing() {
     assert!(!picker.holds(0));
 }
 
+// People by `Person` name alone.
+fn named(names: &[&str]) -> Vec<Person> {
+    names
+        .iter()
+        .map(|name| Person {
+            name: (*name).to_string(),
+            display_name: (*name).to_string(),
+            thumbnail: None,
+        })
+        .collect()
+}
+
+// Each case: the list before, the tile focus stood on, the list after,
+// and the tile focus stands on over the new list.
+const REFOCUS: [(&[&str], usize, &[&str], usize); 4] = [
+    (&["a", "b", "c"], 1, &["c", "b"], 1),
+    (&["a", "b", "c"], 0, &["b", "c", "a"], 2),
+    (&["a", "b", "c"], 1, &["a", "c", "d"], 1),
+    (&["a", "b", "c"], 2, &["a"], 0),
+];
+
+#[test]
+fn focus_follows_its_person_to_a_new_list_or_stays_inside_the_row() {
+    for (before, tile, after, expected) in REFOCUS {
+        let mut picker = Picker::open(before.len(), &[]);
+        for _ in 0..tile {
+            picker.key("right");
+        }
+
+        let relisted = picker.relisted(&named(before), &named(after));
+
+        assert_eq!(
+            relisted.focus(),
+            Focus::Tile(expected),
+            "{before:?} at {tile} to {after:?}"
+        );
+    }
+}
+
+#[test]
+fn a_new_list_keeps_the_people_chosen_by_name_and_drops_the_ones_it_lost() {
+    let picker = Picker::open(3, &[0, 2]);
+
+    let relisted = picker.relisted(&named(&["a", "b", "c"]), &named(&["c", "b", "d"]));
+
+    assert_eq!(relisted.tiles(), 3);
+    assert!(relisted.holds(0), "c stays chosen at its new index");
+    assert!(!relisted.holds(1));
+    assert!(!relisted.holds(2));
+}
+
+#[test]
+fn a_picker_on_the_link_stays_on_the_link_over_a_new_list() {
+    let mut picker = Picker::open(2, &[]);
+    picker.key("down");
+
+    let relisted = picker.relisted(&named(&["a", "b"]), &named(&["b"]));
+
+    assert_eq!(relisted.focus(), Focus::Link);
+}
+
 // A person named First, with this picture or none.
 fn first(thumbnail: Option<crate::audience::Thumbnail>) -> Person {
     Person {

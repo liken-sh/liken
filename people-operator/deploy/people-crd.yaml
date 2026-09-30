@@ -28,7 +28,9 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
-        - name: Name
+        # kubectl already prints the resource's name as NAME, so the
+        # display name takes a header of its own.
+        - name: Display Name
           type: string
           jsonPath: .spec.displayName
         - name: Nickname
@@ -37,15 +39,24 @@ spec:
         - name: UID
           type: integer
           jsonPath: .spec.uid
-        # Whether the thumbnail answers the picture the spec names. A
-        # False here with the reason in the condition is the first thing
-        # to read when a screen shows initials in place of a picture.
-        - name: Avatar
+        # The reason on AvatarReady says both where the thumbnail came
+        # from (Inline, Fetched, Baked, or Initials) and why it failed
+        # (FetchFailed, BakeFailed, DecodeFailed, or UnsupportedScheme),
+        # so one word answers why a screen shows initials in place of a
+        # picture. The spec's source is not a column, because a data:
+        # URI would fill the terminal.
+        - name: Picture
           type: string
-          jsonPath: .status.conditions[?(@.type=="AvatarReady")].status
+          jsonPath: .status.conditions[?(@.type=="AvatarReady")].reason
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+        # kubectl get -o wide adds the condition's message, which names
+        # the failure in full.
+        - name: Message
+          type: string
+          priority: 1
+          jsonPath: .status.conditions[?(@.type=="AvatarReady")].message
       schema:
         openAPIV3Schema:
           type: object
