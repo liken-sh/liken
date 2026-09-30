@@ -43,7 +43,8 @@ codes:
 # holds under 400 MB.
 PATTERN_NAMES := white bars
 PATTERN_FRAMES := 1280x720 1920x1080 3840x2160 2560x1080 3840x1600 1920x804
-PATTERN_FILES := $(foreach name,$(PATTERN_NAMES),$(foreach frame,$(PATTERN_FRAMES),patterns/$(name)-$(frame).mkv))
+PATTERN_FILES := $(foreach name,$(PATTERN_NAMES),$(foreach frame,$(PATTERN_FRAMES),patterns/$(name)-$(frame).mkv)) \
+	patterns/speakers-1280x720.mkv
 
 PATTERN_SOURCE_white := color=c=white:r=1
 PATTERN_TITLE_white := White
@@ -71,6 +72,48 @@ patterns/%.mkv:
 	  -stream_loop 9 -i "$$work/minute.mkv" -i "$$work/chapters" \
 	  -map 0:v -map_chapters 1 -c copy \
 	  -metadata title='$(PATTERN_TITLE_$(name)), $(subst x,×,$(frame))' \
+	  $@
+
+# The speaker walk plays pink noise from one speaker of a 7.1 layout at a
+# time, 5 seconds each, around the room from the front left and then the
+# subwoofer, and names each speaker on the screen and in a chapter. Pink
+# noise is what a receiver's own speaker setup plays, and the subwoofer's
+# noise stops at 120 Hz. The picture is 1280x720, because the file is
+# for the ears. The audio is AAC at 80 kb/s with the cutoff forced to
+# 20 kHz: with the default, the encoder spreads the rate over all eight
+# channels, although seven are silent at a time, and cuts every band
+# above 8 kHz, so a tweeter would play nothing. 80 kb/s keeps the file
+# under the 500 KB that the large-file check allows. Each speaker is a
+# channel, the ffmpeg name of its channel, and its name on the screen.
+SPEAKERS := FL:Front_left FC:Centre FR:Front_right SR:Side_right \
+	BR:Back_right BL:Back_left SL:Side_left LFE:Subwoofer
+SPEAKER_FONT := ../brand/fonts/SourceSans3-Regular.otf
+
+patterns/speakers-1280x720.mkv: $(SPEAKER_FONT)
+	work=$$(mktemp -d) && trap 'rm -rf "$$work"' EXIT && \
+	audio="anoisesrc=color=pink:amplitude=0.25:sample_rate=48000:duration=40:seed=1,asplit=8" && \
+	video="color=c=black:s=1280x720:r=1:d=40" && \
+	echo ';FFMETADATA1' >"$$work/chapters" && \
+	index=0 && \
+	for speaker in $(SPEAKERS); do \
+	  channel=$${speaker%%:*}; label=$$(echo "$${speaker#*:}" | tr _ ' '); \
+	  start=$$((index * 5)); end=$$((start + 5)); \
+	  audio="$$audio[n$$index]"; \
+	  shape=; [ "$$channel" = LFE ] && shape="lowpass=f=120,lowpass=f=120,"; \
+	  gates="$$gates;[n$$index]$${shape}volume=0:enable='not(between(t,$$start,$$end))'[$$channel]"; \
+	  video="$$video,drawtext=fontfile=$(SPEAKER_FONT):text='$$label':fontsize=96:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-40:enable='between(t,$$start,$$end)'"; \
+	  video="$$video,drawtext=fontfile=$(SPEAKER_FONT):text='$$channel · $$((index + 1)) of 8':fontsize=40:fontcolor=0x9a9a9a:x=(w-text_w)/2:y=(h/2)+50:enable='between(t,$$start,$$end)'"; \
+	  printf '[CHAPTER]\nTIMEBASE=1/1\nSTART=%d\nEND=%d\ntitle=%s\n' "$$start" "$$end" "$$label" >>"$$work/chapters"; \
+	  index=$$((index + 1)); \
+	done && \
+	ffmpeg -nostdin -loglevel error -y \
+	  -filter_complex "$$audio$$gates;[FL][FR][FC][LFE][BL][BR][SL][SR]join=inputs=8:channel_layout=7.1:map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-BL|5.0-BR|6.0-SL|7.0-SR[audio];$$video[video]" \
+	  -i "$$work/chapters" -map '[video]' -map '[audio]' -map_chapters 0 -t 40 \
+	  -c:v libx264 -preset veryfast -tune stillimage -g 5 -bf 0 \
+	  -threads 1 -rc-lookahead 0 -pix_fmt yuv420p \
+	  -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 \
+	  -c:a aac -b:a 80k -cutoff 20000 \
+	  -metadata title='Speaker walk, 7.1' \
 	  $@
 
 # One run of the tests gives both the race check and the coverage

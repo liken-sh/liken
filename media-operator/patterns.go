@@ -1,6 +1,7 @@
 package main
 
-// A pattern:// URI plays a test pattern: a white screen, or colour bars.
+// A pattern:// URI plays a test pattern: a white screen, colour bars, or
+// a walk of the speakers.
 // A pattern is the known ground under the display, so a check of the OSD
 // does not depend on finding a bright, flat scene in a film. The files
 // are committed in patterns/, the Makefile's patterns target makes them,
@@ -31,11 +32,6 @@ const patternDir = "/usr/share/liken/patterns"
 // malformed one repeats.
 const patternForm = "a pattern URI is pattern://<pattern>/<frame>, and the frame may be left out"
 
-// The patterns the image carries. White is the worst case for a dark
-// scrim over a bright frame, and the SMPTE HD bars show a colour or a
-// range error at a glance.
-var patternNames = []string{"white", "bars"}
-
 // frame is the size of a pattern's picture, or of a screen, in pixels.
 // The zero frame is a screen whose size is not known.
 type frame struct {
@@ -47,11 +43,20 @@ func (f frame) String() string {
 	return strconv.Itoa(f.width) + "x" + strconv.Itoa(f.height)
 }
 
-// The frames the image carries each pattern at, the sizes of real
-// screens and of a scope film: 16:9 at 720p, 1080p, and 4K, two wide
-// screens, and 1920x804, which letterboxes on a 16:9 screen.
-// The Makefile encodes the same frames.
-var patternFrames = []frame{
+// pattern is one test pattern: its name in the URI, the frames the image
+// carries it at, and the frame it plays at when the screen is not known
+// or no frame has the screen's shape. mpv scales that frame to the
+// screen.
+type pattern struct {
+	name     string
+	frames   []frame
+	fallback frame
+}
+
+// screenFrames are the sizes of real screens and of a scope film: 16:9
+// at 720p, 1080p, and 4K, two wide screens, and 1920x804, which
+// letterboxes on a 16:9 screen.
+var screenFrames = []frame{
 	{1280, 720},
 	{1920, 1080},
 	{3840, 2160},
@@ -60,9 +65,17 @@ var patternFrames = []frame{
 	{1920, 804},
 }
 
-// fallbackFrame is the frame a pattern plays at when the screen is not
-// known or no frame has its shape. mpv scales it to the screen.
-var fallbackFrame = frame{1920, 1080}
+// The patterns the image carries, in the order a refusal lists them.
+// White is the worst case for a dark scrim over a bright frame, and the
+// SMPTE HD bars show a colour or a range error at a glance. The speaker
+// walk plays pink noise from each speaker of a 7.1 layout in turn and
+// names the speaker on the screen; it is for the ears, so it carries one
+// small frame. The Makefile encodes the same patterns at the same frames.
+var patterns = []pattern{
+	{name: "white", frames: screenFrames, fallback: frame{1920, 1080}},
+	{name: "bars", frames: screenFrames, fallback: frame{1920, 1080}},
+	{name: "speakers", frames: []frame{{1280, 720}}, fallback: frame{1280, 720}},
+}
 
 // shapeTolerance is how far apart two ratios of width to height may be
 // and still count as one shape. 2560x1080, 3440x1440, and 3840x1600 are
@@ -72,8 +85,8 @@ const shapeTolerance = 0.02
 // patternRef is one parsed pattern URI. A zero frame means the URI named
 // none.
 type patternRef struct {
-	name  string
-	frame frame
+	pattern pattern
+	frame   frame
 }
 
 // path is the file the pod plays, at the URI's own frame, or at the
@@ -81,55 +94,61 @@ type patternRef struct {
 func (p patternRef) path(screen frame) string {
 	chosen := p.frame
 	if chosen == (frame{}) {
-		chosen = fitFrame(screen)
+		chosen = p.pattern.fit(screen)
 	}
-	return patternDir + "/" + p.name + "-" + chosen.String() + ".mkv"
+	return patternDir + "/" + p.pattern.name + "-" + chosen.String() + ".mkv"
 }
 
 // parsePattern reads the pattern and the frame from one pattern URI. A
-// pattern or a frame the image does not carry fails, and the message
-// lists what it carries.
+// pattern, or a frame the image does not carry that pattern at, fails,
+// and the message lists what it carries.
 func parsePattern(parsed *url.URL, raw string) (*patternRef, error) {
 	if parsed.Host == "" {
 		return nil, fmt.Errorf("the URI %q names no pattern; %s", raw, patternForm)
 	}
-	if !slices.Contains(patternNames, parsed.Host) {
+	index := slices.IndexFunc(patterns, func(known pattern) bool { return known.name == parsed.Host })
+	if index < 0 {
+		names := make([]string, len(patterns))
+		for index, known := range patterns {
+			names[index] = known.name
+		}
 		return nil, fmt.Errorf("the URI %q names the pattern %s; the patterns are %s",
-			raw, parsed.Host, strings.Join(patternNames, ", "))
+			raw, parsed.Host, strings.Join(names, ", "))
 	}
+	chosen := patterns[index]
 	segments := splitPath(parsed.Path)
 	switch len(segments) {
 	case 0:
-		return &patternRef{name: parsed.Host}, nil
+		return &patternRef{pattern: chosen}, nil
 	case 1:
-		for _, known := range patternFrames {
+		for _, known := range chosen.frames {
 			if known.String() == segments[0] {
-				return &patternRef{name: parsed.Host, frame: known}, nil
+				return &patternRef{pattern: chosen, frame: known}, nil
 			}
 		}
-		names := make([]string, len(patternFrames))
-		for index, known := range patternFrames {
+		names := make([]string, len(chosen.frames))
+		for index, known := range chosen.frames {
 			names[index] = known.String()
 		}
-		return nil, fmt.Errorf("the URI %q names the frame %s; the frames are %s",
-			raw, segments[0], strings.Join(names, ", "))
+		return nil, fmt.Errorf("the URI %q names the frame %s; the pattern %s has the frames %s",
+			raw, segments[0], chosen.name, strings.Join(names, ", "))
 	default:
 		return nil, fmt.Errorf("the URI %q names more than a pattern and a frame; %s", raw, patternForm)
 	}
 }
 
-// fitFrame chooses the frame for a screen: the largest frame of the
-// screen's shape that fits on it, so mpv shows it with no scaling or
-// scales it up by the least. A screen smaller than every frame of its
-// shape takes the smallest of them. A screen of no known shape, or no
-// known size, takes the fallback.
-func fitFrame(screen frame) frame {
+// fit chooses the frame for a screen: the largest frame of the screen's
+// shape that fits on it, so mpv shows it with no scaling or scales it up
+// by the least. A screen smaller than every frame of its shape takes the
+// smallest of them. A screen of no known shape, or no known size, takes
+// the fallback.
+func (p pattern) fit(screen frame) frame {
 	if screen.width <= 0 || screen.height <= 0 {
-		return fallbackFrame
+		return p.fallback
 	}
 	ratio := float64(screen.width) / float64(screen.height)
 	var fits, smallest frame
-	for _, candidate := range patternFrames {
+	for _, candidate := range p.frames {
 		shape := float64(candidate.width) / float64(candidate.height)
 		if shape/ratio > 1+shapeTolerance || ratio/shape > 1+shapeTolerance {
 			continue
@@ -148,7 +167,7 @@ func fitFrame(screen frame) frame {
 	case smallest != frame{}:
 		return smallest
 	}
-	return fallbackFrame
+	return p.fallback
 }
 
 // screenFrame is the size of the compositor's canvas on one Display, from

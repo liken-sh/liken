@@ -19,6 +19,9 @@ func TestResolveAPatternToTheFileInTheImage(t *testing.T) {
 		{"pattern://bars/3840x2160", frame{width: 1280, height: 720}, "/usr/share/liken/patterns/bars-3840x2160.mkv"},
 		{"pattern://bars/1920x804", frame{width: 1920, height: 1080}, "/usr/share/liken/patterns/bars-1920x804.mkv"},
 		{"pattern://white", frame{width: 1920, height: 1080}, "/usr/share/liken/patterns/white-1920x1080.mkv"},
+		{"pattern://speakers", frame{width: 3840, height: 2160}, "/usr/share/liken/patterns/speakers-1280x720.mkv"},
+		{"pattern://speakers", frame{width: 1024, height: 768}, "/usr/share/liken/patterns/speakers-1280x720.mkv"},
+		{"pattern://speakers", frame{}, "/usr/share/liken/patterns/speakers-1280x720.mkv"},
 	}
 	for _, c := range cases {
 		t.Run(c.uri, func(t *testing.T) {
@@ -58,8 +61,8 @@ func TestAPatternWithNoFrameFitsTheScreen(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := fitFrame(c.screen); got != c.want {
-				t.Errorf("fitFrame(%v) = %v, want %v", c.screen, got, c.want)
+			if got := patterns[0].fit(c.screen); got != c.want {
+				t.Errorf("fit(%v) = %v, want %v", c.screen, got, c.want)
 			}
 		})
 	}
@@ -72,8 +75,9 @@ func TestResolveRefusesAPatternTheImageDoesNotCarry(t *testing.T) {
 		uri  string
 		want string
 	}{
-		{"pattern://purple", "white, bars"},
+		{"pattern://purple", "white, bars, speakers"},
 		{"pattern://white/1024x768", "1280x720, 1920x1080"},
+		{"pattern://speakers/1920x1080", "the pattern speakers has the frames 1280x720"},
 		{"pattern://white/1920x1080/extra", "pattern://<pattern>/<frame>"},
 		{"pattern:///1920x1080", "names no pattern"},
 	}

@@ -20,9 +20,19 @@ network.
 |---|---|
 | `white` | a white screen, the worst case for the dark scrims behind the OSD |
 | `bars` | the SMPTE HD colour bars, which show a colour or a range error |
+| `speakers` | a walk of a 7.1 layout: pink noise from one speaker at a time, named on the screen |
+
+`speakers` plays pink noise for 5 seconds from each speaker in turn:
+front left, centre, front right, side right, back right, back left, side
+left, and then the subwoofer, whose noise stops at 120 Hz. The screen
+names the speaker that should play, and each speaker is a chapter, so a
+chapter skip moves to the next one. The file is 7.1, so a system with
+fewer speakers plays a downmix, and the walk shows where each missing
+speaker's channel lands. The walk is 40 seconds long and carries the
+one frame `1280x720`.
 
 The URI can name a frame after the pattern, as in
-`pattern://bars/1920x1080`:
+`pattern://bars/1920x1080`. `white` and `bars` carry every frame below:
 
 | Frame | Shape | What it matches |
 |---|---|---|
