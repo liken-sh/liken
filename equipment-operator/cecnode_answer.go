@@ -17,7 +17,10 @@ package main
 // The adapter answers only while a Player's session holds the room
 // awake, and only for the session's Display. With no session awake the
 // adapter is not the active source, and an answer would take the input
-// from a person who watches another source. For the same reason it
+// from a person who watches another source. A Set Stream Path for the
+// Display of a session that sleeps is a person's pick of the Player in
+// the TV's menu, and the adapter asks the Player's screen to wake
+// (cecnode_screen.go) and answers once the session wakes. For the same reason it
 // leaves a Request Active Source to another source when the route
 // moved away from the Display after the adapter's own claim, such as to
 // a streaming player a person chose: that source is the active source
@@ -26,9 +29,10 @@ package main
 // Active Source itself, its routing_control_req_active_source test
 // fails a device that answers its Request Active Source
 // (https://git.linuxtv.org/v4l-utils.git/tree/utils/cec-compliance/cec-test.cpp).
-// The exception is a wake that has not sent its own Active Source yet:
-// the wake is about to claim the input, and the route the adapter last
-// heard can be from before the room woke. A Set Stream Path names the
+// The exceptions are a wake that has not sent its own Active Source
+// yet, because the wake is about to claim the input and the route the
+// adapter last heard can be from before the room woke, and a Routing
+// Information during a wake, for the same reason. A Set Stream Path names the
 // Display itself, so the TV has chosen it, and the adapter answers
 // wherever the route led before.
 //
@@ -60,10 +64,27 @@ import (
 // routeState is where the bus's routing messages last sent the TV's
 // picture. known is false until the adapter hears one, and an address
 // that is not valid after one means no source is active, such as after
-// a Standby.
+// a Standby. by is the opcode of the message that moved it.
+//
+// chosen says a person moved the route through the TV or a switch: a
+// Routing Change, which a switch broadcasts when a person switches it
+// by hand; a Set Stream Path from the TV, which it broadcasts when a
+// person picks a source in its menu; the TV's own Active Source for
+// 0.0.0.0, which it broadcasts for its tuner or apps (HDMI-CEC 1.3a,
+// CEC 13.2.2); and a Standby, after which a claim would wake a TV that
+// a person turned off. A source device's Active Source is no such
+// choice, because a streaming player sends one by itself when the room
+// wakes. A Routing Information is none either: CEC 13.2.2 says a
+// switch sends it when it answers a Routing Change or comes out of
+// standby, and it reports the route the switch holds, which can be
+// from before the room woke. words names the message that moved the
+// route, for the wake's line.
 type routeState struct {
 	address cec.PhysicalAddress
 	known   bool
+	chosen  bool
+	by      cec.Opcode
+	words   string
 }
 
 // leadsTo answers whether the route shows a device at a physical
@@ -102,9 +123,12 @@ func (n *cecNode) followRoute(message cec.Message, own cec.LogicalAddress) {
 	if !read {
 		return
 	}
+	words, _ := cec.Describe(message)
+	chosen := opcode == cec.OpRoutingChange || opcode == cec.OpStandby || (opcode == cec.OpSetStreamPath && message.From == cec.AddressTV)
 	n.mutex.Lock()
-	n.route = routeState{address: address, known: true}
+	n.route = routeState{address: address, known: true, chosen: chosen, by: opcode, words: words}
 	n.mutex.Unlock()
+	poke(n.sources)
 }
 
 // roomHold is the room a Player's session holds on this adapter's bus:
@@ -118,24 +142,44 @@ type roomHold struct {
 }
 
 // holdRoom records the room the bus's Television's session holds, when
-// the session is awake and this adapter speaks for its Display, and
-// clears it otherwise. The pass runs it before the wake, so a request
-// that arrives during a wake finds the room.
+// this adapter speaks for its Display: as the room held awake when the
+// session is awake, and as the sleeping room when it is not. It clears
+// both otherwise. The pass runs it before the wake, so a request that
+// arrives during a wake finds the room.
+//
+// A room that the pass sees go dark, with no standby, gets Inactive
+// Source (cecnode_inactive.go).
 func (n *cecNode) holdRoom(bus *CECBus, television *Television) {
-	var held *roomHold
-	if session := sessionOf(television); session != nil && session.Awake {
-		if _, physical, speaks := n.speaksFor(bus, session.Display); speaks {
-			held = &roomHold{television: television.Metadata.Name, player: session.Player, display: session.Display, physical: physical}
+	var held, asleep *roomHold
+	var own cec.LogicalAddress
+	if session := sessionOf(television); session != nil {
+		var physical cec.PhysicalAddress
+		var speaks bool
+		if own, physical, speaks = n.speaksFor(bus, session.Display); speaks {
+			room := &roomHold{television: television.Metadata.Name, player: session.Player, display: session.Display, physical: physical}
+			if session.Awake {
+				held = room
+			} else {
+				asleep = room
+			}
 		}
 	}
 	n.mutex.Lock()
-	n.room = held
+	was := n.room
+	n.room, n.asleep = held, asleep
 	n.mutex.Unlock()
+	if darkened(was, asleep, television) {
+		why := fmt.Sprintf("Television %s: Player %s's screen went dark", television.Metadata.Name, asleep.player)
+		if err := n.withdraw(own, asleep.physical, why); err != nil {
+			n.fail(err)
+		}
+	}
 }
 
 // answerRouting answers a Request Active Source or a Set Stream Path
 // for the Display that another device broadcast, while the room is
-// held. from names the sender for the line. own is the adapter's
+// held. A Set Stream Path for the Display of a sleeping session asks
+// the screen to wake instead. from names the sender for the line. own is the adapter's
 // logical address in Control.
 func (n *cecNode) answerRouting(message cec.Message, from cec.Peer, own cec.LogicalAddress) {
 	opcode, _ := message.Opcode()
@@ -144,21 +188,32 @@ func (n *cecNode) answerRouting(message cec.Message, from cec.Peer, own cec.Logi
 		return
 	}
 	n.mutex.Lock()
-	room, job, route := n.room, n.woken.job, n.route
+	room, asleep, job, route := n.room, n.asleep, n.woken.job, n.route
 	n.mutex.Unlock()
+	words, _ := cec.Describe(message)
+	heard := fmt.Sprintf("%s broadcast %s", heardSender(from), words)
+	if opcode == cec.OpSetStreamPath {
+		operands := message.Operands()
+		if len(operands) < 2 {
+			return
+		}
+		named := cec.PhysicalAddress(operands[0])<<8 | cec.PhysicalAddress(operands[1])
+		switch {
+		case room != nil && named == room.physical:
+			n.answer(fmt.Sprintf("Television %s: %s", room.television, heard), own, room)
+		case room == nil && asleep != nil && named == asleep.physical:
+			n.pickDisplay(heard, asleep)
+		}
+		return
+	}
 	if room == nil {
 		return
 	}
-	words, _ := cec.Describe(message)
-	asked := fmt.Sprintf("Television %s: %s broadcast %s", room.television, heardSender(from), words)
-	if opcode == cec.OpSetStreamPath {
-		if operands := message.Operands(); len(operands) < 2 || cec.PhysicalAddress(operands[0])<<8|cec.PhysicalAddress(operands[1]) != room.physical {
-			return
-		}
-		n.answer(asked, own, room)
-		return
-	}
-	claiming := job != nil && !job.claimed.Load()
+	asked := fmt.Sprintf("Television %s: %s", room.television, heard)
+	// A Routing Information during a wake can be the stale route of a
+	// receiver that wakes with the room, so it alone does not end the
+	// answer while the wake runs.
+	claiming := job != nil && (!job.claimed.Load() || route.by == cec.OpRoutingInformation)
 	if !claiming && route.known && !route.leadsTo(room.physical) {
 		reason := fmt.Sprintf("the bus last routed the picture to %s, and that source answers", route.address)
 		if route.address == cec.InvalidPhysicalAddress {

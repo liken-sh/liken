@@ -50,7 +50,20 @@ var homeKeys = []string{"KEY_HOMEPAGE", "KEY_WWW"}
 // the same names to power. The Rust crate media-screen holds a copy of
 // this list as POWER in media-screen/src/screen/keys.rs, because a Go
 // list cannot reach it: a change to one changes both.
-var powerKeys = []string{"KEY_POWER", "KEY_POWER2", "KEY_SLEEP"}
+var powerKeys = []string{"KEY_POWER", "KEY_POWER2", powerOffKey}
+
+// powerOffKey and powerOnKey are the names the kernel's rc-cec keymap
+// gives a TV remote's Power Off Function and Power On Function. Each
+// names the state it wants (HDMI-CEC 1.3a, CEC 13.13.3), so the idle
+// screen publishes off and on for them in place of the toggle, and the
+// playback pod asks for off. The Rust crate media-screen names them
+// POWER_OFF and POWER_ON in the same file as POWER. Power on asks the
+// room for on, which selects the unit's input, so it is exempt from
+// the ensure as well.
+const (
+	powerOffKey = "KEY_SLEEP"
+	powerOnKey  = "KEY_WAKEUP"
+)
 
 // ensureDesk maps each unit to the commands topic of the receiver its
 // cable lands on. The pass fills it from the Receivers and the bus
@@ -108,7 +121,7 @@ func pressOf(payload []byte) (string, bool) {
 // because the pod the press reached writes its own.
 func (o *operator) ensureInput(namespace, controller string, payload []byte) {
 	key, pressed := pressOf(payload)
-	if !pressed || slices.Contains(powerKeys, key) {
+	if !pressed || slices.Contains(powerKeys, key) || key == powerOnKey {
 		return
 	}
 	player := o.focus.markFor(controllerKey(namespace, controller))

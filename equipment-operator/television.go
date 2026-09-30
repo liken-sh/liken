@@ -74,6 +74,25 @@ type TelevisionPowerRead struct {
 	Power string `json:"power,omitempty"`
 }
 
+// TelevisionScreenAsk is what the node workload heard the bus ask of
+// the session's Player's screen: Wake for the TV's Set Stream Path to
+// the session's Display while the session sleeps, and Sleep for a
+// Standby while the session holds the room awake. The Deployment
+// relays each new ask to the Player once. Cause names the message in
+// words, for the Deployment's line.
+type TelevisionScreenAsk struct {
+	At     string `json:"at"`
+	Player string `json:"player"`
+	Screen string `json:"screen"`
+	Cause  string `json:"cause,omitempty"`
+}
+
+// The two screens a TelevisionScreenAsk asks for.
+const (
+	screenWake  = "Wake"
+	screenSleep = "Sleep"
+)
+
 // TelevisionCEC names the CECBus the TV is on.
 type TelevisionCEC struct {
 	Bus string `json:"bus"`
@@ -98,7 +117,9 @@ func (t *Television) bus() string {
 // WakeApplied condition when it wakes the TV, and standbyAt and the
 // StandbyApplied condition when it puts the TV in standby. The node
 // workload that sends the bus's commands also writes powerRead when a
-// power press asks for the TV's power.
+// power press asks for the TV's power. The node workload that speaks
+// for the session's Display writes screenAsk when the bus asks the
+// session's Player's screen to wake or to sleep.
 type TelevisionStatus struct {
 	CEC   *TelevisionCECStatus `json:"cec,omitempty"`
 	Power string               `json:"power,omitempty"`
@@ -122,7 +143,10 @@ type TelevisionStatus struct {
 	// ran, so a restart runs no standby twice.
 	StandbyAt string `json:"standbyAt,omitempty"`
 	// PowerRead answers the last session.powerReadAt.
-	PowerRead  *TelevisionPowerRead `json:"powerRead,omitempty"`
+	PowerRead *TelevisionPowerRead `json:"powerRead,omitempty"`
+	// ScreenAsk is the last ask for the session's Player's screen that
+	// the node workload heard on the bus.
+	ScreenAsk  *TelevisionScreenAsk `json:"screenAsk,omitempty"`
 	Displays   []TelevisionDisplay  `json:"displays,omitempty"`
 	Conditions []Condition          `json:"conditions,omitempty"`
 }
@@ -172,6 +196,7 @@ const (
 	reasonConfirmed       = "Confirmed"
 	reasonUnconfirmed     = "Unconfirmed"
 	reasonTaken           = "SourceTaken"
+	reasonChosen          = "Chosen"
 	reasonTooLate         = "TooLate"
 	reasonSuperseded      = "Superseded"
 	reasonWaking          = "Waking"

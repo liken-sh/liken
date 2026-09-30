@@ -36,6 +36,7 @@ func TestThePrinterColumns(t *testing.T) {
 	}{
 		{cecBusesCRD, []column{
 			{"Mode", ".spec.mode", 0},
+			{"Name", ".spec.osdName", 0},
 			{"Machines", ".spec.adapters[*].machine", 0},
 			{"Joined", condition("Joined"), 0},
 			{"Coherent", condition("Coherent"), 0},

@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -15,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 )
@@ -591,128 +589,6 @@ func (s *session) publishPosition() bool {
 	s.bus.Publish(s.spec.VolumeTopic, payload, true)
 	s.awaiting = append(s.awaiting, held)
 	return true
-}
-
-// togglePower turns the room on or off on a toggle event. The remote's
-// power button publishes {"action":"toggle"} on the power topic, and
-// the operator answers it the way a power button does: a room that is
-// on goes to standby, and one that is not comes on and selects the
-// session's input. The room's TV decides whether the room is on, when
-// the room has one that reports its power, because the TV is what a
-// person sees; otherwise the receiver decides. A room that goes off
-// asks its TV for standby and puts the receiver in standby. A room that
-// comes on wakes its TV and turns the receiver on. The spec's power
-// field is updated to match what the receiver did, so the next
-// reconcile sees no change to re-assert. A receiver the operator cannot
-// reach gets nothing, and the TV, when it reports its power, still
-// turns off or on. Anything else on the topic, a malformed body, or an
-// empty payload does nothing.
-func (s *session) togglePower(payload []byte) {
-	var event struct {
-		Action string `json:"action"`
-	}
-	if err := json.Unmarshal(payload, &event); err != nil || event.Action != "toggle" {
-		return
-	}
-	s.oneShot.Lock()
-	defer s.oneShot.Unlock()
-	// The power is read under the lock, so the decision is made against
-	// the receiver as it stands after any in-flight one-shot settles, not
-	// a snapshot taken a moment earlier.
-	state := s.driver.State()
-	receiver := mainZone(state)
-	television, power := "", ""
-	if s.room != nil {
-		television, power = s.room.television()
-	}
-	// A receiver the operator cannot reach has no power to read, and
-	// nothing to command. A TV that reports its power still decides the
-	// room, so the press reaches the TV and skips only the receiver. With
-	// no such TV, nothing decides the room, and the toggle is dropped and
-	// never queued.
-	if state.Reachable != equipment.ConditionTrue {
-		if television == "" || power == "" {
-			return
-		}
-		s.toggleTelevisionOnly(television, power)
-		return
-	}
-	on, reports := roomIsOn(receiver, television, power)
-	trigger := "the power topic asks toggle, and " + reports
-	if on {
-		s.turnOff(trigger, receiver, television)
-		return
-	}
-	if s.room != nil {
-		s.room.woke(trigger)
-	}
-	s.selectInputLocked(s.ctx, trigger)
-	if s.applyPower != nil {
-		s.applyPower(equipment.PowerOn)
-	}
-}
-
-// toggleTelevisionOnly turns the room's TV off or on for a press that
-// finds the receiver unreachable, and writes one line that says the
-// receiver got nothing. The spec's power field stays as it is, because
-// the receiver did nothing.
-func (s *session) toggleTelevisionOnly(television, power string) {
-	on, reports := roomIsOn(equipment.ZoneState{}, television, power)
-	trigger := "the power topic asks toggle, and " + reports
-	if on {
-		s.room.standby(trigger)
-	} else {
-		s.room.woke(trigger)
-	}
-	s.log.printf("%s; sent the receiver nothing, because the operator cannot reach it", trigger)
-}
-
-// roomIsOn answers whether a power press finds the room on, and the
-// words that name what decided it. A TV that reports On, or ToOn on
-// its way there, is a room that is on, and a TV in Standby or ToStandby
-// is a room that is off. With no TV, or a TV that does not answer, the
-// receiver's power decides.
-func roomIsOn(receiver equipment.ZoneState, television, power string) (bool, string) {
-	if television != "" && power != "" {
-		on := strings.EqualFold(power, cec.PowerOn.String()) || strings.EqualFold(power, cec.PowerToOn.String())
-		return on, fmt.Sprintf("Television %s reports power %s", television, power)
-	}
-	return receiver.Power == equipment.PowerOn, "the receiver reports " + powerWords(receiver, 0)
-}
-
-// turnOff puts the room in standby: its TV, when it has one, and the
-// receiver, when the receiver has a standby. A receiver with no
-// standby, such as a WiiM, stays on, and its line says so as the
-// outcome of the press.
-func (s *session) turnOff(trigger string, receiver equipment.ZoneState, television string) {
-	switch {
-	case s.room == nil:
-	case television != "":
-		s.room.standby(trigger)
-	default:
-		s.room.slept()
-	}
-	if !s.driver.HasStandby() {
-		s.log.printf("%s; sent the receiver nothing, because it has no standby command, so it stays on", trigger)
-		return
-	}
-	if receiver.Power != equipment.PowerOn {
-		s.log.printf("%s; sent the receiver nothing, because it reports %s", trigger, powerWords(receiver, 0))
-		if s.applyPower != nil {
-			s.applyPower(equipment.PowerStandby)
-		}
-		return
-	}
-	line := trigger + "; sent power Standby"
-	began := time.Now()
-	if err := s.driver.SetPower(equipment.MainZone, false); err != nil {
-		s.log.refused(line, err)
-		return
-	}
-	s.log.confirm(line, began, mainZoneCheck(s.driver, "power Standby", powerWords))
-	if s.applyPower != nil {
-		s.applyPower(equipment.PowerStandby)
-	}
 }
 
 // selectInput powers the receiver on, waits for it to say so, and

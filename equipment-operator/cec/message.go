@@ -215,6 +215,13 @@ func ActiveSource(from LogicalAddress, address PhysicalAddress) Message {
 	return NewMessage(from, AddressBroadcast, OpActiveSource, byte(address>>8), byte(address))
 }
 
+// InactiveSource tells the TV that the source at an address has no
+// picture to show. It is directed to the TV (HDMI-CEC 1.3a, CEC Table
+// 8).
+func InactiveSource(from LogicalAddress, address PhysicalAddress) Message {
+	return NewMessage(from, AddressTV, OpInactiveSource, byte(address>>8), byte(address))
+}
+
 func ImageViewOn(from, to LogicalAddress) Message {
 	return NewMessage(from, to, OpImageViewOn)
 }

@@ -146,8 +146,9 @@ decoders for the operands this plan uses. The kernel's `cec.h` and
 The kernel does part of the protocol by itself. When the adapter has
 a logical address, the kernel answers polls, Give Physical Address,
 Give OSD Name, and Get CEC Version. It answers Give Device Vendor ID
-only when the claim states a vendor. The pod states none, so that
-request reaches the pod, which answers it with a Feature Abort. The
+too: with the vendor the claim states, or with a Feature Abort when
+the claim states none, as the pod's does. The request never reaches
+the pod. The
 pod opens the device as the exclusive initiator and as a follower,
 and it answers the messages the kernel passes up. Give Device Power
 Status is one of them: the kernel does not answer it.
@@ -538,10 +539,11 @@ Phase 1 ran against the kernel's `vivid` driver and the kernel's CEC
 documentation on 2026-09-26. Four findings correct or add to the text
 above:
 
-* **Give Device Vendor ID.** The kernel answers it only for a claim
-  that states a vendor. The node pod states none, so the request
-  reaches the pod, and the pod answers it with a Feature Abort.
-  `cec-compliance` reports the feature as "OK (Not Supported)".
+* **Give Device Vendor ID.** The node pod's claim states no vendor,
+  so the kernel answers the request with a Feature Abort itself, and
+  the request never reaches the pod (`cec_receive_notify` in
+  `drivers/media/cec/core/cec-adap.c`). `cec-compliance` reports the
+  feature as "OK (Not Supported)".
 * **No acknowledge bit in `Listen`.** A received message carries no
   acknowledge bit for a message between two other devices: the
   receive status holds only OK, timeout, Feature Abort, and aborted.

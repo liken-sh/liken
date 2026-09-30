@@ -207,10 +207,18 @@ type cecNode struct {
 	// route is where the bus's routing messages last sent the TV's
 	// picture (cecnode_answer.go).
 	route routeState
-	// room is the room a Player's session holds through this adapter,
-	// and nil when none does. The adapter answers Request Active Source
-	// for it.
-	room *roomHold
+	// room is the room a Player's session holds awake through this
+	// adapter, and nil when none does. The adapter answers Request
+	// Active Source for it. asleep is the room of a session that stands
+	// on this adapter's Display and sleeps.
+	room   *roomHold
+	asleep *roomHold
+	// picked is the TV's Set Stream Path for a sleeping session's
+	// Display, until the wake it asked for claims the input, and
+	// screenAsk is an ask of the Player's screen the API server has not
+	// accepted yet (cecnode_screen.go).
+	picked    *streamPick
+	screenAsk *screenAskRecord
 }
 
 // newCECNode reads the adapter's capabilities, which every later
@@ -270,6 +278,8 @@ func (n *cecNode) run(ctx context.Context) error {
 	cause := fmt.Sprintf("the node workload stopped: %v", context.Cause(ctx))
 	if err != nil {
 		cause = fmt.Sprintf("the adapter failed: %v", err)
+	} else {
+		n.withdrawOnStop()
 	}
 	n.stop(ctx, cause)
 	return err
@@ -442,7 +452,7 @@ func (n *cecNode) retryLater() {
 func (n *cecNode) retryIn() (time.Duration, bool) {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
-	unwritten := n.powered.unwritten != nil || n.woken.unwritten != nil || n.standby.unwritten != nil
+	unwritten := n.powered.unwritten != nil || n.woken.unwritten != nil || n.standby.unwritten != nil || n.screenAsk != nil
 	joining := (n.entry.State == AdapterJoining || n.entry.State == AdapterRefused) && n.applied.problem == ""
 	switch {
 	case joining && n.entry.Machine != "":

@@ -815,7 +815,8 @@ func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
 		name    string
 		payload string
 	}{
-		{"a different action", `{"action":"off"}`},
+		{"a different action", `{"action":"dim"}`},
+		{"an ask for the screen", `{"action":"wake"}`},
 		{"a payload that is not a state", `not json`},
 		{"an empty payload", ``},
 	}

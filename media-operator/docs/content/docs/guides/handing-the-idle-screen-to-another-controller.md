@@ -165,16 +165,28 @@ Set these variables on your container. Each value comes from
   until the status reads `Idle`, and then answers it as a power press:
   the toggle on `bus.powerTopic` when the unit has one, and the shade
   when it has none. The client drops the message when no `Idle`
-  arrives within 10 seconds. The `media-screen` crate holds this rule. When a `Play` ends, the client's
+  arrives within 10 seconds. It publishes `{"action": "power-off"}`
+  in place of `power` for `KEY_SLEEP`, and the client answers it as a
+  press of `KEY_SLEEP`: `off` on `bus.powerTopic`, or the shade. The
+  `media-screen` crate holds this rule. When a `Play` ends, the client's
   own surface is on the screen again without a command from the client, and the
   retained status is the cue. Nothing else arrives, and the client
   publishes nothing back.
 * `MEDIA_PLAYER_POWER_TOPIC`, from `bus.powerTopic`. It is present
   only when the unit's screen is wired through a `Receiver`. A power
   press between films publishes `{"action": "toggle"}` there, not
-  retained, and the equipment operator turns the room off or on. Set
-  nothing when the field is absent, and a power press reaches the
-  client.
+  retained, and the equipment operator turns the room off or on.
+  `KEY_SLEEP` and `KEY_WAKEUP`, the names the kernel gives a TV
+  remote's Power Off Function and Power On Function, publish
+  `{"action": "off"}` and `{"action": "on"}`, which leave a room
+  already off or on as it is. The client also subscribes to the topic:
+  the equipment operator publishes `{"action": "wake"}` there when a
+  person picks the unit's input in the TV's source menu while the
+  screen sleeps, and `{"action": "sleep"}` when the TV goes to standby.
+  The client wakes the screen and states the `on` desire for the first,
+  and brings the shade down and states the `off` desire at once for
+  the second, while the unit plays nothing. Set nothing when the field
+  is absent, and a power press reaches the client.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
   publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
   The operator turns the desire into an override on the screen's
@@ -190,7 +202,8 @@ A press arrives on a controller's events topic as
 `Remote`'s events topic gets. A press acts only while the
 controller's focus mark names this `Player`, only while the unit plays
 nothing, and only while the screen is awake. A press on a sleeping
-screen wakes it and does nothing else. A held control arrives again as
+screen wakes it and does nothing else, except `KEY_SLEEP` on a unit
+with no `Receiver`, which leaves the screen asleep. A held control arrives again as
 value 2, and a release, value 0, acts on nothing.
 
 A live focus mark that moves to this `Player` wakes the screen. A

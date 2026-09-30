@@ -27,6 +27,7 @@ func TestTheBuildersWriteTheOpcodeAndOperands(t *testing.T) {
 		{"vendor", cec.DeviceVendorID(0, 0x00e091), 15, []byte{0x87, 0x00, 0xe0, 0x91}},
 		{"cec version", cec.CECVersionReport(0, 4, cec.Version14), 4, []byte{0x9e, 0x05}},
 		{"active source", cec.ActiveSource(4, 0x1300), 15, []byte{0x82, 0x13, 0x00}},
+		{"inactive source", cec.InactiveSource(4, 0x1300), 0, []byte{0x9d, 0x13, 0x00}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

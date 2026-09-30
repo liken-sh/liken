@@ -286,11 +286,14 @@ func playerPanelTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerPanelKind
 }
 
-// playerPowerTopic carries the toggle a power press on a unit whose
-// screen is wired through a Receiver publishes, not retained, because a
-// toggle is an event and not a state. The equipment operator reads it
-// and flips the receiver's power. It is the same string the session it
-// applies carries, so the equipment and the idle client answer one key.
+// playerPowerTopic carries the ask a power press on a unit whose screen
+// is wired through a Receiver publishes, not retained, because an ask
+// is an event and not a state: toggle, or on and off for a TV remote's
+// deterministic power functions. The equipment operator reads it and
+// turns the room off or on, and publishes wake and sleep back on it for
+// the screen when the TV speaks for the room over HDMI-CEC. It is the
+// same string the session it applies carries, so the equipment and the
+// idle client share one topic.
 func playerPowerTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/power"
 }

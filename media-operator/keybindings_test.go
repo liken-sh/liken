@@ -15,7 +15,9 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 		{key: "KEY_PLAYPAUSE", want: mediaCommand{Action: actionPause}},
 		{key: "KEY_PLAY", want: mediaCommand{Action: actionPause}},
 		{key: "KEY_PAUSE", want: mediaCommand{Action: actionPause}},
-		{key: "KEY_PLAYCD", want: mediaCommand{Action: actionPause}},
+		{key: "KEY_PLAYCD", want: mediaCommand{Action: actionPlay}},
+		{key: "KEY_PAUSECD", want: mediaCommand{Action: actionHold}},
+		{key: "KEY_STOPCD", want: mediaCommand{Action: actionStop}},
 		{key: "KEY_REWIND", want: mediaCommand{Action: actionSeek, Amount: -10}},
 		{key: "KEY_FASTFORWARD", want: mediaCommand{Action: actionSeek, Amount: 10}},
 		{key: "KEY_PREVIOUSSONG", want: mediaCommand{Action: actionChapter, Amount: -1}},
@@ -23,6 +25,7 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 		{key: "KEY_VOLUMEUP", want: mediaCommand{Action: actionVolume, Amount: 5}},
 		{key: "KEY_VOLUMEDOWN", want: mediaCommand{Action: actionVolume, Amount: -5}},
 		{key: "KEY_MUTE", want: mediaCommand{Action: actionMute}},
+		{key: "KEY_UNMUTE", want: mediaCommand{Action: actionUnmute}},
 		{key: "KEY_SUBTITLE", want: mediaCommand{Action: actionSubtitles}},
 		{key: "KEY_AUDIO", want: mediaCommand{Action: actionAudio}},
 		{key: "KEY_INFO", want: mediaCommand{Action: actionInfo}},
@@ -41,7 +44,7 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 		{key: "KEY_WWW", want: mediaCommand{Action: actionHome}},
 		{key: "KEY_POWER", want: mediaCommand{Action: actionPower}},
 		{key: "KEY_POWER2", want: mediaCommand{Action: actionPower}},
-		{key: "KEY_SLEEP", want: mediaCommand{Action: actionPower}},
+		{key: "KEY_SLEEP", want: mediaCommand{Action: actionPowerOff}},
 		{key: "KEY_CYCLEWINDOWS", want: mediaCommand{Action: actionCycleFocus}},
 	}
 

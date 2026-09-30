@@ -64,15 +64,16 @@ func marshalVolumeState(state volumeState) ([]byte, error) {
 	return json.Marshal(state.clamped())
 }
 
-// isVolumeAction names the two actions that never reach mpv as
-// commands. A press of either publishes the unit's next state, and
+// isVolumeAction names the three actions that never reach mpv as
+// commands. A press of any of them publishes the unit's next state, and
 // the subscription applies it.
 func isVolumeAction(action string) bool {
-	return action == actionVolume || action == actionMute
+	return action == actionVolume || action == actionMute || action == actionUnmute
 }
 
 // nextVolume is the whole arithmetic of a press: the keymap's step,
-// signed by the direction, and mute as a plain toggle. The state it
+// signed by the direction, mute as a plain toggle, and unmute as the
+// unmuted state whatever the state was. The state it
 // reads is the last message from the topic, so two pods that press
 // against the same message compute the same absolute value and the
 // step lands once.
@@ -83,6 +84,9 @@ func nextVolume(state volumeState, command mediaCommand) volumeState {
 		return state.clamped()
 	case actionMute:
 		state.Muted = !state.Muted
+		return state.clamped()
+	case actionUnmute:
+		state.Muted = false
 		return state.clamped()
 	}
 	return state

@@ -41,6 +41,11 @@ func TestTheCECBusDefinitionValidatesExamples(t *testing.T) {
 		{"no mode", cecBus(map[string]any{"adapters": []any{adapter("machine", "node-1")}}), true},
 		{"no adapter", cecBus(map[string]any{"mode": "Listen", "adapters": []any{}}), true},
 		{"an adapter with no machine", cecBus(map[string]any{"mode": "Listen", "adapters": []any{adapter("display", "acm-0001-receiver")}}), true},
+		{"an OSD name of 14 characters", cecBus(map[string]any{"mode": "Listen", "osdName": "Den Media 2026", "adapters": []any{adapter("machine", "node-1")}}), false},
+		{"an OSD name of 15 characters", cecBus(map[string]any{"mode": "Listen", "osdName": "Den Media 20266", "adapters": []any{adapter("machine", "node-1")}}), true},
+		{"an empty OSD name", cecBus(map[string]any{"mode": "Listen", "osdName": "", "adapters": []any{adapter("machine", "node-1")}}), true},
+		{"an OSD name that is not ASCII", cecBus(map[string]any{"mode": "Listen", "osdName": "Salón", "adapters": []any{adapter("machine", "node-1")}}), true},
+		{"an OSD name with a control character", cecBus(map[string]any{"mode": "Listen", "osdName": "den\tTV", "adapters": []any{adapter("machine", "node-1")}}), true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -50,6 +55,15 @@ func TestTheCECBusDefinitionValidatesExamples(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A bus that names no OSD name announces liken, the name the API
+// server writes when the field is absent, so kubectl get shows the name
+// the TV lists.
+func TestTheOSDNameDefaultsToLiken(t *testing.T) {
+	t.Parallel()
+	spec := loadCRDFrom(t, cecBusesCRD).Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+	mustMatch(t, string(spec.Properties["osdName"].Default.Raw), `"liken"`)
 }
 
 func TestTheCECBusDefinitionIdentity(t *testing.T) {

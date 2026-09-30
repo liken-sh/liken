@@ -24,13 +24,16 @@ spec:
       # status.devices and the conditions.
       subresources:
         status: {}
-      # The default view says where the adapters are and whether the bus
-      # works. kubectl get -o wide adds the columns with priority 1: the
+      # The default view says where the adapters are, the name the TV
+      # lists them by, and whether the bus works. kubectl get -o wide adds the columns with priority 1: the
       # scan, each adapter's state, and the names of the devices found.
       additionalPrinterColumns:
         - name: Mode
           type: string
           jsonPath: .spec.mode
+        - name: Name
+          type: string
+          jsonPath: .spec.osdName
         - name: Machines
           type: string
           jsonPath: .spec.adapters[*].machine
@@ -58,7 +61,7 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One HDMI tree, which means one CEC wire, and the USB CEC adapters on the cluster's machines that are connected to it. CEC gives a bus no name, so a person names it. The name is also what the TV shows for each adapter in Control, as its OSD name, and CEC shows only its first 14 characters. A node workload that holds an adapter no CECBus names creates a CECBus in Listen, named after its machine, with the equipment.liken.sh/discovered label. A person's CECBus that names the same machine takes over, and the node workload deletes the one it created. To adopt a discovered CECBus, create one under a new name that names the same machine. Do not apply one under the discovered name: that conflicts with the node workload, which owns that object's spec."
+          description: "One HDMI tree, which means one CEC wire, and the USB CEC adapters on the cluster's machines that are connected to it. CEC gives a bus no name, so a person names it. The TV lists each adapter in Control by spec.osdName, not by this name. A node workload that holds an adapter no CECBus names creates a CECBus in Listen, named after its machine, with the equipment.liken.sh/discovered label. A person's CECBus that names the same machine takes over, and the node workload deletes the one it created. To adopt a discovered CECBus, create one under a new name that names the same machine. Do not apply one under the discovered name: that conflicts with the node workload, which owns that object's spec."
           required: [spec]
           properties:
             spec:
@@ -75,7 +78,14 @@ spec:
                 mode:
                   type: string
                   enum: [Listen, Control]
-                  description: "The consent a person gives the adapters, because a device on a CEC bus can wake the TV and switch its input. Listen claims no logical address and sends nothing: each adapter opens the bus as a monitor, which needs CAP_NET_ADMIN, and reports the devices it hears. A full device list needs polls, and a poll is a transmission, so the device list in Listen is partial. Control claims a playback logical address with the bus's name, cut to 14 characters, as the OSD name, announces the Display's physical address, answers the TV, and scans the bus once when it joins. After the scan an adapter in Control sends no message on a timer: it answers what the CEC rules require, asks a device that announces itself for its facts once, asks the TV for its power alone when it announces itself with no known power, once for each physical address it announces, reads the TV's power around a command and for a press of the remote's power button, and sends the commands a person causes."
+                  description: "The consent a person gives the adapters, because a device on a CEC bus can wake the TV and switch its input. Listen claims no logical address and sends nothing: each adapter opens the bus as a monitor, which needs CAP_NET_ADMIN, and reports the devices it hears. A full device list needs polls, and a poll is a transmission, so the device list in Listen is partial. Control claims a playback logical address with spec.osdName as the OSD name, announces the Display's physical address, answers the TV, and scans the bus once when it joins. After the scan an adapter in Control sends no message on a timer: it answers what the CEC rules require, asks a device that announces itself for its facts once, asks the TV for its power alone when it announces itself with no known power, once for each physical address it announces, reads the TV's power around a command and for a press of the remote's power button, and sends the commands a person causes."
+                osdName:
+                  type: string
+                  default: liken
+                  minLength: 1
+                  maxLength: 14
+                  pattern: "^[ -~]+$"
+                  description: "The name every adapter of the bus announces in Control, which the TV lists as the source's name in its input menu. It is 1 to 14 printable ASCII characters, from space to tilde, the limit of the [OSD Name] operand of Set OSD Name in HDMI-CEC 1.3a (CEC Table 26). The default is liken. The kernel takes the name only when it claims a logical address, so a new name makes each adapter release its address and claim it again, and the TV sees the source leave and come back."
                 adapters:
                   type: array
                   minItems: 1

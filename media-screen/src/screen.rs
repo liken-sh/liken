@@ -10,6 +10,7 @@
 
 mod commands;
 pub mod keys;
+mod power;
 pub mod press;
 
 use std::time::{Duration, Instant};
@@ -24,11 +25,11 @@ use crate::wiring::{Remote, Wiring};
 /// needs no second topic list.
 const CYCLE_SUFFIX: &str = "/cycle";
 
-/// The toggle a power press on a unit whose screen is wired through a
-/// Receiver publishes on the power topic, not retained, because a
-/// toggle is an event and not a state. The equipment operator answers
-/// it by flipping the receiver's power and selecting the input.
-const POWER_TOGGLE: &[u8] = br#"{"action":"toggle"}"#;
+/// The action a power press on a unit whose screen is wired through a
+/// Receiver publishes on the power topic for a toggle. The equipment
+/// operator answers it by flipping the room's power and selecting the
+/// input.
+const POWER_TOGGLE: &str = "toggle";
 
 /// One thing the client draws.
 ///
@@ -179,9 +180,10 @@ pub struct Screen {
     desire: Option<&'static str>,
     /// The armed window and the moment it runs out.
     deadline: Option<(Instant, Window)>,
-    /// The moment a power ask that waits for `Idle` is dropped, and `None`
-    /// while no ask waits. [`commands`] holds the rule.
-    power_ask: Option<Instant>,
+    /// The moment a power ask that waits for `Idle` is dropped, and the key
+    /// the ask is answered as, or `None` while no ask waits. [`commands`]
+    /// holds the rule.
+    power_ask: Option<(Instant, &'static str)>,
     /// The lines the folds since the last [`Screen::take_lines`] wrote, one
     /// per operation a person caused: a press and what it did or why it did
     /// nothing, a window that brought the shade down, a panel desire. A
@@ -258,6 +260,7 @@ impl Screen {
             self.volume_owner_topic.clone().unwrap_or_default(),
             self.commands_topic.clone(),
             self.panel_topic.clone(),
+            self.power_topic.clone(),
         ];
         for remote in &self.remotes {
             filters.push(remote.events.clone());
@@ -272,7 +275,7 @@ impl Screen {
     /// held power ask is dropped, and nothing while neither is armed.
     pub fn next_deadline(&self) -> Option<Instant> {
         let window = self.deadline.map(|(at, _)| at);
-        match (window, self.power_ask) {
+        match (window, self.power_ask.map(|(at, _)| at)) {
             (Some(window), Some(ask)) => Some(window.min(ask)),
             (window, ask) => window.or(ask),
         }
@@ -321,6 +324,9 @@ impl Screen {
         }
         if !self.panel_topic.is_empty() && topic == self.panel_topic {
             return self.on_panel(payload, retained, now);
+        }
+        if !self.power_topic.is_empty() && topic == self.power_topic {
+            return self.on_power(payload, now);
         }
         // The client's own topics are read last, so a topic that is also one
         // of the screen's fires the screen's rule alone and never twice.
@@ -441,8 +447,10 @@ impl Screen {
         }
         self.rearm(now);
         self.shade(moment, &mut effects);
-        if self.idle && self.power_ask.take().is_some() {
-            self.answer_power_ask(&mut effects);
+        if self.idle
+            && let Some((_, key)) = self.power_ask.take()
+        {
+            self.answer_power_ask(key, &mut effects);
         }
         effects
     }
@@ -548,7 +556,9 @@ impl Screen {
                 ),
                 None => format!("{trigger} ignored, because the remote has no focus topic"),
             });
-        } else if self.idle && keys::power(&press.key) && !self.power_topic.is_empty() {
+        } else if let Some(action) =
+            keys::power_action(&press.key).filter(|_| self.idle && !self.power_topic.is_empty())
+        {
             // A room with a receiver answers the power key itself, so the
             // key never reaches the client and the shade never operates:
             // power turns the equipment, and nothing else. Only the
@@ -564,12 +574,35 @@ impl Screen {
             // on and off under the hand, so only the press publishes. A unit
             // with no receiver falls through to the ordinary rules below,
             // and the client lowers its shade.
+            //
+            // The two deterministic power functions of a TV remote publish
+            // off and on in place of the toggle (keys::POWER_OFF), and the
+            // equipment operator leaves a room that is already off or on
+            // as it is.
             power = true;
             if press.down() {
-                publish = Some(self.power_toggle());
+                publish = Some(self.power_publish(action));
+                line = Some(if action == POWER_TOGGLE {
+                    format!(
+                        "{trigger}: power, published the toggle to {}",
+                        self.power_topic
+                    )
+                } else {
+                    format!(
+                        "{trigger}: power {action}, published {action} to {}",
+                        self.power_topic
+                    )
+                });
+            }
+        } else if self.asleep && press.key == keys::POWER_OFF {
+            // A Power Off Function keeps a device in standby when repeated
+            // (HDMI-CEC 1.3a, CEC 13.13.3), so on a unit with no Receiver it
+            // leaves a sleeping screen asleep, where every other key wakes
+            // it.
+            power = true;
+            if press.down() {
                 line = Some(format!(
-                    "{trigger}: power, published the toggle to {}",
-                    self.power_topic
+                    "{trigger} ignored, because the screen is already asleep"
                 ));
             }
         } else if self.asleep {
@@ -678,13 +711,14 @@ impl Screen {
         })
     }
 
-    /// The toggle a power press publishes on a unit whose screen is wired
-    /// through a Receiver. A power ask the playback pod held until `Idle`
-    /// publishes the same toggle.
-    fn power_toggle(&self) -> Publish {
+    /// The ask a power press publishes on a unit whose screen is wired
+    /// through a Receiver: toggle, on, or off, not retained, because an ask
+    /// is an event and not a state. A power ask the playback pod held until
+    /// `Idle` publishes the same ask.
+    fn power_publish(&self, action: &str) -> Publish {
         Publish {
             topic: self.power_topic.clone(),
-            payload: POWER_TOGGLE.to_vec(),
+            payload: format!(r#"{{"action":"{action}"}}"#).into_bytes(),
             retained: false,
         }
     }
@@ -810,6 +844,7 @@ fn level_word(key: &str) -> String {
     match key {
         keys::VOLUME_UP => format!("volume +{}", crate::volume::STEP),
         keys::VOLUME_DOWN => format!("volume -{}", crate::volume::STEP),
+        keys::UNMUTE => "unmute".into(),
         _ => "mute or unmute".into(),
     }
 }

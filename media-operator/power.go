@@ -9,13 +9,26 @@ package main
 // reads, and an ending that reached the room after the toggle would
 // change that room under the next press.
 
-// The action word for power. The Play's commands topic accepts it, and
-// the Player's commands topic carries it.
-const actionPower = "power"
+// The action words for power. The Play's commands topic accepts them,
+// and the Player's commands topic carries them. power asks the client
+// to do what power does between films, which toggles the room.
+// power-off asks for off: a TV remote's Power Off Function keeps a
+// device in standby when repeated (HDMI-CEC 1.3a, CEC 13.13.3), so a
+// room that is already off stays off.
+const (
+	actionPower    = "power"
+	actionPowerOff = "power-off"
+)
 
 // power publishes the ask first and ends the run after it, the same order
 // home keeps, so the client holds the ask before the ending moves the
 // unit to Idle.
 func (c *commander) power(trigger string) {
 	c.askAndEnd(trigger, actionPower)
+}
+
+// powerOff publishes the ask for off and ends the run, in the order
+// power keeps.
+func (c *commander) powerOff(trigger string) {
+	c.askAndEnd(trigger, actionPowerOff)
 }

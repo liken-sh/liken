@@ -15,7 +15,9 @@ package main
 // guard time, and it sends Active Source again when another source
 // claims the input. The guard and a bound on the claims keep it from
 // fighting a person who switches the input on purpose: after the
-// guard, and after the bound, a claim stands.
+// guard, and after the bound, a claim stands, and a route that a
+// person moves through the TV or a switch ends the guard at once
+// (cecnode_source.go).
 //
 // The node workload acts only on a wake it sees arrive. A wokeAt that
 // is already in the status when the node workload starts is what it

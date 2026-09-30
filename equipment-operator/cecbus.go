@@ -30,9 +30,17 @@ type CECBusList struct {
 }
 
 type CECBusSpec struct {
-	Mode     CECMode         `json:"mode,omitempty"`
+	Mode CECMode `json:"mode,omitempty"`
+	// OSDName is the name every adapter of the bus in Control announces,
+	// which the TV lists as the source's name. The API server writes
+	// defaultOSDName when the field is absent.
+	OSDName  string          `json:"osdName,omitempty"`
 	Adapters []CECBusAdapter `json:"adapters,omitempty"`
 }
+
+// defaultOSDName is the name an adapter announces for a bus that names
+// none.
+const defaultOSDName = "liken"
 
 // CECBusAdapter names the machine that carries one adapter and the
 // Display whose physical address the adapter announces.

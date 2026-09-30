@@ -11,6 +11,7 @@ every topic follows and lists every writer and reader of each.
 | `players/{namespace}/{name}/volume/owner` | the equipment operator | yes | who applies the level |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
 | `players/{namespace}/{name}/commands` | the playback pod | no | a command for the idle pod |
+| `players/{namespace}/{name}/power` | the idle pod and the equipment operator | no | an ask for the room's power, or for the screen |
 
 ### `status`
 
@@ -180,10 +181,48 @@ then answers it as a power press between films: on a unit wired
 through a `Receiver`, it publishes the toggle on the power topic, and
 on a unit with none, it lowers the shade. The toggle waits for `Idle`
 so that the equipment operator reads the room after the film ended. A
-client that reads no `Idle` within 10 seconds drops the ask.
+client that reads no `Idle` within 10 seconds drops the ask. The
+sidecar publishes `power-off` in place of `power` for `KEY_SLEEP`, the
+name the kernel gives a TV remote's Power Off Function, and the client
+answers it the way it answers a press of `KEY_SLEEP`: `off` on the
+power topic, or the shade on a unit with no `Receiver`.
 
 | Message | Writer | What it says |
 |---|---|---|
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |
 | `{"action": "home"}` | the playback pod | A person pressed home during a film. The `Play` ends after it, and the client reads the ask as a press of the home key. |
 | `{"action": "power"}` | the playback pod | A person pressed power during a film. The `Play` ends after it, and the client answers the ask as a power press once the status reads `Idle`. |
+| `{"action": "power-off"}` | the playback pod | A person pressed a TV remote's Power Off Function during a film. The `Play` ends after it, and the client answers the ask as a press of `KEY_SLEEP` once the status reads `Idle`. |
+
+### `power`
+
+The room's power, for a unit whose screen is wired through a
+`Receiver`. The operator names the topic in the session it applies on
+the `Receiver`, and in `status.idle.bus.powerTopic`, only for such a
+unit. Each message is an ask, so none is retained.
+
+The idle screen client publishes a power press between films here,
+and the equipment operator answers it:
+
+| Message | Key | What the equipment operator does |
+|---|---|---|
+| `{"action": "toggle"}` | `KEY_POWER`, `KEY_POWER2` | Turns a room that is on off, and a room that is off on. |
+| `{"action": "off"}` | `KEY_SLEEP` | Turns a room that is on off, and leaves a room that is off as it is. |
+| `{"action": "on"}` | `KEY_WAKEUP` | Turns a room that is off on, and leaves a room that is on as it is. |
+
+The kernel's `rc-cec` keymap gives a TV remote's Power Off Function
+and Power On Function the names `KEY_SLEEP` and `KEY_WAKEUP`.
+HDMI-CEC 1.3a, CEC 13.13.3, says each one puts the device in the
+state it names and keeps it there when a person presses it again, so
+neither is a toggle.
+
+The equipment operator publishes two asks for the screen here, when
+the room's TV speaks over HDMI-CEC:
+
+| Message | When | What the client does |
+|---|---|---|
+| `{"action": "wake"}` | A person picked this unit's input in the TV's source menu while the screen sleeps. | Wakes the screen and states the `on` desire, the way a press on a sleeping screen does. |
+| `{"action": "sleep"}` | The TV went to standby while the screen is awake. | Brings the shade down and states the `off` desire at once, while the unit plays nothing. A film goes on. |
+
+Each program ignores the actions it does not answer, so a client that
+reads its own ask come back changes nothing.

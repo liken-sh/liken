@@ -25,9 +25,22 @@ type keyBinding struct {
 	repeats bool
 }
 
-// The table. Each group of names is one command: the four transport
-// names a keyboard and a media remote report for play and pause, the
-// four names a shell sends for OK, and the three it sends for back.
+// The table. Each group of names is one command: the three transport
+// names a keyboard and a media remote report for play and pause, which
+// toggle, the four names a shell sends for OK, and the three it sends
+// for back. The kernel's rc-cec keymap names a TV remote's
+// deterministic functions (HDMI-CEC 1.3a, CEC 13.13.3) with names of
+// their own, and each sets the state it names, so a second press
+// changes nothing: KEY_PLAYCD, from Play and Play Function, plays;
+// KEY_PAUSECD pauses; KEY_STOPCD ends the run; and KEY_UNMUTE, from
+// Restore Volume Function, unmutes. KEY_PLAYPAUSE stays a toggle,
+// because a Bluetooth remote's play button sends it too, and rc-cec
+// names a TV remote's Pause-Play Function with it; a Keymap row on the
+// Remote of the CEC adapter's input device can name that button
+// KEY_PAUSECD instead. KEY_MUTE stays a toggle for the same reason, and
+// no key name mutes without a toggle.
+// KEY_WAKEUP, a TV remote's Power On Function, has no row: a film
+// plays, so the room is on already.
 // KEY_CYCLEWINDOWS asks the operator to move the focus mark and
 // reaches no player program. BTN_MODE is absent on purpose: it is
 // reserved for a home surface this operator does not own.
@@ -43,7 +56,10 @@ var playbackKeys = withPowerRows(map[string]keyBinding{
 	"KEY_PLAYPAUSE": {command: mediaCommand{Action: actionPause}},
 	"KEY_PLAY":      {command: mediaCommand{Action: actionPause}},
 	"KEY_PAUSE":     {command: mediaCommand{Action: actionPause}},
-	"KEY_PLAYCD":    {command: mediaCommand{Action: actionPause}},
+
+	"KEY_PLAYCD":  {command: mediaCommand{Action: actionPlay}},
+	"KEY_PAUSECD": {command: mediaCommand{Action: actionHold}},
+	"KEY_STOPCD":  {command: mediaCommand{Action: actionStop}},
 
 	"KEY_REWIND":      {command: mediaCommand{Action: actionSeek, Amount: -seekSeconds}, repeats: true},
 	"KEY_FASTFORWARD": {command: mediaCommand{Action: actionSeek, Amount: seekSeconds}, repeats: true},
@@ -54,6 +70,7 @@ var playbackKeys = withPowerRows(map[string]keyBinding{
 	"KEY_VOLUMEUP":   {command: mediaCommand{Action: actionVolume, Amount: volumeStep}, repeats: true},
 	"KEY_VOLUMEDOWN": {command: mediaCommand{Action: actionVolume, Amount: -volumeStep}, repeats: true},
 	"KEY_MUTE":       {command: mediaCommand{Action: actionMute}},
+	"KEY_UNMUTE":     {command: mediaCommand{Action: actionUnmute}},
 
 	"KEY_SUBTITLE": {command: mediaCommand{Action: actionSubtitles}},
 	"KEY_AUDIO":    {command: mediaCommand{Action: actionAudio}},
@@ -81,10 +98,15 @@ var playbackKeys = withPowerRows(map[string]keyBinding{
 
 // withPowerRows adds one row per power name to the table. The rows come
 // from powerKeys, so the names the playback pod ends a film on are the
-// names ensureInput exempts, and one list states them in Go.
+// names ensureInput exempts, and one list states them in Go. The power
+// off key asks for off in place of the toggle.
 func withPowerRows(table map[string]keyBinding) map[string]keyBinding {
 	for _, key := range powerKeys {
-		table[key] = keyBinding{command: mediaCommand{Action: actionPower}}
+		action := actionPower
+		if key == powerOffKey {
+			action = actionPowerOff
+		}
+		table[key] = keyBinding{command: mediaCommand{Action: action}}
 	}
 	return table
 }

@@ -13,6 +13,10 @@ func describeCommand(command mediaCommand) string {
 	switch command.Action {
 	case actionPause:
 		return "pause or resume"
+	case actionPlay:
+		return "play"
+	case actionHold:
+		return "pause"
 	case actionSeek:
 		return "seek " + signed(command.Amount) + " s"
 	case actionChapter:
@@ -21,6 +25,8 @@ func describeCommand(command mediaCommand) string {
 		return "volume " + signed(command.Amount)
 	case actionMute:
 		return "mute or unmute"
+	case actionUnmute:
+		return "unmute"
 	case actionSubtitles:
 		return "next subtitle track"
 	case actionAudio:

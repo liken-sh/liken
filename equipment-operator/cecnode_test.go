@@ -259,10 +259,14 @@ func TestFindAdapterFailsWithNoNode(t *testing.T) {
 	mustFail(t, err)
 }
 
-func TestTheOSDNameIsTheBusNameCutToFourteenBytes(t *testing.T) {
+// The adapter announces the bus's spec.osdName, and liken when the bus
+// names none. The API server writes liken for an absent field, and the
+// node workload answers the same for a bus it reads with no default,
+// such as one stored before the field existed.
+func TestTheOSDNameIsTheBusesOrLiken(t *testing.T) {
 	t.Parallel()
-	mustMatch(t, osdName("den"), "den")
-	mustMatch(t, osdName("a-very-long-room-name"), "a-very-long-ro")
+	mustMatch(t, osdName(CECBusSpec{OSDName: "Den TV"}), "Den TV")
+	mustMatch(t, osdName(CECBusSpec{}), "liken")
 }
 
 // Each failure before the node workload runs is the process's last

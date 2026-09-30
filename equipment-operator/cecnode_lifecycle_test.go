@@ -285,7 +285,7 @@ func TestAClaimTheKernelCompletesLaterJoins(t *testing.T) {
 	wire.Send(cec.GiveDevicePowerStatus(0, 4))
 	api.waitUntil(t, "the answer to the TV", func() bool {
 		for _, message := range wire.Sent() {
-			if message.String() == cec.ReportPowerStatus(4, 0, cec.PowerOn).String() {
+			if message.String() == cec.ReportPowerStatus(4, 0, cec.PowerStandby).String() {
 				return true
 			}
 		}

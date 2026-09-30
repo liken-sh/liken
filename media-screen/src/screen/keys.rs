@@ -21,6 +21,11 @@ pub const VOLUME_UP: &str = "KEY_VOLUMEUP";
 pub const VOLUME_DOWN: &str = "KEY_VOLUMEDOWN";
 pub const MUTE: &str = "KEY_MUTE";
 
+/// The key the kernel's `rc-cec` keymap names a TV remote's Restore Volume
+/// Function (HDMI-CEC 1.3a, CEC 13.13.3). It unmutes, and a second press
+/// leaves the level unmuted, where [`MUTE`] toggles.
+pub const UNMUTE: &str = "KEY_UNMUTE";
+
 /// The three back synonyms. A shell sends whichever one it was built
 /// with, so a client reads all three. This crate never sleeps the
 /// screen on a press: only the client knows whether back has anywhere
@@ -35,7 +40,23 @@ pub const BACK: [&str; 3] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT"];
 /// shade. `media-operator` holds a copy of this list as `powerKeys` in
 /// `media-operator/ensure.go`, because a Rust list cannot reach Go: a
 /// change to one changes both.
-pub const POWER: [&str; 3] = [POWER_PRESS, "KEY_SLEEP", "KEY_POWER2"];
+pub const POWER: [&str; 3] = [POWER_PRESS, POWER_OFF, "KEY_POWER2"];
+
+/// The two power synonyms that toggle the room. A Bluetooth remote's power
+/// button and a TV remote's Power Toggle Function send one of them.
+pub const TOGGLE: [&str; 2] = [POWER_PRESS, "KEY_POWER2"];
+
+/// The key the kernel's `rc-cec` keymap names a TV remote's Power Off
+/// Function. HDMI-CEC 1.3a, CEC 13.13.3, says it puts the device in standby
+/// and keeps it there when repeated, so it asks the room for off and never
+/// toggles.
+pub const POWER_OFF: &str = "KEY_SLEEP";
+
+/// The key the kernel's `rc-cec` keymap names a TV remote's Power On
+/// Function. It puts the device on and keeps it on when repeated, so it
+/// asks the room for on. It is no power synonym for a unit with no
+/// Receiver: there it wakes a sleeping screen the way any press does.
+pub const POWER_ON: &str = "KEY_WAKEUP";
 
 /// The key name a power ask reaches the client under, on a unit with no
 /// Receiver. The playback pod publishes the ask on the `Player`'s commands
@@ -53,7 +74,7 @@ pub const HOME: &str = "KEY_HOMEPAGE";
 /// that keeps a key from the client; every key it refuses passes
 /// through.
 pub fn owned(key: &str) -> bool {
-    matches!(key, CYCLE | VOLUME_UP | VOLUME_DOWN | MUTE)
+    matches!(key, CYCLE | VOLUME_UP | VOLUME_DOWN | MUTE | UNMUTE)
 }
 
 /// Whether one kernel key name is a back synonym.
@@ -66,6 +87,18 @@ pub fn power(key: &str) -> bool {
     POWER.contains(&key)
 }
 
+/// The ask a power key publishes on the power topic of a unit with a
+/// Receiver: off and on for the two deterministic functions, the toggle for
+/// every other power key, and nothing for a key that is no power key.
+pub fn power_action(key: &str) -> Option<&'static str> {
+    match key {
+        POWER_OFF => Some("off"),
+        POWER_ON => Some("on"),
+        _ if TOGGLE.contains(&key) => Some("toggle"),
+        _ => None,
+    }
+}
+
 /// What one press means for the level, and nothing for a key that names no
 /// level. The two steps act on the press and on the repeat, because a person
 /// ramps a level by holding the key. Mute acts on the press alone, because a
@@ -76,6 +109,7 @@ pub fn level(press: &Press, held: Volume) -> Option<Volume> {
         VOLUME_UP => Some(held.stepped(STEP)),
         VOLUME_DOWN => Some(held.stepped(-STEP)),
         MUTE if press.down() => Some(held.toggled()),
+        UNMUTE if press.down() => Some(held.unmuted()),
         _ => None,
     }
 }
@@ -168,6 +202,30 @@ mod tests {
             })
         );
         assert_eq!(level(&press("KEY_MUTE", 2), held), None);
+    }
+
+    #[test]
+    fn unmute_unmutes_and_leaves_an_unmuted_level_unmuted() {
+        for muted in [true, false] {
+            let held = Volume { level: 40, muted };
+            assert_eq!(
+                level(&press(UNMUTE, 1), held),
+                Some(Volume {
+                    level: 40,
+                    muted: false
+                })
+            );
+        }
+        assert!(owned(UNMUTE));
+    }
+
+    #[test]
+    fn each_power_key_names_its_ask() {
+        assert_eq!(power_action("KEY_POWER"), Some("toggle"));
+        assert_eq!(power_action("KEY_POWER2"), Some("toggle"));
+        assert_eq!(power_action(POWER_OFF), Some("off"));
+        assert_eq!(power_action(POWER_ON), Some("on"));
+        assert_eq!(power_action("KEY_UP"), None);
     }
 
     #[test]

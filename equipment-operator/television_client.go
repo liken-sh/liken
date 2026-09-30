@@ -10,7 +10,9 @@ package main
 // that speaks for the session's Display, which writes wokeAt and the
 // WakeApplied condition under one manager, and standbyAt and the
 // StandbyApplied condition under another. The node workload that sends
-// the bus's commands writes powerRead under a manager of its own. The conditions are a map
+// the bus's commands writes powerRead under a manager of its own, and
+// the node workload that speaks for the session's Display writes
+// screenAsk under another. The conditions are a map
 // keyed by type, so each writer's apply leaves the other writers'
 // conditions in place. Discovery
 // creates its Television with a create, so it writes no spec field
@@ -221,6 +223,32 @@ func ApplyTelevisionPowerRead(c *Client, television *Television, machine, at, po
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
 	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecPowerReadFieldManager(machine), body)
+}
+
+// cecScreenFieldManager is the field manager of the node workload on
+// one machine for an ask of the session's Player's screen. It is not
+// the wake's manager, because an apply removes each field its manager
+// owns and does not state, and the two are written apart.
+func cecScreenFieldManager(machine string) string {
+	return "equipment-operator-screen-" + machine
+}
+
+// ApplyTelevisionScreenAsk writes one ask of the session's Player's
+// screen. The body states the object's uid for the same reason
+// ApplyTelevisionPower does.
+func ApplyTelevisionScreenAsk(c *Client, television *Television, machine string, ask TelevisionScreenAsk) error {
+	type status struct {
+		ScreenAsk TelevisionScreenAsk `json:"screenAsk"`
+	}
+	body := struct {
+		APIVersion string     `json:"apiVersion"`
+		Kind       string     `json:"kind"`
+		Metadata   ObjectMeta `json:"metadata"`
+		Status     status     `json:"status"`
+	}{Status: status{ScreenAsk: ask}}
+	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
+	body.Metadata.UID = television.Metadata.UID
+	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecScreenFieldManager(machine), body)
 }
 
 // sessionFieldManager is the Deployment's field manager for

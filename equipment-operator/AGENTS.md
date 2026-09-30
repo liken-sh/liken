@@ -74,6 +74,21 @@ Set Stream Path in `cecnode_answer.go`. A home press sends `input.show` on the
 sends a TV that is on Image View On and Active Source in
 `cecnode_show.go`.
 
+The bus can also ask for the Player's screen. The TV's Set Stream Path
+for the `Display` of a session that sleeps asks it to wake, and a
+Standby while the session holds the room awake asks it to sleep. The
+node workload holds no broker connection, so it writes the ask in the
+`Television`'s `status.screenAsk` in `cecnode_screen.go`, and the
+`Deployment` relays each new ask on the session's power topic in
+`television_screen.go`, where the Player's screen client reads it. The
+screen then moves the session, and the node workload follows the
+session: a wake that answers the TV's pick sends Active Source alone.
+When the session sleeps with no standby, the node workload sends the
+TV Inactive Source in `cecnode_inactive.go`, and it does the same when
+it stops while no session holds the room awake. It reports its own power as On only while a session holds
+the room awake. Every adapter of a bus announces the bus's
+`spec.osdName`, `liken` by default.
+
 ## Errors include their source's text
 
 An error that wraps a tool, a daemon socket, a bus answer, or a provider

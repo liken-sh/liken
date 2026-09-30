@@ -25,7 +25,7 @@ func TestAControllingAdapterJoinsAndScans(t *testing.T) {
 	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 	mustMatch(t, entry.PhysicalAddress, "1.3.0.0")
 	mustMatch(t, *entry.LogicalAddress, 4)
-	mustMatch(t, entry.OSDName, "den")
+	mustMatch(t, entry.OSDName, "liken")
 	mustMatch(t, entry.Message, "")
 	mustDeepEqual(t, entry.Devices, []CECDevice{
 		{LogicalAddress: 0, PhysicalAddress: "0.0.0.0", Type: "TV", OSDName: "TV", Vendor: "00e091", CECVersion: "1.4", Power: "Standby"},
@@ -47,8 +47,10 @@ func TestAControllingAdapterAnswersTheTV(t *testing.T) {
 	wire.Send(cec.GiveDevicePowerStatus(0, 4))
 	wire.Send(cec.NewMessage(0, 4, cec.OpMenuRequest, 0x02))
 
+	// No Player's session holds the room awake, so the adapter has no
+	// picture and reports Standby.
 	want := []string{
-		cec.ReportPowerStatus(4, 0, cec.PowerOn).String(),
+		cec.ReportPowerStatus(4, 0, cec.PowerStandby).String(),
 		cec.FeatureAbort(4, 0, cec.OpMenuRequest, cec.AbortUnrecognizedOpcode).String(),
 	}
 	api.waitUntil(t, "the answers to the TV", func() bool {
@@ -168,32 +170,34 @@ func TestADisplayNameIsWhatControlNeedsFirst(t *testing.T) {
 	node, err := newCECNode(startCECAPI(t).client, "node-1", device)
 	mustSucceed(t, err)
 
-	want := node.desired("den", CECControl, "")
+	want := node.desired(CECBusSpec{Mode: CECControl}, "")
 
 	mustMatch(t, want.problem, "the CECBus names no display for machine node-1")
 }
 
-// In Control the adapter announces its bus's name, which the TV lists
-// as the source's name, cut to the 14 bytes CEC carries.
-func TestAControllingAdapterAnnouncesItsBusName(t *testing.T) {
+// In Control the adapter announces the bus's spec.osdName, which the
+// TV lists as the source's name, and liken for a bus that names none.
+func TestAControllingAdapterAnnouncesTheBusesOSDName(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		bus  string
-		name string
+		osdName string
+		name    string
 	}{
-		{"den", "den"},
-		{"a-very-long-room-name", "a-very-long-ro"},
+		{"Den TV", "Den TV"},
+		{"", "liken"},
 	}
 	for _, c := range cases {
-		t.Run(c.bus, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			api := startCECAPI(t)
 			_, device := usbAdapter(cecRoom())
 			api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-			api.putBus(controlBus(c.bus, CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+			bus := controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"})
+			bus.Spec.OSDName = c.osdName
+			api.putBus(bus)
 
 			startNode(t, api, "node-1", device)
 
-			entry := api.waitForEntry(t, c.bus, "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+			entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 			mustMatch(t, entry.OSDName, c.name)
 			held, err := device.Addresses()
 			mustSucceed(t, err)
@@ -202,9 +206,10 @@ func TestAControllingAdapterAnnouncesItsBusName(t *testing.T) {
 	}
 }
 
-// A move to another bus changes the name the adapter announces, so the
-// adapter claims its logical address again under the new name.
-func TestAMoveToAnotherBusClaimsUnderItsName(t *testing.T) {
+// A new spec.osdName changes the name the adapter announces. The
+// kernel takes the name only with a claim, so the adapter claims its
+// logical address again under the new name.
+func TestANewOSDNameClaimsUnderIt(t *testing.T) {
 	t.Parallel()
 	api := startCECAPI(t)
 	adapter, device := usbAdapter(cecRoom())
@@ -214,10 +219,14 @@ func TestAMoveToAnotherBusClaimsUnderItsName(t *testing.T) {
 	api.waitForEntry(t, "lounge", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 	claims := adapter.Claims()
 
-	api.putBus(controlBus("living-room", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	renamed := controlBus("lounge", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"})
+	renamed.Spec.OSDName = "Lounge TV"
+	api.putBus(renamed)
 
-	entry := api.waitForEntry(t, "living-room", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	mustMatch(t, entry.OSDName, "living-room")
+	entry := api.waitForEntry(t, "lounge", "node-1", func(entry CECAdapterStatus) bool {
+		return entry.State == AdapterScanned && entry.OSDName == "Lounge TV"
+	})
+	mustMatch(t, entry.OSDName, "Lounge TV")
 	if adapter.Claims() <= claims {
 		t.Errorf("the adapter announces a new name with no new claim")
 	}
@@ -235,9 +244,9 @@ func TestAClaimTheKernelHoldsIsKeptWhenItMatches(t *testing.T) {
 		held   cec.Claim
 		claims int
 	}{
-		{"the claim the pod would make", cec.Claim{OSDName: "den", Passthrough: true}, 1},
+		{"the claim the pod would make", cec.Claim{OSDName: "liken", Passthrough: true}, 1},
 		{"a claim under another name", cec.Claim{OSDName: "lounge", Passthrough: true}, 2},
-		{"a claim with no passthrough", cec.Claim{OSDName: "den"}, 2},
+		{"a claim with no passthrough", cec.Claim{OSDName: "liken"}, 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -252,7 +261,7 @@ func TestAClaimTheKernelHoldsIsKeptWhenItMatches(t *testing.T) {
 			startNode(t, api, "node-1", device)
 
 			entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-			mustMatch(t, entry.OSDName, "den")
+			mustMatch(t, entry.OSDName, "liken")
 			mustMatch(t, *entry.LogicalAddress, 4)
 			mustMatch(t, adapter.Claims(), c.claims)
 		})

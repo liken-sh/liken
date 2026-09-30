@@ -628,12 +628,20 @@ spec:
                           type: string
                           description: |-
                             The topic a power press on this unit publishes
-                            a toggle on, present only when the unit's
-                            screen is wired through a Receiver. The
-                            equipment operator answers it by flipping the
-                            receiver's power. A unit with none carries no
-                            topic, and a power press reaches its client,
-                            which lowers the shade.
+                            an ask on, present only when the unit's screen
+                            is wired through a Receiver: toggle for
+                            KEY_POWER and KEY_POWER2, off for KEY_SLEEP, and
+                            on for KEY_WAKEUP, the names the kernel gives a
+                            TV remote's Power Off Function and Power On
+                            Function. The equipment operator answers each
+                            ask by turning the room off or on. It also
+                            publishes wake here when a person picks the
+                            unit's input in the TV's source menu while the
+                            screen sleeps, and sleep when the TV goes to
+                            standby, and the client wakes or sleeps the
+                            screen. A unit with none carries no topic, and a
+                            power press reaches its client, which lowers
+                            the shade.
                         remotes:
                           type: array
                           x-kubernetes-list-type: atomic

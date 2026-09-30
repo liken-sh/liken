@@ -49,11 +49,12 @@ func TestAHomePressAsksTheReceiverToShowTheUnit(t *testing.T) {
 // room's toggle, and the equipment operator answers it on the unit's
 // power topic; an input ask beside it would make the receiver select
 // the input, and power it on, while the toggle puts the room to
-// standby. The key is the name the standing pod publishes after the
-// Keymap's fold, so a button a Keymap maps to KEY_POWER asks nothing
-// either.
+// standby. A TV remote's Power On Function, KEY_WAKEUP, asks the room
+// for on on the same topic, which selects the input itself. The key is
+// the name the standing pod publishes after the Keymap's fold, so a
+// button a Keymap maps to KEY_POWER asks nothing either.
 func TestAPowerPressAsksNothingOfTheReceiver(t *testing.T) {
-	for _, key := range []string{"KEY_POWER", "KEY_POWER2", "KEY_SLEEP"} {
+	for _, key := range []string{"KEY_POWER", "KEY_POWER2", "KEY_SLEEP", "KEY_WAKEUP"} {
 		t.Run(key, func(t *testing.T) {
 			media, broker := focusBrokerOperator(t)
 			media.focus.setMark(controllerKey("media", "living-room-remote"), "living-room")

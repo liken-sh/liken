@@ -18,9 +18,18 @@ import (
 // and no controller payload carries one. They are the playback pod's
 // internal step between a key name and mpv's own words. cycle-focus
 // never reaches a player program.
+//
+// pause and mute toggle. play, hold, and unmute set the state they name,
+// so a second press leaves the film or the level where the first put
+// it: a TV remote's Play Function, Pause, and Restore Volume Function
+// are deterministic (HDMI-CEC 1.3a, CEC 13.13.3), and the kernel's
+// rc-cec keymap names them KEY_PLAYCD, KEY_PAUSECD, and KEY_UNMUTE.
 const (
 	actionPause      = "pause"
+	actionPlay       = "play"
+	actionHold       = "hold"
 	actionMute       = "mute"
+	actionUnmute     = "unmute"
 	actionSeek       = "seek"
 	actionVolume     = "volume"
 	actionChapter    = "chapter"
@@ -258,7 +267,8 @@ func nextCommand(block json.RawMessage) []any {
 }
 
 // commandFor is where the action vocabulary becomes the words mpv
-// takes on a press. Seek, chapter, and pause carry no-osd, because
+// takes on a press. Seek, chapter, and the three pause words carry
+// no-osd, because
 // the liken display draws their feedback and mpv's own overlay would
 // draw a second time over it. The rest carry osd-auto, so mpv shows
 // a short line, such as the track name, that the display does not
@@ -272,6 +282,10 @@ func commandFor(command mediaCommand) []any {
 	switch command.Action {
 	case actionPause:
 		return []any{"no-osd", "cycle", "pause"}
+	case actionPlay:
+		return []any{"no-osd", "set", "pause", "no"}
+	case actionHold:
+		return []any{"no-osd", "set", "pause", "yes"}
 	case actionSeek:
 		return []any{"no-osd", "seek", command.Amount}
 	case actionChapter:

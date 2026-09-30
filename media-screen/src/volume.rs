@@ -79,6 +79,15 @@ impl Volume {
         .clamped()
     }
 
+    /// The state one unmute press leaves: unmuted, whatever it was.
+    pub fn unmuted(self) -> Self {
+        Self {
+            muted: false,
+            ..self
+        }
+        .clamped()
+    }
+
     /// The state as it travels on the topic. The clamp runs here too, so
     /// nothing this crate publishes is out of range.
     pub fn payload(self) -> Vec<u8> {

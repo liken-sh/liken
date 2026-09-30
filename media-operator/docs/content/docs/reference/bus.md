@@ -105,7 +105,7 @@ topics, and the resource pages give the payloads.
 
 The equipment operator publishes no tree of its own. Its receiver
 session writes into the media tree's `players` branch, on the volume
-topic and the owner mark beside it, and
+topic, the owner mark beside it, and the power topic, and
 [its reference](https://liken.sh/equipment/docs/reference/receivers/)
 describes that session.
 
@@ -126,6 +126,7 @@ shape.
 | `players/{namespace}/{name}/volume` | the operator, the pod that handles a press, and the equipment operator | the playback pod, the idle pod or a delegate's client, the equipment operator, and the operator | yes | [the level and the muted flag](/docs/reference/players/#volume) |
 | `players/{namespace}/{name}/volume/owner` | the equipment operator and its Last Will | the playback pod, a delegate's client, and the operator | yes | [the owner mark, or empty](/docs/reference/players/#volumeowner) |
 | `players/{namespace}/{name}/panel` | the idle pod, or a delegate's client; the operator clears it | the operator | yes | [the panel desire](/docs/reference/players/#panel) |
+| `players/{namespace}/{name}/power` | the idle pod or a delegate's client, and the equipment operator | the equipment operator, and the idle pod or a delegate's client | no | [an ask for the room's power, or for the screen](/docs/reference/players/#power) |
 | `players/{namespace}/{name}/commands` | the playback pod | the idle pod, or a delegate's client | no | [the ask for the next work, or for home](/docs/reference/players/#commands) |
 | `remotes/{namespace}/{name}/events` | the `Remote`'s pod | the playback pod, the idle pod, or a delegate's client | no | [one key event](/docs/reference/remotes/#events) |
 | `remotes/{namespace}/{name}/keys` | the operator | the `Remote`'s pod | yes | [the compiled key table](/docs/reference/remotes/#keys) |
@@ -140,9 +141,10 @@ scrubber, and the client that wrote the `Play` reads it and creates
 the next `Play`. It publishes `home` when a person presses home during
 a film, just before the `Play` ends, and the client under the film
 reads that ask as a press of the home key. It publishes `power` the
-same way when a person presses power during a film. The client holds
-that ask until the `Player`'s status reads `Idle`, and then answers it
-the way it answers a power press between films.
+same way when a person presses power during a film, and `power-off`
+when a person presses a TV remote's Power Off Function. The client
+holds that ask until the `Player`'s status reads `Idle`, and then
+answers it the way it answers the same press between films.
 
 "The playback pod" in this table is its command sidecar, the one
 container that connects to the bus. "The idle pod" is the idle screen

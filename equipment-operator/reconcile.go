@@ -200,6 +200,7 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 		u.mutex.Lock()
 		u.session = nil
 		u.mutex.Unlock()
+		u.sessions.detach(held.spec.Player, held)
 		held.stop()
 		u.log.printf("the session for Player %s ended", held.spec.Player)
 		u.sessions.lift(held.spec.Player)
@@ -218,6 +219,7 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
+	u.sessions.attach(spec.Player, started)
 	started.start(spec.Active, spec.Awake, adopting)
 	u.readings.setClaimed(u.name, true)
 }
@@ -870,6 +872,7 @@ func (u *receiverUnit) end(close func(*session)) {
 	u.session = nil
 	u.mutex.Unlock()
 	if held != nil {
+		u.sessions.detach(held.spec.Player, held)
 		close(held)
 	}
 	u.cancel()
@@ -1249,6 +1252,7 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 	// process holds each object once.
 	buses.receivers = operator.receivers
 	operator.sessions.televisions = buses.televisions
+	buses.screens = operator.sessions
 	started.Go(func() { watchReceivers(ctx, client, operator.wake, buses.wake, readings, operator.receivers) })
 	started.Go(func() { buses.run(ctx, readings) })
 	operator.run(ctx)

@@ -8,9 +8,9 @@ package main
 // session, a node workload's power apply replaces powerGeneration and
 // its own conditions, a node workload's wake apply replaces wokeAt and
 // its own conditions, a node workload's standby apply replaces
-// standbyAt and its own conditions, and a node workload's power read
-// apply replaces powerRead. No apply touches a field another
-// manager owns.
+// standbyAt and its own conditions, a node workload's power read
+// apply replaces powerRead, and a node workload's screen apply replaces
+// screenAsk. No apply touches a field another manager owns.
 // The conditions are a map keyed by type, so each apply leaves the
 // other writer's conditions in place.
 
@@ -157,6 +157,7 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	waking := strings.HasPrefix(manager, "equipment-operator-wake-")
 	standing := strings.HasPrefix(manager, "equipment-operator-standby-")
 	reading := strings.HasPrefix(manager, "equipment-operator-powerread-")
+	screening := strings.HasPrefix(manager, "equipment-operator-screen-")
 	if manager == sessionFieldManager {
 		// The fake counts the session writes in flight, and holds each one
 		// for sessionDelay, so a test can see two that overlap.
@@ -213,6 +214,8 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
 	case reading:
 		television.Status.PowerRead = body.Status.PowerRead
+	case screening:
+		television.Status.ScreenAsk = body.Status.ScreenAsk
 	case standing:
 		television.Status.StandbyAt = body.Status.StandbyAt
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
@@ -289,6 +292,9 @@ func (a *cecAPI) putTelevision(television Television) {
 	held.Spec = television.Spec
 	if television.Status.Session != nil {
 		held.Status.Session = television.Status.Session
+	}
+	if television.Status.ScreenAsk != nil {
+		held.Status.ScreenAsk = television.Status.ScreenAsk
 	}
 	for key, value := range television.Metadata.Labels {
 		if held.Metadata.Labels == nil {

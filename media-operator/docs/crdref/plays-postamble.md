@@ -28,18 +28,35 @@ direction: seconds for `seek`, a step for `volume` and `chapter`.
 | Action | What it does |
 |---|---|
 | `pause` | toggles pause |
+| `play` | plays, and leaves a film that plays playing |
+| `hold` | pauses, and leaves a paused film paused |
+| `stop` | ends the run, the way the display's exit ends it |
 | `seek` | moves the playhead by `amount` seconds |
 | `chapter` | jumps by `amount` chapters |
 | `volume` | steps the unit's level by `amount` |
 | `mute` | toggles the unit's muted flag |
+| `unmute` | clears the unit's muted flag |
 | `subtitles` | cycles the subtitle track |
 | `audio` | cycles the audio track |
 | `info` | shows the file name and position for a few seconds |
 | `up`, `down`, `left`, `right`, `select`, `back` | drive the on-screen display |
 | `home` | asks the unit's client for its home page, then ends the run |
 | `power` | asks the unit's client to do what power does between films, then ends the run |
+| `power-off` | asks the unit's client to turn the room off, then ends the run |
 
-A `volume` or `mute` command changes no player directly: the pod
+`play`, `hold`, `stop`, `unmute`, and `power-off` set the state they
+name, so a second one changes nothing. The playback pod binds them to
+the names the kernel's `rc-cec` keymap gives a TV remote's
+deterministic functions (HDMI-CEC 1.3a, CEC 13.13.3): `KEY_PLAYCD`,
+`KEY_PAUSECD`, `KEY_STOPCD`, `KEY_UNMUTE`, and `KEY_SLEEP`. The keymap
+also gives the Pause-Play Function and the Mute Function the names
+`KEY_PLAYPAUSE` and `KEY_MUTE`, which a Bluetooth remote's play and
+mute buttons send too, so those two stay toggles. A `Keymap` row on
+the `Remote` that holds the CEC adapter's input device can name the
+Pause-Play Function `KEY_PAUSECD`. No key name mutes without a
+toggle, so the Mute Function stays one.
+
+A `volume`, `mute`, or `unmute` command changes no player directly: the pod
 computes the unit's next state and publishes it on the
 [Player's volume topic](/docs/reference/players/#volume), and every
 pod for the unit applies what that topic delivers. An action this

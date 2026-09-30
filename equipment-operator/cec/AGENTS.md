@@ -66,7 +66,9 @@ says who sends it and what answers it. The package uses four:
   `Display`'s physical address when it claims the input for a person,
   in the wake and for a home press. It answers Request Active Source
   and Set Stream Path with Active Source alone, and it reads every
-  Active Source and routing message the bus carries. `cectest` has a peer that claims Active Source
+  Active Source and routing message the bus carries. It sends the TV
+  Inactive Source when its `Display` goes dark while the route still
+  leads there. `cectest` has a peer that claims Active Source
   after another device's claim, the way a streaming player did in the
   first drill.
 - **Remote control.** User Control Pressed and Released. The kernel
@@ -77,17 +79,31 @@ says who sends it and what answers it. The package uses four:
 
 The kernel answers polls to a claimed address, and Give Physical
 Address, Give OSD Name, and Get CEC Version, from what the claim
-states. It answers Give Device Vendor ID only for a claim that states
-a vendor, and `Claim` states none, so that request reaches the
-follower, which aborts it.
+states. It broadcasts Report Physical Address after each claim. It
+answers Give Device Vendor ID itself, and passes the request to no
+follower: with the vendor a claim states, or with a Feature Abort for
+a claim that states none, as `Claim`'s does (`cec_receive_notify` in
+[`cec-adap.c`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/media/cec/core/cec-adap.c)).
 
 The kernel sends a Feature Abort for an unsupported directed message
 only when no follower exists. The node workload is a follower, so
 `Answer` owes a Feature Abort for each directed request it does not
 support, and it answers Give Device Power Status, which the kernel
-never answers. `cec-compliance --test-core --test-power-status
+never answers, with the power its caller states. The node workload
+states On only while a Player's session holds the room awake on its
+`Display`, because to the TV a playback device with no picture is in
+standby (HDMI-CEC 1.3a, CEC 13.14). `cec-compliance --test-core --test-power-status
 --test-system-information --test-device-osd-transfer` passes against
 `Answer` on vivid.
+
+`Claim` sets no `CEC_LOG_ADDRS_FL_ALLOW_UNREG_FALLBACK`, so when a
+device holds each of the playback addresses 4, 8, and 11, the kernel
+claims nothing and the node workload tries again later. HDMI-CEC
+1.3a, CEC 10.2.1, says a device should take the unregistered address
+15 then. The adapter does not, because at address 15 it could not
+answer a directed request, and its Active Source could not claim the
+input for a person: a retry that later finds a playback address free
+is worth more than a claim that can do neither.
 
 A monitor handle must be in no-initiator mode, and the kernel allows
 it only to a process with `CAP_NET_ADMIN`. Clearing the logical

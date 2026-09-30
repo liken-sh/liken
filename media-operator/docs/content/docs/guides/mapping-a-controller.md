@@ -19,8 +19,13 @@ You need:
 * The operator and its bus, from the
   [install](/docs/guides/install/).
 * The [`bluetooth-operator`](https://liken.sh/bluetooth/), with the
-  controller paired to a machine. An infrared or CEC remote has no
-  device to claim, because no hardware operator publishes one.
+  controller paired to a machine. A TV remote reaches a machine
+  through a USB CEC adapter instead: `liken` publishes the adapter's
+  input device, with the `subsystem` attribute `input`, and the
+  kernel names the remote's buttons with its `rc-cec` keymap. The
+  adapter delivers them only while its `CECBus` is in `Control`. An
+  infrared remote has no device to claim, because no hardware operator
+  publishes one.
 * `kubectl` access to the namespace.
 
 The controller keeps working while you map it. Discovery changes

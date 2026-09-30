@@ -104,6 +104,18 @@ func TestNextVolumeFromAPress(t *testing.T) {
 			want:    volumeState{Level: 40},
 		},
 		{
+			name:    "an unmute press on a muted level",
+			held:    volumeState{Level: 40, Muted: true},
+			command: mediaCommand{Action: actionUnmute},
+			want:    volumeState{Level: 40},
+		},
+		{
+			name:    "an unmute press on a level that is not muted",
+			held:    volumeState{Level: 40},
+			command: mediaCommand{Action: actionUnmute},
+			want:    volumeState{Level: 40},
+		},
+		{
 			name:    "a step keeps the muted flag",
 			held:    volumeState{Level: 40, Muted: true},
 			command: mediaCommand{Action: actionVolume, Amount: 5},

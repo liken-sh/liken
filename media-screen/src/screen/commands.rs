@@ -25,6 +25,20 @@ const HOME: &str = "home";
 /// film, just before the `Play` ends.
 const POWER: &str = "power";
 
+/// The ask the same sidecar publishes when a TV remote's Power Off Function
+/// reaches it during a film, just before the `Play` ends. It is answered as
+/// a press of [`keys::POWER_OFF`], so a room already off stays off.
+const POWER_OFF: &str = "power-off";
+
+/// The key each held power ask is answered as.
+fn ask_key(ask: &str) -> &'static str {
+    if ask == POWER_OFF {
+        keys::POWER_OFF
+    } else {
+        keys::POWER_PRESS
+    }
+}
+
 /// How long a power ask waits for the unit's `Idle` status. The sidecar
 /// publishes the ending just after the ask, and the operator publishes
 /// `Idle` when it reads the ending, so the wait is normally short. An ask
@@ -86,17 +100,18 @@ impl Screen {
                 ));
                 vec![Effect::Moment(Moment::Press(keys::HOME.into()))]
             }
-            POWER if self.idle => {
+            ask @ (POWER | POWER_OFF) if self.idle => {
                 let mut effects = Vec::new();
-                self.answer_power_ask(&mut effects);
+                self.answer_power_ask(ask_key(ask), &mut effects);
                 effects
             }
-            POWER => {
+            ask @ (POWER | POWER_OFF) => {
                 // A second ask while one waits restarts the deadline and
-                // is still one ask, so the room toggles once.
-                self.power_ask = Some(now + POWER_ASK_WAIT);
+                // is still one ask, so the room toggles once. The later
+                // ask names the key it is answered as.
+                self.power_ask = Some((now + POWER_ASK_WAIT, ask_key(ask)));
                 self.lines.push(format!(
-                    "{} asked for {POWER} while the player plays, held until it is Idle for at most {} s",
+                    "{} asked for {ask} while the player plays, held until it is Idle for at most {} s",
                     self.commands_topic,
                     POWER_ASK_WAIT.as_secs()
                 ));
@@ -106,41 +121,58 @@ impl Screen {
         }
     }
 
-    /// Answer a power ask the way a power press answers while the unit is
-    /// idle. With a Receiver, the toggle goes out, and the shade and the
-    /// panel desire stand, for the reason the press's power branch gives.
-    /// With none, the client reads the ask as a power press and lowers its
-    /// shade.
-    pub(super) fn answer_power_ask(&mut self, effects: &mut Vec<Effect>) {
+    /// Answer a power ask the way a press of its key answers while the unit
+    /// is idle. With a Receiver, the key's ask goes out on the power topic,
+    /// and the shade and the panel desire stand, for the reason the press's
+    /// power branch gives. With none, the client reads the ask as a press of
+    /// the key and lowers its shade.
+    pub(super) fn answer_power_ask(&mut self, key: &'static str, effects: &mut Vec<Effect>) {
+        let ask = if key == keys::POWER_OFF {
+            POWER_OFF
+        } else {
+            POWER
+        };
         let asked = format!(
-            "{} asked for {POWER} and the player is Idle",
+            "{} asked for {ask} and the player is Idle",
             self.commands_topic
         );
+        let action = keys::power_action(key).unwrap_or("toggle");
         if self.power_topic.is_empty() {
-            self.lines.push(format!(
-                "{asked}, so passed to the client as {}",
-                keys::POWER_PRESS
-            ));
-            effects.push(Effect::Moment(Moment::Press(keys::POWER_PRESS.into())));
+            self.lines
+                .push(format!("{asked}, so passed to the client as {key}"));
+            effects.push(Effect::Moment(Moment::Press(key.into())));
             return;
         }
+        let what = if action == "toggle" {
+            "the toggle".to_string()
+        } else {
+            action.to_string()
+        };
         self.lines.push(format!(
-            "{asked}, so published the toggle to {}",
+            "{asked}, so published {what} to {}",
             self.power_topic
         ));
-        effects.push(Effect::Publish(self.power_toggle()));
+        effects.push(Effect::Publish(self.power_publish(action)));
     }
 
     /// Drop a held power ask whose deadline passed. The deadline is a clock,
     /// not a poll: the reader's clock thread wakes at
     /// [`Screen::next_deadline`], and no status is read again.
     pub(super) fn expire_power_ask(&mut self, now: Instant) {
-        if self.power_ask.is_none_or(|at| now < at) {
+        let Some((at, key)) = self.power_ask else {
+            return;
+        };
+        if now < at {
             return;
         }
         self.power_ask = None;
+        let ask = if key == keys::POWER_OFF {
+            POWER_OFF
+        } else {
+            POWER
+        };
         self.lines.push(format!(
-            "{} asked for {POWER}, and no Idle status arrived within {} s, so the ask is dropped",
+            "{} asked for {ask}, and no Idle status arrived within {} s, so the ask is dropped",
             self.commands_topic,
             POWER_ASK_WAIT.as_secs()
         ));

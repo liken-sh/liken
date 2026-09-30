@@ -7,10 +7,12 @@ import "testing"
 // The ask reaches the Player's commands topic before the ending does, so
 // the client holds the ask when the unit's Idle status arrives.
 func TestAPowerPressPublishesTheAskAndThenEndsTheRun(t *testing.T) {
-	cases := []struct{ key string }{
-		{key: "KEY_POWER"},
-		{key: "KEY_POWER2"},
-		{key: "KEY_SLEEP"},
+	cases := []struct{ key, ask string }{
+		{key: "KEY_POWER", ask: `{"action":"power"}`},
+		{key: "KEY_POWER2", ask: `{"action":"power"}`},
+		// A TV remote's Power Off Function asks for off, which leaves a room
+		// that is already off as it is.
+		{key: "KEY_SLEEP", ask: `{"action":"power-off"}`},
 	}
 	for _, each := range cases {
 		t.Run(each.key, func(t *testing.T) {
@@ -27,7 +29,7 @@ func TestAPowerPressPublishesTheAskAndThenEndsTheRun(t *testing.T) {
 			ask := waitForPublish(t, broker.pubs)
 			mustMatch(t, ask.topic, c.playerCommandsTopic)
 			mustMatch(t, ask.retained, false)
-			mustMatch(t, string(ask.payload), `{"action":"power"}`)
+			mustMatch(t, string(ask.payload), each.ask)
 			ending := waitForPublish(t, broker.pubs)
 			mustMatch(t, ending.topic, c.statusTopic)
 			mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})

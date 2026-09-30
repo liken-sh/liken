@@ -52,7 +52,7 @@ func (n *cecNode) pass(ctx context.Context) error {
 	n.bus = bus.Metadata.Name
 	n.mutex.Unlock()
 	adapter, _ := bus.Spec.names(n.machine)
-	want := n.desired(bus.Metadata.Name, bus.Spec.Mode, adapter.Display)
+	want := n.desired(bus.Spec, adapter.Display)
 	if err := n.apply(ctx, want); err != nil {
 		return err
 	}
@@ -64,9 +64,10 @@ func (n *cecNode) pass(ctx context.Context) error {
 }
 
 // passTelevisions reads the bus's Television once for each of the
-// Television's intents: its session's power read, the room its session
-// holds, its spec.power, its session's wake, its session's standby, and
-// a home press's ask to show the session's Display.
+// Television's intents: an ask of the Player's screen the adapter
+// heard, its session's power read, the room its session holds, its
+// spec.power, its session's wake, its session's standby, and a home
+// press's ask to show the session's Display.
 // A list that fails leaves each for the next pass, and cancels nothing,
 // because the Television may still ask for what runs.
 func (n *cecNode) passTelevisions(bus *CECBus) {
@@ -80,6 +81,7 @@ func (n *cecNode) passTelevisions(bus *CECBus) {
 		return
 	}
 	television := televisionFor(list.Items, bus.Metadata.Name)
+	n.writeScreenAsk(television)
 	// A power press waits for its read, so the read goes first.
 	n.passPowerRead(bus, television)
 	n.holdRoom(bus, television)

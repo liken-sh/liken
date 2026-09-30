@@ -594,7 +594,7 @@ fn a_back_press_reaches_the_client_and_leaves_the_shade_up() {
 #[test]
 fn a_power_press_publishes_the_toggle_and_reaches_no_client() {
     let now = Instant::now();
-    for name in keys::POWER {
+    for name in keys::TOGGLE {
         let mut screen = idling(&powered(), now);
 
         let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
@@ -656,7 +656,7 @@ fn a_power_press_on_a_sleeping_screen_publishes_only_the_toggle() {
             let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
 
             assert!(moments(effects.clone()).is_empty(), "{name} {desire}");
-            assert_eq!(publishes(effects), only_the_toggle(), "{name} {desire}");
+            assert_eq!(publishes(effects).len(), 1, "{name} {desire}");
             assert!(screen.asleep, "{name} {desire}");
             assert_eq!(screen.desire, Some(desire), "{name} {desire}");
         }
@@ -1398,3 +1398,4 @@ fn a_tick_before_the_deadline_and_a_tick_with_no_deadline_state_nothing() {
 mod lines;
 mod panel;
 mod power_ask;
+mod power_keys;

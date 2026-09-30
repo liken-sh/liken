@@ -45,12 +45,12 @@ type adapterDisplay struct {
 // last good read of the same Display, so an API server that is briefly
 // unreachable does not take the adapter off the bus, and the entry's
 // message gives the read's error.
-func (n *cecNode) desired(bus string, mode CECMode, display string) adapterConfig {
+func (n *cecNode) desired(spec CECBusSpec, display string) adapterConfig {
 	n.displayNote = ""
-	if mode != CECControl {
+	if spec.Mode != CECControl {
 		return adapterConfig{mode: CECListen}
 	}
-	want := adapterConfig{mode: CECControl, osdName: osdName(bus), display: display, physical: cec.InvalidPhysicalAddress}
+	want := adapterConfig{mode: CECControl, osdName: osdName(spec), display: display, physical: cec.InvalidPhysicalAddress}
 	if display == "" {
 		want.problem = fmt.Sprintf("the CECBus names no display for machine %s", n.machine)
 		return want
@@ -177,17 +177,23 @@ func (n *cecNode) listen() (CECAdapterStatus, error) {
 	return entry, nil
 }
 
-// osdName is the name the adapter announces: its bus's name, cut to
-// the fourteen bytes CEC carries. The kernel's osd_name field is 15
-// bytes with the terminating NUL. A TV lists each source by this name,
-// and a room's name reads better there than a machine's. A CECBus name
-// is a Kubernetes name, so it is ASCII and a byte cut splits no
-// character.
-func osdName(bus string) string {
-	if len(bus) > 14 {
-		return bus[:14]
+// osdName is the name the adapter announces: the bus's spec.osdName,
+// and liken for a bus that names none, such as one the API server
+// stored before the field had a default. A TV lists each source by
+// this name. The kernel's osd_name field is 15 bytes with the
+// terminating NUL, and the schema holds the name to 14 printable ASCII
+// characters, the limit of the [OSD Name] operand of Set OSD Name
+// (HDMI-CEC 1.3a, CEC Table 26), so the cut here only guards a bus the
+// API server did not validate.
+func osdName(spec CECBusSpec) string {
+	name := spec.OSDName
+	if name == "" {
+		name = defaultOSDName
 	}
-	return bus
+	if len(name) > 14 {
+		return name[:14]
+	}
+	return name
 }
 
 // The Joining messages for a claim the kernel did not complete.
@@ -566,10 +572,8 @@ func (n *cecNode) heard(message cec.Message) {
 	n.arrived(message, after, held)
 	n.followRoute(message, own)
 	n.answerRouting(message, after, own)
-	// The adapter reports its power as on for as long as its pod runs.
-	// The machine keeps running when the TV goes to standby, so a
-	// Standby broadcast does not change the answer.
-	reply, answers := cec.Answer(message, own, cec.PowerOn)
+	n.sleepOnStandby(message, after, own)
+	reply, answers := cec.Answer(message, own, n.ownPower())
 	if !answers {
 		return
 	}

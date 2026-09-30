@@ -15,6 +15,11 @@ func TestCommandFor(t *testing.T) {
 		want    []any
 	}{
 		{name: "pause", command: mediaCommand{Action: actionPause}, want: []any{"no-osd", "cycle", "pause"}},
+		// play and hold set the state they name, so a second press leaves
+		// the film where the first put it (HDMI-CEC 1.3a, CEC 13.13.3).
+		{name: "play", command: mediaCommand{Action: actionPlay}, want: []any{"no-osd", "set", "pause", "no"}},
+		{name: "hold", command: mediaCommand{Action: actionHold}, want: []any{"no-osd", "set", "pause", "yes"}},
+		{name: "unmute", command: mediaCommand{Action: actionUnmute}, want: nil},
 		// A volume step and a mute press become no mpv command at
 		// all. Each publishes the unit's next level, and the subscription
 		// on the volume topic is what applies it.

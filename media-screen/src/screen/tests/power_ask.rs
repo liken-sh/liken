@@ -199,3 +199,56 @@ fn a_dropped_power_ask_writes_one_line_that_says_so() {
         )]
     );
 }
+
+/// The ask the sidecar publishes on a press of a TV remote's Power Off
+/// Function during a film.
+const POWER_OFF_ASK: &[u8] = br#"{"action":"power-off"}"#;
+
+// A Power Off Function keeps the room off when repeated (HDMI-CEC 1.3a, CEC
+// 13.13.3), so the held ask publishes off and never the toggle, which would
+// turn a room with its TV already off back on.
+#[test]
+fn a_held_power_off_ask_publishes_off_when_the_unit_is_idle() {
+    let now = Instant::now();
+    let mut screen = playing(&powered(), now);
+    screen.deliver(COMMANDS, POWER_OFF_ASK, false, now);
+
+    let effects = screen.deliver(STATUS, &status("Idle"), false, now);
+
+    assert_eq!(
+        publishes(effects),
+        [Publish {
+            topic: POWER.into(),
+            payload: br#"{"action":"off"}"#.to_vec(),
+            retained: false,
+        }]
+    );
+    assert_eq!(
+        screen.take_lines(),
+        [
+            format!(
+                "{COMMANDS} asked for power-off while the player plays, held until it is Idle for at most 10 s"
+            ),
+            format!(
+                "{COMMANDS} asked for power-off and the player is Idle, so published off to {POWER}"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_held_power_off_ask_reaches_the_client_as_its_key_with_no_receiver() {
+    let now = Instant::now();
+    let mut screen = playing(&wiring(), now);
+    screen.deliver(COMMANDS, POWER_OFF_ASK, false, now);
+
+    let effects = screen.deliver(STATUS, &status("Idle"), false, now);
+
+    assert_eq!(
+        moments(effects),
+        [
+            drew_status(Activity::Idle),
+            Moment::Press(keys::POWER_OFF.into())
+        ]
+    );
+}
