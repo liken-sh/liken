@@ -112,9 +112,8 @@ func newTrailerFetchLine(blocks []string, value func(string) string,
 	return line
 }
 
-// How long one file's pull may run. It is a variable so that no test waits it
-// out.
-var trailerPullTimeout = 10 * time.Minute
+// How long one file's pull may run.
+const trailerPullTimeout = 10 * time.Minute
 
 // The most one pulled file may take on the volume. It is a variable so that
 // no test answers half a gigabyte.

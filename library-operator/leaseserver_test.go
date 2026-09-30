@@ -10,13 +10,13 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"k8s.io/client-go/rest"
 )
 
@@ -37,12 +37,14 @@ func newLeaseServer() *leaseServer {
 }
 
 // config is a client configuration for the server, the way
-// inClusterConfig is one for the real API server. Both send JSON.
+// inClusterConfig is one for the real API server. Both send JSON. The
+// server answers over in-memory pipes, so a test in a synctest bubble
+// waits out the Lease's timings on the bubble's clock.
 func (s *leaseServer) config(t *testing.T) *rest.Config {
 	t.Helper()
-	server := httptest.NewServer(s)
-	t.Cleanup(server.Close)
-	return &rest.Config{Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"}}
+	config := apiservertest.Start(t, s).Config()
+	config.ContentType = "application/json"
+	return config
 }
 
 // store writes a Lease at the next version. Callers hold mu.
@@ -70,7 +72,7 @@ func (s *leaseServer) holdAs(holder string) {
 		"metadata":   map[string]any{"name": leaseName, "namespace": testLeaseNamespace},
 		"spec": map[string]any{
 			"holderIdentity":       holder,
-			"leaseDurationSeconds": int(testLeaseTiming.duration / time.Second),
+			"leaseDurationSeconds": int(operatorLeaseTiming.duration / time.Second),
 			"acquireTime":          now,
 			"renewTime":            now,
 		},

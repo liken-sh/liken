@@ -78,8 +78,8 @@ const backstopInterval = 10 * time.Second
 // context rather than taking the stop signal, so a shutdown lets the pass
 // in flight finish its writes, and the loop returns on the next turn. A
 // pass whose API server stops answering ends here, and the next pass
-// starts clean. It is a variable so a test drives a short timeout.
-var passTimeout = 30 * time.Second
+// starts clean.
+const passTimeout = 30 * time.Second
 
 // Operator holds what every pass needs: the client it reads and writes
 // through, the settings it stamps into each pod and Job it

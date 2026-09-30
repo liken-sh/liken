@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // One title as OMDb answers it, with the plot, the certification, and the
@@ -178,19 +179,21 @@ func TestTheOMDbAnswererHoldsNothingForATitleItCannotAsk(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
-				return http.StatusOK, test.answer
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
+					return http.StatusOK, test.answer
+				})
+
+				_, held, err := newOMDbAnswerer(client).answer(t.Context(), test.fact,
+					titleRef{kind: libraryKindMovies, ids: test.ids})
+
+				if err != nil || held {
+					t.Fatalf("answered %v with %v, want nothing and no error", held, err)
+				}
+				if len(fake.requests) != test.requests {
+					t.Errorf("the answerer made %d requests, want %d", len(fake.requests), test.requests)
+				}
 			})
-
-			_, held, err := newOMDbAnswerer(client).answer(t.Context(), test.fact,
-				titleRef{kind: libraryKindMovies, ids: test.ids})
-
-			if err != nil || held {
-				t.Fatalf("answered %v with %v, want nothing and no error", held, err)
-			}
-			if len(fake.requests) != test.requests {
-				t.Errorf("the answerer made %d requests, want %d", len(fake.requests), test.requests)
-			}
 		})
 	}
 }
@@ -208,21 +211,23 @@ func TestTheFactsOfOneTitleCostOneOMDbCall(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
-				return http.StatusOK, test.answer
-			})
-			answerer := newOMDbAnswerer(client)
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
+					return http.StatusOK, test.answer
+				})
+				answerer := newOMDbAnswerer(client)
 
-			for _, fact := range blockOf(providerBlockOMDb).facts {
-				if _, _, err := answerer.answer(t.Context(), fact,
-					titleRef{kind: libraryKindMovies, ids: harbourIDs()}); err != nil {
-					t.Fatalf("the %s fact answered %v", fact, err)
+				for _, fact := range blockOf(providerBlockOMDb).facts {
+					if _, _, err := answerer.answer(t.Context(), fact,
+						titleRef{kind: libraryKindMovies, ids: harbourIDs()}); err != nil {
+						t.Fatalf("the %s fact answered %v", fact, err)
+					}
 				}
-			}
 
-			if len(fake.requests) != 1 {
-				t.Errorf("the answerer made %d requests, want the one the title costs", len(fake.requests))
-			}
+				if len(fake.requests) != 1 {
+					t.Errorf("the answerer made %d requests, want the one the title costs", len(fake.requests))
+				}
+			})
 		})
 	}
 }
@@ -230,52 +235,56 @@ func TestTheFactsOfOneTitleCostOneOMDbCall(t *testing.T) {
 // A provider that refuses one call fails that title alone, and the container
 // records an error and asks again on the next run.
 func TestTheOMDbAnswererCarriesTheProvidersRefusal(t *testing.T) {
-	client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
-		return http.StatusInternalServerError, ""
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
+			return http.StatusInternalServerError, ""
+		})
+
+		_, held, err := newOMDbAnswerer(client).answer(t.Context(), factOverview,
+			titleRef{kind: libraryKindMovies, ids: harbourIDs()})
+
+		if err == nil || held {
+			t.Errorf("answered %v with %v, want the refusal", held, err)
+		}
 	})
-
-	_, held, err := newOMDbAnswerer(client).answer(t.Context(), factOverview,
-		titleRef{kind: libraryKindMovies, ids: harbourIDs()})
-
-	if err == nil || held {
-		t.Errorf("answered %v with %v, want the refusal", held, err)
-	}
 }
 
 // A key with no calls left answers the daily limit, which the answer line
 // reads as the end of that provider's work for the run.
 func TestAKeyWithNoCallsLeftAnswersTheDailyLimit(t *testing.T) {
-	calls := 0
-	client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
-		calls++
-		if calls == 1 {
-			return http.StatusOK, omdbHarbour
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
+			calls++
+			if calls == 1 {
+				return http.StatusOK, omdbHarbour
+			}
+			return http.StatusUnauthorized, `{"Response":"False","Error":"Request limit reached!"}`
+		})
+		answerer := newOMDbAnswerer(client)
+		reached := titleRef{kind: libraryKindMovies, ids: harbourIDs()}
+		next := titleRef{kind: libraryKindMovies, ids: providerIDs{"imdb": "tt4242425"}}
+		after := titleRef{kind: libraryKindMovies, ids: providerIDs{"imdb": "tt4242426"}}
+
+		if _, held, err := answerer.answer(t.Context(), factOverview, reached); err != nil || !held {
+			t.Fatalf("the first title answered %v with %v, want the overview", held, err)
 		}
-		return http.StatusUnauthorized, `{"Response":"False","Error":"Request limit reached!"}`
+		_, _, spent := answerer.answer(t.Context(), factOverview, next)
+		_, _, left := answerer.answer(t.Context(), factOverview, after)
+		_, cached, held := answerer.answer(t.Context(), factCertification, reached)
+
+		for at, err := range []error{spent, left} {
+			if !errors.Is(err, errDailyLimit) {
+				t.Errorf("the title after the limit %d answered %v, want the daily limit", at, err)
+			}
+		}
+		if held != nil || !cached {
+			t.Errorf("the title the provider answered reads %v with %v, want the answer held", cached, held)
+		}
+		if calls != 2 {
+			t.Errorf("the answerer made %d calls, want the one that worked and the one that spent the day", calls)
+		}
 	})
-	answerer := newOMDbAnswerer(client)
-	reached := titleRef{kind: libraryKindMovies, ids: harbourIDs()}
-	next := titleRef{kind: libraryKindMovies, ids: providerIDs{"imdb": "tt4242425"}}
-	after := titleRef{kind: libraryKindMovies, ids: providerIDs{"imdb": "tt4242426"}}
-
-	if _, held, err := answerer.answer(t.Context(), factOverview, reached); err != nil || !held {
-		t.Fatalf("the first title answered %v with %v, want the overview", held, err)
-	}
-	_, _, spent := answerer.answer(t.Context(), factOverview, next)
-	_, _, left := answerer.answer(t.Context(), factOverview, after)
-	_, cached, held := answerer.answer(t.Context(), factCertification, reached)
-
-	for at, err := range []error{spent, left} {
-		if !errors.Is(err, errDailyLimit) {
-			t.Errorf("the title after the limit %d answered %v, want the daily limit", at, err)
-		}
-	}
-	if held != nil || !cached {
-		t.Errorf("the title the provider answered reads %v with %v, want the answer held", cached, held)
-	}
-	if calls != 2 {
-		t.Errorf("the answerer made %d calls, want the one that worked and the one that spent the day", calls)
-	}
 }
 
 // One title with an IMDb id in its .nfo file, which is what OMDb keys on.
@@ -300,41 +309,43 @@ func seedOMDbGap(t *testing.T, catalog *Catalog, root, folder, id string) {
 // reached hold their answers, the titles it did not keep their gaps, and the
 // container logs the count it left.
 func TestTheDailyLimitLeavesTheRestOfTheTitlesTheirGaps(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	for at := range 3 {
-		seedOMDbGap(t, catalog, root, fmt.Sprintf("Winter Harbour %d (2011)", at),
-			fmt.Sprintf("tt424242%d", at))
-	}
-	calls := 0
-	client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
-		if calls++; calls == 1 {
-			return http.StatusOK, omdbHarbour
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		root := t.TempDir()
+		for at := range 3 {
+			seedOMDbGap(t, catalog, root, fmt.Sprintf("Winter Harbour %d (2011)", at),
+				fmt.Sprintf("tt424242%d", at))
 		}
-		return http.StatusUnauthorized, `{"Response":"False","Error":"Request limit reached!"}`
-	})
-	work, log := testEnricher(t, libraryKindMovies, root, catalog)
+		calls := 0
+		client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
+			if calls++; calls == 1 {
+				return http.StatusOK, omdbHarbour
+			}
+			return http.StatusUnauthorized, `{"Response":"False","Error":"Request limit reached!"}`
+		})
+		work, log := testEnricher(t, libraryKindMovies, root, catalog)
 
-	if err := work.nfoGap(t.Context(), factCertification, lineOf(newOMDbAnswerer(client))); err != nil {
-		t.Fatal(err)
-	}
-
-	if calls != 2 {
-		t.Errorf("the container made %d calls, want the one that worked and the one that did not", calls)
-	}
-	if !strings.Contains(log.String(), "left the certification of 2 titles") {
-		t.Errorf("log = %q, want the count it left", log.String())
-	}
-	answered := 0
-	for at := range 3 {
-		ledger, err := readLikenLedger(filepath.Join(root, fmt.Sprintf("Winter Harbour %d (2011)", at)),
-			factCertification)
-		if err != nil {
+		if err := work.nfoGap(t.Context(), factCertification, lineOf(newOMDbAnswerer(client))); err != nil {
 			t.Fatal(err)
 		}
-		answered += len(ledger.Attempts)
-	}
-	if answered != 1 {
-		t.Errorf("%d titles recorded an attempt, want the one the provider reached", answered)
-	}
+
+		if calls != 2 {
+			t.Errorf("the container made %d calls, want the one that worked and the one that did not", calls)
+		}
+		if !strings.Contains(log.String(), "left the certification of 2 titles") {
+			t.Errorf("log = %q, want the count it left", log.String())
+		}
+		answered := 0
+		for at := range 3 {
+			ledger, err := readLikenLedger(filepath.Join(root, fmt.Sprintf("Winter Harbour %d (2011)", at)),
+				factCertification)
+			if err != nil {
+				t.Fatal(err)
+			}
+			answered += len(ledger.Attempts)
+		}
+		if answered != 1 {
+			t.Errorf("%d titles recorded an attempt, want the one the provider reached", answered)
+		}
+	})
 }

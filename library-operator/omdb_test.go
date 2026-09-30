@@ -4,47 +4,50 @@ package main
 // the two 401 answers a key can get, and the cooldown a 429 takes.
 
 import (
-	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// What one fake OMDb recorded: the query of every request, and the cooldowns
-// the client waited instead of sleeping.
+// What one fake OMDb recorded: the query of every request, and the wait
+// between each 429 and the request after it.
 type fakeOMDb struct {
 	mutex     sync.Mutex
 	requests  []url.Values
 	cooldowns []time.Duration
+	limitedAt time.Time
 }
 
-// The client and the fake it reads, with the real cooldown taken out, so no
-// test sleeps and no test reaches the real OMDb.
+// The client and the fake it reads, so no test reaches the real OMDb. The
+// fake answers over in-memory pipes, so a test in a synctest bubble waits
+// out each cooldown on the bubble's clock.
 func newFakeOMDb(t *testing.T, answer func(url.Values) (int, string)) (*omdbClient, *fakeOMDb) {
 	t.Helper()
 	fake := &fakeOMDb{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mutex.Lock()
+		defer fake.mutex.Unlock()
 		fake.requests = append(fake.requests, r.URL.Query())
-		fake.mutex.Unlock()
+		if !fake.limitedAt.IsZero() {
+			fake.cooldowns = append(fake.cooldowns, time.Since(fake.limitedAt))
+			fake.limitedAt = time.Time{}
+		}
 		status, body := answer(r.URL.Query())
+		if status == http.StatusTooManyRequests {
+			fake.limitedAt = time.Now()
+		}
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
 	}))
-	t.Cleanup(server.Close)
 
-	client := newOMDbClient(server.URL, "a-key")
+	client := newOMDbClient(apiservertest.Host, "a-key")
 	client.http = server.Client()
-	client.wait = func(_ context.Context, cooldown time.Duration) error {
-		fake.mutex.Lock()
-		defer fake.mutex.Unlock()
-		fake.cooldowns = append(fake.cooldowns, cooldown)
-		return nil
-	}
 	return client, fake
 }
 
@@ -60,50 +63,54 @@ const omdbAnswer = `{"Title":"The Long Ledger","Year":"1972","Rated":"R",` +
 // The lookup asks for one IMDb id with the full plot, carries the key as a
 // query parameter, and reads back what each nfo fact needs.
 func TestTheOMDbLookupReadsOneTitle(t *testing.T) {
-	client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
-		return http.StatusOK, omdbAnswer
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
+			return http.StatusOK, omdbAnswer
+		})
+
+		title, err := client.title(t.Context(), "tt9003003")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !title.found() {
+			t.Errorf("found = false, want the title OMDb answered")
+		}
+		if title.Rated != "R" || title.Plot == "" || title.IMDbRating != "9.2" || title.Metascore != "100" {
+			t.Errorf("title = %+v, want the certification, the plot, and the ratings", title)
+		}
+		if got := title.score(omdbSourceRottenTomatoes); got != "97%" {
+			t.Errorf("the Rotten Tomatoes score = %q, want 97%%", got)
+		}
+		if got := title.score(omdbSourceIMDb); got != "9.2/10" {
+			t.Errorf("the IMDb score = %q, want 9.2/10", got)
+		}
+		if got := title.score("a site OMDb does not name"); got != "" {
+			t.Errorf("an unnamed source scored %q, want nothing", got)
+		}
+		query := fake.requests[0]
+		if query.Get("apikey") != "a-key" || query.Get("i") != "tt9003003" || query.Get("plot") != omdbFullPlot {
+			t.Errorf("the lookup asked %v, want the key, the id, and the full plot", query)
+		}
 	})
-
-	title, err := client.title(t.Context(), "tt9003003")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !title.found() {
-		t.Errorf("found = false, want the title OMDb answered")
-	}
-	if title.Rated != "R" || title.Plot == "" || title.IMDbRating != "9.2" || title.Metascore != "100" {
-		t.Errorf("title = %+v, want the certification, the plot, and the ratings", title)
-	}
-	if got := title.score(omdbSourceRottenTomatoes); got != "97%" {
-		t.Errorf("the Rotten Tomatoes score = %q, want 97%%", got)
-	}
-	if got := title.score(omdbSourceIMDb); got != "9.2/10" {
-		t.Errorf("the IMDb score = %q, want 9.2/10", got)
-	}
-	if got := title.score("a site OMDb does not name"); got != "" {
-		t.Errorf("an unnamed source scored %q, want nothing", got)
-	}
-	query := fake.requests[0]
-	if query.Get("apikey") != "a-key" || query.Get("i") != "tt9003003" || query.Get("plot") != omdbFullPlot {
-		t.Errorf("the lookup asked %v, want the key, the id, and the full plot", query)
-	}
 }
 
 // OMDb answers 200 for a title it does not hold, so the answer alone is not a
 // find, and the fact records a miss and not an error.
 func TestAnOMDbTitleTheProviderDoesNotHold(t *testing.T) {
-	client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
-		return http.StatusOK, `{"Response":"False","Error":"Incorrect IMDb ID."}`
-	})
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
+			return http.StatusOK, `{"Response":"False","Error":"Incorrect IMDb ID."}`
+		})
 
-	title, err := client.title(t.Context(), "tt0000000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if title.found() {
-		t.Errorf("found = true, want a miss for a title OMDb does not hold")
-	}
+		title, err := client.title(t.Context(), "tt0000000")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if title.found() {
+			t.Errorf("found = true, want a miss for a title OMDb does not hold")
+		}
+	})
 }
 
 // A key with no calls left ends OMDb's work for the run. A key OMDb refused
@@ -129,24 +136,26 @@ func TestTheOMDbDailyLimitSignal(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			calls := 0
-			client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
-				answer := one.answers[calls]
-				status := one.status
-				if calls < len(one.answers)-1 {
-					status = http.StatusOK
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
+					answer := one.answers[calls]
+					status := one.status
+					if calls < len(one.answers)-1 {
+						status = http.StatusOK
+					}
+					calls++
+					return status, answer
+				})
+
+				for range one.answers {
+					_, _ = client.title(t.Context(), "tt9003003")
 				}
-				calls++
-				return status, answer
+
+				if got := client.dailyLimitReached(); got != one.want {
+					t.Errorf("dailyLimitReached = %v, want %v", got, one.want)
+				}
 			})
-
-			for range one.answers {
-				_, _ = client.title(t.Context(), "tt9003003")
-			}
-
-			if got := client.dailyLimitReached(); got != one.want {
-				t.Errorf("dailyLimitReached = %v, want %v", got, one.want)
-			}
 		})
 	}
 }
@@ -154,23 +163,25 @@ func TestTheOMDbDailyLimitSignal(t *testing.T) {
 // A 429 waits the header's own cooldown and the request goes out again, which
 // is the rule every provider client shares.
 func TestAnOMDbRequestWaitsOutA429(t *testing.T) {
-	calls := 0
-	client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
-		calls++
-		if calls == 1 {
-			return http.StatusTooManyRequests, ""
-		}
-		return http.StatusOK, omdbAnswer
-	})
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		client, fake := newFakeOMDb(t, func(url.Values) (int, string) {
+			calls++
+			if calls == 1 {
+				return http.StatusTooManyRequests, ""
+			}
+			return http.StatusOK, omdbAnswer
+		})
 
-	title, err := client.title(t.Context(), "tt9003003")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !title.found() {
-		t.Error("the second request read no title")
-	}
-	if len(fake.cooldowns) != 1 || fake.cooldowns[0] != providerCooldown {
-		t.Errorf("cooldowns = %v, want one of %s", fake.cooldowns, providerCooldown)
-	}
+		title, err := client.title(t.Context(), "tt9003003")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !title.found() {
+			t.Error("the second request read no title")
+		}
+		if len(fake.cooldowns) != 1 || fake.cooldowns[0] != providerCooldown {
+			t.Errorf("cooldowns = %v, want one of %s", fake.cooldowns, providerCooldown)
+		}
+	})
 }

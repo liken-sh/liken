@@ -40,12 +40,12 @@ const defaultHandoffTimeout = 2 * time.Minute
 
 // How often the wait writes the run row again. Ten seconds is long
 // enough for one broadcast to settle and short against the two-minute
-// wait. A test shortens it.
-var handoffNudge = 10 * time.Second
+// wait.
+const handoffNudge = 10 * time.Second
 
 // How long the wait holds off before it opens the confirmations
-// stream again. A test shortens it.
-var handoffRetry = time.Second
+// stream again.
+const handoffRetry = time.Second
 
 // HandoffTimeout reads the wait out of the environment. An empty,
 // unreadable, or negative value takes the default rather than failing the

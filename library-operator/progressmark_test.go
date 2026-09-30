@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -195,37 +196,48 @@ func TestTheWaitBeforeTheClearRunsFromThePress(t *testing.T) {
 // a progress role that was down for longer than the retention still
 // records what was pressed while it was down.
 func TestAnExpiredMarkIsRecordedAndCleared(t *testing.T) {
-	role, broker, db := servingProgress(t)
-	waitForTopic(t, broker, role.availabilityTopic)
-	topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
+	synctest.Test(t, func(t *testing.T) {
+		role, broker, db := servingProgress(t)
+		waitForTopic(t, broker, role.availabilityTopic)
+		topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
 
-	role.onMessage(topic, markPayload(t, markCleared, 0, markRetention+time.Hour))
+		role.onMessage(topic, markPayload(t, markCleared, 0, markRetention+time.Hour))
 
-	published := waitForTopic(t, broker, topic)
-	if len(published.payload) != 0 || !published.retained {
-		t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
-	}
-	if heldPlay(t, db, "mark-den-1").Play == "" {
-		t.Error("the role cleared a mark it did not record")
-	}
+		published := waitForTopic(t, broker, topic)
+		if len(published.payload) != 0 || !published.retained {
+			t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
+		}
+		if heldPlay(t, db, "mark-den-1").Play == "" {
+			t.Error("the role cleared a mark it did not record")
+		}
+	})
 }
 
-// A fresh mark is cleared when its retention runs out, which the test
-// shortens to milliseconds.
+// A fresh mark is cleared when its retention runs out, and not before.
 func TestAFreshMarkIsClearedWhenItsRetentionRunsOut(t *testing.T) {
-	retentionWas := markRetention
-	t.Cleanup(func() { markRetention = retentionWas })
-	markRetention = 50 * time.Millisecond
-	role, broker, _ := servingProgress(t)
-	waitForTopic(t, broker, role.availabilityTopic)
-	topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
+	synctest.Test(t, func(t *testing.T) {
+		role, broker, _ := servingProgress(t)
+		waitForTopic(t, broker, role.availabilityTopic)
+		topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
+		pressed := time.Now()
 
-	role.onMessage(topic, markPayload(t, markWatched, 6000, 0))
+		role.onMessage(topic, markPayload(t, markWatched, 6000, 0))
 
-	published := waitForTopic(t, broker, topic)
-	if len(published.payload) != 0 || !published.retained {
-		t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
-	}
+		var published brokerPublish
+		for published.topic != topic {
+			select {
+			case published = <-broker.pubs:
+			case <-time.After(2 * markRetention):
+				t.Fatal("the role never cleared the mark")
+			}
+		}
+		if len(published.payload) != 0 || !published.retained {
+			t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
+		}
+		if held := time.Since(pressed); held != markRetention {
+			t.Errorf("the mark was cleared %s after the press, want %s", held, markRetention)
+		}
+	})
 }
 
 // Each mark the role records is one line in the pod log that names the

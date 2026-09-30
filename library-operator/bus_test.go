@@ -3,7 +3,8 @@ package main
 // These tests run the client against a fake broker on the far end of a
 // net.Pipe, so the connect handshake, the subscription resend, the
 // publish path, and the inbound delivery are proved with no TCP and no
-// Mosquitto.
+// Mosquitto. Each test runs in a synctest bubble, so a reconnect waits
+// out the client's own backoff on the bubble's clock.
 
 import (
 	"bufio"
@@ -12,12 +13,13 @@ import (
 	"net"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
-// busTestTimeout bounds every wait: long enough that a loaded machine
-// still passes, short enough that a broken client fails in seconds.
-const busTestTimeout = 2 * time.Second
+// busTestTimeout bounds every wait. It exceeds the longest backoff the
+// client waits, so a client that works always reconnects within it.
+const busTestTimeout = 2 * busMaxBackoff
 
 // A brokerPublish is one message the broker read from the client.
 type brokerPublish struct {
@@ -104,8 +106,6 @@ func readTopicFilter(body []byte) (int, string, bool) {
 // the test's context ends.
 func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus, []*fakeBroker, <-chan *Bus) {
 	t.Helper()
-	shorterBackoff(t)
-
 	conns := make(chan net.Conn, count)
 	brokers := make([]*fakeBroker, count)
 	for index := range brokers {
@@ -133,13 +133,6 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 	t.Cleanup(cancel)
 	go bus.Run(ctx)
 	return bus, brokers, connected
-}
-
-func shorterBackoff(t *testing.T) {
-	t.Helper()
-	minWas, maxWas := busMinBackoff, busMaxBackoff
-	t.Cleanup(func() { busMinBackoff, busMaxBackoff = minWas, maxWas })
-	busMinBackoff, busMaxBackoff = 5*time.Millisecond, 20*time.Millisecond
 }
 
 func waitForConnect(t *testing.T, connected <-chan *Bus) {
@@ -176,91 +169,100 @@ func waitForPublish(t *testing.T, values <-chan brokerPublish) brokerPublish {
 // The client connects, calls onConnect, and re-sends every remembered
 // subscription on that connection.
 func TestBusConnectsAndSendsRememberedSubscriptions(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	bus.Subscribe("liken/library/libraries/+/+/status")
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		bus.Subscribe("liken/library/libraries/+/+/status")
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[0].subs); got != "liken/library/libraries/+/+/status" {
-		t.Errorf("subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[0].subs); got != "liken/library/libraries/+/+/status" {
+			t.Errorf("subscription = %q", got)
+		}
+	})
 }
 
 // A publish from the caller reaches the broker with its topic, its
 // payload, and its retain flag.
 func TestBusPublishesToTheBroker(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
 
-	bus.Publish("liken/library/libraries/house/movies/status", []byte(`{"titles":12}`), true)
+		bus.Publish("liken/library/libraries/house/movies/status", []byte(`{"titles":12}`), true)
 
-	got := waitForPublish(t, brokers[0].pubs)
-	if got.topic != "liken/library/libraries/house/movies/status" {
-		t.Errorf("topic = %q", got.topic)
-	}
-	if string(got.payload) != `{"titles":12}` {
-		t.Errorf("payload = %q", got.payload)
-	}
-	if !got.retained {
-		t.Error("the publish was not retained")
-	}
+		got := waitForPublish(t, brokers[0].pubs)
+		if got.topic != "liken/library/libraries/house/movies/status" {
+			t.Errorf("topic = %q", got.topic)
+		}
+		if string(got.payload) != `{"titles":12}` {
+			t.Errorf("payload = %q", got.payload)
+		}
+		if !got.retained {
+			t.Error("the publish was not retained")
+		}
+	})
 }
 
 // A message the broker pushes reaches the handler with its topic and
 // payload.
 func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
-	received := make(chan brokerPublish, 1)
-	handler := func(topic string, payload []byte) {
-		received <- brokerPublish{topic: topic, payload: append([]byte(nil), payload...)}
-	}
-	_, brokers, connected := startBus(t, 1, nil, handler)
-	waitForConnect(t, connected)
-
-	brokers[0].push("liken/library/libraries/house/movies/status", []byte(`{"titles":0}`))
-
-	select {
-	case got := <-received:
-		if got.topic != "liken/library/libraries/house/movies/status" {
-			t.Errorf("topic = %q", got.topic)
+	synctest.Test(t, func(t *testing.T) {
+		received := make(chan brokerPublish, 1)
+		handler := func(topic string, payload []byte) {
+			received <- brokerPublish{topic: topic, payload: append([]byte(nil), payload...)}
 		}
-		if string(got.payload) != `{"titles":0}` {
-			t.Errorf("payload = %q", got.payload)
+		_, brokers, connected := startBus(t, 1, nil, handler)
+		waitForConnect(t, connected)
+
+		brokers[0].push("liken/library/libraries/house/movies/status", []byte(`{"titles":0}`))
+
+		select {
+		case got := <-received:
+			if got.topic != "liken/library/libraries/house/movies/status" {
+				t.Errorf("topic = %q", got.topic)
+			}
+			if string(got.payload) != `{"titles":0}` {
+				t.Errorf("payload = %q", got.payload)
+			}
+		case <-time.After(busTestTimeout):
+			t.Fatal("the handler read nothing the broker pushed")
 		}
-	case <-time.After(busTestTimeout):
-		t.Fatal("the handler read nothing the broker pushed")
-	}
+	})
 }
 
 // A dropped connection reconnects, and the remembered subscription
 // goes out again on the new connection with no second Subscribe call.
 func TestBusResendsSubscriptionsAfterAReconnect(t *testing.T) {
-	bus, brokers, connected := startBus(t, 2, nil, nil)
-	bus.Subscribe("liken/library/libraries/+/+/status")
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 2, nil, nil)
+		bus.Subscribe("liken/library/libraries/+/+/status")
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[0].subs); got != "liken/library/libraries/+/+/status" {
-		t.Fatalf("first subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[0].subs); got != "liken/library/libraries/+/+/status" {
+			t.Fatalf("first subscription = %q", got)
+		}
 
-	// Drop the first connection. The client reconnects onto the second
-	// broker and re-sends the filter it remembers.
-	brokers[0].conn.Close()
+		// Drop the first connection. The client reconnects onto the second
+		// broker and re-sends the filter it remembers.
+		brokers[0].conn.Close()
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[1].subs); got != "liken/library/libraries/+/+/status" {
-		t.Errorf("resent subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[1].subs); got != "liken/library/libraries/+/+/status" {
+			t.Errorf("resent subscription = %q", got)
+		}
+	})
 }
 
 // A publish made while the client is disconnected is dropped at QoS 0,
 // and the caller re-publishes from onConnect once the connection
 // returns.
 func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
-	shorterBackoff(t)
-	bus := newBus("pipe", "library-operator", nil, nil, nil)
-	// No connection is ever dialed, so out stays nil and the publish
-	// has nowhere to go.
-	bus.Publish("liken/library/libraries/house/movies/status", []byte("x"), true)
-	// The test proves only that the call returns and panics on nothing.
+	synctest.Test(t, func(t *testing.T) {
+		bus := newBus("pipe", "library-operator", nil, nil, nil)
+		// No connection is ever dialed, so out stays nil and the publish
+		// has nowhere to go.
+		bus.Publish("liken/library/libraries/house/movies/status", []byte("x"), true)
+		// The test proves only that the call returns and panics on nothing.
+	})
 }
 
 // misbehavingBroker answers one CONNECT with the bytes the test hands
@@ -290,95 +292,138 @@ func TestBusDialsAgainWhenTheHandshakeFails(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			shorterBackoff(t)
-			refusedNear, refusedFar := net.Pipe()
-			acceptedNear, acceptedFar := net.Pipe()
-			t.Cleanup(func() {
-				refusedNear.Close()
-				refusedFar.Close()
-				acceptedNear.Close()
-				acceptedFar.Close()
-			})
-			misbehavingBroker(refusedFar, each.answer)
-			broker := newFakeBroker(acceptedFar)
+			synctest.Test(t, func(t *testing.T) {
+				refusedNear, refusedFar := net.Pipe()
+				acceptedNear, acceptedFar := net.Pipe()
+				t.Cleanup(func() {
+					refusedNear.Close()
+					refusedFar.Close()
+					acceptedNear.Close()
+					acceptedFar.Close()
+				})
+				misbehavingBroker(refusedFar, each.answer)
+				broker := newFakeBroker(acceptedFar)
 
-			conns := make(chan net.Conn, 2)
-			conns <- refusedNear
-			conns <- acceptedNear
-			connected := make(chan *Bus, 2)
-			bus := newBus("pipe", "library-operator", nil, func(b *Bus) { connected <- b }, nil)
-			bus.dial = func(ctx context.Context) (net.Conn, error) {
-				select {
-				case conn := <-conns:
-					return conn, nil
-				case <-ctx.Done():
-					return nil, ctx.Err()
+				conns := make(chan net.Conn, 2)
+				conns <- refusedNear
+				conns <- acceptedNear
+				connected := make(chan *Bus, 2)
+				bus := newBus("pipe", "library-operator", nil, func(b *Bus) { connected <- b }, nil)
+				bus.dial = func(ctx context.Context) (net.Conn, error) {
+					select {
+					case conn := <-conns:
+						return conn, nil
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
 				}
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			go bus.Run(ctx)
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				go bus.Run(ctx)
 
-			waitForConnect(t, connected)
-			bus.Publish("liken/library/libraries/house/movies/availability", []byte(availabilityOnline), true)
-			if got := waitForPublish(t, broker.pubs); string(got.payload) != availabilityOnline {
-				t.Errorf("payload = %q, want %q", got.payload, availabilityOnline)
-			}
+				waitForConnect(t, connected)
+				bus.Publish("liken/library/libraries/house/movies/availability", []byte(availabilityOnline), true)
+				if got := waitForPublish(t, broker.pubs); string(got.payload) != availabilityOnline {
+					t.Errorf("payload = %q, want %q", got.payload, availabilityOnline)
+				}
+			})
 		})
 	}
 }
 
 // A broker that is down is a failed dial, and the client waits a
-// growing backoff between attempts instead of spinning on the address.
+// growing backoff between attempts instead of spinning on the address:
+// the floor after the first failure, and twice the floor after the
+// second.
 func TestBusDialsAgainAfterAFailedDial(t *testing.T) {
-	shorterBackoff(t)
-	near, far := net.Pipe()
-	t.Cleanup(func() {
-		near.Close()
-		far.Close()
-	})
-	newFakeBroker(far)
+	synctest.Test(t, func(t *testing.T) {
+		near, far := net.Pipe()
+		t.Cleanup(func() {
+			near.Close()
+			far.Close()
+		})
+		newFakeBroker(far)
 
-	var attempts atomic.Int32
-	connected := make(chan *Bus, 1)
-	bus := newBus("pipe", "library-operator", nil, func(b *Bus) { connected <- b }, nil)
-	bus.dial = func(context.Context) (net.Conn, error) {
-		if attempts.Add(1) <= 2 {
-			return nil, errors.New("no broker answers at this address")
+		var attempts atomic.Int32
+		connected := make(chan *Bus, 1)
+		bus := newBus("pipe", "library-operator", nil, func(b *Bus) { connected <- b }, nil)
+		bus.dial = func(context.Context) (net.Conn, error) {
+			if attempts.Add(1) <= 2 {
+				return nil, errors.New("no broker answers at this address")
+			}
+			return near, nil
 		}
-		return near, nil
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go bus.Run(ctx)
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		started := time.Now()
+		go bus.Run(ctx)
 
-	waitForConnect(t, connected)
-	if got := attempts.Load(); got != 3 {
-		t.Errorf("dials = %d, want 3", got)
-	}
+		waitForConnect(t, connected)
+		if got := attempts.Load(); got != 3 {
+			t.Errorf("dials = %d, want 3", got)
+		}
+		if waited, want := time.Since(started), busMinBackoff+2*busMinBackoff; waited != want {
+			t.Errorf("connected after %s, want %s", waited, want)
+		}
+	})
 }
 
 // A subscription made while the client is connected goes out on that
 // connection, so a caller that subscribes late does not wait for a
 // reconnect to hear anything.
 func TestBusSendsASubscriptionMadeWhileConnected(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
 
-	bus.Subscribe("liken/library/libraries/+/+/availability")
+		bus.Subscribe("liken/library/libraries/+/+/availability")
 
-	if got := waitForString(t, brokers[0].subs); got != "liken/library/libraries/+/+/availability" {
-		t.Errorf("subscription = %q", got)
-	}
+		if got := waitForString(t, brokers[0].subs); got != "liken/library/libraries/+/+/availability" {
+			t.Errorf("subscription = %q", got)
+		}
+	})
 }
 
 // The protocol reserves packet identifier zero, so the counter skips it
 // when it wraps.
 func TestPacketIdentifiersSkipZeroWhenTheyWrap(t *testing.T) {
-	bus := newBus("pipe", "library-operator", nil, nil, nil)
-	bus.packetID = 65535
+	synctest.Test(t, func(t *testing.T) {
+		bus := newBus("pipe", "library-operator", nil, nil, nil)
+		bus.packetID = 65535
 
-	if got := bus.nextPacketID(); got != 1 {
-		t.Errorf("identifier = %d, want 1", got)
+		if got := bus.nextPacketID(); got != 1 {
+			t.Errorf("identifier = %d, want 1", got)
+		}
+	})
+}
+
+// A client dials its address over TCP. Every other test hands the client
+// a pipe, so this one proves the dialer that production runs.
+func TestBusDialsItsAddressOverTCP(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	accepted := make(chan *fakeBroker, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		t.Cleanup(func() { conn.Close() })
+		accepted <- newFakeBroker(conn)
+	}()
+	connected := make(chan *Bus, 1)
+	bus := newBus(listener.Addr().String(), "library-operator", nil, func(b *Bus) { connected <- b }, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	go bus.Run(ctx)
+
+	waitForConnect(t, connected)
+	bus.Publish("liken/library/libraries/house/movies/availability", []byte(availabilityOnline), true)
+	if got := waitForPublish(t, (<-accepted).pubs); string(got.payload) != availabilityOnline {
+		t.Errorf("payload = %q, want %q", got.payload, availabilityOnline)
 	}
 }

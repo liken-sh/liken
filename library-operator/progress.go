@@ -27,12 +27,11 @@ const progressMode = "progress"
 
 // progressWriteTimeout bounds one message's writes and reads, so an
 // agent that stops answering cannot hold the bus reader forever.
-var progressWriteTimeout = 30 * time.Second
+const progressWriteTimeout = 30 * time.Second
 
 // How long the role holds the bus open after it publishes the closing
-// offline, so the writer goroutine sends it before the process exits. A
-// variable, so a test drives a shutdown in milliseconds.
-var progressFlushGrace = 500 * time.Millisecond
+// offline, so the writer goroutine sends it before the process exits.
+const progressFlushGrace = 500 * time.Millisecond
 
 // One progress role: the namespace it records, the two topic trees it
 // reads, the store it writes, and the bus it publishes on.

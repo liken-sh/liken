@@ -7,11 +7,12 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // A run written twice is one row, so the finished write replaces
@@ -120,12 +121,11 @@ func TestDeleteRunsTakesOneLibrary(t *testing.T) {
 // after it.
 func subscriptionServer(t *testing.T, status int, body string) *Catalog {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client())
+	return NewCatalog(apiservertest.Host, server.Client())
 }
 
 // Every row of the snapshot and every change after it names its
@@ -258,7 +258,7 @@ func TestSubscribeReadsWhatItCanAndSurfacesTheRest(t *testing.T) {
 // in the middle of a Job.
 func proxyCatalog(t *testing.T, catalog *Catalog, refuse func(path string, body []byte) bool) *Catalog {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if refuse(r.URL.Path, body) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -275,7 +275,7 @@ func proxyCatalog(t *testing.T, catalog *Catalog, refuse func(path string, body 
 			return
 		}
 		forward.Header.Set("Content-Type", "application/json")
-		answer, err := http.DefaultClient.Do(forward)
+		answer, err := catalog.http.Do(forward)
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
 			return
@@ -284,8 +284,7 @@ func proxyCatalog(t *testing.T, catalog *Catalog, refuse func(path string, body 
 		w.WriteHeader(answer.StatusCode)
 		streamBack(w, answer.Body)
 	}))
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client())
+	return NewCatalog(apiservertest.Host, server.Client())
 }
 
 // Copies an answer back as it arrives and flushes each piece, so a

@@ -6,36 +6,45 @@ package main
 // headers name.
 
 import (
-	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // What one fake TheIntroDB recorded, and what it answers: one status and body
 // for every request, and the headers of a 429 for the first requests a test
 // names.
 type fakeTheIntroDB struct {
-	mutex     sync.Mutex
-	requests  []*http.Request
-	status    int
-	body      string
-	tooMany   int
-	limited   http.Header
+	mutex    sync.Mutex
+	requests []*http.Request
+	status   int
+	body     string
+	tooMany  int
+	limited  http.Header
+	// The wait between each 429 and the request after it, and when the last
+	// 429 went out.
 	cooldowns []time.Duration
+	limitedAt time.Time
 }
 
 func (f *fakeTheIntroDB) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.requests = append(f.requests, r)
+	if !f.limitedAt.IsZero() {
+		f.cooldowns = append(f.cooldowns, time.Since(f.limitedAt))
+		f.limitedAt = time.Time{}
+	}
 	if f.tooMany > 0 {
 		f.tooMany--
+		f.limitedAt = time.Now()
 		for name, values := range f.limited {
 			w.Header()[name] = values
 		}
@@ -47,18 +56,14 @@ func (f *fakeTheIntroDB) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, f.body)
 }
 
-// The client and the fake it reads, with the cooldown recorded and not slept.
+// The client and the fake it reads, which records each cooldown the client
+// waited.
 func newFakeTheIntroDB(t *testing.T, token string, status int, body string) (*theintrodbClient, *fakeTheIntroDB) {
 	t.Helper()
 	fake := &fakeTheIntroDB{status: status, body: body}
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
-	client := newTheIntroDBClient(server.URL, token)
+	server := apiservertest.Start(t, fake)
+	client := newTheIntroDBClient(apiservertest.Host, token)
 	client.http = server.Client()
-	client.wait = func(_ context.Context, cooldown time.Duration) error {
-		fake.cooldowns = append(fake.cooldowns, cooldown)
-		return nil
-	}
 	return client, fake
 }
 
@@ -74,67 +79,71 @@ func milliseconds(value int64) *int64 { return &value }
 // file's length, and every candidate comes back in the answer's order with
 // its null ends absent.
 func TestTheIntroDBAnswersEveryCandidateOfAnEpisode(t *testing.T) {
-	client, fake := newFakeTheIntroDB(t, "", http.StatusOK, theintrodbEpisodeAnswer)
-	answerer := newTheIntroDBMarkAnswerer(client)
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTheIntroDB(t, "", http.StatusOK, theintrodbEpisodeAnswer)
+		answerer := newTheIntroDBMarkAnswerer(client)
 
-	entries, err := answerer.marks(t.Context(), markFile{
-		ids: providerIDs{"tmdb": "1399"}, season: 1, episode: 2, duration: 3318000,
-	})
+		entries, err := answerer.marks(t.Context(), markFile{
+			ids: providerIDs{"tmdb": "1399"}, season: 1, episode: 2, duration: 3318000,
+		})
 
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []markEntry{
-		{Kind: markKindIntro, End: milliseconds(107000), Source: providerBlockTheIntroDB},
-		{Kind: markKindIntro, Start: milliseconds(7007), End: milliseconds(106482), Source: providerBlockTheIntroDB},
-		{Kind: markKindIntro, Start: milliseconds(8000), End: milliseconds(109000), Source: providerBlockTheIntroDB},
-		{Kind: markKindCredits, Start: milliseconds(3253000), End: milliseconds(3316000), Source: providerBlockTheIntroDB},
-	}
-	if !slices.EqualFunc(entries, want, sameMark) {
-		t.Errorf("entries = %v, want %v", markText(entries), markText(want))
-	}
-	query := fake.requests[0].URL.Query()
-	if fake.requests[0].URL.Path != theintrodbMediaPath {
-		t.Errorf("the ask went to %s, want %s", fake.requests[0].URL.Path, theintrodbMediaPath)
-	}
-	for name, value := range map[string]string{
-		"tmdb_id": "1399", "season": "1", "episode": "2", "duration_ms": "3318000",
-	} {
-		if query.Get(name) != value {
-			t.Errorf("the ask named %s=%q, want %q", name, query.Get(name), value)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+		want := []markEntry{
+			{Kind: markKindIntro, End: milliseconds(107000), Source: providerBlockTheIntroDB},
+			{Kind: markKindIntro, Start: milliseconds(7007), End: milliseconds(106482), Source: providerBlockTheIntroDB},
+			{Kind: markKindIntro, Start: milliseconds(8000), End: milliseconds(109000), Source: providerBlockTheIntroDB},
+			{Kind: markKindCredits, Start: milliseconds(3253000), End: milliseconds(3316000), Source: providerBlockTheIntroDB},
+		}
+		if !slices.EqualFunc(entries, want, sameMark) {
+			t.Errorf("entries = %v, want %v", markText(entries), markText(want))
+		}
+		query := fake.requests[0].URL.Query()
+		if fake.requests[0].URL.Path != theintrodbMediaPath {
+			t.Errorf("the ask went to %s, want %s", fake.requests[0].URL.Path, theintrodbMediaPath)
+		}
+		for name, value := range map[string]string{
+			"tmdb_id": "1399", "season": "1", "episode": "2", "duration_ms": "3318000",
+		} {
+			if query.Get(name) != value {
+				t.Errorf("the ask named %s=%q, want %q", name, query.Get(name), value)
+			}
+		}
+	})
 }
 
 // A movie is asked by its own TMDb id alone, and the four kinds come back in
 // the order intro, recap, credits, preview.
 func TestTheIntroDBAsksAMovieByItsIDAlone(t *testing.T) {
-	client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":1001,"type":"movie",
-		"preview":[{"start_ms":1680000,"end_ms":1740000}],
-		"credits":[{"start_ms":8000000,"end_ms":null}],
-		"recap":[{"start_ms":25000,"end_ms":134000}],
-		"intro":[{"start_ms":null,"end_ms":23000}]}`)
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":1001,"type":"movie",
+			"preview":[{"start_ms":1680000,"end_ms":1740000}],
+			"credits":[{"start_ms":8000000,"end_ms":null}],
+			"recap":[{"start_ms":25000,"end_ms":134000}],
+			"intro":[{"start_ms":null,"end_ms":23000}]}`)
 
-	entries, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(), markFile{
-		movie: true, ids: providerIDs{"tmdb": "1001"},
-	})
+		entries, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(), markFile{
+			movie: true, ids: providerIDs{"tmdb": "1001"},
+		})
 
-	if err != nil {
-		t.Fatal(err)
-	}
-	kinds := []string{}
-	for _, entry := range entries {
-		kinds = append(kinds, entry.Kind)
-	}
-	if !slices.Equal(kinds, []string{markKindIntro, markKindRecap, markKindCredits, markKindPreview}) {
-		t.Errorf("kinds = %v, want intro, recap, credits, preview", kinds)
-	}
-	query := fake.requests[0].URL.Query()
-	for _, absent := range []string{"season", "episode", "duration_ms"} {
-		if query.Has(absent) {
-			t.Errorf("the ask named %s for a movie with no length, want none", absent)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+		kinds := []string{}
+		for _, entry := range entries {
+			kinds = append(kinds, entry.Kind)
+		}
+		if !slices.Equal(kinds, []string{markKindIntro, markKindRecap, markKindCredits, markKindPreview}) {
+			t.Errorf("kinds = %v, want intro, recap, credits, preview", kinds)
+		}
+		query := fake.requests[0].URL.Query()
+		for _, absent := range []string{"season", "episode", "duration_ms"} {
+			if query.Has(absent) {
+				t.Errorf("the ask named %s for a movie with no length, want none", absent)
+			}
+		}
+	})
 }
 
 // A 404 is TheIntroDB saying it holds no span for the work, which is a miss
@@ -151,31 +160,35 @@ func TestTheIntroDBMisses(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTheIntroDB(t, "", http.StatusNotFound, `{"error":"media not found"}`)
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTheIntroDB(t, "", http.StatusNotFound, `{"error":"media not found"}`)
 
-			entries, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
-				markFile{ids: test.ids, season: 9, episode: 9})
+				entries, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
+					markFile{ids: test.ids, season: 9, episode: 9})
 
-			if err != nil || len(entries) != 0 {
-				t.Errorf("marks = %v, %v, want no span and no error", entries, err)
-			}
-			if len(fake.requests) != test.asked {
-				t.Errorf("the client made %d requests, want %d", len(fake.requests), test.asked)
-			}
+				if err != nil || len(entries) != 0 {
+					t.Errorf("marks = %v, %v, want no span and no error", entries, err)
+				}
+				if len(fake.requests) != test.asked {
+					t.Errorf("the client made %d requests, want %d", len(fake.requests), test.asked)
+				}
+			})
 		})
 	}
 }
 
 // Any other status is an error that carries TheIntroDB's own words.
 func TestATheIntroDBFailureCarriesItsBody(t *testing.T) {
-	client, _ := newFakeTheIntroDB(t, "", http.StatusBadRequest, `{"error":"invalid season"}`)
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTheIntroDB(t, "", http.StatusBadRequest, `{"error":"invalid season"}`)
 
-	_, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
-		markFile{ids: providerIDs{"tmdb": "1399"}, season: 1, episode: 2})
+		_, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
+			markFile{ids: providerIDs{"tmdb": "1399"}, season: 1, episode: 2})
 
-	if err == nil || !strings.Contains(err.Error(), `{"error":"invalid season"}`) {
-		t.Errorf("err = %v, want the body TheIntroDB answered", err)
-	}
+		if err == nil || !strings.Contains(err.Error(), `{"error":"invalid season"}`) {
+			t.Errorf("err = %v, want the body TheIntroDB answered", err)
+		}
+	})
 }
 
 // The key is optional. An account that names one sends it as a bearer token,
@@ -191,15 +204,17 @@ func TestTheIntroDBSendsTheKeyOnlyWhereTheAccountNamesOne(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTheIntroDB(t, test.token, http.StatusOK, `{"tmdb_id":1001,"type":"movie"}`)
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTheIntroDB(t, test.token, http.StatusOK, `{"tmdb_id":1001,"type":"movie"}`)
 
-			if _, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
-				markFile{movie: true, ids: providerIDs{"tmdb": "1001"}}); err != nil {
-				t.Fatal(err)
-			}
-			if got := fake.requests[0].Header.Get("Authorization"); got != test.want {
-				t.Errorf("Authorization = %q, want %q", got, test.want)
-			}
+				if _, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
+					markFile{movie: true, ids: providerIDs{"tmdb": "1001"}}); err != nil {
+					t.Fatal(err)
+				}
+				if got := fake.requests[0].Header.Get("Authorization"); got != test.want {
+					t.Errorf("Authorization = %q, want %q", got, test.want)
+				}
+			})
 		})
 	}
 }
@@ -234,21 +249,23 @@ func TestTheIntroDBCooldownsFollowItsRateHeaders(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":1001,"type":"movie"}`)
-			fake.tooMany, fake.limited = 1, test.limited
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":1001,"type":"movie"}`)
+				fake.tooMany, fake.limited = 1, test.limited
 
-			_, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
-				markFile{movie: true, ids: providerIDs{"tmdb": "1001"}})
+				_, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
+					markFile{movie: true, ids: providerIDs{"tmdb": "1001"}})
 
-			if test.wantError != (err != nil) {
-				t.Errorf("err = %v, want an error: %v", err, test.wantError)
-			}
-			if test.wantError && !answeredWith(err, http.StatusTooManyRequests) {
-				t.Errorf("err = %v, want the 429 TheIntroDB answered", err)
-			}
-			if !slices.Equal(fake.cooldowns, test.wantWaits) {
-				t.Errorf("cooldowns = %v, want %v", fake.cooldowns, test.wantWaits)
-			}
+				if test.wantError != (err != nil) {
+					t.Errorf("err = %v, want an error: %v", err, test.wantError)
+				}
+				if test.wantError && !answeredWith(err, http.StatusTooManyRequests) {
+					t.Errorf("err = %v, want the 429 TheIntroDB answered", err)
+				}
+				if !slices.Equal(fake.cooldowns, test.wantWaits) {
+					t.Errorf("cooldowns = %v, want %v", fake.cooldowns, test.wantWaits)
+				}
+			})
 		})
 	}
 }

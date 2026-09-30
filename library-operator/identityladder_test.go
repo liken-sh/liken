@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -84,21 +85,23 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, _ := newFakeTMDb(t, test.answers)
+			synctest.Test(t, func(t *testing.T) {
+				client, _ := newFakeTMDb(t, test.answers)
 
-			answer, err := climbIdentityLadder(t.Context(), client, test.search)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if answer.id != test.wantID {
-				t.Errorf("id = %d, want %d", answer.id, test.wantID)
-			}
-			if answer.reason != test.wantReason {
-				t.Errorf("reason = %q, want %q", answer.reason, test.wantReason)
-			}
-			if len(answer.candidates) != 0 {
-				t.Errorf("candidates = %+v, want none on a sure answer", answer.candidates)
-			}
+				answer, err := climbIdentityLadder(t.Context(), client, test.search)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if answer.id != test.wantID {
+					t.Errorf("id = %d, want %d", answer.id, test.wantID)
+				}
+				if answer.reason != test.wantReason {
+					t.Errorf("reason = %q, want %q", answer.reason, test.wantReason)
+				}
+				if len(answer.candidates) != 0 {
+					t.Errorf("candidates = %+v, want none on a sure answer", answer.candidates)
+				}
+			})
 		})
 	}
 }
@@ -154,24 +157,26 @@ func TestTheLadderLeavesCandidatesWhereNoRungParts(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, _ := newFakeTMDb(t, test.answers)
+			synctest.Test(t, func(t *testing.T) {
+				client, _ := newFakeTMDb(t, test.answers)
 
-			answer, err := climbIdentityLadder(t.Context(), client, test.search)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if answer.id != 0 {
-				t.Errorf("id = %d, want none", answer.id)
-			}
-			if len(answer.candidates) != test.wantCount {
-				t.Fatalf("candidates = %+v, want %d", answer.candidates, test.wantCount)
-			}
-			if test.wantCount == 0 {
-				return
-			}
-			if got := answer.candidates[0].Receipt; !sameReceipt(got, test.wantReceipt) {
-				t.Errorf("receipt = %v, want %v", got, test.wantReceipt)
-			}
+				answer, err := climbIdentityLadder(t.Context(), client, test.search)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if answer.id != 0 {
+					t.Errorf("id = %d, want none", answer.id)
+				}
+				if len(answer.candidates) != test.wantCount {
+					t.Fatalf("candidates = %+v, want %d", answer.candidates, test.wantCount)
+				}
+				if test.wantCount == 0 {
+					return
+				}
+				if got := answer.candidates[0].Receipt; !sameReceipt(got, test.wantReceipt) {
+					t.Errorf("receipt = %v, want %v", got, test.wantReceipt)
+				}
+			})
 		})
 	}
 }
@@ -189,50 +194,54 @@ func sameReceipt(got, want map[string]string) bool {
 }
 
 func TestACandidatesReceiptStatesHowFarTheRuntimeSits(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Deep Orbit", "1977"): `{"results":[` +
-			tmdbResultJSON(1111, "Deep Orbit", "1977-05-01") + `,` +
-			tmdbResultJSON(1112, "Deep Orbit", "1977-06-05") + `]}`,
-		tmdbKey("/3/movie/1111", "", ""): `{"runtime":100}`,
-		tmdbKey("/3/movie/1112", "", ""): `{"runtime":140}`,
-	})
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "Deep Orbit", "1977"): `{"results":[` +
+				tmdbResultJSON(1111, "Deep Orbit", "1977-05-01") + `,` +
+				tmdbResultJSON(1112, "Deep Orbit", "1977-06-05") + `]}`,
+			tmdbKey("/3/movie/1111", "", ""): `{"runtime":100}`,
+			tmdbKey("/3/movie/1112", "", ""): `{"runtime":140}`,
+		})
 
-	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind: libraryKindMovies, title: "Deep Orbit", year: 1977, duration: 121 * time.Minute,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+		answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
+			kind: libraryKindMovies, title: "Deep Orbit", year: 1977, duration: 121 * time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if len(answer.candidates) != 2 {
-		t.Fatalf("candidates = %+v, want both", answer.candidates)
-	}
-	if got := answer.candidates[0].Receipt["runtime"]; got != "21 minutes off" {
-		t.Errorf("runtime receipt = %q, want the distance", got)
-	}
-	if got := answer.candidates[0].ID["tmdb"]; got != "1111" {
-		t.Errorf("candidate id = %q, want the provider's", got)
-	}
+		if len(answer.candidates) != 2 {
+			t.Fatalf("candidates = %+v, want both", answer.candidates)
+		}
+		if got := answer.candidates[0].Receipt["runtime"]; got != "21 minutes off" {
+			t.Errorf("runtime receipt = %q, want the distance", got)
+		}
+		if got := answer.candidates[0].ID["tmdb"]; got != "1111" {
+			t.Errorf("candidate id = %q, want the provider's", got)
+		}
+	})
 }
 
 func TestACandidateWithNoYearInTheNameSaysSo(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Quiet Moon", ""): `{"results":[` +
-			tmdbResultJSON(1121, "Quiet Moon", "1972-03-24") + `,` +
-			tmdbResultJSON(1122, "Quiet Moon", "2002-11-03") + `]}`,
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "Quiet Moon", ""): `{"results":[` +
+				tmdbResultJSON(1121, "Quiet Moon", "1972-03-24") + `,` +
+				tmdbResultJSON(1122, "Quiet Moon", "2002-11-03") + `]}`,
+		})
+
+		answer, err := climbIdentityLadder(t.Context(), client, identitySearch{kind: libraryKindMovies, title: "Quiet Moon"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(answer.candidates) != 2 {
+			t.Fatalf("candidates = %+v, want both", answer.candidates)
+		}
+		if got := answer.candidates[0].Receipt["year"]; got != "the name carries no year" {
+			t.Errorf("year receipt = %q, want the name's own silence", got)
+		}
 	})
-
-	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{kind: libraryKindMovies, title: "Quiet Moon"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(answer.candidates) != 2 {
-		t.Fatalf("candidates = %+v, want both", answer.candidates)
-	}
-	if got := answer.candidates[0].Receipt["year"]; got != "the name carries no year" {
-		t.Errorf("year receipt = %q, want the name's own silence", got)
-	}
 }
 
 func TestALadderFailsWhereTheProviderFails(t *testing.T) {
@@ -258,15 +267,17 @@ func TestALadderFailsWhereTheProviderFails(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTMDb(t, test.answers)
-			fake.statuses[test.refuse] = 500
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTMDb(t, test.answers)
+				fake.statuses[test.refuse] = 500
 
-			_, err := climbIdentityLadder(t.Context(), client, identitySearch{
-				kind: libraryKindMovies, title: "Deep Orbit", year: 1977, duration: 121 * time.Minute,
+				_, err := climbIdentityLadder(t.Context(), client, identitySearch{
+					kind: libraryKindMovies, title: "Deep Orbit", year: 1977, duration: 121 * time.Minute,
+				})
+				if err == nil {
+					t.Error("the ladder reported no error, want the provider's")
+				}
 			})
-			if err == nil {
-				t.Error("the ladder reported no error, want the provider's")
-			}
 		})
 	}
 }
@@ -290,119 +301,131 @@ func TestATitleNormalizesTheSameOnBothSides(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			if got := normalizeTitle(test.title); got != test.want {
-				t.Errorf("normalizeTitle(%q) = %q, want %q", test.title, got, test.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if got := normalizeTitle(test.title); got != test.want {
+					t.Errorf("normalizeTitle(%q) = %q, want %q", test.title, got, test.want)
+				}
+			})
 		})
 	}
 }
 
 func TestTheTitleTestDropsTheResultsThatDoNotMatch(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
-			tmdbResultJSON(1, "Another Film Entirely", "1982-06-01") + `,` +
-			tmdbResultJSON(2, "The Long Survey", "1951-04-03") + `,` +
-			tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
-	})
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
+				tmdbResultJSON(1, "Another Film Entirely", "1982-06-01") + `,` +
+				tmdbResultJSON(2, "The Long Survey", "1951-04-03") + `,` +
+				tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
+		})
 
-	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind: libraryKindMovies, title: "The Long Survey", year: 1982,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+		answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
+			kind: libraryKindMovies, title: "The Long Survey", year: 1982,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if answer.id != 1101 {
-		t.Errorf("id = %d, want the one result that matches on both the title and the year", answer.id)
-	}
+		if answer.id != 1101 {
+			t.Errorf("id = %d, want the one result that matches on both the title and the year", answer.id)
+		}
+	})
 }
 
 func TestAResultOnBothNeighbouringYearsIsOneCandidate(t *testing.T) {
-	both := `{"results":[` + tmdbResultJSON(1104, "Lowland", "1985-02-26") + `]}`
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Lowland", "1985"): `{"results":[]}`,
-		tmdbKey("/3/search/movie", "Lowland", "1984"): `{"results":[` + tmdbResultJSON(1104, "Lowland", "1984-02-26") + `]}`,
-		tmdbKey("/3/search/movie", "Lowland", "1986"): both,
-	})
+	synctest.Test(t, func(t *testing.T) {
+		both := `{"results":[` + tmdbResultJSON(1104, "Lowland", "1985-02-26") + `]}`
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "Lowland", "1985"): `{"results":[]}`,
+			tmdbKey("/3/search/movie", "Lowland", "1984"): `{"results":[` + tmdbResultJSON(1104, "Lowland", "1984-02-26") + `]}`,
+			tmdbKey("/3/search/movie", "Lowland", "1986"): both,
+		})
 
-	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind: libraryKindMovies, title: "Lowland", year: 1985,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+		answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
+			kind: libraryKindMovies, title: "Lowland", year: 1985,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if answer.id != 1104 || answer.reason != reasonFrom(testTitle, testNearYear) {
-		t.Errorf("answer = %+v, want the one result both searches named", answer)
-	}
+		if answer.id != 1104 || answer.reason != reasonFrom(testTitle, testNearYear) {
+			t.Errorf("answer = %+v, want the one result both searches named", answer)
+		}
+	})
 }
 
 // The country a namer writes after a series title, as in Ruckus (US), is a
 // test of its own. TMDb states the origin in origin_country, and the two shows
 // of one name carry different ones.
 func TestACountryQualifierPartsTwoSeriesOfOneName(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "Ruckus", ""): `{"results":[` +
-			`{"id":2101,"name":"Ruckus","original_name":"Ruckus",` +
-			`"first_air_date":"2004-01-21","origin_country":["GB"]},` +
-			`{"id":2102,"name":"Ruckus","original_name":"Ruckus",` +
-			`"first_air_date":"2011-01-17","origin_country":["US"]}]}`,
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/tv", "Ruckus", ""): `{"results":[` +
+				`{"id":2101,"name":"Ruckus","original_name":"Ruckus",` +
+				`"first_air_date":"2004-01-21","origin_country":["GB"]},` +
+				`{"id":2102,"name":"Ruckus","original_name":"Ruckus",` +
+				`"first_air_date":"2011-01-17","origin_country":["US"]}]}`,
+		})
+
+		answer, err := climbIdentityLadder(t.Context(), client,
+			identitySearch{kind: libraryKindSeries, title: "Ruckus (US)"})
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		if answer.id != 2102 {
+			t.Errorf("id = %d, want the show made for the country the name states", answer.id)
+		}
+		if answer.reason != reasonFrom(testTitle, testCountry) {
+			t.Errorf("reason = %q, want the country among the tests", answer.reason)
+		}
 	})
-
-	answer, err := climbIdentityLadder(t.Context(), client,
-		identitySearch{kind: libraryKindSeries, title: "Ruckus (US)"})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if answer.id != 2102 {
-		t.Errorf("id = %d, want the show made for the country the name states", answer.id)
-	}
-	if answer.reason != reasonFrom(testTitle, testCountry) {
-		t.Errorf("reason = %q, want the country among the tests", answer.reason)
-	}
 }
 
 // A year in parentheses after the title is the year, where the name states it
 // nowhere else.
 func TestAYearQualifierIsTheYearTheSearchNarrowsOn(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Night Visit", "2011"): `{"results":[` +
-			tmdbResultJSON(1131, "Night Visit", "2011-08-23") + `]}`,
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "Night Visit", "2011"): `{"results":[` +
+				tmdbResultJSON(1131, "Night Visit", "2011-08-23") + `]}`,
+		})
+
+		answer, err := climbIdentityLadder(t.Context(), client,
+			identitySearch{kind: libraryKindMovies, title: "Night Visit (2011)"})
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		if answer.id != 1131 {
+			t.Errorf("id = %d, want the film of the year the qualifier states", answer.id)
+		}
+		if answer.reason != reasonFrom(testTitle, testYear) {
+			t.Errorf("reason = %q, want the year among the tests", answer.reason)
+		}
 	})
-
-	answer, err := climbIdentityLadder(t.Context(), client,
-		identitySearch{kind: libraryKindMovies, title: "Night Visit (2011)"})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if answer.id != 1131 {
-		t.Errorf("id = %d, want the film of the year the qualifier states", answer.id)
-	}
-	if answer.reason != reasonFrom(testTitle, testYear) {
-		t.Errorf("reason = %q, want the year among the tests", answer.reason)
-	}
 }
 
 // A qualifier that names neither a year nor a country is no test of its own.
 // The title still reaches the provider without it.
 func TestAQualifierThatNamesNeitherAYearNorACountryIsNoTest(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "The Listening Post", ""): `{"results":[{"id":2104,"name":"The Listening Post",` +
-			`"original_name":"The Listening Post","first_air_date":"2015-04-07","origin_country":["FR"]}]}`,
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/tv", "The Listening Post", ""): `{"results":[{"id":2104,"name":"The Listening Post",` +
+				`"original_name":"The Listening Post","first_air_date":"2015-04-07","origin_country":["FR"]}]}`,
+		})
+
+		answer, err := climbIdentityLadder(t.Context(), client,
+			identitySearch{kind: libraryKindSeries, title: "The Listening Post (4K)"})
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		if answer.id != 2104 {
+			t.Errorf("id = %d, want the one result the title matched", answer.id)
+		}
+		if answer.reason != reasonFrom(testTitle) {
+			t.Errorf("reason = %q, want the title alone", answer.reason)
+		}
 	})
-
-	answer, err := climbIdentityLadder(t.Context(), client,
-		identitySearch{kind: libraryKindSeries, title: "The Listening Post (4K)"})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if answer.id != 2104 {
-		t.Errorf("id = %d, want the one result the title matched", answer.id)
-	}
-	if answer.reason != reasonFrom(testTitle) {
-		t.Errorf("reason = %q, want the title alone", answer.reason)
-	}
 }

@@ -138,7 +138,7 @@ const artMountPath = "/art"
 
 // catalogWriteTimeout bounds a walk's writes to the catalog agent, so a
 // stuck agent cannot hold a walk open forever.
-var catalogWriteTimeout = 2 * time.Minute
+const catalogWriteTimeout = 2 * time.Minute
 
 // One scan Job's scanner: the root it walks, the catalog it
 // writes, and the run it records. The walk's own numbers are held under a

@@ -7,6 +7,7 @@ package main
 import (
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -54,9 +55,11 @@ func TestEachArtFactReadsItsOwnEndpoint(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			if got := tmdbImagesPath(test.kind, test.fact, test.gap); got != test.want {
-				t.Errorf("path = %q, want %q", got, test.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if got := tmdbImagesPath(test.kind, test.fact, test.gap); got != test.want {
+					t.Errorf("path = %q, want %q", got, test.want)
+				}
+			})
 		})
 	}
 }
@@ -101,51 +104,59 @@ func TestTheFetchAsksForTheSizeTMDbServes(t *testing.T) {
 // A configuration that names no image host is an error, because every address
 // hangs off it.
 func TestAConfigurationWithNoImageHostIsAnError(t *testing.T) {
-	client, fake := newArtTMDb(t, map[string]string{})
-	fake.answers[tmdbKey(tmdbConfigurationPath, "", "")] = `{"images":{}}`
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newArtTMDb(t, map[string]string{})
+		fake.answers[tmdbKey(tmdbConfigurationPath, "", "")] = `{"images":{}}`
 
-	if _, err := client.configuration(t.Context()); err == nil {
-		t.Error("the read reported no error, want one")
-	}
+		if _, err := client.configuration(t.Context()); err == nil {
+			t.Error("the read reported no error, want one")
+		}
+	})
 }
 
 // A download waits the cooldown a 429 names and asks again, and a refusal
 // that stands is an error.
 func TestTheImageDownloadFollowsTheCooldownRule(t *testing.T) {
-	client, fake := newArtTMDb(t, map[string]string{
-		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
-	})
-	fake.tooMany = 1
-	fake.retryAfter = "2"
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newArtTMDb(t, map[string]string{
+			tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
+		})
+		fake.tooMany = 1
+		fake.retryAfter = "2"
 
-	data, err := client.fetchFile(t.Context(), client.base+"/t/p/w780/quiet.jpg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != testImage {
-		t.Errorf("read %d bytes, want the image", len(data))
-	}
-	if len(fake.cooldowns) != 1 || fake.cooldowns[0] != 2*time.Second {
-		t.Errorf("cooldowns = %v, want the one the header named", fake.cooldowns)
-	}
+		data, err := client.fetchFile(t.Context(), client.base+"/t/p/w780/quiet.jpg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != testImage {
+			t.Errorf("read %d bytes, want the image", len(data))
+		}
+		if len(fake.cooldowns) != 1 || fake.cooldowns[0] != 2*time.Second {
+			t.Errorf("cooldowns = %v, want the one the header named", fake.cooldowns)
+		}
+	})
 }
 
 func TestADownloadTheProviderRefusesIsAnError(t *testing.T) {
-	client, fake := newArtTMDb(t, map[string]string{})
-	fake.statuses[tmdbKey("/t/p/w780/quiet.jpg", "", "")] = http.StatusInternalServerError
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newArtTMDb(t, map[string]string{})
+		fake.statuses[tmdbKey("/t/p/w780/quiet.jpg", "", "")] = http.StatusInternalServerError
 
-	if _, err := client.fetchFile(t.Context(), client.base+"/t/p/w780/quiet.jpg"); err == nil {
-		t.Error("the download reported no error, want one")
-	}
+		if _, err := client.fetchFile(t.Context(), client.base+"/t/p/w780/quiet.jpg"); err == nil {
+			t.Error("the download reported no error, want one")
+		}
+	})
 }
 
 func TestADownloadOfNothingIsAnError(t *testing.T) {
-	client, fake := newArtTMDb(t, map[string]string{})
-	fake.answers[tmdbKey("/t/p/w780/quiet.jpg", "", "")] = ""
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newArtTMDb(t, map[string]string{})
+		fake.answers[tmdbKey("/t/p/w780/quiet.jpg", "", "")] = ""
 
-	if _, err := client.fetchFile(t.Context(), client.base+"/t/p/w780/quiet.jpg"); err == nil {
-		t.Error("the download reported no error, want one")
-	}
+		if _, err := client.fetchFile(t.Context(), client.base+"/t/p/w780/quiet.jpg"); err == nil {
+			t.Error("the download reported no error, want one")
+		}
+	})
 }
 
 // The answer's own list is what each fact reads, and a name the answer does
@@ -168,9 +179,11 @@ func TestTheImagesAnswerHoldsEveryList(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.list, func(t *testing.T) {
-			if got := answer.list(test.list); len(got) != 1 || got[0].FilePath != test.want {
-				t.Errorf("list = %+v, want %q", got, test.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if got := answer.list(test.list); len(got) != 1 || got[0].FilePath != test.want {
+					t.Errorf("list = %+v, want %q", got, test.want)
+				}
+			})
 		})
 	}
 }
@@ -178,13 +191,15 @@ func TestTheImagesAnswerHoldsEveryList(t *testing.T) {
 // A provider that refuses the settings, and an address no request can be
 // built for, are both errors the fact records.
 func TestTheImageCallsAnswerWhatTheProviderRefuses(t *testing.T) {
-	client, fake := newArtTMDb(t, map[string]string{})
-	fake.statuses[tmdbKey(tmdbConfigurationPath, "", "")] = http.StatusUnauthorized
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newArtTMDb(t, map[string]string{})
+		fake.statuses[tmdbKey(tmdbConfigurationPath, "", "")] = http.StatusUnauthorized
 
-	if _, err := client.configuration(t.Context()); err == nil {
-		t.Error("the read reported no error, want one")
-	}
-	if _, err := client.fetchFile(t.Context(), "://not-an-address"); err == nil {
-		t.Error("the download reported no error, want one")
-	}
+		if _, err := client.configuration(t.Context()); err == nil {
+			t.Error("the read reported no error, want one")
+		}
+		if _, err := client.fetchFile(t.Context(), "://not-an-address"); err == nil {
+			t.Error("the download reported no error, want one")
+		}
+	})
 }

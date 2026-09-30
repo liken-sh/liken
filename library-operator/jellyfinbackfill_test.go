@@ -7,12 +7,14 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // a Jellyfin that answers the three calls the backfill makes from fixture
@@ -80,12 +82,11 @@ func backfillSeries() map[string]jellyfinItem {
 func standBackfill(t *testing.T, fake *fakeBackfillJellyfin) (
 	*jellyfinBackfill, *jellyfinMessages, *strings.Builder) {
 	t.Helper()
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, fake)
 	logged := &strings.Builder{}
 	messages := &jellyfinMessages{}
 	backfill := newJellyfinBackfillOn("house", defaultTopicBase,
-		newJellyfinAPI(server.URL, "the-key", server.Client()), messages.publish, logged)
+		newJellyfinAPI(apiservertest.Host, "the-key", server.Client()), messages.publish, logged)
 	return backfill, messages, logged
 }
 
@@ -164,28 +165,30 @@ func TestOneJellyfinItemBecomesAnOutsidePlay(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			backfill, messages, _ := standBackfill(t, &fakeBackfillJellyfin{
-				users:     []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
-				resumable: map[string][]jellyfinItem{"user-a": {test.item}},
-				series:    backfillSeries(),
+			synctest.Test(t, func(t *testing.T) {
+				backfill, messages, _ := standBackfill(t, &fakeBackfillJellyfin{
+					users:     []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+					resumable: map[string][]jellyfinItem{"user-a": {test.item}},
+					series:    backfillSeries(),
+				})
+
+				counts, err := backfill.run(t.Context())
+
+				if err != nil {
+					t.Fatalf("running the backfill: %v", err)
+				}
+				if counts != (jellyfinBackfillCounts{users: 1, published: 1}) {
+					t.Errorf("counts = %+v, want one user and one play", counts)
+				}
+				topic := playOutsideTopic(defaultTopicBase, "house", test.play)
+				got, held := messages.outsidePlays(t)[topic]
+				if !held {
+					t.Fatalf("nothing was published on %q", topic)
+				}
+				if !reflect.DeepEqual(got, test.want) {
+					t.Errorf("play = %+v, want %+v", got, test.want)
+				}
 			})
-
-			counts, err := backfill.run(t.Context())
-
-			if err != nil {
-				t.Fatalf("running the backfill: %v", err)
-			}
-			if counts != (jellyfinBackfillCounts{users: 1, published: 1}) {
-				t.Errorf("counts = %+v, want one user and one play", counts)
-			}
-			topic := playOutsideTopic(defaultTopicBase, "house", test.play)
-			got, held := messages.outsidePlays(t)[topic]
-			if !held {
-				t.Fatalf("nothing was published on %q", topic)
-			}
-			if !reflect.DeepEqual(got, test.want) {
-				t.Errorf("play = %+v, want %+v", got, test.want)
-			}
 		})
 	}
 }
@@ -193,58 +196,62 @@ func TestOneJellyfinItemBecomesAnOutsidePlay(t *testing.T) {
 // the two reads name the user and the fields the mapping needs, and the
 // message is not retained, because a rerun repeats the position.
 func TestTheBackfillReadsBothFiltersAndRetainsNothing(t *testing.T) {
-	fake := &fakeBackfillJellyfin{
-		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
-		resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
-			ProviderIds: map[string]string{"Tmdb": "1101"}}}},
-	}
-	backfill, messages, _ := standBackfill(t, fake)
+	synctest.Test(t, func(t *testing.T) {
+		fake := &fakeBackfillJellyfin{
+			users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+			resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+				ProviderIds: map[string]string{"Tmdb": "1101"}}}},
+		}
+		backfill, messages, _ := standBackfill(t, fake)
 
-	if _, err := backfill.run(t.Context()); err != nil {
-		t.Fatalf("running the backfill: %v", err)
-	}
+		if _, err := backfill.run(t.Context()); err != nil {
+			t.Fatalf("running the backfill: %v", err)
+		}
 
-	items := "/Items?userId=user-a&recursive=true&includeItemTypes=Movie,Episode" +
-		"&fields=ProviderIds&enableImages=false"
-	want := []string{
-		"/Users",
-		items + "&filters=IsResumable&startIndex=0&limit=500",
-		items + "&isPlayed=true&startIndex=0&limit=500",
-	}
-	if !reflect.DeepEqual(fake.queries, want) {
-		t.Errorf("queries = %q, want %q", fake.queries, want)
-	}
-	if messages.held[0].retained {
-		t.Error("the outside play was retained")
-	}
+		items := "/Items?userId=user-a&recursive=true&includeItemTypes=Movie,Episode" +
+			"&fields=ProviderIds&enableImages=false"
+		want := []string{
+			"/Users",
+			items + "&filters=IsResumable&startIndex=0&limit=500",
+			items + "&isPlayed=true&startIndex=0&limit=500",
+		}
+		if !reflect.DeepEqual(fake.queries, want) {
+			t.Errorf("queries = %q, want %q", fake.queries, want)
+		}
+		if messages.held[0].retained {
+			t.Error("the outside play was retained")
+		}
+	})
 }
 
 // an item that comes back in both reads is published once, and the played
 // read is the one that stands, because it says the person finished.
 func TestAnItemInBothReadsIsPublishedOnce(t *testing.T) {
-	backfill, messages, _ := standBackfill(t, &fakeBackfillJellyfin{
-		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
-		resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
-			ProviderIds: map[string]string{"Tmdb": "1101"},
-			UserData:    jellyfinUserData{PlaybackPositionTicks: 42100000000}}}},
-		played: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
-			ProviderIds: map[string]string{"Tmdb": "1101"},
-			UserData:    jellyfinUserData{PlaybackPositionTicks: 81600000000, Played: true}}}},
+	synctest.Test(t, func(t *testing.T) {
+		backfill, messages, _ := standBackfill(t, &fakeBackfillJellyfin{
+			users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+			resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+				ProviderIds: map[string]string{"Tmdb": "1101"},
+				UserData:    jellyfinUserData{PlaybackPositionTicks: 42100000000}}}},
+			played: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+				ProviderIds: map[string]string{"Tmdb": "1101"},
+				UserData:    jellyfinUserData{PlaybackPositionTicks: 81600000000, Played: true}}}},
+		})
+
+		counts, err := backfill.run(t.Context())
+
+		if err != nil {
+			t.Fatalf("running the backfill: %v", err)
+		}
+		if counts.published != 1 {
+			t.Fatalf("published = %d, want one", counts.published)
+		}
+		play := messages.outsidePlays(t)[playOutsideTopic(defaultTopicBase, "house",
+			"jellyfin-user-a-item-film")]
+		if play.Position != 8160 || !play.Ended {
+			t.Errorf("play = %+v, want the played read's position and its ended mark", play)
+		}
 	})
-
-	counts, err := backfill.run(t.Context())
-
-	if err != nil {
-		t.Fatalf("running the backfill: %v", err)
-	}
-	if counts.published != 1 {
-		t.Fatalf("published = %d, want one", counts.published)
-	}
-	play := messages.outsidePlays(t)[playOutsideTopic(defaultTopicBase, "house",
-		"jellyfin-user-a-item-film")]
-	if play.Position != 8160 || !play.Ended {
-		t.Errorf("play = %+v, want the played read's position and its ended mark", play)
-	}
 }
 
 // an item that names no work is skipped and counted, because the store has no
@@ -261,26 +268,28 @@ func TestAnItemWithNoProviderIdsIsSkipped(t *testing.T) {
 			item: jellyfinItem{ID: "item-bare", Type: "Episode", SeriesID: "item-none"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			backfill, messages, logged := standBackfill(t, &fakeBackfillJellyfin{
-				users:     []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
-				resumable: map[string][]jellyfinItem{"user-a": {test.item}},
-				series:    backfillSeries(),
+			synctest.Test(t, func(t *testing.T) {
+				backfill, messages, logged := standBackfill(t, &fakeBackfillJellyfin{
+					users:     []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+					resumable: map[string][]jellyfinItem{"user-a": {test.item}},
+					series:    backfillSeries(),
+				})
+
+				counts, err := backfill.run(t.Context())
+
+				if err != nil {
+					t.Fatalf("running the backfill: %v", err)
+				}
+				if counts.skipped != 1 || counts.published != 0 {
+					t.Errorf("counts = %+v, want one item skipped and nothing published", counts)
+				}
+				if len(messages.held) != 0 {
+					t.Errorf("messages = %d, want none", len(messages.held))
+				}
+				if !strings.Contains(logged.String(), "names no provider ids") {
+					t.Errorf("log = %q, want the item it skipped", logged.String())
+				}
 			})
-
-			counts, err := backfill.run(t.Context())
-
-			if err != nil {
-				t.Fatalf("running the backfill: %v", err)
-			}
-			if counts.skipped != 1 || counts.published != 0 {
-				t.Errorf("counts = %+v, want one item skipped and nothing published", counts)
-			}
-			if len(messages.held) != 0 {
-				t.Errorf("messages = %d, want none", len(messages.held))
-			}
-			if !strings.Contains(logged.String(), "names no provider ids") {
-				t.Errorf("log = %q, want the item it skipped", logged.String())
-			}
 		})
 	}
 }

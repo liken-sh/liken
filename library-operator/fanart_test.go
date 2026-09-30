@@ -7,10 +7,12 @@ package main
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"sync"
 	"testing"
+	"testing/synctest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // What one fake Fanart.tv recorded: the path and the query of every request.
@@ -24,7 +26,7 @@ type fakeFanart struct {
 func newFakeFanart(t *testing.T, status int, body string) (*fanartClient, *fakeFanart) {
 	t.Helper()
 	fake := &fakeFanart{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mutex.Lock()
 		fake.paths = append(fake.paths, r.URL.Path)
 		fake.requests = append(fake.requests, r.URL.Query())
@@ -32,9 +34,8 @@ func newFakeFanart(t *testing.T, status int, body string) (*fanartClient, *fakeF
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
 	}))
-	t.Cleanup(server.Close)
 
-	client := newFanartClient(server.URL, "a-key")
+	client := newFanartClient(apiservertest.Host, "a-key")
 	client.http = server.Client()
 	return client, fake
 }
@@ -52,29 +53,31 @@ const fanartMovieAnswer = `{"name":"Some Film","tmdb_id":"1002","imdb_id":"tt900
 // The movie call reads every art type at once, and the key travels as the
 // api_key parameter.
 func TestTheFanartMovieCallReadsEveryArtType(t *testing.T) {
-	client, fake := newFakeFanart(t, http.StatusOK, fanartMovieAnswer)
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeFanart(t, http.StatusOK, fanartMovieAnswer)
 
-	movie, err := client.movie(t.Context(), "1002")
-	if err != nil {
-		t.Fatal(err)
-	}
+		movie, err := client.movie(t.Context(), "1002")
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if len(movie.Posters) != 1 || len(movie.Backgrounds) != 1 || len(movie.HDLogos) != 1 {
-		t.Errorf("movie = %+v, want the poster, the background, and the logo", movie)
-	}
-	if len(movie.HDClearart) != 1 || len(movie.Banners) != 1 || len(movie.Thumbs) != 1 {
-		t.Errorf("movie = %+v, want the clearart, the banner, and the landscape", movie)
-	}
-	if len(movie.Discs) != 1 || movie.Discs[0].DiscType != "bluray" {
-		t.Errorf("discs = %+v, want the disc art and the kind of disc", movie.Discs)
-	}
-	if movie.Posters[0].URL == "" || movie.Posters[0].Lang != "en" || movie.Posters[0].Likes != "7" {
-		t.Errorf("poster = %+v, want its address, its language, and its likes", movie.Posters[0])
-	}
-	if fake.paths[0] != fanartMoviePath+"1002" || fake.requests[0].Get(fanartAPIKeyParam) != "a-key" {
-		t.Errorf("the call asked %s with %v, want the movie and the key",
-			fake.paths[0], fake.requests[0])
-	}
+		if len(movie.Posters) != 1 || len(movie.Backgrounds) != 1 || len(movie.HDLogos) != 1 {
+			t.Errorf("movie = %+v, want the poster, the background, and the logo", movie)
+		}
+		if len(movie.HDClearart) != 1 || len(movie.Banners) != 1 || len(movie.Thumbs) != 1 {
+			t.Errorf("movie = %+v, want the clearart, the banner, and the landscape", movie)
+		}
+		if len(movie.Discs) != 1 || movie.Discs[0].DiscType != "bluray" {
+			t.Errorf("discs = %+v, want the disc art and the kind of disc", movie.Discs)
+		}
+		if movie.Posters[0].URL == "" || movie.Posters[0].Lang != "en" || movie.Posters[0].Likes != "7" {
+			t.Errorf("poster = %+v, want its address, its language, and its likes", movie.Posters[0])
+		}
+		if fake.paths[0] != fanartMoviePath+"1002" || fake.requests[0].Get(fanartAPIKeyParam) != "a-key" {
+			t.Errorf("the call asked %s with %v, want the movie and the key",
+				fake.paths[0], fake.requests[0])
+		}
+	})
 }
 
 // One series answer, with art of the whole show and art of one season.
@@ -123,27 +126,31 @@ func TestTheFanartSeriesCallReadsTheSeasonArt(t *testing.T) {
 // A title Fanart.tv does not hold answers 404, which is a miss and not an
 // error, because a title with no art is the ordinary case.
 func TestAFanartTitleWithNoArt(t *testing.T) {
-	client, _ := newFakeFanart(t, http.StatusNotFound, `{"status":"error","error message":"Not found"}`)
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeFanart(t, http.StatusNotFound, `{"status":"error","error message":"Not found"}`)
 
-	movie, err := client.movie(t.Context(), "1002")
-	if err != nil || movie != nil {
-		t.Errorf("the movie call answered %+v and %v, want a miss", movie, err)
-	}
-	series, err := client.series(t.Context(), "800002")
-	if err != nil || series != nil {
-		t.Errorf("the series call answered %+v and %v, want a miss", series, err)
-	}
+		movie, err := client.movie(t.Context(), "1002")
+		if err != nil || movie != nil {
+			t.Errorf("the movie call answered %+v and %v, want a miss", movie, err)
+		}
+		series, err := client.series(t.Context(), "800002")
+		if err != nil || series != nil {
+			t.Errorf("the series call answered %+v and %v, want a miss", series, err)
+		}
+	})
 }
 
 // An answer that is neither the art nor a miss is an error the attempt
 // records, so the next run tries again.
 func TestAFanartCallThatFails(t *testing.T) {
-	client, _ := newFakeFanart(t, http.StatusInternalServerError, "")
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeFanart(t, http.StatusInternalServerError, "")
 
-	if _, err := client.movie(t.Context(), "1002"); err == nil {
-		t.Error("the movie call read no error from a 500")
-	}
-	if _, err := client.series(t.Context(), "800002"); err == nil {
-		t.Error("the series call read no error from a 500")
-	}
+		if _, err := client.movie(t.Context(), "1002"); err == nil {
+			t.Error("the movie call read no error from a 500")
+		}
+		if _, err := client.series(t.Context(), "800002"); err == nil {
+			t.Error("the series call read no error from a 500")
+		}
+	})
 }

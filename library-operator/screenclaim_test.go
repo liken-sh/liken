@@ -192,17 +192,19 @@ func TestStandScreenClaimReportsAFailedRead(t *testing.T) {
 	}
 }
 
+// An age of the PodScheduled False condition past the grace.
+const pastTheGrace = unschedulableGrace + time.Minute
+
 // A screen's claims on a per-node class bind to a volume of their own,
 // so the pod they belong to is pinned to no node, and the recovery leaves
 // the pod and both claims in place.
 func TestReconcileScreensKeepsAnUnschedulableScreenOnAPerNodeClass(t *testing.T) {
-	shortUnschedulableGrace(t)
 	cluster := newFakeCluster()
 	seedStorageClass(cluster, "per-node", perNodeProvisioner)
 	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 	catalog := seedCatalog(cluster, "house", testLibraryNamespace)
 	catalog.Spec.Screens.StorageClassName = "per-node"
-	pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
+	pod := unschedulableScreenPod(player, catalog, testNow.Add(-pastTheGrace))
 	cluster.pods[pod.Metadata.Name] = pod
 	for _, claim := range screenClaims(player, catalog) {
 		claim.Status.Phase = claimBound
@@ -220,14 +222,6 @@ func TestReconcileScreensKeepsAnUnschedulableScreenOnAPerNodeClass(t *testing.T)
 			t.Errorf("the pass took the claim %s, which pins the pod to no node", name)
 		}
 	}
-}
-
-// The grace is a variable, so a test drives it in milliseconds.
-func shortUnschedulableGrace(t *testing.T) {
-	t.Helper()
-	held := unschedulableGrace
-	unschedulableGrace = time.Millisecond
-	t.Cleanup(func() { unschedulableGrace = held })
 }
 
 // A screen pod as the scheduler left it, with the PodScheduled
@@ -270,40 +264,39 @@ func TestReconcileScreensRecoversAnUnschedulableScreen(t *testing.T) {
 		claim   func(*PersistentVolumeClaim)
 		wantOut bool
 	}{
-		{name: "past the grace on a bound claim", age: time.Minute, wantOut: true},
-		{name: "inside the grace", age: 0},
+		{name: "past the grace on a bound claim", age: pastTheGrace, wantOut: true},
+		{name: "inside the grace", age: unschedulableGrace - time.Minute},
 		{
-			name: "the pod was scheduled", age: time.Minute,
+			name: "the pod was scheduled", age: pastTheGrace,
 			pod: func(pod *Pod) { pod.Status.Conditions[0].Status = "True" },
 		},
 		{
-			name: "the condition carries no time", age: time.Minute,
+			name: "the condition carries no time", age: pastTheGrace,
 			pod: func(pod *Pod) { pod.Status.Conditions[0].LastTransitionTime = time.Time{} },
 		},
 		{
-			name: "the claim never bound", age: time.Minute,
+			name: "the claim never bound", age: pastTheGrace,
 			claim: func(claim *PersistentVolumeClaim) { claim.Status.Phase = "Pending" },
 		},
 		{
-			name: "the claim carries another name", age: time.Minute,
+			name: "the claim carries another name", age: pastTheGrace,
 			claim: func(claim *PersistentVolumeClaim) { claim.Metadata.Name = "movies-catalog" },
 		},
 		{
-			name: "the claim carries no screen label", age: time.Minute,
+			name: "the claim carries no screen label", age: pastTheGrace,
 			claim: func(claim *PersistentVolumeClaim) { delete(claim.Metadata.Labels, scannerLabelKey) },
 		},
 		{
-			name: "the claim names another Player", age: time.Minute,
+			name: "the claim names another Player", age: pastTheGrace,
 			claim: func(claim *PersistentVolumeClaim) { claim.Metadata.Labels[playerLabelKey] = "kitchen" },
 		},
 		{
-			name: "the owner holds another UID", age: time.Minute,
+			name: "the owner holds another UID", age: pastTheGrace,
 			claim: func(claim *PersistentVolumeClaim) { claim.Metadata.OwnerReferences[0].UID = "an-older-den" },
 		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			shortUnschedulableGrace(t)
 			cluster := newFakeCluster()
 			player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 			catalog := seedCatalog(cluster, "house", testLibraryNamespace)
@@ -370,11 +363,10 @@ func TestReconcileScreensGuardsTheArtClaimDelete(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			shortUnschedulableGrace(t)
 			cluster := newFakeCluster()
 			player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 			catalog := seedCatalog(cluster, "house", testLibraryNamespace)
-			pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
+			pod := unschedulableScreenPod(player, catalog, testNow.Add(-pastTheGrace))
 			cluster.pods[pod.Metadata.Name] = pod
 			claims := boundScreenClaims(player)
 			if one.art != nil {
@@ -428,12 +420,11 @@ func TestReconcileScreensCarriesOnPastAFailedRecovery(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			shortUnschedulableGrace(t)
 			cluster := newFakeCluster()
 			player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 			standing := seedPlayer(cluster, "kitchen", testLibraryNamespace, screenController)
 			catalog := seedCatalog(cluster, "house", testLibraryNamespace)
-			pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
+			pod := unschedulableScreenPod(player, catalog, testNow.Add(-pastTheGrace))
 			cluster.pods[pod.Metadata.Name] = pod
 			for _, claim := range boundScreenClaims(player) {
 				cluster.claims[claim.Metadata.Name] = claim

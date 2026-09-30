@@ -10,26 +10,21 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // The name every confirmer in these tests writes its row under.
 const testConfirmerPod = "movies-catalog-0"
 
-// One confirmer over this catalog, with its recheck in
-// milliseconds, so a test proves the retry in the time a tick takes.
+// One confirmer over this catalog. Each test runs in a synctest bubble,
+// so the recheck and the backoff take no real time.
 func testConfirmer(t *testing.T, catalog *Catalog, log io.Writer) *confirmer {
 	t.Helper()
-	was := confirmerRecheck
-	t.Cleanup(func() { confirmerRecheck = was })
-	confirmerRecheck = 5 * time.Millisecond
-	backoffWas := reportMinBackoff
-	t.Cleanup(func() { reportMinBackoff = backoffWas })
-	reportMinBackoff = 5 * time.Millisecond
-
 	return &confirmer{
 		name:      testConfirmerPod,
 		catalog:   catalog,
@@ -93,42 +88,46 @@ func awaitConfirmation(t *testing.T, catalog *Catalog, library, worker, job stri
 // A finished run whose versions this copy holds is confirmed, and
 // the confirmer names it in one log line.
 func TestTheConfirmerConfirmsARunItsCopyHolds(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	log := &syncLog{}
-	serving(t, testConfirmer(t, catalog, log))
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		log := &syncLog{}
+		serving(t, testConfirmer(t, catalog, log))
 
-	run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
 
-	awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", run.Version)
-	waitForLog(t, log, "confirmed the scan run scan-1 of house/movies")
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", run.Version)
+		waitForLog(t, log, "confirmed the scan run scan-1 of house/movies")
+	})
 }
 
 // A run whose versions this copy is missing stands unconfirmed
 // until the gap fills, which is what keeps a Job from exiting before a
 // standing copy holds its rows.
 func TestTheConfirmerWaitsUntilItsCopyHoldsTheVersions(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	other := "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
-	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
-		Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0),
-		Actor: other, Version: 12,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	work := testConfirmer(t, catalog, io.Discard)
-	serving(t, work)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		other := "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+		if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
+			Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0),
+			Actor: other, Version: 12,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		work := testConfirmer(t, catalog, io.Discard)
+		serving(t, work)
 
-	held, err := catalog.confirmedBy(t.Context(), "house/movies", workerScan, "scan-1", testConfirmerPod, 12)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if held {
-		t.Fatal("the confirmer confirmed a run whose versions its copy does not hold")
-	}
+		held, err := catalog.confirmedBy(t.Context(), "house/movies", workerScan, "scan-1", testConfirmerPod, 12)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if held {
+			t.Fatal("the confirmer confirmed a run whose versions its copy does not hold")
+		}
 
-	agent.holdVersion(t, other, 12)
+		agent.holdVersion(t, other, 12)
 
-	awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", 12)
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", 12)
+	})
 }
 
 // Hands one run to the confirmer the way the run stream does.
@@ -143,77 +142,85 @@ func streamRun(t *testing.T, work *confirmer, run finishedRun) {
 // run to confirm, so it writes no confirmation that would outlive the
 // library, and it holds nothing for the recheck.
 func TestADeletedRunIsNotConfirmed(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	run := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-1")
-	work := testConfirmer(t, catalog, io.Discard)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-1")
+		work := testConfirmer(t, catalog, io.Discard)
 
-	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
-		[]any{"house/departed", workerScan, "scan-1", run.Actor, float64(run.Version)}, true)
+		work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
+			[]any{"house/departed", workerScan, "scan-1", run.Actor, float64(run.Version)}, true)
 
-	held, err := catalog.confirmedBy(t.Context(), "house/departed", workerScan, "scan-1",
-		testConfirmerPod, run.Version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if held || len(work.waiting()) != 0 {
-		t.Errorf("confirmed = %v, waiting = %v, want no confirmation and nothing held",
-			held, work.waiting())
-	}
+		held, err := catalog.confirmedBy(t.Context(), "house/departed", workerScan, "scan-1",
+			testConfirmerPod, run.Version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if held || len(work.waiting()) != 0 {
+			t.Errorf("confirmed = %v, waiting = %v, want no confirmation and nothing held",
+				held, work.waiting())
+		}
+	})
 }
 
 // A run the confirmer holds leaves the pending set when its runs row is
 // deleted, because no Job waits on a run whose row is gone.
 func TestADeletedRowTakesItsPendingRun(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := testConfirmer(t, catalog, io.Discard)
-	run := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
-	streamRun(t, work, run)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		work := testConfirmer(t, catalog, io.Discard)
+		run := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+			actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+		streamRun(t, work, run)
 
-	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
-		[]any{run.library, run.worker, run.job, run.actor, float64(run.version)}, true)
+		work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
+			[]any{run.library, run.worker, run.job, run.actor, float64(run.version)}, true)
 
-	if waiting := work.waiting(); len(waiting) != 0 {
-		t.Errorf("waiting = %+v, want nothing once the row is deleted", waiting)
-	}
+		if waiting := work.waiting(); len(waiting) != 0 {
+			t.Errorf("waiting = %+v, want nothing once the row is deleted", waiting)
+		}
+	})
 }
 
 // A cleanup Job deletes a run the confirmer holds. The agent streams the
 // delete, and the run leaves the pending set with no confirmation.
 func TestARunDeletedFromTheCatalogLeavesThePendingSet(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	if _, _, err := catalog.UpsertRun(t.Context(), "house/departed", libraryRun{
-		Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0),
-		Actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", Version: 12,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	work := testConfirmer(t, catalog, io.Discard)
-	serving(t, work)
-	awaitWaiting(t, work, 1)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		if _, _, err := catalog.UpsertRun(t.Context(), "house/departed", libraryRun{
+			Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0),
+			Actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", Version: 12,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		work := testConfirmer(t, catalog, io.Discard)
+		serving(t, work)
+		awaitWaiting(t, work, 1)
 
-	if _, err := catalog.DeleteRuns(t.Context(), "house/departed"); err != nil {
-		t.Fatal(err)
-	}
+		if _, err := catalog.DeleteRuns(t.Context(), "house/departed"); err != nil {
+			t.Fatal(err)
+		}
 
-	awaitWaiting(t, work, 0)
+		awaitWaiting(t, work, 0)
+	})
 }
 
 // A delete clears its row's pending run, whatever run the delete
 // carries. The pending run and the deleted one can differ, because the
 // agent streams a row that moves from one run to the next as one change.
 func TestADeleteClearsTheRowWhateverRunItCarries(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := testConfirmer(t, catalog, io.Discard)
-	older := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
-	newer := finishedRun{library: "house/movies", worker: workerScan, job: "scan-2",
-		actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
-	streamRun(t, work, older)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		work := testConfirmer(t, catalog, io.Discard)
+		older := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+			actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+		newer := finishedRun{library: "house/movies", worker: workerScan, job: "scan-2",
+			actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
+		streamRun(t, work, older)
 
-	streamDelete(t, work, newer)
+		streamDelete(t, work, newer)
 
-	awaitWaiting(t, work, 0)
+		awaitWaiting(t, work, 0)
+	})
 }
 
 // Hands one delete to the confirmer the way the run stream does.
@@ -229,35 +236,37 @@ func streamDelete(t *testing.T, work *confirmer, run finishedRun) {
 // cleanup Job then deletes the row, and A's versions arrive after it. The
 // confirmer writes no confirmation for A, and B's confirmation stays.
 func TestARunReplacedByARunConfirmedAtOnceIsNotConfirmedLater(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	b := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-2")
-	work := testConfirmer(t, catalog, io.Discard)
-	runA := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
-	runB := finishedRun{library: "house/departed", worker: workerScan, job: "scan-2",
-		actor: b.Actor, version: b.Version}
-	streamRun(t, work, runA)
-	streamRun(t, work, runB)
-	streamDelete(t, work, runB)
-	agent.holdVersion(t, runA.actor, runA.version)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		b := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-2")
+		work := testConfirmer(t, catalog, io.Discard)
+		runA := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+			actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+		runB := finishedRun{library: "house/departed", worker: workerScan, job: "scan-2",
+			actor: b.Actor, version: b.Version}
+		streamRun(t, work, runA)
+		streamRun(t, work, runB)
+		streamDelete(t, work, runB)
+		agent.holdVersion(t, runA.actor, runA.version)
 
-	for _, run := range work.waiting() {
-		work.recheck(t.Context(), run)
-	}
+		for _, run := range work.waiting() {
+			work.recheck(t.Context(), run)
+		}
 
-	confirmedA, err := catalog.confirmedBy(t.Context(), runA.library, runA.worker, runA.job,
-		testConfirmerPod, runA.version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	confirmedB, err := catalog.confirmedBy(t.Context(), runB.library, runB.worker, runB.job,
-		testConfirmerPod, runB.version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if confirmedA || !confirmedB {
-		t.Errorf("confirmed A = %v, B = %v, want only B", confirmedA, confirmedB)
-	}
+		confirmedA, err := catalog.confirmedBy(t.Context(), runA.library, runA.worker, runA.job,
+			testConfirmerPod, runA.version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmedB, err := catalog.confirmedBy(t.Context(), runB.library, runB.worker, runB.job,
+			testConfirmerPod, runB.version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if confirmedA || !confirmedB {
+			t.Errorf("confirmed A = %v, B = %v, want only B", confirmedA, confirmedB)
+		}
+	})
 }
 
 // Stands until the confirmer holds this many runs, and fails when it
@@ -278,150 +287,162 @@ func awaitWaiting(t *testing.T, work *confirmer, want int) {
 // run out of the set while the recheck reads the catalog. The recheck
 // then writes no confirmation, even when the copy holds the versions.
 func TestTheRecheckConfirmsOnlyARunThatIsStillPending(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	written := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-1")
-	work := testConfirmer(t, catalog, io.Discard)
-	run := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
-		actor: written.Actor, version: written.Version}
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		written := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-1")
+		work := testConfirmer(t, catalog, io.Discard)
+		run := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+			actor: written.Actor, version: written.Version}
 
-	work.recheck(t.Context(), run)
+		work.recheck(t.Context(), run)
 
-	held, err := catalog.confirmedBy(t.Context(), "house/departed", workerScan, "scan-1",
-		testConfirmerPod, written.Version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if held {
-		t.Error("the recheck confirmed a run that left the pending set")
-	}
+		held, err := catalog.confirmedBy(t.Context(), "house/departed", workerScan, "scan-1",
+			testConfirmerPod, written.Version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if held {
+			t.Error("the recheck confirmed a run that left the pending set")
+		}
+	})
 }
 
 // The events between one run stream and the next are gone, deletes
 // among them. The confirmer forgets its pending runs when it opens the
 // stream again, and the snapshot holds every run that still exists.
 func TestTheConfirmerForgetsPendingRunsWhenTheStreamOpensAgain(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	log := &syncLog{}
-	refusing := proxyCatalog(t, catalog, func(path string, body []byte) bool {
-		return strings.HasSuffix(path, subscriptionsPath)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		log := &syncLog{}
+		refusing := proxyCatalog(t, catalog, func(path string, body []byte) bool {
+			return strings.HasSuffix(path, subscriptionsPath)
+		})
+		work := testConfirmer(t, refusing, log)
+		work.place(finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+			actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}, false)
+		serving(t, work)
+
+		waitForLog(t, log, "the run stream ended")
+
+		awaitWaiting(t, work, 0)
 	})
-	work := testConfirmer(t, refusing, log)
-	work.place(finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}, false)
-	serving(t, work)
-
-	waitForLog(t, log, "the run stream ended")
-
-	awaitWaiting(t, work, 0)
 }
 
 // A run stream that ends leaves no pending run behind for the backoff
 // before the next stream, because the deletes in that time are lost.
 func TestTheConfirmerForgetsPendingRunsWhenTheStreamEnds(t *testing.T) {
-	// The agent streams one run and ends the stream. It refuses every
-	// read, so the run stays pending and the failed read is in the log.
-	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, subscriptionsPath) {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write([]byte(`{"columns":["library","worker","job","actor","version"]}` + "\n" +
-			`{"row":[1,["house/movies","scan","scan-1","1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",12]]}` + "\n" +
-			`{"eoq":{"time":0.1}}` + "\n"))
-	}))
-	t.Cleanup(agent.Close)
-	log := &syncLog{}
-	work := testConfirmer(t, NewCatalog(agent.URL, agent.Client()), log)
-	reportMinBackoff = time.Hour
-	serving(t, work)
+	synctest.Test(t, func(t *testing.T) {
+		// The agent streams one run and ends the stream. It refuses every
+		// read, so the run stays pending and the failed read is in the log.
+		agent := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasSuffix(r.URL.Path, subscriptionsPath) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"columns":["library","worker","job","actor","version"]}` + "\n" +
+				`{"row":[1,["house/movies","scan","scan-1","1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",12]]}` + "\n" +
+				`{"eoq":{"time":0.1}}` + "\n"))
+		}))
+		log := &syncLog{}
+		work := testConfirmer(t, NewCatalog(apiservertest.Host, agent.Client()), log)
+		serving(t, work)
 
-	waitForLog(t, log, "could not confirm the scan run scan-1")
+		waitForLog(t, log, "could not confirm the scan run scan-1")
 
-	awaitWaiting(t, work, 0)
+		awaitWaiting(t, work, 0)
+	})
 }
 
 // An agent that stops answering fails one confirmation after a bound,
 // and never holds the run stream for ever.
 func TestAnAgentThatHangsFailsTheConfirmation(t *testing.T) {
-	// The handler also ends when the test does, because a server whose
-	// caller gave up on a request body it never read can miss the cancel.
-	stop := make(chan struct{})
-	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-stop:
+	synctest.Test(t, func(t *testing.T) {
+		// The handler also ends when the test does, because a server whose
+		// caller gave up on a request body it never read can miss the cancel.
+		stop := make(chan struct{})
+		hung := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+			case <-stop:
+			}
+		}))
+		t.Cleanup(func() { close(stop) })
+		work := testConfirmer(t, NewCatalog(apiservertest.Host, hung.Client()), io.Discard)
+		started := time.Now()
+
+		confirmed := work.settle(t.Context(), finishedRun{library: "house/movies", worker: workerScan,
+			job: "scan-1", actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12})
+
+		if confirmed {
+			t.Error("the confirmer confirmed a run against an agent that never answered")
 		}
-	}))
-	t.Cleanup(hung.Close)
-	t.Cleanup(func() { close(stop) })
-	work := testConfirmer(t, NewCatalog(hung.URL, &http.Client{}), io.Discard)
-	was := catalogWriteTimeout
-	t.Cleanup(func() { catalogWriteTimeout = was })
-	catalogWriteTimeout = 20 * time.Millisecond
-
-	confirmed := work.settle(t.Context(), finishedRun{library: "house/movies", worker: workerScan,
-		job: "scan-1", actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12})
-
-	if confirmed {
-		t.Error("the confirmer confirmed a run against an agent that never answered")
-	}
+		if waited := time.Since(started); waited != catalogWriteTimeout {
+			t.Errorf("gave up after %s, want the write timeout of %s", waited, catalogWriteTimeout)
+		}
+	})
 }
 
 // The recheck can confirm a run while the stream's read of the same run
 // still runs. The stream's hold that follows keeps nothing, because the
 // run is already confirmed.
 func TestAConfirmedRunIsNotHeldAgain(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := testConfirmer(t, catalog, io.Discard)
-	run := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
-	work.mark(run)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		work := testConfirmer(t, catalog, io.Discard)
+		run := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+			actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+		work.mark(run)
 
-	work.place(run, false)
+		work.place(run, false)
 
-	if waiting := work.waiting(); len(waiting) != 0 {
-		t.Errorf("waiting = %+v, want nothing for a confirmed run", waiting)
-	}
+		if waiting := work.waiting(); len(waiting) != 0 {
+			t.Errorf("waiting = %+v, want nothing for a confirmed run", waiting)
+		}
+	})
 }
 
 // A retried pod of a Job that timed out writes the same runs row with
 // a write of its own. The confirmer then waits on the newer run alone,
 // because no pod waits on the older one.
 func TestTheConfirmerWaitsOnTheNewestRunOfARow(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := testConfirmer(t, catalog, io.Discard)
-	timedOut := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
-	retried := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
-		actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		work := testConfirmer(t, catalog, io.Discard)
+		timedOut := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+			actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+		retried := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+			actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
 
-	streamRun(t, work, timedOut)
-	streamRun(t, work, retried)
+		streamRun(t, work, timedOut)
+		streamRun(t, work, retried)
 
-	waiting := work.waiting()
-	if len(waiting) != 1 || waiting[0] != retried {
-		t.Errorf("waiting = %+v, want only %+v", waiting, retried)
-	}
+		waiting := work.waiting()
+		if len(waiting) != 1 || waiting[0] != retried {
+			t.Errorf("waiting = %+v, want only %+v", waiting, retried)
+		}
+	})
 }
 
 // A recheck of the older run can end after the stream replaced it
 // with the newer one. A recheck that cannot confirm the older run leaves
 // the newer run pending.
 func TestARecheckKeepsTheNewerRunOfARow(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := testConfirmer(t, catalog, io.Discard)
-	timedOut := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
-	retried := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
-		actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
-	streamRun(t, work, retried)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		work := testConfirmer(t, catalog, io.Discard)
+		timedOut := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+			actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+		retried := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+			actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
+		streamRun(t, work, retried)
 
-	work.settle(t.Context(), timedOut)
+		work.settle(t.Context(), timedOut)
 
-	waiting := work.waiting()
-	if len(waiting) != 1 || waiting[0] != retried {
-		t.Errorf("waiting = %+v, want only %+v", waiting, retried)
-	}
+		waiting := work.waiting()
+		if len(waiting) != 1 || waiting[0] != retried {
+			t.Errorf("waiting = %+v, want only %+v", waiting, retried)
+		}
+	})
 }
 
 // A run that names no write is a run whose Job has not answered for
@@ -460,9 +481,11 @@ func TestTheConfirmerSkipsARunThatNamesNoWrite(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if _, ok := decodeFinishedRun(testCase.columns, testCase.cells); ok {
-				t.Error("the confirmer read a run out of a row that names no write")
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if _, ok := decodeFinishedRun(testCase.columns, testCase.cells); ok {
+					t.Error("the confirmer read a run out of a row that names no write")
+				}
+			})
 		})
 	}
 }
@@ -470,34 +493,38 @@ func TestTheConfirmerSkipsARunThatNamesNoWrite(t *testing.T) {
 // The matcher prepends the primary key to the projection, so the
 // confirmer reads every column by name.
 func TestTheConfirmerReadsItsColumnsByName(t *testing.T) {
-	run, ok := decodeFinishedRun(
-		[]string{"worker", "library", "job", "actor", "version"},
-		[]any{"scan", "house/movies", "scan-1", sqliteAgentActor, float64(4)})
+	synctest.Test(t, func(t *testing.T) {
+		run, ok := decodeFinishedRun(
+			[]string{"worker", "library", "job", "actor", "version"},
+			[]any{"scan", "house/movies", "scan-1", sqliteAgentActor, float64(4)})
 
-	if !ok {
-		t.Fatal("the confirmer read no run out of a row with its key columns first")
-	}
-	want := finishedRun{library: "house/movies", worker: "scan", job: "scan-1",
-		actor: sqliteAgentActor, version: 4}
-	if run != want {
-		t.Errorf("run = %+v, want %+v", run, want)
-	}
+		if !ok {
+			t.Fatal("the confirmer read no run out of a row with its key columns first")
+		}
+		want := finishedRun{library: "house/movies", worker: "scan", job: "scan-1",
+			actor: sqliteAgentActor, version: 4}
+		if run != want {
+			t.Errorf("run = %+v, want %+v", run, want)
+		}
+	})
 }
 
 // The confirmation of the Job before this one leaves with this
 // one's arrival, so the table holds the newest run of each worker.
 func TestTheConfirmerTakesTheOlderJobOfTheSameWorker(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	if err := catalog.UpsertConfirmation(t.Context(), "house/movies", workerScan, "scan-0",
-		testConfirmerPod, 1, time.Unix(10, 0)); err != nil {
-		t.Fatal(err)
-	}
-	serving(t, testConfirmer(t, catalog, io.Discard))
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		if err := catalog.UpsertConfirmation(t.Context(), "house/movies", workerScan, "scan-0",
+			testConfirmerPod, 1, time.Unix(10, 0)); err != nil {
+			t.Fatal(err)
+		}
+		serving(t, testConfirmer(t, catalog, io.Discard))
 
-	run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
 
-	awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", run.Version)
-	awaitRowCount(t, agent, "confirmations", 1)
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", run.Version)
+		awaitRowCount(t, agent, "confirmations", 1)
+	})
 }
 
 // A retried pod of one Job carries the Job's name and writes a version
@@ -505,18 +532,20 @@ func TestTheConfirmerTakesTheOlderJobOfTheSameWorker(t *testing.T) {
 // to the newer version. Without this, the retry would read the dead pod's
 // confirmation as its own and exit with its rows unproved.
 func TestTheConfirmerConfirmsARunAgainWhenItsVersionMoves(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	serving(t, testConfirmer(t, catalog, io.Discard))
-	first := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
-	awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", first.Version)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		serving(t, testConfirmer(t, catalog, io.Discard))
+		first := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", first.Version)
 
-	second := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		second := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
 
-	if second.Version <= first.Version {
-		t.Fatalf("the retry wrote version %d, want one past the pod before it", second.Version)
-	}
-	awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", second.Version)
-	awaitRowCount(t, agent, "confirmations", 1)
+		if second.Version <= first.Version {
+			t.Fatalf("the retry wrote version %d, want one past the pod before it", second.Version)
+		}
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", second.Version)
+		awaitRowCount(t, agent, "confirmations", 1)
+	})
 }
 
 // Stands until one table holds this many rows. The confirmer writes
@@ -541,111 +570,123 @@ func awaitRowCount(t *testing.T, agent *sqliteAgent, table string, want int) {
 // A run this pod already confirmed is left where it is, so a
 // confirmer that started again writes no version for a row that stands.
 func TestTheConfirmerLeavesAConfirmationItAlreadyWrote(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
-	if err := catalog.UpsertConfirmation(t.Context(), "house/movies", workerScan, "scan-1",
-		testConfirmerPod, run.Version, time.Unix(30, 0)); err != nil {
-		t.Fatal(err)
-	}
-	before := agent.version
-	work := testConfirmer(t, catalog, io.Discard)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		if err := catalog.UpsertConfirmation(t.Context(), "house/movies", workerScan, "scan-1",
+			testConfirmerPod, run.Version, time.Unix(30, 0)); err != nil {
+			t.Fatal(err)
+		}
+		before := agent.version
+		work := testConfirmer(t, catalog, io.Discard)
 
-	work.settle(t.Context(), finishedRun{library: "house/movies", worker: workerScan,
-		job: "scan-1", actor: run.Actor, version: run.Version})
+		work.settle(t.Context(), finishedRun{library: "house/movies", worker: workerScan,
+			job: "scan-1", actor: run.Actor, version: run.Version})
 
-	if agent.version != before {
-		t.Errorf("the catalog took %d writes, want none for a confirmation that stands",
-			agent.version-before)
-	}
+		if agent.version != before {
+			t.Errorf("the catalog took %d writes, want none for a confirmation that stands",
+				agent.version-before)
+		}
+	})
 }
 
 // A run the confirmer has already settled in this process is read
 // no further, so one stream of changes costs one read per run.
 func TestTheConfirmerSettlesEachRunOnce(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
-	work := testConfirmer(t, catalog, io.Discard)
-	held := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
-		actor: run.Actor, version: run.Version}
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		work := testConfirmer(t, catalog, io.Discard)
+		held := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+			actor: run.Actor, version: run.Version}
 
-	work.settle(t.Context(), held)
-	before := len(work.pending)
-	work.settle(t.Context(), held)
+		work.settle(t.Context(), held)
+		before := len(work.pending)
+		work.settle(t.Context(), held)
 
-	if before != 0 || len(work.pending) != 0 {
-		t.Errorf("the confirmer holds %d runs, want none after it confirmed them", len(work.pending))
-	}
-	if !work.done(held.key()) {
-		t.Error("the confirmer did not mark the run it confirmed")
-	}
+		if before != 0 || len(work.pending) != 0 {
+			t.Errorf("the confirmer holds %d runs, want none after it confirmed them", len(work.pending))
+		}
+		if !work.done(held.key()) {
+			t.Error("the confirmer did not mark the run it confirmed")
+		}
+	})
 }
 
 // An agent that will not answer is one log line and a run held for
 // the next recheck, never a run read as confirmed.
 func TestAnAgentThatWillNotAnswerHoldsTheRun(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
-	log := &bytes.Buffer{}
-	work := testConfirmer(t, catalog, log)
-	agent.queriesLeft = 1
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		log := &bytes.Buffer{}
+		work := testConfirmer(t, catalog, log)
+		agent.queriesLeft = 1
 
-	streamRun(t, work, finishedRun{library: "house/movies", worker: workerScan,
-		job: "scan-1", actor: run.Actor, version: run.Version})
+		streamRun(t, work, finishedRun{library: "house/movies", worker: workerScan,
+			job: "scan-1", actor: run.Actor, version: run.Version})
 
-	if len(work.pending) != 1 {
-		t.Errorf("the confirmer holds %d runs, want the one it could not read", len(work.pending))
-	}
-	if !strings.Contains(log.String(), "could not confirm the scan run scan-1") {
-		t.Errorf("log = %q, want the failed read named", log.String())
-	}
+		if len(work.pending) != 1 {
+			t.Errorf("the confirmer holds %d runs, want the one it could not read", len(work.pending))
+		}
+		if !strings.Contains(log.String(), "could not confirm the scan run scan-1") {
+			t.Errorf("log = %q, want the failed read named", log.String())
+		}
+	})
 }
 
 // A confirmer built without a log writes nowhere, so the role runs
 // in a test with no output of its own.
 func TestAConfirmerWithNoLogWritesNothing(t *testing.T) {
-	work := &confirmer{}
+	synctest.Test(t, func(t *testing.T) {
+		work := &confirmer{}
 
-	work.logf("confirmed nothing")
+		work.logf("confirmed nothing")
+	})
 }
 
 // The confirmer reads its pod name and the agent's address out of
 // the environment, the only place a pod with no API credential learns them.
 func TestTheConfirmerReadsItsPodOutOfTheEnvironment(t *testing.T) {
-	t.Setenv(podNameVariable, testConfirmerPod)
-	t.Setenv(catalogAPIVariable, "")
-	log := &bytes.Buffer{}
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv(podNameVariable, testConfirmerPod)
+		t.Setenv(catalogAPIVariable, "")
+		log := &bytes.Buffer{}
 
-	work := newConfirmer(log)
+		work := newConfirmer(log)
 
-	if work.name != testConfirmerPod {
-		t.Errorf("name = %q, want the pod the environment names", work.name)
-	}
-	if work.catalog.base != defaultCatalogAPI {
-		t.Errorf("catalog = %q, want the loopback agent %s", work.catalog.base, defaultCatalogAPI)
-	}
-	if !strings.Contains(log.String(), testConfirmerPod) {
-		t.Errorf("log = %q, want the copy it confirms against", log.String())
-	}
+		if work.name != testConfirmerPod {
+			t.Errorf("name = %q, want the pod the environment names", work.name)
+		}
+		if work.catalog.base != defaultCatalogAPI {
+			t.Errorf("catalog = %q, want the loopback agent %s", work.catalog.base, defaultCatalogAPI)
+		}
+		if !strings.Contains(log.String(), testConfirmerPod) {
+			t.Errorf("log = %q, want the copy it confirms against", log.String())
+		}
+	})
 }
 
 // A run stream that ends is opened again, so a confirmer whose
 // agent dropped the stream keeps confirming.
 func TestTheConfirmerOpensTheRunStreamAgain(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	log := &syncLog{}
-	refused := 0
-	flaky := proxyCatalog(t, catalog, func(path string, body []byte) bool {
-		if !strings.HasSuffix(path, subscriptionsPath) {
-			return false
-		}
-		refused++
-		return refused == 1
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		log := &syncLog{}
+		refused := 0
+		flaky := proxyCatalog(t, catalog, func(path string, body []byte) bool {
+			if !strings.HasSuffix(path, subscriptionsPath) {
+				return false
+			}
+			refused++
+			return refused == 1
+		})
+		work := testConfirmer(t, flaky, log)
+		serving(t, work)
+		waitForLog(t, log, "the run stream ended")
+
+		run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", run.Version)
 	})
-	work := testConfirmer(t, flaky, log)
-	serving(t, work)
-	waitForLog(t, log, "the run stream ended")
-
-	run := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
-
-	awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", run.Version)
 }

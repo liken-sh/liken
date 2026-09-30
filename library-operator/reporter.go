@@ -29,27 +29,25 @@ const reportMode = "report"
 
 // reportReadTimeout bounds one read of the catalog, so a stuck agent
 // cannot hold the reporter in a query forever.
-var reportReadTimeout = 30 * time.Second
+const reportReadTimeout = 30 * time.Second
 
 // The wait before the reporter opens the run stream again after it
 // ends. It doubles up to the ceiling, so an agent that is down does not
-// become a tight loop. Variables, so a test drives a reconnect in
-// milliseconds.
-var (
+// become a tight loop.
+const (
 	reportMinBackoff = time.Second
 	reportMaxBackoff = 30 * time.Second
 )
 
 // How long a run of changes waits before the reporter
 // republishes again, so a walk that writes thousands of rows costs one
-// report a second and not one report a row. A variable, so a test
-// drives a republish in milliseconds.
-var reportDebounce = time.Second
+// report a second and not one report a row.
+const reportDebounce = time.Second
 
 // How long the reporter holds the bus open after it publishes the
 // closing offline, so the writer goroutine sends it before the process
-// exits. A variable, so a test drives a shutdown in milliseconds.
-var reportFlushGrace = 500 * time.Millisecond
+// exits.
+const reportFlushGrace = 500 * time.Millisecond
 
 // One reporter: the namespace it serves, the catalog it reads, the bus
 // it publishes on, and the report it last published per library.

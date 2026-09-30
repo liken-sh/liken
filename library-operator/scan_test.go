@@ -21,30 +21,26 @@ import (
 // still passes, short enough that a broken scanner fails in seconds.
 const scanTestTimeout = 5 * time.Second
 
-// testBroker listens on a loopback port and serves every client that
-// connects with the same fake broker the bus tests use. The address it
-// returns is what the scanner dials, so the test drives the real
-// dialer and the real TCP path.
-func testBroker(t *testing.T) (address string, accepted <-chan *fakeBroker) {
+// testBroker answers a dialer for a bus and the brokers it reaches. Each
+// dial opens a pipe and serves its far end with a new fake broker, the
+// one the bus tests use, so a client that reconnects reaches a fresh
+// broker, and a test in a synctest bubble opens no socket.
+func testBroker(t *testing.T) (dial func(context.Context) (net.Conn, error), accepted <-chan *fakeBroker) {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { listener.Close() })
-
 	brokers := make(chan *fakeBroker, 32)
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			t.Cleanup(func() { conn.Close() })
-			brokers <- newFakeBroker(conn)
+	return func(ctx context.Context) (net.Conn, error) {
+		near, far := net.Pipe()
+		t.Cleanup(func() {
+			near.Close()
+			far.Close()
+		})
+		select {
+		case brokers <- newFakeBroker(far):
+			return near, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-	}()
-	return listener.Addr().String(), brokers
+	}, brokers
 }
 
 // scanEnvironment writes the whole environment the operator gives a

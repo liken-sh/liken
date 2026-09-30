@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // The namespace, the Player, and the library key every request here
@@ -437,7 +438,6 @@ func TestATopicThatIsNeitherAReportNorAPlayRequestHoldsNothing(t *testing.T) {
 // only here.
 func operatorsBroker(t *testing.T, operator *operator) *fakeBroker {
 	t.Helper()
-	shorterBackoff(t)
 	near, far := net.Pipe()
 	t.Cleanup(func() {
 		near.Close()
@@ -462,25 +462,27 @@ func operatorsBroker(t *testing.T, operator *operator) *fakeBroker {
 // re-sends in sorted order: the reports it folds, the requests it
 // serves, and the two marks the progress store publishes.
 func TestTheOperatorSubscribesToEveryTopicItActsOn(t *testing.T) {
-	operator, _ := playingHouse(t)
-	broker := operatorsBroker(t, operator)
-	want := []string{
-		catalogAvailabilityFilter(defaultTopicBase),
-		libraryStatusFilter(defaultTopicBase),
-		personForgottenFilter(defaultTopicBase),
-		playRequestFilter(defaultTopicBase),
-		playRecordedFilter(defaultTopicBase),
-	}
+	synctest.Test(t, func(t *testing.T) {
+		operator, _ := playingHouse(t)
+		broker := operatorsBroker(t, operator)
+		want := []string{
+			catalogAvailabilityFilter(defaultTopicBase),
+			libraryStatusFilter(defaultTopicBase),
+			personForgottenFilter(defaultTopicBase),
+			playRequestFilter(defaultTopicBase),
+			playRecordedFilter(defaultTopicBase),
+		}
 
-	filters := []string{}
-	for range want {
-		filters = append(filters, waitForString(t, broker.subs))
-	}
+		filters := []string{}
+		for range want {
+			filters = append(filters, waitForString(t, broker.subs))
+		}
 
-	slices.Sort(filters)
-	if !slices.Equal(filters, want) {
-		t.Errorf("the operator subscribed to %v, want %v", filters, want)
-	}
+		slices.Sort(filters)
+		if !slices.Equal(filters, want) {
+			t.Errorf("the operator subscribed to %v, want %v", filters, want)
+		}
+	})
 }
 
 // A request whose item carries no presentation still plays: the file is

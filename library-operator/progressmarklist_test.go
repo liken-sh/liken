@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -187,23 +188,25 @@ func TestAListMarkClearsTheEpisodesItNamesCleared(t *testing.T) {
 // An entry that names a mark that is neither of the two makes the message
 // no mark, and the role clears it from the broker as it clears any other.
 func TestAListEntryWithAnUnknownMarkIsCleared(t *testing.T) {
-	role, broker, db := servingProgress(t)
-	waitForTopic(t, broker, role.availabilityTopic)
-	topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
-	mark := titleMark{}
-	_ = json.Unmarshal(listMarkPayload(t, [2]int{1, 1}), &mark)
-	mark.Episodes = append(mark.Episodes, markedEpisode{Mark: "forgotten", Season: 1, Episode: 3})
-	payload, _ := json.Marshal(mark)
+	synctest.Test(t, func(t *testing.T) {
+		role, broker, db := servingProgress(t)
+		waitForTopic(t, broker, role.availabilityTopic)
+		topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
+		mark := titleMark{}
+		_ = json.Unmarshal(listMarkPayload(t, [2]int{1, 1}), &mark)
+		mark.Episodes = append(mark.Episodes, markedEpisode{Mark: "forgotten", Season: 1, Episode: 3})
+		payload, _ := json.Marshal(mark)
 
-	role.onMessage(topic, payload)
+		role.onMessage(topic, payload)
 
-	published := waitForTopic(t, broker, topic)
-	if len(published.payload) != 0 || !published.retained {
-		t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
-	}
-	if heldPlay(t, db, "mark-den-1-s0001e0001").Play != "" {
-		t.Error("the role recorded a list that holds no mark")
-	}
+		published := waitForTopic(t, broker, topic)
+		if len(published.payload) != 0 || !published.retained {
+			t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
+		}
+		if heldPlay(t, db, "mark-den-1-s0001e0001").Play != "" {
+			t.Error("the role recorded a list that holds no mark")
+		}
+	})
 }
 
 // A list writes one ended row for each episode, with the audience, the
@@ -292,21 +295,23 @@ func TestAListMarkLeavesOneLine(t *testing.T) {
 // The list is one retained message, so the role clears it once, as it
 // clears a single mark.
 func TestAnExpiredListIsRecordedAndClearedOnce(t *testing.T) {
-	role, broker, db := servingProgress(t)
-	waitForTopic(t, broker, role.availabilityTopic)
-	topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
-	mark := titleMark{}
-	_ = json.Unmarshal(listMarkPayload(t, [2]int{1, 1}, [2]int{1, 2}), &mark)
-	mark.At = time.Now().Add(-markRetention - time.Hour).Unix()
-	payload, _ := json.Marshal(mark)
+	synctest.Test(t, func(t *testing.T) {
+		role, broker, db := servingProgress(t)
+		waitForTopic(t, broker, role.availabilityTopic)
+		topic := playMarkTopic(defaultTopicBase, "house", "mark-den-1")
+		mark := titleMark{}
+		_ = json.Unmarshal(listMarkPayload(t, [2]int{1, 1}, [2]int{1, 2}), &mark)
+		mark.At = time.Now().Add(-markRetention - time.Hour).Unix()
+		payload, _ := json.Marshal(mark)
 
-	role.onMessage(topic, payload)
+		role.onMessage(topic, payload)
 
-	published := waitForTopic(t, broker, topic)
-	if len(published.payload) != 0 || !published.retained {
-		t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
-	}
-	if heldPlay(t, db, "mark-den-1-s0001e0002").Play == "" {
-		t.Error("the role cleared a list it did not record")
-	}
+		published := waitForTopic(t, broker, topic)
+		if len(published.payload) != 0 || !published.retained {
+			t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
+		}
+		if heldPlay(t, db, "mark-den-1-s0001e0002").Play == "" {
+			t.Error("the role cleared a list it did not record")
+		}
+	})
 }

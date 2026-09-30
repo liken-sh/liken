@@ -87,9 +87,8 @@ func (o *operator) standScreenClaims(ctx context.Context, player *Player, catalo
 }
 
 // How long a screen pod may carry PodScheduled False before the
-// operator takes its claim away. It is a variable so a test drives it in
-// milliseconds.
-var unschedulableGrace = 5 * time.Minute
+// operator takes its claim away.
+const unschedulableGrace = 5 * time.Minute
 
 // Whether the scheduler has refused this pod for longer than the
 // grace. The verdict is the API server's own lastTransitionTime, so a

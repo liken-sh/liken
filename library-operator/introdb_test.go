@@ -7,11 +7,13 @@ package main
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // What one fake IntroDB recorded, and the one answer it gives.
@@ -33,9 +35,8 @@ func (f *fakeIntroDB) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func newFakeIntroDB(t *testing.T, status int, body string) (*introdbClient, *fakeIntroDB) {
 	t.Helper()
 	fake := &fakeIntroDB{status: status, body: body}
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
-	client := newIntroDBClient(server.URL)
+	server := apiservertest.Start(t, fake)
+	client := newIntroDBClient(apiservertest.Host)
 	client.http = server.Client()
 	return client, fake
 }
@@ -50,59 +51,63 @@ const introdbEpisodeAnswer = `{"imdb_id":"tt9002001","media_type":"tv","is_movie
 // An episode is asked by the series' IMDb id and the two aired numbers, and
 // IntroDB's outro is this fact's credits.
 func TestIntroDBAnswersTheSpansOfAnEpisode(t *testing.T) {
-	client, fake := newFakeIntroDB(t, http.StatusOK, introdbEpisodeAnswer)
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeIntroDB(t, http.StatusOK, introdbEpisodeAnswer)
 
-	entries, err := newIntroDBMarkAnswerer(client).marks(t.Context(), markFile{
-		ids: providerIDs{"imdb": "tt9002001", "tmdb": "2002"}, season: 1, episode: 1, duration: 3700000,
-	})
+		entries, err := newIntroDBMarkAnswerer(client).marks(t.Context(), markFile{
+			ids: providerIDs{"imdb": "tt9002001", "tmdb": "2002"}, season: 1, episode: 1, duration: 3700000,
+		})
 
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []markEntry{
-		{Kind: markKindIntro, Start: milliseconds(437000), End: milliseconds(531000), Source: providerBlockIntroDB},
-		{Kind: markKindCredits, Start: milliseconds(3631500), End: milliseconds(3699500), Source: providerBlockIntroDB},
-	}
-	if !slices.EqualFunc(entries, want, sameMark) {
-		t.Errorf("entries = %v, want %v", markText(entries), markText(want))
-	}
-	request := fake.requests[0]
-	if request.URL.Path != introdbSegmentsPath {
-		t.Errorf("the ask went to %s, want %s", request.URL.Path, introdbSegmentsPath)
-	}
-	query := request.URL.Query()
-	for name, value := range map[string]string{"imdb_id": "tt9002001", "season": "1", "episode": "1"} {
-		if query.Get(name) != value {
-			t.Errorf("the ask named %s=%q, want %q", name, query.Get(name), value)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+		want := []markEntry{
+			{Kind: markKindIntro, Start: milliseconds(437000), End: milliseconds(531000), Source: providerBlockIntroDB},
+			{Kind: markKindCredits, Start: milliseconds(3631500), End: milliseconds(3699500), Source: providerBlockIntroDB},
+		}
+		if !slices.EqualFunc(entries, want, sameMark) {
+			t.Errorf("entries = %v, want %v", markText(entries), markText(want))
+		}
+		request := fake.requests[0]
+		if request.URL.Path != introdbSegmentsPath {
+			t.Errorf("the ask went to %s, want %s", request.URL.Path, introdbSegmentsPath)
+		}
+		query := request.URL.Query()
+		for name, value := range map[string]string{"imdb_id": "tt9002001", "season": "1", "episode": "1"} {
+			if query.Get(name) != value {
+				t.Errorf("the ask named %s=%q, want %q", name, query.Get(name), value)
+			}
+		}
+	})
 }
 
 // A movie is asked by its IMDb id and the movie flag, and a post-credits
 // scene keeps a kind of its own.
 func TestIntroDBAsksAMovieWithTheMovieFlag(t *testing.T) {
-	client, fake := newFakeIntroDB(t, http.StatusOK, `{"imdb_id":"tt9001001","is_movie":true,
-		"intro":null,"recap":null,
-		"outro":{"start_ms":7800000,"end_ms":8100000},
-		"post_credits":{"start_ms":8100000,"end_ms":8160000}}`)
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeIntroDB(t, http.StatusOK, `{"imdb_id":"tt9001001","is_movie":true,
+			"intro":null,"recap":null,
+			"outro":{"start_ms":7800000,"end_ms":8100000},
+			"post_credits":{"start_ms":8100000,"end_ms":8160000}}`)
 
-	entries, err := newIntroDBMarkAnswerer(client).marks(t.Context(),
-		markFile{movie: true, ids: providerIDs{"imdb": "tt9001001"}})
+		entries, err := newIntroDBMarkAnswerer(client).marks(t.Context(),
+			markFile{movie: true, ids: providerIDs{"imdb": "tt9001001"}})
 
-	if err != nil {
-		t.Fatal(err)
-	}
-	kinds := []string{}
-	for _, entry := range entries {
-		kinds = append(kinds, entry.Kind)
-	}
-	if !slices.Equal(kinds, []string{markKindCredits, markKindPostCredits}) {
-		t.Errorf("kinds = %v, want credits and post-credits", kinds)
-	}
-	query := fake.requests[0].URL.Query()
-	if query.Get("is_movie") != "true" || query.Has("season") || query.Has("episode") {
-		t.Errorf("the ask named %v, want the movie flag and no numbers", query)
-	}
+		if err != nil {
+			t.Fatal(err)
+		}
+		kinds := []string{}
+		for _, entry := range entries {
+			kinds = append(kinds, entry.Kind)
+		}
+		if !slices.Equal(kinds, []string{markKindCredits, markKindPostCredits}) {
+			t.Errorf("kinds = %v, want credits and post-credits", kinds)
+		}
+		query := fake.requests[0].URL.Query()
+		if query.Get("is_movie") != "true" || query.Has("season") || query.Has("episode") {
+			t.Errorf("the ask named %v, want the movie flag and no numbers", query)
+		}
+	})
 }
 
 // An answer of nulls, a 404, and a work with no IMDb id are all a miss and
@@ -128,29 +133,33 @@ func TestIntroDBMisses(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeIntroDB(t, test.status, test.body)
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeIntroDB(t, test.status, test.body)
 
-			entries, err := newIntroDBMarkAnswerer(client).marks(t.Context(),
-				markFile{ids: test.ids, season: 1, episode: 1})
+				entries, err := newIntroDBMarkAnswerer(client).marks(t.Context(),
+					markFile{ids: test.ids, season: 1, episode: 1})
 
-			if err != nil || len(entries) != 0 {
-				t.Errorf("marks = %v, %v, want no span and no error", entries, err)
-			}
-			if len(fake.requests) != test.asked {
-				t.Errorf("the client made %d requests, want %d", len(fake.requests), test.asked)
-			}
+				if err != nil || len(entries) != 0 {
+					t.Errorf("marks = %v, %v, want no span and no error", entries, err)
+				}
+				if len(fake.requests) != test.asked {
+					t.Errorf("the client made %d requests, want %d", len(fake.requests), test.asked)
+				}
+			})
 		})
 	}
 }
 
 // Any other status is an error that carries IntroDB's own words.
 func TestAnIntroDBFailureCarriesItsBody(t *testing.T) {
-	client, _ := newFakeIntroDB(t, http.StatusBadRequest, `{"error":"Invalid query params."}`)
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeIntroDB(t, http.StatusBadRequest, `{"error":"Invalid query params."}`)
 
-	_, err := newIntroDBMarkAnswerer(client).marks(t.Context(),
-		markFile{ids: providerIDs{"imdb": "tt9002001"}, season: 1, episode: 1})
+		_, err := newIntroDBMarkAnswerer(client).marks(t.Context(),
+			markFile{ids: providerIDs{"imdb": "tt9002001"}, season: 1, episode: 1})
 
-	if err == nil || !strings.Contains(err.Error(), `{"error":"Invalid query params."}`) {
-		t.Errorf("err = %v, want the body IntroDB answered", err)
-	}
+		if err == nil || !strings.Contains(err.Error(), `{"error":"Invalid query params."}`) {
+			t.Errorf("err = %v, want the body IntroDB answered", err)
+		}
+	})
 }

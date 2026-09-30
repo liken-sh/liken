@@ -8,49 +8,54 @@ package main
 // reaches the pass from the right path, that a change wakes the pass
 // only when the pass acts on it, and that an object that does not
 // convert is reported.
+//
+// Each test runs in a synctest bubble, so a change has reached the pass
+// when every goroutine in the bubble is blocked, and the test reads the
+// wake at that moment instead of waiting for one that may not come.
 
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 )
 
-// The bounds on every wait in this file: long enough that a loaded
-// machine still passes, short enough that a broken watch fails in
-// seconds.
-const (
-	watchTimeout    = 5 * time.Second
-	watchQuietSpell = 300 * time.Millisecond
-)
+// The bound on every wait in this file. The tests run on the fake clock,
+// so the bound costs no real time. It exceeds the backoff client-go's
+// reflector waits before it opens a watch again.
+const watchTimeout = 5 * time.Second
 
 // watchedCluster starts the eight watches on a fake cluster, and
 // answers them once every collection has been read. The wakes of the
 // first read are drained, so a test reads only the wakes its own
-// changes cause.
+// changes cause. The caller runs in a synctest bubble.
 func watchedCluster(t *testing.T, cluster *fakeCluster, m *metrics) (*watches, chan struct{}) {
 	t.Helper()
-	server := httptest.NewServer(cluster.handler())
-	t.Cleanup(server.Close)
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	return watchedServer(t, cluster.start(t), m)
+}
+
+// watchedServer starts the eight watches on one server.
+func watchedServer(t *testing.T, server *apiservertest.Server, m *metrics) (*watches, chan struct{}) {
+	t.Helper()
+	client, err := dynamic.NewForConfig(server.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
 	wake := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	watched := startWatches(ctx, client, wake, m,
-		apiclient.New(server.URL, server.Client(), ""), newObjectVersions())
+		apiclient.New(apiservertest.Host, server.Client(), ""), newObjectVersions())
 	t.Cleanup(func() {
 		cancel()
 		watched.wait()
@@ -60,21 +65,19 @@ func watchedCluster(t *testing.T, cluster *fakeCluster, m *metrics) (*watches, c
 	if err := watched.settle(settling); err != nil {
 		t.Fatal(err)
 	}
-	quiet(wake)
+	wokeOnceIdle(wake)
 	return watched, wake
 }
 
-// quiet reads wakes until none arrives for the quiet spell.
-func quiet(wake <-chan struct{}) {
-	for wokeWithin(wake, watchQuietSpell) {
-	}
-}
-
-func wokeWithin(wake <-chan struct{}, within time.Duration) bool {
+// wokeOnceIdle answers whether the pass was woken, once every goroutine in the
+// bubble has finished the work the last change started. It takes the
+// wake, so the next call reads only what follows.
+func wokeOnceIdle(wake <-chan struct{}) bool {
+	synctest.Wait()
 	select {
 	case <-wake:
 		return true
-	case <-time.After(within):
+	default:
 		return false
 	}
 }
@@ -83,37 +86,25 @@ func wokeWithin(wake <-chan struct{}, within time.Duration) bool {
 // as the operator's struct. The pod watch reads only the pods that hold
 // a catalog agent.
 func TestEachWatchAnswersThePassWithItsCollection(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
 	member := readyCatalogPod("house", "house")
-	cluster.pods[member.Metadata.Name] = member
-	cluster.pods[testOperatorPod] = operatorPod(testScannerImage)
-	seedPlayer(cluster, "den", "house", screenController)
-	cluster.preferences = &MediaPreferences{Metadata: ObjectMeta{Name: "default"},
-		Spec: MediaPreferencesSpec{TimeZone: "Europe/Lisbon"}}
-	cluster.providers["tmdb"] = &MetadataProvider{Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"}}
-	cluster.plays = []Play{{Metadata: ObjectMeta{Name: "den-b2k9x", Namespace: "house"}}}
-	cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a"}, Spec: PersonSpec{DisplayName: "Person A"}}
-	watched, _ := watchedCluster(t, cluster, nil)
-
 	cases := []struct {
 		name string
-		read func() (string, error)
+		read func(ctx context.Context, watched *watches) (string, error)
 		want string
 	}{
-		{name: "libraries", want: "movies /movies", read: func() (string, error) {
-			list, err := watched.readLibraries(t.Context())
+		{name: "libraries", want: "movies /movies", read: func(ctx context.Context, watched *watches) (string, error) {
+			list, err := watched.readLibraries(ctx)
 			return joined(list.Items, func(l Library) string { return l.Metadata.Name + " " + l.Spec.Storage.Root }), err
 		}},
-		{name: "catalogs", want: "house", read: func() (string, error) {
-			list, err := watched.readCatalogs(t.Context())
+		{name: "catalogs", want: "house", read: func(ctx context.Context, watched *watches) (string, error) {
+			list, err := watched.readCatalogs(ctx)
 			return joined(list.Items, func(c NamespaceCatalog) string { return c.Metadata.Name }), err
 		}},
-		{name: "member pods", want: member.Metadata.Name + " 10.42.0.9", read: func() (string, error) {
+		{name: "member pods", want: member.Metadata.Name + " 10.42.0.9", read: func(_ context.Context, watched *watches) (string, error) {
 			list, err := watched.readMemberPods()
 			return joined(list.Items, func(p Pod) string { return p.Metadata.Name + " " + p.Status.PodIP }), err
 		}},
-		{name: "players", want: "den true", read: func() (string, error) {
+		{name: "players", want: "den true", read: func(_ context.Context, watched *watches) (string, error) {
 			list, err := watched.readPlayers()
 			return joined(list.Items, func(p Player) string {
 				if p.delegated() {
@@ -122,29 +113,44 @@ func TestEachWatchAnswersThePassWithItsCollection(t *testing.T) {
 				return p.Metadata.Name
 			}), err
 		}},
-		{name: "media preferences", want: "Europe/Lisbon", read: func() (string, error) {
+		{name: "media preferences", want: "Europe/Lisbon", read: func(_ context.Context, watched *watches) (string, error) {
 			list, err := watched.readMediaPreferences()
 			return householdZone(list), err
 		}},
-		{name: "metadata providers", want: "house/tmdb", read: func() (string, error) {
-			list, err := watched.readMetadataProviders(t.Context())
+		{name: "metadata providers", want: "house/tmdb", read: func(ctx context.Context, watched *watches) (string, error) {
+			list, err := watched.readMetadataProviders(ctx)
 			return joined(list.Items, func(p MetadataProvider) string { return p.Metadata.Namespace + "/" + p.Metadata.Name }), err
 		}},
-		{name: "plays", want: "den-b2k9x", read: func() (string, error) {
+		{name: "plays", want: "den-b2k9x", read: func(_ context.Context, watched *watches) (string, error) {
 			list, err := watched.readPlays()
 			return joined(list.Items, func(p Play) string { return p.Metadata.Name }), err
 		}},
-		{name: "people", want: "Person A", read: func() (string, error) {
+		{name: "people", want: "Person A", read: func(_ context.Context, watched *watches) (string, error) {
 			list, err := watched.readPeople()
 			return joined(list.Items, func(p Person) string { return p.Spec.DisplayName }), err
 		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := c.read()
-			if err != nil || got != c.want {
-				t.Errorf("read = %q, %v; want %q", got, err, c.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				cluster := newFakeCluster()
+				boundHouse(cluster)
+				cluster.pods[member.Metadata.Name] = member
+				cluster.pods[testOperatorPod] = operatorPod(testScannerImage)
+				seedPlayer(cluster, "den", "house", screenController)
+				cluster.preferences = &MediaPreferences{Metadata: ObjectMeta{Name: "default"},
+					Spec: MediaPreferencesSpec{TimeZone: "Europe/Lisbon"}}
+				cluster.providers["tmdb"] = &MetadataProvider{Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"}}
+				cluster.plays = []Play{{Metadata: ObjectMeta{Name: "den-b2k9x", Namespace: "house"}}}
+				cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a"}, Spec: PersonSpec{DisplayName: "Person A"}}
+				watched, _ := watchedCluster(t, cluster, nil)
+
+				got, err := c.read(t.Context(), watched)
+
+				if err != nil || got != c.want {
+					t.Errorf("read = %q, %v; want %q", got, err, c.want)
+				}
+			})
 		})
 	}
 }
@@ -224,25 +230,27 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			boundHouse(cluster)
-			member := readyCatalogPod("house", "house")
-			cluster.pods[member.Metadata.Name] = member
-			seedPlayer(cluster, "den", "house", screenController)
-			cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a"}}
-			cluster.jobs["house/movies-walk-a"] = &Job{Metadata: ObjectMeta{Name: "movies-walk-a", Namespace: "house",
-				Labels: map[string]string{scannerLabelKey: workerLabelValue}}}
-			cluster.services["house/catalog"] = buildCatalogService("house", nil)
-			_, wake := watchedCluster(t, cluster, nil)
+			synctest.Test(t, func(t *testing.T) {
+				cluster := newFakeCluster()
+				boundHouse(cluster)
+				member := readyCatalogPod("house", "house")
+				cluster.pods[member.Metadata.Name] = member
+				seedPlayer(cluster, "den", "house", screenController)
+				cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a"}}
+				cluster.jobs["house/movies-walk-a"] = &Job{Metadata: ObjectMeta{Name: "movies-walk-a", Namespace: "house",
+					Labels: map[string]string{scannerLabelKey: workerLabelValue}}}
+				cluster.services["house/catalog"] = buildCatalogService("house", nil)
+				_, wake := watchedCluster(t, cluster, nil)
 
-			cluster.mutex.Lock()
-			c.change(cluster)
-			cluster.mutex.Unlock()
-			cluster.announce()
+				cluster.mutex.Lock()
+				c.change(cluster)
+				cluster.mutex.Unlock()
+				cluster.announce()
 
-			if woke := wokeWithin(wake, watchQuietSpell); woke != c.wakes {
-				t.Errorf("woke = %v, want %v", woke, c.wakes)
-			}
+				if got := wokeOnceIdle(wake); got != c.wakes {
+					t.Errorf("woke = %v, want %v", got, c.wakes)
+				}
+			})
 		})
 	}
 }
@@ -251,42 +259,44 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 // settles all the same, and the pass reads the failure, which it takes
 // as no Players.
 func TestAWatchOnACollectionNobodyServesSettlesAndAnswersItsFailure(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	cluster.broken[playersPath] = http.StatusNotFound
-	watched, _ := watchedCluster(t, cluster, nil)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster)
+		cluster.broken[playersPath] = http.StatusNotFound
+		watched, _ := watchedCluster(t, cluster, nil)
 
-	players, err := watched.readPlayers()
+		players, err := watched.readPlayers()
 
-	if err == nil || len(players.Items) != 0 {
-		t.Errorf("players = %+v, %v; want none and the failure", players.Items, err)
-	}
-	if _, err := watched.readLibraries(t.Context()); err != nil {
-		t.Errorf("the libraries = %v, want them read", err)
-	}
+		if err == nil || len(players.Items) != 0 {
+			t.Errorf("players = %+v, %v; want none and the failure", players.Items, err)
+		}
+		if _, err := watched.readLibraries(t.Context()); err != nil {
+			t.Errorf("the libraries = %v, want them read", err)
+		}
+	})
 }
 
 // A watch the API server ends is opened again, and each reopen counts
 // one watch_restarts_total under the kind the watch serves. The first
 // watch counts none, because it opened nothing again.
 func TestAReopenedWatchCountsOneRestart(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	m := newMetrics("test")
-	watchedCluster(t, cluster, m)
-	if got := testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)); got != 0 {
-		t.Fatalf("watch_restarts_total = %v before any reopen, want 0", got)
-	}
-
-	cluster.cutStreams()
-
-	deadline := time.Now().Add(watchTimeout)
-	for testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)) != 1 {
-		if time.Now().After(deadline) {
-			t.Fatal("the libraries watch was not opened again")
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster)
+		m := newMetrics("test")
+		watchedCluster(t, cluster, m)
+		if got := testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)); got != 0 {
+			t.Fatalf("watch_restarts_total = %v before any reopen, want 0", got)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+
+		cluster.cutStreams()
+		time.Sleep(watchTimeout)
+		synctest.Wait()
+
+		if got := testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)); got != 1 {
+			t.Errorf("watch_restarts_total = %v after one reopen, want 1", got)
+		}
+	})
 }
 
 // An object that does not convert to the operator's struct is an
@@ -333,7 +343,7 @@ func TestAChangeThatDoesNotConvertWakesThePass(t *testing.T) {
 	if err := unstructured.SetNestedField(mistyped.Object, "two", "metadata", "generation"); err != nil {
 		t.Fatal(err)
 	}
-	client, err := dynamic.NewForConfig(&rest.Config{Host: "http://127.0.0.1:1"})
+	client, err := dynamic.NewForConfig(newFakeCluster().start(t).Config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,42 +421,44 @@ func TestTheWatchesDropANodesImages(t *testing.T) {
 // volumes, the pods, the Jobs, and the nodes, and read the Services and
 // the slices by name.
 func TestASteadyPassListsNoWatchedCollectionAndWakesNothing(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster).Spec.Trickplay.Render = libraryWithRender("gpu.liken.sh", "").Spec.Trickplay.Render
-	boundStudio(cluster)
-	for _, namespace := range []string{"house", "studio"} {
-		pod := readyCatalogPod(namespace, namespace)
-		cluster.pods[pod.Metadata.Name] = pod
-	}
-	seedPlayer(cluster, "den", "house", screenController)
-	cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a", UID: "person-a-uid"}}
-	operator := testOperator(t, cluster)
-	watched, wake := watchedCluster(t, cluster, nil)
-	operator.watched = watched
-	// The first passes stand what the cluster lacks. Each write reaches
-	// the informers before the next pass reads them.
-	for range 3 {
-		operator.pass()
-		quiet(wake)
-	}
-	cluster.mutex.Lock()
-	cluster.requests = nil
-	cluster.mutex.Unlock()
-
-	operator.pass()
-
-	sent := cluster.requestLines()
-	for _, line := range sent {
-		if _, listed := watchedKinds[strings.TrimPrefix(line, http.MethodGet+" ")]; listed {
-			t.Errorf("the pass sent %s, want every watched collection read from its store", line)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster).Spec.Trickplay.Render = libraryWithRender("gpu.liken.sh", "").Spec.Trickplay.Render
+		boundStudio(cluster)
+		for _, namespace := range []string{"house", "studio"} {
+			pod := readyCatalogPod(namespace, namespace)
+			cluster.pods[pod.Metadata.Name] = pod
 		}
-	}
-	if len(sent) != 0 {
-		t.Errorf("a steady pass sent %d requests, want none: %v", len(sent), sent)
-	}
-	if wokeWithin(wake, watchQuietSpell) {
-		t.Error("a steady pass woke the next one")
-	}
+		seedPlayer(cluster, "den", "house", screenController)
+		cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a", UID: "person-a-uid"}}
+		operator := testOperator(t, cluster)
+		watched, wake := watchedCluster(t, cluster, nil)
+		operator.watched = watched
+		// The first passes stand what the cluster lacks. Each write reaches
+		// the informers before the next pass reads them.
+		for range 3 {
+			operator.pass()
+			wokeOnceIdle(wake)
+		}
+		cluster.mutex.Lock()
+		cluster.requests = nil
+		cluster.mutex.Unlock()
+
+		operator.pass()
+
+		sent := cluster.requestLines()
+		for _, line := range sent {
+			if _, listed := watchedKinds[strings.TrimPrefix(line, http.MethodGet+" ")]; listed {
+				t.Errorf("the pass sent %s, want every watched collection read from its store", line)
+			}
+		}
+		if len(sent) != 0 {
+			t.Errorf("a steady pass sent %d requests, want none: %v", len(sent), sent)
+		}
+		if wokeOnceIdle(wake) {
+			t.Error("a steady pass woke the next one")
+		}
+	})
 }
 
 // A collection of another operator that does not answer within the
@@ -463,36 +475,37 @@ func TestSettleWaitsOnlyForTheCollectionsTheOperatorNeeds(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			boundHouse(cluster)
-			answering := cluster.handler()
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == c.silent {
-					<-r.Context().Done()
-					return
+			synctest.Test(t, func(t *testing.T) {
+				cluster := newFakeCluster()
+				boundHouse(cluster)
+				answering := cluster.handler()
+				server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == c.silent {
+						<-r.Context().Done()
+						return
+					}
+					answering.ServeHTTP(w, r)
+				}))
+				client, err := dynamic.NewForConfig(server.Config())
+				if err != nil {
+					t.Fatal(err)
 				}
-				answering.ServeHTTP(w, r)
-			}))
-			t.Cleanup(server.Close)
-			client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			watched := startWatches(ctx, client, make(chan struct{}, 1), nil,
-				apiclient.New(server.URL, server.Client(), ""), newObjectVersions())
-			t.Cleanup(func() {
-				cancel()
-				watched.wait()
+				ctx, cancel := context.WithCancel(context.Background())
+				watched := startWatches(ctx, client, make(chan struct{}, 1), nil,
+					apiclient.New(apiservertest.Host, server.Client(), ""), newObjectVersions())
+				t.Cleanup(func() {
+					cancel()
+					watched.wait()
+				})
+				bound, done := context.WithTimeout(context.Background(), watchTimeout)
+				defer done()
+
+				err = watched.settle(bound)
+
+				if settled := err == nil; settled != c.settles {
+					t.Errorf("settle = %v, want settled %v", err, c.settles)
+				}
 			})
-			bound, done := context.WithTimeout(context.Background(), 500*time.Millisecond)
-			defer done()
-
-			err = watched.settle(bound)
-
-			if settled := err == nil; settled != c.settles {
-				t.Errorf("settle = %v, want settled %v", err, c.settles)
-			}
 		})
 	}
 }

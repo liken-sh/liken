@@ -9,6 +9,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 )
 
 // The choice takes the highest-voted image of the library's own language,
@@ -56,13 +57,15 @@ func TestTheChoiceFollowsTheLanguageOrder(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			candidate, held := chooseArt(test.candidates, artLanguage)
-			if held != (test.want != "") {
-				t.Fatalf("chose %+v, want %q", candidate, test.want)
-			}
-			if candidate.URL != test.want {
-				t.Errorf("chose %q, want %q", candidate.URL, test.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				candidate, held := chooseArt(test.candidates, artLanguage)
+				if held != (test.want != "") {
+					t.Fatalf("chose %+v, want %q", candidate, test.want)
+				}
+				if candidate.URL != test.want {
+					t.Errorf("chose %q, want %q", candidate.URL, test.want)
+				}
+			})
 		})
 	}
 }
@@ -95,20 +98,22 @@ func TestTheArtLineFollowsTheSourceOrder(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			line := newArtLine(test.blocks, func(name string) string { return test.keys[name] }, nil)
+			synctest.Test(t, func(t *testing.T) {
+				line := newArtLine(test.blocks, func(name string) string { return test.keys[name] }, nil)
 
-			blocks := []string{}
-			for _, one := range line.answerers {
-				blocks = append(blocks, one.providerBlock())
-			}
-			if len(blocks) != len(test.want) {
-				t.Fatalf("blocks = %v, want %v", blocks, test.want)
-			}
-			for index, want := range test.want {
-				if blocks[index] != want {
-					t.Errorf("blocks = %v, want %v", blocks, test.want)
+				blocks := []string{}
+				for _, one := range line.answerers {
+					blocks = append(blocks, one.providerBlock())
 				}
-			}
+				if len(blocks) != len(test.want) {
+					t.Fatalf("blocks = %v, want %v", blocks, test.want)
+				}
+				for index, want := range test.want {
+					if blocks[index] != want {
+						t.Errorf("blocks = %v, want %v", blocks, test.want)
+					}
+				}
+			})
 		})
 	}
 }
@@ -137,31 +142,33 @@ func TestTheFirstSourceThatHoldsAnImageWritesIt(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			catalog, _ := newSQLiteCatalog(t)
-			root := t.TempDir()
-			writeFile(t, filepath.Join(root, folder, "Some Film (2014).mkv"), "video")
-			seedArtMovie(t, catalog, folder)
-			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-			answers := map[string]string{}
-			fanart, _ := newArtFanart(t, answers)
-			answers[fanartMoviePath+"1001"] = fanartMovieArt(fanart.base)
-			tmdb, _ := newArtTMDb(t, map[string]string{
-				tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
-				tmdbKey("/t/p/w780/quiet.jpg", "", ""):  testImage,
+			synctest.Test(t, func(t *testing.T) {
+				catalog, _ := newSQLiteCatalog(t)
+				root := t.TempDir()
+				writeFile(t, filepath.Join(root, folder, "Some Film (2014).mkv"), "video")
+				seedArtMovie(t, catalog, folder)
+				work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+				answers := map[string]string{}
+				fanart, _ := newArtFanart(t, answers)
+				answers[fanartMoviePath+"1001"] = fanartMovieArt(fanart.base)
+				tmdb, _ := newArtTMDb(t, map[string]string{
+					tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
+					tmdbKey("/t/p/w780/quiet.jpg", "", ""):  testImage,
+				})
+				line := test.order(fanartArtAnswerer{client: fanart}, newTMDbArtAnswerer(tmdb))
+
+				if err := work.artGap(t.Context(), factPoster, line); err != nil {
+					t.Fatal(err)
+				}
+
+				if got := readFileString(t, filepath.Join(root, folder, "poster.jpg")); got != test.want {
+					t.Errorf("poster.jpg holds %q, want %q", got, test.want)
+				}
+				ledger := artLedger(t, filepath.Join(root, folder), factPoster)
+				if len(ledger.Items) != 1 || !ledger.Items[0].Provider.is(test.block) {
+					t.Errorf("ledger items = %+v, want %s", ledger.Items, test.block)
+				}
 			})
-			line := test.order(fanartArtAnswerer{client: fanart}, newTMDbArtAnswerer(tmdb))
-
-			if err := work.artGap(t.Context(), factPoster, line); err != nil {
-				t.Fatal(err)
-			}
-
-			if got := readFileString(t, filepath.Join(root, folder, "poster.jpg")); got != test.want {
-				t.Errorf("poster.jpg holds %q, want %q", got, test.want)
-			}
-			ledger := artLedger(t, filepath.Join(root, folder), factPoster)
-			if len(ledger.Items) != 1 || !ledger.Items[0].Provider.is(test.block) {
-				t.Errorf("ledger items = %+v, want %s", ledger.Items, test.block)
-			}
 		})
 	}
 }
@@ -228,22 +235,24 @@ func TestAnAskCarriesOnPastAProviderThatRefuses(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			line := artLineOf(test.answerers...)
+			synctest.Test(t, func(t *testing.T) {
+				line := artLineOf(test.answerers...)
 
-			answerer, candidates, err := line.ask(t.Context(), factPoster, artGap{}, titleRef{})
+				answerer, candidates, err := line.ask(t.Context(), factPoster, artGap{}, titleRef{})
 
-			if (err != nil) != test.wantError {
-				t.Fatalf("the ask answered %v, want an error: %t", err, test.wantError)
-			}
-			if test.want == "" {
-				if answerer != nil {
-					t.Errorf("the ask answered %s, want none", answerer.providerBlock())
+				if (err != nil) != test.wantError {
+					t.Fatalf("the ask answered %v, want an error: %t", err, test.wantError)
 				}
-				return
-			}
-			if answerer == nil || answerer.providerBlock() != test.want || len(candidates) != 1 {
-				t.Errorf("the ask answered %+v, want the images of %s", candidates, test.want)
-			}
+				if test.want == "" {
+					if answerer != nil {
+						t.Errorf("the ask answered %s, want none", answerer.providerBlock())
+					}
+					return
+				}
+				if answerer == nil || answerer.providerBlock() != test.want || len(candidates) != 1 {
+					t.Errorf("the ask answered %+v, want the images of %s", candidates, test.want)
+				}
+			})
 		})
 	}
 }

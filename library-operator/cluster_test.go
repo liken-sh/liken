@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"path"
 	"slices"
 	"sort"
@@ -20,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // FakeCluster holds the objects an API server would, and records every
@@ -1116,18 +1116,22 @@ func sortedNames[T any](objects map[string]*T) []string {
 // catalog Service and EndpointSlice are in.
 const testLibraryNamespace = "house"
 
+// start serves the cluster over in-memory pipes until the test ends. A
+// test in a synctest bubble that talks to it waits on the bubble's
+// clock.
+func (f *fakeCluster) start(t *testing.T) *apiservertest.Server {
+	t.Helper()
+	return apiservertest.Start(t, f.handler())
+}
+
 // TestOperator builds the operator around one fake cluster. Its bus is
 // never run by the tests that only take a pass, so a publish finds no
 // write queue and drops, which is what a pass wants with no broker
 // under the test.
-//
-// The server outlives the test on purpose. The operator's watchers
-// have no stop, so a test that runs the loop ends with both held in a
-// watch request, and a server that closed would wait on them.
 func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
-	server := httptest.NewServer(cluster.handler())
-	operator := newOperator(apiclient.New(server.URL, server.Client(), ""),
+	server := cluster.start(t)
+	operator := newOperator(apiclient.New(apiservertest.Host, server.Client(), ""),
 		testScannerImage, testCorrosionImage, testBrowserImage, testFFmpegImage,
 		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
 	operator.watched = listReads{client: operator.client}
@@ -1151,13 +1155,14 @@ const (
 // after it goes out on the connection.
 func operatorOnABroker(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
-	address, accepted := testBroker(t)
+	dial, accepted := testBroker(t)
 	operator := testOperator(t, cluster)
 
 	connected := make(chan *Bus, 1)
 	running, stop := context.WithCancel(context.Background())
 	t.Cleanup(stop)
-	operator.bus = newBus(address, "library-operator", nil, func(bus *Bus) { connected <- bus }, nil)
+	operator.bus = newBus(testBusAddress, "library-operator", nil, func(bus *Bus) { connected <- bus }, nil)
+	operator.bus.dial = dial
 	go operator.bus.Run(running)
 
 	broker := waitForBroker(t, accepted)

@@ -53,9 +53,8 @@ func authorizeParameter(name string) func(*http.Request, string) {
 	}
 }
 
-// The check must not hold a pass open. It is a variable so a test drives a
-// short one.
-var providerCheckTimeout = 10 * time.Second
+// The check must not hold a pass open.
+const providerCheckTimeout = 10 * time.Second
 
 // Every provider the pass read, keyed the way the report desk keys a Library,
 // with the verdict this pass wrote on each.

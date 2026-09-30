@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 )
 
 // The mark a body opens with where the stand-in ffmpeg reads it as a video.
@@ -94,93 +95,99 @@ func TestAFailedTrailerFilePullLandsNothing(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			standInFFmpegRemux(t)
-			standInProbe(t, test.videos, test.seconds)
-			catalog, _ := newSQLiteCatalog(t)
-			root := t.TempDir()
-			seedTrailerFileRun(t, catalog, root)
-			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-			line := trailerFetchLineOf(t, test.body, test.heights, test.fail)
+			synctest.Test(t, func(t *testing.T) {
+				standInFFmpegRemux(t)
+				standInProbe(t, test.videos, test.seconds)
+				catalog, _ := newSQLiteCatalog(t)
+				root := t.TempDir()
+				seedTrailerFileRun(t, catalog, root)
+				work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+				line := trailerFetchLineOf(t, test.body, test.heights, test.fail)
 
-			if err := work.trailerFileGap(t.Context(), line); err != nil {
-				t.Fatal(err)
-			}
+				if err := work.trailerFileGap(t.Context(), line); err != nil {
+					t.Fatal(err)
+				}
 
-			if held := trailersFolderHolds(t, root); len(held) != 0 {
-				t.Errorf("the folder holds %v, want nothing", held)
-			}
-			ledger := trailerFileLedger(t, root)
-			if ledger.TrailerFile != nil {
-				t.Errorf("the ledger records %+v, want no file", ledger.TrailerFile)
-			}
-			if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != test.want {
-				t.Errorf("attempts = %+v, want one %s", ledger.Attempts, test.want)
-			}
+				if held := trailersFolderHolds(t, root); len(held) != 0 {
+					t.Errorf("the folder holds %v, want nothing", held)
+				}
+				ledger := trailerFileLedger(t, root)
+				if ledger.TrailerFile != nil {
+					t.Errorf("the ledger records %+v, want no file", ledger.TrailerFile)
+				}
+				if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != test.want {
+					t.Errorf("attempts = %+v, want one %s", ledger.Attempts, test.want)
+				}
+			})
 		})
 	}
 }
 
 // A file that already exists under the name is never written over.
 func TestATrailerFileNeverLandsOverAFileThatStands(t *testing.T) {
-	standInFFmpegRemux(t)
-	standInProbe(t, 1, 120)
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	seedTrailerFileRun(t, catalog, root)
-	standing := filepath.Join(root, trailerFileFolder, trailersFolderName, "Official Trailer.mp4")
-	writeFile(t, standing, "the file a person kept")
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	line := trailerFetchLineOf(t, "video bytes", []int{1080}, nil)
+	synctest.Test(t, func(t *testing.T) {
+		standInFFmpegRemux(t)
+		standInProbe(t, 1, 120)
+		catalog, _ := newSQLiteCatalog(t)
+		root := t.TempDir()
+		seedTrailerFileRun(t, catalog, root)
+		standing := filepath.Join(root, trailerFileFolder, trailersFolderName, "Official Trailer.mp4")
+		writeFile(t, standing, "the file a person kept")
+		work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+		line := trailerFetchLineOf(t, "video bytes", []int{1080}, nil)
 
-	if err := work.trailerFileGap(t.Context(), line); err != nil {
-		t.Fatal(err)
-	}
+		if err := work.trailerFileGap(t.Context(), line); err != nil {
+			t.Fatal(err)
+		}
 
-	held, err := os.ReadFile(standing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(held) != "the file a person kept" {
-		t.Errorf("the file holds %q, want the bytes that were there", held)
-	}
-	if names := trailersFolderHolds(t, root); !slices.Equal(names, []string{"Official Trailer.mp4"}) {
-		t.Errorf("the folder holds %v, want the one file and no temporary", names)
-	}
-	ledger := trailerFileLedger(t, root)
-	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
-		t.Errorf("attempts = %+v, want the attempt that found the file", ledger.Attempts)
-	}
+		held, err := os.ReadFile(standing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(held) != "the file a person kept" {
+			t.Errorf("the file holds %q, want the bytes that were there", held)
+		}
+		if names := trailersFolderHolds(t, root); !slices.Equal(names, []string{"Official Trailer.mp4"}) {
+			t.Errorf("the folder holds %v, want the one file and no temporary", names)
+		}
+		ledger := trailerFileLedger(t, root)
+		if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
+			t.Errorf("attempts = %+v, want the attempt that found the file", ledger.Attempts)
+		}
+	})
 }
 
 // A file that already exists under the name is read before the pull, so the
 // site answers no bytes at all.
 func TestATrailerFileThatStandsIsNeverPulled(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	seedTrailerFileRun(t, catalog, root)
-	standing := filepath.Join(root, trailerFileFolder, trailersFolderName, "Official Trailer.mp4")
-	writeFile(t, standing, "the file a person kept")
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	line, answered := trailerFetchLineOfFiles(t, "video bytes",
-		[]trailerFile{{Height: 1080}}, nil)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		root := t.TempDir()
+		seedTrailerFileRun(t, catalog, root)
+		standing := filepath.Join(root, trailerFileFolder, trailersFolderName, "Official Trailer.mp4")
+		writeFile(t, standing, "the file a person kept")
+		work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+		line, answered := trailerFetchLineOfFiles(t, "video bytes",
+			[]trailerFile{{Height: 1080}}, nil)
 
-	if err := work.trailerFileGap(t.Context(), line); err != nil {
-		t.Fatal(err)
-	}
+		if err := work.trailerFileGap(t.Context(), line); err != nil {
+			t.Fatal(err)
+		}
 
-	if answered.Load() != 0 {
-		t.Errorf("the site answered %d bytes, want none", answered.Load())
-	}
-	if names := trailersFolderHolds(t, root); !slices.Equal(names, []string{"Official Trailer.mp4"}) {
-		t.Errorf("the folder holds %v, want the one file and no temporary", names)
-	}
-	ledger := trailerFileLedger(t, root)
-	if ledger.TrailerFile != nil {
-		t.Errorf("the ledger records %+v, want no file", ledger.TrailerFile)
-	}
-	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
-		t.Errorf("attempts = %+v, want the attempt that found the file", ledger.Attempts)
-	}
+		if answered.Load() != 0 {
+			t.Errorf("the site answered %d bytes, want none", answered.Load())
+		}
+		if names := trailersFolderHolds(t, root); !slices.Equal(names, []string{"Official Trailer.mp4"}) {
+			t.Errorf("the folder holds %v, want the one file and no temporary", names)
+		}
+		ledger := trailerFileLedger(t, root)
+		if ledger.TrailerFile != nil {
+			t.Errorf("the ledger records %+v, want no file", ledger.TrailerFile)
+		}
+		if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
+			t.Errorf("attempts = %+v, want the attempt that found the file", ledger.Attempts)
+		}
+	})
 }
 
 // The limit one pull runs under, for the length of one test.
@@ -194,27 +201,29 @@ func trailerPullLimitOf(t *testing.T, limit int64) {
 // A site that answers more than the limit is an error, and the temporary the
 // stream wrote is removed with it.
 func TestAPullOverTheLimitRecordsAnErrorAndLeavesNoTemporary(t *testing.T) {
-	trailerPullLimitOf(t, 4)
-	standInFFmpegRemux(t)
-	standInProbe(t, 1, 120)
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	seedTrailerFileRun(t, catalog, root)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	line, _ := trailerFetchLineOfFiles(t, "video bytes over the limit",
-		[]trailerFile{{Height: 1080}}, nil)
+	synctest.Test(t, func(t *testing.T) {
+		trailerPullLimitOf(t, 4)
+		standInFFmpegRemux(t)
+		standInProbe(t, 1, 120)
+		catalog, _ := newSQLiteCatalog(t)
+		root := t.TempDir()
+		seedTrailerFileRun(t, catalog, root)
+		work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+		line, _ := trailerFetchLineOfFiles(t, "video bytes over the limit",
+			[]trailerFile{{Height: 1080}}, nil)
 
-	if err := work.trailerFileGap(t.Context(), line); err != nil {
-		t.Fatal(err)
-	}
+		if err := work.trailerFileGap(t.Context(), line); err != nil {
+			t.Fatal(err)
+		}
 
-	if held := trailersFolderHolds(t, root); len(held) != 0 {
-		t.Errorf("the folder holds %v, want nothing", held)
-	}
-	ledger := trailerFileLedger(t, root)
-	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptError {
-		t.Errorf("attempts = %+v, want the error the limit gave", ledger.Attempts)
-	}
+		if held := trailersFolderHolds(t, root); len(held) != 0 {
+			t.Errorf("the folder holds %v, want nothing", held)
+		}
+		ledger := trailerFileLedger(t, root)
+		if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptError {
+			t.Errorf("attempts = %+v, want the error the limit gave", ledger.Attempts)
+		}
+	})
 }
 
 // A filesystem that makes no hard link lands the file through a create and a
@@ -231,31 +240,33 @@ func TestTheTrailerDoorCopiesWhereItCannotLink(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			was := linkFile
-			t.Cleanup(func() { linkFile = was })
-			linkFile = func(string, string) error {
-				return &os.LinkError{Op: "link", Err: syscall.EXDEV}
-			}
-			root := t.TempDir()
-			writer := newVolumeWriter("movies-trailers")
-			temporary := writer.hiddenTemporary(root, trailerRemuxMark)
-			writeFile(t, temporary, "the remuxed bytes")
-			target := filepath.Join(root, "Official Trailer.mp4")
-			if test.standing != "" {
-				writeFile(t, target, test.standing)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				was := linkFile
+				t.Cleanup(func() { linkFile = was })
+				linkFile = func(string, string) error {
+					return &os.LinkError{Op: "link", Err: syscall.EXDEV}
+				}
+				root := t.TempDir()
+				writer := newVolumeWriter("movies-trailers")
+				temporary := writer.hiddenTemporary(root, trailerRemuxMark)
+				writeFile(t, temporary, "the remuxed bytes")
+				target := filepath.Join(root, "Official Trailer.mp4")
+				if test.standing != "" {
+					writeFile(t, target, test.standing)
+				}
 
-			landed, err := writer.createOnceFrom(temporary, target)
-			if err != nil {
-				t.Fatal(err)
-			}
+				landed, err := writer.createOnceFrom(temporary, target)
+				if err != nil {
+					t.Fatal(err)
+				}
 
-			if landed != (test.standing == "") {
-				t.Errorf("the door answered %v, want %v", landed, test.standing == "")
-			}
-			if held := readFileString(t, target); held != test.want {
-				t.Errorf("the file holds %q, want %q", held, test.want)
-			}
+				if landed != (test.standing == "") {
+					t.Errorf("the door answered %v, want %v", landed, test.standing == "")
+				}
+				if held := readFileString(t, target); held != test.want {
+					t.Errorf("the file holds %q, want %q", held, test.want)
+				}
+			})
 		})
 	}
 }
@@ -263,73 +274,81 @@ func TestTheTrailerDoorCopiesWhereItCannotLink(t *testing.T) {
 // A link that fails for a reason the create fails for too is the error the
 // attempt records.
 func TestTheTrailerDoorReportsACreateItCannotMake(t *testing.T) {
-	was := linkFile
-	t.Cleanup(func() { linkFile = was })
-	linkFile = func(string, string) error {
-		return &os.LinkError{Op: "link", Err: syscall.EXDEV}
-	}
-	root := t.TempDir()
-	writer := newVolumeWriter("movies-trailers")
-	temporary := writer.hiddenTemporary(root, trailerRemuxMark)
-	writeFile(t, temporary, "the remuxed bytes")
-	target := filepath.Join(root, "a folder", "Official Trailer.mp4")
-	writeFile(t, filepath.Join(root, "a folder"), "not a folder at all")
+	synctest.Test(t, func(t *testing.T) {
+		was := linkFile
+		t.Cleanup(func() { linkFile = was })
+		linkFile = func(string, string) error {
+			return &os.LinkError{Op: "link", Err: syscall.EXDEV}
+		}
+		root := t.TempDir()
+		writer := newVolumeWriter("movies-trailers")
+		temporary := writer.hiddenTemporary(root, trailerRemuxMark)
+		writeFile(t, temporary, "the remuxed bytes")
+		target := filepath.Join(root, "a folder", "Official Trailer.mp4")
+		writeFile(t, filepath.Join(root, "a folder"), "not a folder at all")
 
-	landed, err := writer.createOnceFrom(temporary, target)
+		landed, err := writer.createOnceFrom(temporary, target)
 
-	if landed || err == nil {
-		t.Errorf("landed = %v, err = %v, want the error the volume gave", landed, err)
-	}
+		if landed || err == nil {
+			t.Errorf("landed = %v, err = %v, want the error the volume gave", landed, err)
+		}
+	})
 }
 
 // A file that names a way this image does not hold is an error, and nothing
 // lands.
 func TestAFileWhoseWayThisImageDoesNotHoldIsAnError(t *testing.T) {
-	source, address := newFakeDownload(t, &fakeDownload{body: "video bytes"})
+	synctest.Test(t, func(t *testing.T) {
+		source, address := newFakeDownload(t, &fakeDownload{body: "video bytes"})
 
-	_, err := pullTrailerBytes(t.Context(), source,
-		trailerFile{URL: address, Pull: "torrent"}, filepath.Join(t.TempDir(), ".pull"))
+		_, err := pullTrailerBytes(t.Context(), source,
+			trailerFile{URL: address, Pull: "torrent"}, filepath.Join(t.TempDir(), ".pull"))
 
-	if err == nil || !strings.Contains(err.Error(), "torrent") {
-		t.Errorf("err = %v, want the one that names the way", err)
-	}
+		if err == nil || !strings.Contains(err.Error(), "torrent") {
+			t.Errorf("err = %v, want the one that names the way", err)
+		}
+	})
 }
 
 // The write refuses a path that carries no temporary mark, so this fact can
 // never link a file a person wrote into place.
 func TestTheTrailerDoorRefusesAPathWithNoTemporaryMark(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "a person's file.mp4"), "kept")
-	writer := newVolumeWriter("movies-trailers")
+	synctest.Test(t, func(t *testing.T) {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "a person's file.mp4"), "kept")
+		writer := newVolumeWriter("movies-trailers")
 
-	landed, err := writer.createOnceFrom(filepath.Join(root, "a person's file.mp4"),
-		filepath.Join(root, "landed.mp4"))
+		landed, err := writer.createOnceFrom(filepath.Join(root, "a person's file.mp4"),
+			filepath.Join(root, "landed.mp4"))
 
-	if landed || err == nil || !strings.Contains(err.Error(), likenTempMark) {
-		t.Errorf("landed = %v, err = %v, want the refusal that names the mark", landed, err)
-	}
+		if landed || err == nil || !strings.Contains(err.Error(), likenTempMark) {
+			t.Errorf("landed = %v, err = %v, want the refusal that names the mark", landed, err)
+		}
+	})
 }
 
 // A title whose folder is the library root gets no trailer, because the pull
 // writes a trailers folder inside the title's own folder, and a title at the
 // root has none.
 func TestNoTrailerPullsToTheLibraryRoot(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	work, log := testEnricher(t, libraryKindMovies, root, catalog)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		root := t.TempDir()
+		work, log := testEnricher(t, libraryKindMovies, root, catalog)
 
-	entry, result := work.pullTrailerFile(t.Context(), trailerSource{},
-		identityItem{id: trailerFileItem, path: "."},
-		trailerRow{Name: "Official Trailer", Site: trailerSiteArchive},
-		trailerFile{Height: 1080}, root)
+		entry, result := work.pullTrailerFile(t.Context(), trailerSource{},
+			identityItem{id: trailerFileItem, path: "."},
+			trailerRow{Name: "Official Trailer", Site: trailerSiteArchive},
+			trailerFile{Height: 1080}, root)
 
-	if entry != nil || result != attemptNothing {
-		t.Errorf("entry, result = %+v, %q, want no file and %q", entry, result, attemptNothing)
-	}
-	if _, err := os.Stat(filepath.Join(root, trailersFolderName)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the root holds a %s folder, want none", trailersFolderName)
-	}
-	if !strings.Contains(log.String(), "no folder of its own") {
-		t.Errorf("log = %q, want the line that says the title has no folder of its own", log)
-	}
+		if entry != nil || result != attemptNothing {
+			t.Errorf("entry, result = %+v, %q, want no file and %q", entry, result, attemptNothing)
+		}
+		if _, err := os.Stat(filepath.Join(root, trailersFolderName)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("the root holds a %s folder, want none", trailersFolderName)
+		}
+		if !strings.Contains(log.String(), "no folder of its own") {
+			t.Errorf("log = %q, want the line that says the title has no folder of its own", log)
+		}
+	})
 }

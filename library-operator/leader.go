@@ -80,7 +80,6 @@ var operatorLeaseTiming = leaseTiming{
 type leadership struct {
 	elector  *leaderelection.LeaderElector
 	identity string
-	timing   leaseTiming
 
 	// leases and namespace reach the Lease itself, for the release that
 	// follows client-go's own. end says why.
@@ -106,7 +105,7 @@ type leadership struct {
 // newLeadership builds the election. The identity is the pod's name and
 // a random suffix, so a restarted container is a new candidate and
 // waits for the Lease its earlier process held.
-func newLeadership(config *rest.Config, namespace, pod string, timing leaseTiming,
+func newLeadership(config *rest.Config, namespace, pod string,
 	exit func(int), report func(string)) (*leadership, error) {
 	leases, err := coordinationv1.NewForConfig(config)
 	if err != nil {
@@ -116,7 +115,6 @@ func newLeadership(config *rest.Config, namespace, pod string, timing leaseTimin
 	_, _ = rand.Read(suffix)
 	l := &leadership{
 		identity:  pod + "_" + hex.EncodeToString(suffix),
-		timing:    timing,
 		leases:    leases,
 		namespace: namespace,
 		started:   make(chan struct{}),
@@ -131,9 +129,9 @@ func newLeadership(config *rest.Config, namespace, pod string, timing leaseTimin
 			Client:     leases,
 			LockConfig: resourcelock.ResourceLockConfig{Identity: l.identity},
 		},
-		LeaseDuration: timing.duration,
-		RenewDeadline: timing.renewDeadline,
-		RetryPeriod:   timing.retryPeriod,
+		LeaseDuration: operatorLeaseTiming.duration,
+		RenewDeadline: operatorLeaseTiming.renewDeadline,
+		RetryPeriod:   operatorLeaseTiming.retryPeriod,
 		// The release writes the Lease with no holder when the election's
 		// context ends, so a waiting copy takes it on its next retry
 		// instead of after the Lease's duration. end follows it with a
@@ -226,10 +224,10 @@ func (l *leadership) end() {
 	l.cancel()
 	select {
 	case <-l.done:
-	case <-time.After(l.timing.renewDeadline + time.Second):
+	case <-time.After(operatorLeaseTiming.renewDeadline + time.Second):
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), l.timing.renewDeadline/2)
+	ctx, cancel := context.WithTimeout(context.Background(), operatorLeaseTiming.renewDeadline/2)
 	defer cancel()
 	l.clearIfHeld(ctx)
 }

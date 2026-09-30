@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	_ "modernc.org/sqlite"
 )
 
@@ -45,6 +45,9 @@ type sqliteAgent struct {
 	// One entry per open update stream, each waiting on the
 	// writes that name its table.
 	watchers []tableWatcher
+	// A channel the next transaction closes, which every open
+	// subscription waits on before it reads its query again.
+	written chan struct{}
 	// How many reads, and how many writes, the agent answers before it refuses
 	// every later one. Zero answers every request, and a positive number is what
 	// a test sets to stop a walk or a sweep at one of its steps.
@@ -135,9 +138,7 @@ func newSQLiteCatalog(t *testing.T) (*Catalog, *sqliteAgent) {
 		t.Fatal(err)
 	}
 	agent := &sqliteAgent{db: db, actor: sqliteAgentActor, siteID: siteID}
-	server := httptest.NewServer(agent)
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client()), agent
+	return NewCatalog(apiservertest.Host, apiservertest.Start(t, agent).Client()), agent
 }
 
 func (a *sqliteAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +168,9 @@ func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) 
 	enc := json.NewEncoder(w)
 	flusher, _ := w.(http.Flusher)
 
+	// The subscription takes the channel of the next write before it
+	// reads, so a write that lands during the read is not lost.
+	written := a.nextWrite()
 	columns, rows, err := a.readAll(query, params...)
 	if err != nil {
 		_ = enc.Encode(map[string]any{"error": err.Error()})
@@ -182,8 +186,13 @@ func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) 
 	_ = enc.Encode(map[string]any{"eoq": map[string]any{"time": 0.0}})
 	flusher.Flush()
 
-	for r.Context().Err() == nil {
-		time.Sleep(time.Millisecond)
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-written:
+		}
+		written = a.nextWrite()
 		_, rows, err := a.readAll(query, params...)
 		if err != nil {
 			return
@@ -249,6 +258,7 @@ func (a *sqliteAgent) serveTransaction(w http.ResponseWriter, r *http.Request) {
 	a.largestBatch = max(a.largestBatch, len(statements))
 	a.mutex.Unlock()
 	defer a.notifyWatchers(statements)
+	defer a.announceWrite()
 	changed := int64(0)
 	results := make([]map[string]any, len(statements))
 	for i, s := range statements {
@@ -266,6 +276,26 @@ func (a *sqliteAgent) serveTransaction(w http.ResponseWriter, r *http.Request) {
 		"version":  a.wrote(changed),
 		"actor_id": a.actor,
 	})
+}
+
+// nextWrite answers the channel the next transaction closes.
+func (a *sqliteAgent) nextWrite() <-chan struct{} {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	if a.written == nil {
+		a.written = make(chan struct{})
+	}
+	return a.written
+}
+
+// announceWrite wakes every subscription that waits on a write.
+func (a *sqliteAgent) announceWrite() {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	if a.written != nil {
+		close(a.written)
+		a.written = nil
+	}
 }
 
 // The db version this write left, and null where it changed

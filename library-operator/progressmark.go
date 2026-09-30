@@ -27,9 +27,8 @@ import (
 	"time"
 )
 
-// How long the broker keeps a mark after the press. A variable, so a test
-// runs a retention in milliseconds.
-var markRetention = 24 * time.Hour
+// How long the broker keeps a mark after the press.
+const markRetention = 24 * time.Hour
 
 // recordMark writes one mark as its rows and schedules its clear. An empty
 // payload is the clear itself, which records nothing.

@@ -22,7 +22,7 @@ const webhookBodyLimit = 1 << 20
 
 // webhookRescanTimeout bounds a rescan a webhook drives, so a slow volume
 // cannot hold an HTTP request open without end.
-var webhookRescanTimeout = 30 * time.Second
+const webhookRescanTimeout = 30 * time.Second
 
 // webhookHandler is the endpoint the *arr tools and Jellyfin post to. It reads
 // the changed path, rescans it, and answers no-content. A path it cannot map to

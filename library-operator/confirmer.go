@@ -26,8 +26,8 @@ const confirmMode = "confirm"
 
 // How long a run that is not held yet waits before the confirmer
 // reads again. Gossip fills a gap in seconds, so two seconds costs a few
-// reads per run. A test shortens it.
-var confirmerRecheck = 2 * time.Second
+// reads per run.
+const confirmerRecheck = 2 * time.Second
 
 // The runs a confirmer acts on: the finished ones that name the
 // write their Job made. A run with version zero is one whose Job has not

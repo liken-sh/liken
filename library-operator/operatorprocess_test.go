@@ -21,7 +21,6 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 // The operator refuses to start without the settings only the
@@ -223,9 +222,7 @@ func TestRunFailsWhenTheCollectionsCannotBeRead(t *testing.T) {
 // fake cluster the operator's own client reaches.
 func testWatching(t *testing.T, cluster *fakeCluster) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewServer(cluster.handler())
-	t.Cleanup(server.Close)
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	client, err := dynamic.NewForConfig(cluster.start(t).Config())
 	if err != nil {
 		t.Fatal(err)
 	}

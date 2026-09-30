@@ -5,11 +5,11 @@ package main
 
 import (
 	"context"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 func TestDerivingTheCompanionImages(t *testing.T) {
@@ -105,14 +105,13 @@ func operatorPod(image string) *Pod {
 // operator reads its own pod through at start-up.
 func testImageClient(t *testing.T, cluster *fakeCluster) *apiclient.Client {
 	t.Helper()
-	server := httptest.NewServer(cluster.handler())
-	t.Cleanup(server.Close)
+	server := cluster.start(t)
 	t.Setenv(scannerImageVariable, "")
 	t.Setenv(corrosionImageVariable, "")
 	t.Setenv(browserImageVariable, "")
 	t.Setenv(ffmpegImageVariable, "")
 	t.Setenv(podNameVariable, testOperatorPod)
-	return apiclient.New(server.URL, server.Client(), "")
+	return apiclient.New(apiservertest.Host, server.Client(), "")
 }
 
 func TestTheImagesComeFromTheOperatorsOwnPod(t *testing.T) {

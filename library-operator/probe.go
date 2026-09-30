@@ -23,7 +23,7 @@ import (
 
 // One file's bound, so a file the kernel will not answer for cannot hold the
 // container open.
-var ffprobeTimeout = time.Minute
+const ffprobeTimeout = time.Minute
 
 // One read of one file's container, which a test replaces with an answer of
 // its own.

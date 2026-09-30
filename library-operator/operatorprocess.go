@@ -71,7 +71,7 @@ func operate() error {
 	if err != nil {
 		return fmt.Errorf("the client for the watches: %w", err)
 	}
-	leader, err := newLeadership(config, namespace, pod, operatorLeaseTiming, os.Exit,
+	leader, err := newLeadership(config, namespace, pod, os.Exit,
 		func(line string) { fmt.Println(line) })
 	if err != nil {
 		return fmt.Errorf("leader election: %w", err)

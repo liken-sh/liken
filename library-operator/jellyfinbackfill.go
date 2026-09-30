@@ -45,9 +45,8 @@ const jellyfinBackfillFloor = 1
 // retries it. The pace is the gap between two publishes: the bus drops a
 // publish that overflows its queue, so the run hands the writer one message
 // at a time. The flush is what the run waits after its last publish, so the
-// writer reaches the socket before the connection ends. All three are
-// variables so a test drives them in microseconds.
-var (
+// writer reaches the socket before the connection ends.
+const (
 	jellyfinBackfillConnect = 30 * time.Second
 	jellyfinBackfillPace    = time.Millisecond
 	jellyfinBackfillFlush   = 2 * time.Second
@@ -76,7 +75,6 @@ type jellyfinBackfill struct {
 	// nothing.
 	echoes  *jellyfinEchoes
 	publish func(topic string, payload []byte, retained bool)
-	pace    time.Duration
 	bus     *Bus
 	ready   chan struct{}
 	log     io.Writer
@@ -114,7 +112,6 @@ func newJellyfinBackfill(log io.Writer) *jellyfinBackfill {
 
 	backfill := newJellyfinBackfillOn(namespace, base,
 		newJellyfinAPI(address, os.Getenv(jellyfinAPIKeyVariable), &http.Client{}), nil, log)
-	backfill.pace = jellyfinBackfillPace
 	fmt.Fprintf(log, "library.liken.sh: backfilling the progress of %s from %s\n", namespace, address)
 
 	// the connect callback signals that the broker answered the handshake.
@@ -230,9 +227,7 @@ func (b *jellyfinBackfill) carry(ctx context.Context, user jellyfinUser,
 	payload, _ := json.Marshal(play)
 	b.publish(playOutsideTopic(b.topicBase, b.namespace, name), payload, false)
 	counts.published++
-	if b.pace > 0 {
-		time.Sleep(b.pace)
-	}
+	time.Sleep(jellyfinBackfillPace)
 }
 
 // the two reads one user takes, as one list with no item twice. An item that

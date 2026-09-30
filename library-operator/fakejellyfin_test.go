@@ -9,13 +9,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // One user-data write, as the fake server read it. stated says whether the
@@ -204,9 +205,8 @@ func jellyfinFixture() *fakeJellyfin {
 // Stands one fake Jellyfin and hands back a client that reaches it.
 func standJellyfinServer(t *testing.T, fake *fakeJellyfin) *jellyfinAPI {
 	t.Helper()
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
-	return newJellyfinAPI(server.URL+"/", "the-key", server.Client())
+	server := apiservertest.Start(t, fake)
+	return newJellyfinAPI(apiservertest.Host+"/", "the-key", server.Client())
 }
 
 // A clock a test moves, so a refresh floor is proven with no sleep.

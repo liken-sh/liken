@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // The fake provider every identity test runs against, keyed by the request
@@ -20,9 +22,12 @@ type fakeTMDb struct {
 	served   map[string]int
 	// The header a 429 answer carries, and how many of the first requests answer
 	// 429 at all.
-	retryAfter  string
-	tooMany     int
+	retryAfter string
+	tooMany    int
+	// The wait between each 429 and the request after it, and when the last
+	// 429 went out.
 	cooldowns   []time.Duration
+	limitedAt   time.Time
 	requestPath []string
 	// The fake keeps the credential of the last request in both forms, so a test
 	// reads which form the key travelled in.
@@ -49,9 +54,14 @@ func (f *fakeTMDb) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.requestPath = append(f.requestPath, key)
 	f.authorization = r.Header.Get("Authorization")
 	f.apiKey = query.Get("api_key")
+	if !f.limitedAt.IsZero() {
+		f.cooldowns = append(f.cooldowns, time.Since(f.limitedAt))
+		f.limitedAt = time.Time{}
+	}
 
 	if f.tooMany > 0 {
 		f.tooMany--
+		f.limitedAt = time.Now()
 		if f.retryAfter != "" {
 			w.Header().Set("Retry-After", f.retryAfter)
 		}
@@ -69,30 +79,24 @@ func (f *fakeTMDb) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, answer)
 }
 
-// newFakeTMDb builds the fake and the client that reads it, and takes the
-// real cooldown out so no test sleeps.
+// newFakeTMDb builds the fake and the client that reads it. The fake
+// answers over in-memory pipes, so a test in a synctest bubble waits out the
+// pace and each cooldown on the bubble's clock.
 func newFakeTMDb(t *testing.T, answers map[string]string) (*tmdbClient, *fakeTMDb) {
 	t.Helper()
 	fake := &fakeTMDb{answers: answers, statuses: map[string]int{}, served: map[string]int{}}
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, fake)
 
-	client := newTMDbClient(server.URL, "a-token")
+	client := newTMDbClient(apiservertest.Host, "a-token")
 	client.http = server.Client()
-	client.wait = func(_ context.Context, cooldown time.Duration) error {
-		fake.mutex.Lock()
-		defer fake.mutex.Unlock()
-		fake.cooldowns = append(fake.cooldowns, cooldown)
-		return nil
-	}
 	return client, fake
 }
 
 func TestASearchReadsTheResultsTMDbAnswers(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
+	answers := map[string]string{
 		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[{"id":1002,"title":"The Long Survey","original_title":"The Long Survey","release_date":"1982-07-14"}]}`,
 		tmdbKey("/3/search/tv", "Pine Hollow", "1990"):        `{"results":[{"id":2002,"name":"Pine Hollow","original_name":"Pine Hollow","first_air_date":"1990-05-12"}]}`,
-	})
+	}
 
 	cases := []struct {
 		name  string
@@ -106,26 +110,25 @@ func TestASearchReadsTheResultsTMDbAnswers(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			results, err := client.search(t.Context(), test.kind, test.title, test.year)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(results) != 1 || results[0].ID != test.want {
-				t.Fatalf("read %+v, want the id %d", results, test.want)
-			}
-			if results[0].name() == "" || results[0].originalName() == "" || results[0].year() == 0 {
-				t.Errorf("read %+v, want a name, an original name, and a year", results[0])
-			}
+			synctest.Test(t, func(t *testing.T) {
+				client, _ := newFakeTMDb(t, answers)
+
+				results, err := client.search(t.Context(), test.kind, test.title, test.year)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(results) != 1 || results[0].ID != test.want {
+					t.Fatalf("read %+v, want the id %d", results, test.want)
+				}
+				if results[0].name() == "" || results[0].originalName() == "" || results[0].year() == 0 {
+					t.Errorf("read %+v, want a name, an original name, and a year", results[0])
+				}
+			})
 		})
 	}
 }
 
 func TestARuntimeReadsFromTheDetailAnswer(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/movie/1002", "", ""): `{"runtime":109}`,
-		tmdbKey("/3/tv/2002", "", ""):    `{"episode_run_time":[47]}`,
-	})
-
 	cases := []struct {
 		name string
 		kind string
@@ -137,13 +140,20 @@ func TestARuntimeReadsFromTheDetailAnswer(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			runtime, err := client.runtime(t.Context(), test.kind, test.id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if runtime != test.want {
-				t.Errorf("runtime = %s, want %s", runtime, test.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				client, _ := newFakeTMDb(t, map[string]string{
+					tmdbKey("/3/movie/1002", "", ""): `{"runtime":109}`,
+					tmdbKey("/3/tv/2002", "", ""):    `{"episode_run_time":[47]}`,
+				})
+
+				runtime, err := client.runtime(t.Context(), test.kind, test.id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if runtime != test.want {
+					t.Errorf("runtime = %s, want %s", runtime, test.want)
+				}
+			})
 		})
 	}
 }
@@ -160,94 +170,108 @@ func TestATooManyRequestsAnswerIsACooldownAndARetry(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTMDb(t, map[string]string{
-				tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[{"id":1002,"title":"The Long Survey","release_date":"1982-07-14"}]}`,
-			})
-			fake.tooMany, fake.retryAfter = 1, test.retryAfter
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTMDb(t, map[string]string{
+					tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[{"id":1002,"title":"The Long Survey","release_date":"1982-07-14"}]}`,
+				})
+				fake.tooMany, fake.retryAfter = 1, test.retryAfter
 
-			results, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(results) != 1 {
-				t.Fatalf("read %+v, want the retry to have answered", results)
-			}
-			if len(fake.cooldowns) != 1 || fake.cooldowns[0] != test.want {
-				t.Errorf("cooldowns = %v, want one of %s", fake.cooldowns, test.want)
-			}
+				results, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(results) != 1 {
+					t.Fatalf("read %+v, want the retry to have answered", results)
+				}
+				if len(fake.cooldowns) != 1 || fake.cooldowns[0] != test.want {
+					t.Errorf("cooldowns = %v, want one of %s", fake.cooldowns, test.want)
+				}
+			})
 		})
 	}
 }
 
 func TestAProviderThatOnlyAnswersTooManyRequestsFails(t *testing.T) {
-	client, fake := newFakeTMDb(t, nil)
-	fake.tooMany = providerAttempts + 1
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTMDb(t, nil)
+		fake.tooMany = providerAttempts + 1
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
-		t.Fatal("the search reported no error, want one")
-	}
-	if len(fake.cooldowns) != providerAttempts-1 {
-		t.Errorf("cooldowns = %d, want one less than the attempts", len(fake.cooldowns))
-	}
+		if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
+			t.Fatal("the search reported no error, want one")
+		}
+		if len(fake.cooldowns) != providerAttempts-1 {
+			t.Errorf("cooldowns = %d, want one less than the attempts", len(fake.cooldowns))
+		}
+	})
 }
 
 func TestARefusedKeyIsAnError(t *testing.T) {
-	client, fake := newFakeTMDb(t, nil)
-	fake.statuses[tmdbKey("/3/search/movie", "The Long Survey", "1982")] = http.StatusUnauthorized
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTMDb(t, nil)
+		fake.statuses[tmdbKey("/3/search/movie", "The Long Survey", "1982")] = http.StatusUnauthorized
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
-		t.Error("the search reported no error, want one")
-	}
+		if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
+			t.Error("the search reported no error, want one")
+		}
+	})
 }
 
 func TestAnAnswerThatIsNotJSONIsAnError(t *testing.T) {
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `not json`,
-	})
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "The Long Survey", "1982"): `not json`,
+		})
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
-		t.Error("the search reported no error, want one")
-	}
+		if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
+			t.Error("the search reported no error, want one")
+		}
+	})
 }
 
 func TestAProviderThatDoesNotAnswerIsAnError(t *testing.T) {
-	client := newTMDbClient("http://127.0.0.1:1", "a-token")
-	client.http = &http.Client{Timeout: time.Second}
+	synctest.Test(t, func(t *testing.T) {
+		client := newTMDbClient("http://127.0.0.1:1", "a-token")
+		client.http = &http.Client{Timeout: time.Second}
 
-	if _, err := client.runtime(t.Context(), libraryKindMovies, 1002); err == nil {
-		t.Error("the read reported no error, want one")
-	}
+		if _, err := client.runtime(t.Context(), libraryKindMovies, 1002); err == nil {
+			t.Error("the read reported no error, want one")
+		}
+	})
 }
 
 func TestAWaitEndsOnTheContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
 
-	if err := waitFor(ctx, time.Hour); err == nil {
-		t.Error("the wait reported no error, want the context's")
-	}
-	if err := waitFor(t.Context(), time.Millisecond); err != nil {
-		t.Errorf("the wait reported %v, want none", err)
-	}
+		if err := waitFor(ctx, time.Hour); err == nil {
+			t.Error("the wait reported no error, want the context's")
+		}
+		if err := waitFor(t.Context(), time.Millisecond); err != nil {
+			t.Errorf("the wait reported %v, want none", err)
+		}
+	})
 }
 
 // A search with no year sends no year parameter at all, because a year of 0
 // would match nothing.
 func TestASearchWithNoYearNarrowsToNone(t *testing.T) {
-	client, fake := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Untitled", ""): `{"results":[{"id":7,"title":"Untitled"}]}`,
-	})
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "Untitled", ""): `{"results":[{"id":7,"title":"Untitled"}]}`,
+		})
 
-	results, err := client.search(t.Context(), libraryKindMovies, "Untitled", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 1 || results[0].year() != 0 {
-		t.Fatalf("read %+v, want the one result with no year", results)
-	}
-	if fake.served[tmdbKey("/3/search/movie", "Untitled", "")] != 1 {
-		t.Errorf("served %v, want one search with no year", fake.served)
-	}
+		results, err := client.search(t.Context(), libraryKindMovies, "Untitled", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 1 || results[0].year() != 0 {
+			t.Fatalf("read %+v, want the one result with no year", results)
+		}
+		if fake.served[tmdbKey("/3/search/movie", "Untitled", "")] != 1 {
+			t.Errorf("served %v, want one search with no year", fake.served)
+		}
+	})
 }
 
 // The id a test states in a fake answer, kept beside the answers it belongs
@@ -284,19 +308,21 @@ func TestTheIdentityClientSendsTheKeyInTheFormItsShapeNames(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTMDb(t, nil)
-			client.key = test.key
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTMDb(t, nil)
+				client.key = test.key
 
-			if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err != nil {
-				t.Fatal(err)
-			}
+				if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err != nil {
+					t.Fatal(err)
+				}
 
-			fake.mutex.Lock()
-			defer fake.mutex.Unlock()
-			if fake.authorization != test.wantHeader || fake.apiKey != test.wantQuery {
-				t.Errorf("the key arrived as %q and %q, want %q and %q",
-					fake.authorization, fake.apiKey, test.wantHeader, test.wantQuery)
-			}
+				fake.mutex.Lock()
+				defer fake.mutex.Unlock()
+				if fake.authorization != test.wantHeader || fake.apiKey != test.wantQuery {
+					t.Errorf("the key arrived as %q and %q, want %q and %q",
+						fake.authorization, fake.apiKey, test.wantHeader, test.wantQuery)
+				}
+			})
 		})
 	}
 }

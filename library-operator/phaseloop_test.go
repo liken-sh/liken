@@ -24,9 +24,6 @@ func phaseOf(t *testing.T, catalog *Catalog, container string, needs ...string) 
 	work.board = newPhaseBoard(t.TempDir())
 	work.syncTimeout = scanTestTimeout
 	shortSettle(t)
-	backoffWas := reportMinBackoff
-	t.Cleanup(func() { reportMinBackoff = backoffWas })
-	reportMinBackoff = 5 * time.Millisecond
 	return work
 }
 

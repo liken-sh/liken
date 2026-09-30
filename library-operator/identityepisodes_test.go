@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 func TestAnEpisodeFileNameCarriesItsEpisodeTitle(t *testing.T) {
@@ -62,15 +63,17 @@ func TestAnEpisodeFileNameCarriesItsEpisodeTitle(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			clue, held := episodeClueFrom(test.file)
+			synctest.Test(t, func(t *testing.T) {
+				clue, held := episodeClueFrom(test.file)
 
-			if held != test.wantHeld {
-				t.Fatalf("held = %t, want %t", held, test.wantHeld)
-			}
-			want := episodeClue{season: test.wantSeason, episode: test.wantEpisode, title: test.wantTitle}
-			if held && clue != want {
-				t.Errorf("clue = %+v, want %+v", clue, want)
-			}
+				if held != test.wantHeld {
+					t.Fatalf("held = %t, want %t", held, test.wantHeld)
+				}
+				want := episodeClue{season: test.wantSeason, episode: test.wantEpisode, title: test.wantTitle}
+				if held && clue != want {
+					t.Errorf("clue = %+v, want %+v", clue, want)
+				}
+			})
 		})
 	}
 }
@@ -144,100 +147,108 @@ func TestTheEpisodeRungPartsTwoSeriesOfOneName(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			answers := map[string]string{tmdbKey("/3/search/tv", "Ruckus", ""): ruckusResults}
-			for key, answer := range test.seasons {
-				answers[key] = answer
-			}
-			client, _ := newFakeTMDb(t, answers)
+			synctest.Test(t, func(t *testing.T) {
+				answers := map[string]string{tmdbKey("/3/search/tv", "Ruckus", ""): ruckusResults}
+				for key, answer := range test.seasons {
+					answers[key] = answer
+				}
+				client, _ := newFakeTMDb(t, answers)
 
-			answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-				kind: libraryKindSeries, title: "Ruckus", episodes: test.episodes,
+				answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
+					kind: libraryKindSeries, title: "Ruckus", episodes: test.episodes,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if answer.id != test.wantID {
+					t.Errorf("id = %d, want %d", answer.id, test.wantID)
+				}
+				if len(answer.candidates) != test.wantCandidates {
+					t.Errorf("candidates = %+v, want %d", answer.candidates, test.wantCandidates)
+				}
+				if test.wantID > 0 && answer.reason != reasonFrom(testTitle, testEpisodes) {
+					t.Errorf("reason = %q, want the episode names", answer.reason)
+				}
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if answer.id != test.wantID {
-				t.Errorf("id = %d, want %d", answer.id, test.wantID)
-			}
-			if len(answer.candidates) != test.wantCandidates {
-				t.Errorf("candidates = %+v, want %d", answer.candidates, test.wantCandidates)
-			}
-			if test.wantID > 0 && answer.reason != reasonFrom(testTitle, testEpisodes) {
-				t.Errorf("reason = %q, want the episode names", answer.reason)
-			}
 		})
 	}
 }
 
 func TestAMovieNeverAsksForASeason(t *testing.T) {
-	client, fake := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Quiet Moon", ""): `{"results":[` +
-			tmdbResultJSON(1121, "Quiet Moon", "1972-03-24") + `,` +
-			tmdbResultJSON(1122, "Quiet Moon", "2002-11-03") + `]}`,
-	})
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "Quiet Moon", ""): `{"results":[` +
+				tmdbResultJSON(1121, "Quiet Moon", "1972-03-24") + `,` +
+				tmdbResultJSON(1122, "Quiet Moon", "2002-11-03") + `]}`,
+		})
 
-	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind:     libraryKindMovies,
-		title:    "Quiet Moon",
-		episodes: []episodeClue{{season: 1, episode: 1, title: "Pilot"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(answer.candidates) != 2 {
-		t.Fatalf("candidates = %+v, want both", answer.candidates)
-	}
-	for _, path := range fake.requestPath {
-		if strings.Contains(path, "/season/") {
-			t.Errorf("the ladder asked %q, want no season read for a movie", path)
+		answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
+			kind:     libraryKindMovies,
+			title:    "Quiet Moon",
+			episodes: []episodeClue{{season: 1, episode: 1, title: "Pilot"}},
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+
+		if len(answer.candidates) != 2 {
+			t.Fatalf("candidates = %+v, want both", answer.candidates)
+		}
+		for _, path := range fake.requestPath {
+			if strings.Contains(path, "/season/") {
+				t.Errorf("the ladder asked %q, want no season read for a movie", path)
+			}
+		}
+	})
 }
 
 func TestTheEpisodeRungFailsWhereTheProviderFails(t *testing.T) {
-	client, fake := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "Ruckus", ""): ruckusResults,
-	})
-	fake.statuses[tmdbKey("/3/tv/2101/season/1", "", "")] = 500
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/tv", "Ruckus", ""): ruckusResults,
+		})
+		fake.statuses[tmdbKey("/3/tv/2101/season/1", "", "")] = 500
 
-	_, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind:  libraryKindSeries,
-		title: "Ruckus",
-		episodes: []episodeClue{
-			{season: 1, episode: 1, title: "Pilot"},
-			{season: 1, episode: 2, title: "Pete at Sea"},
-		},
-	})
+		_, err := climbIdentityLadder(t.Context(), client, identitySearch{
+			kind:  libraryKindSeries,
+			title: "Ruckus",
+			episodes: []episodeClue{
+				{season: 1, episode: 1, title: "Pilot"},
+				{season: 1, episode: 2, title: "Pete at Sea"},
+			},
+		})
 
-	if err == nil {
-		t.Error("the ladder reported no error, want the provider's")
-	}
+		if err == nil {
+			t.Error("the ladder reported no error, want the provider's")
+		}
+	})
 }
 
 func TestTheCluesComeOffTheFirstSeasonInTheFolder(t *testing.T) {
-	root := t.TempDir()
-	folder := filepath.Join(root, "Pine Hollow")
-	writeFile(t, filepath.Join(folder, "Season 02", "Pine Hollow - S02E01 - The Long Night Road.mkv"), "video")
-	writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E02 - Lanterns at Dusk.mkv"), "video")
-	writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E01 - Pilot.mkv"), "video")
-	writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E03.mkv"), "video")
-	work, _ := testEnricher(t, libraryKindSeries, root, nil)
+	synctest.Test(t, func(t *testing.T) {
+		root := t.TempDir()
+		folder := filepath.Join(root, "Pine Hollow")
+		writeFile(t, filepath.Join(folder, "Season 02", "Pine Hollow - S02E01 - The Long Night Road.mkv"), "video")
+		writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E02 - Lanterns at Dusk.mkv"), "video")
+		writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E01 - Pilot.mkv"), "video")
+		writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E03.mkv"), "video")
+		work, _ := testEnricher(t, libraryKindSeries, root, nil)
 
-	clues := work.episodeClues(folder)
+		clues := work.episodeClues(folder)
 
-	want := []episodeClue{
-		{season: 1, episode: 1, title: "Pilot"},
-		{season: 1, episode: 2, title: "Lanterns at Dusk"},
-	}
-	if len(clues) != len(want) {
-		t.Fatalf("clues = %+v, want %+v", clues, want)
-	}
-	for at, clue := range clues {
-		if clue != want[at] {
-			t.Errorf("clue %d = %+v, want %+v", at, clue, want[at])
+		want := []episodeClue{
+			{season: 1, episode: 1, title: "Pilot"},
+			{season: 1, episode: 2, title: "Lanterns at Dusk"},
 		}
-	}
+		if len(clues) != len(want) {
+			t.Fatalf("clues = %+v, want %+v", clues, want)
+		}
+		for at, clue := range clues {
+			if clue != want[at] {
+				t.Errorf("clue %d = %+v, want %+v", at, clue, want[at])
+			}
+		}
+	})
 }
 
 // A season folder of count episode files, each named with its episode title.
@@ -250,64 +261,70 @@ func writeSeasonOne(t *testing.T, folder string, count int) {
 }
 
 func TestAFolderHandsTheRungTwelveCluesAtTheMost(t *testing.T) {
-	root := t.TempDir()
-	folder := filepath.Join(root, "Pine Hollow")
-	writeSeasonOne(t, folder, 15)
-	work, _ := testEnricher(t, libraryKindSeries, root, nil)
+	synctest.Test(t, func(t *testing.T) {
+		root := t.TempDir()
+		folder := filepath.Join(root, "Pine Hollow")
+		writeSeasonOne(t, folder, 15)
+		work, _ := testEnricher(t, libraryKindSeries, root, nil)
 
-	clues := work.episodeClues(folder)
+		clues := work.episodeClues(folder)
 
-	if len(clues) != maxEpisodeClues {
-		t.Fatalf("clues = %d, want %d", len(clues), maxEpisodeClues)
-	}
-	if clues[0].episode != 1 || clues[maxEpisodeClues-1].episode != maxEpisodeClues {
-		t.Errorf("clues run %d to %d, want 1 to %d", clues[0].episode,
-			clues[maxEpisodeClues-1].episode, maxEpisodeClues)
-	}
+		if len(clues) != maxEpisodeClues {
+			t.Fatalf("clues = %d, want %d", len(clues), maxEpisodeClues)
+		}
+		if clues[0].episode != 1 || clues[maxEpisodeClues-1].episode != maxEpisodeClues {
+			t.Errorf("clues run %d to %d, want 1 to %d", clues[0].episode,
+				clues[maxEpisodeClues-1].episode, maxEpisodeClues)
+		}
+	})
 }
 
 func TestAMovieFolderReadsNoEpisodeClues(t *testing.T) {
-	root := t.TempDir()
-	folder := filepath.Join(root, "The Long Survey (1982)")
-	writeFile(t, filepath.Join(folder, "The Long Survey - S01E01 - Pilot.mkv"), "video")
-	work, _ := testEnricher(t, libraryKindMovies, root, nil)
+	synctest.Test(t, func(t *testing.T) {
+		root := t.TempDir()
+		folder := filepath.Join(root, "The Long Survey (1982)")
+		writeFile(t, filepath.Join(folder, "The Long Survey - S01E01 - Pilot.mkv"), "video")
+		work, _ := testEnricher(t, libraryKindMovies, root, nil)
 
-	if clues := work.episodeClues(folder); len(clues) != 0 {
-		t.Errorf("clues = %+v, want none for a movie", clues)
-	}
+		if clues := work.episodeClues(folder); len(clues) != 0 {
+			t.Errorf("clues = %+v, want none for a movie", clues)
+		}
+	})
 }
 
 func TestABareSeriesFolderIdentifiesByItsEpisodeNames(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	folder := "Pine Hollow"
-	writeFile(t, filepath.Join(root, folder, "Season 01", "Pine Hollow - S01E01 - Pilot.mkv"), "video")
-	writeFile(t, filepath.Join(root, folder, "Season 01", "Pine Hollow - S01E02 - Lanterns at Dusk.mkv"), "video")
-	seedIdentityGap(t, catalog, libraryKindSeries, folder, "", 0)
-	work, _ := testEnricher(t, libraryKindSeries, root, catalog)
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "Pine Hollow", ""): `{"results":[` +
-			tmdbSeriesJSON(2103, "Pine Hollow", "1990-04-12") + `,` +
-			tmdbSeriesJSON(9999, "Pine Hollow", "2017-05-25") + `]}`,
-		tmdbKey("/3/tv/2103/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Lanterns at Dusk"}]}`,
-		tmdbKey("/3/tv/9999/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"The Revisit, Part 1"},{"episode_number":2,"name":"The Revisit, Part 2"}]}`,
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		root := t.TempDir()
+		folder := "Pine Hollow"
+		writeFile(t, filepath.Join(root, folder, "Season 01", "Pine Hollow - S01E01 - Pilot.mkv"), "video")
+		writeFile(t, filepath.Join(root, folder, "Season 01", "Pine Hollow - S01E02 - Lanterns at Dusk.mkv"), "video")
+		seedIdentityGap(t, catalog, libraryKindSeries, folder, "", 0)
+		work, _ := testEnricher(t, libraryKindSeries, root, catalog)
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/tv", "Pine Hollow", ""): `{"results":[` +
+				tmdbSeriesJSON(2103, "Pine Hollow", "1990-04-12") + `,` +
+				tmdbSeriesJSON(9999, "Pine Hollow", "2017-05-25") + `]}`,
+			tmdbKey("/3/tv/2103/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Lanterns at Dusk"}]}`,
+			tmdbKey("/3/tv/9999/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"The Revisit, Part 1"},{"episode_number":2,"name":"The Revisit, Part 2"}]}`,
+		})
+
+		if err := work.identityGap(t.Context(), client); err != nil {
+			t.Fatal(err)
+		}
+
+		nfo := readFileString(t, filepath.Join(root, folder, seriesNFOName))
+		if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">2103</uniqueid>`) {
+			t.Errorf("the .nfo file holds no id:\n%s", nfo)
+		}
+		ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ledger.Items) != 1 || ledger.Items[0].Reason != reasonFrom(testTitle, testEpisodes) {
+			t.Errorf("ledger items = %+v, want the reason that names the episodes", ledger.Items)
+		}
 	})
-
-	if err := work.identityGap(t.Context(), client); err != nil {
-		t.Fatal(err)
-	}
-
-	nfo := readFileString(t, filepath.Join(root, folder, seriesNFOName))
-	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">2103</uniqueid>`) {
-		t.Errorf("the .nfo file holds no id:\n%s", nfo)
-	}
-	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ledger.Items) != 1 || ledger.Items[0].Reason != reasonFrom(testTitle, testEpisodes) {
-		t.Errorf("ledger items = %+v, want the reason that names the episodes", ledger.Items)
-	}
 }
 
 func TestSpecialsAreTheFirstSeasonOnlyWhenAlone(t *testing.T) {
@@ -322,11 +339,13 @@ func TestSpecialsAreTheFirstSeasonOnlyWhenAlone(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			for _, clue := range firstSeasonClues(c.in) {
-				if clue.season != c.want {
-					t.Fatalf("kept season %d, want %d", clue.season, c.want)
+			synctest.Test(t, func(t *testing.T) {
+				for _, clue := range firstSeasonClues(c.in) {
+					if clue.season != c.want {
+						t.Fatalf("kept season %d, want %d", clue.season, c.want)
+					}
 				}
-			}
+			})
 		})
 	}
 }

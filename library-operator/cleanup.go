@@ -28,7 +28,7 @@ const cleanupMode = "cleanup"
 
 // cleanupTimeout bounds each request of one sweep, so an agent that
 // stops answering cannot hold a sweep open forever.
-var cleanupTimeout = 2 * time.Minute
+const cleanupTimeout = 2 * time.Minute
 
 // One cleanup container: the library it deletes, the catalog it
 // deletes through, how long it waits to be confirmed, and the log it

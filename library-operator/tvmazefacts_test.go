@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"testing/synctest"
 )
 
 // One show as TVmaze answers it, with the summary in HTML and the network that
@@ -25,12 +26,6 @@ const tvmazeHarbourCast = `[{"person":{"id":8,"name":"Nora Vance",
 	{"person":{"id":9,"name":"Ada Ferris","image":{}},"character":{"id":12,"name":"Keeper"}}]`
 
 func TestTheTVmazeAnswererReadsWhatTheProviderStates(t *testing.T) {
-	client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
-		tvmazeLookupPath:              tvmazeHarbour,
-		tvmazeShowsPath + "4242/cast": tvmazeHarbourCast,
-	})
-	answerer := newTVmazeAnswerer(client)
-
 	cases := []struct {
 		fact  string
 		check func(*testing.T, factAnswer)
@@ -72,16 +67,24 @@ func TestTheTVmazeAnswererReadsWhatTheProviderStates(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
-			answer, held, err := answerer.answer(t.Context(), test.fact,
-				titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
+			synctest.Test(t, func(t *testing.T) {
+				client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
+					tvmazeLookupPath:              tvmazeHarbour,
+					tvmazeShowsPath + "4242/cast": tvmazeHarbourCast,
+				})
+				answerer := newTVmazeAnswerer(client)
 
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !held {
-				t.Fatalf("the provider answered nothing for %s", test.fact)
-			}
-			test.check(t, answer)
+				answer, held, err := answerer.answer(t.Context(), test.fact,
+					titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
+
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !held {
+					t.Fatalf("the provider answered nothing for %s", test.fact)
+				}
+				test.check(t, answer)
+			})
 		})
 	}
 }
@@ -90,26 +93,28 @@ func TestTheTVmazeAnswererReadsWhatTheProviderStates(t *testing.T) {
 // the others read the show the container holds, so the credits fact asks only
 // for the cast.
 func TestTheFactsOfOneTitleCostOneTVmazeLookup(t *testing.T) {
-	client, fake := newFakeTVmaze(t, http.StatusOK, map[string]string{
-		tvmazeLookupPath:              tvmazeHarbour,
-		tvmazeShowsPath + "4242/cast": tvmazeHarbourCast,
-	})
-	answerer := newTVmazeAnswerer(client)
+	synctest.Test(t, func(t *testing.T) {
+		client, fake := newFakeTVmaze(t, http.StatusOK, map[string]string{
+			tvmazeLookupPath:              tvmazeHarbour,
+			tvmazeShowsPath + "4242/cast": tvmazeHarbourCast,
+		})
+		answerer := newTVmazeAnswerer(client)
 
-	for _, fact := range nfoFacts {
-		if _, _, err := answerer.answer(t.Context(), fact,
-			titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}}); err != nil {
-			t.Fatalf("the %s fact answered %v", fact, err)
+		for _, fact := range nfoFacts {
+			if _, _, err := answerer.answer(t.Context(), fact,
+				titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}}); err != nil {
+				t.Fatalf("the %s fact answered %v", fact, err)
+			}
 		}
-	}
 
-	paths := []string{}
-	for _, request := range fake.requests {
-		paths = append(paths, request.URL.Path)
-	}
-	if !slices.Equal(paths, []string{tvmazeLookupPath, tvmazeShowsPath + "4242/cast"}) {
-		t.Errorf("the answerer asked for %v, want the one lookup and the cast", paths)
-	}
+		paths := []string{}
+		for _, request := range fake.requests {
+			paths = append(paths, request.URL.Path)
+		}
+		if !slices.Equal(paths, []string{tvmazeLookupPath, tvmazeShowsPath + "4242/cast"}) {
+			t.Errorf("the answerer asked for %v, want the one lookup and the cast", paths)
+		}
+	})
 }
 
 // TVmaze answers on the IMDb id first, and on the TheTVDB id where the title
@@ -132,21 +137,23 @@ func TestTheTVmazeAnswererAsksWithTheIDItHas(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTVmaze(t, http.StatusOK,
-				map[string]string{tvmazeLookupPath: tvmazeHarbour})
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTVmaze(t, http.StatusOK,
+					map[string]string{tvmazeLookupPath: tvmazeHarbour})
 
-			_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
-				titleRef{kind: libraryKindSeries, ids: test.ids})
+				_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
+					titleRef{kind: libraryKindSeries, ids: test.ids})
 
-			if err != nil || !held {
-				t.Fatalf("answered %v with %v, want the overview", held, err)
-			}
-			if len(fake.requests) != 1 {
-				t.Fatalf("the answerer made %d requests, want one", len(fake.requests))
-			}
-			if got := fake.requests[0].URL.Query().Get(test.scheme); got != test.id {
-				t.Errorf("the lookup asked %v, want %s of %s", fake.requests[0].URL.Query(), test.scheme, test.id)
-			}
+				if err != nil || !held {
+					t.Fatalf("answered %v with %v, want the overview", held, err)
+				}
+				if len(fake.requests) != 1 {
+					t.Fatalf("the answerer made %d requests, want one", len(fake.requests))
+				}
+				if got := fake.requests[0].URL.Query().Get(test.scheme); got != test.id {
+					t.Errorf("the lookup asked %v, want %s of %s", fake.requests[0].URL.Query(), test.scheme, test.id)
+				}
+			})
 		})
 	}
 }
@@ -171,18 +178,20 @@ func TestTheTVmazeAnswererHoldsNothingForATitleItCannotAsk(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTVmaze(t, http.StatusOK,
-				map[string]string{tvmazeLookupPath: tvmazeHarbour})
+			synctest.Test(t, func(t *testing.T) {
+				client, fake := newFakeTVmaze(t, http.StatusOK,
+					map[string]string{tvmazeLookupPath: tvmazeHarbour})
 
-			_, held, err := newTVmazeAnswerer(client).answer(t.Context(), test.fact,
-				titleRef{kind: test.kind, ids: test.ids})
+				_, held, err := newTVmazeAnswerer(client).answer(t.Context(), test.fact,
+					titleRef{kind: test.kind, ids: test.ids})
 
-			if err != nil || held {
-				t.Fatalf("answered %v with %v, want nothing and no error", held, err)
-			}
-			if len(fake.requests) != 0 {
-				t.Errorf("the answerer made %d requests, want none", len(fake.requests))
-			}
+				if err != nil || held {
+					t.Fatalf("answered %v with %v, want nothing and no error", held, err)
+				}
+				if len(fake.requests) != 0 {
+					t.Errorf("the answerer made %d requests, want none", len(fake.requests))
+				}
+			})
 		})
 	}
 }
@@ -200,14 +209,16 @@ func TestATVmazeShowThatAnswersNothing(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, _ := newFakeTVmaze(t, test.status, map[string]string{tvmazeLookupPath: test.show})
+			synctest.Test(t, func(t *testing.T) {
+				client, _ := newFakeTVmaze(t, test.status, map[string]string{tvmazeLookupPath: test.show})
 
-			_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
-				titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
+				_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
+					titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
 
-			if err != nil || held {
-				t.Fatalf("answered %v with %v, want nothing and no error", held, err)
-			}
+				if err != nil || held {
+					t.Fatalf("answered %v with %v, want nothing and no error", held, err)
+				}
+			})
 		})
 	}
 }
@@ -215,38 +226,42 @@ func TestATVmazeShowThatAnswersNothing(t *testing.T) {
 // A show on a streaming service names a web channel where a broadcaster would
 // be, and the studio is the one it names.
 func TestAShowOnAStreamingServiceNamesItsWebChannel(t *testing.T) {
-	client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
-		tvmazeLookupPath: `{"id":4242,"summary":"<p>A keeper watches the ice.</p>",
-			"network":null,"webChannel":{"id":9,"name":"Harbour Stream"}}`,
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
+			tvmazeLookupPath: `{"id":4242,"summary":"<p>A keeper watches the ice.</p>",
+				"network":null,"webChannel":{"id":9,"name":"Harbour Stream"}}`,
+		})
+
+		answer, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
+			titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
+
+		if err != nil || !held {
+			t.Fatalf("answered %v with %v, want the overview", held, err)
+		}
+		if !slices.Equal(answer.Studios, []string{"Harbour Stream"}) {
+			t.Errorf("studios = %v, want the web channel", answer.Studios)
+		}
 	})
-
-	answer, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
-		titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
-
-	if err != nil || !held {
-		t.Fatalf("answered %v with %v, want the overview", held, err)
-	}
-	if !slices.Equal(answer.Studios, []string{"Harbour Stream"}) {
-		t.Errorf("studios = %v, want the web channel", answer.Studios)
-	}
 }
 
 // The runtime of an episode falls back to the length the episodes average,
 // which is what TVmaze holds for a show with no fixed slot.
 func TestAShowWithNoSlotTakesTheAverageRuntime(t *testing.T) {
-	client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
-		tvmazeLookupPath: `{"id":4242,"runtime":0,"averageRuntime":45}`,
+	synctest.Test(t, func(t *testing.T) {
+		client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
+			tvmazeLookupPath: `{"id":4242,"runtime":0,"averageRuntime":45}`,
+		})
+
+		answer, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
+			titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
+
+		if err != nil || !held {
+			t.Fatalf("answered %v with %v, want the overview", held, err)
+		}
+		if answer.RuntimeMinutes != 45 {
+			t.Errorf("runtime = %d, want the average", answer.RuntimeMinutes)
+		}
 	})
-
-	answer, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
-		titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
-
-	if err != nil || !held {
-		t.Fatalf("answered %v with %v, want the overview", held, err)
-	}
-	if answer.RuntimeMinutes != 45 {
-		t.Errorf("runtime = %d, want the average", answer.RuntimeMinutes)
-	}
 }
 
 // The summary reads as the paragraphs a person wrote, with the markup gone and
@@ -265,9 +280,11 @@ func TestTheSummaryReadsAsParagraphs(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			if got := tvmazePlot(test.summary); got != test.want {
-				t.Errorf("plot = %q, want %q", got, test.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if got := tvmazePlot(test.summary); got != test.want {
+					t.Errorf("plot = %q, want %q", got, test.want)
+				}
+			})
 		})
 	}
 }
@@ -288,14 +305,16 @@ func TestATVmazeAnswerThatFails(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, _ := newFakeTVmaze(t, test.status, test.answers)
+			synctest.Test(t, func(t *testing.T) {
+				client, _ := newFakeTVmaze(t, test.status, test.answers)
 
-			_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factCredits,
-				titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
+				_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factCredits,
+					titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
 
-			if err == nil || held {
-				t.Errorf("answered %v with %v, want the failure", held, err)
-			}
+				if err == nil || held {
+					t.Errorf("answered %v with %v, want the failure", held, err)
+				}
+			})
 		})
 	}
 }

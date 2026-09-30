@@ -9,10 +9,11 @@ package main
 
 import (
 	"context"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // A person marked a film played in Jellyfin while the role was down.
@@ -29,11 +30,10 @@ func toggledWhileDown() *fakeBackfillJellyfin {
 // One role over that Jellyfin, with a recording publish function.
 func standReconcileRole(t *testing.T, fake *fakeBackfillJellyfin) (*jellyfin, *jellyfinMessages) {
 	t.Helper()
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, fake)
 	messages := &jellyfinMessages{}
 	role := newJellyfinOn("house", defaultTopicBase, defaultMediaTopicBase, "127.0.0.1:0",
-		newJellyfinAPI(server.URL, "the-key", server.Client()), newJellyfinClock().now,
+		newJellyfinAPI(apiservertest.Host, "the-key", server.Client()), newJellyfinClock().now,
 		messages.publish, &strings.Builder{})
 	return role, messages
 }

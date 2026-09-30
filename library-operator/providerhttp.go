@@ -36,16 +36,16 @@ const providerAttempts = 3
 
 // One request's bound, so a provider that stops answering cannot hold the
 // container open.
-var providerRequestTimeout = 30 * time.Second
+const providerRequestTimeout = 30 * time.Second
+
+// The transport every provider client sends through. A test replaces it
+// with the transport of its fake provider, the way it replaces each
+// provider's address.
+var providerTransport = http.DefaultTransport
 
 // One answer's bound, so a provider that streams without end cannot grow the
 // container.
 const providerAnswerLimit = 1 << 20
-
-// The interval one block takes, out of the table, or none for a block the
-// table holds no row for. It is a variable so a test drives a pace of its own
-// and no test sleeps.
-var providerPaceFor = func(block string) time.Duration { return blockOf(block).pace }
 
 // When the next request of one client may go. A pointer, so every copy of the
 // client takes its slots from one line.
@@ -55,16 +55,14 @@ type providerSlot struct {
 }
 
 // What every client is made of: the block name, which names the provider in
-// an error; the address, which only a test replaces; the wait a cooldown
-// takes, which a test replaces so no test sleeps; and the form the key
+// an error; the address, which only a test replaces; and the form the key
 // travels in.
-// It holds the pace as well: the interval between two of its requests, which
-// a test zeroes, and the slot the next one takes.
+// It holds the pace as well: the interval between two of its requests, out
+// of the table, and the slot the next one takes.
 type providerRequests struct {
 	provider  string
 	base      string
 	http      *http.Client
-	wait      func(context.Context, time.Duration) error
 	authorize func(*http.Request)
 	interval  time.Duration
 	slot      *providerSlot
@@ -149,18 +147,15 @@ func newProviderRequests(provider, base string, authorize func(*http.Request)) p
 	return providerRequests{
 		provider:  provider,
 		base:      base,
-		http:      &http.Client{Timeout: providerRequestTimeout},
-		wait:      waitFor,
+		http:      &http.Client{Timeout: providerRequestTimeout, Transport: providerTransport},
 		authorize: authorize,
-		interval:  providerPaceFor(provider),
+		interval:  blockOf(provider).pace,
 		slot:      &providerSlot{},
 	}
 }
 
 // Each request takes its slot under the lock and waits for it outside, so two
-// callers queue instead of waking together. The wait is this layer's own, not
-// the replaceable one a cooldown takes, so a test that counts cooldowns
-// counts no slots.
+// callers queue instead of waking together.
 func (r *providerRequests) pace(ctx context.Context) error {
 	if r.slot == nil {
 		return nil
@@ -228,7 +223,7 @@ func (r *providerRequests) get(ctx context.Context, path string, query url.Value
 			return err
 		}
 		if waitable(status, cooldown, attempt) {
-			if err := r.wait(ctx, cooldown); err != nil {
+			if err := waitFor(ctx, cooldown); err != nil {
 				return err
 			}
 			continue
@@ -276,7 +271,7 @@ func (r *providerRequests) fetchFile(ctx context.Context, address string) ([]byt
 			return nil, err
 		}
 		if waitable(status, cooldown, attempt) {
-			if err := r.wait(ctx, cooldown); err != nil {
+			if err := waitFor(ctx, cooldown); err != nil {
 				return nil, err
 			}
 			continue
@@ -327,7 +322,7 @@ func (r *providerRequests) fetchInto(ctx context.Context, address string, into i
 			return written, err
 		}
 		if waitable(status, cooldown, attempt) {
-			if err := r.wait(timed, cooldown); err != nil {
+			if err := waitFor(timed, cooldown); err != nil {
 				return 0, err
 			}
 			continue

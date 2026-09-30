@@ -38,7 +38,7 @@ const sheetExtension = ".jpg"
 
 // One file's bound, so a video the decoder will not finish cannot hold the
 // container open. An hour is above the longest title the lab holds.
-var ffmpegTimeout = time.Hour
+const ffmpegTimeout = time.Hour
 
 // The directory the tiles of one video go beside it under, which is the file's
 // own name with the extension replaced. names.go reads the same name back for

@@ -25,7 +25,9 @@ func seedIMDbProvider(cluster *fakeCluster, name string, facts ...string) *Metad
 // the operator with every provider base on the dataset server.
 func datasetOperator(t *testing.T, cluster *fakeCluster, server *datasetServer) *operator {
 	t.Helper()
-	return operatorOnProviderBase(testOperator(t, cluster), server.URL)
+	operator := operatorOnProviderBase(testOperator(t, cluster), server.URL)
+	operator.providerClient = server.Client()
+	return operator
 }
 
 func TestTheIMDbCheckHeadsEachFileAndReportsItsHeaders(t *testing.T) {
@@ -178,7 +180,7 @@ func TestAnIMDbThatGivesNoAnswerIsUnreachable(t *testing.T) {
 	provider := seedIMDbProvider(cluster, "imdb")
 	server := newDatasetServer(t, testNow)
 	operator := datasetOperator(t, cluster, server)
-	server.Close()
+	server.SetDown(true)
 
 	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 

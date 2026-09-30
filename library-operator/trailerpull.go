@@ -18,8 +18,8 @@ import (
 	"time"
 )
 
-// How long one remux may run. It is a variable so that no test waits it out.
-var trailerRemuxTimeout = 10 * time.Minute
+// How long one remux may run.
+const trailerRemuxTimeout = 10 * time.Minute
 
 // The bounds a pulled file's length must fall inside, so a whole film and a
 // still frame both fail the check. The floor is under a TV spot's length,

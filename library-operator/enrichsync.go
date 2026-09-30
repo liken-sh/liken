@@ -35,9 +35,8 @@ const (
 // sync or at the timeout. No event covers the sync. The proof is in the
 // cr-sqlite bookkeeping, and a subscription or an update stream follows
 // only the catalog's own tables. Each read is two small queries against
-// the agent in the same pod. It is a variable so a test drives it in
-// milliseconds.
-var catalogSyncInterval = time.Second
+// the agent in the same pod.
+const catalogSyncInterval = time.Second
 
 // An empty, unreadable, or negative value takes the default, the
 // rule handoffTimeout follows, because the wait is a bound and not a fact.

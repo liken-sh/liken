@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -13,21 +14,10 @@ import (
 // the shipped schema, so the wait for the copy runs over real rows and the
 // cr-sqlite bookkeeping a real agent holds.
 
-// The poll of the local copy runs in milliseconds here, so a test proves the
-// wait in the time a tick takes.
-func shorterSyncInterval(t *testing.T) {
-	t.Helper()
-	was := catalogSyncInterval
-	t.Cleanup(func() { catalogSyncInterval = was })
-	catalogSyncInterval = 5 * time.Millisecond
-}
-
 // SyncingEnricher builds one fact container with the bound on its
 // wait the operator gives it, and a target another agent wrote.
 func syncingEnricher(t *testing.T, catalog *Catalog) *enricher {
 	t.Helper()
-	shorterSyncInterval(t)
-
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
 	work.syncTimeout = scanTestTimeout
 	work.sync = syncTarget{actor: otherAgent, version: 1}
@@ -41,24 +31,26 @@ const otherAgent = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 // A copy waits until the target's agent reaches its version, and a sync
 // from that agent is what ends the wait.
 func TestAContainerWaitsUntilItsCopyHoldsTheTarget(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	work.sync = syncTarget{actor: otherAgent, version: 40}
-	agent.holdVersion(t, otherAgent, 12)
-	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		work := syncingEnricher(t, catalog)
+		work.sync = syncTarget{actor: otherAgent, version: 40}
+		agent.holdVersion(t, otherAgent, 12)
+		done := make(chan error, 1)
+		go func() { done <- work.awaitCatalogSync(t.Context()) }()
 
-	select {
-	case err := <-done:
-		t.Fatalf("the wait ended on a copy that had not reached the target: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
+		select {
+		case err := <-done:
+			t.Fatalf("the wait ended on a copy that had not reached the target: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
 
-	agent.holdVersion(t, otherAgent, 40)
+		agent.holdVersion(t, otherAgent, 40)
 
-	if err := <-done; err != nil {
-		t.Fatalf("the wait failed after the copy reached the target: %v", err)
-	}
+		if err := <-done; err != nil {
+			t.Fatalf("the wait failed after the copy reached the target: %v", err)
+		}
+	})
 }
 
 // What the wait reads: no target, a target the copy holds, a version it
@@ -80,20 +72,22 @@ func TestWhichCopyHoldsTheTarget(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			catalog, agent := newSQLiteCatalog(t)
-			agent.holdVersion(t, otherAgent, one.held)
-			if one.gap {
-				agent.recordGap(t, otherAgent, 1, 30)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				catalog, agent := newSQLiteCatalog(t)
+				agent.holdVersion(t, otherAgent, one.held)
+				if one.gap {
+					agent.recordGap(t, otherAgent, 1, 30)
+				}
 
-			synced, err := catalogSynced(t.Context(), catalog, one.target)
+				synced, err := catalogSynced(t.Context(), catalog, one.target)
 
-			if err != nil {
-				t.Fatal(err)
-			}
-			if synced != one.want {
-				t.Errorf("catalogSynced = %v, want %v", synced, one.want)
-			}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if synced != one.want {
+					t.Errorf("catalogSynced = %v, want %v", synced, one.want)
+				}
+			})
 		})
 	}
 }
@@ -101,15 +95,17 @@ func TestWhichCopyHoldsTheTarget(t *testing.T) {
 // Ranges left by agents that died with versions unsent never fill, and
 // they say nothing about the target.
 func TestAnotherWritersHoleDoesNotBlockTheWait(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	work.sync = syncTarget{actor: otherAgent, version: 40}
-	agent.holdVersion(t, otherAgent, 40)
-	agent.recordGap(t, "5a6b7c8d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 1, 136)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		work := syncingEnricher(t, catalog)
+		work.sync = syncTarget{actor: otherAgent, version: 40}
+		agent.holdVersion(t, otherAgent, 40)
+		agent.recordGap(t, "5a6b7c8d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 1, 136)
 
-	if err := work.awaitCatalogSync(t.Context()); err != nil {
-		t.Fatalf("the wait held on another writer's missing range: %v", err)
-	}
+		if err := work.awaitCatalogSync(t.Context()); err != nil {
+			t.Fatalf("the wait held on another writer's missing range: %v", err)
+		}
+	})
 }
 
 // The target is the newest finished run that names a version, whatever its
@@ -135,9 +131,11 @@ func TestTheSyncTargetIsTheNewestConfirmedRun(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			if got := syncTargetFor(one.runs); got != one.want {
-				t.Errorf("syncTargetFor = %+v, want %+v", got, one.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if got := syncTargetFor(one.runs); got != one.want {
+					t.Errorf("syncTargetFor = %+v, want %+v", got, one.want)
+				}
+			})
 		})
 	}
 }
@@ -145,42 +143,50 @@ func TestTheSyncTargetIsTheNewestConfirmedRun(t *testing.T) {
 // The target reaches a container through two variables, and a version no
 // reader can parse is zero.
 func TestTheSyncTargetComesOffTheEnvironment(t *testing.T) {
-	if got := syncTargetOf(otherAgent, "40"); got != (syncTarget{actor: otherAgent, version: 40}) {
-		t.Errorf("syncTargetOf = %+v, want the agent and version 40", got)
-	}
-	if got := syncTargetOf(otherAgent, "soon"); got != (syncTarget{actor: otherAgent}) {
-		t.Errorf("syncTargetOf = %+v, want version zero", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		if got := syncTargetOf(otherAgent, "40"); got != (syncTarget{actor: otherAgent, version: 40}) {
+			t.Errorf("syncTargetOf = %+v, want the agent and version 40", got)
+		}
+		if got := syncTargetOf(otherAgent, "soon"); got != (syncTarget{actor: otherAgent}) {
+			t.Errorf("syncTargetOf = %+v, want version zero", got)
+		}
+	})
 }
 
 func TestAContainerThatCannotReachItsAgentFailsTheWait(t *testing.T) {
-	work := syncingEnricher(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+	synctest.Test(t, func(t *testing.T) {
+		work := syncingEnricher(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
 
-	if err := work.awaitCatalogSync(t.Context()); err == nil {
-		t.Error("the wait ended with no read of its own, want the unreachable agent's error")
-	}
+		if err := work.awaitCatalogSync(t.Context()); err == nil {
+			t.Error("the wait ended with no read of its own, want the unreachable agent's error")
+		}
+	})
 }
 
 func TestAStoppedContainerEndsItsWait(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	ctx, stop := context.WithCancel(t.Context())
-	stop()
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		work := syncingEnricher(t, catalog)
+		ctx, stop := context.WithCancel(t.Context())
+		stop()
 
-	if err := work.awaitCatalogSync(ctx); err == nil {
-		t.Error("the wait ended cleanly on a stopped container, want a failure")
-	}
+		if err := work.awaitCatalogSync(ctx); err == nil {
+			t.Error("the wait ended cleanly on a stopped container, want a failure")
+		}
+	})
 }
 
 func TestAFactContainerFailsWhereTheCopyNeverSyncs(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	work.sync = syncTarget{actor: otherAgent, version: 40}
-	work.syncTimeout = 100 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		work := syncingEnricher(t, catalog)
+		work.sync = syncTarget{actor: otherAgent, version: 40}
+		work.syncTimeout = 100 * time.Millisecond
 
-	if err := work.runFacts(t.Context(), likenFacts); err == nil {
-		t.Error("the container read its gap off an unsynced copy")
-	}
+		if err := work.runFacts(t.Context(), likenFacts); err == nil {
+			t.Error("the container read its gap off an unsynced copy")
+		}
+	})
 }
 
 // the probe the probe fact makes, answered for the life of one test.
@@ -192,54 +198,58 @@ func answering(t *testing.T, probe mediaProbe) {
 }
 
 func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	folder := "The Long Survey (1982)"
-	seedProbeGap(t, catalog, work.root, folder, "The Long Survey (1982).mkv")
-	agent.holdVersion(t, otherAgent, 1)
-	answering(t, answeringProbe(ffprobeOfOneFile))
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		work := syncingEnricher(t, catalog)
+		folder := "The Long Survey (1982)"
+		seedProbeGap(t, catalog, work.root, folder, "The Long Survey (1982).mkv")
+		agent.holdVersion(t, otherAgent, 1)
+		answering(t, answeringProbe(ffprobeOfOneFile))
 
-	if err := work.runFacts(t.Context(), []string{factProbe}); err != nil {
-		t.Fatalf("the probe container failed: %v", err)
-	}
+		if err := work.runFacts(t.Context(), []string{factProbe}); err != nil {
+			t.Fatalf("the probe container failed: %v", err)
+		}
 
-	nfo := readFileString(t, filepath.Join(work.root, folder, movieNFOName))
-	if !strings.Contains(nfo, "<codec>h264</codec>") {
-		t.Errorf("the .nfo file holds no stream details:\n%s", nfo)
-	}
+		nfo := readFileString(t, filepath.Join(work.root, folder, movieNFOName))
+		if !strings.Contains(nfo, "<codec>h264</codec>") {
+			t.Errorf("the .nfo file holds no stream details:\n%s", nfo)
+		}
+	})
 }
 
 // the provider the identity fact asks, answered by a fake TMDb for the life
 // of one test.
 func answeringTMDb(t *testing.T, client *tmdbClient) {
 	t.Helper()
-	was := tmdbAPIBase
-	t.Cleanup(func() { tmdbAPIBase = was })
-	tmdbAPIBase = client.base
+	was, transportWas := tmdbAPIBase, providerTransport
+	t.Cleanup(func() { tmdbAPIBase, providerTransport = was, transportWas })
+	tmdbAPIBase, providerTransport = client.base, client.http.Transport
 	t.Setenv(tmdbTokenVariable, "a-token")
 }
 
 func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	folder := "The Long Survey (1982)"
-	writeFile(t, filepath.Join(work.root, folder, "survey.mkv"), "video")
-	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
-	agent.holdVersion(t, otherAgent, 1)
-	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
-			tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		work := syncingEnricher(t, catalog)
+		folder := "The Long Survey (1982)"
+		writeFile(t, filepath.Join(work.root, folder, "survey.mkv"), "video")
+		seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
+		agent.holdVersion(t, otherAgent, 1)
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
+				tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
+		})
+		answeringTMDb(t, client)
+
+		if err := work.runFacts(t.Context(), []string{factIdentity}); err != nil {
+			t.Fatalf("the identity container failed: %v", err)
+		}
+
+		nfo := readFileString(t, filepath.Join(work.root, folder, movieNFOName))
+		if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1101</uniqueid>`) {
+			t.Errorf("the .nfo file holds no id:\n%s", nfo)
+		}
 	})
-	answeringTMDb(t, client)
-
-	if err := work.runFacts(t.Context(), []string{factIdentity}); err != nil {
-		t.Fatalf("the identity container failed: %v", err)
-	}
-
-	nfo := readFileString(t, filepath.Join(work.root, folder, movieNFOName))
-	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1101</uniqueid>`) {
-		t.Errorf("the .nfo file holds no id:\n%s", nfo)
-	}
 }
 
 func TestTheSyncTimeoutComesOffTheEnvironment(t *testing.T) {
@@ -255,9 +265,11 @@ func TestTheSyncTimeoutComesOffTheEnvironment(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			if got := syncTimeout(one.raw); got != one.want {
-				t.Errorf("syncTimeout(%q) = %s, want %s", one.raw, got, one.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if got := syncTimeout(one.raw); got != one.want {
+					t.Errorf("syncTimeout(%q) = %s, want %s", one.raw, got, one.want)
+				}
+			})
 		})
 	}
 }
