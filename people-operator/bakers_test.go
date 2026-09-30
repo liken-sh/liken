@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -227,6 +228,25 @@ func TestAMalformedFileSourceShowsTheInitials(t *testing.T) {
 		}
 		if !isInitials(got.Status.Thumbnail) {
 			t.Error("the thumbnail is not the initials")
+		}
+	})
+}
+
+// A claim in a namespace that does not exist cannot be mounted, so the
+// operator reports it once instead of trying to start the pod again.
+func TestAClaimInANamespaceThatDoesNotExistFailsTheBake(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.api.dropNamespace("gone")
+		w.api.putPerson(ada("claim://gone/pictures/ada.png"))
+		w.settle()
+
+		ready := w.api.person(t, "ada").Status.ready()
+		if ready.Status != "False" || ready.Reason != reasonBakeFailed {
+			t.Errorf("AvatarReady = %+v, want False, BakeFailed", ready)
+		}
+		if want := "the namespace gone does not exist"; !strings.Contains(ready.Message, want) {
+			t.Errorf("the message %q does not say %q", ready.Message, want)
 		}
 	})
 }

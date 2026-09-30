@@ -55,6 +55,17 @@ type fakeAPI struct {
 	// refusals is how many status writes the server refuses next, the
 	// way an API server that restarts does.
 	refusals int
+
+	// absent holds the namespaces that do not exist, where a pod
+	// create answers 404 as a real API server does.
+	absent map[string]bool
+}
+
+// dropNamespace makes a namespace one that does not exist.
+func (a *fakeAPI) dropNamespace(namespace string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.absent[namespace] = true
 }
 
 // refuseStatusWrites makes the server refuse the next status writes.
@@ -69,6 +80,7 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		objects: map[string]map[string]map[string]any{peoplePath: {}, podsPath: {}},
 		logs:    map[string]string{},
 		changed: make(chan struct{}),
+		absent:  map[string]bool{},
 	}
 	api.server = apiservertest.Start(t, api)
 	// The reflector waits out its backoff after a refused list without
@@ -275,6 +287,10 @@ func (a *fakeAPI) createPod(w http.ResponseWriter, r *http.Request, namespace st
 	defer a.mu.Unlock()
 	metadata := created["metadata"].(map[string]any)
 	key := namespace + "/" + metadata["name"].(string)
+	if a.absent[namespace] {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	if _, exists := a.objects[podsPath][key]; exists {
 		w.WriteHeader(http.StatusConflict)
 		return

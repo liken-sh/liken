@@ -101,7 +101,14 @@ func (o *operator) answer(ctx context.Context, p *person, pods map[string]pod, p
 	mount, baked, err := bakedScheme(ref, o.bakers.namespace)
 	switch {
 	case baked && err == nil && podsHeld:
-		return time.Time{}, o.bakers.start(p, mount)
+		err := o.bakers.start(p, mount)
+		// A claim in a namespace that does not exist answers 404 on
+		// every try, so it is a failure of the source and not a
+		// refusal to retry.
+		if !errors.Is(err, apiclient.ErrNotFound) {
+			return time.Time{}, err
+		}
+		out.err = failure(reasonBakeFailed, fmt.Errorf("the namespace %s does not exist", mount.namespace))
 	case baked && err == nil:
 		// The watch of the baker pods has not read them all yet, and
 		// its first read wakes another pass.
