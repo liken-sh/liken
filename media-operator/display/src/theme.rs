@@ -159,10 +159,10 @@ pub const LINE_PITCH: f32 = type_scale::SMALL + 12.0;
 
 /// How far each scrim reaches from its screen edge, in canvas rows. It
 /// holds its peak over the text out to `HOLD`, and is clear at `CLEAR`.
-pub const SCRIM_TOP_HOLD: f32 = 200.0;
-pub const SCRIM_TOP_CLEAR: f32 = 440.0;
-pub const SCRIM_BOTTOM_HOLD: f32 = 250.0;
-pub const SCRIM_BOTTOM_CLEAR: f32 = 520.0;
+pub const SCRIM_TOP_HOLD: f32 = 180.0;
+pub const SCRIM_TOP_CLEAR: f32 = 380.0;
+pub const SCRIM_BOTTOM_HOLD: f32 = 230.0;
+pub const SCRIM_BOTTOM_CLEAR: f32 = 450.0;
 
 #[cfg(test)]
 mod tests {

@@ -1170,14 +1170,19 @@ mod tests {
     #[tokio::test]
     async fn a_resize_resolves_the_scrims_for_the_new_surface() {
         let (mut display, _) = display();
-        let bounds =
-            |display: &Display| display.scrims.bottom.as_ref().map(|picture| picture.bounds);
-        let before = bounds(&display);
-        assert!(before.is_some());
+        let rows = |display: &Display| {
+            display
+                .scrims
+                .bottom
+                .as_ref()
+                .map_or(0, |picture| picture.rows().len())
+        };
+        let before = rows(&display);
+        assert!(before > 0);
 
         let _ = display.update(Message::Resized(Size::new(1280.0, 720.0)));
         assert_eq!(display.canvas, Canvas::for_output(Size::new(1280.0, 720.0)));
-        assert_ne!(bounds(&display), before);
+        assert!(rows(&display) < before);
     }
 
     /// A window at twice the scale resolves each scrim at twice the rows, so
