@@ -20,7 +20,7 @@ passes through that path.
 
 The walk is one 40-second file, `speakers-1280x720.mkv`, beside the
 other patterns. Pink noise plays from each speaker for 5 seconds, in
-the order a receiver walks a room: front left, centre, front right,
+the order a receiver walks a room: front left, center, front right,
 side right, back right, back left, side left, and then the subwoofer.
 Pink noise is what a receiver's own walk plays. The subwoofer's noise
 stops at 120 Hz.

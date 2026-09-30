@@ -1,6 +1,6 @@
 package main
 
-// A pattern:// URI plays a test pattern: a white screen, colour bars, or
+// A pattern:// URI plays a test pattern: a white screen, color bars, or
 // a walk of the speakers.
 // A pattern is the known ground under the display, so a check of the OSD
 // does not depend on finding a bright, flat scene in a film. The files
@@ -67,7 +67,7 @@ var screenFrames = []frame{
 
 // The patterns the image carries, in the order a refusal lists them.
 // White is the worst case for a dark scrim over a bright frame, and the
-// SMPTE HD bars show a colour or a range error at a glance. The speaker
+// SMPTE HD bars show a color or a range error at a glance. The speaker
 // walk plays pink noise from each speaker of a 7.1 layout in turn and
 // names the speaker on the screen; it is for the ears, so it carries one
 // small frame. The Makefile encodes the same patterns at the same frames.

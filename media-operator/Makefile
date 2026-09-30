@@ -49,7 +49,7 @@ PATTERN_FILES := $(foreach name,$(PATTERN_NAMES),$(foreach frame,$(PATTERN_FRAME
 PATTERN_SOURCE_white := color=c=white:r=1
 PATTERN_TITLE_white := White
 PATTERN_SOURCE_bars := smptehdbars=r=1
-PATTERN_TITLE_bars := Colour bars
+PATTERN_TITLE_bars := Color bars
 
 .PHONY: patterns
 patterns: $(PATTERN_FILES)
@@ -85,7 +85,7 @@ patterns/%.mkv:
 # above 8 kHz, so a tweeter would play nothing. 80 kb/s keeps the file
 # under the 500 KB that the large-file check allows. Each speaker is a
 # channel, the ffmpeg name of its channel, and its name on the screen.
-SPEAKERS := FL:Front_left FC:Centre FR:Front_right SR:Side_right \
+SPEAKERS := FL:Front_left FC:Center FR:Front_right SR:Side_right \
 	BR:Back_right BL:Back_left SL:Side_left LFE:Subwoofer
 SPEAKER_FONT := ../brand/fonts/SourceSans3-Regular.otf
 

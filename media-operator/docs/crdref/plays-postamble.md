@@ -1,7 +1,7 @@
 ## Test patterns
 
 A test pattern gives the display a known picture under it, so a check
-of the OSD, the scrims, or the colour does not depend on a scene in a
+of the OSD, the scrims, or the color does not depend on a scene in a
 film. The player image carries each pattern as a ten-minute file with a
 chapter each minute, so the scrubber, the chapter marks, and the time
 left behave as they do for a film. A pattern needs no storage and no
@@ -19,11 +19,11 @@ network.
 | Pattern | What it shows |
 |---|---|
 | `white` | a white screen, the worst case for the dark scrims behind the OSD |
-| `bars` | the SMPTE HD colour bars, which show a colour or a range error |
+| `bars` | the SMPTE HD color bars, which show a color or a range error |
 | `speakers` | a walk of a 7.1 layout: pink noise from one speaker at a time, named on the screen |
 
 `speakers` plays pink noise for 5 seconds from each speaker in turn:
-front left, centre, front right, side right, back right, back left, side
+front left, center, front right, side right, back right, back left, side
 left, and then the subwoofer, whose noise stops at 120 Hz. The screen
 names the speaker that should play, and each speaker is a chapter, so a
 chapter skip moves to the next one. The file is 7.1, so a system with

@@ -1,7 +1,7 @@
 # 40, Test patterns
 
 Built on 2026-09-30. A `Play` can name a test pattern, a white screen
-or colour bars, with a `pattern://` URI. The player image carries the
+or color bars, with a `pattern://` URI. The player image carries the
 pattern files, so a pattern plays on any `Player` with no storage, no
 network, and no film. On `liken-1`, `pattern://white` played on
 `lab-portable`, a 1920x1080 panel; the results are at the end.
@@ -17,7 +17,7 @@ also hides the top and the bottom of the screen behind black bars,
 which are the rows the scrims cover.
 
 A test pattern answers this. A white screen is the worst case for a
-dark scrim, and colour bars show a colour or a range error at a glance.
+dark scrim, and color bars show a color or a range error at a glance.
 
 ## The design
 
@@ -29,7 +29,7 @@ A pattern URI names the pattern and, optionally, the frame size:
     pattern://bars/1920x1080
     pattern://white/1920x804
 
-The patterns are `white` and `bars`, the SMPTE HD colour bars. The frames are the sizes of real screens and of a letterboxed
+The patterns are `white` and `bars`, the SMPTE HD color bars. The frames are the sizes of real screens and of a letterboxed
 film:
 
 | Frame | Shape | What it matches |
