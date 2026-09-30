@@ -15,25 +15,6 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-func TestListMachinesReadsTheCollection(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"kind": "MachineList",
-			"items": []machine.Machine{
-				{Kind: "Machine", Metadata: api.ObjectMeta{Name: "node-1"}},
-				{Kind: "Machine", Metadata: api.ObjectMeta{Name: "node-2"}},
-			},
-		})
-	}))
-	machines, err := ListMachines(client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(machines) != 2 || machines[1].Metadata.Name != "node-2" {
-		t.Errorf("got %+v", machines)
-	}
-}
-
 func TestGetClusterReadsOneCluster(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if want := ClustersPath + "/lab"; r.URL.Path != want {

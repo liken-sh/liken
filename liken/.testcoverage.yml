@@ -24,7 +24,7 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 79
+  total: 81
 
 override:
   # The API group's grammar: the shared shapes, the version format,

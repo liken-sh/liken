@@ -21,6 +21,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -56,13 +57,15 @@ func ListTelevisions(c *Client) (*TelevisionList, error) {
 
 // readTelevisions answers every Television from the watch's store,
 // and lists them from the API server while the store has nothing to
-// give (objectcache.go).
+// give (objectcache.go). A cluster without the Television definition
+// answers the list with not found, which is a cluster with no
+// Television, the way ListTelevisions reads it.
 func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
-	if view := held.view(); view.Ready() {
-		items, err := informer.CurrentList[Television](c.Client, informer.Held{View: view, Versions: c.versions.televisions}, televisionPath)
-		return &TelevisionList{Items: items}, err
+	items, err := informer.List[Television](c.Client, informer.Held{View: held.view(), Versions: c.versions.televisions}, televisionsPath, televisionPath)
+	if errors.Is(err, apiclient.ErrNotFound) {
+		return &TelevisionList{}, nil
 	}
-	return ListTelevisions(c)
+	return &TelevisionList{Items: items}, err
 }
 
 // watchTelevisions wakes a loop on every change to a Television, its

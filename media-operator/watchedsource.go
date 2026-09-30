@@ -10,10 +10,16 @@ package main
 // server. A watch that fails for another reason, such as a refused
 // connection while the API server restarts, leaves the store ready, so
 // the pass keeps its local work going from the store.
+//
+// The reads from the API server go through the shared memo package,
+// which notes the version of each object a read answers. The kinds here
+// have no memo, so each read passes a nil memo and notes nothing. The
+// pass reads no status it wrote back from them (objectcache.go), and it
+// reads an object again from the API server before it creates or
+// deletes one (clusterview.go).
 
 import (
 	"errors"
-	"net/http"
 	"net/url"
 	"strings"
 
@@ -22,6 +28,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // watchedSource is one collection of the view: the watch's store, and
@@ -45,10 +52,7 @@ func (s watchedSource) List() ([]any, error) {
 	if s.labels != "" {
 		path += "?labelSelector=" + url.QueryEscape(s.labels)
 	}
-	var list struct {
-		Items []map[string]any `json:"items"`
-	}
-	err := s.client.RequestJSON(http.MethodGet, path, nil, &list)
+	list, err := memo.ReadList[objectFields](s.client, nil, path)
 	// A collection the API server does not serve holds no object, the
 	// way the watch of an optional collection reads it (watch.go).
 	if errors.Is(err, apiclient.ErrNotFound) {
@@ -57,8 +61,8 @@ func (s watchedSource) List() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	items := make([]any, 0, len(list.Items))
-	for _, fields := range list.Items {
+	items := make([]any, 0, len(list))
+	for _, fields := range list {
 		items = append(items, &unstructured.Unstructured{Object: fields})
 	}
 	return items, nil
@@ -69,16 +73,21 @@ func (s watchedSource) GetByKey(key string) (any, bool, error) {
 	if s.view.Ready() {
 		return s.view.Store.GetByKey(key)
 	}
-	var fields map[string]any
-	err := s.client.RequestJSON(http.MethodGet, objectPath(s.resource, key), nil, &fields)
+	fields, err := memo.ReadFresh[objectFields](s.client, nil, key, objectPath(s.resource, key))
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	return &unstructured.Unstructured{Object: fields}, true, nil
+	return &unstructured.Unstructured{Object: *fields}, true, nil
 }
+
+// objectFields is one object as the API server answers it, which the
+// view converts to the operator's own struct later (clusterview.go).
+type objectFields map[string]any
+
+func (f *objectFields) GetObjectMeta() memo.Meta { return &unstructured.Unstructured{Object: *f} }
 
 // Stored answers one object from the watch's store alone.
 func (s watchedSource) Stored(key string) (any, bool) {

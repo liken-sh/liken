@@ -163,11 +163,8 @@ func ListReceivers(c *Client) (*ReceiverList, error) {
 // lists them from the API server while the store has nothing to give
 // (objectcache.go).
 func readReceivers(c *Client, held *watchStore) (*ReceiverList, error) {
-	if view := held.view(); view.Ready() {
-		items, err := informer.CurrentList[Receiver](c.Client, informer.Held{View: view, Versions: c.versions.receivers}, receiverPath)
-		return &ReceiverList{Items: items}, err
-	}
-	return ListReceivers(c)
+	items, err := informer.List[Receiver](c.Client, informer.Held{View: held.view(), Versions: c.versions.receivers}, receiversPath, receiverPath)
+	return &ReceiverList{Items: items}, err
 }
 
 func GetReceiver(c *Client, name string) (*Receiver, error) {

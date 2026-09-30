@@ -11,8 +11,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"net/url"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -48,11 +48,8 @@ func ListCECBuses(c *Client) (*CECBusList, error) {
 // them from the API server while the store has nothing to give
 // (objectcache.go).
 func readCECBuses(c *Client, held *watchStore) (*CECBusList, error) {
-	if view := held.view(); view.Ready() {
-		items, err := informer.CurrentList[CECBus](c.Client, informer.Held{View: view, Versions: c.versions.cecBuses}, cecBusPath)
-		return &CECBusList{Items: items}, err
-	}
-	return ListCECBuses(c)
+	items, err := informer.List[CECBus](c.Client, informer.Held{View: held.view(), Versions: c.versions.cecBuses}, cecBusesPath, cecBusPath)
+	return &CECBusList{Items: items}, err
 }
 
 // watchCECBuses wakes a loop on every change to a CECBus, its status
@@ -179,13 +176,16 @@ func displayPath(name string) string { return displaysPath + "/" + name }
 
 // readDisplays answers every Display from the watch's store, and lists
 // them from the API server while the store has nothing to give. This
-// operator writes no Display, so the read has no memo.
+// operator writes no Display, so the read has no memo. A cluster
+// without display-operator has no Display definition, and the API
+// server answers the list with not found; that is a cluster with no
+// Display, not a failure.
 func readDisplays(c *Client, held *watchStore) (*DisplayList, error) {
-	if view := held.view(); view.Ready() {
-		items, err := informer.CurrentList[Display](c.Client, informer.Held{View: view}, displayPath)
-		return &DisplayList{Items: items}, err
+	items, err := informer.List[Display](c.Client, informer.Held{View: held.view()}, displaysPath, displayPath)
+	if errors.Is(err, apiclient.ErrNotFound) {
+		return &DisplayList{}, nil
 	}
-	return ListDisplays(c)
+	return &DisplayList{Items: items}, err
 }
 
 // readDisplay answers one Display from the watch's store. A store that
@@ -286,28 +286,4 @@ func receiverSpecMark(receiver Receiver) specMark {
 type DisplayList struct {
 	Metadata ListMeta  `json:"metadata"`
 	Items    []Display `json:"items"`
-}
-
-// ListDisplays reads every Display. A cluster without display-operator
-// has no Display definition, and the API server answers the list with
-// not found; that is a cluster with no Display, not a failure.
-func ListDisplays(c *Client) (*DisplayList, error) {
-	return listDisplays(c, displaysPath)
-}
-
-// ListDisplaysOn reads the Displays whose status.node is one machine.
-func ListDisplaysOn(c *Client, machine string) (*DisplayList, error) {
-	return listDisplays(c, displaysPath+"?fieldSelector="+url.QueryEscape(displayNodeSelector(machine)))
-}
-
-func listDisplays(c *Client, path string) (*DisplayList, error) {
-	list := &DisplayList{}
-	err := c.RequestJSON(http.MethodGet, path, nil, list)
-	if err == apiclient.ErrNotFound {
-		return &DisplayList{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return list, nil
 }

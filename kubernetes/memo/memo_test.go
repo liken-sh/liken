@@ -196,3 +196,49 @@ func TestTheMemoForgetsARecordAtItsVersion(t *testing.T) {
 	var none *Versions
 	none.ForgetAt("a", "7")
 }
+
+// A list notes the version of each object it answered, so a store's
+// copy older than the list is not current. An object that a request
+// noted while the list was in flight keeps that request's version,
+// because the list can hold a copy from before the request's answer.
+func TestAListNotesEachObjectThatNoRequestNotedDuringIt(t *testing.T) {
+	memo := New()
+	memo.Note("den", "1")
+
+	err := memo.SendList(func() (map[string]string, error) {
+		_ = memo.Send("studio", func() (string, error) { return "9", nil })
+		return map[string]string{"den": "2", "studio": "3", "kitchen": "4"}, nil
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !memo.Current("den", "2") || memo.Current("den", "1") {
+		t.Error("the memo does not hold den at the listed version")
+	}
+	if !memo.Current("studio", "9") {
+		t.Error("the list replaced the version a request noted during it")
+	}
+	if !memo.Current("kitchen", "4") || memo.Current("kitchen", "3") {
+		t.Error("the memo does not hold kitchen at the listed version")
+	}
+}
+
+// A list that fails notes nothing, and a nil memo still sends the list.
+func TestAFailedListNotesNothing(t *testing.T) {
+	memo := New()
+	memo.Note("den", "1")
+	refused := errors.New("connection refused")
+
+	err := memo.SendList(func() (map[string]string, error) { return nil, refused })
+
+	if !errors.Is(err, refused) || !memo.Current("den", "1") {
+		t.Errorf("SendList = %v, and den is not at 1; want the failure and no note", err)
+	}
+	var none *Versions
+	sent := false
+	_ = none.SendList(func() (map[string]string, error) { sent = true; return nil, nil })
+	if !sent {
+		t.Error("a nil memo did not send the list")
+	}
+}

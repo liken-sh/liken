@@ -16,4 +16,4 @@ threshold:
   # One package, so the total is the whole gate. go test never calls
   # main(), so its statements never run under the gate, and the
   # number sits below the whole rest of the tree.
-  total: 93
+  total: 94

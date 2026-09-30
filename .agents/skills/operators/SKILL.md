@@ -317,16 +317,22 @@ A pass reads the objects a watch holds from the informer's store, not
 from the API server. A settled pass then sends the API server no read
 of a watched kind. `kubernetes/informer` holds the reads.
 `kubernetes/memo` holds the memo and the requests whose answers it
-notes (`ReadFresh`, `Written`, and `SettleStatus`), and imports nothing
+notes (`ReadFresh`, `ReadList`, `Written`, and `SettleStatus`), and imports nothing
 from `k8s.io`, so a program that must not link client-go can link
 it.
 
 - **The rule.** Read one object with `informer.ReadOne` and a list with
-  `informer.CurrentList`. A store answers only when it is ready
+  `informer.List`. A store answers only when it is ready
   (`informer.View.Ready`): it holds the whole first read, and the API
   server accepted a watch and forbade none since. Before that, and
   after a `401` or a `403` on a watch until the API server accepts one,
-  read and list from the API server. `library-operator` is the one
+  read and list from the API server. `informer.List` sends that list
+  itself and notes the version of each object it answers, because the
+  store can become ready at a copy older than the list: the watch's
+  first read can come from the API server's watch cache. A list that
+  an operator sends itself notes nothing, and the next pass acts on the
+  older copy. The list states no `resourceVersion`, so etcd answers it.
+  `library-operator` is the one
   exception: it reads its member pods, Players, MediaPreferences,
   Plays, people, claims, volumes, stood pods, progress pods, and nodes
   only from their stores, and has no read of them from the API server.
@@ -381,7 +387,8 @@ it.
   whose UID the store can hold from an object deleted since), and for
   a read once at start, before the watch opens.
 - **The reference files.** `kubernetes/informer/cache.go` and
-  `cache_test.go` (the reads, and a list that meets a create),
+  `cache_test.go` (the reads, a list that meets a create, and a list
+  before the store is ready),
   `kubernetes/memo/requests_test.go` (the status write after a `409`),
   `kubernetes/memo/memo_test.go` (the memo itself), `bluetooth-operator/objectcache_test.go` (the memo
   across three kinds and a store that follows its selector),

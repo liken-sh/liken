@@ -28,6 +28,12 @@ type Versions struct {
 	mu   sync.Mutex
 	seen map[string]string
 
+	// notes counts every note, and notedAt holds the count at each
+	// key's last note. A list compares the two to find the keys that a
+	// request noted while the list was in flight (SendList).
+	notes   uint64
+	notedAt map[string]uint64
+
 	// requests holds, for each object, one request at a time with the
 	// note of its answer, so the notes follow the order in which the API
 	// server answered. Two goroutines that write one object could
@@ -39,7 +45,7 @@ type Versions struct {
 
 // New answers an empty memo.
 func New() *Versions {
-	return &Versions{seen: map[string]string{}, requests: map[string]*sync.Mutex{}}
+	return &Versions{seen: map[string]string{}, notedAt: map[string]uint64{}, requests: map[string]*sync.Mutex{}}
 }
 
 // requestsOf answers the lock of one object's requests.
@@ -76,7 +82,14 @@ func (m *Versions) Note(key, version string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.note(key, version)
+}
+
+// note records one version. The caller holds mu.
+func (m *Versions) note(key, version string) {
+	m.notes++
 	m.seen[key] = version
+	m.notedAt[key] = m.notes
 }
 
 // KeyGetter reads one object from a store by its key. client-go's
@@ -124,6 +137,51 @@ func (m *Versions) Send(key string, request func() (version string, err error)) 
 	return err
 }
 
+// SendList runs one list request, and notes the version of each object
+// the API server answered, by its key. A pass that lists before a
+// watch's store is ready must note these versions. The store can then
+// become ready at an older version, because the reflector's first read
+// can come from the API server's watch cache, which runs behind etcd.
+// Without the notes, the next pass reads that older copy as current and
+// acts on an object older than one it already read.
+//
+// An object that a request noted while the list was in flight keeps the
+// request's version. The list can hold a copy from before the request's
+// answer, and a note of that copy would make a store's copy at the older
+// version current. When the request's version is the older one instead,
+// the store's copy at the list's version is not current, and the next
+// read of the object goes to the API server once. That costs one
+// request and never answers an older copy.
+//
+// A list replaces the version of each object that the memo noted before
+// the list was sent. That is correct only for a list that etcd answers,
+// which holds every write the API server answered before the list. A
+// list with resourceVersion=0 comes from the watch cache, which can be
+// older than such a write, so the caller must not send one.
+//
+// A list that fails notes nothing, because it names no object.
+func (m *Versions) SendList(request func() (versions map[string]string, err error)) error {
+	if m == nil {
+		_, err := request()
+		return err
+	}
+	m.mu.Lock()
+	start := m.notes
+	m.mu.Unlock()
+	listed, err := request()
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, version := range listed {
+		if m.notedAt[key] <= start {
+			m.note(key, version)
+		}
+	}
+	return nil
+}
+
 // ForgetGone drops the record of each object that a list did not
 // answer and the store does not hold. The API server answered 404 for
 // such an object, and its watch delivered the delete. An operator whose
@@ -146,6 +204,7 @@ func (m *Versions) ForgetGone(store KeyGetter, listed map[string]bool) {
 			continue
 		}
 		delete(m.seen, key)
+		delete(m.notedAt, key)
 		delete(m.requests, key)
 	}
 }
@@ -168,6 +227,7 @@ func (m *Versions) Forget(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.seen, key)
+	delete(m.notedAt, key)
 	delete(m.requests, key)
 }
 
@@ -202,6 +262,7 @@ func (m *Versions) ForgetAt(key, version string) {
 	defer m.mu.Unlock()
 	if seen, noted := m.seen[key]; noted && seen == version {
 		delete(m.seen, key)
+		delete(m.notedAt, key)
 		delete(m.requests, key)
 	}
 }

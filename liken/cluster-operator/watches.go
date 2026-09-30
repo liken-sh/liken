@@ -207,14 +207,12 @@ var copyFreshness = operatorLeaseTiming.renewDeadline + operatorLeaseTiming.retr
 // machines reads every Machine in the fleet. A copy at another version
 // than this program's own last write or read of the Machine, such as a
 // copy without the grant the last sweep wrote, is read again from the
-// API server, which holds the write.
+// API server, which holds the write. While the copy cannot answer, the
+// list comes from the API server and notes each Machine's version, so a
+// copy that answers later at an older version is read again.
 func (r *fleetReader) machines() ([]machine.Machine, error) {
-	view := r.current(r.machineCopy)
-	if !view.Ready() {
-		return kubernetes.ListMachines(r.client)
-	}
-	held := informer.Held{View: view, Versions: r.machineVersions}
-	machines, err := informer.CurrentList[machine.Machine](r.client, held, machinePath)
+	held := informer.Held{View: r.current(r.machineCopy), Versions: r.machineVersions}
+	machines, err := informer.List[machine.Machine](r.client, held, kubernetes.MachinesPath, machinePath)
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +229,13 @@ func clusterPath(name string) string { return kubernetes.ClustersPath + "/" + na
 // record would otherwise stay for the life of the process. It also
 // drops the record of each object whose copy in the store is at the
 // noted version (watch.Settle), so a later write from another writer
-// costs no read.
+// costs no read. A list from the API server settles nothing, because
+// no ready store compares with it. The records that list noted stay
+// until a ready store holds their versions.
 func settleMemo[T any, P informer.Object[T]](held informer.Held, items []T) {
+	if !held.View.Ready() {
+		return
+	}
 	listed := make(map[string]bool, len(items))
 	keys := make([]string, 0, len(items))
 	for i := range items {
@@ -266,12 +269,8 @@ func (r *fleetReader) publishClusterStatus(clusterDoc *cluster.Cluster) error {
 
 // clusters reads every Cluster. A fleet has one.
 func (r *fleetReader) clusters() ([]cluster.Cluster, error) {
-	view := r.current(r.clusterCopy)
-	if !view.Ready() {
-		return kubernetes.ListClusters(r.client)
-	}
-	held := informer.Held{View: view, Versions: r.clusterVersions}
-	clusters, err := informer.CurrentList[cluster.Cluster](r.client, held, clusterPath)
+	held := informer.Held{View: r.current(r.clusterCopy), Versions: r.clusterVersions}
+	clusters, err := informer.List[cluster.Cluster](r.client, held, kubernetes.ClustersPath, clusterPath)
 	if err != nil {
 		return nil, err
 	}

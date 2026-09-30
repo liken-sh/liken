@@ -3,11 +3,13 @@ package informer
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
@@ -37,7 +39,10 @@ func newFakeAPI(things ...thing) *fakeAPI {
 	return api
 }
 
-func thingPath(key string) string { return "/things/" + key }
+// fakeThingsPath lists every thing, and thingPath names one.
+const fakeThingsPath = "/things"
+
+func thingPath(key string) string { return fakeThingsPath + "/" + key }
 
 func (api *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	api.mu.Lock()
@@ -45,6 +50,15 @@ func (api *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	api.requests = append(api.requests, r.Method+" "+r.URL.Path)
 	if api.failing {
 		http.Error(w, "etcd is gone", http.StatusInternalServerError)
+		return
+	}
+	if r.URL.Path == fakeThingsPath {
+		keys := slices.Sorted(maps.Keys(api.objects))
+		items := make([]thing, 0, len(keys))
+		for _, key := range keys {
+			items = append(items, api.objects[key])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
 		return
 	}
 	key, status := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/things/"), "/status")
@@ -228,6 +242,40 @@ func TestAListReplacesEachOlderCopy(t *testing.T) {
 	if reads := api.sent(); !slices.Equal(reads, []string{"GET /things/b", "GET /things/c"}) {
 		t.Errorf("the list sent %v, want reads of b and c", reads)
 	}
+}
+
+// A list answers from the API server while the store is not ready, and
+// notes the version of each object. A store can be ready at a version
+// older than that list: the reflector's first read can come from the
+// API server's watch cache, which runs behind etcd. A later list reads
+// such an older copy from the API server again, so a pass never acts on
+// an object older than one it already read.
+func TestAListBeforeTheStoreIsReadyNeverGoesBackwards(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		api := newFakeAPI()
+		older := api.put(newThing("a", "", 1))
+		newer := api.put(newThing("a", "", 2))
+		view := storeOf(t, older)
+		ready := false
+		view.Synced = func() bool { return ready }
+		held := Held{View: view, Versions: memo.New()}
+		client := testClient(t, api)
+
+		first, err := List[thing](client, held, fakeThingsPath, thingPath)
+		if err != nil || len(first) != 1 || first[0].Metadata.ResourceVersion != newer.Metadata.ResourceVersion {
+			t.Fatalf("the list before the store is ready = %+v, %v; want a at %s", first, err, newer.Metadata.ResourceVersion)
+		}
+		ready = true
+		second, err := List[thing](client, held, fakeThingsPath, thingPath)
+
+		if err != nil || len(second) != 1 || second[0].Metadata.ResourceVersion != newer.Metadata.ResourceVersion {
+			t.Errorf("the list from the ready store = %+v, %v; want a at %s, not the store's %s",
+				second, err, newer.Metadata.ResourceVersion, older.Metadata.ResourceVersion)
+		}
+		if reads := api.sent(); !slices.Equal(reads, []string{"GET /things", "GET /things/a"}) {
+			t.Errorf("the lists sent %v, want the list and one read of a", reads)
+		}
+	})
 }
 
 // A list that cannot read an older copy fails, so a pass does not act

@@ -20,10 +20,6 @@ func GetMachine(c *apiclient.Client, name string) (*machine.Machine, error) {
 	return apiclient.Get[machine.Machine](c, MachinesPath+"/"+name)
 }
 
-func ListMachines(c *apiclient.Client) ([]machine.Machine, error) {
-	return List[machine.Machine](c, MachinesPath)
-}
-
 // PublishStatus writes through the status subresource. This is a
 // separate endpoint (…/machines/<name>/status) that updates only the
 // status half of the object. Because of this, a controller can never

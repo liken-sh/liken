@@ -1,8 +1,9 @@
 package memo
 
 // The requests whose answers the memo notes: a read of one object from
-// the API server, a write that answers the stored copy, and a status
-// write that settles on the API server's copy. None of them reads a
+// the API server, a list of a collection, a write that answers the
+// stored copy, and a status write that settles on the API server's
+// copy. None of them reads a
 // watch's store, so they import nothing from k8s.io, and a program that
 // must not link client-go can link them. library-operator's pod build
 // is such a program: it runs no pass, but it compiles the pass's code,
@@ -69,6 +70,30 @@ func NamespacedPath(path func(namespace, name string) string) func(key string) s
 // ReadFresh reads one object from the API server and notes its version.
 func ReadFresh[T any, P Object[T]](c *apiclient.Client, versions *Versions, key, path string) (*T, error) {
 	return Written[T, P](versions, key, func() (*T, error) { return apiclient.Get[T](c, path) })
+}
+
+// ReadList reads a collection from the API server, and notes the
+// version of each object it answers (Versions.SendList). listPath is the
+// path of the collection, with the selector of the watch whose store
+// the list stands in for, and no resourceVersion (Versions.SendList).
+func ReadList[T any, P Object[T]](c *apiclient.Client, versions *Versions, listPath string) ([]T, error) {
+	var items []T
+	err := versions.SendList(func() (map[string]string, error) {
+		list, err := apiclient.Get[struct {
+			Items []T `json:"items"`
+		}](c, listPath)
+		if err != nil {
+			return nil, err
+		}
+		items = list.Items
+		listed := make(map[string]string, len(items))
+		for index := range items {
+			meta := P(&items[index]).GetObjectMeta()
+			listed[Key(meta)] = meta.GetResourceVersion()
+		}
+		return listed, nil
+	})
+	return items, err
 }
 
 // Written sends one request that answers an object, such as a create,

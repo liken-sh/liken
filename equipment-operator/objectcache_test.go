@@ -10,6 +10,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -109,5 +110,34 @@ func TestARefusedReadOfACopyOlderThanItsOwnWriteIsAnError(t *testing.T) {
 		mustMatch(t, refused != nil, true)
 		mustSucceed(t, answered)
 		mustMatch(t, list.Items[0].Status.Session.Player, "den")
+	})
+}
+
+// A pass that runs before the Television watch finished its first read
+// lists the Televisions from the API server. The store can then become
+// ready at an older copy, because the watch's first read can come from
+// the API server's watch cache, which runs behind etcd. The next pass
+// must not read that older copy: a node workload that read a session's
+// wake from the list and started it would read the copy from before the
+// wake, and cancel the wake it had just started.
+func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putTelevision(lounge(""))
+		older := snapshot(t, api, televisionsPath).view()
+		session := wokeNow()
+		api.putTelevision(waking(session))
+		held := &watchStore{}
+		held.hold(informer.View{Store: older.Store, Synced: func() bool { return false }}, false)
+
+		listed, err := readTelevisions(api.client, held)
+		mustSucceed(t, err)
+		mustDeepEqual(t, listed.Items[0].Status.Session, session)
+		held.hold(older, false)
+		read, err := readTelevisions(api.client, held)
+
+		mustSucceed(t, err)
+		mustDeepEqual(t, read.Items[0].Status.Session, session)
 	})
 }

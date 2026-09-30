@@ -166,24 +166,6 @@ func TestEveryRequestLeavesTheConnectionReusable(t *testing.T) {
 	}
 }
 
-func TestListClustersReadsTheCollection(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"kind": "ClusterList",
-			"items": []cluster.Cluster{
-				{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}},
-			},
-		})
-	}))
-	clusters, err := ListClusters(client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(clusters) != 1 || clusters[0].Metadata.Name != "lab" {
-		t.Errorf("got %+v", clusters)
-	}
-}
-
 func TestInClusterClientNeedsTheEnvironment(t *testing.T) {
 	// Outside a pod, the injected variables are absent. That absence
 	// is the entire diagnosis.
@@ -326,7 +308,7 @@ func TestListCarriesTheServersRefusal(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "clusters.liken.sh is forbidden", http.StatusForbidden)
 	}))
-	if _, err := ListClusters(client); err == nil {
+	if _, err := List[cluster.Cluster](client, ClustersPath); err == nil {
 		t.Error("a refused list is an error")
 	}
 	if _, err := ListHeartbeats(client); err == nil {

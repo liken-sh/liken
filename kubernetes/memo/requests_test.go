@@ -200,6 +200,25 @@ func TestAFreshReadNotesItsVersion(t *testing.T) {
 	}
 }
 
+// A list from the API server answers every object, and notes the
+// version of each one.
+func TestAListReadNotesEachObject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []record{newRecord("a", "7"), newRecord("b", "8")}})
+	}))
+	t.Cleanup(server.Close)
+	versions := New()
+
+	list, err := ReadList[record](apiclient.New(server.URL, server.Client(), ""), versions, "/records")
+
+	if err != nil || len(list) != 2 || list[0].Metadata.Name != "a" || list[1].Metadata.Name != "b" {
+		t.Fatalf("ReadList = %+v, %v; want a and b", list, err)
+	}
+	if !versions.Current("a", "7") || versions.Current("a", "6") || !versions.Current("b", "8") || versions.Current("b", "6") {
+		t.Error("the memo does not hold each object at its listed version")
+	}
+}
+
 // A store key is namespace/name for a namespaced object and the name
 // for a cluster-scoped one, and NamespacedPath reads a key back into
 // the object's path.

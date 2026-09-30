@@ -17,10 +17,6 @@ func GetCluster(c *apiclient.Client, name string) (*cluster.Cluster, error) {
 	return apiclient.Get[cluster.Cluster](c, ClustersPath+"/"+name)
 }
 
-func ListClusters(c *apiclient.Client) ([]cluster.Cluster, error) {
-	return List[cluster.Cluster](c, ClustersPath)
-}
-
 // PublishClusterStatus writes through the Cluster's status
 // subresource. This is a separate endpoint (…/clusters/<name>/status)
 // that updates only the status half of the object. Because of this,

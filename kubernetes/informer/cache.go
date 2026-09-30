@@ -19,7 +19,8 @@ package informer
 // memo package records the version of each copy the API server
 // answered, and a store's copy at another version is read from the API
 // server once. When the watch delivers the write, the store answers
-// again.
+// again. A list from the API server while the store is not ready notes
+// the version of each object too (List).
 //
 // The memo package holds the requests whose answers the memo notes,
 // because a program that must not link client-go sends them too. This
@@ -170,6 +171,25 @@ func CurrentList[T any, P Object[T]](c *apiclient.Client, held Held, path func(k
 		current = append(current, *fresh)
 	}
 	return current, nil
+}
+
+// List answers every object of one kind: the store's copies through
+// CurrentList while the store is ready, and a list from the API server
+// at listPath while it is not. The list notes the version of each object
+// it answers (memo.Versions.SendList), so a later list from a store that
+// became ready at an older version reads that object from the API server
+// again. listPath carries the selector of the watch, so both answers
+// hold the same objects. It carries no resourceVersion, so etcd answers
+// the list. path names the object of each key.
+//
+// A pass that lists a kind it reads from a store calls List, and never
+// lists the collection from the API server itself. A list outside List
+// notes no version, and the next pass can act on an older copy.
+func List[T any, P Object[T]](c *apiclient.Client, held Held, listPath string, path func(key string) string) ([]T, error) {
+	if held.View.Ready() {
+		return CurrentList[T, P](c, held, path)
+	}
+	return memo.ReadList[T, P](c, held.Versions, listPath)
 }
 
 // SettleStatus writes the status that apply sets on a copy of an
