@@ -118,8 +118,15 @@ type change struct {
 // pending is what the pod wrote and the driver has not committed. Every
 // untracked file is named, so three files under a new directory count
 // as three paths and not one.
+//
+// The read takes no optional lock. Without the flag, git status
+// refreshes the index under index.lock. The watch runs this read in
+// the background, and unwatch kills it when the pod goes. A kill
+// during the refresh leaves index.lock behind, and every later git add
+// of the volume then fails.
 func (w *workTree) pending(ctx context.Context) ([]change, error) {
-	output, err := w.git(ctx, "status", "--porcelain", "-z", "--untracked-files=all")
+	output, err := w.git(ctx, "--no-optional-locks", "status",
+		"--porcelain", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}

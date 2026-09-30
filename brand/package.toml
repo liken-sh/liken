@@ -28,3 +28,5 @@ env = { CARGO_INCREMENTAL = "0" }
 [[jobs]]
 name = "prek"
 toolchain = "prek"
+# The go and rust jobs run the same checks as these hooks.
+skip = ["gofmt", "go-vet", "staticcheck", "go-mod-tidy", "cargo-fmt-iced"]

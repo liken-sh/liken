@@ -1,7 +1,9 @@
 # This is the coverage gate, enforced in CI (see
 # .github/workflows/ci.yaml).
 #
-# The gate measures on a pinned toolchain. The Makefile says why.
+# The numbers are measured with Go 1.27.1. Its profiles count a basic
+# block once for each row that comments split the block into
+# (golang/go#80974), so the floors move when Go 1.27.2 fixes that.
 #
 # The floor started at 90, the project's target, because a skeleton has
 # no mature measurement to set it under. It rises with each

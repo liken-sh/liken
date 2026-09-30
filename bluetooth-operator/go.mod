@@ -9,45 +9,36 @@
 // matches liken's for the same reason.
 module github.com/liken-sh/bluetooth-operator
 
-go 1.26.5
-
-toolchain go1.27.0
-
-require (
-	github.com/godbus/dbus/v5 v5.2.2
-	golang.org/x/sys v0.47.0
-	google.golang.org/grpc v1.83.2
-	// The DRA plugin API that the node's kubelet calls. This side of a
-	// gRPC contract must not lead the side that answers it, so the pin
-	// follows the Kubernetes version k3s ships on a liken machine:
-	// liken's k3s/VERSION names v1.36.3+k3s1, so kubelet stays on
-	// v0.36.3.
-	k8s.io/kubelet v0.36.3
-)
-
-// The client, the watch, and the cache that the operators share. The
-// module is in this repository, and the replace below builds against
-// the copy in the tree, so no version of it is published.
-require github.com/liken-sh/liken/kubernetes v0.0.0
+go 1.27.1
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
-
-require (
-	github.com/prometheus/client_golang v1.24.1
-	github.com/prometheus/client_model v0.6.2
-	sigs.k8s.io/yaml v1.6.0
-)
 
 // The CLI plugin reaches the cluster through client-go and the
 // standard kube flags. The operator's watches run on client-go's
 // reflector with the dynamic client. Both follow the same pin as the
 // kubelet library above: the Kubernetes minor that liken ships.
 require (
+	github.com/godbus/dbus/v5 v5.2.2
+	// The client, the watch, and the cache that the operators share. The
+	// module is in this repository, and the replace above builds against
+	// the copy in the tree, so no version of it is published.
+	github.com/liken-sh/liken/kubernetes v0.0.0
+	github.com/prometheus/client_golang v1.24.1
+	github.com/prometheus/client_model v0.6.2
 	github.com/spf13/pflag v1.0.9
+	golang.org/x/sys v0.47.0
+	google.golang.org/grpc v1.83.2
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
 	k8s.io/cli-runtime v0.36.3
 	k8s.io/client-go v0.36.3
+	// The DRA plugin API that the node's kubelet calls. This side of a
+	// gRPC contract must not lead the side that answers it, so the pin
+	// follows the Kubernetes version k3s ships on a liken machine:
+	// liken's k3s/VERSION names v1.36.3+k3s1, so kubelet stays on
+	// v0.36.3.
+	k8s.io/kubelet v0.36.3
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (

@@ -3,11 +3,15 @@
 // follows the same build discipline: a static binary, no cgo.
 module github.com/liken-sh/library-operator
 
-go 1.26.5
+go 1.27.1
 
-toolchain go1.27.0
+replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
+	// The client, the watch, and the cache that the operators share. The
+	// module is in this repository, and the replace above builds against
+	// the copy in the tree, so no version of it is published.
+	github.com/liken-sh/liken/kubernetes v0.0.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/pflag v1.0.9
@@ -18,13 +22,6 @@ require (
 	k8s.io/client-go v0.36.3
 	modernc.org/sqlite v1.57.0
 )
-
-// The client, the watch, and the cache that the operators share. The
-// module is in this repository, and the replace below builds against
-// the copy in the tree, so no version of it is published.
-require github.com/liken-sh/liken/kubernetes v0.0.0
-
-replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect

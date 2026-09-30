@@ -13,23 +13,12 @@
 .PHONY: test
 test: test-go test-media-browser test-docs
 
-# One run gives the race check and the coverage profile. The run uses
-# the pinned toolchain below, because the profile depends on it, and
-# -race needs -covermode=atomic.
-#
-# The coverage gate measures on a pinned toolchain.
-# Go 1.27 splits a basic block into one profile row per run of code
-# inside it, and repeats the whole block's statement count on every
-# row. Every reader sums those rows, `go tool cover` included, so a
-# block counts once more for each comment that interrupts it. Go 1.26
-# counts each block once, which is what .testcoverage.yml's threshold
-# was set against. Move this pin to the newest toolchain that counts
-# each block once.
+# One run of the tests gives both the race check and the coverage
+# profile, because -race with -covermode=atomic does both.
 #
 # go-test-coverage is a pinned tool dependency (the `tool` directive
 # in go.mod), so the gate needs nothing installed beyond the Go
 # toolchain.
-COVERAGE_TOOLCHAIN := go1.26.7
 
 # The pod build is the program every pod and Job the operator creates
 # runs, built with the tag pod (operate_pod.go says why). The check vets
@@ -40,11 +29,12 @@ POD_BUILD_CLIENT_GO := go list -tags pod -deps . | grep '^k8s.io/client-go'
 .PHONY: test-go
 test-go:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	go mod tidy -diff
 	go vet ./...
 	go vet -tags pod .
 	test -z "$$($(POD_BUILD_CLIENT_GO))" || { echo 'the pod build links client-go:'; $(POD_BUILD_CLIENT_GO); exit 1; }
-	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -race -covermode=atomic -coverprofile=coverage.out ./...
-	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+	go test -race -covermode=atomic -coverprofile=coverage.out ./...
+	go tool go-test-coverage --config=.testcoverage.yml
 
 .PHONY: test-media-browser
 test-media-browser:

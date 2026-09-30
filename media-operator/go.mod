@@ -3,12 +3,16 @@
 // follows the same build discipline: a static binary, no cgo.
 module github.com/liken-sh/media-operator
 
-go 1.26.5
+go 1.27.1
 
-toolchain go1.27.0
+replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
+	// The client, the watch, and the cache that the operators share. The
+	// module is in this repository, and the replace above builds against
+	// the copy in the tree, so no version of it is published.
+	github.com/liken-sh/liken/kubernetes v0.0.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/pflag v1.0.9
 	k8s.io/api v0.36.3
@@ -17,13 +21,6 @@ require (
 	k8s.io/client-go v0.36.3
 	sigs.k8s.io/yaml v1.6.0
 )
-
-// The client, the watch, and the cache that the operators share. The
-// module is in this repository, and the replace below builds against
-// the copy in the tree, so no version of it is published.
-require github.com/liken-sh/liken/kubernetes v0.0.0
-
-replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect

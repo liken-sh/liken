@@ -21,7 +21,7 @@
 # weston image holds, and a node that draws with the compositor and
 # the clients holds glibc, libdrm and LLVM once.
 
-FROM golang:1.27.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

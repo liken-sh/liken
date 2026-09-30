@@ -82,19 +82,21 @@ preview: docs
 # report with a profile missing stays out of the site, because it
 # would show a lower coverage with no reason. ci/coverage.go gives the
 # reason that a served profile is still correct.
+#
+# Each manual is a target of its own, so `make -j site` builds the
+# manuals together, and CI runs it that way. Two manuals never write to
+# the same path: each build writes its generated pages and its
+# dist/site/ inside its own component, and reads the brand theme
+# without writing to it. The copies go to separate directories under
+# dist/docs/, and liken's tree at the root holds no directory that a
+# prefix names. The coverage reports come after every manual, because
+# `ci reports` writes into the finished tree. The recipe passes SITES
+# to the second make, so `ci sites` runs once.
 .PHONY: site
 site:
 	rm -rf $(DOCS)
-	$(MAKE) -C liken/docs build
-	mkdir -p $(DOCS)
-	cp -R liken/docs/dist/site/. $(DOCS)/
-	@set -e; for site in $(SITES); do \
-		dir=$${site%%:*}; prefix=$${site##*:}; \
-		echo "building $$dir into /$$prefix/"; \
-		$(MAKE) -C $$dir/docs build; \
-		mkdir -p $(DOCS)/$$prefix; \
-		cp -R $$dir/docs/dist/site/. $(DOCS)/$$prefix/; \
-	done
+	$(MAKE) SITES='$(SITES)' site-manual-liken \
+		$(foreach site,$(SITES),site-manual-$(firstword $(subst :, ,$(site))))
 	@set -e; reports="$$(cd ci && go run . reports -root .. \
 		-site $(SITE_URL) -dest $(DOCS))"; \
 	for report in $$reports; do \
@@ -104,3 +106,19 @@ site:
 		mkdir -p $$(dirname $$out); \
 		cp $$dir/coverage.html $$out; \
 	done
+
+# liken's manual is the root of the site.
+site-manual-liken:
+	$(MAKE) -C liken/docs build
+	mkdir -p $(DOCS)
+	cp -R liken/docs/dist/site/. $(DOCS)/
+
+# Every other manual copies into the prefix that SITES gives its
+# directory. These targets are not phony, because make does not apply
+# a pattern rule to a phony target, and no file has their names.
+site-manual-%: prefix = $(lastword $(subst :, ,$(filter $*:%,$(SITES))))
+site-manual-%:
+	@echo "building $* into /$(prefix)/"
+	$(MAKE) -C $*/docs build
+	mkdir -p $(DOCS)/$(prefix)
+	cp -R $*/docs/dist/site/. $(DOCS)/$(prefix)/

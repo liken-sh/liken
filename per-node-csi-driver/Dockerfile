@@ -1,7 +1,7 @@
 # The image is the binary alone on scratch. The driver runs no other
 # program, so nothing else is in it.
 
-FROM golang:1.27.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

@@ -4,6 +4,10 @@
 # check, and a change that gains coverage should raise the number here
 # to keep the gain.
 #
+# The numbers are measured with Go 1.27.1. Its profiles count a basic
+# block once for each row that comments split the block into
+# (golang/go#80974), so the floors move when Go 1.27.2 fixes that.
+#
 # What stays untested is main itself, the functions that run go list,
 # cargo metadata, and each publish command for real, and a scattering
 # of I/O error returns. The tests give every command fixtures in their

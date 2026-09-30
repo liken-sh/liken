@@ -11,7 +11,7 @@
 # the program on each node is about half the size. leader_node.go says
 # why.
 
-FROM golang:1.27.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

@@ -125,26 +125,41 @@ jobs:
           cache: false
 
       # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache. Its key follows the hash
-      # of these files:
+      # it, so a branch never writes an entry that pushes one of main's
+      # out of the repository's 10 GB. The cache holds the Go modules
+      # and the build cache.
+      #
+      # The build cache holds Go's test results and the compiled
+      # packages of the job's own module, and most commits change both.
+      # So the key ends in the commit: each push to main saves a new
+      # entry, and every run restores the newest one. A key without the
+      # commit would save one entry when its files last changed. That
+      # entry would keep the test results and packages of that commit,
+      # and each run would compile the module's packages again and run
+      # the tests of every package. The cost is one entry for each job
+      # on each push to main, and GitHub evicts the oldest entries when
+      # the repository's caches pass 10 GB.
+      #
+      # Before the commit, the key holds the hash of these files:
       #
       #   ci/go.sum
       #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same job,
-      # which holds most of what the job needs. Each job has entries of
-      # its own: a job that builds less would save an entry that the
-      # other job then restores whole and never saves.
+      # A restore takes the newest entry with the same hash. When no
+      # entry has that hash, as on a branch that changes one of the
+      # files, the restore takes the newest entry of the same job. Each
+      # job has entries of its own: a job that builds less would save
+      # an entry without the packages that the other job compiles, and
+      # the other job would restore it and compile them again.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
-          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       - id: plan
         working-directory: ci
@@ -171,6 +186,13 @@ jobs:
   # .pre-commit-config.yaml checks them. Each component's own hooks run
   # in its prek job, and the generator refuses a component that has
   # hooks and no prek job.
+  #
+  # The job skips the `workflows` hook, because the graph job runs the
+  # same `generate -check`, and the hook would compile ci a second
+  # time. The hook stays in the root .pre-commit-config.yaml for a
+  # workstation. The skip is a `--skip` argument and not the SKIP
+  # variable, because prek ignores SKIP when the command line has a
+  # `--skip`.
   repository:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -181,6 +203,7 @@ jobs:
           prek-version: 0.5.2
           extra-args: >-
             --all-files
+            --skip workflows
             --skip kubernetes/
             --skip audio-operator/
             --skip bluetooth-operator/
@@ -217,17 +240,13 @@ jobs:
           go-version-file: ci/go.mod
           cache: false
 
-      # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules. Its key follows the hash
-      # of these files:
-      #
-      #   **/go.sum
-      #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same family,
-      # which holds most of what the job needs.
+      # Every run restores the Go modules, and only a push to main saves
+      # them, when the key missed, so a branch never writes an entry
+      # that pushes one of main's out of the repository's 10 GB. The key
+      # follows the hash of `**/go.sum`. When no entry has that
+      # key, as on a branch that changes it, the restore takes the newest
+      # entry of the same family, which holds most of the modules that
+      # the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
@@ -769,8 +788,12 @@ jobs:
   # the reports, and `ci reports` takes that copy: the job's files did
   # not change since the run that wrote it, so it is the profile of this
   # commit. ci/coverage.go gives the whole argument.
+  #
+  # The site reads only the tree and the coverage artifacts of the
+  # check jobs. So it waits for the plan and each component's checks,
+  # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, kubernetes, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -791,17 +814,13 @@ jobs:
           go-version-file: liken/docs/go.mod
           cache: false
 
-      # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules. Its key follows the hash
-      # of these files:
-      #
-      #   **/docs/go.sum
-      #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same family,
-      # which holds most of what the job needs.
+      # Every run restores the Go modules, and only a push to main saves
+      # them, when the key missed, so a branch never writes an entry
+      # that pushes one of main's out of the repository's 10 GB. The key
+      # follows the hash of `**/docs/go.sum`. When no entry has that
+      # key, as on a branch that changes it, the restore takes the newest
+      # entry of the same family, which holds most of the modules that
+      # the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
@@ -809,6 +828,25 @@ jobs:
             ~/go/pkg/mod
           key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('**/docs/go.sum') }}
           restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-
+
+      # The site compiles Hugo and the brand's page generators in every
+      # manual's module, as each manual's docs job does. So the site
+      # keeps its build cache in the same family as the docs jobs. The
+      # site restores the newest entry of any of them. A docs job with
+      # no entry for its own go.sum restores the newest entry of the
+      # family, and the site's entry holds every manual's build. The
+      # hash covers every manual's go.sum, so the site's key never
+      # equals the key that a docs job saves for the same commit. The
+      # key ends in the commit for the reason the docs jobs give: Go
+      # trims a build cache entry that no build used for five days.
+      - id: hugo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-
+            hugo-build-${{ runner.os }}-
 
       - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check && contains(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs, 'go') }}
@@ -894,8 +932,10 @@ jobs:
           name: coverage-per-node-csi-driver-go
           path: per-node-csi-driver
 
+      # Each manual is a target of the root Makefile's site, so -j builds
+      # the manuals together, one for each processor.
       - name: build the site
-        run: make site SITE_URL=https://liken.sh
+        run: make -j"$(nproc)" site SITE_URL=https://liken.sh
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -903,6 +943,12 @@ jobs:
           path: |
             ~/go/pkg/mod
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
       - uses: actions/upload-pages-artifact@v5
         with:
@@ -986,26 +1032,41 @@ jobs:
           cache: false
 
       # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache. Its key follows the hash
-      # of these files:
+      # it, so a branch never writes an entry that pushes one of main's
+      # out of the repository's 10 GB. The cache holds the Go modules
+      # and the build cache.
+      #
+      # The build cache holds Go's test results and the compiled
+      # packages of the job's own module, and most commits change both.
+      # So the key ends in the commit: each push to main saves a new
+      # entry, and every run restores the newest one. A key without the
+      # commit would save one entry when its files last changed. That
+      # entry would keep the test results and packages of that commit,
+      # and each run would compile the module's packages again and run
+      # the tests of every package. The cost is one entry for each job
+      # on each push to main, and GitHub evicts the oldest entries when
+      # the repository's caches pass 10 GB.
+      #
+      # Before the commit, the key holds the hash of these files:
       #
       #   ci/go.sum
       #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same job,
-      # which holds most of what the job needs. Each job has entries of
-      # its own: a job that builds less would save an entry that the
-      # other job then restores whole and never saves.
+      # A restore takes the newest entry with the same hash. When no
+      # entry has that hash, as on a branch that changes one of the
+      # files, the restore takes the newest entry of the same job. Each
+      # job has entries of its own: a job that builds less would save
+      # an entry without the packages that the other job compiles, and
+      # the other job would restore it and compile them again.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
-          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       - name: write the release record
         working-directory: ci

@@ -12,7 +12,7 @@
 # runs as uid 65534 with every capability dropped, which the manifest
 # states.
 
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

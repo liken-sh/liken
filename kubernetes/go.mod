@@ -8,9 +8,7 @@
 // v0.36.3. The Go version matches liken's for the same reason.
 module github.com/liken-sh/liken/kubernetes
 
-go 1.26.5
-
-toolchain go1.27.0
+go 1.27.1
 
 require (
 	k8s.io/apimachinery v0.36.3

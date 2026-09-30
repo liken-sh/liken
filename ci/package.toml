@@ -15,3 +15,5 @@ run = "make test"
 [[jobs]]
 name = "prek"
 toolchain = "prek"
+# The go job runs the same checks as these hooks.
+skip = ["gofmt", "go-vet", "go-mod-tidy"]

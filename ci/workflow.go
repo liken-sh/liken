@@ -3,13 +3,18 @@ package main
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"text/template"
+
+	"gopkg.in/yaml.v3"
 )
 
 // The templates use {% %} as delimiters, because the workflows are full
@@ -157,8 +162,8 @@ type jobData struct {
 	Job
 	Component, WorkDir, ModuleDir string
 	// Go is true when the job sets up Go: a go or hugo job always, and
-	// a prek job when its module directory has a go.mod, because its
-	// hooks then run Go.
+	// a prek job when its module directory has a go.mod and a hook
+	// that the job runs calls go or gofmt.
 	Go bool
 	// Cache is the job's Go cache, when Go is true.
 	Cache goCache
@@ -183,8 +188,12 @@ func componentData(root string, c *Component) (map[string]any, error) {
 		case "go", "hugo":
 			d.Go = true
 		case "prek":
-			_, err := os.Stat(filepath.Join(root, d.ModuleDir, "go.mod"))
-			d.Go = err == nil
+			runsGo, err := hooksRunGo(root, c, job.Skip)
+			if err != nil {
+				return nil, err
+			}
+			_, noModule := os.Stat(filepath.Join(root, d.ModuleDir, "go.mod"))
+			d.Go = runsGo && noModule == nil
 		}
 		d.Cache = jobCache(c, d)
 		for _, file := range job.Coverage {
@@ -220,18 +229,69 @@ func componentData(root string, c *Component) (map[string]any, error) {
 	}, nil
 }
 
+// goCommand matches a command line that runs go or gofmt, as a word
+// of its own, so that cargo does not match.
+var goCommand = regexp.MustCompile(`(^|[\s'"(;&|])(go|gofmt)(\s|$)`)
+
+// hooksRunGo is true when a hook of the component's
+// .pre-commit-config.yaml that is not in skip runs go or gofmt. A prek
+// job that sets up Go also restores a build cache of about 1 GB, and a
+// job whose Go hooks all run in the go job needs neither. Only a local
+// hook runs the Go of the runner: a hook from a remote repository
+// installs its own language. A component with no hooks runs no Go.
+func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
+	file := filepath.Join(root, c.Dir, ".pre-commit-config.yaml")
+	data, err := os.ReadFile(file)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var config struct {
+		Repos []struct {
+			Repo  string `yaml:"repo"`
+			Hooks []struct {
+				ID    string `yaml:"id"`
+				Entry string `yaml:"entry"`
+			} `yaml:"hooks"`
+		} `yaml:"repos"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return false, fmt.Errorf("%s: %w", file, err)
+	}
+	for _, repo := range config.Repos {
+		if repo.Repo != "local" {
+			continue
+		}
+		for _, hook := range repo.Hooks {
+			if !slices.Contains(skip, hook.ID) && goCommand.MatchString(hook.Entry) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // jobCache is the Go cache of one job. Every manual reads the same
 // modules, so the hugo jobs share one entry of modules, keyed on go.sum.
 //
-// Any other job keeps a build cache of its own. A saved entry never
-// changes, and a restore that hits its key saves nothing, so an entry
-// keyed on go.sum alone keeps what the job compiled when go.sum last
-// changed. A job whose flags changed after that, such as a test run
-// that adds -race, then compiles every dependency again on each run.
-// So the key follows the files that choose what the job compiles and
-// with which flags: the Makefile where the job runs, the component's
-// package.toml, which holds the job's command, and its hooks, which a
-// prek job runs.
+// Any other job keeps a build cache of its own, whose key ends in the
+// commit. The build cache holds Go's test results and the compiled
+// packages of the job's own module, and most commits change both, so
+// each push to main saves a new entry and every run restores the
+// newest one. A key without the commit would save one entry when its
+// files last changed, and each later run would compile the module's
+// packages again and run the tests of every package. The cost is one
+// entry for each job on each push to main, and GitHub evicts the
+// oldest entries when the repository's caches pass 10 GB.
+//
+// Before the commit, the key holds the hash of go.sum and of the files
+// that choose what the job compiles and with which flags: the Makefile
+// where the job runs, the component's package.toml, which holds the
+// job's command, and its hooks, which a prek job runs. A restore takes the
+// newest entry with the same hash first, so a run starts from a build
+// made with the same flags when one exists.
 func jobCache(c *Component, d jobData) goCache {
 	sum := path.Join(d.ModuleDir, "go.sum")
 	if d.Toolchain == "hugo" {

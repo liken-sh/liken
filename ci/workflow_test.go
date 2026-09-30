@@ -195,31 +195,6 @@ func TestACoverageFileMustBeAtTheComponentsTop(t *testing.T) {
 	}
 }
 
-func TestAHooksJobSetsUpGoOnlyForAGoModule(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		"os/package.toml":   "[package]\nname = \"os\"\n[[jobs]]\nname = \"checks\"\ntoolchain = \"prek\"\n",
-		"os/go.mod":         "module os\n",
-		"base/package.toml": "[package]\nname = \"base\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
-	})
-	components, err := LoadComponents(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files, err := Workflows(root, components)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cases := map[string]bool{"os": true, "base": false}
-	for name, wants := range cases {
-		t.Run(name, func(t *testing.T) {
-			text := string(files[".github/workflows/component-"+name+".yaml"])
-			if strings.Contains(text, "actions/setup-go") != wants {
-				t.Errorf("setup-go in the %s workflow is %v:\n%s", name, !wants, text)
-			}
-		})
-	}
-}
-
 func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
@@ -260,6 +235,27 @@ func TestTheSiteTakesCoverageOnlyFromAJobThatRan(t *testing.T) {
 	}
 }
 
+// The site compiles Hugo in every manual's module, so it restores the
+// Hugo build cache that the docs jobs save, saves its own on main, and
+// builds the manuals in parallel.
+func TestTheSiteSharesTheHugoBuildCacheAndBuildsInParallel(t *testing.T) {
+	files, err := Workflows("", graphFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(files[".github/workflows/ci.yaml"])
+	for _, want := range []string{
+		"key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}\n" +
+			"          restore-keys: |\n            hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-\n            hugo-build-${{ runner.os }}-\n",
+		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
+		"run: make -j\"$(nproc)\" site SITE_URL=https://liken.sh\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the site job lacks %q", want)
+		}
+	}
+}
+
 // Only a push to main writes the Actions cache, so a branch never
 // pushes one of main's entries out, and the manuals that share a go.sum
 // share one Hugo build cache.
@@ -296,8 +292,13 @@ run = "make test"
 		"          cache: false\n",
 		// Each job has a build cache of its own: a job that builds less
 		// must not save the entry that another job then restores whole.
-		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n" +
-			"          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-\n",
+		// The key ends in the commit, so each push to main saves the
+		// test results and packages of that commit, and a restore takes
+		// the newest entry with the same flags, then the job's newest.
+		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }}\n" +
+			"          restore-keys: |\n" +
+			"            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-\n" +
+			"            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-\n",
 		// Every manual reads the same modules, so the manuals share one.
 		"key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('app/docs/go.sum') }}\n" +
 			"          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-\n",
@@ -318,15 +319,15 @@ run = "make test"
 	}
 }
 
-// A saved cache entry never changes, so a build cache keyed on go.sum
-// alone keeps what its job compiled when go.sum last changed. A job's
-// key follows the files that choose what it compiles and with which
-// flags too: its go.sum, the Makefile where it runs, and the
-// component's package.toml and hooks.
+// A build cache's key holds the hash of the files that choose what the
+// job compiles and with which flags: its go.sum, the Makefile where it
+// runs, and the component's package.toml and hooks. A restore takes the
+// newest entry with the same hash first.
 func TestABuildCacheFollowsWhatChoosesTheBuild(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\ndir = \"svc\"\nrun = \"make test\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
-		"app/go.mod":       "module app\n",
+		"app/package.toml":            "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\ndir = \"svc\"\nrun = \"make test\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
+		"app/go.mod":                  "module app\n",
+		"app/.pre-commit-config.yaml": "repos:\n  - repo: local\n    hooks:\n      - id: go-vet\n        entry: go vet ./...\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -338,8 +339,8 @@ func TestABuildCacheFollowsWhatChoosesTheBuild(t *testing.T) {
 	}
 	text := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
-		"${{ github.job }}-${{ hashFiles('app/svc/go.sum', 'app/svc/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n",
-		"${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n",
+		"${{ github.job }}-${{ hashFiles('app/svc/go.sum', 'app/svc/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }}\n",
+		"${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }}\n",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the workflow lacks the key %q:\n%s", want, text)
@@ -461,6 +462,53 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 	}
 }
 
+// The site reads only the tree and the coverage artifacts of the check
+// jobs, so it waits for the checks and not for the publishes. The
+// release record lists every published version, so it waits for the
+// publishes too.
+func TestTheSiteWaitsForTheChecksAndTheRecordForThePublishes(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"lib/package.toml": "[package]\nname = \"lib\"\n",
+		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
+	cases := map[string][]any{
+		"site":   {"plan", "lib", "app"},
+		"record": {"plan", "lib", "app", "app-publish"},
+	}
+	for name, needs := range cases {
+		if got := jobs[name]["needs"]; !reflect.DeepEqual(got, needs) {
+			t.Errorf("%s needs %v, want %v", name, got, needs)
+		}
+	}
+}
+
+// The graph job runs `generate -check`, so the repository job skips the
+// root hook that runs the same check. prek ignores the SKIP variable
+// when the command line has a `--skip`, and the repository job skips
+// each component's directory, so the hook's skip is an argument too.
+func TestTheRepositoryJobSkipsTheWorkflowsHook(t *testing.T) {
+	files, err := Workflows("", graphFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
+	steps := jobs["repository"]["steps"].([]any)
+	prek := steps[len(steps)-1].(map[string]any)
+	args := prek["with"].(map[string]any)["extra-args"].(string) + " "
+	if prek["uses"] != "j178/prek-action@v2" || !strings.Contains(args, " --skip workflows ") {
+		t.Errorf("the repository job's prek step is %v", prek)
+	}
+}
+
 // The check stage runs the publish job in its dry mode when the plan
 // asks for a dry run. The dry run logs in to nothing, and the OS's dry
 // run builds and boots a release under the lab's serial and uploads
@@ -543,5 +591,50 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s's publish job sets up %v, want %v", name, got, want)
 		}
+	}
+}
+
+// A prek job sets up Go only when a hook that it runs in CI runs go or
+// gofmt. A hook that the job skips runs in another job, which sets up
+// Go for itself, and a remote hook installs its own language.
+func TestAPrekJobSetsUpGoOnlyForAHookThatRunsGo(t *testing.T) {
+	hooks := "repos:\n" +
+		"  - repo: https://github.com/pre-commit/pre-commit-hooks\n    rev: v6.0.0\n    hooks:\n      - id: trailing-whitespace\n" +
+		"  - repo: local\n    hooks:\n" +
+		"      - id: gofmt\n        name: gofmt\n        entry: bash -c 'exec \"$(go env GOROOT)/bin/gofmt\" -l -w \"$@\"' --\n        language: system\n" +
+		"      - id: go-vet\n        name: go vet\n        entry: go vet ./...\n        language: system\n" +
+		"      - id: cargo-fmt\n        name: cargo fmt\n        entry: bash -c 'cargo fmt --check'\n        language: system\n"
+	for _, tc := range []struct {
+		name, skip string
+		goMod      bool
+		setsUpGo   bool
+	}{
+		{"every hook runs", `[]`, true, true},
+		{"one Go hook runs", `["go-vet"]`, true, true},
+		{"every Go hook is skipped", `["gofmt", "go-vet"]`, true, false},
+		{"no go.mod", `[]`, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{
+				"app/package.toml":            "[package]\nname = \"app\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\nskip = " + tc.skip + "\n",
+				"app/.pre-commit-config.yaml": hooks,
+			}
+			if tc.goMod {
+				files["app/go.mod"] = "module app\n"
+			}
+			root := writeTree(t, files)
+			components, err := LoadComponents(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workflows, err := Workflows(root, components)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(workflows[".github/workflows/component-app.yaml"])
+			if got := strings.Contains(text, "uses: actions/setup-go@"); got != tc.setsUpGo {
+				t.Errorf("the prek job sets up Go: %v, want %v:\n%s", got, tc.setsUpGo, text)
+			}
+		})
 	}
 }

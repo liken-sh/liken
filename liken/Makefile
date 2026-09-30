@@ -657,28 +657,13 @@ docs:
 # change that passes here passes there.
 test: test-go test-docs
 
-# The gate measures coverage on its own run, on its own pinned
-# toolchain, and the pin is the point.
-#
-# Go 1.27 splits a basic block into one profile row per run of code,
-# so a comment inside a function ends that row and starts another.
-# Each row repeats the whole block's statement count, and every
-# reader sums the rows, `go tool cover` included. A block written as
-# three runs of code therefore counts three times. The error is not a
-# constant: it grows with the comments inside a function, so it moves
-# a package's number up or down when someone only reflows a comment.
-# On this repo it moves machine-operator down 11.6 points and disks
-# up 5.9.
-#
-# Go 1.26 counts each block once, so the pin below measures what
-# .testcoverage.yml's thresholds were set against. Move it to the
-# newest toolchain that counts each block once.
+# One run of the tests gives both the race check and the coverage
+# profile, because -race with -covermode=atomic does both.
 #
 # go-test-coverage is a pinned tool dependency (the `tool` directive
 # in go.mod), so the gate needs nothing installed beyond the Go
 # toolchain. Its thresholds live in .testcoverage.yml, which explains
 # how they are chosen. The profile itself is gitignored.
-COVERAGE_TOOLCHAIN := go1.26.7
 
 # liken's programs are one Go module (see liken/go.mod). So
 # every check is a single invocation of ./.... This covers Go files in
@@ -689,8 +674,8 @@ COVERAGE_TOOLCHAIN := go1.26.7
 #
 # gofmt is not here. It is its own pre-commit hook, because that hook
 # rewrites the files it finds with the toolchain's own gofmt, and a
-# make target could only report them. vet and staticcheck run both in
-# this target and as pre-commit hooks.
+# make target could only report them. vet, staticcheck, and the tidy
+# check run both in this target and as pre-commit hooks.
 #
 # A package with no test file writes no rows to the profile, so the
 # gate never counts it: its number is not low, it is missing. This
@@ -708,18 +693,18 @@ INIT_HEAVY := go list -deps ./init | grep -E '^(net/http|github\.com/liken-sh/li
 test-go:
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
 	test -z "$$($(INIT_HEAVY))" || { echo 'init links net/http or the shared kubernetes module:'; $(INIT_HEAVY); exit 1; }
+	go mod tidy -diff
 	go vet ./...
 	go tool staticcheck ./...
-	go test ./...
 	$(MAKE) coverage-profile
-	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+	go tool go-test-coverage --config=.testcoverage.yml
 
-# The profile runs the tests once more, on the gate's toolchain. A
+# The profile is the one run of the tests, and test-go runs it. A
 # release tag runs only the checks that its changes reach, so the
 # publish job often has no profile from a check job of its own run,
 # and it writes one here instead.
 coverage-profile:
-	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
+	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 
 # The coverage report is the profile as a page: one HTML file that
 # names every package's number and colors every line of source. The

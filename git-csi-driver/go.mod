@@ -3,9 +3,7 @@
 // own.
 module github.com/liken-sh/git-csi-driver
 
-go 1.26.5
-
-toolchain go1.27.0
+go 1.27.1
 
 tool github.com/vladopajic/go-test-coverage/v2
 

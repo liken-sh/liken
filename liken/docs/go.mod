@@ -11,7 +11,7 @@
 // a fetch script, so this domain needs neither.
 module github.com/liken-sh/liken/liken/docs
 
-go 1.27.0
+go 1.27.1
 
 tool (
 	github.com/gohugoio/hugo

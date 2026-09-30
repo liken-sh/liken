@@ -8,7 +8,7 @@
 # The build stage repeats the operator image's pod build, so every image
 # that carries the pod build carries the same one, built from the same
 # source.
-FROM golang:1.27.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

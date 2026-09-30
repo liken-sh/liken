@@ -22,19 +22,12 @@ codes:
 	go run keycodegen.go $(INPUT_EVENT_CODES) keycodes.go
 	gofmt -w keycodes.go
 
-# The coverage gate measures on its own run, on a pinned toolchain.
-# Go 1.27 splits a basic block into one profile row per run of code
-# inside it, and repeats the whole block's statement count on every
-# row. Every reader sums those rows, `go tool cover` included, so a
-# block counts once more for each comment that interrupts it. Go 1.26
-# counts each block once, which is what .testcoverage.yml's thresholds
-# were set against. Move this pin to the newest toolchain that counts
-# each block once.
+# One run of the tests gives both the race check and the coverage
+# profile, because -race with -covermode=atomic does both.
 #
 # go-test-coverage is a pinned tool dependency (the `tool` directive
 # in go.mod), so the gate needs nothing installed beyond the Go
 # toolchain.
-COVERAGE_TOOLCHAIN := go1.26.7
 
 # A package with no test file writes no rows to the profile, so the
 # gate never counts it: its number is not low, it is missing. This
@@ -53,13 +46,13 @@ POD_BUILD_CLIENT_GO := go list -tags pod -deps . | grep -E '^k8s.io/client-go/(k
 .PHONY: test-go
 test-go:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	go mod tidy -diff
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
 	go vet ./...
 	go vet -tags pod .
 	test -z "$$($(POD_BUILD_CLIENT_GO))" || { echo 'the pod build links more of client-go than its watches need:'; $(POD_BUILD_CLIENT_GO); exit 1; }
-	go test -race ./...
-	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
-	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+	go test -race -covermode=atomic -coverprofile=coverage.out ./...
+	go tool go-test-coverage --config=.testcoverage.yml
 
 # The Rust half is a cargo workspace with two members: the idle screen,
 # which draws with the media-screen library at the top of the
@@ -108,7 +101,7 @@ test-rust:
 		--fail-under-lines $(IDLE_COVERAGE_FLOOR)
 	cargo llvm-cov report -p idle-screen \
 		--cobertura --output-path coverage-idle-screen.xml
-	cargo llvm-cov clean --workspace --profraw-only
+	cargo llvm-cov clean --profraw-only
 	cargo llvm-cov -p media-display --all-targets \
 		--fail-under-lines $(DISPLAY_COVERAGE_FLOOR)
 	cargo llvm-cov report -p media-display \

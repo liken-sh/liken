@@ -6,7 +6,9 @@
 # check, and a change that gains coverage should raise the number
 # here to keep the gain.
 #
-# The gate measures on a pinned toolchain. The CI step says why.
+# The numbers are measured with Go 1.27.1. Its profiles count a basic
+# block once for each row that comments split the block into
+# (golang/go#80974), so the floors move when Go 1.27.2 fixes that.
 
 profile: coverage.out
 

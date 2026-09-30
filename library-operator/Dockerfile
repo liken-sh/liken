@@ -8,7 +8,7 @@
 # sidecar build from media-browser/Dockerfile and corrosion/Dockerfile, and the
 # release ships the four together.
 
-FROM golang:1.27.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

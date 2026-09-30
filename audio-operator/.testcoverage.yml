@@ -6,7 +6,9 @@
 # check, and a change that gains coverage should raise the number
 # here to keep the gain.
 #
-# The gate measures on a pinned toolchain. The Makefile says why.
+# The numbers are measured with Go 1.27.1. Its profiles count a basic
+# block once for each row that comments split the block into
+# (golang/go#80974), so the floors move when Go 1.27.2 fixes that.
 #
 # The number is what CI measures, not what a developer's machine
 # measures. The mixer and control-event tests read a real card where
@@ -14,7 +16,7 @@
 # measures about four points higher. To measure what CI measures,
 # skip the three tests that read card 0:
 #
-#   go test -skip 'TestWatchControlsOnTheLocalCard|TestMixerReadsTheLocalCard|TestTheCardStaysOpenForTheLengthOfAPass' -coverprofile=coverage.out ./...
+#   go test -race -covermode=atomic -skip 'TestWatchControlsOnTheLocalCard|TestMixerReadsTheLocalCard|TestTheCardStaysOpenForTheLengthOfAPass' -coverprofile=coverage.out ./...
 
 profile: coverage.out
 

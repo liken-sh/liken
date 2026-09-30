@@ -69,34 +69,47 @@ jobs:
           cache: false
 
       # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache. Its key follows the hash
-      # of these files:
+      # it, so a branch never writes an entry that pushes one of main's
+      # out of the repository's 10 GB. The cache holds the Go modules
+      # and the build cache.
+      #
+      # The build cache holds Go's test results and the compiled
+      # packages of the job's own module, and most commits change both.
+      # So the key ends in the commit: each push to main saves a new
+      # entry, and every run restores the newest one. A key without the
+      # commit would save one entry when its files last changed. That
+      # entry would keep the test results and packages of that commit,
+      # and each run would compile the module's packages again and run
+      # the tests of every package. The cost is one entry for each job
+      # on each push to main, and GitHub evicts the oldest entries when
+      # the repository's caches pass 10 GB.
+      #
+      # Before the commit, the key holds the hash of these files:
       #
       #   people-operator/go.sum
       #   people-operator/Makefile
       #   people-operator/package.toml
       #   people-operator/.pre-commit-config.yaml
       #
-      # A saved entry never changes. The files after go.sum choose what
-      # the job compiles and with which flags, so an entry keyed on
-      # go.sum alone would keep the build from before a flag such as
-      # -race changed, and each run would compile it again.
+      # The files after go.sum choose what the job compiles and with
+      # which flags.
       #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same job,
-      # which holds most of what the job needs. Each job has entries of
-      # its own: a job that builds less would save an entry that the
-      # other job then restores whole and never saves.
+      # A restore takes the newest entry with the same hash. When no
+      # entry has that hash, as on a branch that changes one of the
+      # files, the restore takes the newest entry of the same job. Each
+      # job has entries of its own: a job that builds less would save
+      # an entry without the packages that the other job compiles, and
+      # the other job would restore it and compile them again.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-${{ hashFiles('people-operator/go.sum', 'people-operator/Makefile', 'people-operator/package.toml', 'people-operator/.pre-commit-config.yaml') }}
-          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-${{ hashFiles('people-operator/go.sum', 'people-operator/Makefile', 'people-operator/package.toml', 'people-operator/.pre-commit-config.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-${{ hashFiles('people-operator/go.sum', 'people-operator/Makefile', 'people-operator/package.toml', 'people-operator/.pre-commit-config.yaml') }}-
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-
 
       - run: make test-go
 
@@ -133,17 +146,13 @@ jobs:
           go-version-file: people-operator/docs/go.mod
           cache: false
 
-      # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules. Its key follows the hash
-      # of these files:
-      #
-      #   people-operator/docs/go.sum
-      #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same family,
-      # which holds most of what the job needs.
+      # Every run restores the Go modules, and only a push to main saves
+      # them, when the key missed, so a branch never writes an entry
+      # that pushes one of main's out of the repository's 10 GB. The key
+      # follows the hash of `people-operator/docs/go.sum`. When no entry has that
+      # key, as on a branch that changes it, the restore takes the newest
+      # entry of the same family, which holds most of the modules that
+      # the job needs.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
@@ -193,57 +202,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - id: setup-go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: people-operator/go.mod
-          cache: false
-
-      # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache. Its key follows the hash
-      # of these files:
-      #
-      #   people-operator/go.sum
-      #   people-operator/Makefile
-      #   people-operator/package.toml
-      #   people-operator/.pre-commit-config.yaml
-      #
-      # A saved entry never changes. The files after go.sum choose what
-      # the job compiles and with which flags, so an entry keyed on
-      # go.sum alone would keep the build from before a flag such as
-      # -race changed, and each run would compile it again.
-      #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same job,
-      # which holds most of what the job needs. Each job has entries of
-      # its own: a job that builds less would save an entry that the
-      # other job then restores whole and never saves.
-      - id: go-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-${{ hashFiles('people-operator/go.sum', 'people-operator/Makefile', 'people-operator/package.toml', 'people-operator/.pre-commit-config.yaml') }}
-          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-people-operator-${{ github.job }}-
-
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make.
+      # with the change it would make. SKIP leaves out the hooks
+      # that another job of this workflow runs.
       - uses: j178/prek-action@v2
+        env:
+          SKIP: gofmt,go-vet,go-mod-tidy
         with:
           prek-version: 0.5.2
           extra-args: --all-files people-operator/
-
-      - if: ${{ github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   publish:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
@@ -261,26 +229,41 @@ jobs:
           cache: false
 
       # Every run restores the Go cache, and only a push to main saves
-      # it, when its key missed, so a branch never writes an entry that
-      # pushes one of main's out of the repository's 10 GB. The cache
-      # holds the Go modules and the build cache. Its key follows the hash
-      # of these files:
+      # it, so a branch never writes an entry that pushes one of main's
+      # out of the repository's 10 GB. The cache holds the Go modules
+      # and the build cache.
+      #
+      # The build cache holds Go's test results and the compiled
+      # packages of the job's own module, and most commits change both.
+      # So the key ends in the commit: each push to main saves a new
+      # entry, and every run restores the newest one. A key without the
+      # commit would save one entry when its files last changed. That
+      # entry would keep the test results and packages of that commit,
+      # and each run would compile the module's packages again and run
+      # the tests of every package. The cost is one entry for each job
+      # on each push to main, and GitHub evicts the oldest entries when
+      # the repository's caches pass 10 GB.
+      #
+      # Before the commit, the key holds the hash of these files:
       #
       #   ci/go.sum
       #
-      # When no entry has that key, as on a branch that changes one of
-      # them, the restore takes the newest entry of the same job,
-      # which holds most of what the job needs. Each job has entries of
-      # its own: a job that builds less would save an entry that the
-      # other job then restores whole and never saves.
+      # A restore takes the newest entry with the same hash. When no
+      # entry has that hash, as on a branch that changes one of the
+      # files, the restore takes the newest entry of the same job. Each
+      # job has entries of its own: a job that builds less would save
+      # an entry without the packages that the other job compiles, and
+      # the other job would restore it and compile them again.
       - id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
-          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       # A dry run pushes nothing, so it needs no login.
       - if: ${{ !inputs.dryrun }}

@@ -12,19 +12,25 @@
 // required.
 module github.com/liken-sh/liken/liken
 
-go 1.26.5
-
-toolchain go1.27.0
+go 1.27.1
 
 require (
 	github.com/beevik/ntp v1.5.0
+	github.com/google/go-containerregistry v0.22.1
 	github.com/insomniacslk/dhcp v0.0.0-20260728151720-c308df0fdcef
 	github.com/klauspost/compress v1.19.2
 	github.com/liken-sh/brand v0.0.0
+	// The client, the watch, and the cache that liken's operators share
+	// with the other operators. The module is in this repository, and the
+	// replace below builds against the copy in the tree, so no version of
+	// it is published.
+	github.com/liken-sh/liken/kubernetes v0.0.0
+	github.com/prometheus/client_golang v1.24.1
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.83.2
+	k8s.io/api v0.36.3
 	// The operators watch the API server through client-go's reflector
 	// (kubernetes/informer), and the cluster operator elects its leader
 	// with client-go's leaderelection. Both follow the same minor as the
@@ -37,12 +43,6 @@ require (
 	// v1.36.3+k3s1, so kubelet stays on v0.36.3.
 	k8s.io/kubelet v0.36.3
 	sigs.k8s.io/yaml v1.6.0
-)
-
-require (
-	github.com/google/go-containerregistry v0.22.1
-	github.com/prometheus/client_golang v1.24.1
-	k8s.io/api v0.36.3
 )
 
 require (
@@ -137,11 +137,5 @@ tool (
 // brand is a component in this repository, so every consumer builds
 // against the tree beside it and never against a published version.
 replace github.com/liken-sh/brand => ../brand
-
-// The client, the watch, and the cache that liken's operators share
-// with the other operators. The module is in this repository, and the
-// replace below builds against the copy in the tree, so no version of
-// it is published.
-require github.com/liken-sh/liken/kubernetes v0.0.0
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes

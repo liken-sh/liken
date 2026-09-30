@@ -113,7 +113,9 @@ fn assert_solid(scaled: &Scaled, pixel: [u8; 4]) {
     );
     let off = scaled
         .rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .position(|drawn| *drawn != pixel);
     assert_eq!(off, None, "a pixel differs from {pixel:?}");
 }

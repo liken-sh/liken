@@ -3,7 +3,7 @@
 # they open into a tree the final stage copies whole. What the driver
 # never runs is not in the image.
 
-FROM golang:1.27.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

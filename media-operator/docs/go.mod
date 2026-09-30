@@ -9,7 +9,7 @@
 // already requires.
 module github.com/liken-sh/media-operator/docs
 
-go 1.27.0
+go 1.27.1
 
 tool (
 	github.com/gohugoio/hugo

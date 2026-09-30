@@ -160,7 +160,7 @@ RUN set -eux; \
 
 # The entrypoint. It is built from this repository's own module, which
 # is also where the operator comes from, so both images move together.
-FROM golang:1.26.5-bookworm AS entrypoint
+FROM golang:1.27.1-bookworm AS entrypoint
 WORKDIR /src
 COPY go.mod go.sum ./
 # go.mod replaces the shared kubernetes module with ../kubernetes, so

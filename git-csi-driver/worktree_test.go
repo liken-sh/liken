@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // workTreeOf makes the bare repository of the source, fetches the ref, and
@@ -133,6 +135,41 @@ func TestThePendingSetIsWhatThePodWrote(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The watch reads the pending set in the background, and unwatch kills
+// that read when the pod goes. A read that writes the index holds
+// index.lock, and a kill leaves the lock behind, so every later commit
+// of the volume fails.
+func TestThePendingReadLeavesTheIndexAlone(t *testing.T) {
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	work, commit := workTreeOf(t, source)
+	if err := work.create(t.Context(), "main", commit); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// A new modification time with the same content is what makes git
+	// refresh the index, which is the write the read must not make.
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(work.tree, "a.txt"), later, later); err != nil {
+		t.Fatalf("touching the file: %v", err)
+	}
+	index := filepath.Join(work.gitDir, "index")
+	before, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatalf("reading the index: %v", err)
+	}
+
+	if _, err := work.pending(t.Context()); err != nil {
+		t.Fatalf("pending: %v", err)
+	}
+
+	after, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatalf("reading the index: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the pending read rewrote the index")
 	}
 }
 

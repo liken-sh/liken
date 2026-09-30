@@ -136,6 +136,13 @@ jobs:
   # .pre-commit-config.yaml checks them. Each component's own hooks run
   # in its prek job, and the generator refuses a component that has
   # hooks and no prek job.
+  #
+  # The job skips the `workflows` hook, because the graph job runs the
+  # same `generate -check`, and the hook would compile ci a second
+  # time. The hook stays in the root .pre-commit-config.yaml for a
+  # workstation. The skip is a `--skip` argument and not the SKIP
+  # variable, because prek ignores SKIP when the command line has a
+  # `--skip`.
   repository:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -145,7 +152,8 @@ jobs:
         with:
           prek-version: 0.5.2
           extra-args: >-
-            --all-files{% range .Components %}
+            --all-files
+            --skip workflows{% range .Components %}
             --skip {% .Dir %}/{% end %}
 
   # The graph job proves that the generated workflows are current, and
@@ -213,8 +221,12 @@ jobs:
   # the reports, and `ci reports` takes that copy: the job's files did
   # not change since the run that wrote it, so it is the profile of this
   # commit. ci/coverage.go gives the whole argument.
+  #
+  # The site reads only the tree and the coverage artifacts of the
+  # check jobs. So it waits for the plan and each component's checks,
+  # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan{% range .Components %}, {% .Name %}{% if .Publishes %}, {% .Name %}-publish{% end %}{% end %}]
+    needs: [plan{% range .Components %}, {% .Name %}{% end %}]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -229,6 +241,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 {% template "go-restore" (goCache "liken/docs/go.mod" "**/docs/go.sum" "manuals" false) %}
+
+      # The site compiles Hugo and the brand's page generators in every
+      # manual's module, as each manual's docs job does. So the site
+      # keeps its build cache in the same family as the docs jobs. The
+      # site restores the newest entry of any of them. A docs job with
+      # no entry for its own go.sum restores the newest entry of the
+      # family, and the site's entry holds every manual's build. The
+      # hash covers every manual's go.sum, so the site's key never
+      # equals the key that a docs job saves for the same commit. The
+      # key ends in the commit for the reason the docs jobs give: Go
+      # trims a build cache entry that no build used for five days.
+      - id: hugo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-
+            hugo-build-${{ runner.os }}-
 {% range .Coverage %}
       - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['{% .Component %}'].check && contains(fromJSON(needs.plan.outputs.components)['{% .Component %}'].jobs, '{% .Job %}') }}
@@ -236,8 +267,16 @@ jobs:
           name: coverage-{% .Component %}-{% .Job %}
           path: {% .Dir %}
 {% end %}
+      # Each manual is a target of the root Makefile's site, so -j builds
+      # the manuals together, one for each processor.
       - name: build the site
-        run: make site SITE_URL=https://liken.sh{% template "go-save" (goCache "liken/docs/go.mod" "**/docs/go.sum" "manuals" false) %}
+        run: make -j"$(nproc)" site SITE_URL=https://liken.sh{% template "go-save" (goCache "liken/docs/go.mod" "**/docs/go.sum" "manuals" false) %}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
       - uses: actions/upload-pages-artifact@v5
         with:

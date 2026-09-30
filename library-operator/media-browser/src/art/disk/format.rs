@@ -181,7 +181,13 @@ fn entry_checksum(prefix: &[u8], key: &[u8], payload: &[u8]) -> [u8; 32] {
 
 fn encode_pixels(scaled: &Scaled) -> Option<(Encoding, Vec<u8>)> {
     let mut payload = Vec::new();
-    if scaled.rgba.chunks_exact(4).any(|pixel| pixel[3] < u8::MAX) {
+    if scaled
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|pixel| pixel[3] < u8::MAX)
+    {
         PngEncoder::new(&mut payload)
             .write_image(
                 &scaled.rgba,
@@ -194,7 +200,9 @@ fn encode_pixels(scaled: &Scaled) -> Option<(Encoding, Vec<u8>)> {
     }
     let rgb: Vec<u8> = scaled
         .rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|pixel| pixel[..3].iter().copied())
         .collect();
     JpegEncoder::new_with_quality(&mut payload, 90)

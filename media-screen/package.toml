@@ -19,3 +19,5 @@ coverage = ["coverage-media-screen.xml"]
 [[jobs]]
 name = "prek"
 toolchain = "prek"
+# The rust job runs the same check as this hook.
+skip = ["cargo-fmt"]

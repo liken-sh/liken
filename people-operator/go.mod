@@ -1,8 +1,6 @@
 module github.com/liken-sh/people-operator
 
-go 1.26.5
-
-toolchain go1.27.0
+go 1.27.1
 
 require (
 	k8s.io/apiextensions-apiserver v0.36.3

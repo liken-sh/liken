@@ -10,9 +10,9 @@ components = ["brand", "ffmpeg", "kubernetes", "media-screen", "vulkan"]
 [docs]
 prefix = "library"
 
-# gofmt, vet, the race tests, and the coverage gate on its pinned
-# toolchain. The Makefile says why the gate pins a toolchain, and
-# .testcoverage.yml holds the floor.
+# gofmt, vet, a tidy check of go.mod, and one run of the tests that
+# checks for races and writes the coverage profile, then the coverage
+# gate on that profile. .testcoverage.yml holds the floor.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -45,6 +45,8 @@ coverage = ["coverage-media-browser.xml"]
 [[jobs]]
 name = "prek"
 toolchain = "prek"
+# The go and rust jobs run the same checks as these hooks.
+skip = ["gofmt", "go-vet", "go-mod-tidy", "cargo-fmt-media-browser"]
 
 [outputs]
 deploy = "deploy"

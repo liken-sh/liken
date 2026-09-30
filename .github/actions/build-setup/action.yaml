@@ -29,23 +29,31 @@ runs:
     # Every run restores the Go cache, and only a push to main saves it,
     # so a branch never writes an entry that pushes one of main's out of
     # the repository's 10 GB. Each job that calls this action has
-    # entries of its own, and a restore with no entry for this key
-    # takes the job's newest one. This is the key format of the go-restore
+    # entries of its own. This is the key format of the go-restore
     # template in ci/templates/go.tmpl.
     #
-    # A saved entry never changes, and a restore that hits its key saves
-    # nothing. So the key follows the Makefiles and package.toml as well
-    # as go.sum: they choose what the build compiles and with which
-    # flags, and an entry keyed on go.sum alone would keep the build
-    # from before a flag changed, and each run would compile it again.
+    # The build cache holds Go's test results and the compiled packages
+    # of liken itself, and most commits change both. So the key ends in
+    # the commit: each push to main saves a new entry, and every run
+    # restores the newest one. The cost is one entry for each job on
+    # each push to main, and GitHub evicts the oldest entries when the
+    # repository's caches pass 10 GB.
+    #
+    # Before the commit, the key holds the hash of go.sum, the
+    # Makefiles, and package.toml: they choose what the build compiles
+    # and with which flags. A restore takes the newest entry with the
+    # same hash, and when none exists, as on a branch that changes one
+    # of those files, the newest entry of the same job.
     - id: go-cache
       uses: actions/cache/restore@v6
       with:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-        key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/*/Makefile', 'liken/package.toml') }}
-        restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-
+        key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/*/Makefile', 'liken/package.toml') }}-${{ github.sha }}
+        restore-keys: |
+          go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/*/Makefile', 'liken/package.toml') }}-
+          go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-
 
     # The fetch scripts document their own host requirements, and the
     # runner image already has most of them (curl, tar, ar, zstd,

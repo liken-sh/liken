@@ -2,9 +2,7 @@
 // in one image, so nothing here versions or releases on its own.
 module github.com/liken-sh/per-node-csi-driver
 
-go 1.26.5
-
-toolchain go1.27.0
+go 1.27.1
 
 tool github.com/vladopajic/go-test-coverage/v2
 

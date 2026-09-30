@@ -18,7 +18,7 @@
 # The sidecar image is this image, so each node that runs a sidecar
 # pulls both builds, about 40MB where one build was 17MB.
 
-FROM golang:1.27.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

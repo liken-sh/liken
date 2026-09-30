@@ -11,21 +11,23 @@ components = ["brand", "kubernetes"]
 # liken's manual is the root of the site.
 prefix = ""
 
-# vet, staticcheck, the tests, and the coverage gate on its pinned
-# toolchain. The Makefile says why the gate pins a toolchain, and
-# .testcoverage.yml holds the floor.
+# vet, staticcheck, a tidy check of go.mod, and one run of the tests
+# that checks for races and writes the coverage profile, then the
+# coverage gate on that profile. .testcoverage.yml holds the floor.
 [[jobs]]
 name = "go"
 toolchain = "go"
 run = "make test-go"
 coverage = ["coverage.out"]
 
-# The hooks in .pre-commit-config.yaml: gofmt, a tidy go.mod, and the
-# hygiene checks, the same hooks that run at commit time on a
-# workstation. The jobs above run the tests and the coverage gate.
+# The hooks in .pre-commit-config.yaml that no other job runs: gofmt
+# and the hygiene checks. The jobs above run the tests and the
+# coverage gate.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
+# The go job runs the same checks as these hooks.
+skip = ["go-vet", "staticcheck", "go-mod-tidy"]
 
 # The link check, the generated skills, and the site build. The docs
 # tests generate the reference pages first, because the link check

@@ -1,10 +1,14 @@
 module github.com/liken-sh/equipment-operator
 
-go 1.26.5
+go 1.27.1
 
-toolchain go1.27.0
+replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
+	// The client, the watch, and the cache that the operators share. The
+	// module is in this repository, and the replace above builds against
+	// the copy in the tree, so no version of it is published.
+	github.com/liken-sh/liken/kubernetes v0.0.0
 	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.47.0
@@ -15,13 +19,6 @@ require (
 	k8s.io/client-go v0.36.3
 	sigs.k8s.io/yaml v1.6.0
 )
-
-// The client, the watch, and the cache that the operators share. The
-// module is in this repository, and the replace below builds against
-// the copy in the tree, so no version of it is published.
-require github.com/liken-sh/liken/kubernetes v0.0.0
-
-replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
 	cel.dev/expr v0.25.2 // indirect
