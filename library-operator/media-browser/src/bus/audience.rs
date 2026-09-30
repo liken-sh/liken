@@ -64,6 +64,7 @@ mod tests {
             .map(|(name, display_name)| Person {
                 name: (*name).to_string(),
                 display_name: (*display_name).to_string(),
+                thumbnail: None,
             })
             .collect()
     }

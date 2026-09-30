@@ -27,6 +27,7 @@ fn halfway(known: &[&str], preset: &[&str]) -> Browser<Fake, NoArt> {
         .map(|name| crate::audience::Person {
             name: (*name).to_string(),
             display_name: (*name).to_string(),
+            thumbnail: None,
         })
         .collect();
     let preset = preset.iter().map(|name| (*name).to_string()).collect();

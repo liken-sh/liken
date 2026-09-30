@@ -426,6 +426,7 @@ fn the_people_file_lands_in_the_options() {
         [crate::audience::Person {
             name: "first".into(),
             display_name: "First".into(),
+            thumbnail: None,
         }]
     );
     assert_eq!(options.audience, ["first"]);

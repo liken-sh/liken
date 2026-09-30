@@ -1930,6 +1930,7 @@ dependencies = [
 name = "media-browser"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "iced_wgpu",
  "iced_widget",
  "iced_winit",

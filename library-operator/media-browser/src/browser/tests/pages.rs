@@ -42,6 +42,7 @@ fn watching(film: Option<Progress>, episodes: Vec<Progress>) -> (Browser<Fake, N
         vec![crate::audience::Person {
             name: WATCHER.into(),
             display_name: "First".into(),
+            thumbnail: None,
         }],
         vec![WATCHER.into()],
     );

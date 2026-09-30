@@ -439,12 +439,14 @@ func (i playRequestItem) stamped(library *Library) (PlayItem, error) {
 // reference is the media reference one relative path becomes. The claim
 // scheme mounts the claim a screen reads read-only on the playback pod, so
 // a file plays from the volume the screen showed and no second claim is
-// created.
+// created. The URI names the Library's namespace before the claim, so the
+// same URI names the same file wherever it is read. `media-operator` refuses
+// a claim URI without the namespace, and one that names another namespace.
 func reference(library *Library, relative string) (string, error) {
 	if !inside(relative) {
 		return "", fmt.Errorf("a path of the request is outside the library")
 	}
-	return "claim://" + library.Spec.screenClaim() + "/" +
+	return "claim://" + library.Metadata.Namespace + "/" + library.Spec.screenClaim() + "/" +
 		path.Join(library.Spec.screenRoot(), relative), nil
 }
 

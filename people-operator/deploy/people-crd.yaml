@@ -2,8 +2,9 @@
 # because the same person can appear in every namespace. Other
 # operators refer to it by name and attach their own facts to it. A
 # `Play` names the people who watched it, and a `Watch` names the
-# people who watch a series together. No controller ships with this
-# CRD.
+# people who watch a series together. people-operator writes the
+# status: a thumbnail of the picture that spec.avatar names, so every
+# screen draws the same face with no work of its own.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -22,7 +23,7 @@ spec:
       served: true
       storage: true
       # The status subresource splits spec and status into two write
-      # paths. People declare the spec; only a controller writes
+      # paths. People declare the spec, and people-operator writes the
       # status.
       subresources:
         status: {}
@@ -36,6 +37,12 @@ spec:
         - name: UID
           type: integer
           jsonPath: .spec.uid
+        # Whether the thumbnail answers the picture the spec names. A
+        # False here with the reason in the condition is the first thing
+        # to read when a screen shows initials in place of a picture.
+        - name: Avatar
+          type: string
+          jsonPath: .status.conditions[?(@.type=="AvatarReady")].status
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -62,9 +69,16 @@ spec:
                 avatar:
                   type: string
                   description: >-
-                    This person's picture, as a `claim://<claim>/<path>`
-                    reference to a file on a claim. A `Play` uses the
-                    same form to name media. Optional.
+                    The URI of this person's picture, in JPEG, PNG,
+                    GIF, or WebP. `https://` and `http://` name a file
+                    that `people-operator` fetches. `data:` holds the
+                    picture in this field. `nfs://<server>/<path>` names
+                    a file on an NFS export, and
+                    `claim://<namespace>/<claim>/<path>` names a file on
+                    a claim; a short-lived pod reads either one. The
+                    file is at most 10 MiB and 8192 pixels on each side.
+                    Optional. With no picture, the thumbnail shows this
+                    person's initials.
                 uid:
                   type: integer
                   format: int64
@@ -94,12 +108,92 @@ spec:
                       description: "The subject claim, `sub`, that the issuer assigns to this person."
             status:
               type: object
-              # Nothing writes this yet. It is declared so a controller
-              # that assigns uids has a place to report them.
               properties:
+                # Nothing writes uid yet. It is declared so a controller
+                # that assigns uids has a place to report them.
                 uid:
                   type: integer
                   format: int64
                   description: >-
                     The uid in effect for this person. Nothing writes
                     it yet.
+                # A data: URI is a string, and it carries its media type,
+                # so a later change of format does not change the field.
+                # At 256 pixels a face takes about 20 to 35 KB, a small
+                # part of the 1.5 MiB that etcd allows one object.
+                thumbnail:
+                  type: string
+                  description: >-
+                    This person's picture as a square JPEG, 256 by 256
+                    pixels, in a `data:image/jpeg;base64,` URI. It is the
+                    picture that `spec.avatar` names, cropped to its
+                    centre, or this person's initials when there is no
+                    picture. A screen crops it to its own shape.
+                avatar:
+                  type: object
+                  description: >-
+                    What the thumbnail answers: the source, the version
+                    of the picture read there, and the check request.
+                  properties:
+                    source:
+                      type: string
+                      description: "The `spec.avatar` that the thumbnail answers."
+                    etag:
+                      type: string
+                      description: >-
+                        The `ETag` of the picture an HTTP source answered.
+                        The check every six hours sends it as
+                        `If-None-Match`.
+                    lastModified:
+                      type: string
+                      description: >-
+                        The `Last-Modified` of the picture an HTTP source
+                        answered, or the modification time of a file on
+                        NFS or a claim.
+                    size:
+                      type: integer
+                      format: int64
+                      description: "The size in bytes of a file on NFS or a claim."
+                    checked:
+                      type: string
+                      description: >-
+                        The value of the `people.liken.sh/check-avatar`
+                        annotation that the thumbnail answers. A new
+                        value of the annotation reads the picture again.
+                conditions:
+                  type: array
+                  description: >-
+                    `AvatarReady` is `True` when the thumbnail answers
+                    `spec.avatar`, with the reason `Fetched`, `Baked`,
+                    `Inline`, or `Initials`. It is `False` when the
+                    picture did not read, with the reason
+                    `FetchFailed`, `BakeFailed`, `DecodeFailed`, or
+                    `UnsupportedScheme`; the last good picture then
+                    stays, or the initials show when there was none.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        description: "The condition's name."
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: "Whether the condition holds."
+                      reason:
+                        type: string
+                        description: "One word for the cause."
+                      message:
+                        type: string
+                        description: "The cause, for a person to read."
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        description: "The generation of the spec that the condition answers."
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: "When the status last changed."

@@ -201,19 +201,66 @@ fn a_press_the_picker_binds_nothing_for_changes_nothing() {
     assert!(!picker.holds(0));
 }
 
-#[test]
-fn a_tile_carries_the_display_name_of_its_person() {
-    let people = vec![Person {
+// A person named First, with this picture or none.
+fn first(thumbnail: Option<crate::audience::Thumbnail>) -> Person {
+    Person {
         name: "first".into(),
         display_name: "First".into(),
-    }];
+        thumbnail,
+    }
+}
+
+#[test]
+fn a_tile_carries_the_display_name_of_its_person() {
+    let people = vec![first(None)];
     let picker = Picker::open(1, &[]);
     let unit = identity::Unit::default();
     let layer = Layer {
         people: &people,
+        faces: &faces::Faces::default(),
         picker: &picker,
         unit: &unit,
     };
 
     assert_eq!(layer.caption(0), "First");
+}
+
+// The picker draws the face of a person with a picture, and the first
+// letter of the name of a person with none or one that did not decode.
+#[test]
+fn a_tile_draws_the_face_of_a_person_with_a_picture_and_the_letter_without() {
+    let people = vec![
+        first(Some(crate::audience::thumbnail::solid(32, [200, 40, 40]))),
+        first(None),
+        first(crate::audience::Thumbnail::from_uri(
+            "data:image/jpeg;base64,aGVsbG8=",
+        )),
+    ];
+    let mut faces = faces::Faces::default();
+    faces.refresh(&people, 1.0);
+    let picker = Picker::open(3, &[]);
+    let unit = identity::Unit::default();
+    let layer = Layer {
+        people: &people,
+        faces: &faces,
+        picker: &picker,
+        unit: &unit,
+    };
+
+    assert!(matches!(layer.face(0), Face::Picture(_)));
+    assert_eq!(layer.face(1), Face::Letter("F".into()));
+    assert_eq!(layer.face(2), Face::Letter("F".into()));
+}
+
+// The face draws inside the chosen ring, which strokes the rim of the
+// circle, so the ring shows whole around a picture.
+#[test]
+fn a_face_draws_inside_the_ring() {
+    let at = tile(bounds(), 3, 1);
+    let inside = picture(at);
+
+    assert_eq!(inside.center_x(), at.center_x());
+    assert_eq!(inside.center_y(), at.center_y());
+    assert_eq!(inside.width, CIRCLE - 2.0 * look::MARK);
+    assert_eq!(inside.height, inside.width);
 }

@@ -14,7 +14,7 @@ resource to attach it to.
 `Person` is a cluster-scoped CRD in `people.liken.sh/v1alpha1`. It
 holds a display name, a nickname, a picture, a Linux uid, and a link
 to a login at an outside identity provider. It says nothing about a
-person's age or what they may watch. No controller ships with it.
+person's age or what they may watch.
 
 Other operators refer to a `Person` by its name and attach their own
 facts to it, the way workloads refer to a `ServiceAccount`. The first
@@ -25,6 +25,16 @@ two references are in `library-operator`:
 - A `Play` carries the people who watched it as owner references, so
   the garbage collector removes a person's plays when the person is
   deleted.
+
+## The picture
+
+A picture is a fact derived from a `Person`, so it goes in the status.
+`spec.avatar` names the source, and `people-operator` writes
+`status.thumbnail`: a 256-pixel square JPEG in a `data:` URI, or the
+person's initials when there is no picture. Every screen draws that
+one field, and no screen fetches, resizes, or mounts anything. Plan 75
+in the repository's top-level `plans/completed/` directory is the
+design of this controller.
 
 ## The uid
 
@@ -41,7 +51,8 @@ NSS and no `/etc/passwd` entry.
 Each of these is a plan of its own:
 
 - A controller that assigns a uid from a reserved range to every
-  `Person` that states none.
+  `Person` that states none. It joins the loop that writes the
+  picture.
 - A client certificate per `Person`, signed through the
   `CertificateSigningRequest` API, so a person can run `kubectl` under
   their own name and a `RoleBinding` can name them.

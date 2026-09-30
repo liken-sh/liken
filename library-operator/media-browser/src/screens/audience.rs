@@ -10,10 +10,13 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
+use crate::art::Image;
 use crate::audience::Person;
 use crate::look;
 use crate::views::{area, extent, mark, text};
 
+// The pictures the tiles draw, cut to the circle.
+pub mod faces;
 // The unit's name and parts at the bottom left of the picker.
 pub mod identity;
 
@@ -123,6 +126,17 @@ pub fn word_at(link: Rectangle) -> Rectangle {
         link.y + LINK_PAD,
         link.width,
         text::height(1, look::CAPTION),
+    )
+}
+
+/// The square a face draws in: the tile's circle less the chosen ring
+/// that strokes its rim.
+pub fn picture(tile: Rectangle) -> Rectangle {
+    area(
+        tile.x + look::MARK,
+        tile.y + look::MARK,
+        tile.width - 2.0 * look::MARK,
+        tile.height - 2.0 * look::MARK,
     )
 }
 
@@ -261,10 +275,22 @@ impl Picker {
 pub struct Layer<'a> {
     /// The people the picker offers, in the order the list came.
     pub people: &'a [Person],
+    /// The faces of the people, cut when the picker went up.
+    pub faces: &'a faces::Faces,
     /// What is chosen and where focus stands.
     pub picker: &'a Picker,
     /// The unit the last status named, which the identity block draws.
     pub unit: &'a identity::Unit,
+}
+
+/// What one tile draws inside its circle.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Face<'a> {
+    /// The person's picture, cut to the circle.
+    Picture(&'a Image),
+    /// The first letter of the person's display name, for a person with no
+    /// picture or one that did not decode.
+    Letter(String),
 }
 
 impl Layer<'_> {
@@ -273,6 +299,20 @@ impl Layer<'_> {
         self.people
             .get(index)
             .map_or("", |person| person.display_name.as_str())
+    }
+
+    /// What the tile at this index draws inside its circle.
+    pub fn face(&self, index: usize) -> Face<'_> {
+        match self.faces.get(index) {
+            Some(image) => Face::Picture(image),
+            None => Face::Letter(
+                self.caption(index)
+                    .chars()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+        }
     }
 }
 
@@ -316,18 +356,25 @@ impl canvas::Program<Infallible, Theme, Renderer> for Layer<'_> {
                         .with_width(look::MARK),
                 );
             }
-            text::shown(
-                &mut frame,
-                &caption.chars().next().unwrap_or_default().to_string(),
-                area(
-                    at.x,
-                    at.center_y() - text::height(1, LETTER) / 2.0,
-                    at.width,
-                    text::height(1, LETTER),
+            match self.face(index) {
+                Face::Picture(image) => {
+                    for (band, handle) in image.bands(picture(at)) {
+                        frame.draw_image(band, canvas::Image::new(handle));
+                    }
+                }
+                Face::Letter(letter) => text::shown(
+                    &mut frame,
+                    &letter,
+                    area(
+                        at.x,
+                        at.center_y() - text::height(1, LETTER) / 2.0,
+                        at.width,
+                        text::height(1, LETTER),
+                    ),
+                    LETTER,
+                    look::text(),
                 ),
-                LETTER,
-                look::text(),
-            );
+            }
             text::centered(&mut frame, caption, name(at), look::CAPTION, look::text());
             if self.picker.focus() == Focus::Tile(index) {
                 mark(&mut frame, at);

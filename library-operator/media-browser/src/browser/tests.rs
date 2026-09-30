@@ -10,6 +10,7 @@ mod audience;
 mod banner;
 mod cleared;
 mod clock;
+mod faces;
 mod home;
 mod identity;
 mod keys;

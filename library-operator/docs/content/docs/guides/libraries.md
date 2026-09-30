@@ -130,9 +130,9 @@ libraries that should never meet on a screen in different namespaces.
 
 When a person plays a title from the browser, the operator creates a
 `Play` for `media-operator`. The media reference in it names the
-claim, never the volume behind it:
+namespace and the claim, never the volume behind it:
 
-    claim://movies-pvc//media/movies/Some Film (1999)/Some Film (1999).mkv
+    claim://media/movies-pvc//media/movies/Some Film (1999)/Some Film (1999).mkv
 
 The claim is the one the screen already mounts read-only, so
 `media-operator` plays from the same claim, and no second claim is

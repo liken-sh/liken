@@ -1,0 +1,56 @@
+# The operator's identity. It reads every Person and writes each one's
+# status. It starts, reads, and deletes the baker pods that read a
+# picture from NFS or a claim.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: people-operator
+---
+# A ClusterRole and not a Role, because a Person is cluster-scoped and
+# a claim's baker pod runs in the claim's own namespace, which can be
+# any namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: people-operator
+rules:
+  # The watch wakes the pass, and the pass reads each Person from the
+  # watch's store. get reads one Person again after a status write that
+  # met a conflict.
+  - apiGroups: [people.liken.sh]
+    resources: [people]
+    verbs: [get, list, watch]
+  # The status is the one thing the operator writes to a Person. It
+  # replaces the whole status with a PUT, which is the update verb, and
+  # it never writes the spec.
+  - apiGroups: [people.liken.sh]
+    resources: [people/status]
+    verbs: [update]
+  # The baker pods. The watch selects them by the label
+  # people.liken.sh/baker, and a list or a watch by label selector needs
+  # list and watch on every pod. get reads the operator's own pod for
+  # its image. create starts a baker pod, and delete removes one that
+  # finished, ran out of time, or bakes for a source no Person names.
+  # The operator deletes only a pod that carries the baker label.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+  # A baker pod writes its result to its log, and the operator reads
+  # that one line.
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: people-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: people-operator
+subjects:
+  - kind: ServiceAccount
+    name: people-operator
+    namespace: liken-system

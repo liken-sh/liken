@@ -91,8 +91,9 @@ read-only. The enricher and the organizer mount it read-write. Nothing
 in this operator depends on the volume's kind.
 
 A `Play` reaches the files by a media reference the `Player` accepts.
-The operator builds it from the library's claim and the item's path:
-`claim://<claim>/<path>`, the scheme `media-operator`'s plan 19 adds.
+The operator builds it from the library's namespace, its claim, and
+the item's path: `claim://<namespace>/<claim>/<path>`, the scheme
+`media-operator`'s plan 19 adds.
 The playback pod mounts the same claim the scanner mounts, so no layer
 reads the volume's kind or names a server, and a library on a Longhorn
 volume or a local disk plays the same way one on NFS does. The
@@ -214,8 +215,8 @@ this operator's tree.
 ## Watch state and people
 
 Progress belongs to a set of people, not to one person. A `Person`
-is a fact of the whole cluster, a cluster-scoped CRD in a repository
-of its own, `people-operator`, with no controller. A `Play` names its
+is a fact of the whole cluster, a cluster-scoped CRD that the
+`people-operator` component owns. A `Play` names its
 people through owner references, and the work's aliases through
 annotations. The set of people on a `Play` is the whole record of who
 shares its progress: there is no resource for a group, because the

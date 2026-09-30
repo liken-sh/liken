@@ -45,6 +45,10 @@ image = { version = "=0.25.10", default-features = false, features = [
     "jpeg",
     "png",
 ] }
+# base64 opens the `data:` URI a person's thumbnail arrives in. ureq and
+# the Prometheus exporter already build this version, so naming it here
+# adds no crate to the build.
+base64 = "=0.22.1"
 # libc is here for glibc's mallopt, which main.rs calls to pin the
 # allocator's mmap and trim thresholds. Without the pin, image decodes
 # dirty heap arenas the process never returns.

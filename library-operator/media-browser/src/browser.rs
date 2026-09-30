@@ -141,6 +141,12 @@ pub struct Browser<S: Source, A: Art> {
     // The picker over the stack while the browser has no answer to who is
     // watching, and nothing once it has one.
     picker: Option<screens::audience::Picker>,
+    // The faces the picker draws, cut when it goes up, at the panel's
+    // scale.
+    faces: screens::audience::faces::Faces,
+    // How many panel pixels one logical pixel spans, which the faces are
+    // cut for.
+    scale: f32,
     // The unit's name and parts from the last status. The picker draws
     // them as its identity block, and nothing else reads them.
     unit: screens::audience::identity::Unit,
@@ -214,6 +220,8 @@ impl<S: Source, A: Art> Browser<S, A> {
             loading: None,
             lights: None,
             picker: None,
+            faces: screens::audience::faces::Faces::default(),
+            scale: 1.0,
             unit: screens::audience::identity::Unit::default(),
             level: volume::Level::default(),
             time: clock::now(),
@@ -324,6 +332,7 @@ impl<S: Source, A: Art> Browser<S, A> {
     // so a picker raised by the ask starts with nobody.
     fn raise_picker(&mut self) {
         self.learn_people();
+        self.faces.refresh(self.audience.known(), self.scale);
         let chosen = self.audience.chosen(self.clock);
         self.picker = Some(screens::audience::Picker::open(
             self.audience.known().len(),
@@ -336,6 +345,7 @@ impl<S: Source, A: Art> Browser<S, A> {
     fn picker_layer(&self) -> Option<screens::audience::Layer<'_>> {
         self.picker.as_ref().map(|picker| screens::audience::Layer {
             people: self.audience.known(),
+            faces: &self.faces,
             picker,
             unit: &self.unit,
         })
@@ -974,6 +984,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // by the panel's size.
     fn scaled(&mut self, logical: (u32, u32), scale: f32) {
         self.page = logical;
+        self.scale = scale;
         let physical = (
             (logical.0 as f32 * scale).round() as u32,
             (logical.1 as f32 * scale).round() as u32,

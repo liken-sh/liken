@@ -18,6 +18,7 @@ fn watching(known: &[&str], preset: &[&str]) -> (Browser<Fake, NoArt>, FakeBus) 
         .map(|name| crate::audience::Person {
             name: (*name).to_string(),
             display_name: (*name).to_string(),
+            thumbnail: None,
         })
         .collect();
     let preset = preset.iter().map(|name| (*name).to_string()).collect();
@@ -262,10 +263,12 @@ fn a_room_of_two() -> Browser<Fake, NoArt> {
             crate::audience::Person {
                 name: "first".into(),
                 display_name: "Coral".into(),
+                thumbnail: None,
             },
             crate::audience::Person {
                 name: "second".into(),
                 display_name: "Kestrel".into(),
+                thumbnail: None,
             },
         ],
         vec!["first".into(), "second".into()],
@@ -529,6 +532,7 @@ fn people(names: &[(&str, &str)]) -> Vec<crate::audience::Person> {
         .map(|(name, display_name)| crate::audience::Person {
             name: (*name).to_string(),
             display_name: (*display_name).to_string(),
+            thumbnail: None,
         })
         .collect()
 }

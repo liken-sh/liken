@@ -320,10 +320,10 @@ func TestTheAudienceCarriesTheCreditsOfTheFirstItem(t *testing.T) {
 		items []PlayItem
 		want  string
 	}{
-		{name: "an item with no presentation", items: []PlayItem{{URI: "claim://movies/a.mkv"}}, want: "null"},
+		{name: "an item with no presentation", items: []PlayItem{{URI: "claim://house/movies/a.mkv"}}, want: "null"},
 		{
 			name: "every credits mark",
-			items: []PlayItem{{URI: "claim://movies/a.mkv", Presentation: &PlayPresentation{Marks: []PlayMark{
+			items: []PlayItem{{URI: "claim://house/movies/a.mkv", Presentation: &PlayPresentation{Marks: []PlayMark{
 				{Kind: markKindIntro, End: seconds(107)},
 				{Kind: markKindCredits, Start: seconds(3253), End: seconds(3316)},
 				{Kind: markKindCredits, End: seconds(3316)},
@@ -333,7 +333,7 @@ func TestTheAudienceCarriesTheCreditsOfTheFirstItem(t *testing.T) {
 		},
 		{
 			name: "a later item's marks",
-			items: []PlayItem{{URI: "claim://movies/a.mkv"}, {URI: "claim://movies/b.mkv",
+			items: []PlayItem{{URI: "claim://house/movies/a.mkv"}, {URI: "claim://house/movies/b.mkv",
 				Presentation: &PlayPresentation{Marks: []PlayMark{{Kind: markKindCredits, Start: seconds(60)}}}}},
 			want: "null",
 		},

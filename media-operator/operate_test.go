@@ -596,25 +596,46 @@ func TestAPlayWhosePlayerIsAbsentStaysPending(t *testing.T) {
 }
 
 // The resolver refuses before any object exists, so a Play that names a
-// scheme this operator does not resolve leaves nothing behind.
-func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.plays["movie"] = housePlay("rtsp://camera/front")
-	cluster.players["theater"] = housePlayer()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
-
-	media.pass()
-
-	status := cluster.plays["movie"].Status
-	if status.Phase != phaseFailed {
-		t.Errorf("phase = %q, want Failed", status.Phase)
+// scheme this operator does not resolve, or a claim in another namespace,
+// leaves nothing behind.
+func TestAPlayWithAURIItCannotResolveFailsAndCreatesNothing(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+		want string
+	}{
+		{
+			name: "an unknown scheme",
+			uri:  "rtsp://camera/front",
+			want: "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, and claim://",
+		},
+		{
+			name: "a claim in another namespace",
+			uri:  "claim://studio/films/movies/film.mkv",
+			want: `the URI "claim://studio/films/movies/film.mkv" names a claim in the namespace studio; ` +
+				"a Play in the namespace house mounts only a claim in its own namespace",
+		},
 	}
-	want := "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, and claim://"
-	if status.Message != want {
-		t.Errorf("message = %q, want %q", status.Message, want)
-	}
-	if len(cluster.claims) != 0 || len(cluster.pods) != 0 {
-		t.Errorf("a refused URI created objects: claims %v pods %v", cluster.claims, cluster.pods)
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			cluster.plays["movie"] = housePlay(one.uri)
+			cluster.players["theater"] = housePlayer()
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+
+			media.pass()
+
+			status := cluster.plays["movie"].Status
+			if status.Phase != phaseFailed {
+				t.Errorf("phase = %q, want Failed", status.Phase)
+			}
+			if status.Message != one.want {
+				t.Errorf("message = %q, want %q", status.Message, one.want)
+			}
+			if len(cluster.claims) != 0 || len(cluster.pods) != 0 {
+				t.Errorf("a refused URI created objects: claims %v pods %v", cluster.claims, cluster.pods)
+			}
+		})
 	}
 }
 

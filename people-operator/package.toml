@@ -1,7 +1,11 @@
-# The Person kind: the people a household's services know.
+# The Person kind: the people a household's services know, and the
+# operator that writes each person's picture into their status.
 [package]
 name = "people-operator"
 license = "MIT"
+
+[depends]
+components = ["kubernetes"]
 
 [docs]
 prefix = "people"
@@ -34,3 +38,11 @@ skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [outputs]
 deploy = "deploy"
+
+# The image builds from this module's go.mod, which replaces the shared
+# kubernetes module with ../kubernetes, so it takes that directory as a
+# build context.
+[[outputs.images]]
+name = "people-operator"
+file = "Dockerfile"
+contexts = { kubernetes = "kubernetes" }

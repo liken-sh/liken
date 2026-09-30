@@ -209,10 +209,12 @@ own `Play` and its own row of progress.
     }
 
 The `Play` the operator creates from that request carries one item
-whose URI is `claim://`, the `Library`'s claim, `/`, and the library
-root joined to the path. For a `Library` on the claim `movies` with
-the root `/`, that is
-`claim://movies//A Quiet Harbor (2014)/A Quiet Harbor (2014).mkv`.
+whose URI is `claim://`, the `Library`'s namespace, `/`, the
+`Library`'s claim, `/`, and the library root joined to the path. The
+root is an absolute path, so the URI has two slashes after the claim.
+For a `Library` in the namespace `den` on the claim `movies` with the
+root `/`, that is
+`claim://den/movies//A Quiet Harbor (2014)/A Quiet Harbor (2014).mkv`.
 The two people become owner references, the two aliases become
 annotations, and `600` becomes `spec.start`.
 

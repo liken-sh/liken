@@ -1,7 +1,7 @@
 package main
 
 // The people file a screen reads: the namespace's Person list, cut to
-// the two fields the browser draws, written as one ConfigMap per screen
+// the fields the browser draws, written as one ConfigMap per screen
 // namespace and mounted into every screen pod there. The browser holds
 // no API credential, so the list reaches it as a file, and the kubelet
 // rewrites the file within its sync period when the map changes, so a
@@ -30,9 +30,12 @@ const (
 )
 
 // One entry of the file, in the shape the browser's audience reads.
+// The thumbnail is absent where the Person has none, and the browser
+// draws the person's letter for it.
 type screenPerson struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
+	Thumbnail   string `json:"thumbnail,omitempty"`
 }
 
 // peopleFile is the file's text for these people, in name order so two
@@ -49,7 +52,11 @@ func peopleFile(people []Person) (string, error) {
 		if display == "" {
 			display = person.Metadata.Name
 		}
-		entries = append(entries, screenPerson{Name: person.Metadata.Name, DisplayName: display})
+		entries = append(entries, screenPerson{
+			Name:        person.Metadata.Name,
+			DisplayName: display,
+			Thumbnail:   person.Status.Thumbnail,
+		})
 	}
 	slices.SortFunc(entries, func(one, other screenPerson) int {
 		return strings.Compare(one.Name, other.Name)

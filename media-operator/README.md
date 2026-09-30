@@ -32,7 +32,8 @@ claim, toleration, and socket built from the `Player` spec. Each
 bus under the kernel's name for it, and each consumer binds those
 names itself. Media
 arrives by URI: `https://` streams, `nfs://` mounts an export, and
-`claim://` mounts a `PersistentVolumeClaim` beside the `Play`. Media
+`claim://<namespace>/<claim>/<path>` mounts a `PersistentVolumeClaim`
+in the `Play`'s own namespace. Media
 library management is a separate concern, and this project does
 none of it.
 

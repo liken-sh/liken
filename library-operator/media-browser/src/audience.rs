@@ -4,6 +4,11 @@
 
 use serde_json::Value;
 
+// The picture a person's entry carries.
+pub mod thumbnail;
+
+pub use thumbnail::Thumbnail;
+
 /// One `Person` of the cluster: the name every record keys on, and the name
 /// a screen draws.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -14,10 +19,15 @@ pub struct Person {
     /// The name a screen draws. It is the resource's name where the resource
     /// declares none.
     pub display_name: String,
+    /// The person's picture, which the picker draws in place of the
+    /// letter. It is none where the entry carries no thumbnail, as on a
+    /// cluster where people-operator does not run, or one the browser
+    /// cannot open.
+    pub thumbnail: Option<Thumbnail>,
 }
 
 /// The `Person` list as a file holds it:
-/// `[{"name":"person-a","displayName":"Person A"}]`.
+/// `[{"name":"person-a","displayName":"Person A","thumbnail":"data:image/jpeg;base64,..."}]`.
 pub fn people_from_json(bytes: &[u8]) -> Result<Vec<Person>, String> {
     let document: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
     people_from_value(&document)
@@ -33,7 +43,8 @@ pub fn people_from_value(value: &Value) -> Result<Vec<Person>, String> {
 }
 
 // One entry of the list. The name is required; the display name falls back
-// to it.
+// to it. A thumbnail that does not open is dropped and not an error, because
+// the letter is a face the picker can always draw.
 fn person(entry: &Value) -> Result<Person, String> {
     let name = entry
         .get("name")
@@ -47,9 +58,15 @@ fn person(entry: &Value) -> Result<Person, String> {
         .and_then(Value::as_str)
         .unwrap_or(name);
 
+    let thumbnail = entry
+        .get("thumbnail")
+        .and_then(Value::as_str)
+        .and_then(Thumbnail::from_uri);
+
     Ok(Person {
         name: name.to_string(),
         display_name: display_name.to_string(),
+        thumbnail,
     })
 }
 
@@ -149,7 +166,9 @@ impl Audience {
     /// The current answer as `Person` records, in answer order, each with
     /// the display name this browser draws, or nothing where no answer
     /// stands. An answer of nobody is an empty room and not the absence of
-    /// one, so the bus carries the two differently.
+    /// one, so the bus carries the two differently. The records carry no
+    /// thumbnail, because the message on the bus names each person by
+    /// their two names alone.
     pub fn watching(&self, at: f64) -> Option<Vec<Person>> {
         if self.lapsed(at) {
             return None;
@@ -161,6 +180,7 @@ impl Audience {
                 .map(|name| Person {
                     name: name.clone(),
                     display_name: self.display_name(name).to_string(),
+                    thumbnail: None,
                 })
                 .collect(),
         )

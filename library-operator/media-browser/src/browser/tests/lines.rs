@@ -212,6 +212,7 @@ fn a_resume_names_the_second_and_the_people() {
         vec![crate::audience::Person {
             name: "person-a".into(),
             display_name: "A".into(),
+            thumbnail: None,
         }],
         vec!["person-a".into()],
     );
@@ -245,6 +246,7 @@ fn an_answer_in_the_picker_names_the_people_and_the_topic() {
         vec![crate::audience::Person {
             name: "person-a".into(),
             display_name: "A".into(),
+            thumbnail: None,
         }],
         Vec::new(),
     );
@@ -341,6 +343,7 @@ fn an_audience_that_lapses_prints_once() {
         vec![crate::audience::Person {
             name: "person-a".into(),
             display_name: "A".into(),
+            thumbnail: None,
         }],
         vec!["person-a".into()],
     );
@@ -363,6 +366,7 @@ fn an_audience_from_the_retained_message_names_the_people() {
         &[crate::audience::Person {
             name: "person-a".into(),
             display_name: "A".into(),
+            thumbnail: None,
         }],
         crate::clock::seconds(),
     );

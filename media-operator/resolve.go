@@ -10,10 +10,12 @@ package main
 // The resolver reads the media and the art URIs in one pass. It groups every
 // nfs:// URI by server, mounts each server's common ancestor once, and
 // rewrites each file's path under that mount. So a film and its logo in one
-// folder become one read-only mount of that folder. A claim:// URI groups by
-// claim name and mounts the claim at its own root, because the claim already
-// bounds what the pod can read. The servers and the claims share one run of
-// mount numbers, in the order the playlist first names each of them.
+// folder become one read-only mount of that folder. A claim:// URI names the
+// namespace, then the claim, then the path, so one URI names one file
+// wherever it appears. It groups by claim name and mounts the claim at its
+// own root, because the claim already bounds what the pod can read. The
+// servers and the claims share one run of mount numbers, in the order the
+// playlist first names each of them.
 
 import (
 	"fmt"
@@ -58,12 +60,13 @@ type nfsRef struct {
 	segments []string
 }
 
-// claimRef is one parsed claim:// URI: the claim it names, and the path
-// segments under the claim's root. The last segment is the file, or an
-// album's folder.
+// claimRef is one parsed claim:// URI: the namespace and the claim it names,
+// and the path segments under the claim's root. The last segment is the
+// file, or an album's folder.
 type claimRef struct {
-	claim    string
-	segments []string
+	namespace string
+	claim     string
+	segments  []string
 }
 
 // resolvedRef is one URI classified for the pod. A passthrough is an https://
@@ -104,7 +107,10 @@ func (r resolvedRef) mount() (mountKey, []string, bool) {
 // begins. So the resolver mounts the common ancestor of every nfs URI on one
 // server, and passes each file's path under that mount. Mounting a wider
 // subtree than one file is safe, because the mount is read-only.
-func resolvePlay(items []PlayItem, next *PlayNext) (resolution, error) {
+//
+// A claim URI must name the Play's own namespace, because a pod can mount
+// only a claim in its own namespace.
+func resolvePlay(namespace string, items []PlayItem, next *PlayNext) (resolution, error) {
 	mediaRefs := make([]resolvedRef, len(items))
 	logoRefs := make([]resolvedRef, len(items))
 	trickRefs := make([]resolvedRef, len(items))
@@ -141,7 +147,7 @@ func resolvePlay(items []PlayItem, next *PlayNext) (resolution, error) {
 				"the URI %q names a directory; mark the item as an album with type music and hint album, or name a file",
 				item.URI)
 		}
-		media, err := parseRef(item.URI)
+		media, err := parseRef(item.URI, namespace)
 		if err != nil {
 			return resolution{}, err
 		}
@@ -155,7 +161,7 @@ func resolvePlay(items []PlayItem, next *PlayNext) (resolution, error) {
 			cover = item.Presentation.Art
 		}
 		if logo != "" {
-			art, err := parseRef(logo)
+			art, err := parseRef(logo, namespace)
 			if err != nil {
 				return resolution{}, err
 			}
@@ -163,7 +169,7 @@ func resolvePlay(items []PlayItem, next *PlayNext) (resolution, error) {
 			register(art)
 		}
 		if trickplay != "" {
-			trick, err := parseRef(trickplay)
+			trick, err := parseRef(trickplay, namespace)
 			if err != nil {
 				return resolution{}, err
 			}
@@ -171,7 +177,7 @@ func resolvePlay(items []PlayItem, next *PlayNext) (resolution, error) {
 			register(trick)
 		}
 		if cover != "" {
-			art, err := parseRef(cover)
+			art, err := parseRef(cover, namespace)
 			if err != nil {
 				return resolution{}, err
 			}
@@ -184,7 +190,7 @@ func resolvePlay(items []PlayItem, next *PlayNext) (resolution, error) {
 	// same claim as the media shares the media's mount.
 	var nextRef resolvedRef
 	if next != nil && next.Art != "" {
-		art, err := parseRef(next.Art)
+		art, err := parseRef(next.Art, namespace)
 		if err != nil {
 			return resolution{}, err
 		}
@@ -418,10 +424,12 @@ const (
 )
 
 // parseRef classifies one URI. An https URI passes through. An nfs URI parses
-// into a server and a path, and a claim URI into a claim name and a path.
+// into a server and a path, and a claim URI into a namespace, a claim name,
+// and a path.
 // Any other scheme, or a missing one, fails the whole Play, so a Play that
-// can never run leaves no half-built objects behind.
-func parseRef(raw string) (resolvedRef, error) {
+// can never run leaves no half-built objects behind. A claim URI that names a
+// namespace other than the Play's fails the same way.
+func parseRef(raw, namespace string) (resolvedRef, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return resolvedRef{}, fmt.Errorf("the URI %q does not parse: %v", raw, err)
@@ -439,6 +447,11 @@ func parseRef(raw string) (resolvedRef, error) {
 		ref, err := parseClaim(parsed, raw)
 		if err != nil {
 			return resolvedRef{}, err
+		}
+		if ref.namespace != namespace {
+			return resolvedRef{}, fmt.Errorf(
+				"the URI %q names a claim in the namespace %s; a Play in the namespace %s mounts only a claim in its own namespace",
+				raw, ref.namespace, namespace)
 		}
 		return resolvedRef{claim: ref}, nil
 	case "":
@@ -468,19 +481,30 @@ func parseNFS(parsed *url.URL, raw string) (*nfsRef, error) {
 	return &nfsRef{server: parsed.Host, segments: segments}, nil
 }
 
-// parseClaim reads the claim name and the path segments from one claim URI.
-// A URI that names no claim, or no path inside it, fails, because neither
-// names a file the pod can reach. One segment is enough, because the claim's
-// own root is the mount and no directory has to be chosen.
+// claimForm is the form of a claim URI, which each refusal of a malformed
+// one repeats so the reader can correct the Play.
+const claimForm = "a claim URI is claim://<namespace>/<claim>/<path>"
+
+// parseClaim reads the namespace, the claim name, and the path segments from
+// one claim URI of the form claim://<namespace>/<claim>/<path>. The claim is
+// the first segment after the namespace, so an empty one fails, and the path
+// below the claim may hold empty segments. A URI that names no namespace, no
+// claim, or no path inside the claim fails, because it names no file the pod
+// can reach. One path segment is enough, because the claim's own root is the
+// mount and no directory has to be chosen.
 func parseClaim(parsed *url.URL, raw string) (*claimRef, error) {
 	if parsed.Host == "" {
-		return nil, fmt.Errorf("the URI %q names no claim", raw)
+		return nil, fmt.Errorf("the URI %q names no namespace; %s", raw, claimForm)
 	}
-	segments := splitPath(parsed.Path)
+	claim, below, _ := strings.Cut(strings.TrimPrefix(parsed.Path, "/"), "/")
+	if claim == "" {
+		return nil, fmt.Errorf("the URI %q names no claim; %s", raw, claimForm)
+	}
+	segments := splitPath(below)
 	if len(segments) == 0 {
-		return nil, fmt.Errorf("the URI %q names no path in the claim", raw)
+		return nil, fmt.Errorf("the URI %q names no path in the claim; %s", raw, claimForm)
 	}
-	return &claimRef{claim: parsed.Host, segments: segments}, nil
+	return &claimRef{namespace: parsed.Host, claim: claim, segments: segments}, nil
 }
 
 // splitPath breaks a URL path into its non-empty segments.

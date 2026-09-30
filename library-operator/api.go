@@ -649,12 +649,14 @@ func (p *Play) ended() bool {
 // A Person is a subject of the cluster, cluster-scoped and owned by
 // people-operator. A Play names the people who watched it through
 // owner references, so this operator reads a Person for its name and
-// its uid alone.
+// its uid, and the screens' people file copies the name a screen shows
+// and the picture it draws.
 type Person struct {
-	APIVersion string     `json:"apiVersion,omitempty"`
-	Kind       string     `json:"kind,omitempty"`
-	Metadata   ObjectMeta `json:"metadata"`
-	Spec       PersonSpec `json:"spec"`
+	APIVersion string       `json:"apiVersion,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       PersonSpec   `json:"spec"`
+	Status     PersonStatus `json:"status,omitempty"`
 }
 
 type PersonList struct {
@@ -666,6 +668,14 @@ type PersonList struct {
 // shows in place of the object's own.
 type PersonSpec struct {
 	DisplayName string `json:"displayName,omitempty"`
+}
+
+// The one field of a Person's status this operator reads. people-operator
+// writes the thumbnail as a data: URI of a square JPEG, and this operator
+// copies it to the screens unread. It is empty where people-operator does
+// not run.
+type PersonStatus struct {
+	Thumbnail string `json:"thumbnail,omitempty"`
 }
 
 // PlaySpec names the Players and the items. A request from one screen

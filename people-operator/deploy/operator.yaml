@@ -1,0 +1,61 @@
+# The operator: one unprivileged Deployment for the cluster. It reads
+# every Person, writes each one's status, fetches https:// and http://
+# pictures itself, and starts a baker pod for each nfs:// and claim://
+# picture. It keeps no state outside the status and the baker pods, so
+# a new pod reads both and carries on.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: people-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: people-operator
+  # Recreate, so two copies never run at once during a rollout. Two
+  # copies would each read every picture, and their status writes to
+  # one Person would conflict.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: people-operator
+    spec:
+      serviceAccountName: people-operator
+      containers:
+        # The operator reads this container's image from its own pod,
+        # and a baker pod runs the same image, so the tag below pins
+        # both.
+        - name: operator
+          image: ghcr.io/liken-sh/people-operator:latest
+          env:
+            # The operator reads its own pod for the image, and starts
+            # an nfs:// baker pod in its own namespace.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            # The operator decodes an https://, http://, or data: picture
+            # in its own memory. The largest one the limits allow is 8192
+            # by 8192 pixels, which decodes to 256 MiB, and the limit
+            # leaves room for the thumbnail and the watches.
+            limits:
+              memory: 384Mi

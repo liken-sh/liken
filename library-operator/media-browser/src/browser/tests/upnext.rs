@@ -282,6 +282,7 @@ fn watcher() -> (Vec<crate::audience::Person>, Vec<String>) {
         vec![crate::audience::Person {
             name: "first".into(),
             display_name: "First".into(),
+            thumbnail: None,
         }],
         vec!["first".into()],
     )

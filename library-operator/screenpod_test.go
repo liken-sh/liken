@@ -494,7 +494,7 @@ func TestScreenPodRunsTheProgressSidecarOnTheCatalogClaim(t *testing.T) {
 }
 
 // The pass writes the namespace's people file before it stands a pod,
-// cut to the two fields the browser draws, in name order, and owned
+// cut to the fields the browser draws, in name order, and owned
 // by the namespace's Catalog. A later pass with the same people
 // rewrites nothing, and one with a new Person rewrites the file.
 func TestReconcileScreensWritesThePeopleFileOfTheNamespace(t *testing.T) {

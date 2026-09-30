@@ -5,7 +5,9 @@ title: people.liken.sh
 A `Person` names one person who uses a `liken` cluster. It is a
 cluster-scoped resource with a display name, a short name, a picture,
 a Linux uid, and a link to an outside login. `people-operator` is the
-definition of that resource and nothing more. No program runs.
+definition of that resource and the operator that writes each
+person's picture into the `Person`'s status, as a small thumbnail
+that every screen draws.
 
 Other operators refer to a `Person` by name and attach their own
 facts to it. The media operator's `Play` names the people who

@@ -11,8 +11,45 @@ fn a_person_carries_the_name_and_the_display_name() {
         [Person {
             name: "first".into(),
             display_name: "First".into(),
+            thumbnail: None,
         }]
     );
+}
+
+#[test]
+fn a_person_carries_the_thumbnail_their_entry_names() {
+    let people =
+        people_from_json(br#"[{"name":"first","thumbnail":"data:image/jpeg;base64,/9j/4A=="}]"#)
+            .unwrap();
+
+    assert_eq!(
+        people[0].thumbnail,
+        Thumbnail::from_uri("data:image/jpeg;base64,/9j/4A==")
+    );
+    assert!(people[0].thumbnail.is_some());
+}
+
+// A thumbnail the browser cannot open costs the person their picture and
+// nothing else: the entry still reads, and the picker draws the letter.
+#[test]
+fn a_person_whose_thumbnail_does_not_open_reads_with_none() {
+    let cases = [
+        ("absent", r#"[{"name":"first"}]"#),
+        (
+            "malformed",
+            r#"[{"name":"first","thumbnail":"data:image/jpeg;base64,!!"}]"#,
+        ),
+        (
+            "another format",
+            r#"[{"name":"first","thumbnail":"data:image/webp;base64,UklGRg=="}]"#,
+        ),
+        ("not text", r#"[{"name":"first","thumbnail":7}]"#),
+    ];
+
+    for (case, file) in cases {
+        let people = people_from_json(file.as_bytes()).unwrap();
+        assert_eq!(people[0].thumbnail, None, "{case}");
+    }
 }
 
 #[test]
@@ -56,6 +93,7 @@ fn audience(known: &[&str]) -> Audience {
             .map(|name| Person {
                 name: (*name).to_string(),
                 display_name: (*name).to_string(),
+                thumbnail: None,
             })
             .collect(),
     )
@@ -136,6 +174,7 @@ fn a_new_person_list_keeps_the_answer_that_stands() {
             .map(|name| Person {
                 name: (*name).to_string(),
                 display_name: (*name).to_string(),
+                thumbnail: None,
             })
             .collect(),
     );
@@ -162,6 +201,7 @@ fn named(known: &[(&str, &str)]) -> Audience {
             .map(|(name, display_name)| Person {
                 name: (*name).to_string(),
                 display_name: (*display_name).to_string(),
+                thumbnail: None,
             })
             .collect(),
     )
@@ -216,10 +256,12 @@ fn the_answer_on_the_bus_carries_each_display_name() {
             Person {
                 name: "second".into(),
                 display_name: "Kestrel".into(),
+                thumbnail: None,
             },
             Person {
                 name: "first".into(),
                 display_name: "Coral".into(),
+                thumbnail: None,
             },
         ])
     );

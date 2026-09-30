@@ -154,6 +154,7 @@ fn a_row_read_on_the_thread_lands_with_no_page_read() {
         vec![crate::audience::Person {
             name: "first".into(),
             display_name: "First".into(),
+            thumbnail: None,
         }],
         vec!["first".into()],
     );

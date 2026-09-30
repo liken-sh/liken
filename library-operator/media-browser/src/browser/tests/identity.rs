@@ -27,6 +27,7 @@ fn asked_in_the_den() -> Browser<Fake, NoArt> {
         .map(|name| crate::audience::Person {
             name: name.to_string(),
             display_name: name.to_string(),
+            thumbnail: None,
         })
         .to_vec();
     let mut browser = browser.with_audience(people, Vec::new());

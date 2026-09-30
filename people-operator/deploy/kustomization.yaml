@@ -1,18 +1,37 @@
-# The kustomize base for people-operator.
+# The kustomize base for people-operator: the Person resource
+# definition and the operator that writes each Person's picture into
+# its status.
 #
 # This base is for the cluster owner to take. `liken` does not apply
 # it and does not name it. Take it through your own GitOps with
 # patches of your own, or read it and write your own manifests.
-#
-# The CRD is cluster-scoped, so this base names no namespace.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# The namespace is set with a transformer, not with the top-level
+# namespace field, because unsetOnly keeps an object that states its
+# own namespace where it belongs. The CRD is cluster-scoped, and the
+# API server ignores a namespace on it.
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: liken-system
+      namespace: liken-system
+    unsetOnly: true
+
 resources:
   - people-crd.yaml
+  - rbac.yaml
+  - operator.yaml
 
 labels:
   - includeSelectors: false
     pairs:
       app.kubernetes.io/name: people-operator
       app.kubernetes.io/part-of: liken
+
+images:
+  - name: ghcr.io/liken-sh/people-operator
+    newTag: latest

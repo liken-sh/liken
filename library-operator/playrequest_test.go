@@ -25,7 +25,7 @@ const (
 	testFilmPath    = "Some Film (1999)/Some Film (1999).mkv"
 	testPosterPath  = "Some Film (1999)/poster.jpg"
 	testTrickplay   = "Some Film (1999)/Some Film (1999).trickplay"
-	testFilmClaimed = "claim://movies//movies/Some Film (1999)/Some Film (1999).mkv"
+	testFilmClaimed = "claim://house/movies//movies/Some Film (1999)/Some Film (1999).mkv"
 )
 
 // A house with one delegated screen over the bound movies library, which
@@ -150,10 +150,10 @@ func TestTheArtAndTheTrickplayAreStampedOntoTheSameClaim(t *testing.T) {
 	operator.pass()
 
 	presentation := cluster.heldPlays()[0].Spec.Items[0].Presentation
-	if presentation.Art != "claim://movies//movies/"+testPosterPath {
+	if presentation.Art != "claim://house/movies//movies/"+testPosterPath {
 		t.Errorf("art = %q", presentation.Art)
 	}
-	if presentation.Trickplay != "claim://movies//movies/"+testTrickplay {
+	if presentation.Trickplay != "claim://house/movies//movies/"+testTrickplay {
 		t.Errorf("trickplay = %q", presentation.Trickplay)
 	}
 }
@@ -195,9 +195,9 @@ func TestAnEpisodeRequestKeepsTheOrderTheBrowserResolved(t *testing.T) {
 
 	items := cluster.heldPlays()[0].Spec.Items
 	want := []string{
-		"claim://movies//movies/Show/S01E02.mkv",
-		"claim://movies//movies/Show/S01E03.mkv",
-		"claim://movies//movies/Show/S01E04.mkv",
+		"claim://house/movies//movies/Show/S01E02.mkv",
+		"claim://house/movies//movies/Show/S01E03.mkv",
+		"claim://house/movies//movies/Show/S01E04.mkv",
 	}
 	if len(items) != len(want) {
 		t.Fatalf("items = %+v, want %d", items, len(want))
@@ -218,8 +218,8 @@ func TestALibraryWithNoRootStampsThePathAlone(t *testing.T) {
 
 	operator.pass()
 
-	if uri := cluster.heldPlays()[0].Spec.Items[0].URI; uri != "claim://movies/"+testFilmPath {
-		t.Errorf("uri = %q, want %q", uri, "claim://movies/"+testFilmPath)
+	if uri := cluster.heldPlays()[0].Spec.Items[0].URI; uri != "claim://house/movies/"+testFilmPath {
+		t.Errorf("uri = %q, want %q", uri, "claim://house/movies/"+testFilmPath)
 	}
 }
 
@@ -234,12 +234,12 @@ func TestAReferenceNamesTheClaimAScreenReads(t *testing.T) {
 		{
 			name:    "a movies library",
 			library: studioMovies(),
-			want:    "claim://movies//movies/Some Film (1999)/poster.jpg",
+			want:    "claim://house/movies//movies/Some Film (1999)/poster.jpg",
 		},
 		{
 			name:    "a franchises library",
 			library: studioFranchises(),
-			want:    "claim://franchise-art//Long Survey/poster.jpg",
+			want:    "claim://house/franchise-art//Long Survey/poster.jpg",
 		},
 	}
 	for _, testCase := range cases {
@@ -801,7 +801,7 @@ func TestAPlayCarriesTheWorkThatFollowsIt(t *testing.T) {
 	if next.Reason != want.Reason || next.Title != want.Title || next.Detail != want.Detail {
 		t.Errorf("next = %+v, want the three lines the browser spelled", next)
 	}
-	if next.Art != "claim://movies//movies/"+testPosterPath {
+	if next.Art != "claim://house/movies//movies/"+testPosterPath {
 		t.Errorf("art = %q, want the poster stamped onto the library's claim", next.Art)
 	}
 	if string(next.Request) != string(want.Request) {
@@ -873,7 +873,7 @@ func TestANextInAnotherLibraryStampsTheArtToThatLibrary(t *testing.T) {
 	operator.pass()
 
 	art := cluster.heldPlays()[0].Spec.Next.Art
-	if art != "claim://shows//shows/Show/Season 01/S01E03-thumb.jpg" {
+	if art != "claim://house/shows//shows/Show/Season 01/S01E03-thumb.jpg" {
 		t.Errorf("art = %q, want the still on the shows library's own claim", art)
 	}
 }

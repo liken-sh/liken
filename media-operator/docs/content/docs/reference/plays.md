@@ -87,7 +87,7 @@ One entry in the playlist: the URI to play and, optionally, how it should look.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path and claim://claim/path to a mount on the playback pod. A URI whose scheme the operator does not know fails the Play before any pod exists. |
+| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path and claim://namespace/claim/path to a mount on the playback pod. A claim URI names the Play's own namespace, because a pod mounts only a claim in its own namespace. A URI whose scheme the operator does not know, or a claim URI that names no namespace or another namespace, fails the Play before any pod exists. |
 | <span id="specitems--presentation"></span>`presentation` | [object](#specitemspresentation) | no | How the item should look, for the fields the display cannot read from the file. The library that fed the item supplies these, and the display prefers them over the container's tags. Omit the block for a loose file, and the display falls back to the file's own tags. |
 
 #### spec.items[].presentation

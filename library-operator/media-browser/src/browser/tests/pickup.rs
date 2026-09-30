@@ -28,6 +28,7 @@ fn on_the_third_episode() -> (Browser<Fake, NoArt>, FakeBus) {
             vec![crate::audience::Person {
                 name: WATCHER.into(),
                 display_name: "First".into(),
+                thumbnail: None,
             }],
             vec![WATCHER.into()],
         );

@@ -60,7 +60,7 @@ const (
 // mount as well as arguments.
 func testResolution(t *testing.T) resolution {
 	t.Helper()
-	resolved, err := resolvePlay(mediaItems(
+	resolved, err := resolvePlay("house", mediaItems(
 		"https://films.example/trailer.mkv",
 		"nfs://nas.example/export/films/film.mkv",
 	), nil)
@@ -555,10 +555,10 @@ func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
 		Reason:  "Next in Harbor Lights",
 		Title:   "E05",
 		Detail:  "45 min",
-		Art:     "claim://library/shows/next.jpg",
+		Art:     "claim://house/library/shows/next.jpg",
 		Request: json.RawMessage(`{"library":"living-room/shows"}`),
 	}
-	resolved, err := resolvePlay(play.Spec.Items, play.Spec.Next)
+	resolved, err := resolvePlay("house", play.Spec.Items, play.Spec.Next)
 	mustSucceed(t, err)
 	pod := buildPod(play, buildClaim(play, testPlayer()), resolved,
 		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
