@@ -254,7 +254,7 @@ spec:
                 wiim:
                   type: object
                   required: [uuid]
-                  description: "The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything."
+                  description: "The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything. The operator drives only a device whose getStatusEx project begins with WiiM, in any letter case. Another brand on the LinkPlay platform gets getStatusEx and nothing else."
                   properties:
                     uuid:
                       type: string

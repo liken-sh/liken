@@ -126,6 +126,36 @@ A patch of your own that sets a node affinity on this `DaemonSet`
 replaces the list of terms in the base, and the `none` term with it.
 Copy the `none` requirement into each term of your patch.
 
+## Which devices the operator adopts
+
+Other brands build on the LinkPlay platform that WiiM uses. Their
+devices advertise the same `_linkplay._tcp.local.` mDNS service and
+answer the same `getStatusEx` request. The operator therefore reads
+the `project` field of the `getStatusEx` answer and drives a device
+only when the field begins with `WiiM`, in any letter case. A WiiM Amp
+reports `WiiM_Amp_4layer`. An Arylic amplifier reports
+`ARYLIC_A50TE`, so the operator does not drive it.
+
+The operator already reads `getStatusEx` on every poll, so the check
+sends a WiiM no extra request. For a device whose `project` does not
+begin with `WiiM`, the operator sends `getStatusEx` and nothing else.
+It sends no setting, no command, and no event subscription. It writes
+one line to its log for each such device, with the project and the
+address:
+
+    discovery skipped the LinkPlay device <uuid> at <address>: its project is ARYLIC_A50TE, which is not a WiiM
+
+Discovery creates a `Receiver` for the device before the first
+`getStatusEx` answer arrives, because the mDNS answer carries no
+project. When the answer names another brand, the operator deletes
+that `Receiver`, and discovery creates no other for the device until
+the operator restarts. A `Receiver` that you declare is never deleted
+for this reason. It reports the device unreachable, and the operator
+still sends the device only `getStatusEx`. A device that does not
+answer `getStatusEx` is not judged: its `Receiver` stays and reports
+the amp unreachable. A device whose answer has no `project` field is
+not judged either.
+
 ## Turn network discovery off
 
 By default, the operator searches the LAN for WiiM amps with mDNS and
@@ -168,7 +198,8 @@ the amp's address. A WiiM `Receiver` with no address sends nothing and
 reports the amp unreachable.
 
 The operator does not delete the `Receiver` objects that the search
-created before you turned it off, because only a search deletes one.
+created before you turned it off, because only a search, or a device
+that reports another brand's `project`, deletes one.
 So a discovered `Receiver` also stays when you declare a `Receiver` for
 the same amp, and the two objects then name one amp. Each discovered
 `Receiver` has the `equipment.liken.sh/discovered` label. List them,

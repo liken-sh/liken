@@ -76,6 +76,11 @@ type Client struct {
 	// nil Reporter is a no-op.
 	Reporter func(status string)
 
+	// Foreign is called when getStatusEx names a project that is not a
+	// WiiM, once for each project the device reports. After it, the
+	// client reads getStatusEx and nothing else from that device.
+	Foreign func(project string)
+
 	// UUID is the identity the device must report before the client
 	// drives it. An empty value skips the check.
 	UUID string
@@ -88,6 +93,9 @@ type Client struct {
 	// misses counts the polls in a row the device did not answer, cleared
 	// by the next poll it does.
 	misses int
+	// foreign is the project a non-WiiM device reported, and empty
+	// while the device is a WiiM or has not answered.
+	foreign string
 	// surveyed is set once one poll has read every family, so the
 	// controller knows the device's own facts are in hand before it
 	// applies a declared setting.
@@ -170,8 +178,13 @@ func (c *Client) Run(ctx context.Context) {
 	defer c.stopEvents()
 	var waits pollWaits
 	for ctx.Err() == nil {
-		c.manageSubscriptions(ctx)
+		// The poll comes first: its getStatusEx read decides whether the
+		// device is a WiiM, and a device that is not gets no
+		// subscription.
 		wait := waits.after(c.poll(ctx))
+		if !c.isForeign() {
+			c.manageSubscriptions(ctx)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -219,6 +232,15 @@ func (c *Client) poll(ctx context.Context) bool {
 		c.miss()
 		return false
 	}
+	if next.Device.Model != "" && !IsWiiM(next.Device.Model) {
+		// Another brand built on the LinkPlay platform answers the same
+		// API. The client sends it nothing beyond this read, so it drives
+		// no device that is not a WiiM. The device counts as unreachable
+		// for the driver's purposes, because the driver cannot operate it.
+		c.rejectForeign(next.Device.Model)
+		c.miss()
+		return true
+	}
 	c.answered()
 	c.report(CommandOK)
 
@@ -242,6 +264,28 @@ func (c *Client) poll(ctx context.Context) bool {
 	c.mutex.Unlock()
 	c.publish(next)
 	return true
+}
+
+// isForeign answers whether the device reported a project that is not a
+// WiiM.
+func (c *Client) isForeign() bool {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.foreign != ""
+}
+
+// rejectForeign records the project of a device that is not a WiiM and
+// tells Foreign once for each project. A device whose getStatusEx names
+// no project is not judged, because the absent field says nothing about
+// whose device it is.
+func (c *Client) rejectForeign(project string) {
+	c.mutex.Lock()
+	changed := c.foreign != project
+	c.foreign = project
+	c.mutex.Unlock()
+	if changed && c.Foreign != nil {
+		c.Foreign(project)
+	}
 }
 
 // miss counts a poll the device did not answer. Enough polls in a row

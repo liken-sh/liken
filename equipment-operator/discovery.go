@@ -62,8 +62,16 @@ type discovery struct {
 	// missed. It is a field so a test holds the clock.
 	now func() time.Time
 
+	// reconciling serializes the reconciles, because a search and a
+	// device that reports another brand each run one.
+	reconciling sync.Mutex
+
 	mutex   sync.Mutex
 	devices map[string]wiim.Device
+	// foreign holds the project of each device that answered getStatusEx
+	// with a project that is not a WiiM, keyed by identity. Discovery
+	// creates no Receiver for it, and deletes the one it made.
+	foreign map[string]string
 	// searches counts the full searches since the start, and
 	// firstSearch and lastSearch stamp the first and the latest.
 	searches    int
@@ -87,6 +95,7 @@ func newDiscovery(client *Client, wake func()) *discovery {
 		log:         os.Stderr,
 		now:         time.Now,
 		devices:     map[string]wiim.Device{},
+		foreign:     map[string]string{},
 		foundIn:     map[string]int{},
 		missedSince: map[string]time.Time{},
 	}
@@ -99,6 +108,35 @@ func (d *discovery) address(uuid string) string {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	return d.devices[wiim.NormalizeUUID(uuid)].Address
+}
+
+// skip records that a device reads as another brand and reconciles at
+// once, so the Receiver discovery made for it goes without waiting for
+// the next search. The driver calls it when the getStatusEx it already
+// reads names a project that is not a WiiM, so a WiiM costs no extra
+// request. It logs the first time it hears of each project for a
+// device, and stays silent on the passes that repeat it.
+func (d *discovery) skip(uuid, project, address string) {
+	uuid = wiim.NormalizeUUID(uuid)
+	d.mutex.Lock()
+	changed := d.foreign[uuid] != project
+	d.foreign[uuid] = project
+	d.mutex.Unlock()
+	if !changed {
+		return
+	}
+	fmt.Fprintf(d.log, "discovery skipped the LinkPlay device %s at %s: its project is %s, which is not a WiiM\n", uuid, address, project)
+	if err := d.reconcile(); err != nil {
+		fmt.Fprintf(os.Stderr, "reconciling discovered receivers: %v\n", err)
+	}
+}
+
+// notWiiM answers the project a device reported that is not a WiiM's,
+// and an empty string for a device that has reported none.
+func (d *discovery) notWiiM(uuid string) string {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	return d.foreign[uuid]
 }
 
 // run discovers until ctx ends.
@@ -213,6 +251,8 @@ func discoveredName(uuid string) string {
 // searches have missed discoveryMisses times in a row, or whose
 // identity a person's Receiver now claims.
 func (d *discovery) reconcile() error {
+	d.reconciling.Lock()
+	defer d.reconciling.Unlock()
 	// Discovery creates and deletes Receivers, and the next search reads
 	// its own writes. The read answers a Receiver it created that the
 	// store has not received yet, so discovery does not create it again
@@ -239,6 +279,10 @@ func (d *discovery) reconcile() error {
 	// alone, so an amp one search missed keeps the Receiver the operator
 	// made for it.
 	for _, device := range d.held() {
+		if d.notWiiM(device.UUID) != "" {
+			// The device is another brand on LinkPlay's platform.
+			continue
+		}
 		if len(claimants[device.UUID]) > 0 {
 			// A Receiver already names this amp, so discovery creates
 			// nothing and defers to what stands.
@@ -271,11 +315,16 @@ func (d *discovery) reconcile() error {
 // one amp, and an empty string when the Receiver stands. A person's
 // Receiver that names the amp replaces the operator's copy at once. An
 // amp that full searches missed discoveryMisses times in a row is gone.
+// A device whose getStatusEx names a project that is not a WiiM is
+// another brand, and the operator deletes its copy at once.
 // An amp with fewer misses keeps its Receiver, which reports the amp
 // unreachable while discovery holds no address for it.
 func (d *discovery) pruneReason(uuid, name string, claimants []string) string {
 	if others := slices.DeleteFunc(slices.Clone(claimants), func(other string) bool { return other == name }); len(others) > 0 {
 		return fmt.Sprintf("Receiver %s names the WiiM %s", strings.Join(others, ", "), uuid)
+	}
+	if project := d.notWiiM(uuid); project != "" {
+		return fmt.Sprintf("the device %s reports the project %s, which is not a WiiM", uuid, project)
 	}
 	misses, span := d.missed(uuid)
 	if misses < discoveryMisses {

@@ -64,11 +64,14 @@ type receiverUnit struct {
 	driver        equipment.Driver
 	denonClient   *denon.Client
 	wiimClient    *wiim.Client
-	readings      *metrics
-	log           *receiverLog
-	cancel        context.CancelFunc
-	dirty         chan struct{}
-	generation    atomic.Int64
+	// foreign tells discovery which device reports a project that is
+	// not a WiiM. It is nil in a test that builds a unit alone.
+	foreign    func(uuid, project, address string)
+	readings   *metrics
+	log        *receiverLog
+	cancel     context.CancelFunc
+	dirty      chan struct{}
+	generation atomic.Int64
 	// The ceiling and the step live here and not on the session, so an
 	// edit to them reaches a standing session with no restart.
 	volume atomic.Pointer[ReceiverVolume]
@@ -1080,6 +1083,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	}
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
+	unit.foreign = c.discovery.skip
 	unit.startDriver(receiver, unit.address, c.readings.reportCommand)
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
@@ -1107,6 +1111,11 @@ func (u *receiverUnit) startDriver(receiver *Receiver, address string, report fu
 		client := wiim.NewClient(address, u.observe)
 		client.UUID = receiver.Spec.Wiim.UUID
 		client.Reporter = report
+		client.Foreign = func(project string) {
+			if u.foreign != nil {
+				u.foreign(receiver.Spec.Wiim.UUID, project, address)
+			}
+		}
 		u.driver = client
 		u.wiimClient = client
 	}

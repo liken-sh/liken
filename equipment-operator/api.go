@@ -226,7 +226,9 @@ type DenonProtocol struct {
 // resolves the UUID to a current address. With no address and no
 // discovered address, which is always the case while network discovery
 // is off (main.go), the driver can reach nothing and reports the
-// receiver unreachable.
+// receiver unreachable. The driver drives only a device whose
+// getStatusEx project begins with WiiM (wiim.IsWiiM), because other
+// brands build on the same platform and answer the same API.
 type WiimProtocol struct {
 	UUID     string        `json:"uuid"`
 	Address  string        `json:"address,omitempty"`
