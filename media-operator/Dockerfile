@@ -19,6 +19,14 @@
 # pulls both builds, about 40MB where one build was 17MB.
 
 FROM golang:1.27.1-bookworm AS build
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the build.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the git that this image includes. `GOSUMDB` keeps its
+# default, so the checksum database still verifies a module that `go`
+# fetched from its origin.
+ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

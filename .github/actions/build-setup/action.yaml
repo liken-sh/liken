@@ -20,6 +20,11 @@ outputs:
 runs:
   using: composite
   steps:
+    # A composite action takes the env of the job that uses it, so the
+    # `GOPROXY` of component-liken.yaml covers every download here:
+    # after any error from proxy.golang.org, `go` fetches the module
+    # from its origin, and the checksum database still verifies it.
+    # ci/templates/component.yaml.tmpl gives the reason.
     - id: setup-go
       uses: actions/setup-go@v6
       with:

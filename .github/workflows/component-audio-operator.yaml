@@ -59,6 +59,18 @@ permissions:
   contents: read
   packages: write
 
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the job.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the runner's git. `GOSUMDB` keeps its default, so the
+# checksum database still verifies a module that `go` fetched from its
+# origin. The value covers the Go of every job here, and of the
+# build-setup action, which takes the env of the job that uses it.
+# The images set the same value in their own build stages.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   go:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'go') }}

@@ -161,6 +161,14 @@ RUN set -eux; \
 # The entrypoint. It is built from this repository's own module, which
 # is also where the operator comes from, so both images move together.
 FROM golang:1.27.1-bookworm AS entrypoint
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the build.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the git that this image includes. `GOSUMDB` keeps its
+# default, so the checksum database still verifies a module that `go`
+# fetched from its origin.
+ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
 COPY go.mod go.sum ./
 # go.mod replaces the shared kubernetes module with ../kubernetes, so
