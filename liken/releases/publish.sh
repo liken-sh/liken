@@ -32,11 +32,19 @@ if [[ "$VERSION" == *-000 ]]; then
   exit 1
 fi
 
-# The release publishes the test coverage report beside the artifacts.
-# The report renders from a profile of the tagged commit that this job
-# writes, because a tag that changes no Go code runs no Go check job to
-# write one.
-make coverage-profile coverage-report
+# The release publishes the test coverage report beside the artifacts,
+# and `make coverage-report` renders it from coverage.out, a profile of
+# the tagged commit. A tag runs only the checks that its changes reach,
+# so its own go job often does not run and writes no profile. The site
+# serves the profile of its last deploy, and `ci profile` takes that
+# copy when no file that the go job reads changed between that deploy
+# and the tag. ci/coverage.go gives the argument. When the copy does not
+# match, the job writes the profile with its own run of the tests, which
+# takes minutes.
+if ! (cd ../ci && go run . profile -root .. -component liken -site https://liken.sh); then
+  make coverage-profile
+fi
+make coverage-report
 cp coverage.html "$DIST/coverage.html"
 
 # s3cmd is the uploader, because it speaks plain S3 to non-AWS endpoints

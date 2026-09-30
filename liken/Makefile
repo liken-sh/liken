@@ -701,8 +701,9 @@ test-go:
 
 # The profile is the one run of the tests, and test-go runs it. A
 # release tag runs only the checks that its changes reach, so the
-# publish job often has no profile from a check job of its own run,
-# and it writes one here instead.
+# publish job often has no profile from a check job of its own run.
+# releases/publish.sh then takes the profile that the site serves, and
+# runs this target only when that profile does not describe the tag.
 coverage-profile:
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 

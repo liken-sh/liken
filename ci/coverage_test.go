@@ -175,3 +175,89 @@ func TestReportsFailWhenTheSiteFails(t *testing.T) {
 		t.Fatal("reports passed while the site failed")
 	}
 }
+
+// taggedRepo is an OS whose go job writes a coverage profile. The site
+// deployed its first commit, and the tag is a second commit that
+// changes the file named, or the same commit when change is "".
+func taggedRepo(t *testing.T, change string) (root, deployed string) {
+	t.Helper()
+	r := newRepo(t, map[string]string{
+		"liken/package.toml":  "[package]\nname = \"liken\"\n[docs]\nprefix = \"\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test-go\"\ncoverage = [\"coverage.out\"]\n[outputs]\nchannel = true\n",
+		"liken/init/main.go":  "package main\n",
+		"liken/docs/index.md": "a manual\n",
+	})
+	deployed = r.run("rev-parse", "HEAD")
+	if change != "" {
+		r.write(change, "changed\n")
+		r.commit("the tag")
+	}
+	return r.git.Dir, deployed
+}
+
+// A servedFile is one answer of the site: its status, its text, and
+// its Last-Modified time, which is the time of its deploy.
+type servedFile struct {
+	status         int
+	text, modified string
+}
+
+const deployTime = "Wed, 30 Sep 2026 16:45:41 GMT"
+
+// deployedSite serves release.txt from a deploy of the commit, and the
+// OS's profile as given.
+func deployedSite(t *testing.T, commit string, profile servedFile) string {
+	t.Helper()
+	files := map[string]servedFile{
+		"/release.txt":                 {http.StatusOK, commit + "\n", deployTime},
+		"/coverage/liken/coverage.out": profile,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := files[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if f.modified != "" {
+			w.Header().Set("Last-Modified", f.modified)
+		}
+		w.WriteHeader(f.status)
+		w.Write([]byte(f.text))
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// The OS's publish takes the profile that the site serves only when
+// that profile describes the files at the tag. In every other case the
+// command fails, writes nothing, and the publish runs the tests.
+func TestThePublishTakesTheServedProfileOnlyWhenItDescribesTheTag(t *testing.T) {
+	const profileText = "mode: atomic\nserved\n"
+	cases := []struct {
+		name    string
+		change  string
+		profile servedFile
+		want    string
+	}{
+		{"served, and the tag is the deployed commit", "", servedFile{http.StatusOK, profileText, deployTime}, profileText},
+		{"served, and a file outside the OS changed", "README.md", servedFile{http.StatusOK, profileText, deployTime}, profileText},
+		{"served, and only the manual changed", "liken/docs/index.md", servedFile{http.StatusOK, profileText, deployTime}, profileText},
+		{"a file the go job reads changed since the deploy", "liken/init/main.go", servedFile{http.StatusOK, profileText, deployTime}, ""},
+		{"the site serves no profile", "", servedFile{http.StatusNotFound, "", ""}, ""},
+		{"the site fails", "", servedFile{http.StatusServiceUnavailable, "", ""}, ""},
+		{"the CDN serves the profile of another deploy", "", servedFile{http.StatusOK, profileText, "Tue, 29 Sep 2026 12:00:00 GMT"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root, deployed := taggedRepo(t, c.change)
+			w := newWorld(t, &fakeRegistry{})
+			err := w.run([]string{"profile", "-root", root, "-component", "liken", "-site", deployedSite(t, deployed, c.profile)})
+			if (err == nil) != (c.want != "") {
+				t.Errorf("profile returned %v", err)
+			}
+			got, _ := os.ReadFile(filepath.Join(root, "liken/coverage.out"))
+			if string(got) != c.want {
+				t.Errorf("liken/coverage.out holds %q, want %q", got, c.want)
+			}
+		})
+	}
+}

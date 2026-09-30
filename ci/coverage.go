@@ -116,16 +116,105 @@ func gatherReports(root, site, dest string, client *http.Client, components map[
 }
 
 func fetchProfile(client *http.Client, url string) ([]byte, error) {
+	text, _, err := fetchServed(client, url)
+	return text, err
+}
+
+// fetchServed reads one file of the site, and the Last-Modified time
+// that the site gives it.
+func fetchServed(client *http.Client, url string) (text []byte, modified string, err error) {
 	resp, err := client.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return io.ReadAll(resp.Body)
+		text, err = io.ReadAll(resp.Body)
+		return text, resp.Header.Get("Last-Modified"), err
 	case http.StatusNotFound:
-		return nil, errNotServed
+		return nil, "", errNotServed
 	}
-	return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+	return nil, "", fmt.Errorf("GET %s: %s", url, resp.Status)
+}
+
+// A release tag of the OS publishes the coverage report beside the
+// release, and the report needs the profile of the tagged commit. A
+// tag runs only the checks that its changes reach, so the check job
+// that writes the profile often does not run. The publish job then
+// takes the copy that the site serves, when that copy describes the
+// files at the tag. The run of the tests that writes a profile takes
+// minutes, and the copy takes one request.
+//
+// The argument above gives the commit that the served copy describes:
+// the commit of the deploy that serves it. The site serves that commit
+// in release.txt. So the copy describes the tag when no file that the
+// job reads changed between that commit and the tag, which is the test
+// that the plan applies to select the job. The deploy can be newer
+// than the tag or older, and the test holds in both directions,
+// because a file that differs between the two commits is a change.
+//
+// A CDN serves the site, and for up to ten minutes it can serve the
+// release.txt of one deploy and the profile of another. GitHub Pages
+// gave every file of a deploy the same Last-Modified time in the
+// deploys checked, so the publish takes the copy only when the two
+// times are the same. If Pages stops doing that, the times differ, and
+// the publish runs the tests.
+//
+// When any of these checks fails, the publish writes the profile with
+// its own run of the tests. So the copy saves time, and a failure to
+// read it costs only that time.
+
+// reuseProfiles writes into the component's directory each profile
+// that the site serves, when every one of them describes the files at
+// head. It returns an error that gives the reason when it writes none.
+func reuseProfiles(root, site, head string, client *http.Client, components map[string]*Component, c *Component) error {
+	commit, deployed, err := fetchServed(client, site+"/release.txt")
+	if err != nil {
+		return fmt.Errorf("the site's release.txt: %w", err)
+	}
+	served := strings.TrimSpace(string(commit))
+	git := Git{Dir: root}
+	if !git.HasCommit(served) {
+		return fmt.Errorf("the site serves commit %q, which the repository does not hold", served)
+	}
+	diff, err := git.ReadDiff(components, served, head)
+	if err != nil {
+		return err
+	}
+	if file, ok := diff.Workflows[c.Name()]; ok {
+		return fmt.Errorf("%s changed since %s", file, served)
+	}
+	sel := selector{root: root, components: components, producer: ImageProducers(components), diff: diff}
+	texts := map[string][]byte{}
+	for _, job := range c.Jobs {
+		if len(job.Coverage) == 0 {
+			continue
+		}
+		deps := sel.jobDeps(c, job)
+		for _, file := range diff.Files {
+			if sel.jobReads(c, job, deps, file) {
+				return fmt.Errorf("the %s job reads %s, which changed since %s", job.Name, file, served)
+			}
+		}
+		for _, file := range job.Coverage {
+			text, modified, err := fetchServed(client, site+"/coverage/"+c.Name()+"/"+file)
+			if err != nil {
+				return fmt.Errorf("the site's %s: %w", file, err)
+			}
+			if deployed == "" || modified != deployed {
+				return fmt.Errorf("the site's %s is from another deploy than its release.txt", file)
+			}
+			texts[file] = text
+		}
+	}
+	if len(texts) == 0 {
+		return fmt.Errorf("%s has no coverage job", c.Name())
+	}
+	for file, text := range texts {
+		if err := os.WriteFile(filepath.Join(root, c.Dir, file), text, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }

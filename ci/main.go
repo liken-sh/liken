@@ -13,6 +13,8 @@
 //	go run ./ci sites               list each manual's directory and prefix
 //	go run ./ci reports -site URL -dest DIR
 //	                                gather each coverage report's profiles, and list the reports to render
+//	go run ./ci profile -component C -site URL
+//	                                take C's coverage profiles from the site when they describe HEAD
 package main
 
 import (
@@ -58,16 +60,16 @@ type World struct {
 func (w World) run(args []string) error {
 	stdout := w.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, deps, publish, record, sites, or reports")
+		return fmt.Errorf("name a command: generate, plan, deps, publish, record, sites, reports, or profile")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
 	check := flags.Bool("check", false, "generate: fail when a workflow on disk differs, and write nothing")
-	component := flags.String("component", "", "publish: the component")
+	component := flags.String("component", "", "publish, profile: the component")
 	version := flags.String("version", "", "publish: the version")
 	mode := flags.String("mode", "", "publish: dev or release")
 	tag := flags.String("tag", "", "record: the release tag")
-	site := flags.String("site", "", "reports: the address of the site that serves the profiles now")
+	site := flags.String("site", "", "reports, profile: the address of the site that serves the profiles now")
 	dest := flags.String("dest", "", "reports: the site's tree, where the profiles publish")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
@@ -99,6 +101,16 @@ func (w World) run(args []string) error {
 		return w.record(*root, components, *tag)
 	case "reports":
 		return gatherReports(*root, *site, *dest, w.Published.Client, components, stdout, w.Stderr)
+	case "profile":
+		c, ok := components[*component]
+		if !ok {
+			return fmt.Errorf("%q is not a component", *component)
+		}
+		if err := reuseProfiles(*root, *site, "HEAD", w.Published.Client, components, c); err != nil {
+			return fmt.Errorf("%s: the site's coverage profile does not describe HEAD: %w", c.Name(), err)
+		}
+		fmt.Fprintf(stdout, "%s: took the coverage profile that the site serves\n", c.Name())
+		return nil
 	case "sites":
 		for _, c := range sortedComponents(components) {
 			if c.Docs != nil && c.Docs.Prefix != "" {
