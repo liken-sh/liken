@@ -197,14 +197,7 @@ func (i *inventory) releaseDepartedAdapters(present bonds.Address) {
 // listAdapters answers every Adapter in the cluster, from the store
 // once it holds its first read.
 func (i *inventory) listAdapters() ([]Adapter, error) {
-	if i.cache.adapters.View.Ready() {
-		return informer.CurrentList[Adapter](i.client, i.cache.adapters, adapterPath)
-	}
-	list, err := apiclient.Get[AdapterList](i.client, adaptersPath())
-	if err != nil {
-		return nil, err
-	}
-	return list.Items, nil
+	return informer.List[Adapter](i.client, i.cache.adapters, adaptersPath(), adapterPath)
 }
 
 // departed reports whether an Adapter is one this node must release:

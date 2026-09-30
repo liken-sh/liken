@@ -94,14 +94,7 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 // listPeripherals answers the Peripherals of one radio, from the store
 // once the watch for that radio holds its first read.
 func (i *inventory) listPeripherals(adapterKey string) ([]Peripheral, error) {
-	if held := i.cache.peripheralsOf(adapterKey); held.View.Ready() {
-		return informer.CurrentList[Peripheral](i.client, held, peripheralPath)
-	}
-	list, err := apiclient.Get[PeripheralList](i.client, byAdapter(peripheralsPath(), adapterKey))
-	if err != nil {
-		return nil, err
-	}
-	return list.Items, nil
+	return informer.List[Peripheral](i.client, i.cache.peripheralsOf(adapterKey), byAdapter(peripheralsPath(), adapterKey), peripheralPath)
 }
 
 // createPeripheral records a bond in the API. request names the

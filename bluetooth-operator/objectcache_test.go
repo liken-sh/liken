@@ -256,6 +256,33 @@ func TestARequestStatusFromAnOlderCopy(t *testing.T) {
 	}
 }
 
+// A list before the PairingRequest watch finished its first read comes
+// from the API server. The store can then become ready at an older
+// copy, because the watch's first read can come from the API server's
+// watch cache. The next list must not answer that older copy: a pass
+// that read a finished request from the first list would read the copy
+// from before it finished, and open the pairing window again.
+func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
+	fixture := newAPIFixture()
+	fixture.put(t, testRequestPath(), openRequest(""))
+	inventory := testInventory(t, fixture, testRadio(t))
+	older := storeOf(t, fixture, pairingRequestKind)
+	fixture.put(t, testRequestPath(), finishedRequest())
+	ready := false
+	inventory.cache.requests = informer.Held{View: informer.View{Store: older.Store, Synced: func() bool { return ready }}, Versions: memo.New()}
+
+	listed, err := inventory.listRequests()
+	if err != nil || len(listed) != 1 || listed[0].Status.Phase != phasePaired {
+		t.Fatalf("the list before the store is ready = %+v, %v; want the paired request", listed, err)
+	}
+	ready = true
+	read, err := inventory.listRequests()
+
+	if err != nil || len(read) != 1 || read[0].Status.Phase != phasePaired {
+		t.Errorf("the list from the ready store = %+v, %v; want the paired request, not the store's older copy", read, err)
+	}
+}
+
 // The store can still hold a request as it was before this operator
 // paired its device. The operator remembers the version its own write
 // produced, reads the request from the API server instead of the

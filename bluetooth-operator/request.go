@@ -24,12 +24,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
 // reconcileRequests runs every open window aimed at this radio, and
@@ -66,19 +66,10 @@ func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, 
 }
 
 // listRequests answers every PairingRequest, from the store once it
-// holds its first read.
+// holds its first read, and from the API server before then
+// (informer.List).
 func (i *inventory) listRequests() ([]PairingRequest, error) {
-	if i.cache.requests.View.Ready() {
-		return informer.CurrentList[PairingRequest](i.client, i.cache.requests, func(key string) string {
-			namespace, name, _ := strings.Cut(key, "/")
-			return pairingRequestPath(namespace, name)
-		})
-	}
-	list, err := apiclient.Get[PairingRequestList](i.client, fromCache(pairingRequestsPath()))
-	if err != nil {
-		return nil, err
-	}
-	return list.Items, nil
+	return informer.List[PairingRequest](i.client, i.cache.requests, pairingRequestsPath(), memo.NamespacedPath(pairingRequestPath))
 }
 
 // runWindow advances one unfinished request, and reports whether its

@@ -29,7 +29,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
@@ -380,20 +379,6 @@ type SeenDevice struct {
 	FirstSeen string `json:"firstSeen,omitempty"`
 }
 
-// The list types. The API server's list responses include far more
-// than this, and the operator reads the items and nothing else.
-type (
-	AdapterList struct {
-		Items []Adapter `json:"items"`
-	}
-	PeripheralList struct {
-		Items []Peripheral `json:"items"`
-	}
-	PairingRequestList struct {
-		Items []PairingRequest `json:"items"`
-	}
-)
-
 // The paths for these objects. A cluster-scoped resource has one
 // collection, and a namespaced resource has one for each namespace and
 // one across all of them, which is the one a controller lists.
@@ -424,27 +409,6 @@ func byAdapter(path, adapterKey string) string {
 // adapterSelector is the label selector for the objects of one radio.
 func adapterSelector(adapterKey string) string {
 	return bonds.AdapterLabel + "=" + adapterKey
-}
-
-// fromCache makes the API server serve a list from its watch cache
-// instead of the datastore. A list with no resourceVersion reads
-// through to etcd every time.
-//
-// The pass lists the PairingRequests from the request watcher's store
-// (objectcache.go), and sends this list only while that store has not
-// finished its first read. The informer puts each change in its store
-// before it calls the handler, so a pass that the watcher woke reads
-// the change from the store. The API server's cache, which this list
-// reads, can be behind. If a pass at the start reads a cache that does
-// not have a change yet, the pass acts on the change at the next wake
-// of any kind: a uevent, a bluetoothd signal, another change to a
-// request, or the backstop tick, which is at most 60 seconds.
-func fromCache(path string) string {
-	separator := "?"
-	if strings.Contains(path, "?") {
-		separator = "&"
-	}
-	return path + separator + "resourceVersion=0"
 }
 
 // createObject posts a new object to its collection and returns what
