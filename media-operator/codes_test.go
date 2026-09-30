@@ -6,6 +6,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -38,14 +39,16 @@ func TestADeclaredCodeSetWakesTheLoop(t *testing.T) {
 // The retained topic delivers the same document on every reconnect, so
 // a repeat wakes nothing.
 func TestARepeatedCodeSetWakesNothing(t *testing.T) {
-	wake := make(chan struct{}, 1)
-	desk := newCodesDesk(wake)
-	desk.setCodes(controllerKey("house", "sofa"), testDeclared())
-	<-wake
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 1)
+		desk := newCodesDesk(wake)
+		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		<-wake
 
-	desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
 
-	mustMatch(t, woke(wake), false)
+		mustMatch(t, woke(wake), false)
+	})
 }
 
 // A controller whose nodes vanished clears its topic, and the desk

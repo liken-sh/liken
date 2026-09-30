@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -78,33 +79,43 @@ func TestReadEventsDeliversOnlyWhatWasObserved(t *testing.T) {
 	}
 }
 
+// The dial tries once a second. A unix socket dial returns at once,
+// whether the socket is there or not, so these tests run in a synctest
+// bubble and check each wait against the bubble's clock.
 func TestDialMPVWaitsForTheSocketMPVHasNotMadeYet(t *testing.T) {
-	useDialDelay(t, 10*time.Millisecond)
-	path := filepath.Join(t.TempDir(), "mpv.sock")
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "mpv.sock")
+		// The first dial nearly always fails in production, because mpv
+		// creates its IPC socket a moment after it starts. The delayed
+		// listener here is that moment.
+		listenAfter(t, path, 2*mpvDialDelay+mpvDialDelay/2)
+		began := time.Now()
 
-	// The first dial nearly always fails in production, because mpv
-	// creates its IPC socket a moment after it starts. The delayed
-	// listener here is that moment.
-	listenAfter(t, path, 50*time.Millisecond)
+		connection, err := dialMPV(context.Background(), path)
 
-	connection, err := dialMPV(context.Background(), path)
-	mustSucceed(t, err)
-	connection.Close()
+		mustSucceed(t, err)
+		connection.Close()
+		mustMatch(t, time.Since(began), 3*mpvDialDelay)
+	})
 }
 
 // A socket that never arrives ends the dial only when the context does,
 // because waiting for mpv is the whole job and the dial has no deadline
 // of its own.
 func TestDialMPVWaitsForASocketUntilItsContextEnds(t *testing.T) {
-	useDialDelay(t, time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancel()
-	_, err := dialMPV(ctx, filepath.Join(t.TempDir(), "absent.sock"))
-	mustFail(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		began := time.Now()
+
+		_, err := dialMPV(ctx, filepath.Join(t.TempDir(), "absent.sock"))
+
+		mustFail(t, err)
+		mustMatch(t, time.Since(began), time.Minute)
+	})
 }
 
 func TestDialMPVStopsWithItsContext(t *testing.T) {
-	useDialDelay(t, 10*time.Millisecond)
 	ctx, stop := context.WithCancel(context.Background())
 	stop()
 
@@ -197,11 +208,4 @@ func listenAfter(t *testing.T, path string, delay time.Duration) {
 		defer listener.Close()
 		<-t.Context().Done()
 	}()
-}
-
-func useDialDelay(t *testing.T, delay time.Duration) {
-	t.Helper()
-	was := mpvDialDelay
-	t.Cleanup(func() { mpvDialDelay = was })
-	mpvDialDelay = delay
 }

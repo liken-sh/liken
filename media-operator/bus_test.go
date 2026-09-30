@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -103,8 +104,6 @@ func readTopicFilter(body []byte) (int, string, bool) {
 // the test's context ends.
 func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus, []*fakeBroker, <-chan *Bus) {
 	t.Helper()
-	shorterBackoff(t)
-
 	conns := make(chan net.Conn, count)
 	brokers := make([]*fakeBroker, count)
 	for index := range brokers {
@@ -128,9 +127,9 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 		}
 	}
 
-	// The test waits for Run to end before it returns, because Run reads the
-	// backoff bounds that shorterBackoff restores on its own cleanup, and a
-	// client still reconnecting would read them as they were written.
+	// The test waits for Run to end before it returns, so no client
+	// outlives its test, and a test in a synctest bubble ends with no
+	// goroutine left.
 	ctx, cancel := context.WithCancel(context.Background())
 	ended := make(chan struct{})
 	t.Cleanup(func() {
@@ -146,13 +145,6 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 		bus.Run(ctx)
 	}()
 	return bus, brokers, connected
-}
-
-func shorterBackoff(t *testing.T) {
-	t.Helper()
-	minWas, maxWas := busMinBackoff, busMaxBackoff
-	t.Cleanup(func() { busMinBackoff, busMaxBackoff = minWas, maxWas })
-	busMinBackoff, busMaxBackoff = 5*time.Millisecond, 20*time.Millisecond
 }
 
 func waitForConnect(t *testing.T, connected <-chan *Bus) {
@@ -275,29 +267,30 @@ func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
 // A dropped connection reconnects, and the remembered subscription
 // goes out again on the new connection with no second Subscribe call.
 func TestBusResendsSubscriptionsAfterAReconnect(t *testing.T) {
-	bus, brokers, connected := startBus(t, 2, nil, nil)
-	bus.Subscribe("liken/media/plays/+/+/status")
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 2, nil, nil)
+		bus.Subscribe("liken/media/plays/+/+/status")
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[0].subs); got != "liken/media/plays/+/+/status" {
-		t.Fatalf("first subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[0].subs); got != "liken/media/plays/+/+/status" {
+			t.Fatalf("first subscription = %q", got)
+		}
 
-	// Drop the first connection. The client reconnects onto the second
-	// broker and re-sends the filter it remembers.
-	brokers[0].conn.Close()
+		// Drop the first connection. The client reconnects onto the second
+		// broker and re-sends the filter it remembers.
+		brokers[0].conn.Close()
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[1].subs); got != "liken/media/plays/+/+/status" {
-		t.Errorf("resent subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[1].subs); got != "liken/media/plays/+/+/status" {
+			t.Errorf("resent subscription = %q", got)
+		}
+	})
 }
 
 // A publish made while the client is disconnected is dropped at QoS 0,
 // and the caller re-publishes from onConnect once the connection
 // returns.
 func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
-	shorterBackoff(t)
 	bus := newBus("pipe", "media-operator", nil, nil, nil)
 	// No connection is ever dialed, so out stays nil and the publish
 	// has nowhere to go.
@@ -320,74 +313,69 @@ func TestNewBusDialsTheAddressOverTCP(t *testing.T) {
 // A broker that never answers is retried ever more slowly, up to the
 // ceiling, so a broker that is down does not become a tight reconnect loop.
 func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
-	shorterBackoff(t)
-	waits := make(chan time.Duration, 16)
-	last := time.Now()
+	synctest.Test(t, func(t *testing.T) {
+		waits := make(chan time.Duration, 16)
+		last := time.Now()
 
-	bus := newBus("pipe", "media-operator", nil, nil, nil)
-	bus.dial = func(ctx context.Context) (net.Conn, error) {
-		waits <- time.Since(last)
-		last = time.Now()
-		return nil, errors.New("the broker is down")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		bus.Run(ctx)
-	}()
-
-	// The first dial is immediate. Each wait after it is twice the
-	// one before, up to the ceiling the third wait already reaches.
-	floors := []time.Duration{0, busMinBackoff, 2 * busMinBackoff, busMaxBackoff, busMaxBackoff}
-	for dial, floor := range floors {
-		select {
-		case waited := <-waits:
-			if waited < floor {
-				t.Errorf("dial %d came %v after the one before, want at least %v", dial+1, waited, floor)
-			}
-		case <-time.After(busTestTimeout):
-			t.Fatal("the client stopped dialing")
+		bus := newBus("pipe", "media-operator", nil, nil, nil)
+		bus.dial = func(ctx context.Context) (net.Conn, error) {
+			waits <- time.Since(last)
+			last = time.Now()
+			return nil, errors.New("the broker is down")
 		}
-	}
-	cancel()
 
-	select {
-	case <-stopped:
-	case <-time.After(busTestTimeout):
-		t.Fatal("Run did not return when its context ended")
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			bus.Run(ctx)
+		}()
+
+		// The first dial is immediate. Each wait after it is twice the
+		// one before, up to the ceiling.
+		want := []time.Duration{0, time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
+			16 * time.Second, busMaxBackoff, busMaxBackoff}
+		for dial, wait := range want {
+			if waited := <-waits; waited != wait {
+				t.Errorf("dial %d came %v after the one before, want %v", dial+1, waited, wait)
+			}
+		}
+		cancel()
+
+		select {
+		case <-stopped:
+		case <-time.After(busTestTimeout):
+			t.Fatal("Run did not return when its context ended")
+		}
+	})
 }
 
 // Run returns while it waits out a backoff, so a pod that is shutting
 // down does not sit through the whole wait.
 func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
-	minWas, maxWas := busMinBackoff, busMaxBackoff
-	t.Cleanup(func() { busMinBackoff, busMaxBackoff = minWas, maxWas })
-	busMinBackoff, busMaxBackoff = time.Minute, time.Minute
+	synctest.Test(t, func(t *testing.T) {
+		dialed := make(chan struct{}, 1)
+		bus := newBus("pipe", "media-operator", nil, nil, nil)
+		bus.dial = func(ctx context.Context) (net.Conn, error) {
+			dialed <- struct{}{}
+			return nil, errors.New("the broker is down")
+		}
 
-	dialed := make(chan struct{}, 1)
-	bus := newBus("pipe", "media-operator", nil, nil, nil)
-	bus.dial = func(ctx context.Context) (net.Conn, error) {
-		dialed <- struct{}{}
-		return nil, errors.New("the broker is down")
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			bus.Run(ctx)
+		}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		bus.Run(ctx)
-	}()
+		<-dialed
+		began := time.Now()
+		cancel()
+		<-stopped
 
-	<-dialed
-	cancel()
-
-	select {
-	case <-stopped:
-	case <-time.After(busTestTimeout):
-		t.Fatal("Run waited out the whole backoff")
-	}
+		if waited := time.Since(began); waited != 0 {
+			t.Errorf("Run returned %s after its context ended, want at once", waited)
+		}
+	})
 }

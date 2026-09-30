@@ -113,9 +113,8 @@ const positionWriteInterval = 8 * time.Second
 // the retained values within milliseconds of the subscribe, and the
 // wait covers that delivery, so the pass reads desks that already hold
 // what the broker holds. A write inside the window would put unity over
-// a level a person set, or move a controller to another room. It is a
-// variable so a test writes without waiting.
-var catchUpGrace = 2 * time.Second
+// a level a person set, or move a controller to another room.
+const catchUpGrace = 2 * time.Second
 
 // defaultTTLSecondsAfterFinished is how long a Finished Play stands when
 // its spec sets no ttlSecondsAfterFinished. Five minutes is the default
@@ -1885,8 +1884,8 @@ type backoffState struct {
 // The recreate backoff follows the kubelet's CrashLoopBackOff: the first
 // recreate is immediate, and each recreate after it doubles the wait from
 // the base to the cap. A run that stays up for the reset window starts the
-// count over. They are variables so a test drives them in milliseconds.
-var (
+// count over.
+const (
 	recreateBackoffBase  = 10 * time.Second
 	recreateBackoffCap   = 5 * time.Minute
 	recreateBackoffReset = 10 * time.Minute

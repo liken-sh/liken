@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -50,40 +51,42 @@ func TestTheSweepClearsTheTopicsOfARunWhosePlayIsGone(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			bus, brokers, connected := startBus(t, 1, nil, nil)
-			waitForConnect(t, connected)
-			broker := brokers[0]
-			wake := make(chan struct{}, 1)
-			media := &operator{
-				topicBase: defaultTopicBase,
-				bus:       bus,
-				reports:   newReports(wake),
-			}
-
-			// The desk has seen the run, the way the broker's retained
-			// availability marks it seen the moment the operator subscribes.
-			media.reports.availability("den", test.play, false, "")
-			if test.disconnected {
-				waitForDisconnect(t, media.bus, broker)
-			}
-
-			media.reclaimPlays(map[string]bool{runKey("den", "new-film"): true})
-
-			if !test.wantCleared {
-				select {
-				case got := <-broker.pubs:
-					t.Fatalf("the sweep published %+v for a run it must leave alone: %s", got, test.name)
-				case <-time.After(50 * time.Millisecond):
+			synctest.Test(t, func(t *testing.T) {
+				bus, brokers, connected := startBus(t, 1, nil, nil)
+				waitForConnect(t, connected)
+				broker := brokers[0]
+				wake := make(chan struct{}, 1)
+				media := &operator{
+					topicBase: defaultTopicBase,
+					bus:       bus,
+					reports:   newReports(wake),
 				}
-				if test.disconnected && len(media.reports.stale(map[string]bool{})) != 1 {
-					t.Error("the sweep forgot a run whose clear it never published")
+
+				// The desk has seen the run, the way the broker's retained
+				// availability marks it seen the moment the operator subscribes.
+				media.reports.availability("den", test.play, false, "")
+				if test.disconnected {
+					waitForDisconnect(t, media.bus, broker)
 				}
-				return
-			}
-			mustClearPlayTopics(t, broker, "den", test.play)
-			if got := media.reports.stale(map[string]bool{}); len(got) != 0 {
-				t.Errorf("the desk still offers %v after the sweep cleared it", got)
-			}
+
+				media.reclaimPlays(map[string]bool{runKey("den", "new-film"): true})
+
+				if !test.wantCleared {
+					select {
+					case got := <-broker.pubs:
+						t.Fatalf("the sweep published %+v for a run it must leave alone: %s", got, test.name)
+					case <-time.After(50 * time.Millisecond):
+					}
+					if test.disconnected && len(media.reports.stale(map[string]bool{})) != 1 {
+						t.Error("the sweep forgot a run whose clear it never published")
+					}
+					return
+				}
+				mustClearPlayTopics(t, broker, "den", test.play)
+				if got := media.reports.stale(map[string]bool{}); len(got) != 0 {
+					t.Errorf("the desk still offers %v after the sweep cleared it", got)
+				}
+			})
 		})
 	}
 }
@@ -153,35 +156,37 @@ func TestADeletingPlayIsReleasedOnlyOnceItsPodIsGone(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
-			play.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
-			play.Metadata.Finalizers = []string{playFinalizer}
-			cluster.plays["movie"] = play
-			cluster.pods["movie-playback"] = housePlaybackPod()
-			cluster.podsLinger["movie-playback"] = test.lingers
-			media, broker := busOperator(t, cluster)
-			if test.disconnected {
-				waitForDisconnect(t, media.bus, broker)
-			}
-
-			media.pass()
-
-			if _, standing := cluster.plays["movie"]; standing != test.wantPlay {
-				t.Fatalf("the Play is still in the collection = %v, want %v", standing, test.wantPlay)
-			}
-			if !test.wantCleared {
-				if held := cluster.plays["movie"].Metadata.Finalizers; !reflect.DeepEqual(held, []string{playFinalizer}) {
-					t.Errorf("finalizers = %v, want the operator to keep %q", held, playFinalizer)
+			synctest.Test(t, func(t *testing.T) {
+				cluster := newFakeCluster()
+				play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
+				play.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
+				play.Metadata.Finalizers = []string{playFinalizer}
+				cluster.plays["movie"] = play
+				cluster.pods["movie-playback"] = housePlaybackPod()
+				cluster.podsLinger["movie-playback"] = test.lingers
+				media, broker := busOperator(t, cluster)
+				if test.disconnected {
+					waitForDisconnect(t, media.bus, broker)
 				}
-				select {
-				case got := <-broker.pubs:
-					t.Fatalf("the pass published %+v while the pod was still there", got)
-				case <-time.After(50 * time.Millisecond):
+
+				media.pass()
+
+				if _, standing := cluster.plays["movie"]; standing != test.wantPlay {
+					t.Fatalf("the Play is still in the collection = %v, want %v", standing, test.wantPlay)
 				}
-				return
-			}
-			mustClearPlayTopics(t, broker, "house", "movie")
+				if !test.wantCleared {
+					if held := cluster.plays["movie"].Metadata.Finalizers; !reflect.DeepEqual(held, []string{playFinalizer}) {
+						t.Errorf("finalizers = %v, want the operator to keep %q", held, playFinalizer)
+					}
+					select {
+					case got := <-broker.pubs:
+						t.Fatalf("the pass published %+v while the pod was still there", got)
+					case <-time.After(50 * time.Millisecond):
+					}
+					return
+				}
+				mustClearPlayTopics(t, broker, "house", "movie")
+			})
 		})
 	}
 }

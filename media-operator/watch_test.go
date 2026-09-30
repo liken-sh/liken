@@ -6,18 +6,25 @@ package main
 // that every collection reaches the view before the first pass, and
 // that a settled pass reads nothing from the API server.
 // optionalwatch_test.go covers a collection a cluster lacks.
+//
+// Each test that runs a reflector runs in a synctest bubble, so
+// synctest.Wait returns when the reflector has taken every event the
+// server sent and waits for the next one. A test then reads what the
+// watch did, with no wait on the machine's clock.
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -222,29 +229,32 @@ func (s *collectionServer) requested(resource schema.GroupVersionResource) []str
 	return found
 }
 
-// runWatch runs one collection watch until the test ends.
+// runWatch runs one collection watch until the test ends. The watch
+// stops before the server closes, because a reflector that meets a
+// closed server waits out a backoff that ignores its context.
 func runWatch(t *testing.T, server *collectionServer, watch collectionWatch) {
 	t.Helper()
+	client := testWatcher(t, server.handler())
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	t.Cleanup(func() {
 		stop()
 		<-done
 	})
-	client := testWatcher(t, server.handler())
 	go func() {
 		defer close(done)
 		watchCollection(ctx, client, watch)
 	}()
 }
 
-// wokeWithin reports whether the wake channel received a wake within the
-// quiet spell, and empties it.
-func wokeWithin(wake chan struct{}) bool {
+// received reports whether the channel holds a value or is closed, and
+// takes the value. A test calls it after synctest.Wait, when every
+// goroutine that could send has sent or waits for something else.
+func received(channel <-chan struct{}) bool {
 	select {
-	case <-wake:
+	case <-channel:
 		return true
-	case <-time.After(watchQuietSpell):
+	default:
 		return false
 	}
 }
@@ -271,24 +281,29 @@ func labeledPod(name, component, phase string) *Pod {
 // read: the pass after a status write is how a Finished Play retires at
 // once.
 func TestAChangeToAPlayWakesThePass(t *testing.T) {
-	server := newCollectionServer()
-	plays := server.serve(t, playResource, "Play", housePlay("https://nas/film.mkv"))
-	wake := make(chan struct{}, 1)
-	synced := make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		server := newCollectionServer()
+		plays := server.serve(t, playResource, "Play", housePlay("https://nas/film.mkv"))
+		wake := make(chan struct{}, 1)
+		synced := make(chan struct{})
 
-	runWatch(t, server, collectionWatch{resource: playResource, handler: wakeOnChange(wake),
-		synced: func(informer.View) { close(synced) }})
-	mustMatch(t, closedWithin(synced, watchTimeout), true)
-	<-wake
+		runWatch(t, server, collectionWatch{resource: playResource, handler: wakeOnChange(wake),
+			synced: func(informer.View) { close(synced) }})
+		synctest.Wait()
+		mustMatch(t, received(synced), true)
+		mustMatch(t, received(wake), true)
 
-	written := housePlay("https://nas/film.mkv")
-	written.Metadata.ResourceVersion = "101"
-	written.Status.Phase = phaseRunning
-	plays.send(t, "MODIFIED", written)
-	mustMatch(t, wokeWithin(wake), true)
+		written := housePlay("https://nas/film.mkv")
+		written.Metadata.ResourceVersion = "101"
+		written.Status.Phase = phaseRunning
+		plays.send(t, "MODIFIED", written)
+		synctest.Wait()
+		mustMatch(t, received(wake), true)
 
-	plays.send(t, "DELETED", written)
-	mustMatch(t, wokeWithin(wake), true)
+		plays.send(t, "DELETED", written)
+		synctest.Wait()
+		mustMatch(t, received(wake), true)
+	})
 }
 
 // Any of this operator's pods wakes the pass when it goes away, and a
@@ -366,46 +381,51 @@ func TestAPodRemovedWithNoCopyWakesThePass(t *testing.T) {
 // by their component label, and a playback pod that fails wakes the
 // pass.
 func TestThePodsWatchSelectsTheOperatorsOwnPods(t *testing.T) {
-	server := newCollectionServer()
-	pods := server.serve(t, podResource, "Pod", labeledPod("movie-playback", playbackLabelValue, podRunning))
-	wake := make(chan struct{}, 1)
-	synced := make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		server := newCollectionServer()
+		pods := server.serve(t, podResource, "Pod", labeledPod("movie-playback", playbackLabelValue, podRunning))
+		wake := make(chan struct{}, 1)
+		synced := make(chan struct{})
 
-	runWatch(t, server, collectionWatch{resource: podResource, labels: ownPodsSelector,
-		handler: podRule.handler(wake), synced: func(informer.View) { close(synced) }})
-	mustMatch(t, closedWithin(synced, watchTimeout), true)
-	// The first read holds a running playback pod, which wakes the pass
-	// once.
-	mustMatch(t, wokeWithin(wake), true)
-	pods.send(t, "MODIFIED", labeledPod("movie-playback", playbackLabelValue, podFailed))
+		runWatch(t, server, collectionWatch{resource: podResource, labels: ownPodsSelector,
+			handler: podRule.handler(wake), synced: func(informer.View) { close(synced) }})
+		synctest.Wait()
+		mustMatch(t, received(synced), true)
+		// The first read holds a running playback pod, which wakes the
+		// pass once.
+		mustMatch(t, received(wake), true)
+		pods.send(t, "MODIFIED", labeledPod("movie-playback", playbackLabelValue, podFailed))
+		synctest.Wait()
 
-	mustMatch(t, wokeWithin(wake), true)
-	for _, request := range server.requested(podResource) {
-		mustMatch(t, strings.Contains(request, "labelSelector=media.liken.sh%2Fcomponent+in+%28playback%2Cidle%2Cremote%29"), true)
-	}
+		mustMatch(t, received(wake), true)
+		for _, request := range server.requested(podResource) {
+			mustMatch(t, strings.Contains(request, "labelSelector=media.liken.sh%2Fcomponent+in+%28playback%2Cidle%2Cremote%29"), true)
+		}
+	})
 }
 
 // Each watch the API server accepts after the first counts as one
 // restart, and the refusals while the API server is away do not.
 func TestAWatchCountsEachReopen(t *testing.T) {
-	server := newCollectionServer()
-	plays := server.serve(t, playResource, "Play")
-	var reopened sync.WaitGroup
-	reopened.Add(1)
-	synced := make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		server := newCollectionServer()
+		plays := server.serve(t, playResource, "Play")
+		var reopened atomic.Int32
+		synced := make(chan struct{})
 
-	runWatch(t, server, collectionWatch{resource: playResource, reopened: reopened.Done,
-		synced: func(informer.View) { close(synced) }})
-	mustMatch(t, closedWithin(synced, watchTimeout), true)
-	plays.send(t, "ADDED", housePlay("https://nas/film.mkv"))
-	plays.live <- closeStream
+		runWatch(t, server, collectionWatch{resource: playResource, reopened: func() { reopened.Add(1) },
+			synced: func(informer.View) { close(synced) }})
+		synctest.Wait()
+		mustMatch(t, received(synced), true)
+		plays.send(t, "ADDED", housePlay("https://nas/film.mkv"))
+		plays.live <- closeStream
+		// The reflector opens the next watch after its backoff, which is
+		// under a minute.
+		time.Sleep(time.Minute)
+		synctest.Wait()
 
-	done := make(chan struct{})
-	go func() {
-		reopened.Wait()
-		close(done)
-	}()
-	mustMatch(t, closedWithin(done, watchTimeout), true)
+		mustMatch(t, reopened.Load(), int32(1))
+	})
 }
 
 // servedCluster serves every collection the view reads, from what the
@@ -443,14 +463,19 @@ func servedCluster(t *testing.T, cluster *fakeCluster) *collectionServer {
 }
 
 // watchedView runs watchCluster against a server until the test ends,
-// and answers its view.
+// and answers its view. The caller runs in a synctest bubble. When the
+// test ends, the watches stop, and the bubble waits for them to end,
+// before the server closes, because a reflector that meets a closed
+// server waits out a backoff that ignores its context.
 func watchedView(t *testing.T, server *collectionServer, wake chan struct{}) *clusterView {
 	t.Helper()
+	watcher, reader := testWatcher(t, server.handler()), viewClient(t, server)
 	ctx, stop := context.WithCancel(context.Background())
-	t.Cleanup(stop)
-	wait, cancel := context.WithTimeout(ctx, watchTimeout)
-	defer cancel()
-	view, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), viewClient(t, server), wake, nil)
+	t.Cleanup(func() {
+		stop()
+		synctest.Wait()
+	})
+	view, err := watchCluster(ctx, ctx, watcher, reader, wake, nil)
 	mustSucceed(t, err)
 	return view
 }
@@ -459,9 +484,7 @@ func watchedView(t *testing.T, server *collectionServer, wake chan struct{}) *cl
 // watches read, for the reads the view sends the API server.
 func viewClient(t *testing.T, server *collectionServer) *apiclient.Client {
 	t.Helper()
-	listening := httptest.NewServer(server.handler())
-	t.Cleanup(listening.Close)
-	return apiclient.New(listening.URL, listening.Client(), "")
+	return apiclient.New(apiservertest.Host, apiservertest.Start(t, server.handler()).Client(), "")
 }
 
 // settledHouse is a cluster the operator has already settled: a Player
@@ -514,31 +537,39 @@ func settledHouse(t *testing.T, wake chan struct{}) (*fakeCluster, *operator) {
 // A pass on a settled cluster reads every collection from the watches
 // and sends the API server nothing: no read and no write.
 func TestASettledPassSendsTheAPIServerNothing(t *testing.T) {
-	wake := make(chan struct{}, 8)
-	cluster, media := settledHouse(t, wake)
-	media.view = watchedView(t, servedCluster(t, cluster), wake)
-	cluster.requests = nil
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 8)
+		cluster, media := settledHouse(t, wake)
+		media.view = watchedView(t, servedCluster(t, cluster), wake)
+		cluster.requests = nil
 
-	media.pass()
+		media.pass()
 
-	mustMatchAll(t, cluster.requests, nil)
+		mustMatchAll(t, cluster.requests, nil)
+	})
 }
 
 // A collection the operator cannot read ends the wait with an error
 // that names it, so the process ends and says which grant or which
 // resource is missing.
 func TestTheFirstReadNamesACollectionItCannotRead(t *testing.T) {
-	server := servedCluster(t, newFakeCluster())
-	server.collections[collectionPath(peripheralResource)].status = http.StatusForbidden
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	wait, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		server := servedCluster(t, newFakeCluster())
+		server.collections[collectionPath(peripheralResource)].status = http.StatusForbidden
+		watcher, reader := testWatcher(t, server.handler()), viewClient(t, server)
+		ctx, stop := context.WithCancel(context.Background())
+		t.Cleanup(func() {
+			stop()
+			synctest.Wait()
+		})
+		wait, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
 
-	_, err := watchCluster(ctx, wait, testWatcher(t, server.handler()), viewClient(t, server), make(chan struct{}, 1), nil)
+		_, err := watchCluster(ctx, wait, watcher, reader, make(chan struct{}, 1), nil)
 
-	mustFail(t, err)
-	mustMatch(t, strings.Contains(err.Error(), "not read: "+kindPeripheral+":"), true)
+		mustFail(t, err)
+		mustMatch(t, strings.Contains(err.Error(), "not read: "+kindPeripheral+":"), true)
+	})
 }
 
 // An object that does not convert is an error that names it, so a log

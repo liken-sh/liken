@@ -2,23 +2,28 @@ package main
 
 // This file is the fixture every API test builds on: the API server
 // under a stand-in control plane that answers the two reviews, one
-// Player, and the events this API writes, with two httptest servers
-// in place of the display API and the audio API. The clock is fixed,
-// so every header field a test compares is the same bytes on every
-// run.
+// Player, and the events this API writes, with two stand-in servers in
+// place of the display API and the audio API. The control plane and the
+// siblings answer over in-memory connections, so a test that composes
+// no stream through ffmpeg runs in a synctest bubble. The clock is
+// fixed, so every header field a test compares is the same bytes on
+// every run.
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // The Player every capture test asks about: its namespace and name,
@@ -130,7 +135,8 @@ func (c *controlPlane) handler() http.Handler {
 // every Authorization field it was sent.
 type sibling struct {
 	mutex       sync.Mutex
-	server      *httptest.Server
+	server      *apiservertest.Server
+	url         string
 	calls       []string
 	credentials []string
 	status      int
@@ -155,10 +161,10 @@ type sibling struct {
 	bodyDelay time.Duration
 }
 
-func newSibling(t *testing.T) *sibling {
+func newSibling(t *testing.T, url string) *sibling {
 	t.Helper()
-	s := &sibling{status: http.StatusOK, contentType: "video/mp4", body: []byte("payload")}
-	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := &sibling{url: url, status: http.StatusOK, contentType: "video/mp4", body: []byte("payload")}
+	s.server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mutex.Lock()
 		call := r.URL.RequestURI()
 		status, contentType, body, after, delay, stall := s.status, s.contentType, s.body, s.retryAfter, s.delay, s.stall
@@ -171,8 +177,14 @@ func newSibling(t *testing.T) *sibling {
 		s.calls = append(s.calls, call)
 		s.credentials = append(s.credentials, r.Header.Get("Authorization"))
 		s.mutex.Unlock()
+		// A sibling whose caller gave up stops waiting, the way a
+		// server's handler ends with its request.
 		if delay > 0 {
-			time.Sleep(delay)
+			select {
+			case <-time.After(delay):
+			case <-r.Context().Done():
+				return
+			}
 		}
 		if after != "" {
 			w.Header().Set("Retry-After", after)
@@ -204,8 +216,22 @@ func newSibling(t *testing.T) *sibling {
 		s.hungUp = true
 		s.mutex.Unlock()
 	}))
-	t.Cleanup(s.server.Close)
 	return s
+}
+
+// siblingRoutes sends a request for a sibling's URL to that sibling.
+// It refuses a request for any other address, the way the network
+// refuses a connection to a sibling that does not run, so no test
+// reaches the network or waits on a name lookup.
+type siblingRoutes []*sibling
+
+func (r siblingRoutes) RoundTrip(request *http.Request) (*http.Response, error) {
+	for _, each := range r {
+		if strings.HasPrefix(request.URL.String(), each.url+"/") {
+			return each.server.RoundTrip(request)
+		}
+	}
+	return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
 }
 
 func (s *sibling) made() []string {
@@ -243,11 +269,9 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	t.Helper()
 	projectSiblingTokens(t)
 	plane := newControlPlane()
-	planeServer := httptest.NewServer(plane.handler())
-	t.Cleanup(planeServer.Close)
-	display := newSibling(t)
-	audio := newSibling(t)
-	client := apiclient.New(planeServer.URL, planeServer.Client(), "")
+	display := newSibling(t, "http://display-api.test")
+	audio := newSibling(t, "http://audio-api.test")
+	client := apiclient.New(apiservertest.Host, apiservertest.Start(t, plane.handler()).Client(), "")
 	fixture := &apiFixture{plane: plane, display: display, audio: audio}
 	instants := upstreamInstants()
 	fixture.server = &apiServer{
@@ -255,12 +279,12 @@ func newAPIFixture(t *testing.T) *apiFixture {
 		auth:    newAuthorizer(client),
 		metrics: newAPIMetrics("test"),
 		upstream: &upstreamClient{
-			http:  http.DefaultClient,
+			http:  &http.Client{Transport: siblingRoutes{display, audio}},
 			token: siblingToken,
 			clock: instants,
 		},
-		display:         display.server.URL,
-		audio:           audio.server.URL,
+		display:         display.url,
+		audio:           audio.url,
 		version:         "test",
 		ffmpeg:          "ffmpeg",
 		maxCompositions: 4,

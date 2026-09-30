@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -184,7 +185,7 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 			document := problemOf(t, recorder)
 			mustMatch(t, document.Type, row.kind)
 			mustMatch(t, document.Detail, row.detail)
-			mustMatch(t, strings.HasPrefix(document.Upstream, fixture.display.server.URL), true)
+			mustMatch(t, strings.HasPrefix(document.Upstream, fixture.display.url), true)
 			mustMatch(t, recorder.Header().Get("Retry-After"), row.relayed)
 		})
 	}
@@ -329,18 +330,21 @@ func run(t *testing.T, name string, arguments ...string) []byte {
 
 // An upstream that sends no headers within the header timeout is a
 // 504 with a plain problem document.
+// It runs in a synctest bubble, so the bound runs its full ten seconds
+// on the bubble's clock, and the test checks that the answer comes at
+// the bound.
 func TestAnUpstreamThatSendsNoHeadersInTimeIsAGatewayTimeout(t *testing.T) {
-	held := upstreamHeaderTimeout
-	upstreamHeaderTimeout = 50 * time.Millisecond
-	defer func() { upstreamHeaderTimeout = held }()
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.display.delay = 2 * upstreamHeaderTimeout
+		began := time.Now()
 
-	fixture := newAPIFixture(t)
-	fixture.display.delay = time.Second
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
-
-	mustMatch(t, recorder.Code, http.StatusGatewayTimeout)
-	mustMatch(t, problemOf(t, recorder).Type, aboutBlank)
+		mustMatch(t, recorder.Code, http.StatusGatewayTimeout)
+		mustMatch(t, problemOf(t, recorder).Type, aboutBlank)
+		mustMatch(t, time.Since(began), upstreamHeaderTimeout)
+	})
 }
 
 // A unit with sinks and no screen composes the sound alone: the

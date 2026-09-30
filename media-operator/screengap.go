@@ -32,10 +32,7 @@ import "time"
 // its create leaves the create to a new leader, which takes over within
 // a 30-second Lease. 90 s covers both. A screen that is really gone
 // keeps its session for up to 90 s more, and then the pass lifts it.
-//
-// It is a variable so a test waits for the wake at the bound in
-// milliseconds.
-var screenGapBound = 90 * time.Second
+const screenGapBound = 90 * time.Second
 
 // heldScreen is the last screen one unit resolved in this run. lostAt
 // is zero while the screen resolves, and is the moment the pass first

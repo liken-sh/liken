@@ -12,6 +12,7 @@ import (
 	"os"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -71,13 +72,15 @@ func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 // A Play with no next block sends the display nothing after the
 // presentation, so the display offers nothing.
 func TestASidecarWithNoNextBlockSendsNone(t *testing.T) {
-	c, lines := bridgeToMPV(t)
-	c.item = 1
+	synctest.Test(t, func(t *testing.T) {
+		c, lines := bridgeToMPV(t)
+		c.item = 1
 
-	c.serveMessage([]string{presentationRequestMessage})
+		c.serveMessage([]string{presentationRequestMessage})
 
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
-	mustNoLine(t, lines, 100*time.Millisecond)
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
+		mustNoLine(t, lines, 100*time.Millisecond)
+	})
 }
 
 // The display's ask becomes one message on the Player's commands topic,
@@ -112,13 +115,15 @@ func TestTheAskPublishesNothingWithoutABlockOrAPlayer(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			bus, brokers, connected := startBus(t, 1, nil, nil)
-			waitForConnect(t, connected)
-			c := &commander{bus: bus, playerCommandsTopic: one.topic, next: one.block}
+			synctest.Test(t, func(t *testing.T) {
+				bus, brokers, connected := startBus(t, 1, nil, nil)
+				waitForConnect(t, connected)
+				c := &commander{bus: bus, playerCommandsTopic: one.topic, next: one.block}
 
-			c.serveMessage([]string{nextRequestMessage})
+				c.serveMessage([]string{nextRequestMessage})
 
-			mustPublishNothing(t, brokers[0])
+				mustPublishNothing(t, brokers[0])
+			})
 		})
 	}
 }
@@ -160,24 +165,26 @@ func TestTheTerminationSignalPublishesTheEndingBeforeTheQuitReachesMpv(t *testin
 // A run that ends on its own leaves the signal handler nothing to do, so
 // the ending publishes once and no second quit reaches mpv.
 func TestARunThatEndsFirstLeavesTheSignalHandlerNothing(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
 
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		bus:         bus,
-		lastReport:  playReport{Item: 1},
-		haveReport:  true,
-	}
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			bus:         bus,
+			lastReport:  playReport{Item: 1},
+			haveReport:  true,
+		}
 
-	ctx, stop := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		c.exitOnSignal(ctx, make(chan os.Signal), func() { t.Error("the handler ended a run that had ended") })
-	}()
-	stop()
-	<-done
+		ctx, stop := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			c.exitOnSignal(ctx, make(chan os.Signal), func() { t.Error("the handler ended a run that had ended") })
+		}()
+		stop()
+		<-done
 
-	mustPublishNothing(t, brokers[0])
+		mustPublishNothing(t, brokers[0])
+	})
 }

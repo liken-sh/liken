@@ -9,6 +9,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -149,31 +150,22 @@ func TestAPlayerThatIsGoneForgetsItsScreen(t *testing.T) {
 // screen that is really gone loses its match when the bound ends, and
 // not at the next unrelated event.
 func TestAScreenGapWakesThePassAtTheBound(t *testing.T) {
-	boundWas := screenGapBound
-	screenGapBound = 300 * time.Millisecond
-	t.Cleanup(func() { screenGapBound = boundWas })
-	wake := make(chan struct{}, 1)
-	cluster := receiverCluster()
-	media := testOperator(t, cluster, wake)
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 1)
+		cluster := receiverCluster()
+		media := testOperator(t, cluster, wake)
 
-	runPlayers(media, []Player{*housePlayer()}, nil)
-	cluster.claims[idleClaimName("theater")].Status = nil
-	runPlayers(media, []Player{*housePlayer()}, nil)
-	select {
-	case <-wake:
-	default:
-	}
+		runPlayers(media, []Player{*housePlayer()}, nil)
+		cluster.claims[idleClaimName("theater")].Status = nil
+		runPlayers(media, []Player{*housePlayer()}, nil)
+		synctest.Wait()
+		received(wake)
+		time.Sleep(screenGapBound - time.Second)
+		synctest.Wait()
+		mustMatch(t, received(wake), false)
+		time.Sleep(time.Second)
+		synctest.Wait()
 
-	mustMatch(t, wokeBefore(wake, watchTimeout), true)
-}
-
-// wokeBefore reports whether a wake arrives before the wait runs
-// out.
-func wokeBefore(wake <-chan struct{}, wait time.Duration) bool {
-	select {
-	case <-wake:
-		return true
-	case <-time.After(wait):
-		return false
-	}
+		mustMatch(t, received(wake), true)
+	})
 }

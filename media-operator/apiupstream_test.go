@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -48,11 +49,14 @@ func copyingFFmpeg(t *testing.T) string {
 // that answers at once and then streams for far longer than the bound
 // is not cut, and a sibling that answers late is a 504.
 func TestTheHeaderDeadlineBoundsOnlyTheWaitForHeaders(t *testing.T) {
-	held := upstreamHeaderTimeout
-	upstreamHeaderTimeout = 50 * time.Millisecond
-	defer func() { upstreamHeaderTimeout = held }()
-
+	// The stream goes through the stand-in ffmpeg, a subprocess, which a
+	// synctest bubble cannot wait on. So this case runs on the machine's
+	// clock, with a bound short enough that a stream of a quarter second
+	// outlives it.
 	t.Run("a stream that outlives the bound", func(t *testing.T) {
+		held := upstreamHeaderTimeout
+		upstreamHeaderTimeout = 50 * time.Millisecond
+		t.Cleanup(func() { upstreamHeaderTimeout = held })
 		fixture := newAPIFixture(t)
 		clock := &testClock{now: testAPIClock}
 		fixture.server.now = clock.read
@@ -73,15 +77,17 @@ func TestTheHeaderDeadlineBoundsOnlyTheWaitForHeaders(t *testing.T) {
 	})
 
 	t.Run("headers that arrive after the bound", func(t *testing.T) {
-		fixture := newAPIFixture(t)
-		fixture.display.delay = 500 * time.Millisecond
+		synctest.Test(t, func(t *testing.T) {
+			fixture := newAPIFixture(t)
+			fixture.display.delay = upstreamHeaderTimeout + time.Second
 
-		recorder := fixture.get(playerPathFor("media.mp4"))
+			recorder := fixture.get(playerPathFor("media.mp4"))
 
-		mustMatch(t, recorder.Code, http.StatusGatewayTimeout)
-		document := problemOf(t, recorder)
-		mustMatch(t, document.Type, aboutBlank)
-		mustMatch(t, document.Detail, "the upstream sent no headers within 50ms")
+			mustMatch(t, recorder.Code, http.StatusGatewayTimeout)
+			document := problemOf(t, recorder)
+			mustMatch(t, document.Type, aboutBlank)
+			mustMatch(t, document.Detail, "the upstream sent no headers within 10s")
+		})
 	})
 }
 

@@ -5,12 +5,12 @@ package main
 // The fake API server the leader tests run against. It holds one Lease
 // the way the API server does: a create conflicts with a Lease that
 // exists, and an update from a stale resourceVersion conflicts with a
-// newer write.
+// newer write. It answers over in-memory connections, so the leader
+// tests run in a synctest bubble at the operator's own durations.
 
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"k8s.io/client-go/rest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 type leaseServer struct {
@@ -42,9 +44,9 @@ func newLeaseServer() *leaseServer {
 // decodes JSON alone.
 func (s *leaseServer) config(t *testing.T) *rest.Config {
 	t.Helper()
-	server := httptest.NewServer(s)
-	t.Cleanup(server.Close)
-	return &rest.Config{Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"}}
+	config := apiservertest.Start(t, s).Config()
+	config.ContentType = "application/json"
+	return config
 }
 
 // store writes a Lease at the next version. Callers hold mu.
@@ -72,7 +74,7 @@ func (s *leaseServer) holdAs(holder string) {
 		"metadata":   map[string]any{"name": leaseName, "namespace": testLeaseNamespace},
 		"spec": map[string]any{
 			"holderIdentity":       holder,
-			"leaseDurationSeconds": int(testLeaseTiming.duration / time.Second),
+			"leaseDurationSeconds": int(leaseDuration / time.Second),
 			"acquireTime":          now,
 			"renewTime":            now,
 		},

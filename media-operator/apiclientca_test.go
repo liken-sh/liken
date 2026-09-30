@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -257,105 +258,110 @@ func (r *reportedLines) count() int {
 }
 
 // keepAnchors runs the watch on the client authority until the test
-// ends, and answers the channel that closes on its first read.
-func keepAnchors(t *testing.T, handler http.Handler, anchors *clientAnchors, lines *reportedLines) <-chan struct{} {
+// ends, and answers the channel that closes on its first read. synced
+// is nil for a caller that waits for no first read. The caller runs in
+// a synctest bubble, and the watch has taken what the server sent when
+// keepAnchors returns.
+func keepAnchors(t *testing.T, handler http.Handler, anchors *clientAnchors, lines *reportedLines, synced chan struct{}) {
 	t.Helper()
+	watcher := testWatcher(t, handler)
 	ctx, stop := context.WithCancel(context.Background())
-	synced := make(chan struct{})
 	done := make(chan struct{})
 	t.Cleanup(func() {
 		stop()
 		<-done
 	})
-	watcher := testWatcher(t, handler)
 	go func() {
 		defer close(done)
 		keepClientAnchors(ctx, watcher, anchors, lines.report, synced)
 	}()
-	return synced
+	synctest.Wait()
 }
 
 // The pool comes from the ConfigMap, and the watch delivers the
 // ConfigMap the API server rewrote when it rotated its authority, so
 // the pool changes with no clock and no restart.
 func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
-	first, second := newClientAuthority(t), newClientAuthority(t)
-	api := newCoreAPI()
-	publishAuthority(t, api, string(first.certPEM))
-	anchors := &clientAnchors{}
+	synctest.Test(t, func(t *testing.T) {
+		first, second := newClientAuthority(t), newClientAuthority(t)
+		api := newCoreAPI()
+		publishAuthority(t, api, string(first.certPEM))
+		anchors := &clientAnchors{}
 
-	synced := keepAnchors(t, api.handler(), anchors, &reportedLines{})
-	mustMatch(t, closedWithin(synced, watchTimeout), true)
-	mustMatch(t, verifiesAgainst(t, anchors, first), true)
-	mustMatch(t, verifiesAgainst(t, anchors, second), false)
+		synced := make(chan struct{})
 
-	api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(string(second.certPEM), "8"))
-	until(t, "the anchors never took up the rotated authority", func() bool {
-		return verifiesAgainst(t, anchors, second)
+		keepAnchors(t, api.handler(), anchors, &reportedLines{}, synced)
+		mustMatch(t, received(synced), true)
+		mustMatch(t, verifiesAgainst(t, anchors, first), true)
+		mustMatch(t, verifiesAgainst(t, anchors, second), false)
+
+		api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(string(second.certPEM), "8"))
+		synctest.Wait()
+		mustMatch(t, verifiesAgainst(t, anchors, second), true)
+		for _, request := range api.requested() {
+			mustMatch(t, request, "/api/v1/namespaces/kube-system/configmaps?fieldSelector=metadata.name="+clientCAConfigMap)
+		}
 	})
-	for _, request := range api.requested() {
-		mustMatch(t, request, "/api/v1/namespaces/kube-system/configmaps?fieldSelector=metadata.name="+clientCAConfigMap)
-	}
 }
 
 // A caller that waits for no first read passes no channel, and the
 // watch still follows the ConfigMap.
 func TestTheClientAnchorsFollowTheConfigMapWithNoSyncedChannel(t *testing.T) {
-	first, second := newClientAuthority(t), newClientAuthority(t)
-	api := newCoreAPI()
-	publishAuthority(t, api, string(first.certPEM))
-	anchors := &clientAnchors{}
-	ctx, stop := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	t.Cleanup(func() {
-		stop()
-		<-done
-	})
-	watcher := testWatcher(t, api.handler())
-	go func() {
-		defer close(done)
-		keepClientAnchors(ctx, watcher, anchors, (&reportedLines{}).report, nil)
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		first, second := newClientAuthority(t), newClientAuthority(t)
+		api := newCoreAPI()
+		publishAuthority(t, api, string(first.certPEM))
+		anchors := &clientAnchors{}
 
-	until(t, "the anchors never took up the authority", func() bool { return verifiesAgainst(t, anchors, first) })
-	api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(string(second.certPEM), "8"))
-	until(t, "the anchors never took up the rotated authority", func() bool {
-		return verifiesAgainst(t, anchors, second)
+		keepAnchors(t, api.handler(), anchors, &reportedLines{}, nil)
+		mustMatch(t, verifiesAgainst(t, anchors, first), true)
+		api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(string(second.certPEM), "8"))
+		synctest.Wait()
+
+		mustMatch(t, verifiesAgainst(t, anchors, second), true)
 	})
 }
 
 // A ConfigMap the API cannot read leaves an empty pool behind, because
 // the API still answers every token caller.
 func TestAConfigMapThisAPICannotReadLeavesAnEmptyPool(t *testing.T) {
-	authority := newClientAuthority(t)
-	api := newCoreAPI()
-	publishAuthority(t, api, string(authority.certPEM))
-	api.refusal = http.StatusForbidden
-	anchors := &clientAnchors{}
+	synctest.Test(t, func(t *testing.T) {
+		authority := newClientAuthority(t)
+		api := newCoreAPI()
+		publishAuthority(t, api, string(authority.certPEM))
+		api.refusal = http.StatusForbidden
+		anchors := &clientAnchors{}
 
-	synced := keepAnchors(t, api.handler(), anchors, &reportedLines{})
-	until(t, "the watch never asked for the ConfigMap", func() bool { return len(api.requested()) > 0 })
+		synced := make(chan struct{})
 
-	mustMatch(t, closedWithin(synced, watchQuietSpell), false)
-	mustMatch(t, verifiesAgainst(t, anchors, authority), false)
+		keepAnchors(t, api.handler(), anchors, &reportedLines{}, synced)
+
+		mustMatch(t, len(api.requested()) > 0, true)
+		mustMatch(t, received(synced), false)
+		mustMatch(t, verifiesAgainst(t, anchors, authority), false)
+	})
 }
 
 // A deleted ConfigMap leaves the pool as it is and says so, because
 // the certificates the pool holds are still the ones the cluster
 // issued.
 func TestADeletedConfigMapKeepsThePool(t *testing.T) {
-	authority := newClientAuthority(t)
-	api := newCoreAPI()
-	publishAuthority(t, api, string(authority.certPEM))
-	anchors := &clientAnchors{}
-	lines := &reportedLines{}
-	synced := keepAnchors(t, api.handler(), anchors, lines)
-	mustMatch(t, closedWithin(synced, watchTimeout), true)
+	synctest.Test(t, func(t *testing.T) {
+		authority := newClientAuthority(t)
+		api := newCoreAPI()
+		publishAuthority(t, api, string(authority.certPEM))
+		anchors := &clientAnchors{}
+		lines := &reportedLines{}
+		synced := make(chan struct{})
+		keepAnchors(t, api.handler(), anchors, lines, synced)
+		mustMatch(t, received(synced), true)
 
-	api.remove("configmaps/" + clientCAConfigMap)
+		api.remove("configmaps/" + clientCAConfigMap)
+		synctest.Wait()
 
-	until(t, "the deletion was never reported", func() bool { return lines.count() == 1 })
-	mustMatch(t, verifiesAgainst(t, anchors, authority), true)
+		mustMatch(t, lines.count(), 1)
+		mustMatch(t, verifiesAgainst(t, anchors, authority), true)
+	})
 }
 
 // A ConfigMap that carries no usable authority is reported, and the
@@ -370,19 +376,21 @@ func TestAConfigMapWithNoAuthorityIsReported(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			authority := newClientAuthority(t)
-			api := newCoreAPI()
-			publishAuthority(t, api, row.caPEM)
-			anchors := &clientAnchors{}
-			lines := &reportedLines{}
+			synctest.Test(t, func(t *testing.T) {
+				authority := newClientAuthority(t)
+				api := newCoreAPI()
+				publishAuthority(t, api, row.caPEM)
+				anchors := &clientAnchors{}
+				lines := &reportedLines{}
+				synced := make(chan struct{})
 
-			synced := keepAnchors(t, api.handler(), anchors, lines)
-			mustMatch(t, closedWithin(synced, watchTimeout), true)
-			mustMatch(t, lines.count(), 1)
+				keepAnchors(t, api.handler(), anchors, lines, synced)
+				mustMatch(t, received(synced), true)
+				mustMatch(t, lines.count(), 1)
 
-			publishAuthority(t, api, string(authority.certPEM))
-			until(t, "the pool never took up the valid authority", func() bool {
-				return verifiesAgainst(t, anchors, authority)
+				publishAuthority(t, api, string(authority.certPEM))
+				synctest.Wait()
+				mustMatch(t, verifiesAgainst(t, anchors, authority), true)
 			})
 		})
 	}

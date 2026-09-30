@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -293,18 +294,20 @@ func TestReconcileFocusSetsAMarkTheBrokerDoesNotHold(t *testing.T) {
 // first connect's grace or inside it, so the retained mark that arrives
 // late still names the room a person chose, and nothing is written over it.
 func TestReconcileFocusWritesNoMarkBeforeTheCatchUp(t *testing.T) {
-	o, broker := focusBrokerOperator(t)
-	players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
+	synctest.Test(t, func(t *testing.T) {
+		o, broker := focusBrokerOperator(t)
+		players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
 
-	o.reconcileFocus(players)
-	o.reestablishRetained()
-	o.reconcileFocus(players)
-	o.handleBusMessage(remoteFocusTopic(defaultTopicBase, "house", "sofa"), []byte("theater"))
-	o.catchUpEnds = time.Now()
-	o.reconcileFocus(players)
+		o.reconcileFocus(players)
+		o.reestablishRetained()
+		o.reconcileFocus(players)
+		o.handleBusMessage(remoteFocusTopic(defaultTopicBase, "house", "sofa"), []byte("theater"))
+		o.catchUpEnds = time.Now()
+		o.reconcileFocus(players)
 
-	mustMatch(t, o.focus.markFor(controllerKey("house", "sofa")), "theater")
-	mustPublishNothing(t, broker)
+		mustMatch(t, o.focus.markFor(controllerKey("house", "sofa")), "theater")
+		mustPublishNothing(t, broker)
+	})
 }
 
 // One pass settles the mark and publishes it on the unit's bus
@@ -348,23 +351,25 @@ func TestSetMarkWakesTheLoopOnAChange(t *testing.T) {
 // is a broker that lost it, so the operator publishes the mark it holds
 // once the catch-up is over, and a controller keeps the Player it drives.
 func TestANewSessionRestoresAMarkTheBrokerLost(t *testing.T) {
-	o, broker := focusBrokerOperator(t)
-	o.focus.setMark(controllerKey("house", "sofa"), "theater")
-	players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
+	synctest.Test(t, func(t *testing.T) {
+		o, broker := focusBrokerOperator(t)
+		o.focus.setMark(controllerKey("house", "sofa"), "theater")
+		players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
 
-	o.focus.newSession()
-	o.reestablishRetained()
-	o.reconcileFocus(players)
-	mustPublishNothing(t, broker)
-	o.catchUpEnds = time.Now()
-	o.reconcileFocus(players)
-	o.reconcileFocus(players)
+		o.focus.newSession()
+		o.reestablishRetained()
+		o.reconcileFocus(players)
+		mustPublishNothing(t, broker)
+		o.catchUpEnds = time.Now()
+		o.reconcileFocus(players)
+		o.reconcileFocus(players)
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(published.payload), "theater")
-	mustMatch(t, published.retained, true)
-	mustPublishNothing(t, broker)
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, string(published.payload), "theater")
+		mustMatch(t, published.retained, true)
+		mustPublishNothing(t, broker)
+	})
 }
 
 // A mark the broker delivers back on the new session is still on the
@@ -372,15 +377,17 @@ func TestANewSessionRestoresAMarkTheBrokerLost(t *testing.T) {
 // screen as a live mark, and a screen reads a live mark as a person
 // pointing a controller at it, so a restart would light a dark room.
 func TestANewSessionDoesNotRepublishAMarkTheBrokerHolds(t *testing.T) {
-	o, broker := focusBrokerOperator(t)
-	o.focus.setMark(controllerKey("house", "sofa"), "theater")
-	players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
+	synctest.Test(t, func(t *testing.T) {
+		o, broker := focusBrokerOperator(t)
+		o.focus.setMark(controllerKey("house", "sofa"), "theater")
+		players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
 
-	o.focus.newSession()
-	o.reestablishRetained()
-	o.handleBusMessage(remoteFocusTopic(defaultTopicBase, "house", "sofa"), []byte("theater"))
-	o.catchUpEnds = time.Now()
-	o.reconcileFocus(players)
+		o.focus.newSession()
+		o.reestablishRetained()
+		o.handleBusMessage(remoteFocusTopic(defaultTopicBase, "house", "sofa"), []byte("theater"))
+		o.catchUpEnds = time.Now()
+		o.reconcileFocus(players)
 
-	mustPublishNothing(t, broker)
+		mustPublishNothing(t, broker)
+	})
 }

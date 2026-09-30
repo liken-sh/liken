@@ -29,9 +29,8 @@ import (
 var mpvSocketPath = ipcSocketPath
 
 // mpv creates the socket a moment after it starts, so a dial retries.
-// mpvDialDelay is the pause between tries, a variable so a test drives
-// the retry in milliseconds.
-var mpvDialDelay = time.Second
+// mpvDialDelay is the pause between tries.
+const mpvDialDelay = time.Second
 
 // The properties the Play's status is made of. The supervisor asks for no
 // others, because every event mpv sends costs a decode. The two current-tracks

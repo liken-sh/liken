@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -1734,26 +1735,28 @@ func TestAnEmptyAvailabilityDoesNotMarkARunSeen(t *testing.T) {
 // the next pass write them again. The focus marks are not written here;
 // reconcileFocus restores only the marks the session did not deliver.
 func TestAReconnectRewritesTheKeyTablesAndNoMark(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	broker := brokers[0]
-	wake := make(chan struct{}, 1)
-	media := &operator{
-		topicBase: defaultTopicBase,
-		bus:       bus,
-		focus:     newFocusDesk(wake),
-		keysPublished: map[string]string{
-			remoteKeysTopic(defaultTopicBase, "house", "sofa"): "already-published",
-		},
-	}
-	media.focus.setMark(controllerKey("den", "sofa"), "theater")
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		broker := brokers[0]
+		wake := make(chan struct{}, 1)
+		media := &operator{
+			topicBase: defaultTopicBase,
+			bus:       bus,
+			focus:     newFocusDesk(wake),
+			keysPublished: map[string]string{
+				remoteKeysTopic(defaultTopicBase, "house", "sofa"): "already-published",
+			},
+		}
+		media.focus.setMark(controllerKey("den", "sofa"), "theater")
 
-	media.reestablishRetained()
+		media.reestablishRetained()
 
-	if len(media.keysPublished) != 0 {
-		t.Errorf("keysPublished still holds %v, want it cleared for a rewrite", media.keysPublished)
-	}
-	mustPublishNothing(t, broker)
+		if len(media.keysPublished) != 0 {
+			t.Errorf("keysPublished still holds %v, want it cleared for a rewrite", media.keysPublished)
+		}
+		mustPublishNothing(t, broker)
+	})
 }
 
 // keysOperator wires an operator with a bus to a fake broker, so a
@@ -1800,49 +1803,53 @@ func TestPublishKeysPublishesARetainedTable(t *testing.T) {
 // on a later pass and the broker keeps serving the one it holds. A
 // changed Keymap does publish.
 func TestPublishKeysRepublishesOnlyOnChange(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := keysOperator(t, cluster)
-	remote := keysRemote(cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		media, broker := keysOperator(t, cluster)
+		remote := keysRemote(cluster)
 
-	media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
-	waitForPublish(t, broker.pubs)
+		media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
+		waitForPublish(t, broker.pubs)
 
-	media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
-	select {
-	case got := <-broker.pubs:
-		t.Fatalf("an unchanged table republished %+v", got)
-	case <-time.After(50 * time.Millisecond):
-	}
+		media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
+		select {
+		case got := <-broker.pubs:
+			t.Fatalf("an unchanged table republished %+v", got)
+		case <-time.After(50 * time.Millisecond):
+		}
 
-	keymap := cluster.keymaps["gamepad"]
-	keymap.Spec.Buttons = keymap.Spec.Buttons[:1]
-	media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
+		keymap := cluster.keymaps["gamepad"]
+		keymap.Spec.Buttons = keymap.Spec.Buttons[:1]
+		media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
 
-	changed := waitForPublish(t, broker.pubs)
-	mustMatch(t, changed.topic, remoteKeysTopic(defaultTopicBase, "house", "sofa"))
+		changed := waitForPublish(t, broker.pubs)
+		mustMatch(t, changed.topic, remoteKeysTopic(defaultTopicBase, "house", "sofa"))
+	})
 }
 
 // A Keymap that will not compile publishes nothing, so the last good
 // retained table stays in place and the controller keeps working.
 func TestPublishKeysPublishesNothingForAKeymapThatWillNotCompile(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.keymaps["broken"] = &Keymap{
-		Metadata: ObjectMeta{Name: "broken"},
-		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Key: "KEY_ENTER"}}},
-	}
-	cluster.remotes["sofa"] = houseRemote("broken")
-	media, broker := keysOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		cluster.keymaps["broken"] = &Keymap{
+			Metadata: ObjectMeta{Name: "broken"},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Key: "KEY_ENTER"}}},
+		}
+		cluster.remotes["sofa"] = houseRemote("broken")
+		media, broker := keysOperator(t, cluster)
 
-	table := media.publishKeys(cluster.remotes["sofa"], media.loadKeymaps(), map[string]bool{})
+		table := media.publishKeys(cluster.remotes["sofa"], media.loadKeymaps(), map[string]bool{})
 
-	if table != nil {
-		t.Errorf("table = %+v, want none", table)
-	}
-	select {
-	case got := <-broker.pubs:
-		t.Fatalf("a Keymap that will not compile published %+v", got)
-	case <-time.After(50 * time.Millisecond):
-	}
+		if table != nil {
+			t.Errorf("table = %+v, want none", table)
+		}
+		select {
+		case got := <-broker.pubs:
+			t.Fatalf("a Keymap that will not compile published %+v", got)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
 }
 
 // playersOperator wires an operator with a bus to a fake broker, so a
@@ -1932,20 +1939,22 @@ func TestAPassPublishesTheRetainedPlayerStatus(t *testing.T) {
 // reads it from there. An edit to the Player does publish, which is how a
 // renamed part reaches the screen with no pod restart.
 func TestThePlayerStatusRepublishesOnlyOnChange(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
-	player := settledPlayer(housePlayer())
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		media, broker := playersOperator(t, cluster)
+		player := settledPlayer(housePlayer())
 
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-	waitForPublish(t, broker.pubs)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
+		waitForPublish(t, broker.pubs)
 
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-	mustPublishNothing(t, broker)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
+		mustPublishNothing(t, broker)
 
-	player.Spec.DisplayName = "Studio Lab"
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-	changed := waitForPublish(t, broker.pubs)
-	mustMatch(t, changed.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
+		player.Spec.DisplayName = "Studio Lab"
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
+		changed := waitForPublish(t, broker.pubs)
+		mustMatch(t, changed.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
+	})
 }
 
 // A controller's Peripheral reaches the unit's status on the bus: the
@@ -2055,18 +2064,20 @@ func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
 // default. The seed runs once: the pass that follows reads the level
 // it wrote and writes nothing more.
 func TestAPassSeedsAPlayerWithNoLevel(t *testing.T) {
-	media, broker := caughtUpOperator(t, newFakeCluster())
-	player := settledPlayer(housePlayer())
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := caughtUpOperator(t, newFakeCluster())
+		player := settledPlayer(housePlayer())
 
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, theaterVolumeTopic())
-	mustMatch(t, published.retained, true)
-	mustMatch(t, string(published.payload), `{"level":100,"muted":false}`)
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, theaterVolumeTopic())
+		mustMatch(t, published.retained, true)
+		mustMatch(t, string(published.payload), `{"level":100,"muted":false}`)
 
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-	mustPublishNoVolume(t, broker)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // The seed is a write to the room's level, so it writes one line that
@@ -2089,24 +2100,28 @@ func TestTheSeedLogsWhatItPublished(t *testing.T) {
 // A level that stands on the broker is never written over by the
 // seed, so a room keeps the level a person set across an operator restart.
 func TestThePassDoesNotSeedOverALevelThatStands(t *testing.T) {
-	media, broker := caughtUpOperator(t, newFakeCluster())
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":30,"muted":true}`))
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := caughtUpOperator(t, newFakeCluster())
+		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":30,"muted":true}`))
 
-	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A Player with no sinks is not seeded, because a unit with nothing
 // to hear has no level to mean anything.
 func TestThePassDoesNotSeedASpeakerlessPlayer(t *testing.T) {
-	media, broker := caughtUpOperator(t, newFakeCluster())
-	player := housePlayer()
-	player.Spec.Sinks = nil
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := caughtUpOperator(t, newFakeCluster())
+		player := housePlayer()
+		player.Spec.Sinks = nil
 
-	media.reconcilePlayers([]Player{settledPlayer(player)}, nil, "", nil)
+		media.reconcilePlayers([]Player{settledPlayer(player)}, nil, "", nil)
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A fresh broker session delivers its retained levels on its own
@@ -2114,12 +2129,14 @@ func TestThePassDoesNotSeedASpeakerlessPlayer(t *testing.T) {
 // for the grace. A seed inside that window would write unity over a level
 // a person had set.
 func TestTheSeedWaitsOutTheGraceAfterAConnect(t *testing.T) {
-	media, broker := caughtUpOperator(t, newFakeCluster())
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := caughtUpOperator(t, newFakeCluster())
 
-	media.reestablishRetained()
-	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+		media.reestablishRetained()
+		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A pass that runs before the first session's catch-up has started seeds
@@ -2127,23 +2144,27 @@ func TestTheSeedWaitsOutTheGraceAfterAConnect(t *testing.T) {
 // connect, and a seed in that moment would put unity over the retained
 // level on its way to the desk.
 func TestTheSeedWaitsForTheFirstCatchUp(t *testing.T) {
-	media, broker := caughtUpOperator(t, newFakeCluster())
-	media.catchUpEnds = time.Time{}
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := caughtUpOperator(t, newFakeCluster())
+		media.catchUpEnds = time.Time{}
 
-	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A unit with a standing Play is not seeded after a broker restart. Its
 // playback pod holds the level the room hears and publishes it again when
 // it reconnects, and that reconnect can come after the grace.
 func TestThePassDoesNotSeedAUnitWithAStandingPlay(t *testing.T) {
-	media, broker := caughtUpOperator(t, newFakeCluster())
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := caughtUpOperator(t, newFakeCluster())
 
-	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, standingPlays(), "", nil)
+		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, standingPlays(), "", nil)
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A Play that declares a starting level has it written through to
@@ -2171,54 +2192,60 @@ func TestAPlayWritesItsLevelThroughBeforeThePodExists(t *testing.T) {
 // a later pass of the same run would write the Play's level over every
 // press a person made during the film.
 func TestAPlayWritesItsLevelThroughOnlyOnce(t *testing.T) {
-	cluster := newFakeCluster()
-	play := housePlay("https://nas/film.mkv")
-	play.Spec.Volume = &PlayVolume{Level: level(35)}
-	cluster.plays["movie"] = play
-	cluster.players["theater"] = housePlayer()
-	media, broker := caughtUpOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		play := housePlay("https://nas/film.mkv")
+		play.Spec.Volume = &PlayVolume{Level: level(35)}
+		cluster.plays["movie"] = play
+		cluster.players["theater"] = housePlayer()
+		media, broker := caughtUpOperator(t, cluster)
 
-	media.pass()
-	mustPublishVolume(t, broker)
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":60,"muted":false}`))
+		media.pass()
+		mustPublishVolume(t, broker)
+		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":60,"muted":false}`))
 
-	media.pass()
+		media.pass()
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A Play may declare a level for a unit that has nothing to hear. The
 // write-through reads the same speaker gate the seed does, so the
 // declaration publishes nothing and the topic stays empty.
 func TestAPlayAgainstASpeakerlessPlayerWritesNoLevelThrough(t *testing.T) {
-	cluster := newFakeCluster()
-	play := housePlay("https://nas/film.mkv")
-	play.Spec.Volume = &PlayVolume{Level: level(35)}
-	cluster.plays["movie"] = play
-	player := housePlayer()
-	player.Spec.Sinks = nil
-	cluster.players["theater"] = player
-	media, broker := caughtUpOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		play := housePlay("https://nas/film.mkv")
+		play.Spec.Volume = &PlayVolume{Level: level(35)}
+		cluster.plays["movie"] = play
+		player := housePlayer()
+		player.Spec.Sinks = nil
+		cluster.players["theater"] = player
+		media, broker := caughtUpOperator(t, cluster)
 
-	media.pass()
+		media.pass()
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A Play that declares no level starts the run at whatever the unit
 // already holds, and the operator publishes nothing of its own.
 func TestAPlayWithNoLevelStartsAtTheUnitsOwn(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayer()
-	media, broker := caughtUpOperator(t, cluster)
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":false}`))
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+		cluster.players["theater"] = housePlayer()
+		media, broker := caughtUpOperator(t, cluster)
+		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":false}`))
 
-	media.pass()
+		media.pass()
 
-	mustPublishNoVolume(t, broker)
-	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
-		"--volume=80\n--mute=no")
+		mustPublishNoVolume(t, broker)
+		mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
+			"--volume=80\n--mute=no")
+	})
 }
 
 // While the owner mark stands the equipment applies the level, so the

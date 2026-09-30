@@ -19,14 +19,17 @@ import (
 	"time"
 )
 
-// The two bounds on an upstream leg. The header bound is 10 s, plus
-// the caller's begin where there is one, then 504. It is a variable
-// so a test drives it in milliseconds.
+// The two bounds on an upstream leg. Both are variables because a test
+// that streams a body through the stand-in ffmpeg runs a subprocess,
+// which a synctest bubble cannot wait on, so that test runs on the
+// machine's clock and drives the bound in milliseconds.
+//
+// The header bound is 10 s, plus the caller's begin where there is one,
+// then 504.
 var upstreamHeaderTimeout = 10 * time.Second
 
 // The idle bound on an upstream body is 30 s, counted from the first
-// body byte or from begin, whichever is later. It is a variable so a
-// test drives it in milliseconds.
+// body byte or from begin, whichever is later.
 var upstreamIdleTimeout = 30 * time.Second
 
 // upstreamStream is one open upstream body with the instant its

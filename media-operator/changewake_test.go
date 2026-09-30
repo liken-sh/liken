@@ -7,6 +7,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/tools/cache"
@@ -198,23 +199,28 @@ func TestAReceiverWakesThePassWhenTheEquipmentOrItsWiringChanges(t *testing.T) {
 // Through the reflector: a Display the display-operator rewrites wakes
 // the pass, and the override this operator applies does not.
 func TestADisplayWakesThePassThroughTheReflector(t *testing.T) {
-	server := newCollectionServer()
-	displays := server.serve(t, displayResource, "Display", litDisplay())
-	wake := make(chan struct{}, 1)
-	synced := make(chan struct{})
-	runWatch(t, server, collectionWatch{resource: displayResource, handler: displayRule.handler(wake),
-		synced: func(informer.View) { close(synced) }})
-	mustMatch(t, closedWithin(synced, watchTimeout), true)
-	<-wake
+	synctest.Test(t, func(t *testing.T) {
+		server := newCollectionServer()
+		displays := server.serve(t, displayResource, "Display", litDisplay())
+		wake := make(chan struct{}, 1)
+		synced := make(chan struct{})
+		runWatch(t, server, collectionWatch{resource: displayResource, handler: displayRule.handler(wake),
+			synced: func(informer.View) { close(synced) }})
+		synctest.Wait()
+		mustMatch(t, received(synced), true)
+		mustMatch(t, received(wake), true)
 
-	overridden := litDisplay()
-	overridden.Metadata.ResourceVersion = "101"
-	overridden.Spec.Override = &DisplayOverride{Backlight: displayPowerOff}
-	displays.send(t, "MODIFIED", overridden)
-	mustMatch(t, wokeWithin(wake), false)
+		overridden := litDisplay()
+		overridden.Metadata.ResourceVersion = "101"
+		overridden.Spec.Override = &DisplayOverride{Backlight: displayPowerOff}
+		displays.send(t, "MODIFIED", overridden)
+		synctest.Wait()
+		mustMatch(t, received(wake), false)
 
-	away := awayDisplay()
-	away.Metadata.ResourceVersion = "102"
-	displays.send(t, "MODIFIED", away)
-	mustMatch(t, wokeWithin(wake), true)
+		away := awayDisplay()
+		away.Metadata.ResourceVersion = "102"
+		displays.send(t, "MODIFIED", away)
+		synctest.Wait()
+		mustMatch(t, received(wake), true)
+	})
 }

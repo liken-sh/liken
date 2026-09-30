@@ -42,16 +42,10 @@ import (
 // operator's own namespace.
 const leaseName = "media-operator"
 
-// leaseTiming holds the election's three durations.
-type leaseTiming struct {
-	duration      time.Duration
-	renewDeadline time.Duration
-	retryPeriod   time.Duration
-}
-
-// operatorLeaseTiming sets the Lease's duration to 30 seconds, twice
-// client-go's default, with client-go's 10-second renewal deadline and
-// a 5-second retry period in place of its 2 seconds.
+// The election's three durations set the Lease's duration to 30
+// seconds, twice client-go's default, with client-go's 10-second
+// renewal deadline and a 5-second retry period in place of its 2
+// seconds.
 //
 // The retry period sets the load. The leader renews once per retry
 // period, and a waiting copy reads the Lease once every 5 to 11
@@ -70,17 +64,16 @@ type leaseTiming struct {
 // The cost is failover time. A waiting copy takes a released Lease on
 // its next read, within about 11 seconds, and an abandoned Lease 30 to
 // 41 seconds after the last renewal.
-var operatorLeaseTiming = leaseTiming{
-	duration:      30 * time.Second,
-	renewDeadline: 10 * time.Second,
-	retryPeriod:   5 * time.Second,
-}
+const (
+	leaseDuration      = 30 * time.Second
+	leaseRenewDeadline = 10 * time.Second
+	leaseRetryPeriod   = 5 * time.Second
+)
 
 // leadership is this process's part in the election.
 type leadership struct {
 	elector  *leaderelection.LeaderElector
 	identity string
-	timing   leaseTiming
 
 	// leases and namespace reach the Lease itself, for the release that
 	// follows client-go's own. end says why.
@@ -106,7 +99,7 @@ type leadership struct {
 // newLeadership builds the election. The identity is the pod's name and
 // a random suffix, so a restarted container is a new candidate and
 // waits for the Lease its earlier process held.
-func newLeadership(config *rest.Config, namespace, pod string, timing leaseTiming,
+func newLeadership(config *rest.Config, namespace, pod string,
 	exit func(int), report func(string)) (*leadership, error) {
 	leases, err := coordinationv1.NewForConfig(config)
 	if err != nil {
@@ -116,7 +109,6 @@ func newLeadership(config *rest.Config, namespace, pod string, timing leaseTimin
 	_, _ = rand.Read(suffix)
 	l := &leadership{
 		identity:  pod + "_" + hex.EncodeToString(suffix),
-		timing:    timing,
 		leases:    leases,
 		namespace: namespace,
 		started:   make(chan struct{}),
@@ -131,9 +123,9 @@ func newLeadership(config *rest.Config, namespace, pod string, timing leaseTimin
 			Client:     leases,
 			LockConfig: resourcelock.ResourceLockConfig{Identity: l.identity},
 		},
-		LeaseDuration: timing.duration,
-		RenewDeadline: timing.renewDeadline,
-		RetryPeriod:   timing.retryPeriod,
+		LeaseDuration: leaseDuration,
+		RenewDeadline: leaseRenewDeadline,
+		RetryPeriod:   leaseRetryPeriod,
 		// The release writes the Lease with no holder when the election's
 		// context ends, so a waiting copy takes it on its next retry
 		// instead of after the Lease's duration. end follows it with a
@@ -226,10 +218,10 @@ func (l *leadership) end() {
 	l.cancel()
 	select {
 	case <-l.done:
-	case <-time.After(l.timing.renewDeadline + time.Second):
+	case <-time.After(leaseRenewDeadline + time.Second):
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), l.timing.renewDeadline/2)
+	ctx, cancel := context.WithTimeout(context.Background(), leaseRenewDeadline/2)
 	defer cancel()
 	l.clearIfHeld(ctx)
 }
@@ -281,7 +273,7 @@ func lead(stop context.Context) *leadership {
 		fmt.Fprintf(os.Stderr, "in-cluster config for the Lease: %v\n", err)
 		os.Exit(1)
 	}
-	l, err := newLeadership(config, namespace, pod, operatorLeaseTiming, os.Exit,
+	l, err := newLeadership(config, namespace, pod, os.Exit,
 		func(line string) { fmt.Println(line) })
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leader election: %v\n", err)

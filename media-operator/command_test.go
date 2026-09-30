@@ -15,6 +15,7 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -74,30 +75,32 @@ func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 // A payload that does not decode, and an action the sidecar has no case
 // for, write nothing to mpv.
 func TestACommandThatDoesNotDecodeOrHasNoCaseWritesNothing(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		defer server.Close()
 
-	wrote := make(chan struct{}, 1)
-	go func() {
-		buffer := make([]byte, 256)
-		if _, err := server.Read(buffer); err == nil {
-			wrote <- struct{}{}
+		wrote := make(chan struct{}, 1)
+		go func() {
+			buffer := make([]byte, 256)
+			if _, err := server.Read(buffer); err == nil {
+				wrote <- struct{}{}
+			}
+		}()
+
+		c := &commander{mpv: client}
+		c.handle(c.commandsTopic, []byte("not json"))
+		newer, err := json.Marshal(mediaCommand{Action: "brightness", Amount: 1})
+		if err != nil {
+			t.Fatal(err)
 		}
-	}()
+		c.handle(c.commandsTopic, newer)
 
-	c := &commander{mpv: client}
-	c.handle(c.commandsTopic, []byte("not json"))
-	newer, err := json.Marshal(mediaCommand{Action: "brightness", Amount: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.handle(c.commandsTopic, newer)
-
-	select {
-	case <-wrote:
-		t.Error("a command with no mpv translation wrote to the socket")
-	case <-time.After(100 * time.Millisecond):
-	}
+		select {
+		case <-wrote:
+			t.Error("a command with no mpv translation wrote to the socket")
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
 }
 
 // The command sidecar forwards the current item's presentation block to
@@ -213,31 +216,35 @@ func TestTheExitPressPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
 
 // The grace between the ending and the quit is what a fade runs under:
 // the operator labels the pod off the ending, and mpv keeps drawing the
-// film until the quit arrives. The window is short here, and the test
-// proves the quit waits by reading nothing off mpv's socket inside it.
+// film until the quit arrives. The test proves the quit waits the whole
+// grace by reading nothing off mpv's socket inside it, and the quit at
+// its end.
 func TestTheQuitWaitsOutTheGraceAfterTheEnding(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		bus:         bus,
-		mpv:         client,
-		grace:       300 * time.Millisecond,
-		lastReport:  playReport{Item: 1, Position: "0:20:00"},
-		haveReport:  true,
-	}
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			bus:         bus,
+			mpv:         client,
+			grace:       exitGrace,
+			lastReport:  playReport{Item: 1, Position: "0:20:00"},
+			haveReport:  true,
+		}
 
-	go c.exit()
+		go c.exit()
 
-	ending := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, ending.topic, c.statusTopic)
-	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
-	mustNoLine(t, lines, 100*time.Millisecond)
-	mustMatch(t, waitForLine(t, lines), `{"command":["quit","0"]}`)
+		ending := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, ending.topic, c.statusTopic)
+		mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+		ended := time.Now()
+		mustMatch(t, waitForLine(t, lines), `{"command":["quit","0"]}`)
+		mustMatch(t, time.Since(ended), exitGrace)
+	})
 }
 
 // The grace is one window per run. A second exit on a run that already
@@ -293,7 +300,6 @@ func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
 
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			useDialDelay(t, time.Millisecond)
 			path := filepath.Join(t.TempDir(), "mpv.sock")
 			useSocket(t, path)
 			listener, err := net.Listen("unix", path)
@@ -399,41 +405,45 @@ func TestTheAvailabilityNamesThePodThatSentIt(t *testing.T) {
 // follows: mpv never named an item, so there are no numbers to carry and
 // the pod's own death is what ends such a run.
 func TestARunThatNeverReportedPublishesNoEnding(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		bus:         bus,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			bus:         bus,
+		}
 
-	c.endRun()
+		c.endRun()
 
-	mustPublishNothing(t, brokers[0])
+		mustPublishNothing(t, brokers[0])
+	})
 }
 
 // A volume press writes nothing to mpv. It publishes the unit's
 // next level, retained, and the subscription is what applies it.
 func TestAVolumePressPublishesTheNextLevelAndWritesNoMpvCommand(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
 
-	c := &commander{
-		commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
-		volumeTopic:   playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		bus:           bus,
-		mpv:           client,
-		volume:        volumeState{Level: 40},
-		haveVolume:    true,
-	}
-	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
+		c := &commander{
+			commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
+			volumeTopic:   playerVolumeTopic(defaultTopicBase, "house", "theater"),
+			bus:           bus,
+			mpv:           client,
+			volume:        volumeState{Level: 40},
+			haveVolume:    true,
+		}
+		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
 
-	published := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, published.topic, c.volumeTopic)
-	mustMatch(t, published.retained, true)
-	mustMatch(t, string(published.payload), `{"level":45,"muted":false}`)
-	mustWriteNothing(t, server)
+		published := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, published.topic, c.volumeTopic)
+		mustMatch(t, published.retained, true)
+		mustMatch(t, string(published.payload), `{"level":45,"muted":false}`)
+		mustWriteNothing(t, server)
+	})
 }
 
 // A mute press toggles the flag the topic holds, and it too writes
@@ -477,34 +487,36 @@ func TestAMessageOnTheVolumeTopicReachesMpv(t *testing.T) {
 // draw. A fresh session redelivers the retained level, so the first message
 // after a reconnect is silent again.
 func TestTheFirstLevelOfASessionAppliesSilently(t *testing.T) {
-	bus, _, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		bus, _, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := &commander{
-		volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		bus:         bus,
-		mpv:         client,
-	}
+		c := &commander{
+			volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+			bus:         bus,
+			mpv:         client,
+		}
 
-	c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-	mustNoLine(t, lines, 100*time.Millisecond)
+		c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		mustNoLine(t, lines, 100*time.Millisecond)
 
-	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"],"request_id":1}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"],"request_id":2}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed"]}`)
+		c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"],"request_id":1}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"],"request_id":2}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed"]}`)
 
-	c.onConnect(bus)
+		c.onConnect(bus)
 
-	c.handle(c.volumeTopic, []byte(`{"level":50,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-	mustNoLine(t, lines, 100*time.Millisecond)
+		c.handle(c.volumeTopic, []byte(`{"level":50,"muted":false}`))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		mustNoLine(t, lines, 100*time.Millisecond)
+	})
 }
 
 // bridgeToMPV is a commander wired to a socket a test reads, so a message the
@@ -550,21 +562,23 @@ func mustNoLine(t *testing.T, lines <-chan string, window time.Duration) {
 // sidecar publishes nothing on a press and writes nothing to mpv, because
 // a unit with nothing to hear has no level to mean anything.
 func TestASidecarWithNoSpeakersIgnoresTheVolume(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
 
-	c := &commander{
-		commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
-		bus:           bus,
-		mpv:           client,
-	}
-	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
-	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionMute}))
+		c := &commander{
+			commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
+			bus:           bus,
+			mpv:           client,
+		}
+		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
+		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionMute}))
 
-	mustPublishNothing(t, brokers[0])
-	mustWriteNothing(t, server)
+		mustPublishNothing(t, brokers[0])
+		mustWriteNothing(t, server)
+	})
 }
 
 // mustEncode marshals one message the way a program on the bus publishes
@@ -767,41 +781,44 @@ func TestApplyOnePropertyChange(t *testing.T) {
 
 func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 	t.Run("a pause and an item change do not wait", func(t *testing.T) {
-		useReportInterval(t, time.Hour)
-		send, sent := recordReports()
+		synctest.Test(t, func(t *testing.T) {
+			send, sent := recordReports()
 
-		changes := make(chan propertyChange, 8)
-		go feedChanges(changes,
-			changeOf("playlist-pos", "0"),
-			changeOf("time-pos", "1.0"),
-			changeOf("pause", "true"),
-			changeOf("time-pos", "1.0"),
-			changeOf("playlist-pos", "1"),
-		)
-		runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
+			changes := make(chan propertyChange, 8)
+			go feedChanges(changes,
+				changeOf("playlist-pos", "0"),
+				changeOf("time-pos", "1.0"),
+				changeOf("pause", "true"),
+				changeOf("time-pos", "1.0"),
+				changeOf("playlist-pos", "1"),
+			)
+			runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
 
-		mustMatchAll(t, itemsAndPauses(sent()), []string{"1 playing", "1 paused", "2 paused"})
+			mustMatchAll(t, itemsAndPauses(sent()), []string{"1 playing", "1 paused", "2 paused"})
+		})
 	})
 
 	t.Run("the position waits for the interval", func(t *testing.T) {
-		useReportInterval(t, 20*time.Millisecond)
-		send, sent := recordReports()
+		synctest.Test(t, func(t *testing.T) {
+			send, sent := recordReports()
 
-		changes := make(chan propertyChange)
-		go func() {
-			changes <- changeOf("playlist-pos", "0")
-			changes <- changeOf("time-pos", "1.0")
-			time.Sleep(60 * time.Millisecond)
-			changes <- changeOf("time-pos", "2.0")
-			close(changes)
-		}()
-		runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
+			changes := make(chan propertyChange)
+			go func() {
+				changes <- changeOf("playlist-pos", "0")
+				changes <- changeOf("time-pos", "1.0")
+				time.Sleep(reportInterval - time.Millisecond)
+				changes <- changeOf("time-pos", "1.9")
+				time.Sleep(time.Millisecond)
+				changes <- changeOf("time-pos", "2.0")
+				close(changes)
+			}()
+			runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
 
-		mustMatchAll(t, positions(sent()), []string{"", "0:00:02"})
+			mustMatchAll(t, positions(sent()), []string{"", "0:00:02"})
+		})
 	})
 
 	t.Run("nothing is reported before an item is loaded", func(t *testing.T) {
-		useReportInterval(t, 0)
 		send, sent := recordReports()
 
 		changes := make(chan propertyChange, 8)
@@ -816,32 +833,27 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 	})
 
 	t.Run("a report the bus drops does not stop the run", func(t *testing.T) {
-		useReportInterval(t, 0)
-		attempts := 0
-		send := func(playReport) error {
-			attempts++
-			return errors.New("the broker is unreachable")
-		}
+		synctest.Test(t, func(t *testing.T) {
+			attempts := 0
+			send := func(playReport) error {
+				attempts++
+				return errors.New("the broker is unreachable")
+			}
 
-		changes := make(chan propertyChange, 8)
-		go feedChanges(changes,
-			changeOf("playlist-pos", "0"),
-			changeOf("time-pos", "1.0"),
-			changeOf("time-pos", "2.0"),
-		)
-		runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
+			changes := make(chan propertyChange)
+			go func() {
+				changes <- changeOf("playlist-pos", "0")
+				time.Sleep(reportInterval)
+				changes <- changeOf("time-pos", "1.0")
+				time.Sleep(reportInterval)
+				changes <- changeOf("time-pos", "2.0")
+				close(changes)
+			}()
+			runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
 
-		mustMatch(t, attempts, 3)
+			mustMatch(t, attempts, 3)
+		})
 	})
-}
-
-// useReportInterval moves the throttle for the length of one test, so a
-// test drives the loop in milliseconds or turns the throttle off.
-func useReportInterval(t *testing.T, interval time.Duration) {
-	t.Helper()
-	was := reportInterval
-	t.Cleanup(func() { reportInterval = was })
-	reportInterval = interval
 }
 
 // recordReports is a reportSender that keeps every report, so a test
@@ -914,16 +926,18 @@ func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
 // reporter presents the first item the moment it does, so the request goes
 // unanswered rather than forwarding a block for no item.
 func TestThePresentationRequestBeforeTheFirstItem(t *testing.T) {
-	bridge, lines := bridgeToMPV(t)
-	bridge.presentations = []json.RawMessage{json.RawMessage(`{"title":"First"}`)}
+	synctest.Test(t, func(t *testing.T) {
+		bridge, lines := bridgeToMPV(t)
+		bridge.presentations = []json.RawMessage{json.RawMessage(`{"title":"First"}`)}
 
-	go bridge.serveMessages(requestFor(presentationRequestMessage))
+		go bridge.serveMessages(requestFor(presentationRequestMessage))
 
-	select {
-	case line := <-lines:
-		t.Errorf("the sidecar sent %q, want nothing", line)
-	case <-time.After(100 * time.Millisecond):
-	}
+		select {
+		case line := <-lines:
+			t.Errorf("the sidecar sent %q, want nothing", line)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
 }
 
 // requestFor is one broadcast on a closed channel, the shape the reader hands
@@ -940,28 +954,30 @@ func requestFor(name string) <-chan clientMessage {
 // indicator, and a press still publishes the next state from the level
 // the topic delivered.
 func TestWhileTheMarkStandsTheLevelDoesNotReachMpv(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := ownedCommander(bus, client)
+		c := ownedCommander(bus, client)
 
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
-	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-	mustNoLine(t, lines, 100*time.Millisecond)
-	mustMatch(t, c.heldVolume(), volumeState{Level: 45})
+		c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		mustNoLine(t, lines, 100*time.Millisecond)
+		mustMatch(t, c.heldVolume(), volumeState{Level: 45})
 
-	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
-	published := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, published.topic, c.volumeTopic)
-	mustMatch(t, string(published.payload), `{"level":50,"muted":false}`)
+		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
+		published := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, published.topic, c.volumeTopic)
+		mustMatch(t, string(published.payload), `{"level":50,"muted":false}`)
+	})
 }
 
 // The mark and the level arrive in either order. A level that reached
@@ -1011,26 +1027,28 @@ func TestEveryMarkReAssertsUnity(t *testing.T) {
 // Every message on the volume topic re-asserts unity while the mark
 // stands, and the level it carries never reaches mpv.
 func TestEveryLevelWhileOwnedReAssertsUnity(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := ownedCommander(nil, client)
+		c := ownedCommander(nil, client)
 
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
-	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
-	c.handle(c.volumeTopic, []byte(`{"level":30,"muted":true}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		c.handle(c.volumeTopic, []byte(`{"level":30,"muted":true}`))
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
-	mustNoLine(t, lines, 100*time.Millisecond)
-	mustMatch(t, c.heldVolume(), volumeState{Level: 30, Muted: true})
+		mustNoLine(t, lines, 100*time.Millisecond)
+		mustMatch(t, c.heldVolume(), volumeState{Level: 30, Muted: true})
+	})
 }
 
 // An empty payload is the mark cleared. mpv takes the level back at the
@@ -1063,15 +1081,17 @@ func TestTheClearedMarkGivesTheLevelBackToMpv(t *testing.T) {
 // A mark cleared before any level arrived writes nothing, because there
 // is no state to give mpv back.
 func TestAClearedMarkWithNoLevelWritesNothing(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := ownedCommander(nil, client)
+		c := ownedCommander(nil, client)
 
-	c.handle(c.volumeOwnerTopic, nil)
+		c.handle(c.volumeOwnerTopic, nil)
 
-	mustNoLine(t, lines, 100*time.Millisecond)
+		mustNoLine(t, lines, 100*time.Millisecond)
+	})
 }
 
 // ownedCommander is a sidecar for a unit with speakers, wired to both
@@ -1091,52 +1111,58 @@ func ownedCommander(bus *Bus, mpv net.Conn) *commander {
 // the socket is live starts the film at unity while the equipment
 // holds the level.
 func TestTheHeldMarkReachesMpvWhenTheSocketOpens(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := ownedCommander(nil, nil)
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+		c := ownedCommander(nil, nil)
+		c.handle(c.volumeOwnerTopic, []byte("house/theater"))
 
-	driveInBackground(t, c, client)
+		driveInBackground(t, c, client)
 
-	skipObserves(t, lines)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-	mustNoLine(t, lines, 100*time.Millisecond)
+		skipObserves(t, lines)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		mustNoLine(t, lines, 100*time.Millisecond)
+	})
 }
 
 // A level that arrived before the socket opened is applied the same
 // way, so a film starts at the level the unit holds.
 func TestTheHeldLevelReachesMpvWhenTheSocketOpens(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := ownedCommander(nil, nil)
-	c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
+		c := ownedCommander(nil, nil)
+		c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
 
-	driveInBackground(t, c, client)
+		driveInBackground(t, c, client)
 
-	skipObserves(t, lines)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-	mustNoLine(t, lines, 100*time.Millisecond)
+		skipObserves(t, lines)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+		mustNoLine(t, lines, 100*time.Millisecond)
+	})
 }
 
 // A sidecar no message reached holds no state to apply, so it writes
 // no level and mpv keeps the level its command line set.
 func TestASocketWithNoHeldStateGetsNoLevel(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := ownedCommander(nil, nil)
+		c := ownedCommander(nil, nil)
 
-	driveInBackground(t, c, client)
+		driveInBackground(t, c, client)
 
-	skipObserves(t, lines)
-	mustNoLine(t, lines, 100*time.Millisecond)
+		skipObserves(t, lines)
+		mustNoLine(t, lines, 100*time.Millisecond)
+	})
 }
 
 // driveInBackground runs the socket loop against a connection the

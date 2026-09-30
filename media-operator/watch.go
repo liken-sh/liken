@@ -77,9 +77,10 @@ func watchCollection(ctx context.Context, client dynamic.Interface, w collection
 
 // optionalRecheck is how long the watch of an absent optional
 // collection waits before it asks the API server again
-// (informer.Options.AbsentRecheck). It is a variable so a test drives it
-// in milliseconds.
-var optionalRecheck = 5 * time.Minute
+// (informer.Options.AbsentRecheck). A collection arrives when a person
+// installs the operator that defines it, so a wait of minutes costs one
+// request and delays nothing a person waits on.
+const optionalRecheck = 5 * time.Minute
 
 // poke never blocks, and the wake channel buffers exactly one. A
 // wake already queued says everything a second one would say,

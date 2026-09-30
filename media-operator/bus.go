@@ -33,9 +33,8 @@ const (
 
 // The reconnect backoff bounds. The client waits busMinBackoff after
 // the first failure and doubles the wait up to busMaxBackoff, so a
-// broker that is down does not become a tight reconnect loop. Both are
-// variables so a test drives a reconnect in milliseconds.
-var (
+// broker that is down does not become a tight reconnect loop.
+const (
 	busMinBackoff = time.Second
 	busMaxBackoff = 30 * time.Second
 )

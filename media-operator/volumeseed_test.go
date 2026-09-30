@@ -8,6 +8,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // brokerRestarted is a broker session that begins with no retained
@@ -46,14 +47,16 @@ func TestABrokerRestartGetsTheHeldLevelBack(t *testing.T) {
 // The republish happens once a session: the level it wrote is on the
 // desk as a delivery of this session.
 func TestTheHeldLevelIsPublishedOnceASession(t *testing.T) {
-	media, broker := brokerRestarted(t, false)
-	player := settledPlayer(housePlayer())
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := brokerRestarted(t, false)
+		player := settledPlayer(housePlayer())
 
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-	mustPublishVolume(t, broker)
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
+		mustPublishVolume(t, broker)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A unit whose level equipment owns, and a unit with a standing Play,
@@ -70,11 +73,13 @@ func TestAHeldLevelSomeoneElseHoldsIsNotPublished(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			media, broker := brokerRestarted(t, each.owned)
+			synctest.Test(t, func(t *testing.T) {
+				media, broker := brokerRestarted(t, each.owned)
 
-			media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, each.plays, "", nil)
+				media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, each.plays, "", nil)
 
-			mustPublishNoVolume(t, broker)
+				mustPublishNoVolume(t, broker)
+			})
 		})
 	}
 }
@@ -82,10 +87,12 @@ func TestAHeldLevelSomeoneElseHoldsIsNotPublished(t *testing.T) {
 // A level the new session delivers is the broker's own, so the pass
 // writes nothing over it.
 func TestALevelTheNewSessionDeliversIsNotPublished(t *testing.T) {
-	media, broker := brokerRestarted(t, false)
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":30,"muted":true}`))
+	synctest.Test(t, func(t *testing.T) {
+		media, broker := brokerRestarted(t, false)
+		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":30,"muted":true}`))
 
-	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
