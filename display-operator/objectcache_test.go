@@ -169,6 +169,32 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	}
 }
 
+// A list before the Display watch finished its first read comes from
+// the API server. The store can then become ready at an older copy,
+// because the watch's first read can come from the API server's watch
+// cache. The next list must not answer that older copy: a Display
+// controller that read a person's override from the first list would
+// read the copy from before it, and put the panel back.
+func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture.declare(DisplaySpec{})
+	older := storeHolding(t, displaysOf(fixture.displays)...)
+	fixture.declare(DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
+	ready := false
+	displays := newDisplayStore(fixture.client, informer.View{Store: older.Store, Synced: func() bool { return ready }})
+
+	listed, err := displays.list()
+	if err != nil || len(listed) != 1 || listed[0].Spec.Override == nil {
+		t.Fatalf("the list before the store is ready = %+v, %v; want the override", listed, err)
+	}
+	ready = true
+	read, err := displays.list()
+
+	if err != nil || len(read) != 1 || read[0].Spec.Override == nil {
+		t.Errorf("the list from the ready store = %+v, %v; want the override, not the store's older copy", read, err)
+	}
+}
+
 // A Layout the store does not hold is a Layout that does not exist,
 // once the store holds its first read, so the screen is drawn to the
 // default with no read of the API server.

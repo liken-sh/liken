@@ -75,14 +75,11 @@ func (s *displayStore) get(name string) (*Display, error) {
 }
 
 // list answers every Display, from the store once it holds its first
-// read. A copy older than this process's own write is read again from
-// the API server, and a Display the API server no longer holds is left
-// out.
+// read, and from the API server before then (informer.List). A copy
+// older than this process's own write or read is read again from the
+// API server, and a Display the API server no longer holds is left out.
 func (s *displayStore) list() ([]Display, error) {
-	if !s.held.View.Ready() {
-		return listDisplays(s.client)
-	}
-	return informer.CurrentList[Display](s.client, s.held, displayPath)
+	return informer.List[Display](s.client, s.held, DisplaysPath, displayPath)
 }
 
 // create creates one Display with an empty spec.
