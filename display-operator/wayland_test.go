@@ -99,15 +99,22 @@ func westonBenchOn(t *testing.T, path string, connectors map[uint32]string) *wes
 			}
 			session := &compositorSession{server: server, wire: newWaylandClient(connection)}
 			go session.serve()
-			server.arrived <- session
 		}
 	}()
 	return server
 }
 
-// The connection this compositor serves now. A test waits for
-// one before it moves any output, and waits again after a
-// restart.
+// The connection this compositor serves now, once it has answered the
+// client's first sync. A test waits for one before it moves any output,
+// and waits again after a restart.
+//
+// The watch treats every output that arrives or leaves before the
+// answer to its first sync as part of the baseline, and the baseline
+// owes no heal. The test moves outputs from its own goroutine, and the
+// session writes the answer from another. The socket delivers messages
+// in the order they are written. The session writes the answer before
+// the test receives the session, so every output the test moves reaches
+// the watch after the baseline.
 func (f *westonBench) client() *compositorSession {
 	f.t.Helper()
 	select {
@@ -215,6 +222,7 @@ func (s *compositorSession) announce(global uint32, connector string) {
 }
 
 func (s *compositorSession) serve() {
+	answered := false
 	for {
 		message, err := s.wire.event()
 		if err != nil {
@@ -237,6 +245,10 @@ func (s *compositorSession) serve() {
 			var deleted waylandWords
 			deleted.putUint(callback)
 			s.send(displayObject, wlDisplayDeleteID, deleted)
+			if !answered {
+				answered = true
+				s.server.arrived <- s
+			}
 		case message.object == s.registryID() && message.opcode == wlRegistryBind:
 			global := message.fields.uint()
 			_ = message.fields.text()
