@@ -151,6 +151,15 @@ const PLAYER: &str = "A Player";
 const PLAYER_STRIP: &str = "A Player · director";
 const ENTRY: &str = ".contributors/A Player";
 
+// The letter each circle of a row of viewers draws where the person has
+// no face.
+fn letters(viewers: &[crate::audience::Viewer]) -> Vec<&str> {
+    viewers
+        .iter()
+        .map(|viewer| viewer.letter.as_str())
+        .collect()
+}
+
 // The catalog's date this many days before today. A date is named by
 // its distance from today because the released strip keeps a window of
 // today, and no test may depend on the wall clock.

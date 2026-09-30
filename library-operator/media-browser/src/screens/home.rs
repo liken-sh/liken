@@ -28,6 +28,8 @@ use self::rows::{GENRE, LIBRARY, rows};
 pub use self::rows::{Last, Row, Strip};
 use super::{Screen, Step, slots};
 use crate::art::Art;
+use crate::audience::Viewer;
+use crate::audience::faces::Faces;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
 use crate::views::{area, band};
@@ -88,24 +90,23 @@ pub struct Home {
     /// The people the page was last read for, so a re-read of the page asks
     /// the progress store for the same audience.
     pub people: Vec<String>,
-    // The letters of those people, as the continue-watching row's heading
-    // draws them.
-    pub letters: Vec<String>,
+    // Those people as the continue-watching row's heading draws them.
+    pub viewers: Vec<Viewer>,
 }
 
 impl Home {
     /// Read every row, with focus on the first row that holds anything.
     /// Read the home page. `people` is the audience the continue-watching
     /// row is read for.
-    pub fn open(source: &mut dyn Source, people: &[String], letters: &[String]) -> Self {
+    pub fn open(source: &mut dyn Source, people: &[String], viewers: &[Viewer]) -> Self {
         let mut home = Self {
             heading: HEADING.to_string(),
             blocks: Vec::new(),
             focus: 0,
             people: Vec::new(),
-            letters: Vec::new(),
+            viewers: Vec::new(),
         };
-        home.apply(read(source, Date::today(), people, letters));
+        home.apply(read(source, Date::today(), people, viewers));
         home
     }
 
@@ -116,8 +117,8 @@ impl Home {
     /// stays.
     pub fn reread(&mut self, source: &mut dyn Source) {
         let people = std::mem::take(&mut self.people);
-        let letters = std::mem::take(&mut self.letters);
-        self.apply(read(source, Date::today(), &people, &letters));
+        let viewers = std::mem::take(&mut self.viewers);
+        self.apply(read(source, Date::today(), &people, &viewers));
     }
 
     /// Take a page the reader answered. A row the page holds and the
@@ -126,7 +127,7 @@ impl Home {
     pub fn apply(&mut self, page: Page) {
         let focused = self.blocks.get(self.focus).map(Block::row);
         self.people = page.people;
-        self.letters = page.letters;
+        self.viewers = page.viewers;
         let mut banner: Option<Banner> = None;
         let mut kept: Vec<Strip> = Vec::new();
         for block in std::mem::take(&mut self.blocks) {
@@ -257,7 +258,7 @@ impl Home {
     // moves focus to the circles and answers true.
     fn climbs(&mut self) -> bool {
         match self.blocks.get_mut(self.focus) {
-            Some(Block::Strip(strip)) if !strip.rung && !strip.letters.is_empty() => {
+            Some(Block::Strip(strip)) if !strip.rung && !strip.viewers.is_empty() => {
                 strip.rung = true;
                 true
             }
@@ -321,6 +322,7 @@ impl Home {
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
+        faces: &'a Faces,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let ground = canvas(Ground { home: self, store })
@@ -330,6 +332,7 @@ impl Home {
         let front = canvas(Program {
             home: self,
             store,
+            faces,
             held,
         })
         .width(Length::Fill)

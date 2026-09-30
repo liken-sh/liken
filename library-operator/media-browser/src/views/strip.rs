@@ -15,6 +15,8 @@ use super::{
     Card, Tone, area, artwork, card, clock, label, mark, mosaic, progress, text, underline, wall,
 };
 use crate::art::Art;
+use crate::audience::Viewer;
+use crate::audience::faces::Faces;
 use crate::look;
 
 /// The height of a poster in the strip.
@@ -90,7 +92,7 @@ fn headed(frame: &mut canvas::Frame<Renderer>, region: Rectangle, heading: &str)
 }
 
 // The box the circles of the room take after the heading: on the
-// heading's line, one circle per letter, half a circle after the
+// heading's line, one circle per person, half a circle after the
 // heading's words as the shaper sets them. The estimate the captions cut
 // by would put the circles a wide space off, so the shaper measures the
 // words.
@@ -174,13 +176,22 @@ pub struct Strip<'a, T> {
     /// heading opens a page of its own takes focus there as well as on
     /// its members, and the mark says which.
     pub headed: bool,
-    // The letters of the people at the screen, drawn as circles after the
-    // heading the way the browser's strip draws the room, and none on a strip
-    // that draws no room; and whether those circles hold focus.
-    pub letters: &'a [String],
-    pub circled: bool,
+    /// The people at the screen, drawn as circles after the heading the
+    /// way the browser's strip draws the room, and none on a strip that
+    /// draws no room.
+    pub room: Option<Room<'a>>,
     /// The part of the frame the strip draws in.
     pub region: Rectangle,
+}
+
+/// The people a strip draws after its heading.
+pub struct Room<'a> {
+    /// Each person at the screen, in the order of the answer.
+    pub viewers: &'a [Viewer],
+    /// The faces the circles draw in place of the letters.
+    pub faces: &'a Faces,
+    /// Whether the circles hold focus.
+    pub circled: bool,
 }
 
 /// Where every slot of the strip is before the scroll, as its left edge
@@ -246,12 +257,17 @@ pub fn draw<T: Card, A: Art>(
     if strip.headed {
         mark(frame, heading_box(strip.region, strip.heading));
     }
-    if !strip.letters.is_empty() {
-        let row = circles_box(strip.region, strip.heading, strip.letters.len());
-        for (index, letter) in strip.letters.iter().enumerate() {
-            clock::strip::circle(frame, clock::strip::circle_in(row, index), letter);
+    if let Some(room) = strip.room.as_ref().filter(|room| !room.viewers.is_empty()) {
+        let row = circles_box(strip.region, strip.heading, room.viewers.len());
+        for (index, viewer) in room.viewers.iter().enumerate() {
+            clock::strip::circle(
+                frame,
+                clock::strip::circle_in(row, index),
+                viewer,
+                room.faces,
+            );
         }
-        if strip.circled {
+        if room.circled {
             mark(frame, row);
         }
     }
@@ -437,8 +453,7 @@ mod tests {
         focus: Option<usize>,
     ) -> Strip<'a, Member> {
         Strip {
-            letters: &[],
-            circled: false,
+            room: None,
             members,
             current,
             focus,

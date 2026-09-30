@@ -26,6 +26,7 @@ use super::card::{self, GROUND_TONE};
 use super::wall::{self, Cell, GAP};
 use super::{circles, metro};
 use crate::art::Art;
+use crate::audience::faces::Faces;
 use crate::catalog::franchise::Standing;
 use crate::look;
 use crate::views::clock::strip;
@@ -71,6 +72,8 @@ pub struct Page<'a, A> {
     pub franchise: &'a Franchise,
     /// The store the entries' art comes from.
     pub store: &'a RefCell<A>,
+    /// The faces the circles of the room draw.
+    pub faces: &'a Faces,
     /// Whether the page holds focus, or the browser's strip over it does.
     pub held: bool,
 }
@@ -157,10 +160,10 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             if people.width > 0.0 {
                 let column = wall::clipped(wall::under(people, held.is_some()));
                 frame.with_clip(column, |frame| {
-                    for (letter, at) in
+                    for (viewer, at) in
                         circles::drawn(people, &page.marks, &page.headings, &tops, down)
                     {
-                        strip::circle(frame, at, &letter);
+                        strip::circle(frame, at, &viewer, self.faces);
                     }
                 });
             }

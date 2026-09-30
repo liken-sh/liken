@@ -15,6 +15,8 @@ use iced_widget::canvas;
 use iced_winit::core::{Color, Point, Rectangle, Theme, mouse};
 
 use super::{SIZE, left, middle, reading};
+use crate::audience::Viewer;
+use crate::audience::faces::{Face, Faces};
 use crate::clock::Time;
 use crate::look;
 use crate::views::field::{self, TextField};
@@ -94,17 +96,22 @@ pub struct Strip<'a> {
     /// The target the focus mark goes on, or nothing while the strip does
     /// not hold the browser's focus.
     pub focus: Option<Target>,
-    /// The first letter of each person in the room, in the order of the
-    /// answer; one "?" where nobody is watching and the picker is not
+    /// Each person in the room, in the order of the answer; the one
+    /// [`Viewer::nobody`] where nobody is watching and the picker is not
     /// up; and none where the browser holds no answer.
-    pub letters: Vec<String>,
-    // Whether the letters are the one "?" that stands for nobody, which
+    pub viewers: Vec<Viewer>,
+    // Whether the viewers are the one "?" that stands for nobody, which
     // draws fainter than a person's circle.
     pub asking: bool,
+    /// The faces of the known people, which a circle draws in place of
+    /// the letter.
+    pub faces: &'a Faces,
 }
 
 /// The side of one circle of the room: the glass's own size, so the
-/// circles and the glass read as one strip.
+/// circles and the glass read as one strip. A face draws across the whole
+/// circle, because no stroke draws on a circle's rim. The focus mark goes
+/// around the row, outside every circle, so no face covers it.
 pub const CIRCLE: f32 = GLASS;
 
 // The gap between two circles, narrow enough that the row reads as one
@@ -144,14 +151,27 @@ pub fn circle_in(row: Rectangle, index: usize) -> Rectangle {
     )
 }
 
-// One circle of the room: a muted disc with the letter on it, the way the
-// strip and the continue-watching row's heading both draw a person.
-pub fn circle(frame: &mut canvas::Frame<Renderer>, at: Rectangle, letter: &str) {
-    disc(frame, at, letter, look::muted());
+/// One circle of the room: the person's face, or a muted disc with the
+/// letter on it, the way the strip, the continue-watching row's heading,
+/// and a franchise page all draw a person.
+pub fn circle(frame: &mut canvas::Frame<Renderer>, at: Rectangle, viewer: &Viewer, faces: &Faces) {
+    drawn(frame, at, faces.face(viewer, CIRCLE), look::muted());
 }
 
-// A disc of this fill with the letter on it. The "?" of nobody draws in
-// the faint fill, and a person's circle in the muted one.
+// One circle with this face on it. A letter draws on a disc of this fill,
+// and the "?" of nobody draws in the faint fill.
+fn drawn(frame: &mut canvas::Frame<Renderer>, at: Rectangle, face: Face<'_>, fill: Color) {
+    match face {
+        Face::Picture(image) => {
+            for (band, handle) in image.bands(at) {
+                frame.draw_image(band, canvas::Image::new(handle));
+            }
+        }
+        Face::Letter(letter) => disc(frame, at, &letter, fill),
+    }
+}
+
+// A disc of this fill with the letter on it.
 fn disc(frame: &mut canvas::Frame<Renderer>, at: Rectangle, letter: &str, fill: Color) {
     frame.fill(
         &canvas::Path::circle(Point::new(at.center_x(), at.center_y()), at.width / 2.0),
@@ -169,6 +189,14 @@ fn disc(frame: &mut canvas::Frame<Renderer>, at: Rectangle, letter: &str, fill: 
         look::FACE,
         look::text(),
     );
+}
+
+impl Strip<'_> {
+    /// What the circle at this index of the row draws.
+    pub fn face(&self, index: usize) -> Face<'_> {
+        let viewer = self.viewers.get(index).cloned().unwrap_or_default();
+        self.faces.face(&viewer, CIRCLE)
+    }
 }
 
 impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
@@ -203,17 +231,17 @@ impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
         }
         // The field draws leftward from the clock over the same band, so
         // the circles stand down while a search wall is on top.
-        if !self.letters.is_empty() && self.field.is_none() {
-            let count = self.letters.len();
+        if !self.viewers.is_empty() && self.field.is_none() {
+            let count = self.viewers.len();
             let fill = match self.asking {
                 true => look::faint(),
                 false => look::muted(),
             };
-            for (index, letter) in self.letters.iter().enumerate() {
-                disc(
+            for index in 0..count {
+                drawn(
                     &mut frame,
                     circle_at(bounds.width, count, index),
-                    letter,
+                    self.face(index),
                     fill,
                 );
             }

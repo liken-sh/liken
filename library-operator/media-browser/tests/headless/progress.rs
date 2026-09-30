@@ -9,7 +9,7 @@ use super::*;
 
 // A progress file beside the catalog fixture, with one play of the
 // fixture's own movie and the alias that resolves it.
-fn store(dir: &Path, database: &Path) -> PathBuf {
+pub(super) fn store(dir: &Path, database: &Path) -> PathBuf {
     rusqlite::Connection::open(database)
         .expect("open the fixture catalog")
         .execute(

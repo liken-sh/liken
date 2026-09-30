@@ -19,13 +19,13 @@ impl<S: Source, A: Art> Browser<S, A> {
     // reader, so the read that uncovers it never holds the frame thread.
     pub(super) fn reread_top(&mut self) {
         let people = self.audience.current(self.clock).to_vec();
-        let letters = self.audience.letters(self.clock);
+        let viewers = self.audience.viewers(self.clock);
         let Some(top) = self.stack.last_mut() else {
             self.refresh_home();
             return;
         };
         top.reread(&mut self.source);
-        top.read_progress(&mut self.source, &people, &letters);
+        top.read_progress(&mut self.source, &people, &viewers);
         top.volume(&*self.store.borrow());
     }
 
@@ -89,8 +89,8 @@ impl<S: Source, A: Art> Browser<S, A> {
     // resolves a library's root.
     pub(super) fn opened(&mut self, mut screen: screens::Screen) {
         let people = self.audience.current(self.clock).to_vec();
-        let letters = self.audience.letters(self.clock);
-        screen.read_progress(&mut self.source, &people, &letters);
+        let viewers = self.audience.viewers(self.clock);
+        screen.read_progress(&mut self.source, &people, &viewers);
         screen.volume(&*self.store.borrow());
         self.stack.push(screen);
         self.on_strip = false;

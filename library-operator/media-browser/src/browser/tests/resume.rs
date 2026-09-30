@@ -461,14 +461,14 @@ fn a_row_the_store_answers_nothing_for_holds_nothing() {
 
     assert!(row(&browser).items.is_empty());
     assert_eq!(row(&browser).heading, "Continue watching · ");
-    assert_eq!(row(&browser).letters, ["F"]);
+    assert_eq!(letters(&row(&browser).viewers), ["F"]);
 }
 
 #[test]
 fn the_heading_carries_the_letters_of_the_people_at_the_screen() {
     let (browser, _bus) = continuing();
 
-    assert_eq!(row(&browser).letters, ["F"]);
+    assert_eq!(letters(&row(&browser).viewers), ["F"]);
     assert!(!row(&browser).rung);
 }
 
@@ -591,5 +591,5 @@ fn the_row_comes_back_with_the_pickers_answer() {
     browser.pump(crate::audience::IDLE_SECONDS + 3.0);
 
     assert!(holds_the_row(&browser));
-    assert_eq!(row(&browser).letters, ["F"]);
+    assert_eq!(letters(&row(&browser).viewers), ["F"]);
 }

@@ -10,13 +10,11 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
-use crate::art::Image;
-use crate::audience::Person;
+use crate::audience::faces::{Face, Faces};
+use crate::audience::{Person, Viewer};
 use crate::look;
 use crate::views::{area, extent, mark, text};
 
-// The pictures the tiles draw, cut to the circle.
-pub mod faces;
 // The unit's name and parts at the bottom left of the picker.
 pub mod identity;
 
@@ -30,6 +28,12 @@ pub const START: &str = "Start";
 
 /// The side of the square one tile's circle draws in.
 pub const CIRCLE: f32 = 160.0;
+
+/// The side of the face inside one tile: the circle less the chosen ring
+/// that strokes its rim. The ring is a stroke, and the renderer draws
+/// every stroke of a canvas under every image of it, so a face as wide as
+/// the tile would cover the ring.
+pub const FACE: f32 = CIRCLE - 2.0 * look::MARK;
 
 // The space between two tiles, wider than the focus mark reaches.
 const GAP: f32 = 48.0;
@@ -129,15 +133,10 @@ pub fn word_at(link: Rectangle) -> Rectangle {
     )
 }
 
-/// The square a face draws in: the tile's circle less the chosen ring
-/// that strokes its rim.
+/// The square a face draws in: [`FACE`] across, centred in the tile.
 pub fn picture(tile: Rectangle) -> Rectangle {
-    area(
-        tile.x + look::MARK,
-        tile.y + look::MARK,
-        tile.width - 2.0 * look::MARK,
-        tile.height - 2.0 * look::MARK,
-    )
+    let inset = (tile.width - FACE) / 2.0;
+    area(tile.x + inset, tile.y + inset, FACE, FACE)
 }
 
 /// The band the name under one tile draws in, as wide as the pitch, so no
@@ -299,22 +298,13 @@ impl Picker {
 pub struct Layer<'a> {
     /// The people the picker offers, in the order the list came.
     pub people: &'a [Person],
-    /// The faces of the people, cut when the picker went up.
-    pub faces: &'a faces::Faces,
+    /// The faces of the people, which the browser cut when it learned
+    /// the list.
+    pub faces: &'a Faces,
     /// What is chosen and where focus stands.
     pub picker: &'a Picker,
     /// The unit the last status named, which the identity block draws.
     pub unit: &'a identity::Unit,
-}
-
-/// What one tile draws inside its circle.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Face<'a> {
-    /// The person's picture, cut to the circle.
-    Picture(&'a Image),
-    /// The first letter of the person's display name, for a person with no
-    /// picture or one that did not decode.
-    Letter(String),
 }
 
 impl Layer<'_> {
@@ -327,16 +317,8 @@ impl Layer<'_> {
 
     /// What the tile at this index draws inside its circle.
     pub fn face(&self, index: usize) -> Face<'_> {
-        match self.faces.get(index) {
-            Some(image) => Face::Picture(image),
-            None => Face::Letter(
-                self.caption(index)
-                    .chars()
-                    .next()
-                    .unwrap_or_default()
-                    .to_string(),
-            ),
-        }
+        let viewer = self.people.get(index).map(Viewer::of).unwrap_or_default();
+        self.faces.face(&viewer, FACE)
     }
 }
 

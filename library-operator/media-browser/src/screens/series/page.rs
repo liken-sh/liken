@@ -146,8 +146,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                     frame,
                     store,
                     &strip::Strip {
-                        letters: &[],
-                        circled: false,
+                        room: None,
                         members: &band.members,
                         current: band.current,
                         kept: None,

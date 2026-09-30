@@ -53,8 +53,8 @@ impl<S: Source, A: Art> Browser<S, A> {
         if !drawn {
             return false;
         }
-        let letters = self.audience.letters(self.clock);
-        top.read_progress(&mut self.source, &people, &letters);
+        let viewers = self.audience.viewers(self.clock);
+        top.read_progress(&mut self.source, &people, &viewers);
         true
     }
 
@@ -64,11 +64,11 @@ impl<S: Source, A: Art> Browser<S, A> {
     pub(super) fn progress_again(&mut self) -> bool {
         self.row_stale = true;
         let people = self.audience.current(self.clock).to_vec();
-        let letters = self.audience.letters(self.clock);
+        let viewers = self.audience.viewers(self.clock);
         let Some(top) = self.stack.last_mut() else {
             return false;
         };
-        top.read_progress(&mut self.source, &people, &letters);
+        top.read_progress(&mut self.source, &people, &viewers);
         true
     }
 
@@ -84,8 +84,8 @@ impl<S: Source, A: Art> Browser<S, A> {
         }
         self.row_stale = false;
         let people = self.audience.current(self.clock).to_vec();
-        let letters = self.audience.letters(self.clock);
-        self.reader.ask_row(&mut self.source, people, letters);
+        let viewers = self.audience.viewers(self.clock);
+        self.reader.ask_row(&mut self.source, people, viewers);
         self.landed_home()
     }
 }

@@ -4,6 +4,8 @@
 
 use serde_json::Value;
 
+// The pictures of the people, cut to the circle every screen draws.
+pub mod faces;
 // The picture a person's entry carries.
 pub mod thumbnail;
 // The inotify watch that keeps the list current from its file.
@@ -21,11 +23,47 @@ pub struct Person {
     /// The name a screen draws. It is the resource's name where the resource
     /// declares none.
     pub display_name: String,
-    /// The person's picture, which the picker draws in place of the
+    /// The person's picture, which every screen draws in place of the
     /// letter. It is none where the entry carries no thumbnail, as on a
     /// cluster where people-operator does not run, or one the browser
     /// cannot open.
     pub thumbnail: Option<Thumbnail>,
+}
+
+/// One person in the room as a screen draws them in a circle: the
+/// `Person` name their face is found by, and the first letter of their
+/// display name, which draws where they have no face.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Viewer {
+    /// The `Person` resource's own name.
+    pub name: String,
+    /// The first letter of the display name.
+    pub letter: String,
+}
+
+impl Viewer {
+    /// This person as a circle draws them.
+    pub fn of(person: &Person) -> Self {
+        Self {
+            name: person.name.clone(),
+            letter: first_letter(&person.display_name),
+        }
+    }
+
+    /// The one "?" circle the strip draws where nobody is watching. It
+    /// names no `Person`, so it has no face.
+    pub fn nobody() -> Self {
+        Self {
+            name: String::new(),
+            letter: "?".to_string(),
+        }
+    }
+}
+
+// The first letter of a display name, which a circle draws for a person
+// with no face.
+fn first_letter(display_name: &str) -> String {
+    display_name.chars().next().unwrap_or_default().to_string()
 }
 
 /// The `Person` list as a file holds it:
@@ -46,7 +84,7 @@ pub fn people_from_value(value: &Value) -> Result<Vec<Person>, String> {
 
 // One entry of the list. The name is required; the display name falls back
 // to it. A thumbnail that does not open is dropped and not an error, because
-// the letter is a face the picker can always draw.
+// the letter is a face every screen can always draw.
 fn person(entry: &Value) -> Result<Person, String> {
     let name = entry
         .get("name")
@@ -216,18 +254,15 @@ impl Audience {
         self.answered.as_deref().unwrap_or_default()
     }
 
-    /// The first letter of the display name of each person in the current
-    /// answer, in the order of the answer. The strip draws one circle per
-    /// letter. A lapsed answer and an answer of nobody both carry none.
-    pub fn letters(&self, at: f64) -> Vec<String> {
+    /// Each person in the current answer as a screen draws them, in the
+    /// order of the answer. The strip draws one circle per viewer. A
+    /// lapsed answer and an answer of nobody both carry none.
+    pub fn viewers(&self, at: f64) -> Vec<Viewer> {
         self.current(at)
             .iter()
-            .map(|name| {
-                self.display_name(name)
-                    .chars()
-                    .next()
-                    .unwrap_or_default()
-                    .to_string()
+            .map(|name| Viewer {
+                name: name.clone(),
+                letter: first_letter(self.display_name(name)),
             })
             .collect()
     }

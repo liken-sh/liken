@@ -4,6 +4,7 @@
 
 use super::banner::{Banner, Title};
 use super::{Block, Row, Strip, rows};
+use crate::audience::Viewer;
 use crate::catalog::draw::{self, Date};
 use crate::catalog::{Query, Source};
 use crate::screens::Item;
@@ -17,9 +18,9 @@ pub struct Page {
     /// The people the continue-watching row was read for. The screen keeps
     /// them so a re-read of its own asks for the same audience.
     pub people: Vec<String>,
-    // The letters of those people, one per person in the same order, which
-    // the row's heading draws.
-    pub letters: Vec<String>,
+    // Those people as the row's heading draws them, one per person in the
+    // same order.
+    pub viewers: Vec<Viewer>,
     /// The rows in the page's order, each one read, with no focus in any
     /// of them.
     pub blocks: Vec<Block>,
@@ -50,10 +51,10 @@ impl Drop for PageRead<'_> {
 ///
 /// Read every row of the page. `people` is the audience the
 /// continue-watching row is read for.
-// `letters` are their letters for the row's heading. An empty audience
+// `viewers` are those people as the row's heading draws them. An empty audience
 // takes no continue-watching row at all, neither a heading nor cards, and
 // the row is back with the next answer.
-pub fn read(source: &mut dyn Source, today: Date, people: &[String], letters: &[String]) -> Page {
+pub fn read(source: &mut dyn Source, today: Date, people: &[String], viewers: &[Viewer]) -> Page {
     let scope = PageRead::begin(source);
     let source = &mut *scope.source;
     let seconds = today.seconds();
@@ -68,7 +69,7 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String], letters: &[
     for index in 0..blocks.len() {
         let released = released(&blocks);
         if let Block::Strip(strip) = &mut blocks[index] {
-            strip.reread(source, seconds, &released, people, letters);
+            strip.reread(source, seconds, &released, people, viewers);
         }
     }
     let titles = titles(&blocks, source);
@@ -81,7 +82,7 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String], letters: &[
     Page {
         date: today,
         people: people.to_vec(),
-        letters: letters.to_vec(),
+        viewers: viewers.to_vec(),
         blocks,
     }
 }
@@ -89,9 +90,9 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String], letters: &[
 /// Read the continue-watching row alone, for a change the progress store
 /// made that can add, move, or remove a card. Every other row of the page
 /// stays as it was read, because no progress change moves them.
-pub fn read_row(source: &mut dyn Source, people: &[String], letters: &[String]) -> Strip {
+pub fn read_row(source: &mut dyn Source, people: &[String], viewers: &[Viewer]) -> Strip {
     let mut strip = Strip::new(Row::Continue);
-    strip.reread(source, 0, &[], people, letters);
+    strip.reread(source, 0, &[], people, viewers);
     strip
 }
 

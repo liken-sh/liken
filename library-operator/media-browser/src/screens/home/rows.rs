@@ -5,6 +5,7 @@
 // both take it from here.
 
 use super::resume;
+use crate::audience::Viewer;
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
 use crate::catalog::{
@@ -143,11 +144,11 @@ pub struct Strip {
     pub focus: usize,
     pub last: Option<Last>,
     pub lines: usize,
-    // The letters of the people at the screen, drawn as circles after the
+    // The people at the screen, drawn as circles after the
     // heading of the continue-watching row and empty on every other strip,
     // and whether focus stands on those circles, the rung before the first
     // card, rather than on a card.
-    pub letters: Vec<String>,
+    pub viewers: Vec<Viewer>,
     pub rung: bool,
 }
 
@@ -163,7 +164,7 @@ impl Strip {
             last: None,
             lines: card::LINES,
             row,
-            letters: Vec::new(),
+            viewers: Vec::new(),
             rung: false,
         }
     }
@@ -184,7 +185,7 @@ impl Strip {
         today: i64,
         released: &[Item],
         people: &[String],
-        letters: &[String],
+        viewers: &[Viewer],
     ) {
         match &self.row {
             // The continue-watching row reads the progress store for the
@@ -194,7 +195,7 @@ impl Strip {
             // it.
             Row::Continue => {
                 self.heading = format!("{}{}", resume::HEADING, strip::DOT);
-                self.letters = letters.to_vec();
+                self.viewers = viewers.to_vec();
                 self.rung = false;
                 self.items = resume::cards(source, people)
                     .into_iter()
@@ -290,7 +291,7 @@ impl Strip {
         match (self.rung, key) {
             (true, "right") => self.rung = false,
             (true, _) => {}
-            (false, "left") if self.focus == 0 && !self.letters.is_empty() => self.rung = true,
+            (false, "left") if self.focus == 0 && !self.viewers.is_empty() => self.rung = true,
             (false, _) => self.focus = focus::row(self.focus, self.count(), key),
         }
     }

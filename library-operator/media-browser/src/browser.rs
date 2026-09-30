@@ -143,9 +143,10 @@ pub struct Browser<S: Source, A: Art> {
     // The picker over the stack while the browser has no answer to who is
     // watching, and nothing once it has one.
     picker: Option<screens::audience::Picker>,
-    // The faces the picker draws, cut when it goes up, at the panel's
-    // scale.
-    faces: screens::audience::faces::Faces,
+    // The faces of the known people, cut at every size a screen draws
+    // them at, at the panel's scale. The browser cuts them again when the
+    // `Person` list or the scale changes, and never in a frame.
+    faces: audience::faces::Faces,
     // How many panel pixels one logical pixel spans, which the faces are
     // cut for.
     scale: f32,
@@ -222,7 +223,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             loading: None,
             lights: None,
             picker: None,
-            faces: screens::audience::faces::Faces::default(),
+            faces: audience::faces::Faces::default(),
             scale: 1.0,
             unit: screens::audience::identity::Unit::default(),
             level: volume::Level::default(),
@@ -286,6 +287,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         // continue-watching row is behind, and the loop's first pass reads
         // the page again.
         self.home_stale = true;
+        self.recut();
         self
     }
 
@@ -312,10 +314,8 @@ impl<S: Source, A: Art> Browser<S, A> {
     // the screen under it is the one that comes back when the answer is
     // taken. The people of the current answer start chosen. An audience
     // that needs an answer holds none, so a picker raised by the ask
-    // starts with nobody. The faces are cut here, because the panel's
-    // scale can change between two raises.
+    // starts with nobody.
     fn raise_picker(&mut self) {
-        self.faces.refresh(self.audience.known(), self.scale);
         let chosen = self.audience.chosen(self.clock);
         self.picker = Some(screens::audience::Picker::open(
             self.audience.known().len(),
@@ -380,9 +380,9 @@ impl<S: Source, A: Art> Browser<S, A> {
     fn read_again(&mut self) {
         self.home_stale = true;
         let people = self.audience.current(self.clock).to_vec();
-        let letters = self.audience.letters(self.clock);
+        let viewers = self.audience.viewers(self.clock);
         if let Some(top) = self.stack.last_mut() {
-            top.read_progress(&mut self.source, &people, &letters);
+            top.read_progress(&mut self.source, &people, &viewers);
         }
     }
 
@@ -665,8 +665,8 @@ impl<S: Source, A: Art> Browser<S, A> {
             return false;
         }
         let people = self.audience.current(self.clock).to_vec();
-        let letters = self.audience.letters(self.clock);
-        self.reader.ask(&mut self.source, today, people, letters);
+        let viewers = self.audience.viewers(self.clock);
+        self.reader.ask(&mut self.source, today, people, viewers);
         self.landed_home()
     }
 
@@ -793,11 +793,12 @@ impl<S: Source, A: Art> Browser<S, A> {
             time: self.time,
             field: self.top().field(),
             focus: self.on_strip.then_some(focus),
-            letters: match self.nobody_watching() {
-                true => vec!["?".to_string()],
-                false => self.audience.letters(self.clock),
+            viewers: match self.nobody_watching() {
+                true => vec![audience::Viewer::nobody()],
+                false => self.audience.viewers(self.clock),
             },
             asking: self.nobody_watching(),
+            faces: &self.faces,
         })
     }
 
@@ -975,6 +976,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         );
         self.store.get_mut().scaled(physical, scale);
         views::ramp::density(scale);
+        self.recut();
     }
 
     // The source, the art store, the home page's reader, the bus, and the
@@ -1040,7 +1042,9 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         };
 
         let curtain = self.loading.map(|state| state.curtain(self.clock));
-        let screen = self.top().view(&self.store, curtain, !self.on_strip);
+        let screen = self
+            .top()
+            .view(&self.store, &self.faces, curtain, !self.on_strip);
 
         // The dim of the room is the frame's layer and not a page's, so
         // the home page, a wall, and a title's page all go down the same

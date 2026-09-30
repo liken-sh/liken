@@ -30,6 +30,8 @@ use iced_winit::core::{Element, Theme};
 
 use self::series::seasons_of;
 use crate::art::Art;
+use crate::audience::Viewer;
+use crate::audience::faces::Faces;
 pub use crate::bus::mark::TitleMark;
 use crate::catalog::{InSeries, Played, Query, Selection, Slot, Source};
 use crate::views::curtain::Curtain;
@@ -240,20 +242,20 @@ impl Screen {
     /// every wall, whose film slots draw a bar under the art. The home page
     /// is the one screen that reads its own, through the reader thread.
     ///
-    /// `letters` are the initials of those people, in the same order. The
+    /// `viewers` are those people as a circle draws them, in the same order. The
     /// franchise page draws them as the circles of the room. Every other
     /// screen reads none.
     pub fn read_progress(
         &mut self,
         source: &mut dyn Source,
         people: &[String],
-        letters: &[String],
+        viewers: &[Viewer],
     ) {
         match self {
             Self::Movie(screen) => screen.read_progress(source, people),
             Self::Series(screen) => series::progress::read(screen, source, people),
             Self::Wall(screen) => screen.read_progress(source, people),
-            Self::Franchise(screen) => franchise::progress::read(screen, source, people, letters),
+            Self::Franchise(screen) => franchise::progress::read(screen, source, people, viewers),
             _ => {}
         }
     }
@@ -272,22 +274,26 @@ impl Screen {
     /// every other screen ignores it, because a press enters that state
     /// on one of those two and no press reaches a screen while it runs.
     ///
+    /// `faces` are the pictures of the people, which the home page and a
+    /// franchise page draw in the circles of the room.
+    ///
     /// `held` is whether the screen holds focus. The browser's strip
     /// takes focus off the screen under it, and a screen that drew its
     /// own mark then would put two marks on the glass.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
+        faces: &'a Faces,
         curtain: Option<Curtain>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
-            Self::Home(screen) => screen.view(store, held),
+            Self::Home(screen) => screen.view(store, faces, held),
             Self::Wall(screen) => screen.view(store, held),
             Self::Movie(screen) => screen.view(store, curtain, held),
             Self::Series(screen) => screen.view(store, curtain, held),
             Self::Person(screen) => screen.view(store, held),
-            Self::Franchise(screen) => screen.view(store, held),
+            Self::Franchise(screen) => screen.view(store, faces, held),
         }
     }
 

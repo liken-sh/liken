@@ -2,13 +2,21 @@
 // under its members, over a fake store of plays.
 
 use super::*;
-use crate::screens::franchise::tests::{CYCLE, FIRST, Night, ORDERS, Orders, RUNTIME, SHOW};
+use crate::audience::Viewer;
+use crate::screens::franchise::tests::{
+    CYCLE, FIRST, Night, ORDERS, Orders, RUNTIME, SHOW, viewer,
+};
 
 // The room the reads are made for, one person to a letter.
 const ROOM: [&str; 3] = ["A", "B", "C"];
 
 fn room() -> Vec<String> {
     ROOM.iter().map(|person| person.to_string()).collect()
+}
+
+// The same room as its circles draw it.
+fn viewers() -> Vec<Viewer> {
+    ROOM.iter().map(|person| viewer(person)).collect()
 }
 
 // The page of the split order, read for the room over these plays.
@@ -19,7 +27,7 @@ fn page(nights: &[Night]) -> Franchise {
         ..Orders::default()
     };
     let mut page = Franchise::open(ORDERS, CYCLE, &mut source).expect("the fake holds the order");
-    read(&mut page, &mut source, &room(), &room());
+    read(&mut page, &mut source, &room(), &viewers());
     page
 }
 
@@ -58,14 +66,14 @@ fn the_room_stands_on_the_row_of_the_run_it_is_partway_into() {
     let page = page(&nights());
 
     assert_eq!(page.marks.room, Some(3));
-    assert_eq!(page.marks.letters, room());
+    assert_eq!(page.marks.viewers, viewers());
 }
 
 #[test]
 fn a_person_alone_draws_a_circle_only_where_their_own_thread_stands_elsewhere() {
     let page = page(&nights());
 
-    assert_eq!(page.marks.solo, [("A".to_string(), 0)]);
+    assert_eq!(page.marks.solo, [(viewer("A"), 0)]);
 }
 
 #[test]
@@ -73,7 +81,7 @@ fn an_order_no_play_names_draws_no_marker_and_earns_no_column() {
     let page = page(&[]);
 
     assert_eq!(page.marks.room, None);
-    assert_eq!(page.marks.letters, [] as [String; 0]);
+    assert_eq!(page.marks.viewers, []);
     assert_eq!(page.marks.solo, []);
     assert!(!page.marks.marked());
 }
@@ -88,11 +96,11 @@ fn the_first_read_lands_focus_on_the_rooms_row_and_later_reads_leave_it() {
     let mut page = Franchise::open(ORDERS, CYCLE, &mut source).expect("the fake holds the order");
     assert_eq!(page.focus, 0);
 
-    read(&mut page, &mut source, &room(), &room());
+    read(&mut page, &mut source, &room(), &viewers());
     assert_eq!(page.focus, 3);
 
     page.key("up", &mut source);
-    read(&mut page, &mut source, &room(), &room());
+    read(&mut page, &mut source, &room(), &viewers());
     assert_eq!(page.focus, 2);
 }
 
@@ -104,7 +112,7 @@ fn a_reread_holds_the_marks_and_the_row_focus_was_placed_on() {
         ..Orders::default()
     };
     let mut page = Franchise::open(ORDERS, CYCLE, &mut source).expect("the fake holds the order");
-    read(&mut page, &mut source, &room(), &room());
+    read(&mut page, &mut source, &room(), &viewers());
     page.key("up", &mut source);
     page.reread(&mut source);
 
@@ -126,7 +134,7 @@ fn every_held_member_draws_the_bar_the_room_reached_and_a_gap_draws_none() {
         ..Orders::default()
     };
     let mut page = Franchise::open(ORDERS, CYCLE, &mut source).expect("the fake holds the order");
-    read(&mut page, &mut source, &room(), &room());
+    read(&mut page, &mut source, &room(), &viewers());
 
     assert_eq!(
         page.marks.bars,

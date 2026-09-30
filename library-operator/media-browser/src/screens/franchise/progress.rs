@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use super::{Franchise, leaves};
+use crate::audience::Viewer;
 use crate::catalog::franchise::Entry;
 use crate::catalog::progress::thread;
 use crate::catalog::{Progress, Resume, Source};
@@ -16,7 +17,7 @@ use crate::screens::home::resume::containers::{Episodes, Leaf, Work, on_leaves};
 const SERIES: &str = "series";
 
 /// What the read hangs on the page: one bar share per row, the row the
-/// room's thread stands on with the letters of everyone present, and one
+/// room's thread stands on with everyone present, and one
 /// circle per person whose own thread stands on another row.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Marks {
@@ -26,13 +27,13 @@ pub struct Marks {
     /// The row the room's thread stands on, and none where no thread of
     /// theirs stands, or the room finished the story.
     pub room: Option<usize>,
-    /// The letters of everyone in the room, which draw as the stack on
+    /// Everyone in the room, who draw as the stack on
     /// that row, and none where the room has no row.
-    pub letters: Vec<String>,
-    /// One person's letter and the row their own thread stands on, for
+    pub viewers: Vec<Viewer>,
+    /// One person and the row their own thread stands on, for
     /// every person whose own thread stands on a row other than the
     /// room's.
-    pub solo: Vec<(String, usize)>,
+    pub solo: Vec<(Viewer, usize)>,
 }
 
 impl Marks {
@@ -53,18 +54,18 @@ impl Marks {
 /// an open, focus lands on the room's row. The browser calls it at every
 /// open and at every re-read, because only the browser holds the
 /// audience.
-pub fn read(page: &mut Franchise, source: &mut dyn Source, people: &[String], letters: &[String]) {
+pub fn read(page: &mut Franchise, source: &mut dyn Source, people: &[String], viewers: &[Viewer]) {
     let mut episodes = Episodes::default();
     let leaves = leaves::of(source, &mut episodes, &page.entries);
     let rows = rows(&page.entries, &leaves);
     let played = plays(source, &page.entries, people);
     let room = stands(&leaves, &rows, &played);
     let bars = bars(source, &page.entries, &leaves, &played, people);
-    let solo = solo(source, &page.entries, people, letters, &leaves, &rows, room);
+    let solo = solo(source, &page.entries, people, viewers, &leaves, &rows, room);
     page.marks = Marks {
         bars,
-        letters: match room {
-            Some(_) => letters.to_vec(),
+        viewers: match room {
+            Some(_) => viewers.to_vec(),
             None => Vec::new(),
         },
         room,
@@ -109,21 +110,21 @@ fn solo(
     source: &mut dyn Source,
     entries: &[Entry],
     people: &[String],
-    letters: &[String],
+    viewers: &[Viewer],
     leaves: &[Leaf],
     rows: &[Option<usize>],
     room: Option<usize>,
-) -> Vec<(String, usize)> {
+) -> Vec<(Viewer, usize)> {
     if people.len() < 2 {
         return Vec::new();
     }
     people
         .iter()
-        .zip(letters)
-        .filter_map(|(person, letter)| {
+        .zip(viewers)
+        .filter_map(|(person, viewer)| {
             let alone = plays(source, entries, std::slice::from_ref(person));
             let row = stands(leaves, rows, &alone)?;
-            (Some(row) != room).then(|| (letter.clone(), row))
+            (Some(row) != room).then(|| (viewer.clone(), row))
         })
         .collect()
 }

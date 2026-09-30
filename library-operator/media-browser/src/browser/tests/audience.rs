@@ -253,18 +253,18 @@ fn the_strip_carries_one_letter_for_each_person_in_the_room() {
     browser.tick(0.0);
 
     assert_eq!(
-        browser.strip().expect("the strip draws").letters,
-        ["C".to_string(), "K".to_string()]
+        letters(&browser.strip().expect("the strip draws").viewers),
+        ["C", "K"]
     );
 }
 
 #[test]
-fn the_strip_carries_no_letters_once_the_answer_has_lapsed() {
+fn the_strip_carries_no_circles_once_the_answer_has_lapsed() {
     let (mut browser, _bus) = watching(&["first"], &["first"]);
 
     browser.tick(IDLE_SECONDS + 1.0);
 
-    assert!(browser.strip().expect("the strip draws").letters.is_empty());
+    assert!(browser.strip().expect("the strip draws").viewers.is_empty());
 }
 
 // The walk from the home page up to the strip, which is where the glass
@@ -310,7 +310,7 @@ fn the_strip_carries_one_question_mark_where_nobody_is_watching() {
     let browser = nobody_watching();
 
     let strip = browser.strip().expect("the strip draws");
-    assert_eq!(strip.letters, ["?".to_string()]);
+    assert_eq!(strip.viewers, [crate::audience::Viewer::nobody()]);
     assert!(strip.asking);
 }
 
@@ -321,7 +321,7 @@ fn the_strip_carries_the_letters_of_the_room_and_no_question_mark() {
     browser.tick(0.0);
 
     let strip = browser.strip().expect("the strip draws");
-    assert_eq!(strip.letters, ["C".to_string(), "K".to_string()]);
+    assert_eq!(letters(&strip.viewers), ["C", "K"]);
     assert!(!strip.asking);
 }
 
@@ -333,7 +333,7 @@ fn the_strip_carries_no_question_mark_under_the_picker() {
 
     assert!(browser.picker.is_some());
     let strip = browser.strip().expect("the strip draws");
-    assert!(strip.letters.is_empty());
+    assert!(strip.viewers.is_empty());
     assert!(!strip.asking);
 }
 
@@ -343,7 +343,7 @@ fn the_strip_carries_no_question_mark_where_the_browser_knows_no_people() {
 
     browser.tick(0.0);
 
-    assert!(browser.strip().expect("the strip draws").letters.is_empty());
+    assert!(browser.strip().expect("the strip draws").viewers.is_empty());
 }
 
 #[test]

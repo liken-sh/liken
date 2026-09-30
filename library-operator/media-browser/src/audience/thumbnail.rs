@@ -1,9 +1,9 @@
 // A person's picture as the people file carries it: the `thumbnail` field
 // that people-operator writes into the `Person`'s status, a `data:` URI
 // of a square image. The browser opens the URI when it reads the file and
-// keeps the encoded bytes. The picker decodes them at the size it draws,
-// once per size, because the panel's scale decides that size and the file
-// is read before the window opens.
+// keeps the encoded bytes. `audience::faces` decodes them at each size a
+// screen draws, once per size, because the panel's scale decides that
+// size and the file is read before the window opens.
 
 use std::sync::Arc;
 

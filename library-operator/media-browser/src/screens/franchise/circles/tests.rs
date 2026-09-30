@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::screens::franchise::metro;
+use crate::screens::franchise::tests::viewer;
 use crate::views::area;
 
 const REGION: Rectangle = Rectangle {
@@ -18,28 +19,28 @@ fn the_column_takes_the_widest_stack_and_a_gap_and_nothing_where_no_marker_stand
         (None, Vec::new(), Vec::new(), 0.0),
         (
             Some(1),
-            vec!["C".to_string()],
+            vec![viewer("C")],
             Vec::new(),
             circles_width(1) + GAP,
         ),
         (
             Some(1),
-            vec!["C".to_string(), "K".to_string()],
+            vec![viewer("C"), viewer("K")],
             Vec::new(),
             circles_width(2) + GAP,
         ),
         (
             None,
             Vec::new(),
-            vec![("C".to_string(), 2)],
+            vec![(viewer("C"), 2)],
             circles_width(1) + GAP,
         ),
     ];
-    for (room, letters, solo, expected) in cases {
+    for (room, viewers, solo, expected) in cases {
         let marks = Marks {
             bars: Vec::new(),
             room,
-            letters,
+            viewers,
             solo,
         };
         assert_eq!(width(&marks), expected, "{marks:?}");
@@ -85,8 +86,8 @@ fn marks() -> Marks {
     Marks {
         bars: Vec::new(),
         room: Some(1),
-        letters: vec!["A".into(), "B".into()],
-        solo: vec![("C".into(), 0)],
+        viewers: vec![viewer("A"), viewer("B")],
+        solo: vec![(viewer("C"), 0)],
     }
 }
 
@@ -98,9 +99,12 @@ fn middle(row: usize) -> f32 {
 #[test]
 fn the_rooms_stack_stands_on_its_own_row_and_a_solo_circle_on_theirs() {
     let drawn = drawn(column(), &marks(), &[], &TOPS, 0.0);
-    let letters: Vec<String> = drawn.iter().map(|(letter, _)| letter.clone()).collect();
+    let names: Vec<&str> = drawn
+        .iter()
+        .map(|(viewer, _)| viewer.name.as_str())
+        .collect();
 
-    assert_eq!(letters, ["A", "B", "C"]);
+    assert_eq!(names, ["A", "B", "C"]);
     assert_eq!(drawn[0].1.center_y(), middle(1));
     assert_eq!(drawn[1].1.center_y(), middle(1));
     assert_eq!(drawn[2].1.center_y(), middle(0));

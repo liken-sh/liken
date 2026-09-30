@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
+use crate::audience::Viewer;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
 use crate::harness::Waker;
@@ -61,7 +62,7 @@ impl Reader {
         source: &mut dyn Source,
         today: Date,
         people: Vec<String>,
-        letters: Vec<String>,
+        viewers: Vec<Viewer>,
     ) {
         self.send(
             source,
@@ -69,20 +70,20 @@ impl Reader {
                 what: What::Page,
                 date: today,
                 people,
-                letters,
+                viewers,
             },
         );
     }
 
     /// Ask for the continue-watching row alone, for these people.
-    pub fn ask_row(&mut self, source: &mut dyn Source, people: Vec<String>, letters: Vec<String>) {
+    pub fn ask_row(&mut self, source: &mut dyn Source, people: Vec<String>, viewers: Vec<Viewer>) {
         self.send(
             source,
             Ask {
                 what: What::Row,
                 date: Date::today(),
                 people,
-                letters,
+                viewers,
             },
         );
     }
@@ -156,8 +157,8 @@ struct Ask {
     what: What,
     date: Date,
     people: Vec<String>,
-    // The letters of those people, for the row's heading.
-    letters: Vec<String>,
+    // Those people as the row's heading draws them.
+    viewers: Vec<Viewer>,
 }
 
 // The thread over the second source: the asks it reads on, the pages
@@ -201,11 +202,11 @@ fn read(source: &mut dyn Source, ask: &Ask, timed: &AtomicBool) -> Landed {
     let started = Instant::now();
     let (landed, what) = match ask.what {
         What::Page => (
-            Landed::Page(home::read(source, ask.date, &ask.people, &ask.letters)),
+            Landed::Page(home::read(source, ask.date, &ask.people, &ask.viewers)),
             "home page",
         ),
         What::Row => (
-            Landed::Row(home::read_row(source, &ask.people, &ask.letters)),
+            Landed::Row(home::read_row(source, &ask.people, &ask.viewers)),
             "continue-watching row",
         ),
     };

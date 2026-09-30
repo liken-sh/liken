@@ -208,19 +208,27 @@ fn named(known: &[(&str, &str)]) -> Audience {
 }
 
 #[test]
-fn the_room_carries_the_first_letter_of_each_display_name() {
+fn the_room_carries_each_name_and_the_first_letter_of_each_display_name() {
     let mut audience = named(&[("first", "Coral"), ("second", "Kestrel")]);
     audience.answer(vec!["first".into(), "second".into()], 0.0);
 
-    assert_eq!(audience.letters(0.0), ["C".to_string(), "K".to_string()]);
+    let viewers = audience.viewers(0.0);
+    let letters: Vec<&str> = viewers
+        .iter()
+        .map(|viewer| viewer.letter.as_str())
+        .collect();
+    let names: Vec<&str> = viewers.iter().map(|viewer| viewer.name.as_str()).collect();
+
+    assert_eq!(letters, ["C", "K"]);
+    assert_eq!(names, ["first", "second"]);
 }
 
 #[test]
-fn a_lapsed_answer_carries_no_letters() {
+fn a_lapsed_answer_carries_no_viewers() {
     let mut audience = named(&[("first", "Coral")]);
     audience.answer(vec!["first".into()], 0.0);
 
-    assert!(audience.letters(IDLE_SECONDS + 1.0).is_empty());
+    assert!(audience.viewers(IDLE_SECONDS + 1.0).is_empty());
 }
 
 #[test]

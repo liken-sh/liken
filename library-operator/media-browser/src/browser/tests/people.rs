@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use super::*;
 use crate::audience::Person;
+use crate::audience::faces::Face;
 use crate::audience::thumbnail::solid;
 use crate::audience::watch::mount::{mounted, swap};
-use crate::screens::audience::{Face, Focus};
+use crate::screens::audience::Focus;
 
 // A person whose display name is their name in capitals, with this
 // picture or none.
@@ -200,8 +201,8 @@ fn a_renamed_person_in_the_room_draws_their_new_letter_everywhere() {
     browser.pump(1.0);
 
     let strip = browser.strip().expect("the strip draws");
-    assert_eq!(strip.letters, ["Z".to_string()]);
-    assert_eq!(super::resume::row(&browser).letters, ["Z"]);
+    assert_eq!(letters(&strip.viewers), ["Z"]);
+    assert_eq!(letters(&super::resume::row(&browser).viewers), ["Z"]);
     let held = bus
         .published
         .lock()

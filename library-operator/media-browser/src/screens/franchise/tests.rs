@@ -10,6 +10,15 @@ use crate::catalog::{
 };
 use crate::harness::Waker;
 
+/// A person in the room whose `Person` name is their letter, as the
+/// progress reads and the circles of a page carry them.
+pub fn viewer(name: &str) -> crate::audience::Viewer {
+    crate::audience::Viewer {
+        name: name.to_string(),
+        letter: name.to_string(),
+    }
+}
+
 /// The `Library` of kind franchises the fake holds.
 pub const ORDERS: &str = "screening/orders";
 

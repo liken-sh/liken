@@ -262,10 +262,11 @@ fn a_picker_on_the_link_stays_on_the_link_over_a_new_list() {
     assert_eq!(relisted.focus(), Focus::Link);
 }
 
-// A person named First, with this picture or none.
-fn first(thumbnail: Option<crate::audience::Thumbnail>) -> Person {
+// A person with this `Person` name, the display name First, and this
+// picture or none.
+fn first(name: &str, thumbnail: Option<crate::audience::Thumbnail>) -> Person {
     Person {
-        name: "first".into(),
+        name: name.into(),
         display_name: "First".into(),
         thumbnail,
     }
@@ -273,12 +274,12 @@ fn first(thumbnail: Option<crate::audience::Thumbnail>) -> Person {
 
 #[test]
 fn a_tile_carries_the_display_name_of_its_person() {
-    let people = vec![first(None)];
+    let people = vec![first("first", None)];
     let picker = Picker::open(1, &[]);
     let unit = identity::Unit::default();
     let layer = Layer {
         people: &people,
-        faces: &faces::Faces::default(),
+        faces: &Faces::default(),
         picker: &picker,
         unit: &unit,
     };
@@ -291,14 +292,18 @@ fn a_tile_carries_the_display_name_of_its_person() {
 #[test]
 fn a_tile_draws_the_face_of_a_person_with_a_picture_and_the_letter_without() {
     let people = vec![
-        first(Some(crate::audience::thumbnail::solid(32, [200, 40, 40]))),
-        first(None),
-        first(crate::audience::Thumbnail::from_uri(
-            "data:image/jpeg;base64,aGVsbG8=",
-        )),
+        first(
+            "pictured",
+            Some(crate::audience::thumbnail::solid(32, [200, 40, 40])),
+        ),
+        first("bare", None),
+        first(
+            "broken",
+            crate::audience::Thumbnail::from_uri("data:image/jpeg;base64,aGVsbG8="),
+        ),
     ];
-    let mut faces = faces::Faces::default();
-    faces.refresh(&people, 1.0);
+    let mut faces = Faces::default();
+    faces.refresh(&people, &[FACE], 1.0);
     let picker = Picker::open(3, &[]);
     let unit = identity::Unit::default();
     let layer = Layer {

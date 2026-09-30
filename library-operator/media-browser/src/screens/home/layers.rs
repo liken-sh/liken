@@ -12,6 +12,7 @@ use iced_winit::core::{Rectangle, Theme, mouse};
 
 use super::{Block, Home, Last};
 use crate::art::Art;
+use crate::audience::faces::Faces;
 use crate::views::{self, band, strip};
 
 // The under layer: the banner's backdrop and its scrim, clipped under
@@ -58,6 +59,8 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, A> {
 pub(super) struct Program<'a, A> {
     pub(super) home: &'a Home,
     pub(super) store: &'a RefCell<A>,
+    // The faces the continue-watching row's heading draws.
+    pub(super) faces: &'a Faces,
     // Whether the page holds focus, or the browser's strip over it does.
     pub(super) held: bool,
 }
@@ -114,8 +117,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
                         store,
                         &strip::Strip {
                             headed: false,
-                            letters: &strip.letters,
-                            circled: focused && strip.rung,
+                            room: Some(strip::Room {
+                                viewers: &strip.viewers,
+                                faces: self.faces,
+                                circled: focused && strip.rung,
+                            }),
                             members: &strip.items,
                             current: None,
                             focus: (focused && !strip.rung).then_some(strip.focus),

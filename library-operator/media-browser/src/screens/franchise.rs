@@ -30,6 +30,7 @@ use iced_winit::core::{Element, Length, Theme};
 
 use super::{InFranchise, Screen, Step, movie, series};
 use crate::art::Art;
+use crate::audience::faces::Faces;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
 use crate::catalog::franchise::Entry;
@@ -210,11 +211,13 @@ impl Franchise {
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
+        faces: &'a Faces,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let wall = canvas(page::Page {
             franchise: self,
             store,
+            faces,
             held,
         })
         .width(Length::Fill)

@@ -186,8 +186,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 &mut frame,
                 store,
                 &strip::Strip {
-                    letters: &[],
-                    circled: false,
+                    room: None,
                     members: &set.members,
                     current: Some(set.current),
                     kept: None,
@@ -221,8 +220,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 &mut frame,
                 store,
                 &strip::Strip {
-                    letters: &[],
-                    circled: false,
+                    room: None,
                     members: &band.members,
                     current: band.current,
                     kept: None,
