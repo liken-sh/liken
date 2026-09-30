@@ -6,10 +6,10 @@ package main
 // not. The Peripheral watch follows the radio the pass reports.
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"k8s.io/client-go/tools/cache"
@@ -136,10 +136,8 @@ func editServers(t *testing.T, adapters, peripherals *watchServer) http.Handler 
 // runEditWatch runs the edit watcher until the test ends.
 func runEditWatch(t *testing.T, handler http.Handler) *editWatch {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	watch := watchEdits(ctx, testWatcher(t, handler), "node-1")
+	watch := watchEdits(t.Context(), testWatcher(t, handler), "node-1")
 	t.Cleanup(func() {
-		cancel()
 		for range watch.wakes() {
 		}
 	})
@@ -152,35 +150,38 @@ func peripheralEvent(t *testing.T, version string, peripheral Peripheral) string
 	return fmt.Sprintf(`{"type":"MODIFIED","object":%s}`, encode(t, peripheral))
 }
 
-// quiet is how long a test waits to see that no wake comes.
-const quiet = 300 * time.Millisecond
-
 // The operator's own status write reaches the watch as an event, and
 // must not wake the loop, or every pass that writes a battery level
 // would run a second pass. A person's edit to the spec wakes it. The
 // server holds each event back until the test has read the wakes
 // before it.
 func TestAPeripheralEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
-	adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
-	peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[" + encode(t, peripheralAt(1, false)) + "]"}, []string{
-		pause, peripheralEvent(t, "2", peripheralAt(1, false)),
-		pause, peripheralEvent(t, "3", peripheralAt(2, false)),
-		holdOpen,
-	})
-	watch := runEditWatch(t, editServers(t, adapters, peripherals))
-	watch.follow(testAdapterName)
-	adapters.awaitWatches(t, 1)
-	peripherals.awaitWatches(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
+		peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[" + encode(t, peripheralAt(1, false)) + "]"}, []string{
+			pause, peripheralEvent(t, "2", peripheralAt(1, false)),
+			pause, peripheralEvent(t, "3", peripheralAt(2, false)),
+			holdOpen,
+		})
+		watch := runEditWatch(t, editServers(t, adapters, peripherals))
+		watch.follow(testAdapterName)
+		synctest.Wait()
 
-	// Each watch wakes the loop when it starts.
-	awaitWake(t, watch.wakes(), time.Second)
-	settleWakes(watch.wakes(), quiet)
-	peripherals.release()
-	if wokeWithin(watch.wakes(), 2*quiet) {
-		t.Fatal("the status write woke the loop")
-	}
-	peripherals.release()
-	awaitWake(t, watch.wakes(), 3*time.Second)
+		// Each watch wakes the loop when it starts.
+		if adapters.opened() != 1 || peripherals.opened() != 1 || !woke(watch.wakes()) {
+			t.Fatal("the watches did not start and wake the loop")
+		}
+		peripherals.release()
+		synctest.Wait()
+		if woke(watch.wakes()) {
+			t.Fatal("the status write woke the loop")
+		}
+		peripherals.release()
+		synctest.Wait()
+		if !woke(watch.wakes()) {
+			t.Fatal("the spec edit did not wake the loop")
+		}
+	})
 }
 
 // Each watch wakes the loop once when its first read is done, even
@@ -188,16 +189,21 @@ func TestAPeripheralEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 // objects before the watch does, and an edit made between the two
 // reads is in the watch's read and in no event.
 func TestAWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
-	adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
-	peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[]"})
-	watch := runEditWatch(t, editServers(t, adapters, peripherals))
-	adapters.awaitWatches(t, 1)
-	awaitWake(t, watch.wakes(), time.Second)
-	settleWakes(watch.wakes(), quiet)
+	synctest.Test(t, func(t *testing.T) {
+		adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
+		peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[]"})
+		watch := runEditWatch(t, editServers(t, adapters, peripherals))
+		synctest.Wait()
+		if adapters.opened() != 1 || !woke(watch.wakes()) {
+			t.Fatal("the Adapter watch did not wake the loop when its first read was done")
+		}
 
-	watch.follow(testAdapterName)
-	peripherals.awaitWatches(t, 1)
-	awaitWake(t, watch.wakes(), time.Second)
+		watch.follow(testAdapterName)
+		synctest.Wait()
+		if peripherals.opened() != 1 || !woke(watch.wakes()) {
+			t.Fatal("the Peripheral watch did not wake the loop when its first read was done")
+		}
+	})
 }
 
 // A watch that closes at once makes the reflector read the collection
@@ -215,18 +221,27 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
-			reads := []string{"[" + encode(t, peripheralAt(1, false)) + "]", "[" + encode(t, c.after) + "]"}
-			peripherals := newWatchServer(peripheralsPath(), "PeripheralList", reads, []string{}, []string{holdOpen})
-			watch := runEditWatch(t, editServers(t, adapters, peripherals))
-			watch.follow(testAdapterName)
-			peripherals.awaitWatches(t, 1)
-			settleWakes(watch.wakes(), quiet)
+			synctest.Test(t, func(t *testing.T) {
+				adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
+				reads := []string{"[" + encode(t, peripheralAt(1, false)) + "]", "[" + encode(t, c.after) + "]"}
+				peripherals := newWatchServer(peripheralsPath(), "PeripheralList", reads, []string{}, []string{holdOpen})
+				watch := runEditWatch(t, editServers(t, adapters, peripherals))
+				watch.follow(testAdapterName)
+				synctest.Wait()
+				if peripherals.opened() != 1 || !woke(watch.wakes()) {
+					t.Fatal("the first Peripheral watch did not start and wake the loop")
+				}
 
-			peripherals.awaitWatches(t, 1)
-			if got := wokeWithin(watch.wakes(), quiet); got != c.want {
-				t.Fatalf("the change woke the loop: %t, want %t", got, c.want)
-			}
+				// The reflector's backoff is less than a minute.
+				time.Sleep(time.Minute)
+				synctest.Wait()
+				if peripherals.opened() != 2 {
+					t.Fatalf("the watcher opened %d Peripheral watches, want 2", peripherals.opened())
+				}
+				if got := woke(watch.wakes()); got != c.want {
+					t.Fatalf("the change woke the loop: %t, want %t", got, c.want)
+				}
+			})
 		})
 	}
 }
@@ -236,30 +251,23 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 // the old one and opens a watch that selects the new radio's
 // Peripherals.
 func TestThePeripheralWatchFollowsTheRadio(t *testing.T) {
-	adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
-	peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[]"})
-	watch := runEditWatch(t, editServers(t, adapters, peripherals))
-	const other = "00-1a-7d-da-71-13"
+	synctest.Test(t, func(t *testing.T) {
+		adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
+		peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[]"})
+		watch := runEditWatch(t, editServers(t, adapters, peripherals))
+		const other = "00-1a-7d-da-71-13"
 
-	watch.follow(testAdapterName)
-	peripherals.awaitWatches(t, 1)
-	watch.follow(testAdapterName)
-	watch.follow(other)
-	peripherals.awaitWatches(t, 1)
+		watch.follow(testAdapterName)
+		synctest.Wait()
+		watch.follow(testAdapterName)
+		watch.follow(other)
+		synctest.Wait()
 
-	want := fmt.Sprint([]string{adapterSelector(testAdapterName), adapterSelector(other)})
-	deadline := time.After(5 * time.Second)
-	for {
-		holding, selectors := peripherals.held()
-		if holding == 1 && fmt.Sprint(selectors) == want {
-			return
-		}
-		select {
-		case <-deadline:
+		want := fmt.Sprint([]string{adapterSelector(testAdapterName), adapterSelector(other)})
+		if holding, selectors := peripherals.held(); holding != 1 || fmt.Sprint(selectors) != want {
 			t.Fatalf("the server holds %d watches, and the requests selected %v; want 1 and %s", holding, selectors, want)
-		case <-time.After(10 * time.Millisecond):
 		}
-	}
+	})
 }
 
 // The pass reports the address of the radio it read, so the edit
@@ -281,27 +289,25 @@ func TestAPassReportsTheRadioItHolds(t *testing.T) {
 // watches. The Peripheral store answers only for the radio the watch
 // follows.
 func TestTheEditWatchesFillTheStoresThePassReads(t *testing.T) {
-	adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[" + encode(t, adapterOn(testAdapterName, "node-1", 1)) + "]"})
-	peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[" + encode(t, peripheralAt(1, false)) + "]"})
-	watch := runEditWatch(t, editServers(t, adapters, peripherals))
-	watch.follow(testAdapterName)
-	stores := watch.cache(informer.View{})
+	synctest.Test(t, func(t *testing.T) {
+		adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[" + encode(t, adapterOn(testAdapterName, "node-1", 1)) + "]"})
+		peripherals := newWatchServer(peripheralsPath(), "PeripheralList", []string{"[" + encode(t, peripheralAt(1, false)) + "]"})
+		watch := runEditWatch(t, editServers(t, adapters, peripherals))
+		watch.follow(testAdapterName)
+		stores := watch.cache(informer.View{})
+		synctest.Wait()
 
-	deadline := time.After(5 * time.Second)
-	for !stores.adapters.View.Ready() || !stores.peripherals.of(testAdapterName).Ready() {
-		select {
-		case <-deadline:
-			t.Fatal("the stores never held their first reads")
-		case <-time.After(10 * time.Millisecond):
+		if !stores.adapters.View.Ready() || !stores.peripherals.of(testAdapterName).Ready() {
+			t.Fatal("the stores do not hold their first reads")
 		}
-	}
-	if held := informer.CachedList[Adapter](stores.adapters.View); len(held) != 1 || held[0].Metadata.Name != testAdapterName {
-		t.Errorf("the Adapter store holds %+v", held)
-	}
-	if held := informer.CachedList[Peripheral](stores.peripherals.of(testAdapterName)); len(held) != 1 {
-		t.Errorf("the Peripheral store holds %+v", held)
-	}
-	if stores.peripherals.of("00-1a-7d-da-71-13").Ready() {
-		t.Error("the Peripheral store answered for a radio the watch does not follow")
-	}
+		if held := informer.CachedList[Adapter](stores.adapters.View); len(held) != 1 || held[0].Metadata.Name != testAdapterName {
+			t.Errorf("the Adapter store holds %+v", held)
+		}
+		if held := informer.CachedList[Peripheral](stores.peripherals.of(testAdapterName)); len(held) != 1 {
+			t.Errorf("the Peripheral store holds %+v", held)
+		}
+		if stores.peripherals.of("00-1a-7d-da-71-13").Ready() {
+			t.Error("the Peripheral store answered for a radio the watch does not follow")
+		}
+	})
 }

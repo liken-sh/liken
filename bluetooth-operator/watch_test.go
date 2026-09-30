@@ -5,21 +5,26 @@ package main
 // loop is upstream's to test, and the shared informer package tests
 // the copy it keeps. What the tests of this operator prove is that each
 // change the API server sends reaches this operator's handlers.
+//
+// The server answers over the in-memory connections of apiservertest,
+// so each test that runs a watch runs in a synctest bubble.
+// synctest.Wait returns once the reflector and the handlers have done
+// all they can do at the present moment, and a time.Sleep waits out a
+// backoff or a TTL on the fake clock.
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // holdOpen, as the last line of a script, keeps the stream open until
@@ -52,7 +57,6 @@ type watchServer struct {
 	watches   int
 	selectors []string
 	holding   int
-	opened    chan struct{}
 	released  chan struct{}
 }
 
@@ -62,7 +66,6 @@ func newWatchServer(collection, listKind string, reads []string, scripts ...[]st
 		listKind:   listKind,
 		reads:      reads,
 		scripts:    scripts,
-		opened:     make(chan struct{}, len(scripts)+8),
 		released:   make(chan struct{}, 1),
 	}
 }
@@ -118,7 +121,6 @@ func (s *watchServer) handler(t testing.TB) http.Handler {
 			fmt.Fprintln(w, initialEventsEnd(strings.TrimSuffix(s.listKind, "List"), version))
 		}
 		w.(http.Flusher).Flush()
-		s.opened <- struct{}{}
 
 		script := []string{holdOpen}
 		if connection < len(s.scripts) {
@@ -170,25 +172,18 @@ func (s *watchServer) held() (int, []string) {
 	return s.holding, append([]string{}, s.selectors...)
 }
 
-// awaitWatches waits until the watcher has opened count more watch
-// connections.
-func (s *watchServer) awaitWatches(t *testing.T, count int) {
-	t.Helper()
-	for range count {
-		select {
-		case <-s.opened:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("the watcher opened fewer than %d watches", count)
-		}
-	}
+// opened answers how many watch connections the watcher has opened.
+func (s *watchServer) opened() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.watches
 }
 
-// testWatcher points a dynamic client at a test server.
+// testWatcher serves a handler over in-memory connections, and points a
+// dynamic client at it.
 func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	client, err := dynamic.NewForConfig(apiservertest.Start(t, handler).Config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,34 +209,14 @@ func encode(t *testing.T, item any) string {
 	return string(encoded)
 }
 
-func awaitWake(t *testing.T, wakes <-chan struct{}, within time.Duration) {
-	t.Helper()
-	select {
-	case <-wakes:
-	case <-time.After(within):
-		t.Fatalf("the loop had no wake within %s", within)
-	}
-}
-
-// settleWakes reads wakes until none arrives for quiet. A watch wakes
-// the loop at its start, and the test reads those wakes before the
-// events it scripts.
-func settleWakes(wakes <-chan struct{}, quiet time.Duration) {
-	for {
-		select {
-		case <-wakes:
-		case <-time.After(quiet):
-			return
-		}
-	}
-}
-
-// wokeWithin answers whether a wake arrives within the given time.
-func wokeWithin(wakes <-chan struct{}, within time.Duration) bool {
+// woke answers whether the loop has a wake waiting, and takes it. A
+// test calls it after synctest.Wait, when every wake that the present
+// moment gives has arrived.
+func woke(wakes <-chan struct{}) bool {
 	select {
 	case <-wakes:
 		return true
-	case <-time.After(within):
+	default:
 		return false
 	}
 }

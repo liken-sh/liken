@@ -141,16 +141,16 @@ func parseDeviceInfo(buffer []byte) deviceInfo {
 // The wait is bounded, and running out is a failure the caller
 // reports. An adapter that never reports an address is a pod that must
 // not start bluetoothd, and the kubelet's restart is the retry.
-func waitForAdapter(read adapterReader, timeout, poll time.Duration) (deviceInfo, error) {
-	deadline := time.Now().Add(timeout)
+func waitForAdapter(read adapterReader) (deviceInfo, error) {
+	deadline := time.Now().Add(adapterTimeout)
 	for {
 		if adapter, ok := readyAdapter(read); ok {
 			return adapter, nil
 		}
 		if !time.Now().Before(deadline) {
-			return deviceInfo{}, fmt.Errorf("no Bluetooth adapter reported an address within %s", timeout)
+			return deviceInfo{}, fmt.Errorf("no Bluetooth adapter reported an address within %s", adapterTimeout)
 		}
-		time.Sleep(poll)
+		time.Sleep(adapterPoll)
 	}
 }
 

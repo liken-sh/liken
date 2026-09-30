@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -86,37 +87,52 @@ func notReady(index uint16, name string) deviceInfo {
 // read the address out of the controller, so the first answers report
 // the all-zero address. For a USB dongle that lasts about a second.
 func TestWaitForAdapterWaitsForARealAddress(t *testing.T) {
-	read, calls := answers(map[uint16][]deviceInfo{
-		0: {notReady(0, "hci0"), notReady(0, "hci0"), ready(0, "hci0")},
-	})
+	synctest.Test(t, func(t *testing.T) {
+		read, _ := answers(map[uint16][]deviceInfo{
+			0: {notReady(0, "hci0"), notReady(0, "hci0"), ready(0, "hci0")},
+		})
+		start := time.Now()
 
-	adapter, err := waitForAdapter(read, time.Second, time.Millisecond)
-	if err != nil {
-		t.Fatalf("waitForAdapter: %v", err)
-	}
-	if got := adapter.Address.String(); got != "04:4A:69:66:92:27" {
-		t.Fatalf("address = %q", got)
-	}
-	if *calls < 3 {
-		t.Errorf("the wait made %d reads, so it did not retry", *calls)
-	}
+		adapter, err := waitForAdapter(read)
+		if err != nil {
+			t.Fatalf("waitForAdapter: %v", err)
+		}
+		if got := adapter.Address.String(); got != "04:4A:69:66:92:27" {
+			t.Fatalf("address = %q", got)
+		}
+		// The third read is the first with an address, and it comes
+		// two polls after the first.
+		if waited := time.Since(start); waited != 2*adapterPoll {
+			t.Errorf("the wait took %s, want %s", waited, 2*adapterPoll)
+		}
+	})
 }
 
 // An adapter that never reports an address blocks the pod. bluetoothd
-// must not start with a tree this program could not fill.
-func TestWaitForAdapterGivesUpWhenNoAddressArrives(t *testing.T) {
-	read, _ := answers(map[uint16][]deviceInfo{0: {notReady(0, "hci0")}})
-
-	if _, err := waitForAdapter(read, 20*time.Millisecond, time.Millisecond); err == nil {
-		t.Fatal("waitForAdapter accepted an adapter with no address")
+// must not start with a tree this program could not fill. The wait
+// gives up at its timeout.
+func TestWaitForAdapterGivesUp(t *testing.T) {
+	cases := []struct {
+		name    string
+		answers map[uint16][]deviceInfo
+	}{
+		{name: "no address arrives", answers: map[uint16][]deviceInfo{0: {notReady(0, "hci0")}}},
+		{name: "no adapter at all", answers: map[uint16][]deviceInfo{}},
 	}
-}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				read, _ := answers(c.answers)
+				start := time.Now()
 
-func TestWaitForAdapterReportsNoAdapterAtAll(t *testing.T) {
-	read, _ := answers(map[uint16][]deviceInfo{})
-
-	if _, err := waitForAdapter(read, 20*time.Millisecond, time.Millisecond); err == nil {
-		t.Fatal("waitForAdapter answered with an adapter that is not there")
+				if _, err := waitForAdapter(read); err == nil {
+					t.Fatal("waitForAdapter answered with an adapter that has no address")
+				}
+				if waited := time.Since(start); waited != adapterTimeout {
+					t.Errorf("the wait gave up after %s, want %s", waited, adapterTimeout)
+				}
+			})
+		})
 	}
 }
 
@@ -127,7 +143,7 @@ func TestWaitForAdapterReportsNoAdapterAtAll(t *testing.T) {
 func TestWaitForAdapterSkipsIndexesWithNoAdapter(t *testing.T) {
 	read, _ := answers(map[uint16][]deviceInfo{3: {ready(3, "hci3")}})
 
-	adapter, err := waitForAdapter(read, time.Second, time.Millisecond)
+	adapter, err := waitForAdapter(read)
 	if err != nil {
 		t.Fatalf("waitForAdapter: %v", err)
 	}
@@ -144,7 +160,7 @@ func TestWaitForAdapterTakesTheLowestReadyIndex(t *testing.T) {
 		2: {ready(2, "hci2")},
 	})
 
-	adapter, err := waitForAdapter(read, time.Second, time.Millisecond)
+	adapter, err := waitForAdapter(read)
 	if err != nil {
 		t.Fatalf("waitForAdapter: %v", err)
 	}

@@ -8,9 +8,8 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"k8s.io/client-go/tools/cache"
 
@@ -129,34 +128,27 @@ func TestABondTheStoreHasNotDeliveredIsComparedNotCreated(t *testing.T) {
 // in the pod's namespace, and its store answers each Secret with the
 // bytes of its bond.
 func TestTheSecretWatchHoldsTheRadiosBonds(t *testing.T) {
-	secrets := storedBondAt(t, oneBond, "7")
-	var encoded string
-	for _, secret := range secrets {
-		secret.APIVersion, secret.Kind = "v1", "Secret"
-		encoded = encode(t, secret)
-	}
-	server := newWatchServer(testSecretsPath, "SecretList", []string{"[" + encoded + "]"})
-	watcher := testWatcher(t, server.handler(t))
-	// The watch ends before the server closes, because the server waits
-	// for the stream the watch holds open.
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	view := watchBondSecrets(ctx, watcher, "liken-system", testAdapterAddress(t))
-
-	deadline := time.After(5 * time.Second)
-	for !view.Ready() {
-		select {
-		case <-deadline:
-			t.Fatal("the Secret watch never finished its first read")
-		case <-time.After(10 * time.Millisecond):
+	synctest.Test(t, func(t *testing.T) {
+		secrets := storedBondAt(t, oneBond, "7")
+		var encoded string
+		for _, secret := range secrets {
+			secret.APIVersion, secret.Kind = "v1", "Secret"
+			encoded = encode(t, secret)
 		}
-	}
-	held, ok := informer.Cached[bonds.Secret](view, "liken-system/bluetooth-bond-a0-ab-51-33-b7-12")
-	if !ok || !held.Tree()[testAddress(t, testDevice)].Equal(oneBond) {
-		t.Fatalf("the store answered %+v, %t; want the bond", held, ok)
-	}
-	if _, selectors := server.held(); len(selectors) == 0 || selectors[0] != adapterSelector("14-b4-57-91-2f-c8") {
-		t.Errorf("the watch selected %v, want %s", selectors, adapterSelector("14-b4-57-91-2f-c8"))
-	}
+		server := newWatchServer(testSecretsPath, "SecretList", []string{"[" + encoded + "]"})
+
+		view := watchBondSecrets(t.Context(), testWatcher(t, server.handler(t)), "liken-system", testAdapterAddress(t))
+		synctest.Wait()
+
+		if !view.Ready() {
+			t.Fatal("the Secret watch did not finish its first read")
+		}
+		held, ok := informer.Cached[bonds.Secret](view, "liken-system/bluetooth-bond-a0-ab-51-33-b7-12")
+		if !ok || !held.Tree()[testAddress(t, testDevice)].Equal(oneBond) {
+			t.Fatalf("the store answered %+v, %t; want the bond", held, ok)
+		}
+		if _, selectors := server.held(); len(selectors) == 0 || selectors[0] != adapterSelector("14-b4-57-91-2f-c8") {
+			t.Errorf("the watch selected %v, want %s", selectors, adapterSelector("14-b4-57-91-2f-c8"))
+		}
+	})
 }

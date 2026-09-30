@@ -89,7 +89,7 @@ func run() error {
 	}
 	defer socket.Close()
 
-	adapter, err := waitForAdapter(socket.deviceInfo, adapterTimeout, adapterPoll)
+	adapter, err := waitForAdapter(socket.deviceInfo)
 	if err != nil {
 		return err
 	}

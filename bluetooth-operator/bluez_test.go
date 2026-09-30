@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -253,132 +254,124 @@ func nameOwnerChanged(name, owner string) *dbus.Signal {
 	}
 }
 
+// ready answers whether a channel has a value or has closed, and takes
+// the value. A test calls it after synctest.Wait, when the goroutine
+// under test has done all it can.
+func ready[T any](from <-chan T) (open, got bool) {
+	select {
+	case _, open := <-from:
+		return open, true
+	default:
+		return false, false
+	}
+}
+
 func TestRelayBlueZSignalsWakesOnASignal(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		signals := make(chan *dbus.Signal, 4)
+		released := make(chan struct{})
+		changed := relayBlueZSignals(t.Context(), signals, func() { close(released) })
 
-	signals := make(chan *dbus.Signal, 4)
-	released := make(chan struct{})
-	changed := relayBlueZSignals(ctx, signals, func() { close(released) })
-
-	signals <- &dbus.Signal{Name: "org.freedesktop.DBus.Properties.PropertiesChanged"}
-	select {
-	case <-changed:
-	case <-time.After(time.Second):
-		t.Fatal("a signal produced no wake")
-	}
-
-	// A closed signal channel is godbus reporting that the connection
-	// to the bus is gone. The relay closes its own channel, and the
-	// main loop reads that as the lost bus.
-	close(signals)
-	select {
-	case _, ok := <-changed:
-		if ok {
-			t.Fatal("the relay emitted after its source closed")
+		signals <- &dbus.Signal{Name: "org.freedesktop.DBus.Properties.PropertiesChanged"}
+		synctest.Wait()
+		if open, got := ready(changed); !open || !got {
+			t.Fatal("a signal produced no wake")
 		}
-	case <-time.After(time.Second):
-		t.Fatal("the relay did not close its channel")
-	}
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("the relay never released its signal channel")
-	}
+
+		// A closed signal channel is godbus reporting that the
+		// connection to the bus is gone. The relay closes its own
+		// channel, and the main loop reads that as the lost bus.
+		close(signals)
+		synctest.Wait()
+		if open, got := ready(changed); open || !got {
+			t.Fatal("the relay did not close its channel when its source closed")
+		}
+		if _, got := ready(released); !got {
+			t.Fatal("the relay never released its signal channel")
+		}
+	})
 }
 
 func TestRelayBlueZSignalsStopsWithItsContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	signals := make(chan *dbus.Signal, 1)
-	released := make(chan struct{})
-	changed := relayBlueZSignals(ctx, signals, func() { close(released) })
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		signals := make(chan *dbus.Signal, 1)
+		released := make(chan struct{})
+		changed := relayBlueZSignals(ctx, signals, func() { close(released) })
 
-	cancel()
-	select {
-	case _, ok := <-changed:
-		if ok {
-			t.Fatal("the relay emitted after its context ended")
+		cancel()
+		synctest.Wait()
+		if open, got := ready(changed); open || !got {
+			t.Fatal("the relay did not close its channel when its context ended")
 		}
-	case <-time.After(time.Second):
-		t.Fatal("the relay did not close its channel")
-	}
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("the relay never released its signal channel")
-	}
+		if _, got := ready(released); !got {
+			t.Fatal("the relay never released its signal channel")
+		}
+	})
 }
 
 func TestWatchNameLossReportsADeadConnection(t *testing.T) {
-	// godbus closes every registered signal channel when the
-	// connection to the bus is lost. bluetoothd is then unreachable
-	// whether or not it is still running, so this counts as the daemon
-	// leaving. Without it the operator would exit zero and look like a
-	// clean shutdown.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		// godbus closes every registered signal channel when the
+		// connection to the bus is lost. bluetoothd is then unreachable
+		// whether or not it is still running, so this counts as the
+		// daemon leaving. Without it the operator would exit zero and
+		// look like a clean shutdown.
+		names := make(chan *dbus.Signal, 1)
+		released := make(chan struct{})
+		gone := watchNameLoss(t.Context(), names, func() { close(released) })
 
-	names := make(chan *dbus.Signal, 1)
-	released := make(chan struct{})
-	gone := watchNameLoss(ctx, names, func() { close(released) })
-
-	close(names)
-	select {
-	case <-gone:
-	case <-time.After(time.Second):
-		t.Fatal("a closed signal channel did not report the daemon gone")
-	}
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("the watcher never released its signal channel")
-	}
+		close(names)
+		synctest.Wait()
+		if _, got := ready(gone); !got {
+			t.Fatal("a closed signal channel did not report the daemon gone")
+		}
+		if _, got := ready(released); !got {
+			t.Fatal("the watcher never released its signal channel")
+		}
+	})
 }
 
 func TestWatchNameLossReportsTheNameLosingItsOwner(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		names := make(chan *dbus.Signal, 4)
+		gone := watchNameLoss(t.Context(), names, func() {})
 
-	names := make(chan *dbus.Signal, 4)
-	gone := watchNameLoss(ctx, names, func() {})
+		// Neither of these is bluetoothd going away.
+		names <- nameOwnerChanged("org.freedesktop.systemd1", "")
+		names <- nameOwnerChanged(bluezService, ":1.9")
+		names <- &dbus.Signal{Name: "org.bluez.Adapter1.PropertiesChanged"}
+		synctest.Wait()
+		if _, got := ready(gone); got {
+			t.Fatal("an unrelated signal reported the daemon gone")
+		}
 
-	// Neither of these is bluetoothd going away.
-	names <- nameOwnerChanged("org.freedesktop.systemd1", "")
-	names <- nameOwnerChanged(bluezService, ":1.9")
-	names <- &dbus.Signal{Name: "org.bluez.Adapter1.PropertiesChanged"}
-	select {
-	case <-gone:
-		t.Fatal("an unrelated signal reported the daemon gone")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	names <- nameOwnerChanged(bluezService, "")
-	select {
-	case <-gone:
-	case <-time.After(time.Second):
-		t.Fatal("bluetoothd losing its name did not report it gone")
-	}
+		names <- nameOwnerChanged(bluezService, "")
+		synctest.Wait()
+		if _, got := ready(gone); !got {
+			t.Fatal("bluetoothd losing its name did not report it gone")
+		}
+	})
 }
 
 func TestWatchNameLossStaysQuietOnShutdown(t *testing.T) {
-	// A shutdown must not read as the daemon dying. The channel stays
-	// open and empty, so the loop's own ctx.Done branch wins.
-	ctx, cancel := context.WithCancel(context.Background())
-	names := make(chan *dbus.Signal, 1)
-	released := make(chan struct{})
-	gone := watchNameLoss(ctx, names, func() { close(released) })
+	synctest.Test(t, func(t *testing.T) {
+		// A shutdown must not read as the daemon dying. The channel
+		// stays open and empty, so the loop's own ctx.Done branch wins.
+		ctx, cancel := context.WithCancel(t.Context())
+		names := make(chan *dbus.Signal, 1)
+		released := make(chan struct{})
+		gone := watchNameLoss(ctx, names, func() { close(released) })
 
-	cancel()
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("the watcher never released its signal channel")
-	}
-	select {
-	case <-gone:
-		t.Fatal("the shutdown reported the daemon gone")
-	case <-time.After(50 * time.Millisecond):
-	}
+		cancel()
+		synctest.Wait()
+		if _, got := ready(released); !got {
+			t.Fatal("the watcher never released its signal channel")
+		}
+		if _, got := ready(gone); got {
+			t.Fatal("the shutdown reported the daemon gone")
+		}
+	})
 }
 
 // An address with no bus behind it is the state the operator finds

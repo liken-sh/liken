@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -80,34 +81,61 @@ func TestWriteInputConfRejectsAnythingElse(t *testing.T) {
 	}
 }
 
+// dbus-daemon binds the socket a moment after it starts, and the wait
+// returns at the first poll that finds it.
 func TestWaitForSocketReturnsOnceTheSocketIsBound(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "system_bus_socket")
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("listening: %v", err)
-	}
-	t.Cleanup(func() { listener.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "system_bus_socket")
+		go func() {
+			time.Sleep(10*busPoll - busPoll/2)
+			listener, err := net.Listen("unix", path)
+			if err != nil {
+				t.Errorf("listening: %v", err)
+				return
+			}
+			t.Cleanup(func() { listener.Close() })
+		}()
+		start := time.Now()
 
-	if err := waitForSocket(path, time.Second, time.Millisecond); err != nil {
-		t.Errorf("waitForSocket: %v", err)
-	}
+		if err := waitForSocket(path); err != nil {
+			t.Errorf("waitForSocket: %v", err)
+		}
+		if waited := time.Since(start); waited != 10*busPoll {
+			t.Errorf("the wait took %s, want %s", waited, 10*busPoll)
+		}
+	})
 }
 
-func TestWaitForSocketGivesUpWhenNothingBinds(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "system_bus_socket")
-	if err := waitForSocket(path, 20*time.Millisecond, time.Millisecond); err == nil {
-		t.Error("waitForSocket returned success for a socket that never appeared")
+// The wait gives up one poll after its timeout at the latest, for a
+// socket that never appears, and for a leftover plain file at that
+// path. dbus-daemon unlinks and recreates the socket at every start, so
+// a plain file is a bus that is not listening.
+func TestWaitForSocketGivesUp(t *testing.T) {
+	cases := []struct {
+		name  string
+		decoy bool
+	}{
+		{name: "nothing binds"},
+		{name: "a plain file", decoy: true},
 	}
-}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "system_bus_socket")
+				if c.decoy {
+					if err := os.WriteFile(path, nil, 0o644); err != nil {
+						t.Fatalf("writing the decoy: %v", err)
+					}
+				}
+				start := time.Now()
 
-// dbus-daemon unlinks and recreates the socket at every start, so a
-// leftover plain file at that path is a bus that is not listening.
-func TestWaitForSocketIgnoresAPlainFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "system_bus_socket")
-	if err := os.WriteFile(path, nil, 0o644); err != nil {
-		t.Fatalf("writing the decoy: %v", err)
-	}
-	if err := waitForSocket(path, 20*time.Millisecond, time.Millisecond); err == nil {
-		t.Error("waitForSocket accepted a plain file as the bus socket")
+				if err := waitForSocket(path); err == nil {
+					t.Fatal("waitForSocket answered a bus that is not listening")
+				}
+				if waited := time.Since(start); waited <= busTimeout || waited > busTimeout+busPoll {
+					t.Errorf("the wait gave up after %s, want more than %s and at most %s", waited, busTimeout, busTimeout+busPoll)
+				}
+			})
+		})
 	}
 }

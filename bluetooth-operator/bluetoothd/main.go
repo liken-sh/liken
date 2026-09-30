@@ -118,7 +118,7 @@ func run() error {
 	if err := bus.Run(); err != nil {
 		return fmt.Errorf("starting dbus-daemon: %w", err)
 	}
-	if err := waitForSocket(socket, busTimeout, busPoll); err != nil {
+	if err := waitForSocket(socket); err != nil {
 		return err
 	}
 
@@ -184,16 +184,16 @@ func writeInputConf(path, bondedOnly string) error {
 // checks that the path is a socket and not merely a name, because a
 // stale file at that path would otherwise read as a bus that is
 // listening.
-func waitForSocket(path string, timeout, poll time.Duration) error {
-	deadline := time.Now().Add(timeout)
+func waitForSocket(path string) error {
+	deadline := time.Now().Add(busTimeout)
 	for {
 		info, err := os.Stat(path)
 		if err == nil && info.Mode()&os.ModeSocket != 0 {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("dbus-daemon did not create %s within %s", path, timeout)
+			return fmt.Errorf("dbus-daemon did not create %s within %s", path, busTimeout)
 		}
-		time.Sleep(poll)
+		time.Sleep(busPoll)
 	}
 }

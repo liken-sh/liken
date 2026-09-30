@@ -6,9 +6,9 @@ package main
 // wakes nothing.
 
 import (
-	"context"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"k8s.io/client-go/tools/cache"
@@ -108,10 +108,8 @@ func TestTheNextCollectionIsTheEarliestOneStillAhead(t *testing.T) {
 // test ends.
 func watchRequests(t *testing.T, server *watchServer) <-chan struct{} {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	wakes, _ := watchPairingRequests(ctx, testWatcher(t, server.handler(t)), time.Now)
+	wakes, _ := watchPairingRequests(t.Context(), testWatcher(t, server.handler(t)), time.Now)
 	t.Cleanup(func() {
-		cancel()
 		for range wakes {
 		}
 	})
@@ -119,31 +117,44 @@ func watchRequests(t *testing.T, server *watchServer) <-chan struct{} {
 }
 
 func TestANewRequestWakesTheLoopAtOnce(t *testing.T) {
-	created := fmt.Sprintf(`{"type":"ADDED","object":%s}`, encode(t, openRequest("")))
-	server := newWatchServer(pairingRequestsPath(), "PairingRequestList", []string{"[]"}, []string{created, holdOpen})
+	synctest.Test(t, func(t *testing.T) {
+		created := fmt.Sprintf(`{"type":"ADDED","object":%s}`, encode(t, openRequest("")))
+		server := newWatchServer(pairingRequestsPath(), "PairingRequestList", []string{"[]"}, []string{created, holdOpen})
+		wakes := watchRequests(t, server)
+		synctest.Wait()
 
-	awaitWake(t, watchRequests(t, server), 5*time.Second)
+		if !woke(wakes) {
+			t.Fatal("the new request did not wake the loop")
+		}
+	})
 }
 
+// The clock fires at the moment the TTL is up, and not before.
 func TestAFinishedRequestWakesTheLoopWhenItsTTLIsUp(t *testing.T) {
-	// The TTL is up between one and two seconds from now. timestamp
-	// keeps whole seconds, so the exact moment depends on when the
-	// test starts.
-	seconds := 60
-	request := *openRequest(testDevice)
-	request.Spec.TTLSecondsAfterFinished = &seconds
-	request.Status = PairingRequestStatus{
-		Phase:      phasePaired,
-		FinishedAt: timestamp(time.Now().Add(-58 * time.Second)),
-	}
-	server := newWatchServer(pairingRequestsPath(), "PairingRequestList", []string{"[" + encode(t, request) + "]"}, []string{holdOpen})
-	wakes := watchRequests(t, server)
-	server.awaitWatches(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		// The bubble's clock starts on a whole second, so the TTL is up
+		// exactly two seconds from now.
+		seconds := 60
+		request := *openRequest(testDevice)
+		request.Spec.TTLSecondsAfterFinished = &seconds
+		request.Status = PairingRequestStatus{
+			Phase:      phasePaired,
+			FinishedAt: timestamp(time.Now().Add(-58 * time.Second)),
+		}
+		server := newWatchServer(pairingRequestsPath(), "PairingRequestList", []string{"[" + encode(t, request) + "]"}, []string{holdOpen})
+		wakes := watchRequests(t, server)
 
-	if wokeWithin(wakes, 500*time.Millisecond) {
-		t.Fatal("a request inside its TTL woke the loop")
-	}
-	awaitWake(t, wakes, 3*time.Second)
+		time.Sleep(2*time.Second - time.Nanosecond)
+		synctest.Wait()
+		if server.opened() != 1 || woke(wakes) {
+			t.Fatal("a request inside its TTL woke the loop")
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if !woke(wakes) {
+			t.Fatal("the loop had no wake when the TTL was up")
+		}
+	})
 }
 
 // A deleted request can arrive as a tombstone that holds no copy of
