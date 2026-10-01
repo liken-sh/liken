@@ -92,8 +92,8 @@ eye: 83 are the right person, and one is doubtful. The gallery held
 headshots from other decades, such as a photo of George Kennedy taken
 long after 1963, and the matches held.
 
-**Recall depends on face size.** The match rate by the height of the
-detected face:
+**Recall.** Recall depends on the size of the face. The match rate by
+the height of the detected face:
 
 | Face height | Faces | Named |
 |---|---|---|
@@ -122,7 +122,7 @@ and a non-root user needs a udev rule that covers both identities.
 
 ## The design
 
-### Step 1: the answer on the volume
+### Step 1: files on the volume
 
 The design rule from [`00-design.md`](00-design.md) applies: the
 volume holds every fact, and the catalog derives from the volume
@@ -130,7 +130,7 @@ alone. The first step is a fact that writes its answer to files beside
 the title, and to nothing else. A lost catalog rebuilds the
 appearances by a walk, and no video opens again.
 
-**Two outputs, because the passes cost different amounts.** The
+**Two outputs.** The passes cost different amounts. The
 expensive pass is decode, detection, and embedding: it opens the video.
 The cheap pass is the match: it compares vectors with headshots. A new
 headshot, a new credit, or a new threshold needs only the cheap pass.
@@ -161,14 +161,14 @@ and the ledger records that person as unmatched, so the gap is
 visible. For an episode, the gallery is the series cast and that
 episode's guest stars.
 
-**One embedding model everywhere.** Two embedding models write
+**The embedding model.** Two embedding models write
 vectors that cannot be compared with each other. So every node embeds
 with the same model, whatever its hardware, and the faces record names
 that model. A change of model makes every faces record stale, and the
 fact runs the expensive pass again. The detector can differ by node,
 because a detector writes only boxes.
 
-**The hardware ladder.** The fact runs as a `Job` of its own, the way
+**Hardware.** The fact runs as a `Job` of its own, the way
 trickplay does after [plan 58](completed/58-trickplay-on-the-gpu.md),
 and claims its hardware through a `ResourceClaimTemplate` that the
 `Library` names. Each step takes the best hardware the pod holds:
@@ -184,7 +184,7 @@ common but not universal. OpenVINO's CPU plugin also runs on AMD x86,
 so the floor covers every machine that `liken` supports. A pod with a
 Coral still embeds on its GPU or CPU.
 
-**Not on a screen.** The Job is per-title batch work, as trickplay is.
+**Scheduling.** The Job is per-title batch work, as trickplay is.
 It never runs on a one-gigabyte screen machine. On the Arc it took
 about a minute and 1.6 GB per film, once per file.
 
@@ -194,7 +194,7 @@ The walk reads `.liken/appearances.yaml` into a catalog table, one row
 per observation, deleted with its file and swept with it, the way the
 `marks` table is. The walk never reads the faces record.
 
-### Step 3: a feature on the screen
+### Step 3: the user-facing feature
 
 Later, and shaped in its own plan. The candidates are the cast on
 screen when playback pauses, the scenes of one person from the
@@ -221,7 +221,7 @@ needs only the catalog table.
   the volume, would make the expensive pass a cost that every lost
   catalog pays again.
 
-## What is still owed
+## Open questions
 
 - **The CPU floor.** The cost of SCRFD and MobileFaceNet on one or two
   cores, with onnxruntime and no OpenVINO. That number decides whether
