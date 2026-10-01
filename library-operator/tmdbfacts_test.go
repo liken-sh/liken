@@ -4,8 +4,10 @@ package main
 // gives, for a movie and for a series.
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 )
@@ -219,6 +221,32 @@ func TestAPersonWithNoPictureCarriesNoThumb(t *testing.T) {
 		}
 		if answer.Cast[0].Thumb != "" {
 			t.Errorf("thumb = %q, want none", answer.Cast[0].Thumb)
+		}
+	})
+}
+
+// A cast longer than the limit keeps its first 50 by billing: an ensemble
+// film's bit parts down to the fiftieth are people the appearances fact names
+// on screen.
+func TestTheCreditsKeepTheFirstFiftyBilled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		members := make([]string, 0, 60)
+		for order := range 60 {
+			members = append(members, fmt.Sprintf(`{"name":"Actor %d","order":%d}`, order, order))
+		}
+		client, _ := newFakeTMDb(t, map[string]string{
+			tmdbKey("/3/movie/4242/credits", "", ""): `{"cast":[` + strings.Join(members, ",") + `]}`,
+		})
+
+		answer, _, err := tmdbAnswerer{client: client}.answer(t.Context(), factCredits,
+			titleRef{kind: libraryKindMovies, ids: providerIDs{"tmdb": "4242"}})
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(answer.Cast) != 50 || answer.Cast[49].Name != "Actor 49" {
+			t.Errorf("kept %d, the last %q, want the first 50 by billing", len(answer.Cast),
+				answer.Cast[len(answer.Cast)-1].Name)
 		}
 	})
 }

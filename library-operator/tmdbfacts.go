@@ -25,8 +25,11 @@ const tmdbImageBase = "https://image.tmdb.org/t/p/"
 
 // Why the cast is cut: a title has a hundred credited people at TMDb, and the
 // scanner reads the .nfo file on every walk, so the fact writes the billed cast
-// and no further.
-const tmdbCastLimit = 25
+// and no further. Fifty reaches the bit parts the appearances fact names on
+// screen: on an ensemble film, people billed 26th to 50th were named in about
+// 40 faces, with 1 wrong. Past 50 the cast is mostly extras, and each extra
+// is a near match that can take a lead's name from a face.
+const tmdbCastLimit = 50
 
 // What the external ids call answers: the ids of the same title in the other
 // databases, which is what makes a provider that keys on an IMDb id or a
