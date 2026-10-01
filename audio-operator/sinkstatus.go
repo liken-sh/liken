@@ -56,6 +56,11 @@ type endpointFacts struct {
 	// The claim that holds the endpoint now, and nil between holders.
 	Claim *EndpointClaim
 
+	// The channel layout the declaration holds for a card's sink, and
+	// whether PipeWire runs it. It is nil on a source, on a speaker,
+	// and on a sink the declaration holds no node for.
+	Layout *layoutState
+
 	// The level this operator last wrote to the node that stands,
 	// and nil when it wrote none. A suspended node reports no level
 	// and PipeWire 1.4.2 announces no change to one, so this is what
@@ -189,6 +194,12 @@ func (f endpointFacts) status(published EndpointStatus, now time.Time) EndpointS
 	ready, reason, message := f.ready()
 	status.Conditions = setCondition(status.Conditions,
 		condition(ReadyCondition, ready, reason, message, now))
+	if f.Layout != nil {
+		status.Layout = f.Layout.Layout.Positions
+		status.LayoutSource = string(f.Layout.Layout.source())
+		status.Conditions = setCondition(status.Conditions,
+			condition(LayoutAppliedCondition, f.Layout.Applied, f.Layout.Reason, f.Layout.Message, now))
+	}
 	return status
 }
 

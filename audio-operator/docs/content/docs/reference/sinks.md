@@ -37,6 +37,7 @@ status:
     device: 0
     id: USB Audio
   nodeName: liken.audio.card1-pcm0
+  layoutSource: ChannelMap
   capabilities:
     PCM Playback Volume:
       type: integer
@@ -58,6 +59,8 @@ status:
     - type: Connected
       status: "True"
     - type: Ready
+      status: "True"
+    - type: LayoutApplied
       status: "True"
 ```
 
@@ -84,6 +87,7 @@ The desired settings for the endpoint. Every field is optional. The operator wri
 | <span id="spec--volume"></span>`volume` | integer | no | The level the endpoint plays at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. It applies at once, under a claim or not, and a claim holder's own stream fader is a separate level above it. |
 | <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. The operator applies this setting at the same layer as volume, and it takes effect at once. |
 | <span id="spec--controls"></span>`controls` | map[string]string | no | The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range. A boolean control takes on or off. An enumerated control takes one of its values. The operator writes a control only when spec states it. When two endpoints share one control, the last write wins because the hardware has one register. |
+| <span id="spec--layout"></span>`layout` | []string | no | The channel positions of an ALSA sink, in PCM slot order, in PipeWire's channel names, such as FL, FR, FC, LFE, RL, RR, SL, SR, RLC, RRC, TFL, TFR, NA for a slot that plays nothing, and AUX0 to AUX63. A 7.1 receiver on HDMI takes [FL, FR, RL, RR, FC, LFE, SL, SR], and a 5.1 one takes [FL, FR, RL, RR, FC, LFE]. When this field is absent, the operator selects the layout from the monitor's ELD on HDMI and DisplayPort, from the device's own channel map on USB, and declares no positions on the analog jack, whose streams then play in stereo. The operator declares the layout to PipeWire, and a change restarts the PipeWire container once no stream plays on the machine. The number of positions must be a channel count the device accepts, or PipeWire ignores the layout. The operator does not write the kernel's channel map, so on HDMI each slot reaches the speaker the kernel's standard allocation gives it, and a height position names a slot that the kernel routes elsewhere. A Bluetooth speaker ignores this field. |
 | <span id="spec--codec"></span>`codec` | string | no | The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint. |
 
 ## status
@@ -102,9 +106,11 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--nodename"></span>`nodeName` | string | no | The PipeWire node a consumer's streams target, the same value a prepared claim delivers as PIPEWIRE_NODE. Absent while PipeWire holds no node for the endpoint. |
 | <span id="status--format"></span>`format` | [object](#statusformat) | no | The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The card's own controls for this endpoint, keyed by the kernel's control name. A Playback control applies to the card's analog and USB sinks. A control with no direction, such as Auto-Mute Mode, also applies to those sinks. An IEC958 Playback Switch applies to the HDMI slot with the same ordinal. It is the only control an HDMI slot lists because an HDMI PCM has no volume element. The operator omits read-only jack controls because they feed the Connected condition. A Bluetooth speaker lists no card controls. |
+| <span id="status--layout"></span>`layout` | []string | no | The channel positions the operator declares the sink's node with, in PCM slot order. Absent when layoutSource is ChannelMap, because PipeWire reads the positions from the device, and absent when it is None. While LayoutApplied is False with the reason Restarting, this is the layout PipeWire loads when its container starts again. |
+| <span id="status--layoutsource"></span>`layoutSource` | string | no | Where the layout came from. Spec is spec.layout. ELD is the monitor's speaker allocation, capped by the largest LPCM channel count it accepts. ChannelMap is the channel map a USB device describes. None is no positions, and a multichannel stream then plays in stereo. An HDMI sink keeps a layout from the ELD while its monitor is off. Absent on a Bluetooth speaker. One of: `Spec`, `ELD`, `ChannelMap`, `None`. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling. |
 | <span id="status--claim"></span>`claim` | [object](#statusclaim) | no | The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while the kubelet restarts the PipeWire container to load it. |
 
 ### status.card
 
@@ -196,7 +202,7 @@ The claim that currently allocates the endpoint. This field is absent when no cl
 
 ### status.conditions[]
 
-Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read.
+Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while the kubelet restarts the PipeWire container to load it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -293,3 +299,59 @@ DAC. PipeWire's graph reports every node and device change. So a
 change a person made with a knob, a remote, or a speaker's own
 buttons shows in `observed` within about a second. A value the spec
 declares is written back on the same event.
+
+## The channel layout
+
+The operator declares every sink of a sound card to PipeWire with a
+channel layout: the position of each PCM slot, in PipeWire's channel
+names. WirePlumber links each channel of a stream to the sink's
+channel of the same name. It links every stream to a sink with no
+positions as two channels, `FL` and `FR`, so a 5.1 or 7.1 stream is
+mixed down into them.
+
+The operator takes the layout from the first source that gives one,
+and `status.layoutSource` names it:
+
+| Source | Where the positions come from |
+| --- | --- |
+| `Spec` | `spec.layout` |
+| `ELD` | the HDMI or DisplayPort monitor's speaker allocation, capped by the largest LPCM channel count it accepts |
+| `ChannelMap` | the channel map a USB device describes in its descriptors. PipeWire reads it when it opens the device, so `status.layout` is absent |
+| `None` | nothing. The analog jack reports no speakers, and neither does an HDMI output whose monitor was off when the pod started |
+
+From the ELD, the operator selects one of the HDMI layouts that
+PipeWire's own card profiles use:
+
+| The monitor advertises | `status.layout` |
+| --- | --- |
+| 8-channel LPCM and `FL/FR`, `LFE`, `FC`, `RL/RR`, `RLC/RRC` | `FL, FR, RL, RR, FC, LFE, SL, SR` |
+| 6-channel LPCM and `FL/FR`, `LFE`, `FC`, `RL/RR` | `FL, FR, RL, RR, FC, LFE` |
+| anything else | `FL, FR` |
+
+Most televisions accept 8-channel LPCM and have two speakers. Such a
+set gets `FL, FR`, so PipeWire mixes the center channel, which
+carries the dialog, into the front pair. An HDMI sink keeps its
+layout from the ELD while its monitor is off, so a receiver that
+turns off and on again changes nothing.
+
+PipeWire reads the layout once, when it starts. When a sink's layout
+changes, because `spec.layout` changed or a monitor with another
+layout answers, the operator writes the new declaration and the
+kubelet restarts the PipeWire container. The restart ends every
+stream on the machine, so the operator waits until no stream plays.
+`LayoutApplied` is `False` with the reason `AwaitingIdle` while it
+waits, and with the reason `Restarting` until the new PipeWire
+starts. Each change writes one `LayoutChanged` event on the `Sink`,
+which names the old layout, the new one, and the source.
+
+Two things the operator does not do:
+
+* It does not write the kernel's channel map. On HDMI the kernel
+  routes each slot by its standard allocation for the channel count,
+  so a height position such as `TFL` in `spec.layout` names a slot
+  that the kernel sends to another speaker. The kernel can route
+  front heights (CEA allocation 0x2f), but only when a program
+  writes the PCM's channel map while the device is open and stopped.
+* It does not pass a bitstream through. A receiver that plays height
+  speakers from Dolby Atmos or DTS:X needs the compressed stream,
+  and the operator sends PCM. Passthrough is a separate design.

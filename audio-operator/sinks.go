@@ -40,13 +40,16 @@ const (
 	SourceKind = "Source"
 )
 
-// The two conditions. Connected reports that the endpoint can play
-// or record now, and Ready reports that PipeWire holds a node for it.
+// The conditions. Connected reports that the endpoint can play or
+// record now, and Ready reports that PipeWire holds a node for it.
 // They carry the same facts as the no-monitor and no-sink taints, for
-// a person rather than the scheduler.
+// a person rather than the scheduler. LayoutApplied is a card's
+// sink's alone, and reports whether PipeWire runs the channel layout
+// the operator selected for it (layoutdrift.go).
 const (
-	ConnectedCondition = "Connected"
-	ReadyCondition     = "Ready"
+	ConnectedCondition     = "Connected"
+	ReadyCondition         = "Ready"
+	LayoutAppliedCondition = "LayoutApplied"
 )
 
 // The two states a condition takes here. Unknown is never written:
@@ -88,12 +91,14 @@ type EndpointMeta struct {
 // Every field is a pointer because its absence is what says the
 // operator writes nothing, and zero is a level and a mute a person
 // declares. Codec is a speaker's alone, and an ALSA endpoint ignores
-// it.
+// it. Layout is an ALSA sink's alone, and an empty list is the same
+// as no list: either one leaves the layout to the hardware.
 type SinkSpec struct {
 	Volume   *int              `json:"volume,omitempty"`
 	Mute     *bool             `json:"mute,omitempty"`
 	Controls map[string]string `json:"controls,omitempty"`
 	Codec    *string           `json:"codec,omitempty"`
+	Layout   []string          `json:"layout,omitempty"`
 }
 
 // SourceSpec is the same declaration for a capture endpoint, without
@@ -123,9 +128,9 @@ func (s SourceSpec) declaration() declaration {
 }
 
 // EndpointStatus is what the hardware declares and what the operator
-// last read. Both kinds carry this shape, and the two fields that
-// belong to a Sink alone, monitor and bluetooth, are absent on a
-// Source because no capture endpoint has either.
+// last read. Both kinds carry this shape, and the fields that belong
+// to a Sink alone, monitor, bluetooth, layout, and layoutSource, are
+// absent on a Source because no capture endpoint has them.
 type EndpointStatus struct {
 	Node           string                       `json:"node,omitempty"`
 	Location       string                       `json:"location,omitempty"`
@@ -137,6 +142,8 @@ type EndpointStatus struct {
 	NodeName       string                       `json:"nodeName,omitempty"`
 	Format         *EndpointFormat              `json:"format,omitempty"`
 	Capabilities   map[string]controlCapability `json:"capabilities,omitempty"`
+	Layout         []string                     `json:"layout,omitempty"`
+	LayoutSource   string                       `json:"layoutSource,omitempty"`
 	Observed       *EndpointObserved            `json:"observed,omitempty"`
 	Claim          *EndpointClaim               `json:"claim,omitempty"`
 	Conditions     []EndpointCondition          `json:"conditions,omitempty"`

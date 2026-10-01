@@ -37,7 +37,7 @@ func testReconciler(t *testing.T, api *slicePublishFixture, graph func(context.C
 		nodeName: "liken-1",
 		owner:    testOwner(),
 		graph:    graph,
-		declared: nodeConfig(outputs),
+		declared: nodeConfig(outputs, nil),
 	}
 }
 

@@ -6,7 +6,8 @@ package main
 // Sink or the Source: reason Captured, type Normal, with the caller
 // and the aspect in the message, so kubectl describe sink answers who
 // listened and when. The log line is the detail record and never
-// carries the token.
+// carries the token. The operator container writes Events of its own
+// through the same function, one for each layout change.
 //
 // A Sink and a Source are cluster-scoped and an Event is namespaced,
 // so the Event goes in default, which is where Kubernetes puts the
@@ -68,6 +69,16 @@ type eventSource struct {
 // and never fails the request: the sound is already on the wire, and
 // the log line holds the same record.
 func recordCapture(client *apiclient.Client, kind, name, uid, aspect, format, who string, at time.Time) error {
+	return postEvent(client, kind, name, uid, capturedReason,
+		fmt.Sprintf("%s captured the %s of this %s as %s", who, aspect, kind, format), apiComponent, at)
+}
+
+// operatorComponent is the operator container's name on every Event it
+// writes, such as the LayoutChanged event in layoutdrift.go.
+const operatorComponent = "audio-operator"
+
+// postEvent writes one Normal Event about a Sink or a Source.
+func postEvent(client *apiclient.Client, kind, name, uid, reason, message, component string, at time.Time) error {
 	stamp := at.UTC().Format(time.RFC3339)
 	body, err := json.Marshal(&event{
 		APIVersion: "v1",
@@ -82,10 +93,10 @@ func recordCapture(client *apiclient.Client, kind, name, uid, aspect, format, wh
 			Name:       name,
 			UID:        uid,
 		},
-		Reason:         capturedReason,
-		Message:        fmt.Sprintf("%s captured the %s of this %s as %s", who, aspect, kind, format),
+		Reason:         reason,
+		Message:        message,
 		Type:           "Normal",
-		Source:         eventSource{Component: apiComponent},
+		Source:         eventSource{Component: component},
 		FirstTimestamp: stamp,
 		LastTimestamp:  stamp,
 		Count:          1,

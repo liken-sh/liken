@@ -29,6 +29,7 @@ status:
     device: 0
     id: USB Audio
   nodeName: liken.audio.card1-pcm0
+  layoutSource: ChannelMap
   capabilities:
     PCM Playback Volume:
       type: integer
@@ -50,6 +51,8 @@ status:
     - type: Connected
       status: "True"
     - type: Ready
+      status: "True"
+    - type: LayoutApplied
       status: "True"
 ```
 

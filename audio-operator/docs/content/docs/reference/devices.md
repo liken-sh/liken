@@ -325,8 +325,11 @@ A PCM device that appears or leaves after that publishes with the
 `no-sink` taint until the pod is replaced.
 
 This path gives some things up. The card-profile machinery needs the
-ALSA monitor, so there is no profile switching, and the channel
-layout comes from what is connected when PipeWire starts. A node's
+ALSA monitor, so there is no profile switching. Each sink's channel
+layout comes from its `Sink`'s `spec.layout`, the monitor's ELD, or a
+USB device's channel map, as the
+[`Sink` reference](/docs/reference/sinks/#the-channel-layout)
+describes, and a new layout restarts PipeWire. A node's
 volume is PipeWire's software gain. The card's own mixer controls
 are a separate surface, which the operator reads and writes through
 the ALSA control interface and publishes on the endpoint's

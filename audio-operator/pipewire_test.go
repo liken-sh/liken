@@ -366,3 +366,19 @@ func TestMissingNodesNamesTheOutputsWithNoSink(t *testing.T) {
 		})
 	}
 }
+
+// A link names the two nodes it joins, and the graph holds both ids,
+// so a stream into a sink and a tap of its monitor both mark the sink.
+func TestParseGraphReadsWhichNodesALinkTouches(t *testing.T) {
+	graph, err := parseGraph([]byte(`[
+		{"id": 60, "type": "PipeWire:Interface:Link",
+		 "info": {"output-node-id": 51, "output-port-id": 50, "input-node-id": 59, "input-port-id": 61, "state": "active", "props": {}}},
+		{"id": 61, "type": "PipeWire:Interface:Link", "info": null}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Linked) != 2 || !graph.Linked[51] || !graph.Linked[59] {
+		t.Errorf("linked = %v, want 51 and 59", graph.Linked)
+	}
+}

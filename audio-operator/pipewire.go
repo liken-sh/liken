@@ -21,9 +21,8 @@ package main
 // keeps one pw-dump -m running so that a steady state costs no process
 // at all.
 //
-// The writes take the same path for the same reason: pw-cli
-// set-param is one process per write, changing one parameter on an
-// object the same dump named.
+// The writes take the same path for the same reason, and pwcli.go
+// holds them.
 
 import (
 	"context"
@@ -40,14 +39,6 @@ import (
 // that stops answering would otherwise hold the reconcile pass
 // forever.
 const pwDumpTimeout = 10 * time.Second
-
-// pwCLITimeout bounds one property write.
-//
-// A set-param connects to the same socket, writes one pod, and
-// exits. The bound guards the same failure the dump's bound
-// guards: a socket that accepts the connection and then answers
-// nothing.
-const pwCLITimeout = 10 * time.Second
 
 // runtimeDir is where PipeWire creates its socket. It is a hostPath
 // mount, so that a consumer's CDI spec can bind the same directory
@@ -120,9 +111,14 @@ type pwFormat struct {
 // pwGraph is what one read yields: every ALSA node by PCM device and
 // direction, and every Bluetooth speaker by peer MAC in the lowercase
 // colon form.
+//
+// Linked holds the id of every node that a link touches, on either
+// side. A stream that plays into a sink, and a tap that records from
+// its monitor ports, each hold a link to the sink's node.
 type pwGraph struct {
 	Nodes    map[nodeAddress]pwNode
 	Speakers map[string]bluezSink
+	Linked   map[int]bool
 }
 
 // bluezSink is one Bluetooth speaker as the graph reports it: its
@@ -216,9 +212,14 @@ type pwObject struct {
 }
 
 // pwInfo is an object's properties and parameters.
+//
+// A link's info block holds the two node ids it joins, and the block
+// of every other object holds neither.
 type pwInfo struct {
-	Props  map[string]json.RawMessage `json:"props"`
-	Params pwParams                   `json:"params"`
+	Props        map[string]json.RawMessage `json:"props"`
+	Params       pwParams                   `json:"params"`
+	OutputNodeID *int                       `json:"output-node-id"`
+	InputNodeID  *int                       `json:"input-node-id"`
 }
 
 // pwParams holds the parameter lists this operator reads. Every value
@@ -303,10 +304,19 @@ func buildGraph(objects []pwObject) pwGraph {
 	graph := pwGraph{
 		Nodes:    map[nodeAddress]pwNode{},
 		Speakers: map[string]bluezSink{},
+		Linked:   map[int]bool{},
 	}
 	devices := map[string]bluez5Device{}
 	for _, object := range objects {
 		if object.Info == nil {
+			continue
+		}
+		if object.Type == "PipeWire:Interface:Link" {
+			for _, end := range []*int{object.Info.OutputNodeID, object.Info.InputNodeID} {
+				if end != nil {
+					graph.Linked[*end] = true
+				}
+			}
 			continue
 		}
 		if object.Type == "PipeWire:Interface:Device" {
@@ -429,32 +439,6 @@ func nodeFormat(params []json.RawMessage) pwFormat {
 		}
 	}
 	return pwFormat{}
-}
-
-// setParam writes one of an object's parameters through pw-cli. The
-// parameter is named because the two writes this operator makes go
-// to different ones: Props on a node, and Route on a Bluetooth
-// device.
-//
-// The write is an exec of pw-cli rather than a protocol message,
-// for readGraph's reason: one short-lived process per action, no
-// client library, no long-lived connection to keep healthy.
-//
-// The pod argument is a SPA object literal, pw-cli's own input
-// form: { bluetoothAudioCodec: 1 } names an enum value by its
-// integer id.
-func setParam(ctx context.Context, object int, param, pod string) error {
-	ctx, cancel := context.WithTimeout(ctx, pwCLITimeout)
-	defer cancel()
-
-	command := exec.CommandContext(ctx, "pw-cli", "set-param", strconv.Itoa(object), param, pod)
-	command.WaitDelay = time.Second
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("running pw-cli set-param %d %s %s: %w: %s",
-			object, param, pod, err, strings.TrimSpace(string(output)))
-	}
-	return nil
 }
 
 // property reads one property as a string. pw-dump prints a property

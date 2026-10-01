@@ -83,12 +83,27 @@ type reconciler struct {
 	// answer to one line for each run of failures.
 	speakerFailure bool
 
-	// declared is the drop-in the init container wrote before PipeWire
-	// started. PipeWire reads its configuration once, so this is what
-	// the running graph was built from, and a pass that would generate
-	// something else has found a card that no longer matches its own
+	// declared is the drop-in PipeWire builds its graph from: the one
+	// the init container wrote before PipeWire started, or the one this
+	// operator wrote for a layout change. PipeWire reads its
+	// configuration once, so a pass that finds a PCM device the file
+	// does not name has found a card that no longer matches its own
 	// sound server.
 	declared string
+
+	// declarationStale reports whether the drop-in is newer than the
+	// PipeWire that runs, which is the window between a layout write
+	// and the restart that applies it (declarationprobe.go). It is nil
+	// in a test, which runs no PipeWire.
+	declarationStale func() bool
+
+	// restartRequested is when this operator last wrote a new layout,
+	// and the zero time when it has written none. A graph read that
+	// fails within layoutRestartGrace of it is the restart.
+	restartRequested time.Time
+
+	// layoutReport keeps a failure of the layout step to one line.
+	layoutReport string
 
 	// endpoints is what the last pass read from the hardware, keyed by
 	// device name. The DRA plugin resolves a prepare call's device
@@ -185,18 +200,27 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	// A PCM device that appeared or left since PipeWire started has no
 	// node in the running graph. PipeWire reads context.objects only
 	// while it loads its configuration, so nothing this operator does
-	// gives that output a sink. Only the init container writes the
-	// declaration, and an init container runs once per pod, so an
-	// operator restart would re-read the same file and find the same
+	// gives that output a sink. Only the init container declares a set
+	// of PCM devices, because a layout change keeps the set the file
+	// holds (layoutdrift.go). An init container runs once per pod, so
+	// an operator restart would re-read the same set and find the same
 	// divergence. The report goes out once, the pass continues, and
 	// every output with no node publishes with the no-sink taint.
 	// Deleting the pod is what declares the new set.
-	if current := nodeConfig(outputs); current != r.declared && !r.driftReported {
+	if nodes, err := parseDeclaration(r.declared); (err != nil || !samePCMDevices(nodes, outputs)) && !r.driftReported {
 		r.driftReported = true
 		fmt.Fprintf(os.Stderr, "the card's playback PCM devices have changed since PipeWire started; "+
 			"the outputs with no declared node publish with the no-sink taint until this pod is replaced\n")
 	}
 	graph, err := r.graph(ctx)
+	if err != nil && r.awaitingRestart() {
+		// The PipeWire container is restarting for a layout this
+		// operator wrote, so the failure is expected and counts toward
+		// nothing. The pass publishes nothing, so no output is tainted
+		// for the seconds the restart takes.
+		fmt.Fprintf(os.Stderr, "reading PipeWire's graph while it restarts for a layout change: %v\n", err)
+		return nil
+	}
 	if err != nil {
 		r.sinkFailures++
 		r.readings.observationFailed(sourcePipeWire)
@@ -221,13 +245,18 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	speakers := r.pairedSpeakers()
 	r.publish(ctx, sliceDevices(endpoints, speakers, graph))
 
+	// The layouts come after the slice, because a layout change is a
+	// restart of PipeWire, and the slice of this pass describes the
+	// graph that was read before it.
+	layouts := r.reconcileLayouts(endpoints, graph)
+
 	// The resources come after the slice, because a claim is what
 	// places a workload and the resource is what a person reads. A
 	// failure here is reported and the pass stands: an API server that
 	// refuses a status write says nothing about whether the card
 	// plays.
 	if r.control != nil {
-		if err := r.control.pass(ctx, endpoints, speakers, graph); err != nil {
+		if err := r.control.pass(ctx, endpoints, speakers, graph, layouts); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling the endpoints' resources: %v\n", err)
 		}
 	}

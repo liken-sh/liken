@@ -68,6 +68,12 @@ spec:
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Layout
+          type: string
+          jsonPath: .status.layout
+        - name: Layout Source
+          type: string
+          jsonPath: .status.layoutSource
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -98,6 +104,36 @@ spec:
                   additionalProperties:
                     type: string
                   description: "The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range. A boolean control takes on or off. An enumerated control takes one of its values. The operator writes a control only when spec states it. When two endpoints share one control, the last write wins because the hardware has one register."
+                layout:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  # A set: the API server refuses a list that names one
+                  # position twice, because two slots with one position
+                  # leave PipeWire no single port to link a stream's
+                  # channel to.
+                  x-kubernetes-list-type: set
+                  items:
+                    type: string
+                    # The short channel names PipeWire's SPA defines,
+                    # the ones audio.position takes. UNK is left out,
+                    # because a stated layout states each position.
+                    enum: [
+                        MONO, FL, FR, FC, LFE, SL, SR, FLC, FRC, RC, RL,
+                        RR, TC, TFL, TFC, TFR, TRL, TRC, TRR, RLC, RRC,
+                        FLW, FRW, LFE2, FLH, FCH, FRH, TFLC, TFRC, TSL,
+                        TSR, LLFE, RLFE, BC, BLC, BRC, NA, AUX0, AUX1,
+                        AUX2, AUX3, AUX4, AUX5, AUX6, AUX7, AUX8, AUX9,
+                        AUX10, AUX11, AUX12, AUX13, AUX14, AUX15, AUX16,
+                        AUX17, AUX18, AUX19, AUX20, AUX21, AUX22, AUX23,
+                        AUX24, AUX25, AUX26, AUX27, AUX28, AUX29, AUX30,
+                        AUX31, AUX32, AUX33, AUX34, AUX35, AUX36, AUX37,
+                        AUX38, AUX39, AUX40, AUX41, AUX42, AUX43, AUX44,
+                        AUX45, AUX46, AUX47, AUX48, AUX49, AUX50, AUX51,
+                        AUX52, AUX53, AUX54, AUX55, AUX56, AUX57, AUX58,
+                        AUX59, AUX60, AUX61, AUX62, AUX63
+                      ]
+                  description: "The channel positions of an ALSA sink, in PCM slot order, in PipeWire's channel names, such as FL, FR, FC, LFE, RL, RR, SL, SR, RLC, RRC, TFL, TFR, NA for a slot that plays nothing, and AUX0 to AUX63. A 7.1 receiver on HDMI takes [FL, FR, RL, RR, FC, LFE, SL, SR], and a 5.1 one takes [FL, FR, RL, RR, FC, LFE]. When this field is absent, the operator selects the layout from the monitor's ELD on HDMI and DisplayPort, from the device's own channel map on USB, and declares no positions on the analog jack, whose streams then play in stereo. The operator declares the layout to PipeWire, and a change restarts the PipeWire container once no stream plays on the machine. The number of positions must be a channel count the device accepts, or PipeWire ignores the layout. The operator does not write the kernel's channel map, so on HDMI each slot reaches the speaker the kernel's standard allocation gives it, and a height position names a slot that the kernel routes elsewhere. A Bluetooth speaker ignores this field."
                 codec:
                   type: string
                   description: "The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint."
@@ -229,6 +265,15 @@ spec:
                       channels:
                         type: integer
                         description: "How many channels the control carries. A write from spec sets every channel to the same value."
+                layout:
+                  type: array
+                  items:
+                    type: string
+                  description: "The channel positions the operator declares the sink's node with, in PCM slot order. Absent when layoutSource is ChannelMap, because PipeWire reads the positions from the device, and absent when it is None. While LayoutApplied is False with the reason Restarting, this is the layout PipeWire loads when its container starts again."
+                layoutSource:
+                  type: string
+                  enum: [Spec, ELD, ChannelMap, None]
+                  description: "Where the layout came from. Spec is spec.layout. ELD is the monitor's speaker allocation, capped by the largest LPCM channel count it accepts. ChannelMap is the channel map a USB device describes. None is no positions, and a multichannel stream then plays in stereo. An HDMI sink keeps a layout from the ELD while its monitor is off. Absent on a Bluetooth speaker."
                 observed:
                   type: object
                   description: "The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling."
@@ -257,7 +302,7 @@ spec:
                       type: string
                 conditions:
                   type: array
-                  description: "Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read."
+                  description: "Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while the kubelet restarts the PipeWire container to load it."
                   items:
                     type: object
                     required: [type, status, reason, lastTransitionTime]

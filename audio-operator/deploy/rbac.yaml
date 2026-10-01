@@ -1,7 +1,7 @@
 # The operator's identity in the cluster, and deliberately nothing
 # more. It writes one ResourceSlice, owns the Sinks and Sources of
 # its node's endpoints, reads the claims the kubelet asks it to
-# prepare, and reads its own Node.
+# prepare, reads its own Node, and records layout changes as Events.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -56,6 +56,13 @@ rules:
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]
+  # One Event on a Sink for each channel layout change the operator
+  # applies (layoutdrift.go), so kubectl describe sink shows when
+  # PipeWire restarted and why. Events about a cluster-scoped object
+  # go in the default namespace, and the operator never reads them.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create]
   # The capture container answers audio-api and nothing else, and it
   # proves the caller with a TokenReview, which is a create on a
   # review object rather than a read. The audience on that token is

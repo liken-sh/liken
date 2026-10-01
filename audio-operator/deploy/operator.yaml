@@ -105,6 +105,16 @@ spec:
         - name: declare
           image: ghcr.io/liken-sh/audio-operator:latest
           args: ["declare"]
+          # The machine's name is the first part of every Sink's name,
+          # and this container reads each Sink's spec.layout before
+          # PipeWire starts. It reads with the pod's ServiceAccount, and
+          # an API server that does not answer leaves the layouts to the
+          # ELD and the channel map, so the pod starts either way.
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           securityContext:
             capabilities:
               drop: ["ALL"]
@@ -163,6 +173,24 @@ spec:
             periodSeconds: 2
             failureThreshold: 30
             timeoutSeconds: 10
+          # The restart that applies a new channel layout. The operator
+          # writes the new declaration into the drop-in directory when no
+          # stream plays, and this check fails while the drop-in is newer
+          # than PipeWire's socket, which PipeWire creates at its start.
+          # The kubelet then restarts this container alone, the pod and
+          # the operator stay, and WirePlumber restarts after it.
+          # declarationprobe.go states why every other state passes.
+          #
+          # One failure is enough, because the check fails only on the
+          # one fact the operator wrote to ask for the restart, and the
+          # period of 5 seconds keeps the time between the write and the
+          # restart short, so a stream that starts in it is rare.
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/audio-operator", "declaration-loaded"]
+            periodSeconds: 5
+            failureThreshold: 1
+            timeoutSeconds: 5
           securityContext:
             # PipeWire and WirePlumber touch hardware only through the
             # device nodes their claim delivers: the card's control
@@ -340,9 +368,10 @@ spec:
             # the path is the same on both sides of the mount.
             - name: runtime
               mountPath: /var/run/audio.liken.sh
-            # The declaration the init container wrote. The operator
-            # reads it back to notice a card whose PCM devices changed
-            # since PipeWire loaded it.
+            # The declaration PipeWire loads. The operator reads it back
+            # to notice a card whose PCM devices changed since PipeWire
+            # loaded it, and writes it when a sink's channel layout
+            # changes, so the mount is writable.
             - name: pipewire-config
               mountPath: /etc/pipewire/pipewire.conf.d
         # A restart of this container ends every running capture on
@@ -418,7 +447,8 @@ spec:
             path: /var/run/audio.liken.sh
             type: DirectoryOrCreate
         # PipeWire's configuration drop-in directory, shared between
-        # the declare container that writes it and the PipeWire
+        # the declare container that writes it at pod start, the
+        # operator that writes it for a layout change, and the PipeWire
         # container that reads it. It is the pod's own volume, because
         # a declaration is generated again at every start, and a
         # volume that outlived the pod would let a stale one reach the

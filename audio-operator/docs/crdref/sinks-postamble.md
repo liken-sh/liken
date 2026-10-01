@@ -85,3 +85,59 @@ DAC. PipeWire's graph reports every node and device change. So a
 change a person made with a knob, a remote, or a speaker's own
 buttons shows in `observed` within about a second. A value the spec
 declares is written back on the same event.
+
+## The channel layout
+
+The operator declares every sink of a sound card to PipeWire with a
+channel layout: the position of each PCM slot, in PipeWire's channel
+names. WirePlumber links each channel of a stream to the sink's
+channel of the same name. It links every stream to a sink with no
+positions as two channels, `FL` and `FR`, so a 5.1 or 7.1 stream is
+mixed down into them.
+
+The operator takes the layout from the first source that gives one,
+and `status.layoutSource` names it:
+
+| Source | Where the positions come from |
+| --- | --- |
+| `Spec` | `spec.layout` |
+| `ELD` | the HDMI or DisplayPort monitor's speaker allocation, capped by the largest LPCM channel count it accepts |
+| `ChannelMap` | the channel map a USB device describes in its descriptors. PipeWire reads it when it opens the device, so `status.layout` is absent |
+| `None` | nothing. The analog jack reports no speakers, and neither does an HDMI output whose monitor was off when the pod started |
+
+From the ELD, the operator selects one of the HDMI layouts that
+PipeWire's own card profiles use:
+
+| The monitor advertises | `status.layout` |
+| --- | --- |
+| 8-channel LPCM and `FL/FR`, `LFE`, `FC`, `RL/RR`, `RLC/RRC` | `FL, FR, RL, RR, FC, LFE, SL, SR` |
+| 6-channel LPCM and `FL/FR`, `LFE`, `FC`, `RL/RR` | `FL, FR, RL, RR, FC, LFE` |
+| anything else | `FL, FR` |
+
+Most televisions accept 8-channel LPCM and have two speakers. Such a
+set gets `FL, FR`, so PipeWire mixes the center channel, which
+carries the dialog, into the front pair. An HDMI sink keeps its
+layout from the ELD while its monitor is off, so a receiver that
+turns off and on again changes nothing.
+
+PipeWire reads the layout once, when it starts. When a sink's layout
+changes, because `spec.layout` changed or a monitor with another
+layout answers, the operator writes the new declaration and the
+kubelet restarts the PipeWire container. The restart ends every
+stream on the machine, so the operator waits until no stream plays.
+`LayoutApplied` is `False` with the reason `AwaitingIdle` while it
+waits, and with the reason `Restarting` until the new PipeWire
+starts. Each change writes one `LayoutChanged` event on the `Sink`,
+which names the old layout, the new one, and the source.
+
+Two things the operator does not do:
+
+* It does not write the kernel's channel map. On HDMI the kernel
+  routes each slot by its standard allocation for the channel count,
+  so a height position such as `TFL` in `spec.layout` names a slot
+  that the kernel sends to another speaker. The kernel can route
+  front heights (CEA allocation 0x2f), but only when a program
+  writes the PCM's channel map while the device is open and stopped.
+* It does not pass a bitstream through. A receiver that plays height
+  speakers from Dolby Atmos or DTS:X needs the compressed stream,
+  and the operator sends PCM. Passthrough is a separate design.

@@ -145,8 +145,11 @@ type endpoint struct {
 // One endpoint's failure never stops another's: the failures are
 // collected and returned together, and the reconciler counts the
 // pass as failed.
+//
+// layouts is the layout state of each declared sink, keyed by device
+// name, which the reconciler composed this pass (layoutdrift.go).
 func (e *endpointControl) pass(ctx context.Context, endpoints []alsaEndpoint,
-	speakers map[string]speaker, graph pwGraph) error {
+	speakers map[string]speaker, graph pwGraph, layouts map[string]layoutState) error {
 	// The control devices stay open for the length of the pass,
 	// because the same descriptor reads a control's value and writes
 	// the declaration back to it.
@@ -155,7 +158,7 @@ func (e *endpointControl) pass(ctx context.Context, endpoints []alsaEndpoint,
 
 	var failures []error
 	present := map[string]bool{}
-	for _, reading := range e.read(cards, endpoints, speakers, graph) {
+	for _, reading := range e.read(cards, endpoints, speakers, graph, layouts) {
 		present[reading.facts.Name] = true
 		if err := e.reconcile(ctx, reading); err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", reading.facts.Name, err))
@@ -171,11 +174,11 @@ func (e *endpointControl) pass(ctx context.Context, endpoints []alsaEndpoint,
 // read gathers what one pass read about every endpoint, from the
 // card, from bluetoothd's paired set, and from the graph.
 func (e *endpointControl) read(cards map[int]*mixer, endpoints []alsaEndpoint,
-	speakers map[string]speaker, graph pwGraph) []endpoint {
+	speakers map[string]speaker, graph pwGraph, layouts map[string]layoutState) []endpoint {
 	readings := make([]endpoint, 0, len(endpoints)+len(speakers))
 	grouped := byCard(endpoints)
 	for _, card := range slices.Sorted(maps.Keys(grouped)) {
-		readings = append(readings, e.cardEndpoints(cards[card], grouped[card], graph)...)
+		readings = append(readings, e.cardEndpoints(cards[card], grouped[card], graph, layouts)...)
 	}
 	for _, address := range slices.Sorted(maps.Keys(speakers)) {
 		sink, hasSink := graph.Speakers[address]
@@ -244,7 +247,8 @@ func closeCards(cards map[int]*mixer) {
 // cardEndpoints reads one card: what it declares, what its jacks say,
 // and the value of every control that belongs to each of its
 // endpoints.
-func (e *endpointControl) cardEndpoints(device *mixer, endpoints []alsaEndpoint, graph pwGraph) []endpoint {
+func (e *endpointControl) cardEndpoints(device *mixer, endpoints []alsaEndpoint, graph pwGraph,
+	layouts map[string]layoutState) []endpoint {
 	var attached map[string][]control
 	var jacks map[string]bool
 	if device != nil {
@@ -264,6 +268,10 @@ func (e *endpointControl) cardEndpoints(device *mixer, endpoints []alsaEndpoint,
 		node, hasNode := graph.Nodes[alsa.graphAddress()]
 		controls := attached[alsa.Name()]
 		plugged, sensed := jackState(alsa.direction(), jacks)
+		var layout *layoutState
+		if state, ok := layouts[alsa.Name()]; ok {
+			layout = &state
+		}
 		readings = append(readings, endpoint{
 			card: device,
 			facts: endpointFacts{
@@ -278,6 +286,7 @@ func (e *endpointControl) cardEndpoints(device *mixer, endpoints []alsaEndpoint,
 				Plugged:   plugged,
 				Sensed:    sensed,
 				Claim:     e.holder(alsa.Name()),
+				Layout:    layout,
 			},
 		})
 	}

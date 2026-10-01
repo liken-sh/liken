@@ -79,7 +79,7 @@ func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 			control := testEndpointControl(t, api, &writeRecord{})
 			withMemos(control)
 			ctx := context.Background()
-			if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+			if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
 				t.Fatal(err)
 			}
 			if c.cached {
@@ -93,7 +93,7 @@ func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 			}
 			forget(api)
 
-			if err := control.pass(ctx, labEndpoints(), speakers, labGraph()); err != nil {
+			if err := control.pass(ctx, labEndpoints(), speakers, labGraph(), nil); err != nil {
 				t.Fatal(err)
 			}
 			if got := reads(api); got != c.want {
@@ -111,7 +111,7 @@ func TestAStatusWriteFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	ctx := context.Background()
-	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	control.cache = cacheOf(t, api)
@@ -129,7 +129,7 @@ func TestAStatusWriteFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 
 	// The capture endpoint is gone, so the sweep writes its Source's
 	// absence from the older copy.
-	if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
 	for _, held := range api.sources[testSourceName].Status.Conditions {
@@ -175,7 +175,7 @@ func forget(api *endpointAPI) {
 func staleCache(t *testing.T, api *endpointAPI, control *endpointControl) {
 	t.Helper()
 	withMemos(control)
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	delivered(t, api, control)
@@ -227,7 +227,7 @@ func TestAReconcileFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 	staleCache(t, api, control)
 	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
 
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
 	if claim := api.sinks[testAnalogName].Status.Claim; claim == nil || claim.Name != "den" {
@@ -249,7 +249,7 @@ func TestTheSweepLeavesASinkAnotherMachineTook(t *testing.T) {
 
 	// The analog endpoint is gone from this machine, so the sweep finds
 	// its Sink in the store under this machine's name.
-	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
 	if got := api.sinks[testAnalogName].Status; got.NodeName != taken.NodeName || got.Node != "node-2" {
@@ -270,7 +270,7 @@ func TestASinkDeletedSinceTheStoresCopyIsCreatedAgain(t *testing.T) {
 	api.mutex.Unlock()
 	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
 
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
 	if sink, held := api.sinks[testAnalogName]; !held || sink.Status.Node != "liken-1" {
@@ -289,12 +289,12 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	control := testEndpointControl(t, api, &writeRecord{})
 	withMemos(control)
 	ctx := context.Background()
-	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	delivered(t, api, control)
 	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
-	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if claim := api.sinks[testAnalogName].Status.Claim; claim == nil {
@@ -303,7 +303,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 
 	control.claims.released("claim-1")
 	forget(api)
-	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -337,12 +337,12 @@ func ownWriteUndelivered(t *testing.T) (*endpointAPI, *endpointControl) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	withMemos(control)
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	delivered(t, api, control)
 	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	forget(api)
@@ -356,7 +356,7 @@ func TestTheSweepReplacesACopyOlderThanItsOwnWrite(t *testing.T) {
 	api, control := ownWriteUndelivered(t)
 
 	// The analog endpoint is gone, so the sweep finds its Sink.
-	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
 
@@ -379,7 +379,7 @@ func TestTheSweepLeavesOutASinkTheAPIServerNoLongerHolds(t *testing.T) {
 	delete(api.sinks, testAnalogName)
 	api.mutex.Unlock()
 
-	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
 
@@ -408,7 +408,7 @@ func TestTheSweepReadsACopyThatDoesNotConvertFromTheAPIServer(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	withMemos(control)
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	delivered(t, api, control)
@@ -420,7 +420,7 @@ func TestTheSweepReadsACopyThatDoesNotConvertFromTheAPIServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
 

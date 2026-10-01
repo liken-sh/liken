@@ -68,7 +68,7 @@ func TestPassCreatesAResourceForEveryEndpoint(t *testing.T) {
 	control.claims.prepared("claim-1",
 		EndpointClaim{Namespace: "media", Name: "kitchen"}, []string{testSpeakerName})
 
-	if err := control.pass(context.Background(), labEndpoints(), testSpeakers(), labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,7 +107,7 @@ func TestPassWritesTheStatusOnce(t *testing.T) {
 	control := testEndpointControl(t, api, &writeRecord{})
 	ctx := context.Background()
 
-	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	writes := 0
@@ -121,7 +121,7 @@ func TestPassWritesTheStatusOnce(t *testing.T) {
 	}
 
 	api.requests = nil
-	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, request := range api.requests {
@@ -161,7 +161,7 @@ func TestAStartWritesNothingToNodesThatStand(t *testing.T) {
 	ctx := context.Background()
 
 	for range 2 {
-		if err := control.pass(ctx, labEndpoints(), testSpeakers(), turnedDownGraph()); err != nil {
+		if err := control.pass(ctx, labEndpoints(), testSpeakers(), turnedDownGraph(), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -180,7 +180,7 @@ func TestUnityIsWrittenOnceForANodeBuiltAfterTheStart(t *testing.T) {
 	ctx := context.Background()
 
 	graph := turnedDownGraph()
-	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +190,7 @@ func TestUnityIsWrittenOnceForANodeBuiltAfterTheStart(t *testing.T) {
 	rebuilt := graph.Nodes[address]
 	rebuilt.ID = 77
 	graph.Nodes[address] = rebuilt
-	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
 		t.Fatal(err)
 	}
 	if record.node == nil || record.node.ID != 77 || record.level.Volume == nil || *record.level.Volume != unityPercent {
@@ -198,7 +198,7 @@ func TestUnityIsWrittenOnceForANodeBuiltAfterTheStart(t *testing.T) {
 	}
 
 	record.node, record.level = nil, levelWrite{}
-	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
 		t.Fatal(err)
 	}
 	if record.node != nil {
@@ -217,7 +217,7 @@ func TestPassCarriesADeclaredLevel(t *testing.T) {
 		Spec:     SinkSpec{Volume: pointerTo(25), Mute: pointerTo(true)},
 	}
 
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 || record.level.Mute == nil || !*record.level.Mute {
@@ -234,10 +234,10 @@ func TestPassReportsAnEndpointThatLeft(t *testing.T) {
 	control := testEndpointControl(t, api, &writeRecord{})
 	ctx := context.Background()
 
-	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -272,7 +272,7 @@ func TestPassLeavesAnotherMachinesEndpointAlone(t *testing.T) {
 	}
 	api.sinks[elsewhere.Metadata.Name] = elsewhere
 
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := api.sinks[elsewhere.Metadata.Name].Status.NodeName; got != "liken.audio.card0-pcm3" {
@@ -303,17 +303,17 @@ func TestALaterPassOverTheSameHardwareWritesNothing(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	ctx := context.Background()
-	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	written := statusWrites(api)
 
 	// Two hours on, the sweep is due again on the backstop's clock.
 	control.now = func() time.Time { return factsTime.Add(2 * time.Hour) }
-	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := statusWrites(api); got != written {
@@ -337,7 +337,7 @@ func TestAResourceNoMachinePublishesIsReportedAbsentOnce(t *testing.T) {
 		}},
 	}
 	ctx := context.Background()
-	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	old := api.sinks[shared]
@@ -351,7 +351,7 @@ func TestAResourceNoMachinePublishesIsReportedAbsentOnce(t *testing.T) {
 	written := statusWrites(api)
 
 	control.now = func() time.Time { return factsTime.Add(2 * time.Hour) }
-	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := statusWrites(api); got != written {
@@ -391,7 +391,7 @@ func TestTheCardStaysOpenForTheLengthOfAPass(t *testing.T) {
 		t.Skip("card 0 does not open for this user")
 	}
 
-	readings := control.read(cards, endpoints, nil, pwGraph{})
+	readings := control.read(cards, endpoints, nil, pwGraph{}, nil)
 	if len(readings) != 1 || readings[0].card != device {
 		t.Fatalf("the reading carries %+v, want the open device", readings[0].card)
 	}
@@ -421,14 +421,14 @@ func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
 	quiet := graph.Nodes[address]
 	delete(graph.Nodes, address)
 	ctx := context.Background()
-	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
 		t.Fatal(err)
 	}
 	graph.Nodes[address] = quiet
 
 	// This pass reports the failed write, which is what the reconcile
 	// loop logs and carries on from.
-	if err := control.pass(ctx, labEndpoints(), nil, graph); err == nil {
+	if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err == nil {
 		t.Fatal("a failed write reported nothing")
 	}
 
@@ -436,7 +436,7 @@ func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
 		record.node, record.level = &node, level
 		return nil
 	}
-	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
 		t.Fatal(err)
 	}
 	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
@@ -470,7 +470,7 @@ func TestAStartWritesNothingToASuspendedNodeUntilTheDeclarationChanges(t *testin
 	ctx := context.Background()
 
 	for range 2 {
-		if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+		if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph(), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -479,7 +479,7 @@ func TestAStartWritesNothingToASuspendedNodeUntilTheDeclarationChanges(t *testin
 	}
 
 	api.sinks[testAnalogName].Spec.Volume = pointerTo(25)
-	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
@@ -500,10 +500,10 @@ func TestASuspendedNodeIsComparedOnceItRuns(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := control.pass(ctx, labEndpoints(), nil, turnedDownGraph()); err != nil {
+	if err := control.pass(ctx, labEndpoints(), nil, turnedDownGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
@@ -525,7 +525,7 @@ func TestARunningNodeThatMatchesTakesNoWriteWhenItGoesIdle(t *testing.T) {
 	ctx := context.Background()
 
 	for _, graph := range []pwGraph{turnedDownGraph(), suspendedGraph()} {
-		if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

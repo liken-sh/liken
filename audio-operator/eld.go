@@ -106,8 +106,12 @@ type eld struct {
 	// at the publish site.
 	LPCMMaxRateHz int
 	LPCMDepths    byte
-	Speakers      string
-	PortID        uint64
+	// Speakers names the speaker allocation for a person, and
+	// SpeakerAllocation holds the same seven bits as the block
+	// states them, which is what layout.go reads.
+	Speakers          string
+	SpeakerAllocation byte
+	PortID            uint64
 }
 
 // parseELD reads one raw block. A block that is too short, or that
@@ -139,11 +143,12 @@ func parseELD(raw []byte) (eld, error) {
 		// into the block in EDID order, so the decoding reads them
 		// big-endian. The product code is little-endian in EDID and
 		// stays that way here.
-		Manufacturer: pnpID(binary.BigEndian.Uint16(raw[16:18])),
-		Product:      binary.LittleEndian.Uint16(raw[18:20]),
-		MonitorName:  strings.TrimRight(string(raw[eldFixedBytes:eldFixedBytes+monitorNameLength]), "\x00 \t\r\n"),
-		Speakers:     speakerNames(raw[7] & 0x7f),
-		PortID:       binary.LittleEndian.Uint64(raw[8:16]),
+		Manufacturer:      pnpID(binary.BigEndian.Uint16(raw[16:18])),
+		Product:           binary.LittleEndian.Uint16(raw[18:20]),
+		MonitorName:       strings.TrimRight(string(raw[eldFixedBytes:eldFixedBytes+monitorNameLength]), "\x00 \t\r\n"),
+		Speakers:          speakerNames(raw[7] & 0x7f),
+		SpeakerAllocation: raw[7] & 0x7f,
+		PortID:            binary.LittleEndian.Uint64(raw[8:16]),
 	}
 
 	// The channel count comes from the LPCM descriptor. A monitor may

@@ -102,10 +102,10 @@ const (
 // own binary, the operator container runs with no argument, and the
 // capture container passes capture and serves the taps.
 //
-// The WirePlumber and PipeWire containers run the image once more,
-// each as its own probe: the same binary is already there, so the
-// endpoints check and the graph check need no second image and no
-// shell.
+// The WirePlumber and PipeWire containers run the image once more
+// for each of their probes: the same binary is already there, so the
+// endpoints check, the graph check, and the declaration check need no
+// second image and no shell.
 //
 // The audio-api Deployment runs the same image with the api argument,
 // so the cluster runs one binary at one version for the whole
@@ -121,6 +121,9 @@ func main() {
 			return
 		case graphMode:
 			graphProbe()
+			return
+		case declarationMode:
+			declarationProbe()
 			return
 		case captureMode:
 			capture()
@@ -175,12 +178,12 @@ func operate() {
 		fatal("reading node %s: %v", nodeName, err)
 	}
 
-	// The declaration the init container wrote, which is what PipeWire
-	// built its graph from. See nodes.go.
+	// The declaration PipeWire built its graph from: the one the init
+	// container wrote, or the one this operator wrote for a layout
+	// change before it last restarted. See nodes.go and layoutdrift.go.
 	//
-	// The operator cannot regenerate the file, because PipeWire has
-	// already read it. A missing file is an init container that did
-	// not run, so the process ends.
+	// A missing file is an init container that did not run, so the
+	// process ends.
 	declared, err := readNodeConfig()
 	if err != nil {
 		fatal("reading the declaration PipeWire loaded: %v", err)
@@ -253,7 +256,10 @@ func operate() {
 		graph:    feed.read,
 		speakers: speakers,
 		declared: declared,
-		readings: readings,
+		// The operator reads the same fact as the PipeWire container's
+		// liveness probe, to report a layout that waits for the restart.
+		declarationStale: runningStale,
+		readings:         readings,
 		// The reconcile pass fills the inventory and the DRA plugin
 		// reads it, so the two hold one object between them.
 		endpoints: &endpointInventory{},

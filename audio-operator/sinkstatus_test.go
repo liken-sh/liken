@@ -416,3 +416,56 @@ func readyCondition(met bool, message string) EndpointCondition {
 	}
 	return condition(ReadyCondition, met, reason, message, factsTime)
 }
+
+// A card's sink reports the layout the declaration holds, where it
+// came from, and whether PipeWire runs it.
+func TestSinkStatusReportsTheLayout(t *testing.T) {
+	cases := []struct {
+		name      string
+		state     layoutState
+		positions []string
+		source    string
+		condition EndpointCondition
+	}{
+		{"a layout from the ELD that PipeWire runs",
+			layoutState{Layout: channelLayout{Source: layoutFromELD, Positions: surround71Layout},
+				Applied: true, Reason: layoutReasonApplied, Message: "runs"},
+			surround71Layout, "ELD",
+			condition(LayoutAppliedCondition, true, layoutReasonApplied, "runs", factsTime)},
+		{"a layout that waits for the film to end",
+			layoutState{Layout: channelLayout{Source: layoutNone}, Reason: layoutReasonAwaitingIdle, Message: "waits"},
+			nil, "None",
+			condition(LayoutAppliedCondition, false, layoutReasonAwaitingIdle, "waits", factsTime)},
+		{"the channel map of a USB card",
+			layoutState{Layout: channelLayout{Source: layoutFromChannelMap}, Applied: true, Reason: layoutReasonApplied},
+			nil, "ChannelMap",
+			condition(LayoutAppliedCondition, true, layoutReasonApplied, "", factsTime)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			state := c.state
+			status := endpointFacts{Name: "sink", Direction: directionSink, Layout: &state}.
+				status(EndpointStatus{}, factsTime)
+			if !reflect.DeepEqual(status.Layout, c.positions) || status.LayoutSource != c.source {
+				t.Errorf("layout = %v from %q, want %v from %q", status.Layout, status.LayoutSource, c.positions, c.source)
+			}
+			if got := status.Conditions[len(status.Conditions)-1]; !reflect.DeepEqual(got, c.condition) {
+				t.Errorf("condition = %+v, want %+v", got, c.condition)
+			}
+		})
+	}
+}
+
+// A speaker and a source have no layout, so they report no layout
+// fields and no LayoutApplied condition.
+func TestAnEndpointWithNoLayoutReportsNone(t *testing.T) {
+	status := endpointFacts{Name: "speaker", Direction: directionSink}.status(EndpointStatus{}, factsTime)
+	if status.Layout != nil || status.LayoutSource != "" {
+		t.Errorf("layout = %v from %q", status.Layout, status.LayoutSource)
+	}
+	for _, reported := range status.Conditions {
+		if reported.Type == LayoutAppliedCondition {
+			t.Errorf("reported %+v", reported)
+		}
+	}
+}

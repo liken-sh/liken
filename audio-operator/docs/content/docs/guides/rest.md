@@ -1,7 +1,7 @@
 ---
 title: Set endpoint volume and controls
 weight: 40
-description: "Set endpoint volume, mute an output, close a microphone, or set a sound card control with kubectl, with no claim and no interruption to a playing pod. Use when a speaker needs a different default level or when another operator needs volume control."
+description: "Set endpoint volume, mute an output, close a microphone, set a sound card control, or state a sink's channel layout with kubectl, with no claim and no interruption to a playing pod. Use when a speaker needs a different default level, when another operator needs volume control, or when a multichannel stream plays in stereo."
 ---
 
 <a id="set-what-an-endpoint-rests-at"></a>
@@ -120,6 +120,39 @@ never makes up a value on its own:
 
     kubectl patch sink a0-ab-51-33-b7-12 --type json \
       -p '[{"op":"remove","path":"/spec/volume"}]'
+
+## 6. Set the channel layout
+
+A sink of a sound card plays a multichannel stream on its own
+channels only when PipeWire knows the position of each one. The
+operator reads the positions from an HDMI monitor's ELD and from a
+USB device's channel map. The analog jack reports no speakers, so
+its streams play in stereo until you state the layout. See which
+layout each sink has:
+
+    kubectl get sinks
+
+To play 5.1 through the analog outputs, list the positions in the
+order of the card's PCM slots:
+
+    kubectl patch sink node-1-pci-0000-00-1f-3-alc257-analog --type merge \
+      -p '{"spec":{"layout":["FL","FR","RL","RR","FC","LFE"]}}'
+
+The same field overrides a monitor or a device that reports its
+layout wrong. A new layout restarts PipeWire, and the restart ends
+every stream on the machine. So the operator waits until nothing
+plays. While it waits, the `Sink`'s `LayoutApplied` condition is
+`False` with the reason `AwaitingIdle`. Remove the field to return
+the sink to the layout its hardware reports:
+
+    kubectl patch sink node-1-pci-0000-00-1f-3-alc257-analog --type json \
+      -p '[{"op":"remove","path":"/spec/layout"}]'
+
+The operator sends PCM and does not write the kernel's channel map.
+So a height speaker plays only what a receiver makes from the other
+channels, and Dolby Atmos and DTS:X do not reach the receiver. The
+[`Sink` reference](/docs/reference/sinks/#the-channel-layout) gives
+the layouts the operator selects and the reasons.
 
 <a id="give-someone-else-the-remote"></a>
 
