@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -106,14 +107,21 @@ func (a *sqliteAgent) holdVersion(t *testing.T, actor string, version int64) {
 	}
 }
 
+// The count of the catalogs the tests have opened, which names each one.
+var sqliteCatalogs atomic.Int64
+
 // newSQLiteCatalog opens a database with the shipped schema, serves it
 // over the agent's two endpoints, and hands back the client the scanner
 // writes through.
 func newSQLiteCatalog(t *testing.T) (*Catalog, *sqliteAgent) {
 	t.Helper()
 	// One connection, because an in-memory database belongs to the
-	// connection that opened it.
-	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	// connection that opened it. The name is the test's own: with a shared
+	// cache, every connection in the process that opens one name opens one
+	// database, so two tests on the unnamed database would find each
+	// other's tables.
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:catalog-%d?mode=memory&cache=shared",
+		sqliteCatalogs.Add(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
