@@ -1,8 +1,7 @@
 # 12, Channel layouts
 
-Plan 12. Built on 2026-09-30. No drill has run on hardware yet: the
-evidence below comes from hand tests before the build, and the drill
-that is still owed is in the last section.
+Plan 12. Built on 2026-09-30. The first drill ran on 2026-10-01 on a
+home cluster; its results are at the end, with the checks still owed.
 
 Every sink the operator declares names its channel positions, so a
 multichannel stream reaches a multichannel sink with its channels
@@ -207,3 +206,33 @@ On the testbed and on a home cluster:
   channels, and removing it returns the sink to `None`.
 * A receiver turned off and on again with the same layout restarts
   nothing. A new layout while a film plays waits for the film to end.
+
+## What the drill measured
+
+On 2026-10-01, on a home cluster of nine machines and on the testbed,
+every audio-operator pod rolled out with no container restart in the
+first minutes. HDMI sinks reported their layout from the ELD, USB sinks
+`ChannelMap`, and analog sinks and unconnected HDMI ports `None`.
+
+An HDMI sink feeds a 7-channel receiver set up as 5.1.2. In standby,
+the receiver advertised a 2-channel ELD with `FL/FR`, and the sink was
+declared `FL,FR`. When the receiver turned on, its ELD advertised
+8-channel LPCM with speaker allocation `0x5f`. The operator wrote the
+new declaration, emitted one `LayoutChanged` Event, "the channel layout
+changes from FL,FR from ELD to FL,FR,RL,RR,FC,LFE,SL,SR from ELD", and
+the PipeWire and WirePlumber containers each restarted once.
+`LayoutApplied` then read `True`.
+
+During the speaker walk, mpv's 7.1 stream linked eight ports by name,
+`FL` to `FL` through `SR` to `SR`, and the receiver reported
+`MULTI CH IN`. By ear, the front left, center, front right, and
+subwoofer each played on their own speaker, and the side and back
+windows played on the surround speakers, which is what a 5.1.2 room
+does with 7.1. A film with a surround track played correctly.
+
+This receiver's ELD changes with its power, so the PipeWire on that
+machine restarts at each power change of the receiver while no stream
+plays. Still owed: a room with surround-back speakers, to confirm that
+the side and back pairs reach the speakers their names say; a
+`spec.layout` on an analog output; and a layout change that arrives
+while a film plays.
