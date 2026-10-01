@@ -340,6 +340,16 @@ needs only the catalog table.
 - **The NPU.** Meteor Lake's NPU is present, and OpenVINO supports it.
   The workstation lacked its user-space driver, so the NPU was not
   measured.
+- **Denser sampling for tighter spans.** Keyframes come about every
+  4.5 seconds, so the ledger places a person near a time, not at it.
+  Sampling 1 or 2 frames per second gives 7,000 to 14,000 frames per
+  film. On the Coral, detection at 16 ms per frame would take 2 to 4
+  minutes and little CPU time. Faces could be tracked from frame to
+  frame by the overlap of their boxes, so each track is embedded once
+  and the extra frames only extend its span. The cost is a decode of
+  every frame, 62 seconds on VA-API for this film. Not measured, and
+  not part of step 1. This is the one use found for the Coral in this
+  feature.
 - **The Coral as a claimed device.** This matters only if the Coral
   returns. `liken` publishes a USB device by its vendor and product,
   and a `DeviceClass` selects on those values. The Coral changes both
