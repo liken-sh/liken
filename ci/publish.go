@@ -64,8 +64,11 @@ type Publisher struct {
 // change to it, before a release needs it.
 //
 // A pinned component publishes its own tag in any mode, with its
-// recipe hash as a label, and never moves :latest: every consumer
-// builds on the base in the tree, so nothing follows a moving tag.
+// recipe hash as a label, and then moves :latest to it. Every consumer
+// in the repository builds on the base in the tree, so no build reads
+// :latest, but a person who pulls a base by hand reads it. Publish
+// takes only the tree's own pin, and the plan publishes a pin only
+// once, so the newest pin is the one that holds :latest.
 func (p Publisher) Publish(c *Component, version, mode string) error {
 	if c.Pinned() {
 		return p.pinned(c, version, mode)
@@ -162,7 +165,8 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 			return fmt.Errorf("pushing %s: %w", ref(image.Name, version), err)
 		}
 	}
-	if mode != publishRelease || c.Pinned() || version < NewestRelease(tags) {
+	moves := c.Pinned() || (mode == publishRelease && version >= NewestRelease(tags))
+	if dry || !moves {
 		return nil
 	}
 	for _, name := range append([]string{image.Name}, image.Aliases...) {

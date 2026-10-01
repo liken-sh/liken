@@ -140,8 +140,9 @@ label `sh.liken.recipe`, and the plan job fails when the tree's recipe
 differs from it: the recipe changed, and the revision did not. The
 `bump-components` skill holds the rule for a new revision.
 
-A pinned component never moves `:latest`. No consumer reads a
-published base: every consumer builds `FROM` the base in the tree,
+A pinned component moves `:latest` to its tag when it publishes, so a
+person who pulls a base by hand gets the current pin. No consumer
+reads a published base: every consumer builds `FROM` the base in the tree,
 through `docker-bake.hcl`, so a change to a base reaches each
 consumer at the same commit, and the consumer releases because its
 dependency's directory changed. The workstation harness in
@@ -152,8 +153,8 @@ target beside the repository's.
 
 * Each image goes to `ghcr.io/liken-sh/<image>`, under the version.
   A release also moves `:latest`, unless a newer release has it. A
-  pinned component's image goes under its own tag and leaves `:latest`
-  as it is.
+  pinned component's image goes under its own tag, and `:latest`
+  moves to that tag.
 * Each `deploy/` directory goes to
   `ghcr.io/liken-sh/<component>-deploy` as an OCI artifact, after
   every image of the component. The artifact's `kustomization.yaml`

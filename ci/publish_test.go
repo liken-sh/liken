@@ -194,7 +194,7 @@ func pinnedPublishFixture(t *testing.T, tags map[string][]string) (Publisher, *r
 	return Publisher{Root: root, Registry: registry, Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components}, rec, components
 }
 
-func TestAPinnedComponentPushesItsTagWithItsRecipeAndLeavesLatest(t *testing.T) {
+func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) {
 	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260927-1"}})
 	if err := p.Publish(components["base"], "20260928-1", publishRelease); err != nil {
 		t.Fatal(err)
@@ -209,7 +209,21 @@ func TestAPinnedComponentPushesItsTagWithItsRecipeAndLeavesLatest(t *testing.T) 
 		" --set base.labels.org.opencontainers.image.version=20260928-1" +
 		" --set base.labels.sh.liken.recipe=" + recipe +
 		" --set base.tags=ghcr.io/liken-sh/base:20260928-1 base"
-	if !reflect.DeepEqual(rec.commands, []string{want}) {
+	latest := "docker buildx imagetools create --tag ghcr.io/liken-sh/base:latest ghcr.io/liken-sh/base:20260928-1"
+	if !reflect.DeepEqual(rec.commands, []string{want, latest}) {
+		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
+	}
+}
+
+// A pin that is already published still moves :latest, so a run
+// again after a failed move sets it.
+func TestAPublishedPinStillMovesLatest(t *testing.T) {
+	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260928-1"}})
+	if err := p.Publish(components["base"], "20260928-1", publishDev); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"docker buildx imagetools create --tag ghcr.io/liken-sh/base:latest ghcr.io/liken-sh/base:20260928-1"}
+	if !reflect.DeepEqual(rec.commands, want) {
 		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
 	}
 }
