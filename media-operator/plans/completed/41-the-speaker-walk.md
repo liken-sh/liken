@@ -4,8 +4,8 @@ Built on 2026-09-30. `pattern://speakers` plays pink noise from one
 speaker of a 7.1 layout at a time and names the speaker on the screen,
 so a person can check that each speaker of a home theater is wired to
 the channel it should play. It extends the test patterns of
-[plan 40](40-test-patterns.md). The workstation check passed; no drill
-has run on `liken-1` yet.
+[plan 40](40-test-patterns.md). The walk played on `liken-1`; the
+results are at the end.
 
 ## The problem
 
@@ -72,7 +72,25 @@ subwoofer at -30.7 dBFS. The other seven channels are silent in each
 window. The file is 470 KB, and `make` writes it in under half a
 second, holding 92 MB.
 
-Still owed: on `liken-1`, `pattern://speakers` plays on `lab-portable`, whose sink
-is the panel's two speakers. A tap of the sink through `audio-api`
-shows which channels arrive at the sink and where the downmix puts
-each speaker.
+On 2026-09-30, on `liken-1`, `pattern://speakers` played on
+`lab-portable`, whose sink is the panel's two speakers. A 50-second tap
+of the sink through `audio-api` measured each window's middle three
+seconds:
+
+| Speaker | Left | Right |
+|---|---|---|
+| Front left | -25.7 dBFS | silent |
+| Center | -28.8 dBFS | -28.8 dBFS |
+| Front right | silent | -26.0 dBFS |
+| Side right | silent | -29.0 dBFS |
+| Back right | silent | -29.1 dBFS |
+| Back left | -28.8 dBFS | silent |
+| Side left | -28.7 dBFS | silent |
+| Subwoofer | -39.8 dBFS | -39.8 dBFS |
+
+The front speakers reach their own side at the file's level, the center
+reaches both sides 3 dB down, each surround reaches its own side 3 dB
+down, and the subwoofer reaches both sides about 9 dB below its level
+in the file. No speaker reached the wrong side. The tap shows the
+downmix at the sink, and does not show whether mpv or PipeWire made it.
+A run on a 7.1 sink is still owed.
