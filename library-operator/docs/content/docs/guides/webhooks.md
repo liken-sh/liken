@@ -50,11 +50,17 @@ says what the walk opens and what it keeps.
 A `Library` runs one `Job` at a time. A webhook that arrives while a
 `Job` runs waits for it, and every folder the webhooks named in the
 meantime goes into the next `Job`. So five imports during one run start
-one `Job`, not five. Trickplay and the trailer files each stop starting
-new titles fifteen minutes into a run, so a `Job` that works through a
-backlog of them ends within about fifteen minutes and one title, and the
-folders that waited go next. Past 64 distinct folders held for one
+one `Job`, not five. The trailer files stop starting new titles fifteen
+minutes into a run, so a `Job` that works through a backlog of them
+ends within about fifteen minutes and one title, and the folders that
+waited go next. Trickplay runs in a worker `Job` that holds no catalog,
+so no folder waits for a decode. Past 64 distinct folders held for one
 `Library`, the whole set collapses to a full walk.
+
+The trickplay worker sends the same request for each title folder it
+finishes, with the folder in a top-level `path` field, so the catalog
+reads the new tiles at once. The operator's log counts each one as a
+webhook that named 1 folder.
 
 ## Radarr
 

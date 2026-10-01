@@ -22,17 +22,15 @@ import (
 	"time"
 )
 
-// How long trickplay and the trailer files work in one run. One trickplay
-// title decodes for minutes, and one trailer download takes up to ten, so a
-// backlog would hold the Job for hours and a webhook's folders would wait
-// behind all of it. At the limit the phase finishes the title it has, starts
-// no other, and ends, and the rest stays as gaps for the next Job. A
-// variable, so a test reaches the limit in milliseconds.
+// How long the trailer files work in one run. One trailer download takes up
+// to ten minutes, so a backlog would hold the Job for hours and a webhook's
+// folders would wait behind all of it. At the limit the phase finishes the
+// title it has, starts no other, and ends, and the rest stays as gaps for the
+// next Job. A variable, so a test reaches the limit in milliseconds.
 var phaseTimeLimit = 15 * time.Minute
 
 // The phases whose run stops at the time limit, by container name.
 var timeLimitedPhases = map[string]bool{
-	trickplayContainerName:   true,
 	trailerFileContainerName: true,
 }
 

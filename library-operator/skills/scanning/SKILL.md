@@ -141,21 +141,21 @@ the old name, and it often gives the new file the old modified time.
 So the walk compares each video's size with the size in its
 `probe.yaml` record. A file of another size is a new file:
 
-- The walk stops counting the `probe`, `trickplay`, `episode-thumb`, and
-  `marks` attempts at that path, and it drops the file's marks from the
+- The walk stops counting the `probe`, `trickplay`, `episode-thumb`,
+  `marks`, and `appearances` attempts at that path, and it drops the file's marks from the
   catalog. The file's length and codecs are empty until the probe reads
   the new file.
 - The tile directory and the thumbnail beside the file were made from
   the earlier file, so the walk no longer counts them as this file's.
-  The `trickplay` and `art` phases make them again and replace the old
-  ones. A tile directory or a thumbnail made after the new file arrived,
-  by Jellyfin or by any other writer, is this file's, and the phases
+  The trickplay worker and the `art` phase make them again and replace
+  the old ones. A tile directory or a thumbnail made after the new file
+  arrived, by Jellyfin or by any other writer, is this file's, and both
   keep it.
 - `arrival.yaml` keeps the path's first arrival, so an upgrade does not
   put an old title back on the recently added rail.
 
-The `trickplay` and `marks` gaps open once the probe has measured the
-new file, because both phases need its length. A new modified time on a
+The `trickplay`, `marks`, and `appearances` gaps open once the probe
+has measured the new file, because the three facts need its length. A new modified time on a
 file of the same size opens only the probe.
 
 A found attempt also needs its output. When the walk finds no tile
@@ -200,9 +200,11 @@ wait with it. The next `Job` walks all of them.
 A walk `Job` is named `<library>-walk-<suffix>`. It runs the `scan`
 container beside every phase the `Library`'s sources serve: the probe,
 the arrival fact, identity, the `.nfo` facts, the art, the trailers,
-the marks, the people, trickplay, and the trailer files. All of them
-start together, and each phase works on a title as soon as the walk and
-the phases before it have written that title's rows. The
+the marks, the people, and the trailer files. All of them start
+together, and each phase works on a title as soon as the walk and the
+phases before it have written that title's rows. Trickplay and the
+appearances each run in a worker `Job` of their own after the walk
+`Job` ends. The
 [enrichment guide](https://liken.sh/library/docs/guides/enrichment/#3-what-the-phases-do)
 describes the phases. The `scan` container runs a person's own image
 when the kind's settings block names one, and it always mounts the
@@ -217,7 +219,9 @@ waits until a catalog pod confirms it. So a `Job` that completed is a
 
 Every `Job` of a `Library` runs its catalog agent on the `Library`'s one
 catalog claim, `<library>-catalog`. The operator's rule of one `Job` at
-a time is what keeps two agents off one database. On a per-node class
+a time is what keeps two agents off one database. The trickplay worker
+runs no agent and mounts no catalog claim, so it runs beside these
+`Job`s and the rule leaves it out. On a per-node class
 the claim is also `ReadWriteOncePod`, so the scheduler keeps a second
 pod of the claim `Pending` while the first one runs.
 
@@ -250,13 +254,19 @@ is due from the `Library` as it is now:
 
     kubectl -n media delete job franchises-walk-dlov5hvq2ryn
 
-Every `Job` of a `Library` has a deadline of two hours in
-`activeDeadlineSeconds`, and the time its pod stays `Pending` counts.
-The longest healthy `Job` is shorter: trickplay and the trailer files
-start no title after 15 minutes, and one trickplay title decodes for at
-most an hour. At the deadline, Kubernetes fails the `Job` with the
-reason `DeadlineExceeded`, so a `Job` whose pod never starts holds
-back the next `Job` of the `Library` for at most two hours.
+A trickplay worker holds back no other `Job`, so the `Ready` condition
+names neither a worker whose pod has not started nor a worker that
+failed. Read its pods by its worker label:
+
+    kubectl -n media get pods -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
+
+Every `Job` of a `Library` that runs a catalog agent has a deadline of
+two hours in `activeDeadlineSeconds`, and the time its pod stays
+`Pending` counts. The longest healthy `Job` is shorter: the trailer
+files start no title after 15 minutes, and one trailer file takes at
+most 20 minutes. At the deadline, Kubernetes fails the `Job` with the
+reason `DeadlineExceeded`, so a `Job` whose pod never starts holds back
+the next `Job` of the `Library` for at most two hours.
 
 A `Job` also fails when three of its pods fail, with the reason
 `BackoffLimitExceeded`. After a `Job` fails, the phase is `Failed`,

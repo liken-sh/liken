@@ -27,8 +27,6 @@ func TestACreatedJobLeavesOneLineWithItsCause(t *testing.T) {
 			want: []string{"a walk of 2 folders", "because a webhook named 2 folders"}},
 		{name: "a webhook that named no folder", report: walked, held: []string{""},
 			want: []string{"a full walk", "because a webhook asked for a full walk"}},
-		{name: "an open trickplay gap", report: &libraryReport{Runs: walked.Runs, Gaps: map[string]int{factTrickplay: 3}},
-			want: []string{"a job that fills gaps with the phases trickplay", "because gaps are open"}},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

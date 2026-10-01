@@ -4,11 +4,11 @@ package main
 // come from its own pod. The Deployment names the operator image
 // once, with a tag, and every companion image is that repository at
 // the same tag: library-operator itself for the scanner, and
-// library-operator-corrosion, library-operator-media-browser, and
-// library-operator-ffmpeg beside it. So one pin in a kustomization
-// moves every image together, and no manifest names a version twice.
-// SCANNER_IMAGE, CORROSION_IMAGE, BROWSER_IMAGE, and FFMPEG_IMAGE still
-// win when set, for a test or for a cluster whose pod names its image
+// library-operator-corrosion, library-operator-media-browser,
+// library-operator-ffmpeg, and library-operator-appearances beside it.
+// So one pin in a kustomization moves every image together, and no
+// manifest names a version twice. SCANNER_IMAGE, CORROSION_IMAGE,
+// BROWSER_IMAGE, FFMPEG_IMAGE, and APPEARANCES_IMAGE still win when set, for a test or for a cluster whose pod names its image
 // by digest, which has no tag to share.
 
 import (
@@ -29,7 +29,7 @@ const (
 	operatorContainer = "operator"
 )
 
-// The four images the operator stamps into the pods and Jobs it creates, and
+// The five images the operator stamps into the pods and Jobs it creates, and
 // the tag they share. Version feeds liken_build_info, the gauge every process
 // in the organization carries, so a cluster's dashboard shows this operator's
 // release without a second source for it. It is empty where every image
@@ -41,8 +41,11 @@ type images struct {
 	browser   string
 	// The image the two file facts run on, which carries ffprobe, ffmpeg, and
 	// the VA-API drivers.
-	ffmpeg  string
-	version string
+	ffmpeg string
+	// The image the appearances worker runs on, which carries the
+	// appearances tool, OpenVINO, and the face models beside ffmpeg.
+	appearances string
+	version     string
 }
 
 // operatorImages settles each companion image. A variable that is
@@ -52,12 +55,14 @@ type images struct {
 // image.
 func operatorImages(ctx context.Context, client *apiclient.Client, namespace string) (images, error) {
 	named := images{
-		scanner:   os.Getenv(scannerImageVariable),
-		corrosion: os.Getenv(corrosionImageVariable),
-		browser:   os.Getenv(browserImageVariable),
-		ffmpeg:    os.Getenv(ffmpegImageVariable),
+		scanner:     os.Getenv(scannerImageVariable),
+		corrosion:   os.Getenv(corrosionImageVariable),
+		browser:     os.Getenv(browserImageVariable),
+		ffmpeg:      os.Getenv(ffmpegImageVariable),
+		appearances: os.Getenv(appearancesImageVariable),
 	}
-	if named.scanner != "" && named.corrosion != "" && named.browser != "" && named.ffmpeg != "" {
+	if named.scanner != "" && named.corrosion != "" && named.browser != "" && named.ffmpeg != "" &&
+		named.appearances != "" {
 		return named, nil
 	}
 	name := os.Getenv(podNameVariable)
@@ -88,6 +93,9 @@ func operatorImages(ctx context.Context, client *apiclient.Client, namespace str
 	if named.ffmpeg != "" {
 		derived.ffmpeg = named.ffmpeg
 	}
+	if named.appearances != "" {
+		derived.appearances = named.appearances
+	}
 	return derived, nil
 }
 
@@ -113,11 +121,12 @@ func deriveImages(reference string) (images, error) {
 		return images{}, fmt.Errorf("the operator's image %q has no tag; every companion image takes the tag of this one", reference)
 	}
 	return images{
-		scanner:   reference,
-		corrosion: repository + "-corrosion:" + tag,
-		browser:   repository + "-media-browser:" + tag,
-		ffmpeg:    repository + "-ffmpeg:" + tag,
-		version:   tag,
+		scanner:     reference,
+		corrosion:   repository + "-corrosion:" + tag,
+		browser:     repository + "-media-browser:" + tag,
+		ffmpeg:      repository + "-ffmpeg:" + tag,
+		appearances: repository + "-appearances:" + tag,
+		version:     tag,
 	}, nil
 }
 

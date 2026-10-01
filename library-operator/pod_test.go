@@ -16,11 +16,12 @@ import (
 // The images the tests stamp, named once so a change to one reads in
 // one place.
 const (
-	testScannerImage   = "ghcr.io/liken-sh/library-operator:test"
-	testCorrosionImage = "ghcr.io/liken-sh/library-operator-corrosion:test"
-	testBrowserImage   = "ghcr.io/liken-sh/library-operator-media-browser:test"
-	testFFmpegImage    = "ghcr.io/liken-sh/library-operator-ffmpeg:test"
-	testBusAddress     = "bus.liken-system.svc:1883"
+	testScannerImage     = "ghcr.io/liken-sh/library-operator:test"
+	testCorrosionImage   = "ghcr.io/liken-sh/library-operator-corrosion:test"
+	testBrowserImage     = "ghcr.io/liken-sh/library-operator-media-browser:test"
+	testFFmpegImage      = "ghcr.io/liken-sh/library-operator-ffmpeg:test"
+	testAppearancesImage = "ghcr.io/liken-sh/library-operator-appearances:test"
+	testBusAddress       = "bus.liken-system.svc:1883"
 )
 
 // StudioMovies is the Library every test in this package starts from: a

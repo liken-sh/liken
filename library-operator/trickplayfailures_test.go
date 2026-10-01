@@ -9,35 +9,35 @@ import (
 	"time"
 )
 
-// what these tests read: what the trickplay fact does when the catalog, the
+// What these tests read: what the trickplay fact does when the catalog, the
 // volume, or ffmpeg's own output will not answer, and what the staging door
 // refuses.
 
-// A gap read that fails ends the container, because the list is the work.
-func TestTheTrickplayFactFailsWhereTheGapReadIsRefused(t *testing.T) {
-	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
-		NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+// A gap read that fails writes no list, because a list from part of the gap
+// would replace the whole list before it.
+func TestAWorkListIsNotWrittenWhereTheGapReadIsRefused(t *testing.T) {
+	catalog := NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second})
 
-	if err := work.trickplayFact(t.Context()); err == nil {
-		t.Error("the fact ran, want the refused read to end the container")
+	if _, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{}); err == nil {
+		t.Error("the gap read answered, want the refused read as an error")
 	}
 }
 
-// A row the gap read cannot use is no gap, so a short answer or a row with no
-// path leaves the list rather than the container.
-func TestARowTheTrickplayGapCannotUseIsNoGap(t *testing.T) {
-	body := `{"columns":["path","duration_ms"]}` + "\n" +
-		`{"row":[1,["",100]]}` + "\n" +
-		`{"row":[2,["A/a.mkv"]]}` + "\n" +
+// A row the gap read cannot use is no work, so a short answer or a row with
+// no path leaves the list.
+func TestARowTheTrickplayGapCannotUseIsNoWork(t *testing.T) {
+	body := `{"columns":["path","size_bytes","duration_ms"]}` + "\n" +
+		`{"row":[1,["",5,100]]}` + "\n" +
+		`{"row":[2,["A/a.mkv",5]]}` + "\n" +
 		`{"eoq":{"time":0.1}}` + "\n"
 
-	gaps, err := streamingServer(t, http.StatusOK, body).
-		trickplayGaps(t.Context(), trickplayLibrary, ledgerTime, time.Time{})
+	items, err := streamingServer(t, http.StatusOK, body).
+		workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gaps) != 0 {
-		t.Errorf("gaps = %+v, want neither row", gaps)
+	if len(items) != 0 {
+		t.Errorf("work list = %+v, want neither row", items)
 	}
 }
 
@@ -60,15 +60,12 @@ func TestTheTrickplayFactRecordsWhatTheVolumeRefused(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			seedTrickplayGap(t, catalog, root, 100*time.Second)
+			item := seedTrickplayItem(t, root, 100*time.Second)
 			test.setUp(t, root)
-			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+			work, _ := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-			if err := work.trickplayFact(t.Context()); err != nil {
-				t.Fatal(err)
-			}
+			work.trickplayOne(t.Context(), item)
 
 			ledger, err := readLikenLedger(filepath.Join(root, trickplayFolder), factTrickplay)
 			if err != nil {
@@ -97,15 +94,12 @@ func TestAStagingDirectoryTheVolumeCannotHoldIsAnError(t *testing.T) {
 // and the log names the write it could not make. The ledger is in that same
 // folder, so the run records nothing there either.
 func TestAFolderThatTakesNoRenameLandsNothing(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 100*time.Second)
+	item := seedTrickplayItem(t, root, 100*time.Second)
 	standInFFmpegSealing(t, filepath.Join(root, trickplayFolder))
-	work, log := testEnricher(t, libraryKindMovies, root, catalog)
+	work, log := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	work.trickplayOne(t.Context(), item)
 
 	if !strings.Contains(log.String(), "could not write") {
 		t.Errorf("log = %q, want the line that names the write it could not make", log)
@@ -120,20 +114,17 @@ func TestAFolderThatTakesNoRenameLandsNothing(t *testing.T) {
 // and the log names the step that could not be made. The ledger is in that
 // same folder, so the run records nothing there either.
 func TestAFolderThatTakesNoStagingDirectoryStopsTheFile(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 100*time.Second)
+	item := seedTrickplayItem(t, root, 100*time.Second)
 	standInFFmpeg(t, 1)
 	folder := filepath.Join(root, trickplayFolder)
 	if err := os.Chmod(folder, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
-	work, log := testEnricher(t, libraryKindMovies, root, catalog)
+	work, log := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	work.trickplayOne(t.Context(), item)
 
 	if !strings.Contains(log.String(), "could not stage the trickplay of") {
 		t.Errorf("log = %q, want the line that names the staging it could not make", log)
@@ -144,15 +135,12 @@ func TestAFolderThatTakesNoStagingDirectoryStopsTheFile(t *testing.T) {
 // tree lands with one rename or not at all, and the sheets that were written
 // go with the staging directory.
 func TestACrashBetweenTwoSheetsLandsNoTrickplayDirectory(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 100*time.Second)
+	item := seedTrickplayItem(t, root, 100*time.Second)
 	standInFFmpegFailingAfterASheet(t)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	work, _ := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	work.trickplayOne(t.Context(), item)
 
 	entries, err := os.ReadDir(filepath.Join(root, trickplayFolder))
 	if err != nil {

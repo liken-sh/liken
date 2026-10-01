@@ -314,6 +314,39 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  rust-appearances:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'rust-appearances') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: library-operator/appearances
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustup reads the toolchain pin from rust-toolchain.toml.
+      - name: install the toolchain
+        run: rustup show
+
+      # The key holds the component, so a workspace never restores
+      # another component's target directory. Only a push to main
+      # saves, so a branch never writes an entry that pushes one of
+      # main's out of the repository's 10 GB.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: library-operator/appearances
+          key: library-operator
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make test
+
   prek:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
     runs-on: ubuntu-26.04

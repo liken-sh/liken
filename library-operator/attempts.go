@@ -160,7 +160,7 @@ var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
 	factCredits, factCreditsMove,
 	factPoster, factBackdrop, factLogo, factClearart, factBanner,
 	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
-	factTrailer, factTrailerFile, factMarks}
+	factTrailer, factTrailerFile, factMarks, factAppearances}
 
 // The rows one folder's trailer ledger becomes: one per trailer the providers
 // hold, keyed on the item its own entry names.
@@ -261,7 +261,7 @@ func unixOrZero(at time.Time) int64 {
 // item fact names the title the folder holds.
 func (s likenDir) itemOf(fact, path string) string {
 	if _, art := artTypes[fact]; fact == factProbe || fact == factArrival || fact == factTrickplay ||
-		fact == factMarks || art {
+		fact == factMarks || fact == factAppearances || art {
 		return relativePath(s.root, filepath.Join(s.dir, path))
 	}
 	if path == likenSelfPath || path == "" {

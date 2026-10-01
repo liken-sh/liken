@@ -45,6 +45,9 @@ func main() {
 		case closeMode:
 			runClose()
 			return
+		case workerMode:
+			runWorker()
+			return
 		case progressMode:
 			runProgress()
 			return

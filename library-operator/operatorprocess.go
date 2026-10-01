@@ -93,8 +93,7 @@ func operate() error {
 		return err
 	}
 
-	library := newOperator(client, stamped.scanner, stamped.corrosion, stamped.browser,
-		stamped.ffmpeg, busAddress, topicBase, namespace, ":"+port)
+	library := newOperator(client, stamped, busAddress, topicBase, namespace, ":"+port)
 	library.mediaTopicBase = mediaTopicBase
 
 	// The metrics listener's address, with no default: milestone 65

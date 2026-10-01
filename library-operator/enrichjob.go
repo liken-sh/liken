@@ -5,7 +5,8 @@ package main
 // containers that start together, beside one Corrosion agent on the
 // Library's one catalog claim. The agent is the only init container, because
 // Kubernetes runs a native sidecar as an init container. A close container
-// writes the run's start, waits for every phase's mark, and hands off.
+// writes the run's start, waits for every phase's mark, writes the work list
+// of each heavy fact the Library runs, and hands off.
 //
 // The pod names every phase and the facts each runs, so a person reads the
 // Job's work with kubectl get pod, and the operator holds no order of its
@@ -72,12 +73,14 @@ func (j libraryJob) described() string {
 	return "a full walk with " + phases
 }
 
-// The images a library Job runs: the operator's own, the one with ffmpeg for
-// the phases that open a media file, and the catalog agent's.
+// The images a library Job and the worker Jobs run: the operator's own, the
+// one with ffmpeg for the phases that open a media file, the catalog agent's,
+// and the one with the face models for the appearances worker.
 type jobImages struct {
-	operator  string
-	ffmpeg    string
-	corrosion string
+	operator    string
+	ffmpeg      string
+	corrosion   string
+	appearances string
 }
 
 // The Job's name: the Library, the mode, and the creation time in base 36,
@@ -149,6 +152,9 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 	}
 	closing := enrichContainer(library, closeMode, closeMode, plan.paths, images.operator)
 	withPhaseEnv(&closing, plan, included)
+	if facts := workListFacts(library); len(facts) > 0 {
+		closing.Env = append(closing.Env, EnvVar{Name: libraryWorkListsVariable, Value: strings.Join(facts, ",")})
+	}
 	containers = append(containers, closing)
 
 	spec := PodSpec{
@@ -158,19 +164,6 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 		InitContainers:                []Container{libraryJobAgent(images.corrosion)},
 		Containers:                    containers,
 		Volumes:                       libraryJobVolumes(library, providers, included),
-	}
-	// The pod holds the render claim only where the Library names a render
-	// block and the Job runs trickplay. With none it decodes in software.
-	if library.Spec.Trickplay.Render != nil && slices.Contains(included, trickplayContainerName) {
-		spec.ResourceClaims = []PodResourceClaim{{
-			Name:                      renderRequestName,
-			ResourceClaimTemplateName: trickplayTemplateName(library.Metadata.Name),
-		}}
-		for index := range spec.Containers {
-			if spec.Containers[index].Name == trickplayContainerName {
-				spec.Containers[index].Resources.Claims = []ResourceClaim{{Name: renderRequestName}}
-			}
-		}
 	}
 	return PodTemplateSpec{
 		Metadata: ObjectMeta{Labels: withMemberLabel(workerLabels(library.Metadata.Name, plan.mode))},
@@ -240,7 +233,7 @@ func walkContainer(library *Library, paths []string, image string) Container {
 func phaseContainer(library *Library, providers providerSet, languages []string, plan libraryJob,
 	phase servedPhase, needs []string, images jobImages) Container {
 	image := images.operator
-	if phase.name == factProbe || phase.name == trickplayContainerName || phase.name == trailerFileContainerName {
+	if phase.name == factProbe || phase.name == trailerFileContainerName {
 		image = images.ffmpeg
 	}
 	container := factsContainer(library, phase.name, phase.served, plan.paths, image)
@@ -250,10 +243,6 @@ func phaseContainer(library *Library, providers providerSet, languages []string,
 	case artContainerName:
 		// The art container holds an image while it writes it.
 		container.Resources.Limits = map[string]string{"memory": artMemoryLimit}
-	case trickplayContainerName:
-		// Trickplay decodes a video, where every other container reads rows.
-		container.Resources.Requests["cpu"] = trickplayCPURequest
-		container.Resources.Limits = map[string]string{"memory": trickplayMemoryLimit}
 	case trailerFileContainerName:
 		container.Resources.Limits = map[string]string{"memory": trailersMemoryLimit}
 	case nfoContainerName:

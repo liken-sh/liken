@@ -30,9 +30,12 @@ type phaseSpec struct {
 // A phase needs another where its gap query reads a row the other writes:
 // nfo, art, and trailer ask a provider by the id identity writes, marks
 // reads the id and the length the probe measures, contributors reads the
-// people the credits fact writes, trickplay reads the length, and the trailer
-// files read the addresses the trailer fact writes. Every phase needs the
-// walk, through the phases it needs or on its own.
+// people the credits fact writes, and the trailer files read the addresses
+// the trailer fact writes. Every phase needs the walk, through the phases it
+// needs or on its own.
+//
+// The facts that decode a whole video run in worker Jobs of their own and
+// not here (factworkers.go).
 var libraryPhases = []phaseSpec{
 	{name: factProbe, needs: []string{scanPhase}, facts: always(factProbe)},
 	{name: arrivalContainerName, needs: []string{scanPhase}, facts: always(factArrival)},
@@ -42,7 +45,6 @@ var libraryPhases = []phaseSpec{
 	{name: trailerContainerName, needs: []string{factIdentity}, facts: servedFact(factTrailer)},
 	{name: marksContainerName, needs: []string{factIdentity, factProbe}, facts: servedFact(factMarks)},
 	{name: contributorsContainerName, needs: []string{nfoContainerName}, facts: servedContributorFacts},
-	{name: trickplayContainerName, needs: []string{factProbe}, facts: trickplayFacts},
 	{name: trailerFileContainerName, needs: []string{trailerContainerName}, facts: trailerFileFacts},
 }
 
@@ -68,14 +70,6 @@ func servedContributorFacts(library *Library, providers providerSet) []string {
 		return nil
 	}
 	return contributorFactNames
-}
-
-// The trickplay fact, where the Library turns it on.
-func trickplayFacts(library *Library, _ providerSet) []string {
-	if !library.Spec.Trickplay.Enabled {
-		return nil
-	}
-	return []string{factTrickplay}
 }
 
 // The trailer files, where the Library turns them on and a Ready source

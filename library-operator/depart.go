@@ -216,9 +216,11 @@ func departingStatus(library *Library, stage departure, now time.Time) LibrarySt
 // The Job of this Library that holds the departure back: a walk, or a Job
 // that fills gaps, or a Job an earlier release created. A walk writes the
 // rows the sweep deletes. Every other Job writes onto the volume and its own
-// runs row into the catalog the sweep is emptying.
+// runs row into the catalog the sweep is emptying. A heavy fact's worker
+// writes no row, so it holds nothing back, and the garbage collector takes
+// it with the Library.
 func departureBlocker(jobs []Job, report *libraryReport, namespace, library string) departure {
-	for _, job := range jobsOfLibrary(jobs, namespace, library) {
+	for _, job := range catalogJobsOf(jobs, namespace, library) {
 		worker := job.Metadata.Labels[workerLabelKey]
 		if job.finished() || worker == workerCleanup {
 			continue

@@ -1132,7 +1132,8 @@ func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := cluster.start(t)
 	operator := newOperator(apiclient.New(apiservertest.Host, server.Client(), ""),
-		testScannerImage, testCorrosionImage, testBrowserImage, testFFmpegImage,
+		images{scanner: testScannerImage, corrosion: testCorrosionImage, browser: testBrowserImage,
+			ffmpeg: testFFmpegImage, appearances: testAppearancesImage},
 		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
 	operator.watched = listReads{client: operator.client}
 	return operator

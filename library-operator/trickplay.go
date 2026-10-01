@@ -1,21 +1,21 @@
 package main
 
-// The trickplay fact's whole run: the sweep that removes the map earlier runs
-// wrote, the gap of videos with a length and no tiles beside them, the ffmpeg
-// pass over one of them, and the sheets created where none exist. The fact
-// asks no provider, because the file alone answers it, and it writes nothing
-// into the .nfo.
+// The trickplay fact: the gap of videos with a length and no tiles beside
+// them, the ffmpeg pass over one of them, and the sheets created where none
+// exist. The fact asks no provider, because the file alone answers it, and
+// it writes nothing into the .nfo. It runs in a worker Job of its own
+// (factworkers.go), because one title decodes for minutes.
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-// The name of the container that runs this fact.
-const trickplayContainerName = "trickplay"
+// The name of the container that runs this fact, which is the fact's name, as
+// every worker container's is.
+const trickplayContainerName = factTrickplay
 
 // How much memory this container may take, and the share of a core it asks
 // for. Both are above the scanner's, because ffmpeg decodes a video where
@@ -25,6 +25,24 @@ const (
 	trickplayCPURequest  = "500m"
 )
 
+// The trickplay worker. It runs where the Library turns the fact on, on the
+// image that holds ffmpeg, and it decodes on the render node its claim
+// allocates where the Library names a render block. With no render block it
+// decodes in software.
+var trickplayWorker = factWorker{
+	fact:    factTrickplay,
+	enabled: func(library *Library) bool { return library.Spec.Trickplay.Enabled },
+	image:   func(images jobImages) string { return images.ffmpeg },
+	resources: func() ResourceRequirements {
+		return ResourceRequirements{
+			Requests: map[string]string{"cpu": trickplayCPURequest, "memory": scannerMemoryRequest},
+			Limits:   map[string]string{"memory": trickplayMemoryLimit},
+		}
+	},
+	render: func(library *Library) *RenderDevice { return library.Spec.Trickplay.Render },
+	work:   func(ctx context.Context, run *factWorkerRun, item workItem) { run.trickplayOne(ctx, item) },
+}
+
 // The gap. A feature the probe gave a length to, with no trickplay directory
 // beside it in the catalog, outside the retry window. The scanner writes the
 // column from the directory it finds, so the tiles this fact writes close the
@@ -33,78 +51,15 @@ const (
 // A video whose role is not the feature is no gap, because a player reads a
 // thumbnail track while a person scrubs a title, and a trailer, an extra, a
 // sample, or a theme is not a title.
+//
+// The query selects the columns a work list carries, so the rows are the
+// worker's list as they are.
 func trickplayGapSQL() string {
-	return `SELECT path, duration_ms FROM files ` +
+	return `SELECT path, size_bytes, duration_ms FROM files ` +
 		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
 		`AND role = '` + fileRolePrimary + `' ` +
 		`AND duration_ms > 0 AND video_codec != '' ` +
 		`AND ` + gapClause(factTrickplay, "path", `trickplay = ''`)
-}
-
-// One gap: the file to open, and the length the probe wrote, which is what
-// says how many thumbnails cover it.
-type trickplayGap struct {
-	path     string
-	duration time.Duration
-}
-
-// The work list, out of the local copy of the catalog, with the same query the
-// reporter counts the gap with.
-func (c *Catalog) trickplayGaps(ctx context.Context, library string,
-	now, refresh time.Time) ([]trickplayGap, error) {
-	var gaps []trickplayGap
-	err := c.stream(ctx, gapQueries[factTrickplay], gapParams(factTrickplay, library, now, refresh),
-		func(cells []any) error {
-			if len(cells) < 2 {
-				return nil
-			}
-			path, _ := cells[0].(string)
-			if path == "" {
-				return nil
-			}
-			gaps = append(gaps, trickplayGap{
-				path:     path,
-				duration: time.Duration(cellNumber(cells[1])) * time.Millisecond,
-			})
-			return nil
-		})
-	if err != nil {
-		return nil, fmt.Errorf("reading the %s gap of %s: %w", factTrickplay, library, err)
-	}
-	return gaps, nil
-}
-
-// The whole run. A catalog read that fails ends the container, because the gap
-// list is the work. A file ffmpeg cannot read records an error attempt, and
-// the run carries on to the next file. The files run one at a time, so one
-// ffmpeg holds the container's memory line.
-func (e *enricher) trickplayFact(ctx context.Context) error {
-	if err := e.sweepTrickplayMaps(ctx); err != nil {
-		return err
-	}
-	gaps, err := e.catalog.trickplayGaps(ctx, e.library, time.Now().UTC(), e.refresh[factTrickplay])
-	if err != nil {
-		return err
-	}
-	written := 0
-	for _, gap := range gaps {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !e.inScope(gap.path) {
-			continue
-		}
-		// Past the phase's time limit the run starts no other file, and the
-		// rest stays as the gap of the next Job.
-		if !e.mayStartTitle() {
-			break
-		}
-		if e.trickplayOne(ctx, gap) {
-			written++
-		}
-	}
-	e.logf("wrote the trickplay of %d of the %d files that had none", written, len(gaps))
-	return nil
 }
 
 // One file. The volume is read before ffmpeg runs, because a directory that
@@ -113,38 +68,38 @@ func (e *enricher) trickplayFact(ctx context.Context) error {
 //
 // A directory older than the second a new file took this path is the
 // exception. Jellyfin writes its tiles after it reads a file, and so does
-// this phase, so a directory made at or after that second was made from the
-// file that is here now, whoever made it, and the phase keeps it. A directory
-// made before it was made from the earlier file, and its thumbnails sit at
-// that encode's times, so the phase decodes this file and replaces the whole
-// directory.
-func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
-	absolute := filepath.Join(e.root, gap.path)
-	folder, entry := likenFolderFor(e.kind, absolute)
+// this worker, so a directory made at or after that second was made from the
+// file that is here now, whoever made it, and the worker keeps it. A
+// directory made before it was made from the earlier file, and its thumbnails
+// sit at that encode's times, so the worker decodes this file and replaces the
+// whole directory.
+func (w *factWorkerRun) trickplayOne(ctx context.Context, gap workItem) bool {
+	absolute := filepath.Join(w.root, gap.Path)
+	folder, entry := likenFolderFor(w.kind, absolute)
 	target := trickplayDirectory(absolute)
-	earlier, err := earlierFileAt(e.kind, absolute)
+	earlier, err := earlierFileAt(w.kind, absolute)
 	if err != nil {
-		e.logf("could not read the probe record of %s: %v", e.named(absolute), err)
-		e.recordArt(folder, factTrickplay, entry, "", attemptError)
+		w.logf("could not read the probe record of %s: %v", w.named(absolute), err)
+		w.record(folder, entry, "", attemptError)
 		return false
 	}
 	replacing := madeBefore(target, earlier)
 	if dirExists(target) && !replacing {
-		if e.dropTrickplayMap(filepath.Join(target, trickplayTilesFolder())) {
-			e.logf("removed the trickplay map beside the sheets of %s", e.named(absolute))
+		if w.dropTrickplayMap(filepath.Join(target, trickplayTilesFolder())) {
+			w.logf("removed the trickplay map beside the sheets of %s", w.named(absolute))
 		}
-		e.recordArt(folder, factTrickplay, entry, artProviderExisting, attemptFound)
+		w.record(folder, entry, artProviderExisting, attemptFound)
 		return false
 	}
 	if replacing {
-		e.logf("replacing the trickplay of %s, which was made from the file its path held before", e.named(absolute))
+		w.logf("replacing the trickplay of %s, which was made from the file its path held before", w.named(absolute))
 	}
 	// The line goes out before the decode, because a decode of a feature
 	// runs for minutes with nothing else to say, and it names the decoder,
 	// because nothing else in the log says whether the GPU took the work.
-	e.logf("tiling %s, %s long, %s", e.named(absolute), gap.duration.Round(time.Second), decoderName())
-	result := e.buildTrickplay(ctx, absolute, target, earlier)
-	e.recordArt(folder, factTrickplay, entry, "", result)
+	w.logf("tiling %s, %s long, %s", w.named(absolute), gap.duration().Round(time.Second), decoderName())
+	result := w.buildTrickplay(ctx, absolute, target, earlier)
+	w.record(folder, entry, "", result)
 	return result == attemptFound
 }
 
@@ -155,29 +110,29 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 // the run that follows it clears that staging first. The landing takes the
 // place of a directory older than earlier, the tiles of the file the path
 // held before, and keeps any other.
-func (e *enricher) buildTrickplay(ctx context.Context, input, target string, earlier int64) string {
-	staging, err := e.writer.stageTree(target)
+func (w *factWorkerRun) buildTrickplay(ctx context.Context, input, target string, earlier int64) string {
+	staging, err := w.writer.stageTree(target)
 	if err != nil {
-		e.logf("could not stage the trickplay of %s: %v", e.named(input), err)
+		w.logf("could not stage the trickplay of %s: %v", w.named(input), err)
 		return attemptError
 	}
 	defer func() {
-		if err := e.writer.removeTemporaryTree(staging); err != nil {
-			e.logf("could not clear %s: %v", e.named(staging), err)
+		if err := w.writer.removeTemporaryTree(staging); err != nil {
+			w.logf("could not clear %s: %v", w.named(staging), err)
 		}
 	}()
 
-	sheets, result := e.stageTrickplay(ctx, input, staging)
+	sheets, result := w.stageTrickplay(ctx, input, staging)
 	if result != attemptFound {
 		return result
 	}
-	landed, err := e.writer.replaceEarlierTree(target, earlier)
+	landed, err := w.writer.replaceEarlierTree(target, earlier)
 	if err != nil {
-		e.logf("could not write %s: %v", e.named(target), err)
+		w.logf("could not write %s: %v", w.named(target), err)
 		return attemptError
 	}
 	if landed {
-		e.logf("wrote %d trickplay sheets under %s", sheets, e.named(target))
+		w.logf("wrote %d trickplay sheets under %s", sheets, w.named(target))
 	}
 	return attemptFound
 }
@@ -186,10 +141,10 @@ func (e *enricher) buildTrickplay(ctx context.Context, input, target string, ear
 // its sheets straight into the folder that states the width and the grid, so
 // no sheet is ever read back to be written again, and nothing else goes in
 // the folder: a player reads the geometry off the folder's name.
-func (e *enricher) stageTrickplay(ctx context.Context, input, staging string) (int, string) {
+func (w *factWorkerRun) stageTrickplay(ctx context.Context, input, staging string) (int, string) {
 	tiles := filepath.Join(staging, trickplayTilesFolder())
 	if err := os.MkdirAll(tiles, volumeDirectoryPerm); err != nil {
-		e.logf("could not stage the trickplay of %s: %v", e.named(input), err)
+		w.logf("could not stage the trickplay of %s: %v", w.named(input), err)
 		return 0, attemptError
 	}
 	// A decode ffmpeg refuses is the file's own state, and not a fault of
@@ -197,7 +152,7 @@ func (e *enricher) stageTrickplay(ctx context.Context, input, staging string) (i
 	// that will not decode today will not decode tomorrow. A run a signal
 	// ended is an error, and the error window applies.
 	if err := ffmpegSheets(ctx, input, tiles); err != nil {
-		e.logf("could not tile %s: %v", e.named(input), err)
+		w.logf("could not tile %s: %v", w.named(input), err)
 		if ffmpegRefused(err) {
 			return 0, attemptNothing
 		}
@@ -205,68 +160,27 @@ func (e *enricher) stageTrickplay(ctx context.Context, input, staging string) (i
 	}
 	sheets, err := sheetsIn(tiles)
 	if err != nil {
-		e.logf("could not read the sheets of %s: %v", e.named(input), err)
+		w.logf("could not read the sheets of %s: %v", w.named(input), err)
 		return 0, attemptError
 	}
 	if len(sheets) == 0 {
-		e.logf("ffmpeg read no frame of %s", e.named(input))
+		w.logf("ffmpeg read no frame of %s", w.named(input))
 		return 0, attemptNothing
 	}
 	return len(sheets), attemptFound
 }
 
-// The tiled videos of one library. The scanner writes the directory it found
-// beside a video into the row, so the column names every video that has one,
-// whoever made it.
-func trickplayTiledSQL() string {
-	return `SELECT path, trickplay FROM files ` +
-		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
-		`AND trickplay != ''`
-}
-
-// The sweep. Earlier runs of this fact wrote a WebVTT map beside the sheets,
-// which no player reads and which Jellyfin counts as a thumbnail. The gap
-// never reaches a tiled video, because a video with a directory is no gap, so
-// the sweep reads the tiled videos on its own and removes the map under each.
-// One stat per tiled video, and no decode.
-func (e *enricher) sweepTrickplayMaps(ctx context.Context) error {
-	tiled, removed := 0, 0
-	err := e.catalog.stream(ctx, trickplayTiledSQL(), []any{e.library}, func(cells []any) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if len(cells) < 2 {
-			return nil
-		}
-		path, _ := cells[0].(string)
-		directory, _ := cells[1].(string)
-		if directory == "" || !e.inScope(path) {
-			return nil
-		}
-		tiled++
-		if e.dropTrickplayMap(filepath.Join(e.root, directory, trickplayTilesFolder())) {
-			removed++
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("reading the tiled files of %s: %w", e.library, err)
-	}
-	e.logf("removed the trickplay map of %d of the %d files that carry tiles", removed, tiled)
-	return nil
-}
-
 // The map of one layout folder, removed where it exists. A removal the volume
 // refuses is logged and changes no attempt, because the sheets beside it are
 // still the answer.
-func (e *enricher) dropTrickplayMap(layout string) bool {
+func (w *factWorkerRun) dropTrickplayMap(layout string) bool {
 	path := filepath.Join(layout, trickplayMapName)
 	present, _ := fileExists(path)
 	if !present {
 		return false
 	}
-	if err := e.writer.removeTrickplayMap(path); err != nil {
-		e.logf("could not remove %s: %v", e.named(path), err)
+	if err := w.writer.removeTrickplayMap(path); err != nil {
+		w.logf("could not remove %s: %v", w.named(path), err)
 		return false
 	}
 	return true

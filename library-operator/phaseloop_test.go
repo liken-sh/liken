@@ -157,17 +157,17 @@ func TestAPhaseEndsAtItsTimeLimit(t *testing.T) {
 	t.Cleanup(func() { phaseTimeLimit = was })
 	phaseTimeLimit = 50 * time.Millisecond
 	catalog, _ := newSQLiteCatalog(t)
-	work := phaseOf(t, catalog, trickplayContainerName, factProbe)
+	work := phaseOf(t, catalog, trailerFileContainerName, factProbe)
 	probe := newPhaseBoard(work.board.dir)
 	if err := probe.start(factProbe); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := work.runFacts(t.Context(), []string{factTrickplay}); err != nil {
+	if err := work.runFacts(t.Context(), []string{factTrailerFile}); err != nil {
 		t.Fatal(err)
 	}
 
-	if !work.board.ended(trickplayContainerName).ended {
+	if !work.board.ended(trailerFileContainerName).ended {
 		t.Error("the phase ended at its limit with no mark")
 	}
 }

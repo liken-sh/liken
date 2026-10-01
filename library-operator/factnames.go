@@ -48,6 +48,12 @@ const (
 	// out of spec.refresh, and served by no provider.
 	factTrailerFile = "trailerfile"
 
+	// The appearances fact names the credited people on screen at each
+	// keyframe of a feature. It runs in a worker Job of its own and asks no
+	// provider, so it is out of factVocabulary and out of spec.refresh, as
+	// trailerfile is.
+	factAppearances = "appearances"
+
 	factContributorIDs       = "contributor.ids"
 	factContributorBiography = "contributor.biography"
 	factContributorHeadshot  = "contributor.headshot"

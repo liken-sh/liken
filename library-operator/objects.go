@@ -334,8 +334,8 @@ type PodSpec struct {
 	Volumes        []Volume    `json:"volumes,omitempty"`
 	// The claims the pod holds, under the names its containers ask for
 	// them by. A screen pod names the display claim media-operator stood for
-	// its Player, and a library Job that runs trickplay names the
-	// template the operator keeps for its Library's render node.
+	// its Player, and a trickplay worker names the template the operator
+	// keeps for its Library's render node.
 	ResourceClaims []PodResourceClaim `json:"resourceClaims,omitempty"`
 	// The scheduling rules the pod carries. The durable copies of a store
 	// are the only pods this operator gives any.

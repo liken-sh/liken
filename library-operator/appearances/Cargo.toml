@@ -1,0 +1,38 @@
+[package]
+name = "appearances"
+version = "0.1.0"
+edition = "2024"
+
+# The crate is a library with one binary over it, so the decoder, the
+# alignment, and the spans have unit tests that load no model.
+[lib]
+name = "appearances"
+path = "src/lib.rs"
+
+[[bin]]
+name = "appearances"
+path = "src/main.rs"
+
+# Every version is exact, so a build from this manifest resolves the same
+# crates the lock file names.
+[dependencies]
+# runtime-linking opens libopenvino_c.so when the program starts, not when
+# it links. The build needs no OpenVINO installation, and the binary links
+# only the C library, so the OpenVINO libraries stay in the image that runs
+# the fact and out of every other image.
+openvino = { version = "=0.11.0", features = ["runtime-linking"] }
+# The detections record stores each embedding as 16-bit floats, half the
+# size of 32-bit floats, and the GPU computes in 16 bits anyway.
+half = "=2.7.1"
+base64 = "=0.22.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+# The credits fact writes .liken/credits.yaml, which names the cast that
+# match compares faces with. review also writes its spans as YAML.
+serde_yaml_ng = "=0.10.0"
+# The headshots in .contributors/ are JPEG and PNG.
+image = { version = "=0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+] }
+sha2 = "=0.10.9"

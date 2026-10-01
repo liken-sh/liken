@@ -39,6 +39,17 @@ env = { CARGO_INCREMENTAL = "0", WLR_RENDERER = "pixman" }
 apt = ["cage", "wlr-randr", "mesa-vulkan-drivers", "libvulkan1", "libwayland-client0", "libxkbcommon0"]
 coverage = ["coverage-media-browser.xml"]
 
+# `appearances`, the tool that finds the credited people on screen. Its
+# unit tests load no model, so the job needs no OpenVINO and no GPU.
+# The crate has no coverage floor yet.
+[[jobs]]
+name = "rust-appearances"
+toolchain = "rust"
+dir = "appearances"
+run = "make test"
+timeout = 30
+env = { CARGO_INCREMENTAL = "0" }
+
 # The hooks in .pre-commit-config.yaml: the formatters, the linters,
 # and the hygiene checks. The jobs above run the tests and the
 # coverage gates.
@@ -72,6 +83,16 @@ context = "media-browser"
 file = "media-browser/Dockerfile"
 contexts = { brand = "brand", media-screen = "media-screen" }
 smoke = "library-operator/smoke/library-operator-media-browser.sh"
+
+# The image of `appearances` builds on the ffmpeg base and pulls the face
+# models as an OCI artifact by digest. It carries the pod program beside
+# the tool, so it builds from this module's Go files like the ffmpeg
+# image, and takes the crate's directory as a named context.
+[[outputs.images]]
+name = "library-operator-appearances"
+file = "Dockerfile.appearances"
+contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances" }
+smoke = "library-operator/smoke/library-operator-appearances.sh"
 
 [[outputs.images]]
 name = "library-operator-corrosion"

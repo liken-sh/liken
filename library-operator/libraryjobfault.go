@@ -52,9 +52,11 @@ func (f *jobFault) message() string {
 // libraryJobFault reads the Jobs and pods one pass listed, and the runs the
 // reporter published, for the fault of one Library's Jobs, or nil. A Job that
 // has not started comes first, because it is the Job that holds the gate now.
+// A heavy fact's worker holds no gate and writes no runs row, so a later run
+// cannot answer its failure, and it is left out.
 func libraryJobFault(jobs []Job, pods []Pod, runs []libraryRun, namespace, library string,
 	now time.Time) *jobFault {
-	held := jobsOfLibrary(jobs, namespace, library)
+	held := catalogJobsOf(jobs, namespace, library)
 	for index := range held {
 		if fault := notStarted(&held[index], pods, now); fault != nil {
 			return fault

@@ -11,7 +11,7 @@ import (
 func libraryWithRender(class, selector string) *Library {
 	library := studioMovies()
 	library.Spec.Trickplay.Enabled = true
-	library.Spec.Trickplay.Render = &TrickplayDevice{Class: class, Selector: selector}
+	library.Spec.Trickplay.Render = &RenderDevice{Class: class, Selector: selector}
 	return library
 }
 
@@ -30,7 +30,7 @@ func TestTheRenderTemplateAsksForOneDeviceOfTheClass(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			template := buildTrickplayTemplate(libraryWithRender("gpu.liken.sh", test.selector))
+			template := buildRenderTemplate(libraryWithRender("gpu.liken.sh", test.selector), trickplayWorker)
 
 			if template.Metadata.Name != "movies-trickplay" || template.Metadata.Namespace != "house" {
 				t.Errorf("the template is %s/%s, want house/movies-trickplay",
@@ -61,7 +61,7 @@ func TestTheRenderTemplateAsksForOneDeviceOfTheClass(t *testing.T) {
 func TestTheRenderTemplateIsOwnedByTheLibrary(t *testing.T) {
 	library := libraryWithRender("gpu.liken.sh", "")
 
-	template := buildTrickplayTemplate(library)
+	template := buildRenderTemplate(library, trickplayWorker)
 
 	want := []OwnerReference{libraryOwner(library)}
 	if len(template.Metadata.OwnerReferences) != 1 || template.Metadata.OwnerReferences[0] != want[0] {
@@ -76,7 +76,7 @@ func TestTheRenderTemplateFollowsTheRenderBlock(t *testing.T) {
 	boundHouse(cluster)
 	operator := testOperator(t, cluster)
 
-	if err := operator.standTrickplayTemplate(t.Context(), libraryWithRender("gpu.liken.sh", "")); err != nil {
+	if err := operator.standRenderTemplate(t.Context(), libraryWithRender("gpu.liken.sh", ""), trickplayWorker); err != nil {
 		t.Fatal(err)
 	}
 	stood := cluster.heldClaimTemplate("house", "movies-trickplay")
@@ -84,7 +84,7 @@ func TestTheRenderTemplateFollowsTheRenderBlock(t *testing.T) {
 		t.Fatal("the pass stood no template")
 	}
 
-	if err := operator.standTrickplayTemplate(t.Context(), libraryWithRender("intel.liken.sh", "")); err != nil {
+	if err := operator.standRenderTemplate(t.Context(), libraryWithRender("intel.liken.sh", ""), trickplayWorker); err != nil {
 		t.Fatal(err)
 	}
 	rewritten := cluster.heldClaimTemplate("house", "movies-trickplay")
@@ -92,7 +92,7 @@ func TestTheRenderTemplateFollowsTheRenderBlock(t *testing.T) {
 		t.Errorf("the template holds %+v, want the class the Library now names", rewritten)
 	}
 
-	if err := operator.standTrickplayTemplate(t.Context(), studioMovies()); err != nil {
+	if err := operator.standRenderTemplate(t.Context(), studioMovies(), trickplayWorker); err != nil {
 		t.Fatal(err)
 	}
 	if left := cluster.heldClaimTemplate("house", "movies-trickplay"); left != nil {
@@ -106,7 +106,7 @@ func TestALibraryWithNoRenderBlockWritesNoTemplate(t *testing.T) {
 	boundHouse(cluster)
 	operator := testOperator(t, cluster)
 
-	if err := operator.standTrickplayTemplate(t.Context(), studioMovies()); err != nil {
+	if err := operator.standRenderTemplate(t.Context(), studioMovies(), trickplayWorker); err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,12 +126,37 @@ func TestATemplateStoodAgainIsDeleted(t *testing.T) {
 	operator := testOperator(t, cluster)
 
 	for _, library := range []*Library{studioMovies(), libraryWithRender("gpu.liken.sh", ""), studioMovies()} {
-		if err := operator.standTrickplayTemplate(t.Context(), library); err != nil {
+		if err := operator.standRenderTemplate(t.Context(), library, trickplayWorker); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	if left := cluster.heldClaimTemplate("house", "movies-trickplay"); left != nil {
 		t.Errorf("the template stands at %+v, want it gone with the render block", left)
+	}
+}
+
+// Each worker that names a render node keeps a template of its own, so the
+// Library drops one claim and keeps the other.
+func TestEachWorkerKeepsItsOwnRenderTemplate(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	operator := testOperator(t, cluster)
+	library := libraryWithRender("gpu.liken.sh", "")
+	library.Spec.Appearances = LibraryAppearances{Enabled: true, Render: &RenderDevice{Class: "gpu.liken.sh"}}
+
+	if err := operator.standRenderTemplates(t.Context(), library); err != nil {
+		t.Fatal(err)
+	}
+	library.Spec.Appearances.Render = nil
+	if err := operator.standRenderTemplates(t.Context(), library); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldClaimTemplate("house", "movies-trickplay") == nil {
+		t.Error("the trickplay template is gone, want it kept with its render block")
+	}
+	if left := cluster.heldClaimTemplate("house", "movies-appearances"); left != nil {
+		t.Errorf("the appearances template stands at %+v, want it gone with its render block", left)
 	}
 }

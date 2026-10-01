@@ -315,6 +315,8 @@ var gapQueries = map[string]string{
 	factTrailerFile: trailerFileGapQuery(),
 	// A main video of an identified work, asked again once its window passes.
 	factMarks: marksGapQuery(),
+	// A feature with a length whose cast has a headshot, and no answer yet.
+	factAppearances: appearancesGapSQL(),
 
 	factContributorIDs:       contributorIDsGapSQL(),
 	factContributorBiography: contributorFileGapSQL(factContributorBiography, "biography"),

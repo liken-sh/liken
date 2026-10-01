@@ -2,17 +2,18 @@
 # and cli/, and nothing else. Everything below is documentation, plans,
 # manifests, test data, smoke scripts, generated skills, a workstation's
 # build output, or the source of an image with its own context (the
-# media browser's Rust tree and Corrosion). Sending any of it to the
-# daemon costs the build time and no Go build reads it. A change to any
-# of it must not rebuild the Go images, and CI selects images by what
-# this file leaves in. The cargo target directory is the large one,
-# gigabytes on a workstation.
+# media browser's Rust tree, `appearances`, and Corrosion). Sending any
+# of it to the daemon costs the build time and no Go build reads it. A
+# change to any of it must not rebuild the Go images, and CI selects
+# images by what this file leaves in. The cargo target directory is the
+# large one, gigabytes on a workstation.
 deploy
 docs
 plans
 testdata
 local
 media-browser
+appearances
 corrosion
 skills
 smoke

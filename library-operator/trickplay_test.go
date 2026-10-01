@@ -111,22 +111,14 @@ func standInFFmpegTakingItsOutput(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// seedTrickplayGap seeds one movie with one video file that carries a length
-// and no trickplay directory, which is the shape of a trickplay gap.
-func seedTrickplayGap(t *testing.T, catalog *Catalog, root string, duration time.Duration) {
+// seedTrickplayItem writes one movie's video onto the volume and returns the
+// line a work list holds for it: a feature with a length and no tiles, which
+// is the shape of a trickplay gap.
+func seedTrickplayItem(t *testing.T, root string, duration time.Duration) workItem {
 	t.Helper()
 	writeFile(t, filepath.Join(root, trickplayFolder, trickplayFile), "video")
-	seed := &walkResult{
-		movies: []movieRow{{Id: "movie:path:x", Library: trickplayLibrary, Kind: libraryKindMovies,
-			Path: trickplayFolder, Title: trickplayFolder}},
-		files: []fileRow{{Path: filepath.Join(trickplayFolder, trickplayFile), Library: trickplayLibrary,
-			Present: true, Type: fileTypeVideo, Role: fileRolePrimary,
-			DurationMs: duration.Milliseconds(), VideoCodec: "h264",
-			Items: []string{"movie:path:x"}}},
-	}
-	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
-		t.Fatal(err)
-	}
+	return workItem{Path: filepath.Join(trickplayFolder, trickplayFile), Size: int64(len("video")),
+		DurationMs: duration.Milliseconds(), Listed: time.Now().UTC()}
 }
 
 // The folder the sheets land in for the file above.
@@ -144,7 +136,7 @@ func TestTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{files: []fileRow{
 		{Path: "A/a.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264",
-			Role: fileRolePrimary},
+			Role: fileRolePrimary, SizeBytes: 4096},
 		{Path: "B/b.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, Role: fileRolePrimary},
 		{Path: "C/c.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 100, VideoCodec: "h264",
 			Trickplay: "C/c.trickplay", Role: fileRolePrimary},
@@ -156,20 +148,18 @@ func TestTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gaps, err := catalog.trickplayGaps(t.Context(), trickplayLibrary, ledgerTime, time.Time{})
+	items, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gaps) != 1 || gaps[0].path != "A/a.mkv" {
-		t.Fatalf("gaps = %+v, want the one video with a length and no tiles", gaps)
-	}
-	if gaps[0].duration != 6540*time.Second {
-		t.Errorf("duration = %s, want the length the probe wrote", gaps[0].duration)
+	want := workItem{Path: "A/a.mkv", Size: 4096, DurationMs: 6540000, Listed: ledgerTime}
+	if len(items) != 1 || items[0] != want {
+		t.Fatalf("work list = %+v, want the one video with a length and no tiles, as %+v", items, want)
 	}
 }
 
 // An attempt inside the retry window takes the file out of the gap, and the
-// count the reporter reads is the same one the container works from.
+// count the reporter reads is the same one the work list is written from.
 func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
@@ -205,22 +195,24 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 
 // The whole run over one title: the sheets under Jellyfin's own folder name,
 // nothing else in that folder, and no staging directory left on the volume.
-func TestTheTrickplayFactWritesSheetsBesideTheVideo(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
+func TestTheTrickplayWorkerWritesSheetsBesideTheVideo(t *testing.T) {
 	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 1050*time.Second)
+	item := seedTrickplayItem(t, root, 1050*time.Second)
+	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, []workItem{item}); err != nil {
+		t.Fatal(err)
+	}
 	standInFFmpeg(t, 2)
-	work, log := testEnricher(t, libraryKindMovies, root, catalog)
+	work, log := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-	if err := work.trickplayFact(t.Context()); err != nil {
+	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
 	if left := namesIn(t, trickplayTilesUnder(root)); !slices.Equal(left, []string{"0.jpg", "1.jpg"}) {
 		t.Errorf("the tiles folder holds %v, want the sheets alone", left)
 	}
-	if !strings.Contains(log.String(), "wrote the trickplay of 1 of the 1 files") {
-		t.Errorf("log = %q, want the count of the files it filled", log)
+	if !strings.Contains(log.String(), "wrote 2 trickplay sheets") {
+		t.Errorf("log = %q, want the count of the sheets it wrote", log)
 	}
 	entries, err := os.ReadDir(filepath.Join(root, trickplayFolder))
 	if err != nil {
@@ -235,18 +227,15 @@ func TestTheTrickplayFactWritesSheetsBesideTheVideo(t *testing.T) {
 
 // A directory another tool wrote is never opened. The fact records that the
 // tiles are there and leaves every byte of them.
-func TestTheTrickplayFactLeavesTilesAnotherToolWrote(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
+func TestTheTrickplayWorkerLeavesTilesAnotherToolWrote(t *testing.T) {
 	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 1050*time.Second)
+	item := seedTrickplayItem(t, root, 1050*time.Second)
 	held := filepath.Join(trickplayTilesUnder(root), "0.jpg")
 	writeFile(t, held, "the sheet another tool wrote")
 	standInFFmpeg(t, 2)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	work, _ := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	work.trickplayOne(t.Context(), item)
 
 	if got := readFileString(t, held); got != "the sheet another tool wrote" {
 		t.Errorf("the sheet reads %q, want the bytes the other tool left", got)
@@ -277,15 +266,12 @@ func TestWhatOneTrickplayAttemptRecords(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			seedTrickplayGap(t, catalog, root, 100*time.Second)
+			item := seedTrickplayItem(t, root, 100*time.Second)
 			standInFFmpeg(t, test.sheets)
-			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+			work, _ := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-			if err := work.trickplayFact(t.Context()); err != nil {
-				t.Fatal(err)
-			}
+			work.trickplayOne(t.Context(), item)
 
 			ledger, err := readLikenLedger(filepath.Join(root, trickplayFolder), factTrickplay)
 			if err != nil {
@@ -301,19 +287,16 @@ func TestWhatOneTrickplayAttemptRecords(t *testing.T) {
 	}
 }
 
-// The tiles a walk already found close the gap without a decode, and the
-// ledger says the file has them.
+// Tiles that landed after the list was written close the gap without a
+// decode, and the ledger says the file has them.
 func TestATrickplayDirectoryOnTheVolumeCostsNoDecode(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 100*time.Second)
+	item := seedTrickplayItem(t, root, 100*time.Second)
 	writeFile(t, filepath.Join(trickplayTilesUnder(root), "0.jpg"), "sheet")
 	standInFFmpeg(t, -1)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	work, _ := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	work.trickplayOne(t.Context(), item)
 
 	ledger, err := readLikenLedger(filepath.Join(root, trickplayFolder), factTrickplay)
 	if err != nil {
@@ -324,39 +307,18 @@ func TestATrickplayDirectoryOnTheVolumeCostsNoDecode(t *testing.T) {
 	}
 }
 
-// A narrowed Job works its own folder alone, the rule every fact holds.
-func TestTheTrickplayFactWorksOnlyItsOwnScope(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 100*time.Second)
-	standInFFmpeg(t, 1)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scopes = []string{"Another Folder"}
-
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	if fileExistsInTest(t, filepath.Join(trickplayTilesUnder(root), "0.jpg")) {
-		t.Error("the fact wrote tiles for a folder outside its scope")
-	}
-}
-
 // The staging directory a crashed run left behind is cleared before ffmpeg
 // writes, so no sheet of that run becomes a tile of this one.
 func TestAStrayStagingDirectoryDoesNotBecomeTiles(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 100*time.Second)
+	item := seedTrickplayItem(t, root, 100*time.Second)
 	video := filepath.Join(root, trickplayFolder, trickplayFile)
-	staging := newVolumeWriter("movies-enrich").temporary(trickplayDirectory(video))
+	staging := newVolumeWriter("movies-trickplay").temporary(trickplayDirectory(video))
 	writeFile(t, filepath.Join(staging, trickplayTilesFolder(), "9.jpg"), "a sheet of the run that failed")
 	standInFFmpeg(t, 1)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	work, _ := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
 
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	work.trickplayOne(t.Context(), item)
 
 	tiles := trickplayTilesUnder(root)
 	if fileExistsInTest(t, filepath.Join(tiles, "9.jpg")) {
@@ -364,24 +326,5 @@ func TestAStrayStagingDirectoryDoesNotBecomeTiles(t *testing.T) {
 	}
 	if !fileExistsInTest(t, filepath.Join(tiles, "0.jpg")) {
 		t.Error("this run's own sheet is not beside the video")
-	}
-}
-
-// Past the phase's time limit the fact starts no other file, and the file
-// stays in the gap of the next Job.
-func TestTheTrickplayFactStartsNoFilePastItsTimeLimit(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 100*time.Second)
-	standInFFmpeg(t, 1)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.stopStarting = time.Now().Add(-time.Second)
-
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	if fileExistsInTest(t, filepath.Join(trickplayTilesUnder(root), "0.jpg")) {
-		t.Error("the fact started a file past its time limit")
 	}
 }

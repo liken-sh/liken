@@ -62,6 +62,7 @@ group "default" {
     "library-operator",
     "library-operator-ffmpeg",
     "library-operator-media-browser",
+    "library-operator-appearances",
     "library-operator-corrosion",
     "library-operator-cli",
     "mpv",
@@ -376,6 +377,23 @@ target "library-operator-media-browser" {
   tags       = ["ghcr.io/liken-sh/library-operator-media-browser:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache"]
   cache-to   = CACHE_WRITE == "library-operator-media-browser" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "library-operator-appearances" {
+  context    = "library-operator"
+  dockerfile = "Dockerfile.appearances"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "appearances" = "library-operator/appearances"
+    "ffmpeg" = "target:ffmpeg"
+    "kubernetes" = "kubernetes"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/library-operator-appearances:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-appearances:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-appearances" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-appearances:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "library-operator-corrosion" {

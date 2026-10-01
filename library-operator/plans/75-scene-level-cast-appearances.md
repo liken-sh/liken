@@ -1,11 +1,12 @@
 # 75, Scene-level cast appearances
 
-This is a plan for later. Nothing here is built. It records
-experiments from conversations on 2026-09-30 and 2026-10-01, which
-found that the library can learn which credited person is on screen at
-each moment of a title, at a cost a home cluster can pay. The first
-step writes that answer to files on the library's volume. A feature
-that a person sees on a screen comes after the files exist.
+This plan records experiments from conversations on 2026-09-30 and
+2026-10-01, which found that the library can learn which credited
+person is on screen at each moment of a title, at a cost a home cluster
+can pay. The first step writes that answer to files on the library's
+volume. A feature that a person sees on a screen comes after the files
+exist. Step 1 is built, as the `appearances` fact and its worker `Job`,
+and its proof on the lab is open. Steps 2 and 3 are not built.
 
 ## The problem
 
@@ -217,30 +218,50 @@ So the fact keeps the output of each pass on the volume.
   its embedding as 16-bit floats. A header names the embedding model
   and the hash of its weights. This film's faces record would be about
   575 KB, which is 2,245 faces of 128 values at 2 bytes. The format
-  must be one that a person can read with common tools. The builder
-  chooses the format.
+  must be one that a person can read with common tools. As built, it is
+  JSON Lines, `.liken/appearances/<file>.jsonl` beside the video: a
+  header line with the file's size and both models' hashes, then one
+  line per keyframe, with each embedding in base64.
 - **The ledger** is `.liken/appearances.yaml` in the title's folder,
   which follows the shape of `.liken/marks.yaml`. It is keyed on the
   file's path, and holds one entry for each face it named: the time,
   the `.contributors/` entry, and the similarity. It also holds the
   attempts, as every fact's ledger does. The ledger records the
   similarity, not only the name, so a later threshold change needs no
-  new pass.
+  new pass. As built, the operator owns the ledger: the tool's `match`
+  prints one JSON document, and the worker writes it into the ledger
+  with the attempt. Each file's entry also holds the next closest
+  person's similarity, the file's size, the embedder, the threshold,
+  the margin, each person of the gallery with the hash of their
+  headshot, and the people with no headshot to match. A failed attempt
+  holds the tool's error text.
 
 The ledger records observations at keyframe times, not spans. A span
 from one keyframe to the next is an inference, and the reader of the
 ledger can draw it.
+
+**The margin.** As built, a face is named for its closest person when
+the similarity reaches the threshold and leads the next closest
+person's similarity by at least 0.05. A face as close to two headshots
+as to one is not evidence for either person. On a 1080p and a 4K film,
+the margin removed 2 and 3 names of about 780 and 650, and 2 of the 5
+were wrong when checked by eye.
 
 **The gallery.** The credits fact's list in `.liken/` names each
 credited person and their `.contributors/` entry. The headshot fact
 puts a headshot in that entry. A person with no headshot cannot match,
 and the ledger records that person as unmatched, so the gap is
 visible. For an episode, the gallery is the series cast and that
-episode's guest stars.
+episode's guest stars. As built, an episode's gallery is the series
+cast alone: the credits fact credits the series, and no fact records an
+episode's guest stars. The worker passes the series' `credits.yaml` to
+`match` with `--credits`.
 
 **The models.** YuNet detects and SFace embeds, as the ONNX files
 OpenCV Zoo publishes, with no conversion. OpenCV's DNN module or ONNX
 Runtime runs them, so the runtime needs no Python and no TensorFlow.
+As built, OpenVINO runs them through its C API, from a Rust tool,
+`appearances`, on the CPU or an Intel GPU.
 Their weights do not go into this repository. A workstation pushes them
 to a registry as an OCI artifact, with each model's license file and
 an attribution notice, and the image build pulls that artifact.
@@ -257,8 +278,11 @@ fact runs the expensive pass again.
 
 **Hardware.** The fact runs as a `Job` of its own, the way
 trickplay does after [plan 58](completed/58-trickplay-on-the-gpu.md).
-The CPU is the default, and the GPU is an option, claimed through a
-`ResourceClaimTemplate` that the `Library` names:
+As built, it is a worker `Job`, as trickplay's is: the library `Job`
+writes the gap as a work list onto the volume when it ends, and the
+operator starts the worker on that list. The CPU is the default, and
+the GPU is an option, claimed through a `ResourceClaimTemplate` that
+the `Library` names in `spec.appearances.render`:
 
 | Step | With a GPU claim | Without |
 |---|---|---|
@@ -273,7 +297,9 @@ model of their own.
 
 **Scheduling.** The Job is per-title batch work, as trickplay is.
 It never runs on a one-gigabyte screen machine. On the CPU it held
-417 MB.
+417 MB. As built, the container's memory limit is 1.5 GiB, because the
+tool held up to about 350 MB and `ffmpeg` up to about 860 MB on a 4K
+file decoded in software, and about 510 MB with VA-API.
 
 ### Step 2: the catalog
 
@@ -358,7 +384,28 @@ needs only the catalog table.
 - **The image.** OpenCV's DNN module and ONNX Runtime both run the
   models on the CPU. OpenVINO adds the GPU, and onnxruntime with
   OpenVINO was 825 MB installed. The builder decides whether one image
-  carries the GPU runtime, or the GPU has an image of its own.
+  carries the GPU runtime, or the GPU has an image of its own. As
+  built, one image, `library-operator-appearances`, carries OpenVINO,
+  Intel's OpenCL runtime, the models, the tool, and the operator's pod
+  program, and runs on the CPU and the GPU.
+- **Matching again when the gallery changes.** A found answer stands
+  until the file is replaced. The ledger records each person of the
+  gallery with the hash of their headshot, so a later step can see that
+  a headshot or the cast changed and run `match` alone. Not built: today a
+  person deletes the title's `.liken/appearances.yaml`.
+- **Guest stars.** No fact records an episode's guest stars, so an
+  episode's gallery is the series cast. TMDB and TVmaze list guest
+  stars by episode. A credits fact for episodes would let the worker
+  write a credits file for `match --credits` that holds both.
+- **ffmpeg's own error text.** The tool reads `ffmpeg`'s stderr for the
+  keyframe times and keeps none of it, so a decode that fails records
+  "ffmpeg exited with exit status: 1" and not the reason `ffmpeg`
+  gave.
+- **The ledger's size on a walk.** The walk reads every ledger of a
+  folder for its attempts, and this ledger holds every observation.
+  At about 100 bytes per observation, a film of about 800 named faces
+  is about 80 KB of YAML to parse on each walk of the folder, and a season folder holds one entry
+  per episode.
 
 ## The proof
 

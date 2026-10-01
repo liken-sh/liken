@@ -198,6 +198,10 @@ type LibrarySpec struct {
 	// Whether this library pulls one trailer file beside each title from the
 	// links the trailer fact recorded.
 	Trailers LibraryTrailers `json:"trailers,omitzero"`
+
+	// Whether this library finds which credited people are on screen at each
+	// keyframe of its features, which decodes every feature once.
+	Appearances LibraryAppearances `json:"appearances,omitzero"`
 }
 
 // The trailers block of the spec, off unless the owner turns it on.
@@ -209,14 +213,25 @@ type LibraryTrailers struct {
 type LibraryTrickplay struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	// The render node a library Job claims for the trickplay decode. Unset,
-	// the Job carries no claim and decodes in software.
-	Render *TrickplayDevice `json:"render,omitempty"`
+	// The render node the trickplay worker claims for its decode. Unset, the
+	// worker carries no claim and decodes in software.
+	Render *RenderDevice `json:"render,omitempty"`
+}
+
+// The appearances block of the spec, off unless the owner turns it on.
+type LibraryAppearances struct {
+	Enabled bool `json:"enabled,omitempty"`
+
+	// The GPU the appearances worker claims to decode keyframes and to run
+	// the face models. Unset, the worker carries no claim and does both on
+	// the CPU.
+	Render *RenderDevice `json:"render,omitempty"`
 }
 
 // One DeviceClass name, and a CEL expression over that class's devices where
-// the class alone chooses too many.
-type TrickplayDevice struct {
+// the class alone chooses too many. A worker that holds one decodes on the
+// render node the claim allocates.
+type RenderDevice struct {
 	Class    string `json:"class"`
 	Selector string `json:"selector,omitempty"`
 }

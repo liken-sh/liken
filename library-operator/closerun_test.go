@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +252,56 @@ func TestACloseContainerWithNoWorkerFails(t *testing.T) {
 
 	if _, err := newCloseRun(&bytes.Buffer{}); err == nil {
 		t.Error("newCloseRun = nil error with no worker")
+	}
+}
+
+// The close container writes the gap of each heavy fact the Library runs as
+// that fact's work list, before the finished run that starts the worker.
+func TestTheCloseContainerWritesTheWorkList(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seed := &walkResult{files: []fileRow{{Path: "A Quiet Field (1950)/A Quiet Field (1950).mkv",
+		Library: "house/movies", Present: true, Type: fileTypeVideo, Role: fileRolePrimary,
+		DurationMs: 5400000, VideoCodec: "h264", SizeBytes: 4096}}}
+	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+		t.Fatal(err)
+	}
+	run, log := closingJob(t, catalog)
+	run.workLists = []string{factTrickplay}
+	done := make(chan error, 1)
+	go func() { done <- run.runJob(t.Context()) }()
+	confirmTheRun(t, catalog, workerEnrich, run.job)
+	if err := <-done; err != nil {
+		t.Fatalf("the job failed: %v", err)
+	}
+
+	items, err := readWorkList(run.root, factTrickplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Size != 4096 || items[0].DurationMs != 5400000 {
+		t.Errorf("work list = %+v, want the one video with its size and length", items)
+	}
+	if !strings.Contains(log.String(), "wrote the trickplay work list: 1 video") {
+		t.Errorf("log = %q, want the line that counts the list", log)
+	}
+}
+
+// A list the volume refuses is a failure of the run, and the Job still hands
+// off, so the rows it wrote reach the catalog.
+func TestAWorkListTheVolumeRefusesFailsTheRun(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	run, _ := closingJob(t, catalog)
+	run.workLists = []string{factTrickplay}
+	writeFile(t, filepath.Join(run.root, likenDirectory), "a file where the directory goes")
+	done := make(chan error, 1)
+	go func() { done <- run.runJob(t.Context()) }()
+	confirmTheRun(t, catalog, workerEnrich, run.job)
+	if err := <-done; err != nil {
+		t.Fatalf("the job failed: %v", err)
+	}
+
+	finished := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Finished.IsZero() })
+	if !strings.Contains(finished.Failure, "the trickplay work list") {
+		t.Errorf("failure = %q, want the list it could not write", finished.Failure)
 	}
 }

@@ -1,8 +1,9 @@
 package main
 
-// The ResourceClaimTemplate one Library keeps for the render node its trickplay
-// Job decodes on: the DRA objects the operator writes, the request it builds
-// out of spec.trickplay.render, and the requests it makes for them.
+// The ResourceClaimTemplate one Library keeps for each worker Job that names a
+// render node: the DRA objects the operator writes, the request it builds out
+// of a block such as spec.trickplay.render or spec.appearances.render, and
+// the requests it makes for them.
 
 import (
 	"context"
@@ -18,7 +19,7 @@ import (
 // under, which is the one media-operator writes its claims under.
 const deviceAPIVersion = "resource.k8s.io/v1"
 
-// The name of the one device request the trickplay pod holds, which is the name
+// The name of the one device request a worker's pod holds, which is the name
 // its container repeats under resources.claims.
 const renderRequestName = "render"
 
@@ -37,7 +38,7 @@ type ResourceClaimTemplateSpec struct {
 	Spec ResourceClaimSpec `json:"spec"`
 }
 
-// The devices one claim asks for. The trickplay claim asks for one.
+// The devices one claim asks for. A worker's claim asks for one.
 type ResourceClaimSpec struct {
 	Devices DeviceClaim `json:"devices"`
 }
@@ -72,17 +73,31 @@ type CELDeviceSelector struct {
 	Expression string `json:"expression"`
 }
 
-// The template of one Library, named from the Library and the phase that
-// holds its claim, so a person reading the template finds the container.
-func trickplayTemplateName(library string) string {
-	return library + "-" + trickplayContainerName
+// The template of one Library's worker, named from the Library and the fact
+// whose container holds its claim, so a person reading the template finds the
+// container.
+func renderTemplateName(library, fact string) string {
+	return library + "-" + fact
 }
 
-// The template one Library's render block becomes: one request named render,
+// The claim a worker's pod holds, and nil where the Library names no render
+// node for the worker. The pod names the template, and the kubelet mints one
+// claim from it for the pod.
+func renderClaim(library *Library, worker factWorker) *PodResourceClaim {
+	if worker.render(library) == nil {
+		return nil
+	}
+	return &PodResourceClaim{
+		Name:                      renderRequestName,
+		ResourceClaimTemplateName: renderTemplateName(library.Metadata.Name, worker.fact),
+	}
+}
+
+// The template one worker's render block becomes: one request named render,
 // one device of the class it names, and the CEL selector where it states one.
 // It is owned by the Library, so the garbage collector takes it.
-func buildTrickplayTemplate(library *Library) *ResourceClaimTemplate {
-	device := library.Spec.Trickplay.Render
+func buildRenderTemplate(library *Library, worker factWorker) *ResourceClaimTemplate {
+	device := worker.render(library)
 	request := DeviceRequest{
 		Name: renderRequestName,
 		Exactly: &ExactDeviceRequest{
@@ -102,7 +117,7 @@ func buildTrickplayTemplate(library *Library) *ResourceClaimTemplate {
 		APIVersion: deviceAPIVersion,
 		Kind:       "ResourceClaimTemplate",
 		Metadata: ObjectMeta{
-			Name:            trickplayTemplateName(library.Metadata.Name),
+			Name:            renderTemplateName(library.Metadata.Name, worker.fact),
 			Namespace:       library.Metadata.Namespace,
 			Labels:          libraryLabels(library.Metadata.Name),
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
@@ -111,6 +126,16 @@ func buildTrickplayTemplate(library *Library) *ResourceClaimTemplate {
 			Spec: ResourceClaimSpec{Devices: DeviceClaim{Requests: []DeviceRequest{request}}},
 		},
 	}
+}
+
+// Every worker's template, before the pass creates a pod that names one.
+func (o *operator) standRenderTemplates(ctx context.Context, library *Library) error {
+	for _, worker := range factWorkers {
+		if err := o.standRenderTemplate(ctx, library, worker); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // The template is brought into line on every pass: created where the Library
@@ -123,9 +148,9 @@ func buildTrickplayTemplate(library *Library) *ResourceClaimTemplate {
 // no request. The memo notes each create and delete, so a pass that deleted
 // and created the template does not read the older copy the store can still
 // hold, and delete the new one.
-func (o *operator) standTrickplayTemplate(ctx context.Context, library *Library) error {
+func (o *operator) standRenderTemplate(ctx context.Context, library *Library, worker factWorker) error {
 	namespace := library.Metadata.Namespace
-	name := trickplayTemplateName(library.Metadata.Name)
+	name := renderTemplateName(library.Metadata.Name, worker.fact)
 
 	live, err := o.watched.readClaimTemplate(ctx, namespace, name)
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
@@ -133,14 +158,14 @@ func (o *operator) standTrickplayTemplate(ctx context.Context, library *Library)
 	}
 	stands := err == nil
 
-	if library.Spec.Trickplay.Render == nil {
+	if worker.render(library) == nil {
 		if !stands {
 			return nil
 		}
 		return o.deleteClaimTemplate(ctx, namespace, name)
 	}
 
-	desired := buildTrickplayTemplate(library)
+	desired := buildRenderTemplate(library, worker)
 	if stands {
 		same, err := sameTemplateSpec(live.Spec, desired.Spec)
 		if err != nil || same {

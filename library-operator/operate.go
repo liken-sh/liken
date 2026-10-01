@@ -25,14 +25,15 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The four image overrides. A variable that is set wins over the
+// The five image overrides. A variable that is set wins over the
 // image operatorimages.go derives from the operator's own pod, and
 // one that is unset derives.
 const (
-	scannerImageVariable   = "SCANNER_IMAGE"
-	corrosionImageVariable = "CORROSION_IMAGE"
-	browserImageVariable   = "BROWSER_IMAGE"
-	ffmpegImageVariable    = "FFMPEG_IMAGE"
+	scannerImageVariable     = "SCANNER_IMAGE"
+	corrosionImageVariable   = "CORROSION_IMAGE"
+	browserImageVariable     = "BROWSER_IMAGE"
+	ffmpegImageVariable      = "FFMPEG_IMAGE"
+	appearancesImageVariable = "APPEARANCES_IMAGE"
 )
 
 // The name this operator answers to as an idle controller. A Player
@@ -91,9 +92,11 @@ type operator struct {
 	scannerImage   string
 	corrosionImage string
 	browserImage   string
-	// The image the phases that open a media file run on: the probe,
-	// trickplay, and the trailer files.
+	// The image the containers that open a media file run on: the probe and
+	// the trailer files phases, and the trickplay worker.
 	ffmpegImage string
+	// The image the appearances worker runs on.
+	appearancesImage string
 	// The household wall-clock zone the pass read last, which every screen
 	// pod it stands carries as TZ. Empty where the cluster states none.
 	timeZone string
@@ -173,6 +176,10 @@ type operator struct {
 	// deleted, keyed the way the report desk keys a Library.
 	legacyRetired map[string]bool
 
+	// The library Job whose work list each heavy fact's last worker took,
+	// keyed by the Library and the fact (factworkerjob.go).
+	workListsTaken map[string]string
+
 	// Which of the classes this pass has read are served by the per-node
 	// driver, by class name. The pass clears it when it starts, so an
 	// answer is one pass old at most and the operator watches no
@@ -213,32 +220,34 @@ type operator struct {
 // bus subscriptions that fill it. The subscriptions are remembered
 // here and sent on every connection, so they outlive a broker
 // restart.
-func newOperator(client *apiclient.Client, scannerImage, corrosionImage, browserImage, ffmpegImage,
+func newOperator(client *apiclient.Client, stamped images,
 	busAddress, topicBase, namespace, webhookAddress string) *operator {
 	wake := make(chan struct{}, 1)
 	library := &operator{
-		client:         client,
-		versions:       newObjectVersions(),
-		scannerImage:   scannerImage,
-		corrosionImage: corrosionImage,
-		browserImage:   browserImage,
-		ffmpegImage:    ffmpegImage,
-		busAddress:     busAddress,
-		topicBase:      topicBase,
-		namespace:      namespace,
-		webhookAddress: webhookAddress,
-		reports:        newReports(wake),
-		reporters:      newReporters(wake),
-		paths:          newHeldPaths(wake),
-		plays:          newPlayRequests(wake),
-		marks:          newStoreMarks(wake),
-		published:      map[string]string{},
-		mediaTopicBase: defaultMediaTopicBase,
-		wake:           wake,
-		cleanupStands:  map[string]cleanupStand{},
-		backfillStands: map[string]cleanupStand{},
-		failedStands:   map[string]cleanupStand{},
-		legacyRetired:  map[string]bool{},
+		client:           client,
+		versions:         newObjectVersions(),
+		scannerImage:     stamped.scanner,
+		corrosionImage:   stamped.corrosion,
+		browserImage:     stamped.browser,
+		ffmpegImage:      stamped.ffmpeg,
+		appearancesImage: stamped.appearances,
+		busAddress:       busAddress,
+		topicBase:        topicBase,
+		namespace:        namespace,
+		webhookAddress:   webhookAddress,
+		reports:          newReports(wake),
+		reporters:        newReporters(wake),
+		paths:            newHeldPaths(wake),
+		plays:            newPlayRequests(wake),
+		marks:            newStoreMarks(wake),
+		published:        map[string]string{},
+		mediaTopicBase:   defaultMediaTopicBase,
+		wake:             wake,
+		cleanupStands:    map[string]cleanupStand{},
+		backfillStands:   map[string]cleanupStand{},
+		failedStands:     map[string]cleanupStand{},
+		legacyRetired:    map[string]bool{},
+		workListsTaken:   map[string]string{},
 
 		perNodeClasses: map[string]bool{},
 		providerBases:  defaultProviderBases(),
@@ -427,11 +436,16 @@ func (o *operator) pass() {
 			delete(o.legacyRetired, key)
 		}
 	}
-	// A restand key names a Library and a worker, so the Library it names is
-	// the part before the last separator.
+	// A restand key and a work list key name a Library and a worker, so the
+	// Library each names is the part before the last separator.
 	for key := range o.failedStands {
 		if !live[key[:strings.LastIndex(key, "/")]] {
 			delete(o.failedStands, key)
+		}
+	}
+	for key := range o.workListsTaken {
+		if !live[key[:strings.LastIndex(key, "/")]] {
+			delete(o.workListsTaken, key)
 		}
 	}
 

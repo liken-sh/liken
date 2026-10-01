@@ -160,17 +160,19 @@ title, `nfo`, which fills the `.nfo` file, `art`, which downloads the
 images, `trailer`, which records where each title's trailers are,
 `marks`, which records where each video's intro and credits are,
 `contributors`, which fills the people, and, where the `Library` turns
-them on, `trickplay` and `trailer-files`. A phase runs only where a
-Ready source of the `Library` serves one of its facts. `probe` and
-`arrival` ask no provider, so they always run.
+it on, `trailer-files`. A phase runs only where a Ready source of the
+`Library` serves one of its facts. `probe` and `arrival` ask no
+provider, so they always run. The trickplay and appearances facts are
+no phases: each runs in a worker `Job` of its own, which the
+[trickplay](#trickplay) and [appearances](#appearances) sections
+describe.
 
 All the phases start together, and each one reads its gap again
 whenever the rows it reads change. So a phase works on a title as soon
 as the phases before it have written that title's rows: `nfo`, `art`,
 and `trailer` wait for the id `identity` writes, `marks` for the id and
 the length `probe` measures, `contributors` for the people the credits
-fact writes, `trickplay` for the length, and `trailer-files` for the
-addresses `trailer` records. The art of the first title lands while
+fact writes, and `trailer-files` for the addresses `trailer` records. The art of the first title lands while
 `identity` still works on the rest.
 
 A phase ends when every phase it waits for has ended and one pass after
@@ -191,32 +193,171 @@ titles stay in its gap for the next `Job`.
 
 ### Trickplay
 
-The scrub-bar thumbnails are the `trickplay` phase, which runs where
+The scrub-bar thumbnails are the `trickplay` fact, which runs where
 `spec.trickplay.enabled` is set. One title's decode runs for minutes,
-so the phase starts no new title fifteen minutes into a run. It
-finishes the title it has, and the rest stays in its gap. While that gap
-is open, the operator starts a `Job` that fills gaps each time the
-`Library` has no other `Job` running, so a backlog clears fifteen
-minutes at a time and a webhook's folder never waits behind all of it.
+so the fact runs in a worker `Job` of its own, outside the `Job` that
+walks the `Library`. The worker holds no catalog agent and no catalog
+claim, so a walk and a webhook's rescan never wait for a decode, and
+no decode adds a copy of the catalog.
 
-The phase decodes on the node's GPU when `spec.trickplay.render` names
+Each `Job` of the `Library` ends by writing the trickplay gap onto the
+volume as a work list, `.liken/worklists/trickplay.jsonl` under the
+library root: one line per video, with its path, its size, and its
+length. When that `Job` has ended, the gap in `status.gaps` is above
+zero, and no trickplay worker of the `Library` runs, the operator
+starts one, named `<library>-trickplay-<suffix>`. The worker reads the
+list and checks each video again before it decodes it. It passes over
+a video that is gone, a video whose size changed, and a video with an
+attempt in `.liken/trickplay.yaml` from after the list was written.
+After the last video of a title folder, it asks the operator to rescan
+that folder through the `Library`'s webhook address, so the catalog
+shows the tiles within seconds.
+
+The worker has no time limit of its own. A backlog runs to the end of
+the list in one `Job`, and a `Job` that runs for 24 hours reaches its
+deadline. The list of the next `Job` of the `Library` then starts
+another worker, which passes over every title the first one finished.
+
+    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
+
+The worker decodes on the node's GPU when `spec.trickplay.render` names
 a DeviceClass. The operator keeps a `ResourceClaimTemplate` for the
-`Library`, and a `Job` that runs the phase claims one device from it.
-`ffmpeg` decodes through VA-API, and it falls back to software for a
-codec the GPU refuses. With no render block the phase decodes in
-software. With a render block on a cluster where no node offers such a
-device, the pod stays `Pending`, and its events say so.
+`Library`, and the worker's pod claims one device from it. `ffmpeg`
+decodes through VA-API, and it falls back to software for a codec the
+GPU refuses. With no render block the worker decodes in software. With
+a render block on a cluster where no node offers such a device, the
+pod stays `Pending`, and its events say so.
 
-The tile directory is the one Jellyfin reads and writes. So the phase
+The tile directory is the one Jellyfin reads and writes. So the worker
 accepts a directory Jellyfin made first and leaves it alone. The one
 exception is a directory older than the file beside it: when a new
 file replaced the video at the same path, tiles made before it arrived
-place each thumbnail at the earlier file's times. The phase decodes the
-new file and replaces the whole directory. The
+place each thumbnail at the earlier file's times. The worker decodes
+the new file and replaces the whole directory. The
 [scanning guide](https://liken.sh/library/docs/guides/scanning/#a-file-replaced-at-the-same-path)
 says how the walk finds a replaced file. To make the tiles of any
 title again, delete its `.trickplay` directory, and the next walk opens
-its gap.
+its gap, and the list that `Job` writes starts a worker.
+
+### Appearances
+
+The `appearances` fact records which credited actor is on screen at
+each keyframe of a feature. It runs where `spec.appearances.enabled` is
+set. The fact asks no provider: it matches the faces in the video with
+the headshots that the people facts put in `.contributors/`. A first
+pass decodes the keyframes of every feature, so the fact runs in a
+worker `Job` of its own, named `<library>-appearances-<suffix>`, in the
+same way as the [trickplay](#trickplay) worker. It reads the list
+`.liken/worklists/appearances.jsonl`, checks each video again before it
+opens it, and asks the operator to rescan each title folder when the
+folder is done.
+
+A feature is in the gap when the probe gave it a length and its title
+credits at least one actor whose entry holds a headshot. The credits
+fact credits a series and not each episode, so an episode takes the
+cast of its series. No source records an episode's guest stars yet, so
+a guest star has no headshot to match. A title whose cast has no
+headshot waits until the headshot fact writes one.
+
+For each video, the worker runs two passes of the `appearances` tool:
+
+1. `appearances detect` decodes the video's keyframes with `ffmpeg`,
+   finds the faces with the YuNet detector, embeds each face with the
+   SFace model, and writes the detections record
+   `.liken/appearances/<file>.jsonl` beside the video. This is the only
+   pass that opens the video. The record's first line names the file's
+   size and the hash of each model. When a record on the volume names
+   the file's size and the models of the image, the worker uses it and
+   does not decode again.
+2. `appearances match` embeds the headshot of each actor that the
+   title folder's `.liken/credits.yaml` names, and compares each face
+   with them. A face is named for the closest actor when the similarity
+   is at least 0.363, the threshold OpenCV publishes for SFace, and
+   leads the next closest actor by at least 0.05. The match takes about
+   a second, and it runs on the CPU.
+
+The worker writes the answer to `.liken/appearances.yaml` beside the
+video, one entry per file:
+
+    appearances:
+        - path: Example Movie (2019).mkv
+          size: 4831838208
+          embedder: {name: face_recognition_sface_2021dec, sha256: 0ba9fbfa...}
+          threshold: 0.363
+          margin: 0.05
+          gallery:
+            - {contributor: .contributors/ad/ada-quill, name: Ada Quill, headshot: found, sha256: 5d2c...}
+            - {contributor: .contributors/bo/bo-reyes, name: Bo Reyes, headshot: missing}
+          unmatched:
+            - {contributor: .contributors/bo/bo-reyes, name: Bo Reyes, headshot: missing}
+          observations:
+            - {time: 4.5, face: 1, contributor: .contributors/ad/ada-quill, similarity: 0.612, runnerUp: 0.201}
+    attempts:
+        - path: Example Movie (2019).mkv
+          at: 2026-10-01T12:00:00Z
+          result: found
+
+Each observation is one face at one keyframe: the time in seconds, the
+face's place in that keyframe's line of the detections record, the
+actor, the similarity, and the next closest actor's similarity. The
+entry also records the inputs of the answer: the size of the file, the
+embedding model, the threshold, the margin, and each actor's headshot
+with its hash. `unmatched` lists the actors who cannot be named,
+because their entry holds no headshot or the detector found no face in
+it. A failed pass is an `error` attempt whose `reason` holds the tool's
+own error text, and the worker tries the file again after a day.
+
+A found answer stands until a new file replaces the video at its path.
+The answer does not change when a headshot or the credits change. To
+match a title again, delete its `.liken/appearances.yaml`. The next
+walk opens the gap, and the worker uses the detections records on the
+volume and runs only the match.
+
+    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=appearances
+
+The worker runs on the `library-operator-appearances` image, which
+carries the tool, Intel's OpenVINO runtime, Intel's OpenCL runtime for
+the GPU, and the two models from
+[OpenCV Zoo](https://github.com/opencv/opencv_zoo): YuNet under the MIT
+license and SFace under the Apache 2.0 license. The operator names the
+image at its own tag, and `APPEARANCES_IMAGE` on the operator's
+`Deployment` names another. The container requests `500m` of CPU and
+may take `1536Mi` of memory. The largest measured run held 350 MB in
+the tool and 860 MB in `ffmpeg`, for a 4K file decoded in software.
+
+With no render block, the worker decodes and runs the models on the
+CPU. `spec.appearances.render` names a DeviceClass, and the operator
+keeps a `ResourceClaimTemplate` for the worker, as it does for
+trickplay. With the claim, `ffmpeg` decodes and scales the keyframes on
+the render node through VA-API, and OpenVINO runs the models on the
+Intel GPU. A file the render node refuses to decode is decoded again in
+software. OpenVINO compiles the models for the GPU when the worker
+starts, and it keeps the compiled kernels in an `emptyDir`, so one
+worker `Job` compiles once for its whole list.
+
+#### Checking the faces by hand
+
+`appearances review` shows a person what the match named, on a copy of
+a title folder on a workstation. It runs no model and writes nothing
+into the folder. Never run the tool on the library itself. The copy
+needs the title folder with its `.liken` directory, and the
+`.contributors/` entries its credits name, at the same paths under a
+common root. The
+[tool's README](https://github.com/liken-sh/liken/tree/main/library-operator/appearances)
+says how to build it and how to install the runtime.
+
+    appearances match "Movies/Example Movie (2019)"
+    appearances review "Movies/Example Movie (2019)" --sheets 24 --play
+
+`--play` opens `mpv` with a chapter for each span and a box around each
+face: green for a named face, yellow for a face near the threshold or
+the margin, and red for a face no actor is close to. `--sheets 24`
+writes contact sheets of the faces named for each actor, weakest
+first. `--threshold` and `--margin` show the result of other values
+with no pass over the video. For an episode, run the match on the
+season folder and name the series' credits:
+
+    appearances match "Series/Example Show/Season 01" --credits "Series/Example Show/.liken/credits.yaml"
 
 ### Identification
 
@@ -452,9 +593,8 @@ the attempt records the error.
 adds gigabytes to the volume the first time this fact runs.**
 
 The `trailer-files` phase of the `Library`'s `Job` runs the fact, and
-two titles pull at once inside it. Like `trickplay`, the phase starts
-no new title fifteen minutes into a run, and the next `Job` goes on
-with the rest. The fact takes no `spec.refresh`.
+two titles pull at once inside it. The phase starts no new title
+fifteen minutes into a run, and the next `Job` goes on with the rest. The fact takes no `spec.refresh`.
 
 ### IMDb ratings and credits from the datasets
 
@@ -579,6 +719,8 @@ the file to Jellyfin.
 `status.gaps` counts, per fact, the rows still to fill. Between walks,
 the operator starts a `Job` that fills gaps with the phases whose counts
 are above zero, once a refresh time or a source provider that turned
-`Ready` has given them work since the last `Job` started. `trickplay` and
-`trailer-files` run in such a `Job` while their counts are above zero,
-because each run stops at its time limit.
+`Ready` has given them work since the last `Job` started. `trailer-files`
+runs in such a `Job` while its count is above zero, because each run
+stops at its time limit. The `trickplay` and `appearances` counts
+start no `Job` that fills gaps: each starts its fact's worker when a
+`Job` of the `Library` ends.

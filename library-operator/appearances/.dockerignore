@@ -1,0 +1,9 @@
+# What never belongs in the image build context.
+#
+# cargo writes target/ on a workstation, and it holds gigabytes that the
+# build inside the image never reads: the image compiles the crate again on
+# its own pinned toolchain. The push script and the README are for a
+# person, and no step of the build reads them.
+target/
+README.md
+models/push.sh

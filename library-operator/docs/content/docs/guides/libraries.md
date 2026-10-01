@@ -50,8 +50,19 @@ you are likely to set:
   in the cluster's time zone. It defaults to once an hour, on the hour.
 * `spec.trickplay.enabled` builds the thumbnail sheets for the scrub
   bar. It is off by default, because the first pass reads every video
-  end to end. `spec.trickplay.render` names the DeviceClass of the
-  node's GPU, so the decode runs there instead of on the CPU.
+  end to end. A trickplay worker `Job` of its own decodes the videos
+  after each `Job` of the `Library` ends. `spec.trickplay.render` names
+  the DeviceClass of the node's GPU, so the decode runs there instead
+  of on the CPU.
+* `spec.appearances.enabled` records which credited actor is on screen
+  at each keyframe of each feature, from the faces in the video and the
+  actors' headshots. It is off by default, because the first pass
+  decodes the keyframes of every feature. An appearances worker `Job`
+  runs after each `Job` of the `Library` ends, and
+  `spec.appearances.render` names the DeviceClass of a GPU to decode
+  and run the face models on. The
+  [enrichment guide](/docs/guides/enrichment/#appearances) describes
+  the fact.
 * `spec.refresh` reopens one fact at a time, so it asks its provider
   again and rewrites its own files in place.
 

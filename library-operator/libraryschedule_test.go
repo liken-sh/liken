@@ -55,8 +55,8 @@ func libraryWithProvider() (*Library, providerSet) {
 }
 
 // A walk of another Library, and a walk in another namespace, hold nothing
-// here. Every worker of this Library holds the gate, because each runs an
-// agent on its catalog claim.
+// here. Every Job of this Library that runs an agent on its catalog claim
+// holds the gate. A heavy fact's worker runs none, so it holds nothing.
 func TestTheGateReadsEveryJobOfOneLibrary(t *testing.T) {
 	otherLibrary := houseJob("shows-walk-1", jobModeWalk, JobStatus{Active: 1})
 	otherLibrary.Metadata.Labels[libraryLabelKey] = "shows"
@@ -75,6 +75,7 @@ func TestTheGateReadsEveryJobOfOneLibrary(t *testing.T) {
 		{name: "a Job that fills gaps", jobs: []Job{houseJob("movies-gaps-1", jobModeGaps, JobStatus{Active: 1})}, running: true},
 		{name: "the cleanup", jobs: []Job{houseJob("movies-cleanup", workerCleanup, JobStatus{Active: 1})}, running: true},
 		{name: "an enricher of an earlier release", jobs: []Job{houseJob("movies-enrich-1", workerEnrich, JobStatus{})}, running: true},
+		{name: "a trickplay worker", jobs: []Job{houseJob("movies-trickplay-1", factTrickplay, JobStatus{Active: 1})}},
 		{name: "a walk between the pods of its backoff", jobs: []Job{walkJob(JobStatus{Failed: 1})}, running: true},
 		{name: "a walk the controller marked complete", jobs: []Job{walkJob(succeededStatus(testNow))}},
 		{name: "a walk the controller marked failed", jobs: []Job{walkJob(failedStatus(testNow))}},
@@ -134,7 +135,7 @@ func TestThePassStartsTheJobThatIsDue(t *testing.T) {
 		{name: "a webhook that named no folder", report: &libraryReport{Runs: walkedRuns(testNow.Add(time.Minute))},
 			held: []string{""}, want: jobModeWalk},
 		{name: "a walk that runs", jobs: []Job{walkJob(JobStatus{Active: 1})}, held: []string{"/a"}},
-		{name: "an open trickplay gap", want: jobModeGaps, report: &libraryReport{
+		{name: "an open trickplay gap, which its worker fills", report: &libraryReport{
 			Runs: walkedRuns(testNow.Add(time.Minute)), Gaps: map[string]int{factTrickplay: 3}}},
 		{name: "an open identity gap no cause has opened", report: &libraryReport{
 			Runs: walkedRuns(testNow.Add(time.Minute)), Gaps: map[string]int{factIdentity: 3}}},
@@ -206,8 +207,8 @@ func TestFoldersNamedWhileAJobRunsWaitForTheNextJob(t *testing.T) {
 }
 
 // A Job that fills gaps runs the phases whose gaps are open and that a cause
-// has opened since the last Job, and the time-limited phases whenever their
-// gap is open.
+// has opened since the last Job. The trickplay gap is its worker's, so it
+// adds no phase.
 func TestAGapJobRunsThePhasesWithWork(t *testing.T) {
 	library, providers := libraryWithProvider()
 	library.Spec.Trickplay.Enabled = true
@@ -222,8 +223,8 @@ func TestAGapJobRunsThePhasesWithWork(t *testing.T) {
 	for _, phase := range plan.phases {
 		names = append(names, phase.name)
 	}
-	if !due || plan.mode != jobModeGaps || !slices.Equal(names, []string{factIdentity, trickplayContainerName}) {
-		t.Errorf("plan = %s %v, due %v, want the identity and trickplay phases", plan.mode, names, due)
+	if !due || plan.mode != jobModeGaps || !slices.Equal(names, []string{factIdentity}) {
+		t.Errorf("plan = %s %v, due %v, want the identity phase alone", plan.mode, names, due)
 	}
 }
 

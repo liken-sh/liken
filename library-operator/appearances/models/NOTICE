@@ -1,0 +1,28 @@
+The face models of `appearances`
+
+This artifact holds two ONNX models that OpenCV Zoo publishes, as the
+files OpenCV Zoo publishes them, with no conversion. `liken` did not
+train or change either model. Each model keeps its own license, and
+the license file beside each model is the one OpenCV Zoo publishes in
+that model's directory.
+
+The files come from https://github.com/opencv/opencv_zoo at commit
+47534e27c9851bb1128ccc0102f1145e27f23f98.
+
+face_detection_yunet_2023mar.onnx
+
+  YuNet, a face detector, by Shiqi Yu and the contributors of
+  https://github.com/ShiqiYu/libfacedetection.train. OpenCV Zoo
+  publishes it in models/face_detection_yunet/.
+  License: MIT, in face_detection_yunet_2023mar.LICENSE.
+  Copyright (c) 2020 Shiqi Yu <shiqi.yu@gmail.com>.
+
+face_recognition_sface_2021dec.onnx
+
+  SFace, a face embedding model, by Yaoyao Zhong
+  (https://github.com/zhongyy/SFace), from the paper "SFace:
+  Sigmoid-Constrained Hypersphere Loss for Robust Face Recognition"
+  (https://arxiv.org/abs/2205.12010). Chengrui Wang converted it to
+  ONNX for OpenCV Zoo, which publishes it in
+  models/face_recognition_sface/.
+  License: Apache 2.0, in face_recognition_sface_2021dec.LICENSE.

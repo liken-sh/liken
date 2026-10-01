@@ -504,7 +504,6 @@ func TestThePhasesThatOpenAFileTakeTheirOwnImageAndMemory(t *testing.T) {
 	}{
 		{phase: factProbe, image: testFFmpegImage, memory: probeMemoryLimit},
 		{phase: artContainerName, image: testScannerImage, memory: artMemoryLimit},
-		{phase: trickplayContainerName, image: testFFmpegImage, memory: trickplayMemoryLimit},
 		{phase: trailerFileContainerName, image: testFFmpegImage, memory: trailersMemoryLimit},
 	}
 	for _, one := range cases {
@@ -518,50 +517,36 @@ func TestThePhasesThatOpenAFileTakeTheirOwnImageAndMemory(t *testing.T) {
 				container.Resources.Limits, one.image, one.memory)
 		}
 	}
-	if got := jobContainer(job, trickplayContainerName).Resources.Requests["cpu"]; got != trickplayCPURequest {
-		t.Errorf("trickplay requests %s of CPU, want %s", got, trickplayCPURequest)
+}
+
+// The library Job runs no trickplay container and holds no render claim,
+// whatever the Library's trickplay block says, because the trickplay worker
+// decodes outside it. Its close container names the list it writes for the
+// worker.
+func TestTheLibraryJobLeavesTrickplayToItsWorker(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Trickplay.Enabled = true
+	library.Spec.Trickplay.Render = &RenderDevice{Class: "display-render"}
+
+	job := testEnrichJob(library, "")
+
+	if jobContainer(job, trickplayContainerName) != nil {
+		t.Errorf("containers = %v, want no trickplay container", jobContainerNames(job))
+	}
+	if claims := job.Spec.Template.Spec.ResourceClaims; len(claims) != 0 {
+		t.Errorf("resourceClaims = %+v, want none", claims)
+	}
+	if got := envOf(*jobContainer(job, closeMode))[libraryWorkListsVariable]; got != factTrickplay {
+		t.Errorf("%s = %q, want the trickplay list", libraryWorkListsVariable, got)
 	}
 }
 
-// The pod holds the render claim only where the Library names a render block
-// and the Job runs trickplay, and only the trickplay container takes it.
-func TestTheRenderClaimGoesToTheTrickplayPhase(t *testing.T) {
-	cases := []struct {
-		name      string
-		trickplay bool
-		render    bool
-		want      bool
-	}{
-		{name: "trickplay with a render block", trickplay: true, render: true, want: true},
-		{name: "trickplay in software", trickplay: true},
-		{name: "a render block with no trickplay", render: true},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			library := studioMovies()
-			library.Spec.Trickplay.Enabled = one.trickplay
-			if one.render {
-				library.Spec.Trickplay.Render = &TrickplayDevice{Class: "display-render"}
-			}
+// A Library that runs no heavy fact writes no list.
+func TestALibraryWithNoHeavyFactWritesNoList(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "")
 
-			job := testEnrichJob(library, "")
-
-			claims := job.Spec.Template.Spec.ResourceClaims
-			if (len(claims) == 1) != one.want {
-				t.Fatalf("resourceClaims = %+v, want one: %v", claims, one.want)
-			}
-			if !one.want {
-				return
-			}
-			if claims[0].ResourceClaimTemplateName != "movies-trickplay" {
-				t.Errorf("template = %q, want the Library's own", claims[0].ResourceClaimTemplateName)
-			}
-			for _, container := range job.Spec.Template.Spec.Containers {
-				if held := len(container.Resources.Claims) == 1; held != (container.Name == trickplayContainerName) {
-					t.Errorf("%s holds the claim: %v", container.Name, held)
-				}
-			}
-		})
+	if got := envOf(*jobContainer(job, closeMode))[libraryWorkListsVariable]; got != "" {
+		t.Errorf("%s = %q, want none", libraryWorkListsVariable, got)
 	}
 }
 

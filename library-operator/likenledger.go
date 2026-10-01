@@ -104,8 +104,12 @@ type likenLedger struct {
 	// entry path, in the order the providers answered. Only the marks fact
 	// writes it. The walk reads it for the marks table, so a rebuilt catalog
 	// never asks a provider again.
-	Marks    []markEntry    `yaml:"marks,omitempty"`
-	Attempts []likenAttempt `yaml:"attempts,omitempty"`
+	Marks []markEntry `yaml:"marks,omitempty"`
+	// The appearances fact's own list, in the file that is its ledger: one
+	// entry per video file the match answered for, keyed by the file's entry
+	// path. Only the appearances worker writes it (appearancesledger.go).
+	Appearances []appearancesEntry `yaml:"appearances,omitempty"`
+	Attempts    []likenAttempt     `yaml:"attempts,omitempty"`
 }
 
 // The provider blocks that answered one fact: one name for a single value,
@@ -185,6 +189,10 @@ type likenAttempt struct {
 	// reads a bulk file. The rating.imdb gap reads it to decide whether a newer
 	// file is worth a read.
 	DatasetModified time.Time `yaml:"datasetModified,omitempty"`
+	// Why an attempt failed, in the words of the tool that refused it, for a
+	// fact that runs a tool. A person reads the cause beside the title, and
+	// the next attempt replaces it.
+	Reason string `yaml:"reason,omitempty"`
 }
 
 // A fact's file is named for the fact itself, so the one-file-per-

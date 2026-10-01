@@ -1,9 +1,9 @@
 package main
 
-// What the phases do with a file that replaced another at the same path: the
-// probe records the replacement, the trickplay and art phases replace an
-// output made for the earlier file and keep one made for this file, and the
-// marks phase drops every span of the earlier file.
+// What the facts do with a file that replaced another at the same path: the
+// probe records the replacement, the trickplay worker and the art phase
+// replace an output made for the earlier file and keep one made for this
+// file, and the marks phase drops every span of the earlier file.
 
 import (
 	"context"
@@ -77,19 +77,19 @@ func TestTheProbeRecordsWhenAFileWasReplaced(t *testing.T) {
 }
 
 // Tiles older than the replacement were made from the earlier file. The
-// phase decodes the new file and replaces the whole directory.
-func TestTheTrickplayPhaseReplacesTilesOfTheEarlierFile(t *testing.T) {
+// worker decodes the new file and replaces the whole directory.
+func TestTheTrickplayWorkerReplacesTilesOfTheEarlierFile(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		episode := seedEnrichedEpisode(t)
 		episode.replace(t)
 		episode.replacedAt(t, episode.made.Add(30*time.Minute))
 		standInFFmpeg(t, 2)
-		work, _ := testEnricher(t, libraryKindSeries, episode.root, nil)
+		work, _ := testFactWorker(t, trickplayWorker, libraryKindSeries, episode.root)
 
-		built := work.trickplayOne(t.Context(), trickplayGap{path: episode.path, duration: 1050 * time.Second})
+		built := work.trickplayOne(t.Context(), workItem{Path: episode.path, DurationMs: 1050000})
 
 		if !built {
-			t.Error("the phase reported no tiles written")
+			t.Error("the worker reported no tiles written")
 		}
 		sheets := namesIn(t, filepath.Join(episode.tiles, trickplayTilesFolder()))
 		if len(sheets) != 2 {
@@ -100,15 +100,15 @@ func TestTheTrickplayPhaseReplacesTilesOfTheEarlierFile(t *testing.T) {
 		}
 		for _, name := range namesIn(t, episode.season) {
 			if strings.Contains(name, likenTempMark) {
-				t.Errorf("the phase left %s on the volume", name)
+				t.Errorf("the worker left %s on the volume", name)
 			}
 		}
 	})
 }
 
 // Tiles made after the replacement are tiles of this file, whoever made
-// them, Jellyfin included. The phase records them and decodes nothing.
-func TestTheTrickplayPhaseKeepsTilesMadeAfterTheReplacement(t *testing.T) {
+// them, Jellyfin included. The worker records them and decodes nothing.
+func TestTheTrickplayWorkerKeepsTilesMadeAfterTheReplacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		episode := seedEnrichedEpisode(t)
 		episode.replace(t)
@@ -118,12 +118,12 @@ func TestTheTrickplayPhaseKeepsTilesMadeAfterTheReplacement(t *testing.T) {
 			setModified(t, output, now)
 		}
 		standInFFmpeg(t, 2)
-		work, _ := testEnricher(t, libraryKindSeries, episode.root, nil)
+		work, _ := testFactWorker(t, trickplayWorker, libraryKindSeries, episode.root)
 
-		built := work.trickplayOne(t.Context(), trickplayGap{path: episode.path, duration: 1050 * time.Second})
+		built := work.trickplayOne(t.Context(), workItem{Path: episode.path, DurationMs: 1050000})
 
 		if built {
-			t.Error("the phase decoded a file whose tiles are its own")
+			t.Error("the worker decoded a file whose tiles are its own")
 		}
 		if got := readFileString(t, filepath.Join(episode.tiles, trickplayTilesFolder(), "0.jpg")); got != "a sheet of the first encode" {
 			t.Errorf("the sheet reads %q, want the bytes the other tool wrote", got)

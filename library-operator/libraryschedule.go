@@ -1,9 +1,10 @@
 package main
 
 // libraryschedule.go decides when a Library runs its Job. The operator starts
-// a Job only when no other Job of the Library is unfinished, because every
-// Job of a Library runs an agent on the one catalog claim, and two agents on
-// one database corrupt it. The gate reads the Job list the pass read, so a
+// a Job only when no other Job of the Library that holds its catalog claim is
+// unfinished, because each of them runs an agent on the one catalog claim,
+// and two agents on one database corrupt it. A heavy fact's worker holds no
+// claim, and factworkerjob.go starts it on its own terms. The gate reads the Job list the pass read, so a
 // restarted operator keeps it with no state of its own.
 //
 // Behind the gate the pass chooses one Job. A walk runs when
@@ -45,13 +46,12 @@ const (
 // liken-1 ran for 7 minutes 53 seconds: a full walk of a large movies
 // library onto an empty catalog claim, where the agent's first sync took
 // most of the time.
-// Trickplay and the trailer files start no title after phaseTimeLimit, 15
-// minutes, and then finish the title they have. One trickplay title can
-// decode for up to ffmpegTimeout, one hour, and one trailer file can take
+// The trailer files start no title after phaseTimeLimit, 15 minutes, and
+// then finish the title they have, and one trailer file can take
 // trailerPullTimeout and then trailerRemuxTimeout, 20 minutes. So a healthy
-// Job ends in about 15 + 60 minutes after its phases start, plus the sync
+// Job ends in about 15 + 20 minutes after its phases start, plus the sync
 // before them and the hand-off after them. Two hours leaves room for all of
-// it. A Job that Kubernetes retries after a failed pod has less time for its
+// it, and for a probe of a slow volume. A Job that Kubernetes retries after a failed pod has less time for its
 // last pod, because the deadline counts every pod of the Job.
 const libraryJobDeadline = 2 * time.Hour
 
@@ -75,13 +75,21 @@ func jobsOfLibrary(jobs []Job, namespace, library string) []Job {
 	return held
 }
 
-// Whether any Job of this Library is unfinished: one the controller has
-// marked neither Complete nor Failed. A Job between the pods of its backoff
-// counts. Every worker counts, the cleanup Job and a Job an earlier release
-// created included, because each of them runs an agent on the Library's
-// catalog claim.
+// The Jobs of one Library that run an agent on its catalog claim: every Job
+// but the heavy facts' workers, the cleanup Job and a Job an earlier release
+// created included.
+func catalogJobsOf(jobs []Job, namespace, library string) []Job {
+	return slices.DeleteFunc(jobsOfLibrary(jobs, namespace, library), func(job Job) bool {
+		return isFactWorker(job.Metadata.Labels[workerLabelKey])
+	})
+}
+
+// Whether any Job of this Library that holds its catalog claim is unfinished:
+// one the controller has marked neither Complete nor Failed. A Job between the
+// pods of its backoff counts. A heavy fact's worker does not count, because
+// it runs no agent, so a walk or a webhook's rescan never waits for a decode.
 func libraryJobUnfinished(jobs []Job, namespace, library string) bool {
-	return slices.ContainsFunc(jobsOfLibrary(jobs, namespace, library), func(job Job) bool {
+	return slices.ContainsFunc(catalogJobsOf(jobs, namespace, library), func(job Job) bool {
 		return !job.finished()
 	})
 }
@@ -111,8 +119,7 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	if report != nil {
 		plan.sync = syncTargetFor(report.Runs)
 	}
-	job := buildLibraryJob(library, providers, o.languages, plan,
-		jobImages{operator: o.scannerImage, ffmpeg: o.ffmpegImage, corrosion: o.corrosionImage}, now)
+	job := buildLibraryJob(library, providers, o.languages, plan, o.jobImages(), now)
 	_, err := o.createJob(ctx, job)
 	if err != nil && !errors.Is(err, apiclient.ErrConflict) {
 		return fmt.Errorf("creating the library job %s: %w", job.Metadata.Name, err)
@@ -141,7 +148,7 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 // the Ready condition agree.
 func (o *operator) mayFollow(jobs []Job, runs []libraryRun, namespace, library string, now time.Time) bool {
 	key := libraryKey(namespace, library) + "/job"
-	if unansweredFailure(jobsOfLibrary(jobs, namespace, library), runs) == nil {
+	if unansweredFailure(catalogJobsOf(jobs, namespace, library), runs) == nil {
 		delete(o.failedStands, key)
 		return true
 	}
@@ -257,9 +264,9 @@ func walkRequested(library *Library, last time.Time) bool {
 	return named && requested.After(last)
 }
 
-// The phases a Job that fills gaps runs. Trickplay and the trailer files run
-// while their gap is open, because a run stops at its time limit and leaves
-// the rest for the next Job. Every other phase runs while its gap is open and
+// The phases a Job that fills gaps runs. The trailer files run while their
+// gap is open, because a run stops at its time limit and leaves the rest for
+// the next Job. Every other phase runs while its gap is open and
 // a cause has come that no Job has answered, so a gap that no phase can close
 // does not start a Job on every pass.
 func gapPhases(library *Library, report *libraryReport, providers providerSet,

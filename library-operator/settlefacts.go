@@ -24,6 +24,7 @@ import (
 // file keeps its arrival.
 var fileFacts = map[string]bool{
 	factProbe: true, factTrickplay: true, factEpisodeThumb: true, factMarks: true,
+	factAppearances: true,
 }
 
 // What one folder read reopened: the files replaced at their paths, and the
@@ -96,8 +97,8 @@ func sortedPaths(identities fileIdentities) []string {
 // stay on the volume, and the rows still list them, but the video no longer
 // names those tiles and the episode no longer links to that still. The
 // catalog then says what is true of the file at the path: it has no tiles and
-// no still of its own. The trickplay and art phases read the same second
-// before they replace either one.
+// no still of its own. The trickplay worker and the art phase read the same
+// second before they replace either one.
 func (r *walkResult) dropEarlierOutputs(identities fileIdentities) {
 	made := map[string]int64{}
 	for _, row := range r.files {

@@ -357,7 +357,7 @@ func (w *volumeWriter) replaceEarlierFile(target string, data []byte, before int
 }
 
 // The replace door for a tile directory that shows an earlier file, which
-// the trickplay phase staged a new tree for. The tiles of an earlier encode
+// the trickplay worker staged a new tree for. The tiles of an earlier encode
 // place each thumbnail at that encode's times, so they are not this file's
 // tiles. The door takes the directory only while it is older than before,
 // the second the new file took the path. A directory at or after that

@@ -1,0 +1,137 @@
+# syntax=docker/dockerfile:1
+
+# The image of `appearances`, the tool that finds the credited people on
+# screen in a title's keyframes. It holds the tool, OpenVINO's runtime
+# for the CPU and an Intel GPU, Intel's OpenCL runtime for the GPU, and
+# the two face models, on liken's ffmpeg base, which carries the ffmpeg
+# and ffprobe that the tool runs to decode keyframes. The appearances
+# worker Job runs on this image: its container runs the operator's pod
+# program, which runs the tool on each video of the work list and writes
+# the ledger.
+#
+# The build context is this component's directory, as for
+# Dockerfile.ffmpeg, so the pod program builds from the module's Go
+# files. The crate comes in as the named context appearances, because the
+# component's .dockerignore keeps it out of every Go build. The bake file
+# at the top of the repository gives this build the ffmpeg image of the
+# same commit as the named context ffmpeg, and the shared kubernetes
+# module as the named context kubernetes. Every file that comes from
+# outside the repository is pinned: the Rust and Debian images by
+# digest, the Go image by version as in Dockerfile.ffmpeg, OpenVINO and
+# Intel's packages by sha256, and the models by the digest of their OCI
+# artifact.
+
+# The pod program, built the way Dockerfile.ffmpeg builds it, which says
+# why each step is there.
+FROM golang:1.27.1-bookworm AS pod
+ENV GOPROXY="https://proxy.golang.org|direct"
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY --from=kubernetes go.mod go.sum /kubernetes/
+RUN go mod download
+COPY --from=kubernetes . /kubernetes/
+COPY *.go ./
+RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
+
+FROM rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS build
+WORKDIR /src
+
+# The manifest, the lock file, and the toolchain pin come first, so a
+# source edit reuses the cached dependency layer. A stub library and a
+# stub binary give cargo something to compile the dependencies against.
+COPY --from=appearances Cargo.toml Cargo.lock rust-toolchain.toml ./
+RUN mkdir src \
+    && echo 'fn main() {}' > src/main.rs \
+    && : > src/lib.rs
+
+# The cache mounts hold the crate registry and the git checkouts between
+# builds, so a rebuild on a workstation downloads no crate a second time.
+# --locked builds the versions the lock file names and never rewrites it.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release --locked
+
+# The review command embeds the mpv overlay script from dev/.
+COPY --from=appearances src/ ./src/
+COPY --from=appearances dev/ ./dev/
+
+# The touch marks the crate's own sources newer than the stub build, so
+# cargo compiles them again and leaves the dependencies as they are.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    touch src/main.rs src/lib.rs \
+    && cargo build --release --locked
+
+# The inference runtime. The binary opens libopenvino_c.so when it
+# starts, so the build above needs no OpenVINO, and this stage collects
+# the runtime that the image loads. The builder is the same Debian image
+# as the bases', and the closure script checks that its glibc is the
+# base's.
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runtime
+
+# OpenVINO's runtime archive for Ubuntu 24.04, from Intel.
+ADD --checksum=sha256:772ce52d9b0aa375c77d391fccea71450d889c98b9af197bb8f05167a9dabd87 \
+    https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu24_2026.4.1.22982.07f9c262b05_x86_64.tgz \
+    /openvino.tgz
+
+# Intel's OpenCL runtime 26.35.39758.10 and gmmlib, and the graphics
+# compiler 2.41.5 that the runtime's release names. The sums are the
+# ones the two releases publish.
+ADD --checksum=sha256:61712caaddeba3d38e4f79e2a0fb23fea25596ca2d72c3144c6eea2331ec4301 \
+    https://github.com/intel/compute-runtime/releases/download/26.35.39758.10/intel-opencl-icd_26.35.39758.10-0_amd64.deb \
+    /debs/
+ADD --checksum=sha256:6031a63d6e8a12ce61c14efc15f2c8e727061286e3820b8594e6d00615e04d54 \
+    https://github.com/intel/compute-runtime/releases/download/26.35.39758.10/libigdgmm12_22.10.0_amd64.deb \
+    /debs/
+ADD --checksum=sha256:0a6e64a663ae65a0fa02d6912ae3b6b37cf85b90c21cc423fd9fef70aaf4f628 \
+    https://github.com/intel/intel-graphics-compiler/releases/download/v2.41.5/intel-igc-core-2_2.41.5+22716_amd64.deb \
+    /debs/
+ADD --checksum=sha256:779e1b9e88098eb25711e9a8f67c2752665bad22f134aa40ed5649f6e1b87058 \
+    https://github.com/intel/intel-graphics-compiler/releases/download/v2.41.5/intel-igc-opencl-2_2.41.5+22716_amd64.deb \
+    /debs/
+
+# The tree of the ffmpeg image, so the closure can check that every
+# library it adds loads against the base's own libraries.
+COPY --from=ffmpeg / /base/
+COPY --from=appearances inference-closure.sh /
+RUN sh /inference-closure.sh /out /base /openvino.tgz /debs/*.deb
+
+# The models. Their weights are not in the repository, so a workstation
+# pushes them to a registry as an OCI artifact with models/push.sh, and
+# this stage pulls the artifact by the digest in models/digest. A pull
+# by digest fails when any byte differs, and the sums in
+# models/models.sha256 check each file by name. MODELS_REPOSITORY and
+# MODELS_PLAIN_HTTP point a test build at another registry that holds
+# the same artifact. The digest is the same on every registry.
+FROM ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179 AS models
+ARG MODELS_REPOSITORY=ghcr.io/liken-sh/library-operator-appearances-models
+ARG MODELS_PLAIN_HTTP=false
+COPY --from=appearances models/digest models/models.sha256 /pin/
+RUN oras pull --plain-http="$MODELS_PLAIN_HTTP" --output /models \
+        "$MODELS_REPOSITORY@$(cat /pin/digest)" \
+    && cd /models \
+    && sha256sum -c /pin/models.sha256 \
+    && test "$(ls | wc -l)" -eq "$(wc -l < /pin/models.sha256)"
+
+# The ffmpeg base is a closure on scratch, with no shell, so every
+# layer below is a copy.
+FROM ffmpeg
+COPY --from=runtime /out /
+# The license files and the notice travel with the weights.
+COPY --from=models /models /usr/share/appearances/models
+COPY --from=build /src/target/release/appearances /appearances
+# The worker makes one kind of request, the rescan, over plain HTTP to the
+# operator's service inside the cluster, so the image needs no trust store.
+COPY --from=pod /library-operator-pod /library-operator-pod
+
+# The OpenVINO runtime and Intel's graphics compiler are outside the
+# directories that the loader searches, and the binary searches
+# LD_LIBRARY_PATH for libopenvino_c.so. The tool runs ffmpeg and ffprobe
+# by name, and a scratch image carries no PATH. The pod program reads
+# APPEARANCES_MODELS to hash the models a detections record names.
+ENV LD_LIBRARY_PATH=/opt/openvino/lib:/usr/local/lib \
+    APPEARANCES_MODELS=/usr/share/appearances/models \
+    PATH=/usr/bin
+# The entrypoint is the tool, so a person runs it from the image with no
+# other argument. The worker Job names the pod program as its command.
+ENTRYPOINT ["/appearances"]

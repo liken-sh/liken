@@ -72,9 +72,14 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		if err := o.standCatalogClaim(ctx, library, choice.catalog); err != nil {
 			return err
 		}
-		// The render template must exist before the pass creates a pod
-		// that names it. A pod that names a missing template never starts.
-		if err := o.standTrickplayTemplate(ctx, library); err != nil {
+		// The render templates must exist before the pass creates a pod
+		// that names one. A pod that names a missing template never starts.
+		if err := o.standRenderTemplates(ctx, library); err != nil {
+			return err
+		}
+		// A worker holds no catalog and waits for no source, so it starts
+		// whatever the gate of the library Job says.
+		if err := o.runFactWorkers(ctx, library, report, jobs, now); err != nil {
 			return err
 		}
 		// No Job of this Library is built while any source it names has no

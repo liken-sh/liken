@@ -79,15 +79,24 @@ requests:
 | `scan`, in a walk | `32Mi` | `128Mi` | `10m` |
 | `probe` | `32Mi` | `256Mi` | `10m` |
 | `art` | `32Mi` | `256Mi` | `10m` |
-| `trickplay`, when enabled | `32Mi` | `512Mi` | `500m` |
 | `trailer-files`, when enabled | `32Mi` | `256Mi` | `10m` |
 | every other phase, and `close` | `32Mi` | `64Mi` | `10m` |
 
-A walk of a `Library` whose sources serve every phase runs twelve
-containers beside the agent, so the pod requests about `448Mi`. A `Job`
-that fills gaps runs only the phases with work, and requests less. The
-probe and trickplay limits are wide because `ffmpeg` and `ffprobe` hold
-a decoded stream, and the art limit because the art container holds an
+A walk of a `Library` whose sources serve every phase runs eleven
+containers beside the agent, so the pod requests about `416Mi`. A `Job`
+that fills gaps runs only the phases with work, and requests less.
+
+The trickplay worker, when enabled, is a pod of its own with one
+container and no agent. It requests `32Mi` of memory and `500m` of CPU,
+and its limit is `512Mi`. It runs beside the `Library`'s `Job`, so a
+node that takes both holds the sum of the two. The appearances worker
+is the same shape with a limit of `1536Mi`, because `ffmpeg` held
+860 MB on a 4K file decoded in software, and the face models held
+350 MB beside it. The two workers of one `Library` can run at the same
+time.
+
+The probe and trickplay limits are wide because `ffmpeg` and `ffprobe`
+hold a decoded stream, and the art limit because the art container holds an
 image while it writes it. The `scan` limit is wide because the walk reads
 eight title folders at once and holds each whole, so eight long series
 set its peak. A walk of a dozen synthetic series of 3,000 episodes each
@@ -118,6 +127,9 @@ measured yet.
 * **Leave `spec.trickplay.enabled` off**, its default. The first pass
   reads every video end to end, hours of CPU on any library. Where it
   is on, `spec.trickplay.render` moves the decode onto the GPU.
+* **Leave `spec.appearances.enabled` off**, its default. The first
+  pass decodes the keyframes of every feature, and its limit of
+  `1536Mi` is more than a one-gigabyte machine holds.
 * **Walk less often.** `spec.scan.schedule` defaults to once an hour.
   A webhook covers imports between walks:
 
