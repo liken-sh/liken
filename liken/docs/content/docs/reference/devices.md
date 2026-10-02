@@ -89,7 +89,7 @@ constrain two requests to one physical device.
 
 ## Attributes
 
-Every attribute except the last belongs to the driver's domain, so a
+Every attribute except the last two belongs to the driver's domain, so a
 selector reads it as `device.attributes["liken.sh"].<name>`. If the
 hardware does not have an attribute, the attribute is absent, not
 empty. Thus `has(device.attributes["liken.sh"].serial)` gives a
@@ -111,6 +111,7 @@ correct result.
 | `vendor` | string | the vendor ID, lowercase hex with no prefix |
 | `product` | string | the product ID, lowercase hex with no prefix |
 | `sound.liken.sh/supportsSound` | bool | a sound server can run against this device. The attribute carries its own domain, so a selector reads it as `device.attributes["sound.liken.sh"].supportsSound`. The domain belongs to no single driver, so a DeviceClass that selects the attribute names no driver, and any driver may stamp it on a device that supports a sound server |
+| `resource.kubernetes.io/pciBusID` | string | the address of a PCI device, the same value as `address`, on every device `liken` publishes for a PCI device. Kubernetes defines the attribute and its format, Domain:Bus:Device.Function, in the [standard device attributes](https://kubernetes.io/docs/reference/node/dra-standard-device-attributes/). The domain belongs to no single driver, so another driver can publish the same attribute for the same card, and a `matchAttribute` constraint can pair a device of `liken` with a device of that driver. A USB device has no such attribute |
 
 Use the attribute that describes what you need. `renderNode` and
 `classCode` describe a capability of the hardware, and they stay
@@ -126,11 +127,20 @@ render node and a request for a card node constrains the two with
 the same card. The
 [guide](/docs/guides/devices/#two-requests-one-card) has the claim.
 
+`liken.sh/address` pairs only the devices that `liken` publishes,
+because a bare attribute name belongs to the driver that published it.
+To pair a `liken` device with a device of another driver for the same
+card, constrain the requests with
+`matchAttribute: resource.kubernetes.io/pciBusID`.
+
 `liken` publishes no capability facts that need a driver stack to
 measure, for example the codecs that a GPU can encode. To read those
 facts, you must run libva and a vendor driver, which the image does
 not contain. A pod that holds a claim on the render node can measure
 them for itself, so the operating system does not publish them.
+media-operator measures them, and publishes them as devices of its
+own driver, `media.liken.sh`, that pair with the render node through
+`resource.kubernetes.io/pciBusID`.
 
 ## Sharing
 

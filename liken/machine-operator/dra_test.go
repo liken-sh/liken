@@ -163,6 +163,34 @@ func TestInventoryGivesOneCardsDevicesOneAddress(t *testing.T) {
 	}
 }
 
+func TestInventoryStampsThePCIBusIDOnEveryDeviceOfAPCICard(t *testing.T) {
+	// A device of another driver, such as media-operator's statement
+	// of what a GPU decodes, pairs with this card's render node through
+	// matchAttribute. The standard attribute is the name both drivers
+	// can publish, and a USB device has no PCI bus ID to state.
+	discovered, inspect := gpu()
+	discovered = append(discovered, hardware.Device{
+		Bus: "usb", Address: "2-1:1.0", Driver: "uas", Class: "mass-storage",
+	})
+	devices := inventoryDevices(discovered, inspect, nil, nil)
+
+	busIDs := map[string]string{}
+	for _, d := range devices {
+		if got := d.Attributes[pciBusIDAttribute].String; got != nil {
+			busIDs[d.Name] = *got
+		}
+	}
+	want := map[string]string{
+		"pci-0000-00-02-0":         "0000:00:02.0",
+		"pci-0000-00-02-0-display": "0000:00:02.0",
+		"pci-0000-00-02-0-i2c-dev": "0000:00:02.0",
+	}
+	if !maps.Equal(busIDs, want) {
+		t.Errorf("%s = %v, want the card's address on each of its devices and none on the USB disk",
+			pciBusIDAttribute, busIDs)
+	}
+}
+
 func TestInventoryPublishesAnAudioControllerExclusively(t *testing.T) {
 	// The HDA controller on the testbed, with the nodes its sysfs
 	// subtree holds: the card's own nodes, and the input device that

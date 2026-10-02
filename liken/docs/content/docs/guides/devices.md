@@ -34,6 +34,7 @@ Each entry is one device you can claim:
         name: {string: Alder Lake-N [UHD Graphics]}
         product: {string: 46d2}
         renderNode: {bool: true}
+        resource.kubernetes.io/pciBusID: {string: "0000:00:02.0"}
         subsystem: {string: drm}
         vendor: {string: "8086"}
     - name: pci-0000-00-02-0-display
@@ -47,6 +48,7 @@ Each entry is one device you can claim:
         modalias: {string: "pci:v00008086d000046D2..."}
         name: {string: Alder Lake-N [UHD Graphics]}
         product: {string: 46d2}
+        resource.kubernetes.io/pciBusID: {string: "0000:00:02.0"}
         subsystem: {string: drm}
         vendor: {string: "8086"}
     - name: pci-0000-00-02-0-i2c-dev
@@ -59,6 +61,7 @@ Each entry is one device you can claim:
         modalias: {string: "pci:v00008086d000046D2..."}
         name: {string: Alder Lake-N [UHD Graphics]}
         product: {string: 46d2}
+        resource.kubernetes.io/pciBusID: {string: "0000:00:02.0"}
         subsystem: {string: i2c-dev}
         vendor: {string: "8086"}
 
@@ -280,6 +283,13 @@ the same GPU.
 
 Leave the audio controller out of the list. It has an address of its
 own, so a constraint that included its request would never match.
+
+`liken.sh/address` pairs only the devices of `liken`. To pair the
+render node with a device that another driver publishes for the same
+card, such as media-operator's statement of what a GPU decodes, use
+`matchAttribute: resource.kubernetes.io/pciBusID`. Kubernetes defines
+that attribute, and both drivers publish it with the card's PCI
+address.
 
 ## 5. Give one pod a device alone
 

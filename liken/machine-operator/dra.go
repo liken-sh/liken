@@ -279,6 +279,17 @@ func inventoryDevices(discovered []hardware.Device,
 			if p.Subsystem == "sound" {
 				attrs["sound.liken.sh/supportsSound"] = kubernetes.AttrBool(true)
 			}
+			// The bare address pairs the devices of one card only
+			// inside this driver, because a bare name belongs to the
+			// driver that published it. Another driver's device for
+			// the same card, such as media-operator's statement of
+			// what a GPU decodes, pairs with these devices through
+			// the attribute Kubernetes defines for a PCI device's
+			// address. A sysfs PCI address is already the extended
+			// BDF that the attribute's format names.
+			if d.Bus == "pci" {
+				attrs[pciBusIDAttribute] = kubernetes.AttrString(d.Address)
+			}
 			device := kubernetes.SliceDevice{
 				Name:       deviceName(d) + p.Suffix,
 				Attributes: attrs,
@@ -330,3 +341,11 @@ func attributeString(s string) string {
 	}
 	return s[:64]
 }
+
+// pciBusIDAttribute is the standard attribute that Kubernetes defines
+// for the address of a PCI device, in the `resource.kubernetes.io`
+// domain that belongs to no single driver. Its value is the extended
+// BDF notation, Domain:Bus:Device.Function, so it identifies one
+// device on a node. The reference is
+// https://kubernetes.io/docs/reference/node/dra-standard-device-attributes/.
+const pciBusIDAttribute = "resource.kubernetes.io/pciBusID"
