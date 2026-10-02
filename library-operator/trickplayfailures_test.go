@@ -171,7 +171,7 @@ func TestEveryAttemptKindGatesTheTrickplayGapAgainstTheRealSchema(t *testing.T) 
 				t.Fatal(err)
 			}
 
-			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime)
+			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,7 +194,7 @@ func TestAFileWithNoVideoStreamIsNoTrickplayGap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime)
+	gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

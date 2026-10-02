@@ -328,17 +328,24 @@ func factsContainer(library *Library, name string, facts []string, paths []strin
 // that names none writes an empty value. The walk is not a fact and no
 // container runs it, so it does not travel.
 func refreshValue(library *Library) string {
+	facts := factRefreshTimes(library)
+	if len(facts) == 0 {
+		return ""
+	}
+	refresh, _ := json.Marshal(facts)
+	return string(refresh)
+}
+
+// The refresh times of the facts a Library names, which the containers and
+// the reporter read. The walk is not a fact, so it is not in the map.
+func factRefreshTimes(library *Library) refreshTimes {
 	facts := refreshTimes{}
 	for name, at := range library.Spec.Refresh {
 		if isContainerFact(name) {
 			facts[name] = at
 		}
 	}
-	if len(facts) == 0 {
-		return ""
-	}
-	refresh, _ := json.Marshal(facts)
-	return string(refresh)
+	return facts
 }
 
 // ffprobe is a child process of the probe container, so its memory counts

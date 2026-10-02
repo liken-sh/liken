@@ -40,6 +40,7 @@ answer is meant to outlive the process that wrote it.
 |---|---|---|---|---|
 | `libraries/{namespace}/{name}/status` | the catalog pod's reporter | the operator | yes | [the library report](#the-library-report) |
 | `catalogs/{namespace}/availability` | the catalog pod's reporter | the operator | yes | `online` or `offline` |
+| `libraries/{namespace}/{name}/refresh` | the operator | the catalog pod's reporter | yes | [the refresh times](#the-refresh-times) |
 | `players/{namespace}/{player}/play` | the media browser, or any client | the operator | no | [the play request](#the-play-request) |
 | `players/{namespace}/{player}/audience` | the media browser | the media browser, and any client that wants to know who is in the room | yes | [who is watching](#who-is-watching) |
 | `plays/{namespace}/{play}/audience` | the operator | the progress role, the jellyfin role | yes | [the audience](#the-audience) |
@@ -95,7 +96,7 @@ catalog pod holds every row the `Job` wrote.
 | `walking` | boolean | True while a walk runs, which is a scan run whose start is later than its finish. |
 | `removedLastSweep` | integer | How many rows the last full sweep removed. |
 | `runs` | list | One entry per worker that has run against this library, sorted by worker. Absent until a worker has run. |
-| `gaps` | map of integers | One count per fact of the rows that fact has left to fill. Absent when no fact has a gap. |
+| `gaps` | map of integers | One count per fact of the rows that fact has left to fill, counted with the `Library`'s [refresh times](#the-refresh-times). Absent when no fact has a gap. |
 | `oldestAttempts` | map of RFC 3339 times | The oldest attempt this library holds for each fact. The operator reads it against `spec.refresh`. Absent when no fact has an attempt. |
 | `waiting` | integer | How many titles the identity fact left as candidates for a person to choose from. |
 | `unresolved` | integer | How many titles no provider could name. |
@@ -128,6 +129,29 @@ is empty for a run that finished its work.
       "unresolved": 1,
       "fights": 0
     }
+
+## The refresh times
+
+`libraries/{namespace}/{name}/refresh`
+
+The reporter counts each gap with the `Library`'s
+[`spec.refresh`](/docs/reference/libraries/#spec--refresh), so a title a
+refresh reopened is in `gaps`. The reporter holds no API credential and
+cannot read the `Library`, so the operator publishes the refresh time of
+each fact the `Library` names, retained, whenever the times change. The
+reporter subscribes to the refresh topics of its own namespace and
+publishes the report again when one changes, so an edit of `spec.refresh`
+reaches `gaps` with no restart of the catalog pod. The payload is the value
+a `Job`'s containers read from `LIBRARY_REFRESH`: one RFC 3339 time per
+fact. The walk is not a fact, and it is not in the payload. A `Library`
+that names no refresh time publishes an empty object.
+
+    {"credits": "2026-09-30T00:00:00Z", "appearances": "2026-09-30T00:00:00Z"}
+
+A report that the reporter built before the refresh times reached it
+counts with none. The operator reads `oldestAttempts` against
+`spec.refresh` as well, so a fact with a refresh that has work left starts
+its work from such a report too.
 
 ## The reporter's availability
 

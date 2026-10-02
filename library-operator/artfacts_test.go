@@ -244,7 +244,7 @@ func TestTheGapCountsHoldEveryArtFact(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedArtMovie(t, catalog, "Some Film (2014)")
 
-	counts, err := catalog.gapCounts(t.Context(), artLibrary, time.Now().UTC())
+	counts, err := catalog.gapCounts(t.Context(), artLibrary, time.Now().UTC(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

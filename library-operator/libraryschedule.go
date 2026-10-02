@@ -333,10 +333,12 @@ func enrichDue(cause time.Time, runs []libraryRun) bool {
 }
 
 // Whether one fact's refresh time has titles left to ask about. The
-// reporter counts a gap with no refresh, so a title whose file and rows
-// are there counts as filled; the oldest attempt of the fact is what
-// says the refresh still has work, and the fact's own run moves that
-// attempt past the refresh, which is what ends the work.
+// reporter counts each gap with the refresh times the operator publishes on
+// the bus, but a report built before those times reached the reporter
+// counts with none, and a title whose file and rows are there then counts as
+// filled. The oldest attempt of the fact says the refresh still has work in
+// either case, and the fact's own run moves that attempt past the refresh,
+// which is what ends the work.
 func refreshHasWork(library *Library, report *libraryReport, fact string) bool {
 	refresh, named := library.Spec.Refresh[fact]
 	if !named {

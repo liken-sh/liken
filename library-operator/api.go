@@ -216,6 +216,10 @@ type LibraryTrickplay struct {
 	// The render node the trickplay worker claims for its decode. Unset, the
 	// worker carries no claim and decodes in software.
 	Render *RenderDevice `json:"render,omitempty"`
+
+	// How many pods the trickplay worker runs at once, each on its own share
+	// of the list. The CRD defaults it to 1.
+	Parallelism int `json:"parallelism,omitempty"`
 }
 
 // The appearances block of the spec, off unless the owner turns it on.
@@ -226,6 +230,10 @@ type LibraryAppearances struct {
 	// the face models. Unset, the worker carries no claim and does both on
 	// the CPU.
 	Render *RenderDevice `json:"render,omitempty"`
+
+	// How many pods the appearances worker runs at once, each on its own
+	// share of the list. The CRD defaults it to 1.
+	Parallelism int `json:"parallelism,omitempty"`
 }
 
 // One DeviceClass name, and a CEL expression over that class's devices where

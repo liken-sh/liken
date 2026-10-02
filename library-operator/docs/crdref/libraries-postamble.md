@@ -11,6 +11,7 @@ tree, and it gives every field of the report.
 |---|---|---|---|
 | `libraries/{namespace}/{name}/status` | the catalog pod | yes | the library's report |
 | `catalogs/{namespace}/availability` | the catalog pod | yes | `online` or `offline` |
+| `libraries/{namespace}/{name}/refresh` | the operator | yes | the refresh time of each fact in `spec.refresh` |
 
 ### `status`
 
@@ -44,9 +45,10 @@ every row the `Job` wrote.
     }
 
 `walking` is true while a walk runs, and the operator's phase
-follows it. `oldestAttempts` is what the operator reads `spec.refresh`
-against: a refresh later than the oldest attempt is a fact with work
-left, whatever `gaps` says.
+follows it. The reporter counts `gaps` with the refresh times the operator
+publishes on the `refresh` topic. `oldestAttempts` is what the operator
+reads `spec.refresh` against: a refresh later than the oldest attempt is
+a fact with work left, whatever `gaps` says.
 
 ### `availability`
 

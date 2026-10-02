@@ -232,6 +232,42 @@ GPU refuses. With no render block the worker decodes in software. With
 a render block on a cluster where no node offers such a device, the
 pod stays `Pending`, and its events say so.
 
+#### A worker on several nodes
+
+One worker pod works its whole list on one node. A large library can
+spread the list over several nodes' GPUs with
+`spec.trickplay.parallelism` or `spec.appearances.parallelism`, the
+number of pods the worker `Job` runs at once, from 1 to 16:
+
+```yaml
+spec:
+  appearances:
+    enabled: true
+    parallelism: 3
+    render:
+      class: display-render
+```
+
+At 1, the default, the worker is one pod. Above 1, the worker is an
+Indexed `Job`, and every pod reads the same list. Each pod takes the
+videos of the title folders whose name hashes to its index, so a
+series and the ledgers of its seasons stay in one pod, and no two pods
+ask for a rescan of one folder. Each pod logs its share:
+
+    library.liken.sh: index 1 of 3 takes 482 of the 1447 videos
+
+Each pod claims its own device from the worker's
+`ResourceClaimTemplate`. The pods prefer different nodes. When fewer
+nodes offer the device than the worker has pods, two pods share a
+node and its device, because `liken` publishes a render node for many
+claims at once. Kubernetes retries a failed pod up to twice on its own
+share, and leaves the pods that finished alone. The 24-hour deadline
+is for the whole `Job`. The worker counts as running until every pod
+has ended, so the next list waits for the last pod.
+
+The split is by the count of title folders, not by hours. A pod whose
+share holds a long series can run for hours after the others end.
+
 The tile directory is the one Jellyfin reads and writes. So the worker
 accepts a directory Jellyfin made first and leaves it alone. The one
 exception is a directory older than the file beside it: when a new
@@ -256,6 +292,9 @@ same way as the [trickplay](#trickplay) worker. It reads the list
 video again before it
 opens it, and asks the operator to rescan each title folder when the
 folder is done.
+`spec.appearances.parallelism` runs the worker on several nodes at
+once, as [a worker on several nodes](#a-worker-on-several-nodes)
+describes.
 
 A feature is in the gap when the probe gave it a length and its title
 credits at least one actor whose entry holds a headshot. The credits

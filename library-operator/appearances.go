@@ -57,10 +57,11 @@ var appearancesWorker = factWorker{
 			Limits:   map[string]string{"memory": appearancesMemoryLimit},
 		}
 	},
-	render:  func(library *Library) *RenderDevice { return library.Spec.Appearances.Render },
-	scratch: appearancesScratch,
-	work:    func(ctx context.Context, run *factWorkerRun, item workItem) { run.appearancesOne(ctx, item) },
-	quick:   appearancesQuick,
+	render:      func(library *Library) *RenderDevice { return library.Spec.Appearances.Render },
+	parallelism: func(library *Library) int { return podsOf(library.Spec.Appearances.Parallelism) },
+	scratch:     appearancesScratch,
+	work:        func(ctx context.Context, run *factWorkerRun, item workItem) { run.appearancesOne(ctx, item) },
+	quick:       appearancesQuick,
 }
 
 // Whether a video of the list needs only the match: a detections record of

@@ -341,7 +341,7 @@ func TestTheReporterCountsTheEpisodesOfTheRatingGap(t *testing.T) {
 			seedGapEpisodes(t, catalog)
 			agent.queriesLeft = one.refused
 
-			got, err := catalog.episodeGapCounts(t.Context(), "house/movies", testNow)
+			got, err := catalog.episodeGapCounts(t.Context(), "house/movies", testNow, nil)
 
 			if (err != nil) != one.failed || !maps.Equal(got, one.want) {
 				t.Errorf("counts = %v, %v, want %v", got, err, one.want)

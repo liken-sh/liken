@@ -32,6 +32,9 @@ type factWorker struct {
 	// The operator keeps one ResourceClaimTemplate per worker that names one
 	// (renderclaim.go).
 	render func(library *Library) *RenderDevice
+	// How many pods the worker Job runs, each on its own share of the list
+	// (workershare.go). It is never below 1.
+	parallelism func(library *Library) int
 	// Where the container gets a directory of its own that is not the volume,
 	// as an emptyDir the pod takes with it, and empty where it needs none.
 	scratch string
@@ -63,6 +66,13 @@ func factWorkerOf(fact string) (factWorker, bool) {
 func isFactWorker(worker string) bool {
 	_, held := factWorkerOf(worker)
 	return held
+}
+
+// The count of pods a Library's block asks for. A Library the API server
+// served carries the CRD's default of 1. A Library built in this program can
+// carry 0, which is one pod too.
+func podsOf(parallelism int) int {
+	return max(parallelism, 1)
 }
 
 // The heavy facts this Library runs, whose work lists its library Job

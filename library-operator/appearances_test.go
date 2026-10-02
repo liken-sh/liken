@@ -261,7 +261,7 @@ func TestAnAppearancesAttemptHoldsItsFileOutOfTheGap(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			gaps, err := catalog.gapCounts(t.Context(), appearancesLibrary, ledgerTime)
+			gaps, err := catalog.gapCounts(t.Context(), appearancesLibrary, ledgerTime, nil)
 
 			if err != nil {
 				t.Fatal(err)

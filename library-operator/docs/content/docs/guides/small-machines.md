@@ -94,6 +94,8 @@ is the same shape with a limit of `1536Mi`, because `ffmpeg` held
 860 MB on a 4K file decoded in software, and the face models held
 350 MB beside it. The two workers of one `Library` can run at the same
 time.
+A worker with `parallelism` above 1 runs that many such pods, and two
+of them can share a node, so a node can hold the limit more than once.
 
 The probe and trickplay limits are wide because `ffmpeg` and `ffprobe`
 hold a decoded stream, and the art limit because the art container holds an

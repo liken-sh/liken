@@ -7,6 +7,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -207,6 +210,8 @@ type likenRows struct {
 	credits  []creditRow
 	trailers []trailerRow
 	marks    []markRow
+	// The stale partial files the listing of the .liken directory found.
+	stale []string
 }
 
 // Reads every .liken file the folder holds into attempts rows. A folder that
@@ -214,9 +219,33 @@ type likenRows struct {
 // none.
 // One pass answers for every kind of row, because the credits ledger, the
 // trailer ledger, and the marks ledger are files this pass already opens.
-func (s likenDir) read() (likenRows, error) {
+//
+// The pass lists the .liken directory once and opens only the ledgers the
+// listing names. On a network volume one listing costs less than an open of
+// each of the facts' ledgers, most of which a folder does not hold. The same
+// listing names the stale partial files a stopped writer left.
+func (s likenDir) read(now time.Time) (likenRows, error) {
 	held := likenRows{}
+	liken := filepath.Join(s.dir, likenDirectory)
+	entries, err := os.ReadDir(liken)
+	if errors.Is(err, fs.ErrNotExist) {
+		return held, nil
+	}
+	if err != nil {
+		return held, err
+	}
+	listed := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		listed[entry.Name()] = true
+	}
+	held.stale = stalePartialsIn(liken, entries, now)
+	if listed[appearancesRecordsDirectory] {
+		held.stale = append(held.stale, staleRecordPartials(liken, now)...)
+	}
 	for _, fact := range s.ledgerFacts() {
+		if !listed[likenLedgerName(fact)] {
+			continue
+		}
 		ledger, err := readLikenLedger(s.dir, fact)
 		if err != nil {
 			return held, err
@@ -274,8 +303,9 @@ func (s likenDir) itemOf(fact, path string) string {
 // way an unreadable .nfo file does, so the sweep never removes rows the volume
 // still holds.
 func readLikenDir(liken likenDir, result *walkResult) {
-	held, err := liken.read()
+	held, err := liken.read(time.Now())
 	result.noteReadError(err)
+	result.stalePartials = append(result.stalePartials, held.stale...)
 	result.attempts = append(result.attempts, held.attempts...)
 	result.credits = append(result.credits, held.credits...)
 	result.trailers = append(result.trailers, held.trailers...)
@@ -287,14 +317,14 @@ func readLikenDir(liken likenDir, result *walkResult) {
 // one set.
 //
 // The reporter runs in the catalog pod, which reads no Library, so it
-// counts with no refresh time and publishes the oldest attempt of each
-// fact beside the counts. The operator holds the Library and reads the
-// two together.
-func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time) (map[string]int, error) {
+// counts with the refresh times the operator publishes on the bus for
+// each Library. A Library with no refresh times counts each gap with none.
+func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time,
+	refresh refreshTimes) (map[string]int, error) {
 	counts := map[string]int{}
 	for fact, query := range gapQueries {
 		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`,
-			gapParams(fact, library, now, time.Time{}))
+			gapParams(fact, library, now, refresh[fact]))
 		if err != nil {
 			return nil, err
 		}

@@ -3,8 +3,9 @@ package main
 // The reporter is the container beside the standing catalog agent. It
 // is the one process in the namespace that reads the catalog and
 // publishes what it holds: one retained report per library, rebuilt
-// Whenever the runs table changes and while any replicated table
-// keeps changing. It holds no Kubernetes credentials, it answers on no
+// whenever the runs table changes, while any replicated table keeps
+// changing, and when the operator publishes new refresh times for a
+// library. It holds no Kubernetes credentials, it answers on no
 // port, and it never exits on its own, because the operator reads a
 // Library's whole status off this process.
 
@@ -61,6 +62,14 @@ type reporter struct {
 
 	mutex     sync.Mutex
 	published map[string]libraryReport
+	// The refresh times of each Library, by library key, as the operator
+	// last published them. A Library with no entry counts its gaps with no
+	// refresh time.
+	refresh map[string]refreshTimes
+	// The mark that a Library's refresh times changed, which the bus handler
+	// raises and the republish loop answers, because the handler runs on the
+	// bus reader and must not wait on a catalog read.
+	changed chan struct{}
 }
 
 // runReport is the report role's whole program: read the environment,
@@ -101,7 +110,7 @@ func newReporter(log io.Writer) *reporter {
 	}
 	report.bus = newBus(os.Getenv(busAddressVariable), "catalog-"+namespace,
 		&busWill{Topic: report.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
-		report.onConnect, nil)
+		report.onConnect, report.handleBusMessage)
 	return report
 }
 
@@ -110,6 +119,14 @@ func newReporter(log io.Writer) *reporter {
 // reporter offline and returns. The bus runs on a context of its own,
 // so the closing publish has a live connection to go out on.
 func (r *reporter) serve(stopped context.Context) {
+	r.mutex.Lock()
+	if r.changed == nil {
+		r.changed = make(chan struct{}, 1)
+	}
+	changed := r.changed
+	r.mutex.Unlock()
+	r.bus.Subscribe(libraryRefreshFilter(r.topicBase, r.namespace))
+
 	running, stopBus := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -119,8 +136,8 @@ func (r *reporter) serve(stopped context.Context) {
 
 	// The runs stream carries the values a report needs. The update
 	// streams carry only the fact that a row moved, so they mark a
-	// change, and the republish reads the catalog.
-	changed := make(chan struct{}, 1)
+	// change, and the republish reads the catalog. A refresh time that
+	// changes on the bus raises the same mark.
 	var streams sync.WaitGroup
 	for _, table := range catalogTables {
 		streams.Add(1)
@@ -310,12 +327,13 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 	}
 	report.LastChange = r.lastChange(library, report)
 
-	gaps, err := r.catalog.gapCounts(ctx, library, time.Now().UTC())
+	refresh := r.refreshOf(library)
+	gaps, err := r.catalog.gapCounts(ctx, library, time.Now().UTC(), refresh)
 	if err != nil {
 		return libraryReport{}, err
 	}
 	report.Gaps = gaps
-	report.EpisodeGaps, err = r.catalog.episodeGapCounts(ctx, library, time.Now().UTC())
+	report.EpisodeGaps, err = r.catalog.episodeGapCounts(ctx, library, time.Now().UTC(), refresh)
 	if err != nil {
 		return libraryReport{}, err
 	}
@@ -373,6 +391,40 @@ func (r *reporter) onConnect(bus *Bus) {
 		payload, _ := json.Marshal(report)
 		bus.Publish(libraryStatusTopic(r.topicBase, namespace, name), payload, true)
 	}
+}
+
+// handleBusMessage folds one Library's refresh times, which the operator
+// publishes retained. An empty payload clears them, which is what the
+// operator publishes when the Library departs. The fold raises the change
+// mark, so the republish loop counts the gaps again.
+func (r *reporter) handleBusMessage(topic string, payload []byte) {
+	namespace, name, kind, ok := parseLibraryTopic(r.topicBase, topic)
+	if !ok || kind != libraryRefreshKind || namespace != r.namespace {
+		return
+	}
+	library := libraryKey(namespace, name)
+	r.mutex.Lock()
+	if r.refresh == nil {
+		r.refresh = map[string]refreshTimes{}
+	}
+	if len(payload) == 0 {
+		delete(r.refresh, library)
+	} else {
+		r.refresh[library] = parseRefresh(string(payload))
+	}
+	changed := r.changed
+	r.mutex.Unlock()
+	if changed != nil {
+		markChanged(changed)
+	}
+}
+
+// The refresh times of one Library, and none where the operator has
+// published none.
+func (r *reporter) refreshOf(library string) refreshTimes {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return r.refresh[library]
 }
 
 // splitLibraryKey reads a library key back into the namespace and the

@@ -59,7 +59,9 @@ type libraryReport struct {
 	// The oldest attempt this library holds for each fact. The operator
 	// reads it against the Library's spec.refresh: a refresh later than
 	// the oldest attempt is a fact with work left, whatever the gap
-	// count says, because the reporter counts with no refresh.
+	// count says. The reporter counts each gap with the refresh times the
+	// operator publishes, and a report built before those times reached
+	// the reporter counts with none.
 	OldestAttempts map[string]time.Time `json:"oldestAttempts,omitempty"`
 	// Waiting is the titles whose identity ended in candidates for a
 	// person to choose from, and Unresolved the titles no provider could

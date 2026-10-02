@@ -345,6 +345,21 @@ type PodSpec struct {
 	// one machine. Every other pod this operator builds stays off a
 	// tainted machine, which is why the cluster owner set the taint.
 	Tolerations []Toleration `json:"tolerations,omitempty"`
+	// How the pods of one set prefer to spread over the nodes. The pods of a
+	// worker Job that runs several are the only pods this operator gives any.
+	TopologySpreadConstraints []TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+}
+
+// One spread rule, in core/v1's fields. The scheduler counts the pods the
+// selector matches in each value of the topology key, and a skew is the
+// count on one node less the count on the node that holds the fewest.
+// WhenUnsatisfiable is DoNotSchedule, which refuses a node past the skew, or
+// ScheduleAnyway, which only ranks the nodes by it.
+type TopologySpreadConstraint struct {
+	MaxSkew           int32          `json:"maxSkew"`
+	TopologyKey       string         `json:"topologyKey"`
+	WhenUnsatisfiable string         `json:"whenUnsatisfiable"`
+	LabelSelector     *LabelSelector `json:"labelSelector,omitempty"`
 }
 
 // One taint the pod accepts. The fields are core/v1's, so the JSON this

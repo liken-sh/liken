@@ -58,8 +58,18 @@ type JobList struct {
 // pod before the Job itself fails, ActiveDeadlineSeconds is how long the
 // Job may run before Kubernetes fails it, and TTLSecondsAfterFinished is how
 // long a finished Job stays for a person to read its logs.
+//
+// A worker Job that spreads its list over several pods is an Indexed Job:
+// CompletionMode is Indexed, Completions and Parallelism are the count of
+// pods, and BackoffLimitPerIndex retries each index on its own, so a failed
+// pod does not run the indexes that finished again. The other Jobs leave the
+// four unset.
 type JobSpec struct {
 	BackoffLimit            *int32          `json:"backoffLimit,omitempty"`
+	BackoffLimitPerIndex    *int32          `json:"backoffLimitPerIndex,omitempty"`
+	CompletionMode          string          `json:"completionMode,omitempty"`
+	Completions             *int32          `json:"completions,omitempty"`
+	Parallelism             *int32          `json:"parallelism,omitempty"`
 	ActiveDeadlineSeconds   *int64          `json:"activeDeadlineSeconds,omitempty"`
 	TTLSecondsAfterFinished *int32          `json:"ttlSecondsAfterFinished,omitempty"`
 	Template                PodTemplateSpec `json:"template"`

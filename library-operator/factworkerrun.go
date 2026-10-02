@@ -51,6 +51,9 @@ type factWorkerRun struct {
 	// The Library's webhook address, and empty where the operator named none.
 	webhook string
 	client  *http.Client
+	// The share of the list this pod works, which is the whole list in a Job
+	// of one pod.
+	share workerShare
 }
 
 // The role's whole program. A failure is a non-zero exit, so the Job fails and
@@ -81,15 +84,20 @@ func newFactWorkerRun(log io.Writer) (*factWorkerRun, error) {
 	if !held {
 		return nil, fmt.Errorf("%s names %q, which this image runs in no worker", libraryFactVariable, fact)
 	}
+	share, err := workerShareOf(os.Getenv(completionIndexVariable), os.Getenv(workerParallelismVariable))
+	if err != nil {
+		return nil, err
+	}
 	return &factWorkerRun{
 		worker:  worker,
 		library: libraryKey(os.Getenv(libraryNamespaceVariable), os.Getenv(libraryNameVariable)),
 		kind:    os.Getenv(libraryKindVariable),
 		root:    path.Join(libraryMountPath, os.Getenv(libraryRootVariable)),
-		writer:  newVolumeWriter(writerName(os.Getenv(jobNameVariable), fact)),
+		writer:  newVolumeWriter(share.writerName(writerName(os.Getenv(jobNameVariable), fact))),
 		log:     log,
 		webhook: os.Getenv(libraryWebhookVariable),
 		client:  &http.Client{Timeout: workerWebhookTimeout},
+		share:   share,
 	}, nil
 }
 
@@ -105,7 +113,7 @@ func (w *factWorkerRun) work(ctx context.Context) error {
 		return err
 	}
 	w.logf("read %s from the %s work list", counted(len(items), "video"), w.worker.fact)
-	items = w.quickFirst(items)
+	items = w.quickFirst(w.shareOf(items))
 	worked, passed := 0, 0
 	unreported := ""
 	for _, item := range items {

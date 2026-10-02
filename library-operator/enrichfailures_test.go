@@ -191,7 +191,7 @@ func oneCountThenRefuses(t *testing.T) *Catalog {
 
 func TestAGapCountThatIsRefusedIsAnError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		if _, err := writeOnlyCatalog(t).gapCounts(t.Context(), "house/movies", ledgerTime); err == nil {
+		if _, err := writeOnlyCatalog(t).gapCounts(t.Context(), "house/movies", ledgerTime, nil); err == nil {
 			t.Error("the gap count reported no error, want the refused read's")
 		}
 	})

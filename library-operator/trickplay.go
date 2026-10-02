@@ -39,8 +39,9 @@ var trickplayWorker = factWorker{
 			Limits:   map[string]string{"memory": trickplayMemoryLimit},
 		}
 	},
-	render: func(library *Library) *RenderDevice { return library.Spec.Trickplay.Render },
-	work:   func(ctx context.Context, run *factWorkerRun, item workItem) { run.trickplayOne(ctx, item) },
+	render:      func(library *Library) *RenderDevice { return library.Spec.Trickplay.Render },
+	parallelism: func(library *Library) int { return podsOf(library.Spec.Trickplay.Parallelism) },
+	work:        func(ctx context.Context, run *factWorkerRun, item workItem) { run.trickplayOne(ctx, item) },
 }
 
 // The gap. A feature the probe gave a length to, with no trickplay directory

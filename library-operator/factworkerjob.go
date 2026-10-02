@@ -17,7 +17,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -55,10 +57,11 @@ func factWorkerDue(library *Library, worker factWorker, report *libraryReport, j
 	if !ran || listed.Finished.IsZero() || listed.Job == taken {
 		return "", false
 	}
-	// The reporter counts a gap with no refresh, so a refresh that reopens
-	// titles the gap counts as answered shows in the fact's oldest attempt
-	// and not in the count. The library Job wrote those titles into the list
-	// with the refresh time, so the worker has them to work.
+	// A report built before the reporter received the Library's refresh
+	// times counts the titles a refresh reopens as answered, so the fact's
+	// oldest attempt is read beside the count. The library Job wrote those
+	// titles into the list with the refresh time, so the worker has them to
+	// work.
 	if report.Gaps[worker.fact] <= 0 && !refreshHasWork(library, report, worker.fact) {
 		return "", false
 	}
@@ -90,11 +93,20 @@ func (o *operator) runFactWorkers(ctx context.Context, library *Library, report 
 		}
 		o.workListsTaken[key] = listed
 		if err == nil {
-			o.logf("library %s/%s: created the job %s to work the %s gap of %s from the list of the job %s",
-				namespace, name, job.Metadata.Name, worker.fact, counted(report.Gaps[worker.fact], "video"), listed)
+			o.logf("library %s/%s: created the job %s to work the %s gap of %s%s from the list of the job %s",
+				namespace, name, job.Metadata.Name, worker.fact, counted(report.Gaps[worker.fact], "video"),
+				inPods(worker.parallelism(library)), listed)
 		}
 	}
 	return nil
+}
+
+// The words a creation line adds for a worker of several pods.
+func inPods(pods int) string {
+	if pods <= 1 {
+		return ""
+	}
+	return " in " + counted(pods, "pod")
 }
 
 // The images every Job of this operator runs.
@@ -110,7 +122,7 @@ func buildFactWorkerJob(library *Library, worker factWorker, images jobImages, w
 	created time.Time) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	deadline := int64(factWorkerDeadline / time.Second)
-	return &Job{
+	job := &Job{
 		APIVersion: batchAPIVersion,
 		Kind:       "Job",
 		Metadata: ObjectMeta{
@@ -130,6 +142,46 @@ func buildFactWorkerJob(library *Library, worker factWorker, images jobImages, w
 			Template:                factWorkerPod(library, worker, images, webhook),
 		},
 	}
+	if pods := worker.parallelism(library); pods > 1 {
+		spreadFactWorker(job, int32(pods))
+	}
+	return job
+}
+
+// The completion mode whose pods each read their index from the Job.
+const indexedCompletion = "Indexed"
+
+// A worker Job of several pods, built on the Job of one: an Indexed Job whose
+// pods each work one share of the list (workershare.go).
+//
+// Each index has the backoff the Job of one pod has, and the Job states no
+// backoff of its own, because a limit for the whole Job counts the failures
+// of every index together and would end the indexes that still work. An
+// index that runs out of retries leaves the others to finish, and the Job
+// then ends Failed. The deadline stays the Job's, so every pod stops at it.
+//
+// The spread is ScheduleAnyway. The scheduler counts a node with no matching
+// GPU as a place to spread to, and the DRA filter is separate. With
+// DoNotSchedule, a cluster with fewer GPU nodes than pods would hold the
+// extra pods Pending until another pod ends. With ScheduleAnyway, the claim
+// decides which nodes can take a pod, and the spread only ranks them, so an
+// extra pod shares a GPU, which `liken` publishes for many claims at once.
+func spreadFactWorker(job *Job, pods int32) {
+	backoff := int32(scanBackoffLimit)
+	job.Spec.BackoffLimit = nil
+	job.Spec.BackoffLimitPerIndex = &backoff
+	job.Spec.CompletionMode = indexedCompletion
+	job.Spec.Completions = &pods
+	job.Spec.Parallelism = &pods
+	pod := &job.Spec.Template
+	pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env,
+		EnvVar{Name: workerParallelismVariable, Value: strconv.Itoa(int(pods))})
+	pod.Spec.TopologySpreadConstraints = []TopologySpreadConstraint{{
+		MaxSkew:           1,
+		TopologyKey:       hostnameTopologyKey,
+		WhenUnsatisfiable: "ScheduleAnyway",
+		LabelSelector:     &LabelSelector{MatchLabels: maps.Clone(pod.Metadata.Labels)},
+	}}
 }
 
 // The worker's pod: one container on the volume the phases write, and the

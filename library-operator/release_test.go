@@ -44,7 +44,7 @@ func TestDepartClearsTheRetainedTopics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cleared := clearedTopics(t, broker, 2)
+	cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
 	for _, topic := range libraryTopics("house", "movies") {
 		if !cleared[topic] {
 			t.Errorf("%s was not cleared", topic)

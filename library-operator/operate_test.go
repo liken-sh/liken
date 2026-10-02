@@ -42,7 +42,7 @@ func TestPassClearsTheTopicsOfALibraryTheCollectionDoesNotHold(t *testing.T) {
 
 	operator.pass()
 
-	cleared := clearedTopics(t, broker, 2)
+	cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
 	for _, topic := range libraryTopics("house", "gone") {
 		if !cleared[topic] {
 			t.Errorf("%s was not cleared", topic)
@@ -65,7 +65,7 @@ func TestPassClearsTheLitterOfALibraryItNeverSaw(t *testing.T) {
 
 	operator.pass()
 
-	cleared := clearedTopics(t, broker, 2)
+	cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
 	for _, topic := range libraryTopics("studio", "films") {
 		if !cleared[topic] {
 			t.Errorf("%s was not cleared", topic)

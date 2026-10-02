@@ -3,8 +3,9 @@ package main
 // closerun.go is the close container of a library Job. It starts with the
 // phases and does no work on titles. It writes the run's start first, so the
 // operator reads a run in flight from the moment the Job starts. It then waits
-// for the mark of every phase the Job includes, derives the Library's set
-// rows, writes the work list of each heavy fact, writes the one finished runs
+// for the mark of every phase the Job includes, removes the stale partial
+// files the scan found, derives the Library's set rows, writes the work list
+// of each heavy fact, writes the one finished runs
 // row, and waits for a catalog pod to confirm it. Every container of the Job writes through the one agent, so that
 // confirmation covers every row the Job wrote.
 
@@ -87,6 +88,7 @@ func (r *closeRun) runJob(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	r.sweepStalePartials(time.Now())
 	if r.kind == libraryKindMovies {
 		if err := deriveLibrarySets(ctx, r.catalog, r.library); err != nil {
 			r.logf("could not derive the sets of %s: %v", r.library, err)

@@ -102,6 +102,10 @@ type walkResult struct {
 	// returned. The mark above says only that some read failed, so the
 	// collector logs these to name the paths a person has to fix.
 	readFailures []walkReadFailure
+	// The partial files under the folder's .liken directories that no writer
+	// has changed for stalePartialAge, by absolute path. The scan hands them
+	// to the close container, which removes them.
+	stalePartials []string
 }
 
 // walkReadFailure is one directory the walk could not read: the path it

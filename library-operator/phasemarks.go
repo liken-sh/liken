@@ -123,6 +123,27 @@ func (b *phaseBoard) finish(phase string, failure error) error {
 	return nil
 }
 
+// writeNote leaves a file for a later phase, such as the close container,
+// beside the marks. A phase writes its note before its mark, so a phase that
+// reads the mark finds the whole note. The rename puts the whole file in
+// place at once.
+func (b *phaseBoard) writeNote(name string, data []byte) error {
+	staged := filepath.Join(b.dir, "."+name)
+	if err := os.WriteFile(staged, data, 0o644); err != nil {
+		return fmt.Errorf("writing the note %s: %w", name, err)
+	}
+	if err := os.Rename(staged, filepath.Join(b.dir, name)); err != nil {
+		return fmt.Errorf("naming the note %s: %w", name, err)
+	}
+	return nil
+}
+
+// readNote reads a note another phase wrote. A note no phase wrote answers
+// fs.ErrNotExist.
+func (b *phaseBoard) readNote(name string) ([]byte, error) {
+	return os.ReadFile(filepath.Join(b.dir, name))
+}
+
 func (b *phaseBoard) path(phase, suffix string) string {
 	return filepath.Join(b.dir, phase+suffix)
 }

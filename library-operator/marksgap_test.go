@@ -119,7 +119,7 @@ func TestTheReporterCountsTheMarksGapWithItsWindows(t *testing.T) {
 	seedMarksAttempt(t, catalog, []string{now.Add(-72 * time.Hour).Format(time.DateOnly)},
 		attemptNothing, now.Add(-48*time.Hour))
 
-	counts, err := catalog.gapCounts(t.Context(), marksLibrary, now)
+	counts, err := catalog.gapCounts(t.Context(), marksLibrary, now, nil)
 
 	if err != nil {
 		t.Fatal(err)

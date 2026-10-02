@@ -121,6 +121,19 @@ answered, and its attempts. One file per writer lets the phases of a `Job` run a
 once on a network mount with no locks. The scan reads these files and
 never writes them.
 
+Every writer writes its file under a partial name beside the final name
+and renames it into place, so a reader never reads half a file. The
+operator's partial names carry `.liken-tmp-`, and the appearances tool's
+carry `.partial-<host>-<pid>`, in `.liken/` and in `.liken/appearances/`.
+A writer that is stopped before the rename leaves its partial file
+behind. The walk lists each `.liken/` directory, and the
+`.liken/appearances/` directory where one exists, and names each partial
+file that no writer has changed for 24 hours. The scan mounts the volume
+read-only, so it hands those names to the `Job`'s close container, which
+removes each file and logs one line for it. The longest writer, the
+appearances tool's detect pass, stops after 6 hours and changes its file as
+it writes, so the walk never names a file that a live writer holds.
+
 ### `.contributors/`
 
 At the library root, one directory per credited person, sharded by

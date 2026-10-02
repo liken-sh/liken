@@ -186,7 +186,7 @@ func TestAFileReplacedWithANewSizeReopensEveryFileFact(t *testing.T) {
 // gapsOf reads the four file facts' gap counts of the fixture's library now.
 func gapsOf(t *testing.T, catalog *Catalog) map[string]int {
 	t.Helper()
-	counts, err := catalog.gapCounts(t.Context(), replacedLibrary, time.Now().UTC())
+	counts, err := catalog.gapCounts(t.Context(), replacedLibrary, time.Now().UTC(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

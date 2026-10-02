@@ -59,6 +59,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 	}
 
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
+	o.publishMark(libraryRefreshTopic(o.topicBase, namespace, name), factRefreshTimes(library))
 	report := o.reports.latestFor(namespace, name)
 	o.metrics.observeLibraryReport(library, report)
 

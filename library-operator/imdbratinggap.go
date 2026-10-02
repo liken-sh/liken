@@ -88,9 +88,10 @@ func imdbRatingGapQuery() string {
 // The episodes among the rating.imdb gap the reporter counts. The operator
 // takes them out of the count for a Library whose rating another block
 // answers, because no container of that Library asks for them.
-func (c *Catalog) episodeGapCounts(ctx context.Context, library string, now time.Time) (map[string]int, error) {
+func (c *Catalog) episodeGapCounts(ctx context.Context, library string, now time.Time,
+	refresh refreshTimes) (map[string]int, error) {
 	count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+gapQueries[factRatingIMDb]+`) WHERE id LIKE '`+
-		scopeEpisode+`:%'`, gapParams(factRatingIMDb, library, now, time.Time{}))
+		scopeEpisode+`:%'`, gapParams(factRatingIMDb, library, now, refresh[factRatingIMDb]))
 	if err != nil {
 		return nil, err
 	}

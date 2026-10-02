@@ -143,8 +143,9 @@ type operator struct {
 	// namespaces have forgotten a person.
 	marks *storeMarks
 
-	// What this operator last published on each retained progress
-	// topic, so a pass that changed nothing publishes nothing. The pass
+	// What this operator last published on each retained topic it
+	// holds, the progress marks and each Library's refresh times, so a
+	// pass that changed nothing publishes nothing. The pass
 	// is its only reader and writer.
 	published map[string]string
 

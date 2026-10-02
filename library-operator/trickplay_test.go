@@ -182,7 +182,7 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, test.now)
+			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, test.now, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

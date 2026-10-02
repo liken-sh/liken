@@ -5,7 +5,8 @@ package main
 // here are what keep a bad write from losing a file a person cares about: a
 // temporary and a rename, a remove that refuses every name but a
 // temporary's, a remove that takes one file this operator wrote and nothing
-// else reads, the trickplay map, the move and the remove a merge of two
+// else reads, a remove of a partial file a stopped writer left under .liken,
+// the trickplay map, the move and the remove a merge of two
 // .contributors/ entries makes, and the replace of a thumbnail or a tile
 // directory made from the file a path held before. The edit of one element
 // in an .nfo file is in xmledit.go, and the door for a file a writer reads,
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // The mark every temporary carries. The remove below checks for it, and the
@@ -142,6 +144,28 @@ func (w *volumeWriter) removeToolPartial(path, host string) error {
 		return fmt.Errorf("refusing to remove %s: it carries no partial mark of host %q", path, host)
 	}
 	return os.Remove(path)
+}
+
+// removeStalePartial removes a partial file that a stopped writer left under
+// a .liken directory, of any writer, on any host. The age is what proves that
+// no writer still holds the file: a writer changes its partial file as it
+// writes, and stalePartialAge is longer than any writer runs. The remove
+// refuses a name with neither the temporary mark nor the appearances tool's
+// partial mark, a path outside a .liken directory, and a file younger than
+// that age. The answer says whether this call removed the file.
+func (w *volumeWriter) removeStalePartial(path string, now time.Time) (bool, error) {
+	if !isPartialName(filepath.Base(path)) || !isUnderLiken(filepath.Dir(path)) {
+		return false, fmt.Errorf("refusing to remove %s: it is no partial file under a %s directory",
+			path, likenDirectory)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || !isStale(info.ModTime(), now) {
+		return false, nil
+	}
+	return true, os.Remove(path)
 }
 
 // land renames a temporary this writer filled onto its target, for a file

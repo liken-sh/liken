@@ -253,7 +253,7 @@ func TestEveryAttemptKindGatesTheProbeAndIdentityGapsAgainstTheRealSchema(t *tes
 				t.Fatal(err)
 			}
 
-			gaps, err := catalog.gapCounts(t.Context(), "house/movies", now)
+			gaps, err := catalog.gapCounts(t.Context(), "house/movies", now, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

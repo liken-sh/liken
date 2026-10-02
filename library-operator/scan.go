@@ -173,6 +173,10 @@ type scanner struct {
 	// One walk runs at a time, so the reconciliation reads a
 	// settled catalog whichever caller drives the walk.
 	walkMutex sync.Mutex
+
+	// The stale partial files the full walk found, which the scan hands to
+	// the close container before it writes its mark.
+	stalePartials []string
 }
 
 // The scan role's whole program: read the environment, run the
@@ -210,6 +214,7 @@ func (s *scanner) runPhase(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return walked
 	}
+	s.noteStalePartials()
 	return s.board.finish(scanPhase, walked)
 }
 
@@ -425,6 +430,7 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		}
 		s.logReplaced(folder.reopened)
 		reopened = reopened.add(folder.reopened)
+		s.stalePartials = append(s.stalePartials, folder.stalePartials...)
 		appendFolder(buffer, folder)
 		sets.add(folder.movies)
 		found := len(folder.movies) + len(folder.series) + len(folder.episodes)
@@ -454,6 +460,7 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 			readError = true
 		}
 		reopened = reopened.add(person.reopened)
+		s.stalePartials = append(s.stalePartials, person.stalePartials...)
 		appendFolder(buffer, person)
 		buffered += len(person.contributors)
 		if buffered >= scanFlushBatch {

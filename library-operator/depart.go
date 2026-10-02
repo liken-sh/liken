@@ -189,12 +189,13 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 }
 
 // clearLibraryTopics publishes an empty retained payload on the
-// departed library's two topics, which is how MQTT drops a retained
+// departed library's three topics, which is how MQTT drops a retained
 // message, so a subscriber that arrives later reads nothing for a
 // Library that is gone.
 func (o *operator) clearLibraryTopics(namespace, name string) {
 	o.bus.Publish(libraryStatusTopic(o.topicBase, namespace, name), nil, true)
 	o.bus.Publish(libraryAvailabilityTopic(o.topicBase, namespace, name), nil, true)
+	o.clearTopic(libraryRefreshTopic(o.topicBase, namespace, name))
 }
 
 // departingStatus keeps the counts and the volume as the last true

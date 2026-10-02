@@ -161,7 +161,7 @@ func TestTheGapCountsHoldEveryNFOFact(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedNFOFactRows(t, catalog)
 
-	counts, err := catalog.gapCounts(t.Context(), "house/movies", time.Now().UTC())
+	counts, err := catalog.gapCounts(t.Context(), "house/movies", time.Now().UTC(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

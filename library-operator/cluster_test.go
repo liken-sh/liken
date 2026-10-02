@@ -1154,7 +1154,40 @@ const (
 // while the client is disconnected is dropped at QoS 0. The helper
 // returns once the client has its write queue, so the first publish
 // after it goes out on the connection.
+//
+// Every pass publishes each Library's refresh times, which most tests do not
+// read, so the broker the test reads holds back each refresh time it is sent.
+// A clear of a refresh topic still reaches the test, because a departure
+// clears it. operatorOnTheBus is the broker that holds back nothing.
 func operatorOnABroker(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+	t.Helper()
+	operator, broker := operatorOnTheBus(t, cluster)
+	shown := make(chan brokerPublish, cap(broker.pubs))
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case published := <-broker.pubs:
+				if _, _, kind, ok := parseLibraryTopic(defaultTopicBase, published.topic); ok &&
+					kind == libraryRefreshKind && len(published.payload) != 0 {
+					continue
+				}
+				select {
+				case shown <- published:
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+	return operator, &fakeBroker{conn: broker.conn, subs: broker.subs, pubs: shown}
+}
+
+// operatorOnTheBus is operatorOnABroker with every publish shown.
+func operatorOnTheBus(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	dial, accepted := testBroker(t)
 	operator := testOperator(t, cluster)
@@ -1197,6 +1230,7 @@ func libraryTopics(namespace, name string) []string {
 	return []string{
 		libraryStatusTopic(defaultTopicBase, namespace, name),
 		libraryAvailabilityTopic(defaultTopicBase, namespace, name),
+		libraryRefreshTopic(defaultTopicBase, namespace, name),
 	}
 }
 

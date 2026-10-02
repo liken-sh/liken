@@ -131,7 +131,7 @@ func TestEveryGapQueryRunsAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gaps, err := catalog.gapCounts(ctx, "house/movies", ledgerTime)
+	gaps, err := catalog.gapCounts(ctx, "house/movies", ledgerTime, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestAnAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			gaps, err := catalog.gapCounts(ctx, "house/movies", test.now)
+			gaps, err := catalog.gapCounts(ctx, "house/movies", test.now, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

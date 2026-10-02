@@ -314,7 +314,7 @@ func servingReporter(t *testing.T, catalog *Catalog) (*reporter, <-chan *fakeBro
 	}
 	report.bus = newBus(testBusAddress, "catalog-house",
 		&busWill{Topic: report.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
-		report.onConnect, nil)
+		report.onConnect, report.handleBusMessage)
 	report.bus.dial = dial
 
 	stopped, stop := context.WithCancel(context.Background())
