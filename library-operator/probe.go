@@ -12,8 +12,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -307,22 +305,23 @@ func commandStderr(err error) string {
 //
 // The read and the write are one step under the file's lock, because the
 // probe, identity, and nfo containers edit one .nfo file at the same time.
+// The lock holds within one cluster, and the update door covers a writer of
+// another cluster that mounts the same volume.
 func (w *volumeWriter) editNFO(path, rootElement, title string, element xmlElement, replacement []byte) error {
 	release, err := lockNFO(w.locks, path)
 	if err != nil {
 		return err
 	}
 	defer release()
-	document, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	if !hasRootElement(document) {
-		document = minimalNFO(rootElement, title)
-	}
-	edited, err := editElement(document, element, replacement)
-	if err != nil {
-		return fmt.Errorf("editing the .nfo file: %w", err)
-	}
-	return w.write(path, edited)
+	_, err = w.update(path, func(document []byte) ([]byte, error) {
+		if !hasRootElement(document) {
+			document = minimalNFO(rootElement, title)
+		}
+		edited, err := editElement(document, element, replacement)
+		if err != nil {
+			return nil, fmt.Errorf("editing the .nfo file: %w", err)
+		}
+		return edited, nil
+	})
+	return err
 }

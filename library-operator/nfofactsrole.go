@@ -268,7 +268,8 @@ func creditsOrNFO(merged factAnswer, document []byte) factAnswer {
 // The probe and identity containers edit the same .nfo file while this fact
 // asks its providers. So the edit takes the file's lock, reads the file
 // again, and changes this fact's group in what it reads, and an element
-// another container wrote in the meantime stays.
+// another container wrote in the meantime stays. The update door does the
+// same for a writer of another cluster that mounts the same volume.
 func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem, group elementGroup,
 	document []byte, merged factAnswer, names providerNames) (string, bool) {
 	release, err := lockNFO(e.writer.locks, nfoPath)
@@ -278,24 +279,28 @@ func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem,
 		return attemptError, false
 	}
 	defer release()
-	if fresh, err := os.ReadFile(nfoPath); err == nil && hasRootElement(fresh) {
-		document = fresh
+	written := false
+	edited, err := e.writer.update(nfoPath, func(fresh []byte) ([]byte, error) {
+		current := document
+		if hasRootElement(fresh) {
+			current = fresh
+		}
+		written = groupNeedsWrite(fact, current, merged)
+		if !written {
+			// The file stays as it is, so the door answers what it holds,
+			// and the group the hash reads is the one this fact read.
+			document = current
+			return nil, nil
+		}
+		return editElementGroup(current, group, nfoElements(fact, merged))
+	})
+	if err != nil {
+		e.logf("could not write the %s of %s: %v", fact, opaqueID(item.id), err)
+		e.recordNFO(folder, fact, nil, attemptError, names)
+		return attemptError, false
 	}
-	edited := document
-	written := groupNeedsWrite(fact, document, merged)
-	if written {
-		changed, err := editElementGroup(document, group, nfoElements(fact, merged))
-		if err != nil {
-			e.logf("could not write the %s of %s: %v", fact, opaqueID(item.id), err)
-			e.recordNFO(folder, fact, nil, attemptError, names)
-			return attemptError, false
-		}
-		if err := e.writer.write(nfoPath, changed); err != nil {
-			e.logf("could not write the %s of %s: %v", fact, opaqueID(item.id), err)
-			e.recordNFO(folder, fact, nil, attemptError, names)
-			return attemptError, false
-		}
-		edited = changed
+	if !written {
+		edited = document
 	}
 	hash, err := groupHash(edited, group)
 	if err != nil {

@@ -8,7 +8,8 @@ package main
 // else reads, the trickplay map, the move and the remove a merge of two
 // .contributors/ entries makes, and the replace of a thumbnail or a tile
 // directory made from the file a path held before. The edit of one element
-// in an .nfo file is in xmledit.go.
+// in an .nfo file is in xmledit.go, and the door for a file a writer reads,
+// changes, and writes back is in volumeupdate.go.
 
 import (
 	"errors"
@@ -270,6 +271,15 @@ func (w *volumeWriter) writeInto(directory, name string, data []byte) error {
 		return err
 	}
 	return w.write(filepath.Join(directory, name), data)
+}
+
+// The update door for a file in a directory that may not exist yet, as a
+// title's .liken directory is before its first ledger.
+func (w *volumeWriter) updateInto(directory, name string, change func([]byte) ([]byte, error)) ([]byte, error) {
+	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
+		return nil, err
+	}
+	return w.update(filepath.Join(directory, name), change)
 }
 
 // The create door for a directory that may not exist yet, which is what a

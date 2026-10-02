@@ -418,6 +418,17 @@ replaced the video at the same path. That thumbnail is a frame of the
 earlier file, so the fact downloads the still again and writes it over
 the old one.
 
+Every file lands whole: the writer fills a temporary beside it and
+renames the temporary into place. Two clusters can mount one library,
+each with its own `Library` over the same root, and their writers can
+reach one file at once. A writer that changes a file it read, an
+`.nfo` file, a `.liken` ledger, or a person's `contributor.yaml`,
+reads the file again just before its rename. Where another writer
+changed the file in between, it applies its change to what that
+writer left, so neither change is lost. The two clusters can still do
+the same work twice. The check keeps each other's writes, and it does
+not divide the work between them.
+
 ### People
 
 The `credits` fact writes each title's cast and crew into

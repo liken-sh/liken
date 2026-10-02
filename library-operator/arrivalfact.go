@@ -89,6 +89,9 @@ func (e *enricher) stampArrivals(ctx context.Context, work arrivalWork) int {
 	// fails records an error attempt for every entry instead.
 	found, failed := 0, 0
 	err := e.writer.updateLikenLedger(work.folder, factArrival, func(ledger *likenLedger) {
+		// The change runs again where another writer changed the ledger
+		// first, so the counts start over with each run of it.
+		stamped, found, failed = 0, 0, 0
 		held := map[string]bool{}
 		for _, entry := range ledger.Files {
 			held[entry.Path] = true

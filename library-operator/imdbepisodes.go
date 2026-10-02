@@ -53,18 +53,28 @@ func (e *enricher) fillEpisodeRating(ctx context.Context, id string) (string, bo
 	if target.imdb == "" || !held {
 		return e.recordEpisodeRating(folder, file, target, attemptNothing, ""), false
 	}
+	// The edit reads the file again through the update door, so a change
+	// another cluster that mounts the same volume made since the read above
+	// stays.
 	answer := factAnswer{Rating: &rating}
-	written := ratingChanged(document, answer)
+	written := false
+	landed, err := e.writer.update(nfoPath, func(fresh []byte) ([]byte, error) {
+		document = fresh
+		if !hasRootElement(document) {
+			document = minimalNFO(nfoRootEpisode, target.title)
+		}
+		written = ratingChanged(document, answer)
+		if !written {
+			return nil, nil
+		}
+		return editElementGroup(document, group, nfoElements(factRatingIMDb, answer))
+	})
+	if err != nil {
+		e.logf("could not write the %s of %s: %v", factRatingIMDb, opaqueID(target.id), err)
+		return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
+	}
 	if written {
-		edited, err := editElementGroup(document, group, nfoElements(factRatingIMDb, answer))
-		if err == nil {
-			err = e.writer.write(nfoPath, edited)
-		}
-		if err != nil {
-			e.logf("could not write the %s of %s: %v", factRatingIMDb, opaqueID(target.id), err)
-			return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
-		}
-		document = edited
+		document = landed
 	}
 	hash, err := groupHash(document, group)
 	if err != nil {

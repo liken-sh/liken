@@ -222,6 +222,10 @@ func readLikenLedger(folder, fact string) (likenLedger, error) {
 	if err != nil {
 		return likenLedger{}, err
 	}
+	return parseLikenLedger(data, fact)
+}
+
+func parseLikenLedger(data []byte, fact string) (likenLedger, error) {
 	var ledger likenLedger
 	if err := yaml.Unmarshal(data, &ledger); err != nil {
 		return likenLedger{}, fmt.Errorf("reading %s: %w", likenLedgerName(fact), err)
@@ -229,20 +233,22 @@ func readLikenLedger(folder, fact string) (likenLedger, error) {
 	return ledger, nil
 }
 
-// The whole file is read, changed, and written again through the write door.
-// That is safe because one writer owns one file, and the write is a temporary
-// and a rename, so a reader never sees half of it.
+// The whole file is read, changed, and written again through the update
+// door, so a change another cluster made to the same ledger in the meantime
+// stays: the door applies this change again to what that writer left. The
+// change may run more than once, so it sets what it records rather than
+// adding to it, which every note on a ledger does.
 func (w *volumeWriter) updateLikenLedger(folder, fact string, change func(*likenLedger)) error {
-	ledger, err := readLikenLedger(folder, fact)
-	if err != nil {
-		return err
-	}
-	change(&ledger)
-	data, err := yaml.Marshal(ledger)
-	if err != nil {
-		return err
-	}
-	return w.writeInto(filepath.Join(folder, likenDirectory), likenLedgerName(fact), data)
+	_, err := w.updateInto(filepath.Join(folder, likenDirectory), likenLedgerName(fact),
+		func(current []byte) ([]byte, error) {
+			ledger, err := parseLikenLedger(current, fact)
+			if err != nil {
+				return nil, err
+			}
+			change(&ledger)
+			return yaml.Marshal(ledger)
+		})
+	return err
 }
 
 // One path holds one attempt, the latest, so a file grows with the titles

@@ -123,11 +123,17 @@ func readContributorFile(file string) (contributorFile, []byte, error) {
 	if err != nil {
 		return contributorFile{}, nil, err
 	}
-	var held contributorFile
-	if err := yaml.Unmarshal(data, &held); err != nil {
+	held, err := parseContributorFile(data)
+	if err != nil {
 		return contributorFile{}, nil, fmt.Errorf("reading %s: %w", file, err)
 	}
 	return held, data, nil
+}
+
+func parseContributorFile(data []byte) (contributorFile, error) {
+	var held contributorFile
+	err := yaml.Unmarshal(data, &held)
+	return held, err
 }
 
 // The bytes of one entry, and the hash the ids fact records for them. Every

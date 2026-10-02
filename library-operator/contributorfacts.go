@@ -149,7 +149,7 @@ func (e *enricher) fillContributorIDs(ctx context.Context, client *tmdbClient,
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
-	return e.writeContributorIDs(folder, gap, held, data, person, ids)
+	return e.writeContributorIDs(folder, gap, held, person, ids)
 }
 
 // An entry that holds an IMDb id and no TMDb id, which a credit from IMDb's
@@ -177,25 +177,41 @@ func (e *enricher) findContributorTMDb(ctx context.Context, client *tmdbClient,
 // hold leaves the one the file has. A file the provider's answer does not
 // change is left as it is, and the ledger still records the answer.
 func (e *enricher) writeContributorIDs(folder string, gap contributorGap,
-	held contributorFile, data []byte, person tmdbPerson, ids providerIDs) bool {
+	held contributorFile, person tmdbPerson, ids providerIDs) bool {
 	if len(ids) == 0 && person.Birthday == "" && person.Deathday == "" {
 		e.logf("the provider holds no ids or dates for %s", entryNamed(gap.path))
 		e.recordContributor(folder, factContributorIDs, "", attemptNothing, "")
 		return false
 	}
-	written := marshalContributorFile(filledContributor(held, gap.tmdb, person, ids))
-	if bytes.Equal(written, data) {
-		e.recordContributor(folder, factContributorIDs, providerBlockTMDb, attemptFound, contentHash(written))
-		return false
-	}
-	if err := e.writer.write(filepath.Join(folder, contributorFileName), written); err != nil {
+	// The answer fills the file the door reads, so ids another cluster that
+	// mounts the same volume added since the read above stay in it.
+	changed := false
+	written, err := e.writer.update(filepath.Join(folder, contributorFileName), func(current []byte) ([]byte, error) {
+		fresh := held
+		if current != nil {
+			parsed, err := parseContributorFile(current)
+			if err != nil {
+				return nil, fmt.Errorf("reading %s: %w", contributorFileName, err)
+			}
+			fresh = parsed
+		}
+		filled := marshalContributorFile(filledContributor(fresh, gap.tmdb, person, ids))
+		changed = !bytes.Equal(filled, current)
+		if !changed {
+			return nil, nil
+		}
+		return filled, nil
+	})
+	if err != nil {
 		e.logf("could not write %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
-	e.logf("wrote the ids of %s from %s", entryNamed(gap.path), providerBlockTMDb)
+	if changed {
+		e.logf("wrote the ids of %s from %s", entryNamed(gap.path), providerBlockTMDb)
+	}
 	e.recordContributor(folder, factContributorIDs, providerBlockTMDb, attemptFound, contentHash(written))
-	return true
+	return changed
 }
 
 // The entry the ids fact leaves: every scheme the file and the provider hold
