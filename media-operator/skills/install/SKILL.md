@@ -36,12 +36,12 @@ the YAML for its class:
 [audio outputs](https://liken.sh/audio/docs/guides/install/), and
 [Bluetooth devices](https://liken.sh/bluetooth/docs/guides/install/).
 
-The install defines the classes of the capabilities agent alone.
+The install defines one class, for the capabilities agent alone.
 `capabilities.yaml` defines `media-render`, the class of the agent's
-own claim on the render nodes, and `capability-classes.yaml` defines
-the classes that select the agent's `media.liken.sh` devices.
-[Render node capabilities](https://liken.sh/media/docs/reference/capabilities/#device-classes)
-lists them.
+own claim on the render nodes. A workload that claims a GPU by what its
+driver states needs classes that the cluster owner writes.
+[Claim a GPU by what it decodes](https://liken.sh/media/docs/guides/claim-a-gpu-by-capability/)
+gives the YAML.
 
 ## Apply the manifests
 
@@ -58,8 +58,7 @@ the install needs no clone:
       -f https://liken.sh/media/deploy/rbac.yaml \
       -f https://liken.sh/media/deploy/operator.yaml \
       -f https://liken.sh/media/deploy/bus.yaml \
-      -f https://liken.sh/media/deploy/capabilities.yaml \
-      -f https://liken.sh/media/deploy/capability-classes.yaml
+      -f https://liken.sh/media/deploy/capabilities.yaml
 
 The `-n` flag places the `ServiceAccounts`, the two `Deployments`,
 the `DaemonSet`, and the `Service` in `liken-system`, the namespace
@@ -82,7 +81,6 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/media/deploy/operator.yaml
       - https://liken.sh/media/deploy/bus.yaml
       - https://liken.sh/media/deploy/capabilities.yaml
-      - https://liken.sh/media/deploy/capability-classes.yaml
 
 A clone works too: `kubectl apply -k media-operator/deploy/` from the
 repository applies the same files through
@@ -326,8 +324,7 @@ itself:
       -f https://liken.sh/media/deploy/rbac.yaml \
       -f https://liken.sh/media/deploy/operator.yaml \
       -f https://liken.sh/media/deploy/bus.yaml \
-      -f https://liken.sh/media/deploy/capabilities.yaml \
-      -f https://liken.sh/media/deploy/capability-classes.yaml
+      -f https://liken.sh/media/deploy/capabilities.yaml
 
 **Deleting a CRD deletes every resource of that kind.** Delete the
 five `*-crd.yaml` files only when every player, play, remote,

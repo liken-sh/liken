@@ -193,36 +193,42 @@ render node as it does now, and media-operator delivers nothing:
       - name: gpu
         exactly: { deviceClassName: media-render }
       - name: decodes
-        exactly: { deviceClassName: media-decode-10bit }
+        exactly: { deviceClassName: decode-10bit }
     constraints:
       - requests: [gpu, decodes]
         matchAttribute: resource.kubernetes.io/pciBusID
 
-media-operator ships four `DeviceClass` objects, so that a workload
-names a class and not a CEL expression: `media-capabilities` (every
-device), `media-decode-10bit` (`decodeHEVCMain10` and `scale10bit`),
-`media-decode-av1` (both AV1 depths), and `media-encode` (H.264 and
-HEVC at both depths).
+The cluster owner writes the classes that select `media.liken.sh`
+devices, such as `decode-10bit`, which selects `decodeHEVCMain10` and
+`scale10bit`. Plan 11 of `liken` gives the rule: a class encodes a
+deployment's purposes, so a shipped class would guess at someone
+else's vocabulary. media-operator ships only `media-render`, the class
+of the agent's own claim, which is wiring. The capabilities guide
+gives example classes.
 
 ### The first users
 
 None of these is wired yet; each is its own change.
 
 - **The appearances worker** of library-operator would replace its
-  claim on `display-render` with the pair above, through
-  `media-decode-10bit` for a 10-bit film or `media-decode-av1` for an
-  AV1 film, and keep a second claim on any render node as its fallback
-  when no GPU qualifies. Its CPU scale for a GPU that cannot scale
+  claim on `display-render` with the pair above, through a class that
+  selects `decodeHEVCMain10` and `scale10bit` for a 10-bit film, or one
+  that selects both AV1 depths for an AV1 film, and keep a second claim
+  on any render node as its fallback when no GPU qualifies. Its CPU scale for a GPU that cannot scale
   stays as the path for that fallback.
 - **A Player's playback**, which selects a render node through its
   render class, could ask for a GPU that decodes the codecs of its
   library.
 - **A Jellyfin server** on the same fleet, which transcodes, would
-  claim `media-encode` beside its render node. This is the first
-  workload from outside `liken` that the design serves.
+  claim a class that selects the encode attributes beside its render
+  node. This is the first workload from outside `liken` that the
+  design serves.
 
 ## What was considered and set aside
 
+- **Shipped capability classes.** A class encodes a deployment's
+  purposes, so a shipped class would guess at someone else's
+  vocabulary (plan 11 of `liken`). The cluster owner writes them.
 - **The OS publishes the capabilities.** The image would carry libva and
   every vendor driver, against the rule that the OS carries no driver
   stack. Each driver update would need an OS release.
@@ -275,6 +281,6 @@ took 20 ms and peaked at 27 MB of resident memory.
 ## The proof
 
 On the lab, the agent publishes a `media.liken.sh` device for each
-GPU. A claim through `media-decode-10bit` schedules only on a GPU
+GPU. A claim that selects `decodeHEVCMain10` and `scale10bit` schedules only on a GPU
 whose driver states `scale10bit`, and receives that GPU's render node.
 The open problem holds this proof.

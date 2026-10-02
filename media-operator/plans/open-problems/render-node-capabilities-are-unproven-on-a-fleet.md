@@ -11,7 +11,7 @@ yet, so four facts are unchecked:
   `allowMultipleAllocations`.
 - The kubelet accepts a prepare of a `media.liken.sh` claim that
   answers with no device, and starts the pod.
-- A claim through `media-decode-10bit`, paired by
+- A claim that selects `decodeHEVCMain10` and `scale10bit`, paired by
   `resource.kubernetes.io/pciBusID`, schedules only on a GPU whose
   driver states `scale10bit`, and receives that GPU's render node.
 - The Coffee Lake GPU that failed `scale_vaapi` on 10-bit frames
@@ -23,5 +23,7 @@ yet, so four facts are unchecked:
   gives.
 
 The proof runs on the lab: deploy the base, read each node's
-`<node>-media.liken.sh` slice, and schedule one pod through
-`media-decode-10bit`.
+`<node>-media.liken.sh` slice, and schedule one pod
+through a class the cluster owner writes to select those two
+attributes. `media-operator` ships no such class, so the proof applies
+the example class from the capabilities guide.

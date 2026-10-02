@@ -3,12 +3,17 @@
 # scales, and publishes the answer as media.liken.sh devices. A
 # workload's claim pairs one of those devices with the render node of
 # the same GPU, so the scheduler places the workload on a GPU whose
-# driver states what the workload needs. capability-classes.yaml holds
-# the classes that a claim names.
+# driver states what the workload needs. The classes that select those
+# devices are the cluster owner's vocabulary to create, and the
+# capabilities guide gives the YAML.
 ---
-# The render nodes, as liken publishes them. liken publishes a render
-# node as a shareable device, so the agent's hold takes nothing away
-# from the workloads that decode on the same GPU.
+# The class this agent's own claim names, so it is wiring. It ships
+# with the base because the claim template below names it literally,
+# and the agent cannot start without it. It is not the class for a
+# workload's render node: that class is the cluster owner's to write.
+# The class selects the render nodes as liken publishes them. liken
+# publishes a render node as a shareable device, so the agent's hold
+# takes nothing away from the workloads that decode on the same GPU.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:

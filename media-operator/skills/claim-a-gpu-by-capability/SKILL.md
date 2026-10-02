@@ -59,7 +59,52 @@ Each device is one GPU:
 [Render node capabilities](https://liken.sh/media/docs/reference/capabilities/) describes
 each attribute, and where its value comes from.
 
-## 2. Claim the render node and the capability together
+## 2. Write the classes
+
+`media-operator` ships no class for a capability. A class encodes a
+deployment's purposes, so you write the classes that your workloads
+claim through. Two classes are enough here.
+
+The first selects the `media.liken.sh` devices of GPUs that decode
+10-bit HEVC and scale 10-bit frames on the video processor, which is
+the whole path of a 10-bit film from the decoder to a scaled frame:
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: decode-10bit
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "media.liken.sh" &&
+          device.attributes["media.liken.sh"].decodeHEVCMain10 &&
+          device.attributes["media.liken.sh"].scale10bit
+```
+
+The second selects the render nodes that `liken` publishes. If you
+have a class like it, such as `display-render` from
+`display-operator`, use that class and skip this one. It works the
+same way:
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: gpu-render
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].renderNode)
+```
+
+`media-render` is not for workloads. It is the class of the agent's
+own claim, and the install ships it as wiring.
+
+## 3. Claim the render node and the capability together
 
 The claim has two requests: the render node from `liken`, and the
 `media.liken.sh` device of a GPU that states what the workload needs.
@@ -78,10 +123,10 @@ spec:
       requests:
         - name: gpu
           exactly:
-            deviceClassName: media-render
+            deviceClassName: gpu-render
         - name: decodes
           exactly:
-            deviceClassName: media-decode-10bit
+            deviceClassName: decode-10bit
       constraints:
         - requests: [gpu, decodes]
           matchAttribute: resource.kubernetes.io/pciBusID
@@ -107,21 +152,19 @@ is a statement about the GPU, and any number of claims can allocate
 it at once. The render node is shareable too, so several workloads
 decode on one GPU at the same time.
 
-`media-render` is the class the agent's own claim uses, and it
-selects every `liken.sh` render node. A class of your own that
-selects render nodes, such as `display-render` from
-`display-operator`, works the same way.
+## 4. Ask for another set
 
-## 3. Ask for a set no class names
-
-`media-decode-10bit`, `media-decode-av1`, and `media-encode` are the
-classes the base ships. For another set, use `media-capabilities` and
-a selector in the request:
+For a set that `decode-10bit` does not state, add a selector to the
+request. It narrows the class, so it works on any class that selects
+`media.liken.sh` devices. This request asks for a GPU that decodes VP9
+and scales 8-bit frames, through a class of your own that selects
+every `media.liken.sh` device (`device.driver == "media.liken.sh"`),
+here named `media-gpu`:
 
 ```yaml
         - name: decodes
           exactly:
-            deviceClassName: media-capabilities
+            deviceClassName: media-gpu
             selectors:
               - cel:
                   expression: |
@@ -129,10 +172,14 @@ a selector in the request:
                     device.attributes["media.liken.sh"].scale8bit
 ```
 
+A selector on `decode-10bit` works the same way and requires the
+10-bit capabilities as well. To reuse a set, write another class with
+the expression in it.
+
 Every device has every capability attribute, `true` or `false`, so a
 selector needs no `has()` check.
 
-## 4. Fall back when no GPU qualifies
+## 5. Fall back when no GPU qualifies
 
 A claim that no GPU satisfies stays unallocated, and its pod stays
 `Pending`:

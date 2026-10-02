@@ -6,10 +6,11 @@
 #
 # The classes a Player names are the cluster owner's vocabulary, the
 # same classes a hand-written claim would use; each hardware operator's
-# manual gives the YAML for its class. The base ships the DeviceClasses
-# of the capabilities agent alone: the class its own claim names, in
-# capabilities.yaml, and the classes that select its media.liken.sh
-# devices, in capability-classes.yaml.
+# manual gives the YAML for its class. The base ships one DeviceClass,
+# media-render in capabilities.yaml, because the capabilities agent's
+# own claim names it. The classes that select the agent's
+# media.liken.sh devices are the cluster owner's to write, and the
+# capabilities guide gives the YAML.
 #
 # The namespace below is set with a transformer rather than with the
 # top-level namespace field, because unsetOnly is what keeps the one
@@ -42,7 +43,6 @@ resources:
   - api.yaml
   - bus.yaml
   - capabilities.yaml
-  - capability-classes.yaml
 
 # The cpu and memory settings of the containers the operator builds. A
 # generated ConfigMap's name carries a hash of its content, and kustomize

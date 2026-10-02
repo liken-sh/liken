@@ -114,18 +114,11 @@ the Intel iHD driver.
 
 ## Device classes
 
-The base ships four classes. Each selects `media.liken.sh` devices,
-so a claim pairs each with a render node.
+`media-operator` ships no class that selects `media.liken.sh`
+devices. A class encodes a deployment's purposes, so the cluster owner
+writes the classes that a workload claims through.
+[Claim a GPU by what it decodes](/docs/guides/claim-a-gpu-by-capability/)
+gives example classes.
 
-| Class | Selects a GPU whose driver states |
-|---|---|
-| `media-capabilities` | anything: every `media.liken.sh` device |
-| `media-decode-10bit` | `decodeHEVCMain10` and `scale10bit` |
-| `media-decode-av1` | `decodeAV1Main` and `decodeAV1Main10` |
-| `media-encode` | `encodeH264`, `encodeHEVCMain`, and `encodeHEVCMain10` |
-
-For a set that no class names, use `media-capabilities` with a
-selector of your own in the claim.
-
-The agent's own claim names one more class, `media-render`, which
-selects every `liken.sh` render node.
+The base ships one class, `media-render`, because the agent's own
+claim names it. It selects every `liken.sh` render node.

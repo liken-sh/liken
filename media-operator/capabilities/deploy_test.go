@@ -2,13 +2,11 @@ package main
 
 import (
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"sigs.k8s.io/yaml"
 )
@@ -63,22 +61,5 @@ func TestThePodNamesTheClaimTheAgentReads(t *testing.T) {
 	claims := daemonSet.Spec.Template.Spec.ResourceClaims
 	if len(claims) != 1 || claims[0].Name != claimName {
 		t.Errorf("the pod's claims are %+v, want one named %s", claims, claimName)
-	}
-}
-
-// Every attribute a shipped class reads must be one the agent
-// publishes, because a selector that reads an absent attribute fails
-// to evaluate, and the claim never allocates.
-func TestEveryClassReadsAnAttributeTheAgentPublishes(t *testing.T) {
-	published := capabilitiesOf(report{})
-	attribute := regexp.MustCompile(`device\.attributes\["media\.liken\.sh"\]\.(\w+)`)
-	for _, class := range documentsOf[resourcev1.DeviceClass](t, "../deploy/capability-classes.yaml", "DeviceClass") {
-		for _, selector := range class.Spec.Selectors {
-			for _, match := range attribute.FindAllStringSubmatch(selector.CEL.Expression, -1) {
-				if _, ok := published[match[1]]; !ok {
-					t.Errorf("the class %s reads %s, which the agent does not publish", class.Name, match[1])
-				}
-			}
-		}
 	}
 }
