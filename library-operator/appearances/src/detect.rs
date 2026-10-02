@@ -1,5 +1,5 @@
-// The expensive pass: decode the keyframes of one video, find the faces in
-// each, embed each face, and write the detections record. Nothing here
+// The expensive pass: decode every frame of one video, find the faces in
+// each sample (frames.rs), embed each face, and write the detections record. Nothing here
 // knows who anyone is. The match reads the record later, so a new headshot
 // or a new threshold never opens the video again.
 
@@ -8,9 +8,9 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::frames::{self, Keyframes};
+use crate::frames::{self, Samples};
 use crate::models;
-use crate::record::{self, Detection, Header, KeyframeLine};
+use crate::record::{self, Detection, Header, SampleLine};
 use crate::runtime::{Detector, Embedder, Engine, Error};
 
 pub struct Settings {
@@ -45,6 +45,7 @@ pub fn record_path(video: &Path) -> PathBuf {
 
 #[derive(Default)]
 struct Timing {
+    samples: usize,
     keyframes: usize,
     faces: usize,
     resize: Duration,
@@ -105,20 +106,20 @@ pub fn run(video: &Path, settings: &Settings) -> Result<PathBuf, Error> {
     record::write_line(&mut out, &header)?;
 
     let mut timing = Timing::default();
-    let mut keyframes = Keyframes::open(
+    let mut samples = Samples::open(
         video,
         width,
         height,
         settings.hwaccel.as_deref(),
         settings.decode_threads,
     )?;
-    for keyframe in keyframes.by_ref() {
-        let keyframe = keyframe?;
+    for sample in samples.by_ref() {
+        let sample = sample?;
         let clock = Instant::now();
         let small = if detect_width == width {
-            keyframe.picture.clone()
+            sample.picture.clone()
         } else {
-            keyframe.picture.resize(detect_width, detect_height)
+            sample.picture.resize(detect_width, detect_height)
         };
         timing.resize += clock.elapsed();
         let clock = Instant::now();
@@ -128,30 +129,33 @@ pub fn run(video: &Path, settings: &Settings) -> Result<PathBuf, Error> {
         let mut faces = Vec::with_capacity(found.len());
         for face in found {
             let face = face.scaled(scale);
-            let vector = embedder.embed(&keyframe.picture, &face)?;
+            let vector = embedder.embed(&sample.picture, &face)?;
             faces.push(Detection {
                 face,
                 embedding: record::encode(&vector),
             });
         }
         timing.embed += clock.elapsed();
-        timing.keyframes += 1;
+        timing.samples += 1;
+        timing.keyframes += usize::from(sample.keyframe);
         timing.faces += faces.len();
-        let line = KeyframeLine {
-            time: keyframe.time,
+        let line = SampleLine {
+            time: sample.time,
+            keyframe: sample.keyframe,
             faces,
         };
         record::write_line(&mut out, &line)?;
     }
-    keyframes.finish()?;
+    samples.finish()?;
     out.flush()?;
     drop(out);
     fs::rename(&partial, &path)?;
 
     let per = |total: Duration, count: usize| total.as_secs_f64() * 1000.0 / count.max(1) as f64;
     eprintln!(
-        "{}: {} keyframes, {} faces on {} at {}x{}, detect at {}x{}",
+        "{}: {} samples, {} of them keyframes, {} faces on {} at {}x{}, detect at {}x{}",
         header.video,
+        timing.samples,
         timing.keyframes,
         timing.faces,
         header.device,
@@ -164,8 +168,8 @@ pub fn run(video: &Path, settings: &Settings) -> Result<PathBuf, Error> {
         "  startup {:.1}s, wall {:.1}s; resize {:.1} ms/frame, detect {:.1} ms/frame, embed {:.1} ms/face",
         ready.as_secs_f64(),
         started.elapsed().as_secs_f64(),
-        per(timing.resize, timing.keyframes),
-        per(timing.detect, timing.keyframes),
+        per(timing.resize, timing.samples),
+        per(timing.detect, timing.samples),
         per(timing.embed, timing.faces),
     );
     Ok(path)

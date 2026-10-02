@@ -1,6 +1,6 @@
 package main
 
-// The appearances fact: which credited person is on screen at each keyframe
+// The appearances fact: which credited person is on screen at each second
 // of a feature, the first step of plan 75. The gap is the features whose cast
 // can be matched and that hold no answer. The worker runs the appearances
 // tool on each one (appearancestool.go) and writes the answer to
@@ -10,19 +10,26 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 // What the container asks for and the memory it may take. The limit covers
-// the largest measured run with room to spare: the tool held up to 350 MB,
-// and ffmpeg up to 860 MB on a 4K file decoded in software and 510 MB on
-// VA-API. The models run on one CPU thread and ffmpeg decodes on two, so
-// half a core is the share the container needs on most of a run.
+// the largest measured run with room to spare. A decode of every frame of a
+// 4K HEVC film held 740 MB in the tool and ffmpeg together in software, and
+// 460 MB with VA-API. The request is the CPU a decode with VA-API used on
+// average, the tool and ffmpeg together: 270 CPU seconds in 167 seconds for
+// a 1080p film, 1.6 cores, and 301 CPU seconds in 533 seconds for a 4K film,
+// 0.6 cores, where the GPU's decode was the slower part. The CPU time per
+// film is close to the same, so the request sets how fast a node works its
+// list. A decode in software also keeps ffmpeg's two decode threads busy,
+// and its CPU time was not measured. There is no CPU limit, so a run uses
+// the idle cores of its node.
 const (
 	appearancesMemoryLimit = "1536Mi"
-	appearancesCPURequest  = "500m"
+	appearancesCPURequest  = "1"
 )
 
 // The emptyDir the worker keeps the GPU's compiled kernels in. OpenVINO
@@ -122,8 +129,13 @@ func (w *factWorkerRun) appearancesOne(ctx context.Context, item workItem) {
 		w.recordAppearances(folder, entry, nil, err)
 		return
 	}
-	w.logf("named %s in %s, and %d of the %d credited actors cannot be matched",
-		counted(len(answer.Observations), "face"), w.named(absolute), len(answer.Unmatched), len(answer.Gallery))
+	people := "1 person"
+	if answer.People != 1 {
+		people = fmt.Sprintf("%d people", answer.People)
+	}
+	w.logf("named %s of %s in %s, and %d of the %d credited actors cannot be matched",
+		counted(answer.Named.Headshot+answer.Named.Film, "face"), people, w.named(absolute),
+		len(answer.Unmatched), len(answer.Gallery))
 	w.recordAppearances(folder, entry, &answer, nil)
 }
 

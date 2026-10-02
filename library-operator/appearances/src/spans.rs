@@ -1,8 +1,9 @@
-// Spans drawn from keyframe observations. Each keyframe stands for its shot,
-// from its own time to the next keyframe's, because encoders place a
-// keyframe at most cuts. A span is a run of shots that name the same
-// people, so two shots of the same two actors merge, and a shot with nobody
-// named is a span with no people.
+// The review's spans, drawn from the samples with no rule of the display's:
+// each sample stands from its own time to the next sample's, and a span is
+// a run of samples that name the same people, so a run with nobody named
+// is a span with no people. The review shows these, and not the display's
+// spans (player.rs), so each gap in the naming shows as a chapter of its
+// own.
 
 use serde::Serialize;
 
@@ -13,8 +14,8 @@ pub struct Span {
     pub people: Vec<String>,
 }
 
-// `shots` is each keyframe's time with the people named in it, in time
-// order, with each list sorted. The last shot ends at the video's end.
+// `shots` is each sample's time with the people named in it, in time
+// order, with each list sorted. The last sample ends at the video's end.
 pub fn spans(shots: &[(f64, Vec<String>)], duration: f64) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     for (index, (start, people)) in shots.iter().enumerate() {

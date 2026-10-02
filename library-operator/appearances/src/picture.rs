@@ -45,7 +45,7 @@ impl Picture {
         top * (1.0 - fy) + bottom * fy
     }
 
-    // The resize runs on every keyframe, so it computes each column's two
+    // The resize runs on every sample, so it computes each column's two
     // source pixels and weight once and reuses them on every row. It
     // clamps at the edges instead of reading black, as OpenCV's resize
     // does, so a scaled frame keeps its border pixels.

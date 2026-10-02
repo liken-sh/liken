@@ -245,10 +245,10 @@ its gap, and the list that `Job` writes starts a worker.
 ### Appearances
 
 The `appearances` fact records which credited actor is on screen at
-each keyframe of a feature. It runs where `spec.appearances.enabled` is
+each second of a feature. It runs where `spec.appearances.enabled` is
 set. The fact asks no provider: it matches the faces in the video with
 the headshots that the people facts put in `.contributors/`. A first
-pass decodes the keyframes of every feature, so the fact runs in a
+pass decodes every frame of every feature, so the fact runs in a
 worker `Job` of its own, named `<library>-appearances-<suffix>`, in the
 same way as the [trickplay](#trickplay) worker. It reads the list
 `.liken/worklists/<namespace>/<library>/appearances.jsonl`, checks each
@@ -265,23 +265,29 @@ headshot waits until the headshot fact writes one.
 
 For each video, the worker runs two passes of the `appearances` tool:
 
-1. `appearances detect` decodes the video's keyframes with `ffmpeg`,
-   finds the faces with the YuNet detector, embeds each face with the
-   SFace model, and writes the detections record
-   `.liken/appearances/<file>.jsonl` beside the video. This is the only
-   pass that opens the video. The detector keeps each face it scores
-   at 0.8 or more. The record's first line names the record's format,
-   the file's size, and the hash of each model. When a record on the
-   volume names the current format, the file's size, and the models of
-   the image, the worker uses it and does not decode again. A record of
-   the format `liken.sh/appearances/detections/v1` holds only the faces
-   scored at 0.9 or more, so the worker decodes its video again.
+1. `appearances detect` decodes every frame of the video with `ffmpeg`,
+   finds the faces with the YuNet detector in every keyframe and in a
+   frame every second, embeds each face with the SFace model, and
+   writes the detections record `.liken/appearances/<file>.jsonl`
+   beside the video. This is the only pass that opens the video. The
+   detector keeps each face it scores at 0.8 or more, and the record
+   marks each keyframe. The record's first line names the record's
+   format, the file's size, and the hash of each model. When a record
+   on the volume names the current format,
+   `liken.sh/appearances/detections/v2`, the file's size, and the models
+   of the image, the worker uses it and does not decode again. A record
+   of any other format holds the keyframes alone, so the worker decodes
+   its video again.
 2. `appearances match` embeds the headshot of each actor that the
-   title folder's `.liken/credits.yaml` names, and compares each face
-   with them. A face is named for the closest actor when the similarity
-   is at least 0.363, the threshold OpenCV publishes for SFace, and
-   leads the next closest actor by at least 0.05. The match takes about
-   a second, and it runs on the CPU.
+   title folder's `.liken/credits.yaml` names, and names the faces in
+   two passes. The headshot pass names a face for the closest actor when
+   the similarity is at least 0.363, the threshold OpenCV publishes for
+   SFace, and leads the next closest actor by at least 0.05. The film
+   pass then names a face the headshots missed, such as a face in
+   profile or decades younger than the headshot, when at least 2 faces
+   the headshots named in other samples are close to it, all of them
+   name one actor, and they are at least 30% of the faces close to it.
+   The match takes 1 to 5 seconds, and it runs on the CPU.
 
 The worker writes the answer to `.liken/appearances.yaml` beside the
 video, one entry per file:
@@ -297,28 +303,40 @@ video, one entry per file:
             - {contributor: .contributors/bo/bo-reyes, name: Bo Reyes, headshot: missing}
           unmatched:
             - {contributor: .contributors/bo/bo-reyes, name: Bo Reyes, headshot: missing}
-          observations:
-            - {time: 4.5, face: 1, contributor: .contributors/ad/ada-quill, similarity: 0.612, runnerUp: 0.201}
+          named: {headshot: 4326, film: 921}
+          people: 21
     attempts:
         - path: Example Movie (2019).mkv
           at: 2026-10-01T12:00:00Z
           result: found
 
-Each observation is one face at one keyframe: the time in seconds, the
-face's place in that keyframe's line of the detections record, the
-actor, the similarity, and the next closest actor's similarity. The
-entry also records the inputs of the answer: the size of the file, the
+The entry records the inputs of the answer: the size of the file, the
 embedding model, the threshold, the margin, and each actor's headshot
-with its hash. `unmatched` lists the actors who cannot be named,
-because their entry holds no headshot or the detector found no face in
-it. A failed pass is an `error` attempt whose `reason` holds the tool's
-own error text, and the worker tries the file again after a day.
+with its hash. `named` counts the faces each pass named, and `people`
+counts the actors they name. `unmatched` lists the actors who cannot be
+named, because their entry holds no headshot or the detector found no
+face in it.
+
+The faces themselves are in `.liken/appearances/<file>.matches.json`
+beside the video, one JSON document of 0.4 to 0.8 MB for a film. Each
+face is one observation: the time of its sample in seconds, the face's
+place in that sample's line of the detections record, the actor, the
+pass that named the face, the similarity to the actor's headshot, and
+the closest other actor's similarity. A face named `by` `film` can be
+under the threshold. The ledger holds only the counts, because a walk
+reads every ledger of a folder on each pass, and the faces of one film
+would make the ledger entry about 700 KB. A failed pass is an `error`
+attempt whose `reason` holds the tool's own error text, and the worker
+tries the file again after a day.
 
 The match also writes `.liken/appearances/<file>.spans.json` beside
-the video, for the screens. It holds spans, not keyframes: each run of
-keyframes that names the same actors, with the actors left to right in
+the video, for the screens. It holds spans, not samples: each run of
+samples that names the same actors, with the actors left to right in
 the order they stand in the picture, and each actor's name, character,
-headshot, and dates. When a person plays a video whose answer is
+headshot, and dates. Each sample stands for the time halfway to its
+neighbours, and never past the next keyframe, where a cut can fall. The
+actors named last hold through samples that name nobody for up to 10
+seconds, and two samples in a row with no face end the span. When a person plays a video whose answer is
 `found`, the screen's browser names the spans file and the library's
 `.contributors/` in the `Play`. The display then shows who is on screen
 when the film pauses. The
@@ -333,8 +351,8 @@ volume and runs only the match. To match every title again, set
 `spec.refresh.appearances` to the current time, as the
 [When a fact asks again](#when-a-fact-asks-again) section describes
 for every fact. A refresh also decodes again each video whose record
-is of an earlier format, which finds the faces that the earlier
-detector left out.
+is of an earlier format, and the match then rewrites its ledger entry
+and its spans file in place.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=appearances
 
@@ -344,14 +362,17 @@ the GPU, and the two models from
 [OpenCV Zoo](https://github.com/opencv/opencv_zoo): YuNet under the MIT
 license and SFace under the Apache 2.0 license. The operator names the
 image at its own tag, and `APPEARANCES_IMAGE` on the operator's
-`Deployment` names another. The container requests `500m` of CPU and
-may take `1536Mi` of memory. The largest measured run held 350 MB in
-the tool and 860 MB in `ffmpeg`, for a 4K file decoded in software.
+`Deployment` names another. The container requests one core of CPU and
+may take `1536Mi` of memory. The largest measured run held 740 MB in
+the tool and `ffmpeg` together, for a 4K file decoded in software. On a
+laptop, the detect pass took 1.5 to 4 minutes for a 1080p film and 6
+minutes for a 4K film through VA-API, and 34 minutes for the 4K film in
+software. The worker allows each detect pass 6 hours.
 
 With no render block, the worker decodes and runs the models on the
 CPU. `spec.appearances.render` names a DeviceClass, and the operator
 keeps a `ResourceClaimTemplate` for the worker, as it does for
-trickplay. With the claim, `ffmpeg` decodes and scales the keyframes on
+trickplay. With the claim, `ffmpeg` decodes and scales the video on
 the render node through VA-API, and OpenVINO runs the models on the
 Intel GPU. A file the render node refuses to decode is decoded again in
 software. OpenVINO compiles the models for the GPU when the worker

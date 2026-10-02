@@ -11,8 +11,8 @@
 -- change moves these faces. A red box is a face nobody in the gallery is
 -- close to.
 --
--- Keys: k and j seek to the next and the previous keyframe with a face, at
--- the keyframe's exact time, where each box sits on its face. v shows and
+-- Keys: k and j seek to the next and the previous sample with a face, at
+-- the sample's exact time, where each box sits on its face. v shows and
 -- hides the overlay.
 
 -- mpv runs Lua 5.1 or LuaJIT, so this script uses no integer division and
@@ -67,8 +67,8 @@ local function color(face)
     return RED
 end
 
--- After an exact seek to a keyframe, mpv's time-pos can read a fraction of
--- a millisecond before the keyframe's time, which would select the keyframe
+-- After an exact seek to a sample, mpv's time-pos can read a fraction of
+-- a millisecond before the sample's time, which would select the sample
 -- before it. Every lookup adds a tolerance, well under one frame.
 local TOLERANCE = 0.01
 
@@ -90,13 +90,13 @@ local function draw()
     local sy = (dim.h - dim.mt - dim.mb) / data.height
     local lines = {}
 
-    local k = last_before(data.keyframes, "time", t)
+    local k = last_before(data.samples, "time", t)
     if k then
-        local keyframe = data.keyframes[k]
-        -- The boxes are exact only at the keyframe. Later in the shot the
-        -- faces move, so the outline thins.
-        local border = (t - keyframe.time < 0.5) and 3 or 1
-        for _, face in ipairs(keyframe.faces) do
+        local sample = data.samples[k]
+        -- The boxes are exact only at the sample. Later the faces move, so
+        -- the outline thins.
+        local border = (t - sample.time < 0.5) and 3 or 1
+        for _, face in ipairs(sample.faces) do
             local x1, y1 = dim.ml + face.x * sx, dim.mt + face.y * sy
             local x2, y2 = x1 + face.w * sx, y1 + face.h * sy
             local c = color(face)
@@ -120,10 +120,10 @@ local function draw()
         local people = #span.people > 0 and table.concat(span.people, ", ") or "nobody named"
         header = string.format("%s to %s   %s", clock(span.start), clock(span["end"]), people)
     end
-    local keyframe = k and string.format("   keyframe %d of %d at %s", k, #data.keyframes,
-        clock(data.keyframes[k].time)) or ""
+    local sample = k and string.format("   sample %d of %d at %s", k, #data.samples,
+        clock(data.samples[k].time)) or ""
     lines[#lines + 1] = string.format("{\\an7\\pos(20,20)\\fs26\\bord2\\shad0}%s{\\fs18}\\N%s   threshold %.3f   margin %.3f",
-        escape(header), keyframe, data.threshold, data.margin)
+        escape(header), sample, data.threshold, data.margin)
 
     overlay.res_x, overlay.res_y = dim.w, dim.h
     overlay.data = table.concat(lines, "\n")
@@ -132,16 +132,16 @@ end
 
 local function seek_face(step)
     local t = now() or 0
-    local k = last_before(data.keyframes, "time", t) or 0
-    -- Between two keyframes, j goes back to the one at or before the
+    local k = last_before(data.samples, "time", t) or 0
+    -- Between two samples, j goes back to the one at or before the
     -- current time, not the one before that.
-    if step < 0 and k > 0 and data.keyframes[k].time < t - 2 * TOLERANCE then
+    if step < 0 and k > 0 and data.samples[k].time < t - 2 * TOLERANCE then
         k = k + 1
     end
     local i = k + step
-    while i >= 1 and i <= #data.keyframes do
-        if #data.keyframes[i].faces > 0 then
-            mp.commandv("seek", tostring(data.keyframes[i].time), "absolute+exact")
+    while i >= 1 and i <= #data.samples do
+        if #data.samples[i].faces > 0 then
+            mp.commandv("seek", tostring(data.samples[i].time), "absolute+exact")
             return
         end
         i = i + step

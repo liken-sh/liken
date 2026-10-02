@@ -4,13 +4,20 @@
 // display reads finished spans and does no matching, merging, or ordering
 // of its own.
 //
-// A span is a run of keyframes that name the same people. Each keyframe
-// stands for its shot, from its own time to the next keyframe's, the rule
-// spans.rs holds. A span lists its people left to right by where their
-// faces sat across its keyframes, so the cards on screen read in the order
-// the people stand in the picture. A short run of keyframes that names
-// nobody belongs to the span before it, as HOLD and BLANK say. A longer run
-// that names nobody is no span: the display shows nothing there.
+// A span is a run of samples that name the same people. Each sample stands
+// for half the gap to the sample before it and half the gap to the sample
+// after it, and its stretch stops at the next keyframe: encoders place a
+// keyframe at most cuts, so a stretch that crossed one would put the
+// people of one shot over the next. The matcher misses faces, so samples
+// that name nobody break a scene into pieces, and the people named last
+// hold through them, within the limits HOLD and BLANK set. Two spans of the
+// same people that meet join into one. A span lists its people left to
+// right by where their faces sat across its samples, so the cards on screen
+// read in the order the people stand in the picture.
+//
+// On the bench of nine films, 360 pause moments labeled by hand, these
+// rules and the names of match (matches.rs) showed the right people with a
+// precision of 0.87, and showed 84% of the clear faces.
 //
 // Each person carries what a card shows: the name, the part, the portrait,
 // and the dates the display turns into ages. The display subtracts the
@@ -26,7 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::gallery::Person;
 use crate::matches::Observation;
-use crate::record::Record;
+use crate::record::{Record, SampleLine};
 
 pub const FORMAT: &str = "liken.sh/appearances/spans/v1";
 
@@ -77,17 +84,23 @@ pub struct Entry {
 
 const CONTRIBUTORS: &str = ".contributors/";
 
-// The longest time after the last person named that the people seen last
-// hold, in seconds. The matcher misses a face turned away, in shadow, or
-// too small to name, so a scene breaks into pieces with gaps between them,
-// and a pause in a gap shows no cast. A longer hold carries people past the
-// end of their scene.
-const HOLD: f64 = 30.0;
+// The longest time, in seconds, that the people named last hold through
+// samples with faces that name nobody, counted from the end of their last
+// sample. A face turned away, in shadow, or too small to name breaks a
+// scene into pieces, and a pause in a gap would show no cast. A longer hold
+// carries people past the end of their scene. On the bench, a hold of 30
+// seconds scored within a moment of this one, and no hold at all showed 4
+// points less of the clear faces.
+const HOLD: f64 = 10.0;
 
-// The shortest stretch with no face at all that ends the people's span, in
-// seconds. A wide shot of a landscape or a street ends the scene's people,
-// and a cut of a moment to a hand or a door does not.
-const BLANK: f64 = 4.0;
+// The run of consecutive samples with no face at all that ends a span. A
+// wide shot of a landscape or a street ends the scene's people, and one
+// sample with no face, a cut to a hand or a door for a second, does not.
+// On the bench, the rules with a run of 4 seconds here and a hold of 30
+// seconds let spans run through inserts and wide shots. These rules raised
+// precision from 0.80 to 0.87, and the share of clear faces shown from 0.81
+// to 0.84.
+const BLANK: usize = 2;
 
 pub fn path(title: &Path, video: &str) -> PathBuf {
     title
@@ -106,108 +119,84 @@ pub fn spans(
     entries: &HashMap<String, Entry>,
     released: Option<String>,
 ) -> Spans {
+    let samples = &record.samples;
     let width = record.header.width.max(1) as f32;
-    let mut named: HashMap<u64, Vec<(&str, f32)>> = HashMap::new();
+    let index: HashMap<u64, usize> = samples
+        .iter()
+        .enumerate()
+        .map(|(at, sample)| (sample.time.to_bits(), at))
+        .collect();
+    let mut named: Vec<Vec<(&str, f32)>> = vec![Vec::new(); samples.len()];
     for observation in observations {
-        let Some(face) = record
-            .keyframes
-            .iter()
-            .find(|k| k.time == observation.time)
-            .and_then(|k| k.faces.get(observation.face))
-        else {
+        let Some(&at) = index.get(&observation.time.to_bits()) else {
+            continue;
+        };
+        let Some(face) = samples[at].faces.get(observation.face) else {
             continue;
         };
         let centre = (face.face.x + face.face.w / 2.0) / width;
-        named
-            .entry(observation.time.to_bits())
-            .or_default()
-            .push((observation.contributor.as_str(), centre));
+        named[at].push((observation.contributor.as_str(), centre));
     }
+    let stretches = stretches(samples, record.header.duration);
+    let blank = blank(samples);
 
-    // One run: its start, its end, its sorted set of people, whether its
-    // keyframes hold no face at all, the end of its last keyframe that named
-    // someone, and the sum and count of each person's face centre.
+    // One span as it grows: its stretch, its sorted set of people, the end
+    // of its last sample that named them, and the sum and count of each
+    // person's face centre.
     struct Run<'a> {
         start: f64,
         end: f64,
         set: Vec<&'a str>,
-        blank: bool,
         seen: f64,
         places: HashMap<&'a str, (f32, u32)>,
     }
     let mut runs: Vec<Run> = Vec::new();
-    for (index, keyframe) in record.keyframes.iter().enumerate() {
-        let end = record
-            .keyframes
-            .get(index + 1)
-            .map_or(record.header.duration, |next| next.time);
-        let faces = named
-            .get(&keyframe.time.to_bits())
-            .cloned()
-            .unwrap_or_default();
+    let mut open: Option<Run> = None;
+    for (at, faces) in named.into_iter().enumerate() {
+        let (start, end) = stretches[at];
         let mut set: Vec<&str> = faces.iter().map(|(who, _)| *who).collect();
         set.sort();
         set.dedup();
-        let blank = keyframe.faces.is_empty();
-        let run = match runs.last_mut() {
-            Some(last) if last.set == set && last.blank == blank => {
-                last.end = end;
-                last.seen = end;
-                last
+        if set.is_empty() {
+            match open.take() {
+                Some(mut run) if !blank[at] && end - run.seen < HOLD => {
+                    run.end = end;
+                    open = Some(run);
+                }
+                Some(run) => runs.push(run),
+                None => {}
             }
-            _ => {
-                runs.push(Run {
-                    start: keyframe.time,
+            continue;
+        }
+        let run = match open.take() {
+            Some(mut run) if run.set == set => {
+                run.end = end;
+                run
+            }
+            closed => {
+                runs.extend(closed);
+                Run {
+                    start,
                     end,
                     set,
-                    blank,
                     seen: end,
                     places: HashMap::new(),
-                });
-                runs.last_mut().unwrap()
+                }
             }
         };
+        let run = open.insert(run);
+        run.seen = end;
         for (who, centre) in faces {
             let place = run.places.entry(who).or_default();
             place.0 += centre;
             place.1 += 1;
         }
     }
-
-    // The held runs: a run that names nobody between two named runs goes to
-    // the run before it while it ends within HOLD of the last person named,
-    // unless it holds no face for BLANK or longer. Two runs of the same
-    // people that meet merge, with the places of both.
-    let mut held: Vec<Run> = Vec::new();
-    let mut runs = runs.into_iter().peekable();
-    while let Some(run) = runs.next() {
-        if run.set.is_empty()
-            && !(run.blank && run.end - run.start >= BLANK)
-            && runs.peek().is_some()
-            && let Some(last) = held
-                .last_mut()
-                .filter(|last| !last.set.is_empty() && run.end - last.seen < HOLD)
-        {
-            last.end = run.end;
-            continue;
-        }
-        match held.last_mut() {
-            Some(last) if last.set == run.set && last.blank == run.blank => {
-                last.end = run.end;
-                last.seen = run.seen;
-                for (who, (sum, count)) in run.places {
-                    let place = last.places.entry(who).or_default();
-                    place.0 += sum;
-                    place.1 += count;
-                }
-            }
-            _ => held.push(run),
-        }
-    }
+    runs.extend(open);
 
     let mut cards = BTreeMap::new();
     let mut spans = Vec::new();
-    for run in held.into_iter().filter(|r| !r.set.is_empty()) {
+    for run in runs {
         let mut order: Vec<(&str, f32)> = run
             .set
             .iter()
@@ -237,6 +226,50 @@ pub fn spans(
         people: cards,
         spans,
     }
+}
+
+// The stretch each sample stands for: from halfway to the sample before it
+// to halfway to the sample after it. A keyframe starts a stretch of its
+// own, so a stretch never crosses a keyframe after its sample. The first
+// sample starts at its own time, and the last ends at the video's end.
+fn stretches(samples: &[SampleLine], duration: f64) -> Vec<(f64, f64)> {
+    let bounds: Vec<f64> = samples
+        .windows(2)
+        .map(|pair| {
+            if pair[1].keyframe {
+                pair[1].time
+            } else {
+                (pair[0].time + pair[1].time) / 2.0
+            }
+        })
+        .collect();
+    (0..samples.len())
+        .map(|at| {
+            let start = if at == 0 {
+                samples[0].time
+            } else {
+                bounds[at - 1]
+            };
+            (start, bounds.get(at).copied().unwrap_or(duration))
+        })
+        .collect()
+}
+
+// Whether each sample is in a run of BLANK or more samples with no face.
+fn blank(samples: &[SampleLine]) -> Vec<bool> {
+    let mut blank = vec![false; samples.len()];
+    let mut at = 0;
+    while at < samples.len() {
+        let length = samples[at..]
+            .iter()
+            .take_while(|sample| sample.faces.is_empty())
+            .count();
+        if length >= BLANK {
+            blank[at..at + length].fill(true);
+        }
+        at += length.max(1);
+    }
+    blank
 }
 
 fn card(contributor: &str, people: &[Person], entries: &HashMap<String, Entry>) -> Card {
@@ -306,7 +339,8 @@ fn premiered(nfo: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::gallery::Headshot;
-    use crate::record::{self, Detection, Header, KeyframeLine, Model};
+    use crate::matches::By;
+    use crate::record::{self, Detection, Header, Model};
     use crate::yunet::Face;
 
     fn model() -> Model {
@@ -331,14 +365,15 @@ mod tests {
         }
     }
 
-    fn keyframe(time: f64, places: &[f32]) -> KeyframeLine {
-        KeyframeLine {
+    fn sample(time: f64, places: &[f32]) -> SampleLine {
+        SampleLine {
             time,
+            keyframe: false,
             faces: places.iter().map(|x| face_at(*x)).collect(),
         }
     }
 
-    fn record(keyframes: Vec<KeyframeLine>) -> Record {
+    fn record(samples: Vec<SampleLine>) -> Record {
         Record {
             header: Header {
                 format: record::FORMAT.into(),
@@ -352,7 +387,7 @@ mod tests {
                 embedder: model(),
                 device: "CPU".into(),
             },
-            keyframes,
+            samples,
         }
     }
 
@@ -361,6 +396,7 @@ mod tests {
             time,
             face,
             contributor: format!(".contributors/{who}"),
+            by: By::Headshot,
             similarity: 0.5,
             runner_up: None,
         }
@@ -392,140 +428,130 @@ mod tests {
         }
     }
 
+    // One sample of a case: its time, whether it is a keyframe, and its
+    // faces, each named for a person or for nobody.
+    type Shot = (f64, bool, &'static [Option<&'static str>]);
+
+    const JANE: &[Option<&str>] = &[Some("ja/jane")];
+    const JOHN: &[Option<&str>] = &[Some("jo/john")];
+    const NOBODY: &[Option<&str>] = &[None];
+    const NO_FACE: &[Option<&str>] = &[];
+
+    fn spans_of(shots: &[Shot], duration: f64) -> Vec<Span> {
+        let samples = shots
+            .iter()
+            .map(|(time, keyframe, faces)| SampleLine {
+                time: *time,
+                keyframe: *keyframe,
+                faces: faces.iter().map(|_| face_at(50.0)).collect(),
+            })
+            .collect();
+        let mut record = record(samples);
+        record.header.duration = duration;
+        let observations: Vec<Observation> = shots
+            .iter()
+            .flat_map(|(time, _, faces)| {
+                faces
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(face, who)| who.map(|who| seen(*time, face, who)))
+            })
+            .collect();
+        spans(&record, &observations, &people(), &HashMap::new(), None).spans
+    }
+
+    // Jane named at 0 s and faces nobody named every second after it.
+    fn jane_then_nobody(until: usize) -> Vec<Shot> {
+        std::iter::once((0.0, true, JANE))
+            .chain((1..until).map(|time| (time as f64, false, NOBODY)))
+            .collect()
+    }
+
     #[test]
-    fn keyframes_that_name_the_same_people_merge_and_nobody_is_no_span() {
-        let mut record = record(vec![
-            keyframe(0.0, &[]),
-            keyframe(10.0, &[30.0]),
-            keyframe(15.0, &[40.0]),
-            keyframe(20.0, &[]),
-            keyframe(60.0, &[70.0]),
-        ]);
-        record.header.duration = 70.0;
-        let observations = [
-            seen(10.0, 0, "ja/jane"),
-            seen(15.0, 0, "ja/jane"),
-            seen(60.0, 0, "jo/john"),
+    fn the_span_rules() {
+        let cases: Vec<(&str, Vec<Shot>, f64, Vec<Span>)> = vec![
+            (
+                "each sample stands for half the gap on each side",
+                vec![(0.0, true, JANE), (1.0, false, JANE), (2.0, false, JOHN)],
+                3.0,
+                vec![span(0.0, 1.5, &["ja/jane"]), span(1.5, 3.0, &["jo/john"])],
+            ),
+            (
+                "a stretch stops at the next keyframe",
+                vec![
+                    (0.0, true, JANE),
+                    (1.0, false, JANE),
+                    (1.4, true, JOHN),
+                    (2.4, false, JOHN),
+                ],
+                3.0,
+                vec![span(0.0, 1.4, &["ja/jane"]), span(1.4, 3.0, &["jo/john"])],
+            ),
+            (
+                "two samples with no face end the span",
+                vec![
+                    (0.0, true, JANE),
+                    (1.0, false, NO_FACE),
+                    (2.0, false, NO_FACE),
+                    (3.0, false, JANE),
+                ],
+                4.0,
+                vec![span(0.0, 0.5, &["ja/jane"]), span(2.5, 4.0, &["ja/jane"])],
+            ),
+            (
+                "one sample with no face keeps the span",
+                vec![(0.0, true, JANE), (1.0, false, NO_FACE), (2.0, false, JANE)],
+                3.0,
+                vec![span(0.0, 3.0, &["ja/jane"])],
+            ),
+            (
+                "faces nobody named hold the people named last until others are named",
+                vec![(0.0, true, JANE), (1.0, false, NOBODY), (2.0, false, JOHN)],
+                3.0,
+                vec![span(0.0, 1.5, &["ja/jane"]), span(1.5, 3.0, &["jo/john"])],
+            ),
+            (
+                "the same people after a hold join into one span",
+                vec![
+                    (0.0, true, JANE),
+                    (1.0, false, NOBODY),
+                    (2.0, false, NOBODY),
+                    (3.0, false, JANE),
+                ],
+                4.0,
+                vec![span(0.0, 4.0, &["ja/jane"])],
+            ),
+            // Jane's last sample ends at 0.5 s, and the hold takes each
+            // stretch that ends before 10.5 s.
+            (
+                "the hold ends 10 seconds after the last naming",
+                jane_then_nobody(15),
+                15.0,
+                vec![span(0.0, 9.5, &["ja/jane"])],
+            ),
+            (
+                "the hold runs to the end of the video",
+                jane_then_nobody(2),
+                2.0,
+                vec![span(0.0, 2.0, &["ja/jane"])],
+            ),
+            (
+                "faces before the first naming are no span",
+                vec![(0.0, true, NOBODY), (1.0, false, JANE)],
+                2.0,
+                vec![span(0.5, 2.0, &["ja/jane"])],
+            ),
         ];
-        let spans = spans(&record, &observations, &people(), &HashMap::new(), None);
-        assert_eq!(
-            spans.spans,
-            vec![
-                span(10.0, 20.0, &["ja/jane"]),
-                span(60.0, 70.0, &["jo/john"])
-            ]
-        );
-    }
-
-    // A shot of the same people from behind, or too far off to name, breaks
-    // a scene into pieces. A short stretch of faces nobody named between two
-    // spans of the same people is part of their span.
-    #[test]
-    fn a_short_gap_between_the_same_people_joins_their_spans() {
-        let record = record(vec![
-            keyframe(0.0, &[30.0]),
-            keyframe(10.0, &[60.0]),
-            keyframe(30.0, &[40.0]),
-        ]);
-        let observations = [seen(0.0, 0, "ja/jane"), seen(30.0, 0, "ja/jane")];
-        let spans = spans(&record, &observations, &people(), &HashMap::new(), None);
-        assert_eq!(spans.spans, vec![span(0.0, 40.0, &["ja/jane"])]);
-    }
-
-    // Between two spans of different people, the people seen last hold
-    // a short stretch of faces nobody named, until the next person is named.
-    #[test]
-    fn a_short_gap_before_other_people_holds_the_people_seen_last() {
-        let record = record(vec![
-            keyframe(0.0, &[30.0]),
-            keyframe(10.0, &[60.0]),
-            keyframe(30.0, &[40.0]),
-        ]);
-        let observations = [seen(0.0, 0, "ja/jane"), seen(30.0, 0, "jo/john")];
-        let spans = spans(&record, &observations, &people(), &HashMap::new(), None);
-        assert_eq!(
-            spans.spans,
-            vec![
-                span(0.0, 30.0, &["ja/jane"]),
-                span(30.0, 40.0, &["jo/john"])
-            ]
-        );
-    }
-
-    // A wide shot with no face in it ends the scene's people, so a stretch
-    // with no face at all, a few seconds long, closes the span.
-    #[test]
-    fn a_stretch_with_no_face_at_all_closes_the_span() {
-        let record = record(vec![
-            keyframe(0.0, &[30.0]),
-            keyframe(10.0, &[]),
-            keyframe(20.0, &[40.0]),
-        ]);
-        let observations = [seen(0.0, 0, "ja/jane"), seen(20.0, 0, "ja/jane")];
-        let spans = spans(&record, &observations, &people(), &HashMap::new(), None);
-        assert_eq!(
-            spans.spans,
-            vec![
-                span(0.0, 10.0, &["ja/jane"]),
-                span(20.0, 40.0, &["ja/jane"])
-            ]
-        );
-    }
-
-    // A cut away from every face shorter than that, an insert of a hand or
-    // a door, keeps the span.
-    #[test]
-    fn a_moment_with_no_face_keeps_the_span() {
-        let record = record(vec![
-            keyframe(0.0, &[30.0]),
-            keyframe(10.0, &[]),
-            keyframe(12.0, &[40.0]),
-        ]);
-        let observations = [seen(0.0, 0, "ja/jane"), seen(12.0, 0, "ja/jane")];
-        let spans = spans(&record, &observations, &people(), &HashMap::new(), None);
-        assert_eq!(spans.spans, vec![span(0.0, 40.0, &["ja/jane"])]);
-    }
-
-    // The hold counts from the last time someone was named, so a run of
-    // short gaps adds up to no more than the one hold.
-    #[test]
-    fn the_hold_counts_from_the_last_person_named() {
-        let mut record = record(vec![
-            keyframe(0.0, &[30.0]),
-            keyframe(10.0, &[60.0]),
-            keyframe(30.0, &[]),
-            keyframe(32.0, &[60.0]),
-            keyframe(50.0, &[40.0]),
-        ]);
-        record.header.duration = 60.0;
-        let observations = [seen(0.0, 0, "ja/jane"), seen(50.0, 0, "jo/john")];
-        let spans = spans(&record, &observations, &people(), &HashMap::new(), None);
-        assert_eq!(
-            spans.spans,
-            vec![
-                span(0.0, 32.0, &["ja/jane"]),
-                span(50.0, 60.0, &["jo/john"])
-            ]
-        );
-    }
-
-    // After the last person named, nobody holds the rest of the video.
-    #[test]
-    fn a_gap_at_the_end_of_the_video_names_nobody() {
-        let record = record(vec![keyframe(0.0, &[30.0]), keyframe(10.0, &[])]);
-        let observations = [seen(0.0, 0, "ja/jane")];
-        let spans = spans(&record, &observations, &people(), &HashMap::new(), None);
-        assert_eq!(spans.spans, vec![span(0.0, 10.0, &["ja/jane"])]);
+        for (case, shots, duration, expected) in cases {
+            assert_eq!(spans_of(&shots, duration), expected, "{case}");
+        }
     }
 
     #[test]
     fn a_span_lists_its_people_left_to_right_by_their_average_place() {
-        // John stands left of Jane in the first keyframe and right of her
+        // John stands left of Jane in the first sample and right of her
         // in the second, and his average place is the further left.
-        let record = record(vec![
-            keyframe(0.0, &[10.0, 50.0]),
-            keyframe(5.0, &[60.0, 55.0]),
-        ]);
+        let record = record(vec![sample(0.0, &[10.0, 50.0]), sample(5.0, &[60.0, 55.0])]);
         let observations = [
             seen(0.0, 0, "jo/john"),
             seen(0.0, 1, "ja/jane"),
@@ -538,7 +564,7 @@ mod tests {
 
     #[test]
     fn a_card_carries_the_name_the_part_the_portrait_and_the_dates() {
-        let record = record(vec![keyframe(0.0, &[50.0, 20.0])]);
+        let record = record(vec![sample(0.0, &[50.0, 20.0])]);
         let observations = [seen(0.0, 0, "ja/jane"), seen(0.0, 1, "jo/john")];
         let entries = HashMap::from([(
             ".contributors/ja/jane".to_string(),

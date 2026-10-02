@@ -60,24 +60,24 @@ func detectionsLine(t *testing.T, size int64) string {
 	return string(header) + "\n"
 }
 
-// The header line of a record of the first format, which the tool wrote
-// with a detector cutoff of 0.9, of a file of size bytes.
-func firstFormatDetectionsLine(t *testing.T, size int64) string {
+// The header line of a record of an earlier format, which held the
+// keyframes alone, of a file of size bytes.
+func earlierFormatDetectionsLine(t *testing.T, size int64) string {
 	t.Helper()
 	return strings.Replace(detectionsLine(t, size), detectionsFormat, "liken.sh/appearances/detections/v1", 1)
 }
 
-// One match document, as the tool prints it, for one video file of size
-// bytes: two people in the gallery, one with no headshot, and one face named.
+// One match summary, as the tool prints it, for one video file of size
+// bytes: two people in the gallery, one with no headshot, and three faces
+// named for one person.
 func matchDocumentFor(file string, size int64) string {
-	return `{"format":"liken.sh/appearances/matches/v1",` +
+	return `{"format":"liken.sh/appearances/summary/v1",` +
 		`"embedder":{"name":"face_recognition_sface_2021dec","sha256":"` + appearancesEmbedder.SHA256 + `"},` +
-		`"threshold":0.363,"margin":0.05,"self_gallery":false,` +
+		`"threshold":0.363,"margin":0.05,` +
 		`"gallery":[{"contributor":".contributors/ad/ada-quill","name":"Ada Quill","headshot":"found","sha256":"ab12"},` +
 		`{"contributor":".contributors/bo/bo-reyes","name":"Bo Reyes","headshot":"missing"}],` +
 		`"unmatched":[{"contributor":".contributors/bo/bo-reyes","name":"Bo Reyes","headshot":"missing"}],` +
-		`"files":{"` + file + `":{"size":` + itoa(size) + `,"observations":[` +
-		`{"time":4.5,"face":1,"contributor":".contributors/ad/ada-quill","similarity":0.612,"runner_up":0.201}]}}}`
+		`"files":{"` + file + `":{"size":` + itoa(size) + `,"named":{"headshot":2,"film":1},"people":1}}}`
 }
 
 func itoa(value int64) string {
@@ -119,7 +119,7 @@ func (s standInAppearances) install(t *testing.T) string {
 	} else {
 		script += "  out=\"$(dirname \"$last\")/.liken/appearances\"\n  mkdir -p \"$out\"\n" +
 			"  cp '" + record + "' \"$out/$(basename \"$last\").jsonl\"\n" +
-			"  echo \"$(basename \"$last\"): 1 keyframes, 1 faces on CPU\" >&2\n"
+			"  echo \"$(basename \"$last\"): 1 samples, 1 of them keyframes, 1 faces on CPU\" >&2\n"
 	}
 	script += "  ;;\nmatch)\n"
 	if s.document == "" {
@@ -337,20 +337,17 @@ func TestTheAppearancesWorkerWritesTheLedger(t *testing.T) {
 			{Contributor: ".contributors/bo/bo-reyes", Name: "Bo Reyes", Headshot: "missing"},
 		},
 		Unmatched: []appearancesPerson{{Contributor: ".contributors/bo/bo-reyes", Name: "Bo Reyes", Headshot: "missing"}},
-		Observations: []appearanceObservation{{Time: 4.5, Face: 1, Contributor: ".contributors/ad/ada-quill",
-			Similarity: 0.612, RunnerUp: float32Of(0.201)}},
+		Named:     appearancesNamed{Headshot: 2, Film: 1}, People: 1,
 	}
 	if len(ledger.Appearances) != 1 || !sameAppearances(ledger.Appearances[0], want) {
 		t.Errorf("appearances = %+v, want %+v", ledger.Appearances, want)
 	}
-	wantOneLine(t, log, "named 1 face in "+work.named(filepath.Join(folder, appearancesFile)),
+	wantOneLine(t, log, "named 3 faces of 1 person in "+work.named(filepath.Join(folder, appearancesFile)),
 		"1 of the 2 credited actors cannot be matched")
 	if strings.Contains(log.String(), "Paper Lanterns") || strings.Contains(log.String(), "Ada Quill") {
 		t.Errorf("log = %q, want no title and no name", log)
 	}
 }
-
-func float32Of(value float32) *float32 { return &value }
 
 func sameAppearances(a, b appearancesEntry) bool {
 	left, _ := json.Marshal(a)
@@ -406,7 +403,7 @@ func TestTheAppearancesWorkerDecodesOnTheRenderNode(t *testing.T) {
 // A detections record already on the volume is reused where its header names
 // the file's size and the models the image holds, so a match that failed costs
 // no second decode. A record of another size or another model is stale, and
-// so is a record of the first format, whose detector kept fewer faces.
+// so is a record of an earlier format, which holds the keyframes alone.
 func TestAnAppearancesWorkerReusesACurrentRecord(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -420,8 +417,8 @@ func TestAnAppearancesWorkerReusesACurrentRecord(t *testing.T) {
 			header: func(t *testing.T, size int64) string {
 				return strings.Replace(detectionsLine(t, size), appearancesEmbedder.SHA256, sha256Hex("older"), 1)
 			}},
-		{name: "a record of the first format", detect: true,
-			header: func(t *testing.T, size int64) string { return firstFormatDetectionsLine(t, size) }},
+		{name: "a record of an earlier format", detect: true,
+			header: func(t *testing.T, size int64) string { return earlierFormatDetectionsLine(t, size) }},
 		{name: "a record that is not JSON", detect: true,
 			header: func(*testing.T, int64) string { return "not json\n" }},
 	}
@@ -497,8 +494,8 @@ func TestWhatAFailedAppearancesRunRecords(t *testing.T) {
 			document: func(size int64) string { return matchDocumentFor(appearancesFile, size+1) },
 			want:     "of another size"},
 		{name: "match prints another format", record: true,
-			document: func(int64) string { return `{"format":"liken.sh/appearances/matches/v9"}` },
-			want:     "liken.sh/appearances/matches/v9"},
+			document: func(int64) string { return `{"format":"liken.sh/appearances/summary/v9"}` },
+			want:     "liken.sh/appearances/summary/v9"},
 		{name: "match prints no JSON", record: true, document: func(int64) string { return "faces" },
 			want: "reading the match document"},
 	}
@@ -593,9 +590,9 @@ func TestAVideoWithARecordOfItsSizeIsQuick(t *testing.T) {
 	if appearancesQuick(run, item) {
 		t.Error("a video with a record of another size is quick")
 	}
-	writeFile(t, detectionsPath(video), firstFormatDetectionsLine(t, 4))
+	writeFile(t, detectionsPath(video), earlierFormatDetectionsLine(t, 4))
 	if appearancesQuick(run, item) {
-		t.Error("a video with a record of the first format is quick")
+		t.Error("a video with a record of an earlier format is quick")
 	}
 	writeFile(t, detectionsPath(video), detectionsLine(t, 4))
 	if !appearancesQuick(run, item) {

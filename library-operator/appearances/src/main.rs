@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use appearances::film_gallery::Naming;
 use appearances::matcher::{self, Rule};
 use appearances::{detect, matches, review, runtime::Error};
 
@@ -10,9 +9,9 @@ const USAGE: &str = "usage:
                      [--cache DIR] [--decode-width PX] [--detect-width PX] [--hwaccel vaapi]
                      [--decode-threads N]
   appearances match <title folder>... [--models DIR] [--device auto|cpu|gpu] [--threads N]
-                    [--credits FILE] [--threshold X] [--margin X] [--self-gallery]
-  appearances review <title folder>... [--threshold X] [--margin X] [--self-gallery]
-                     [--out DIR] [--sheets N] [--play]
+                    [--credits FILE] [--threshold X] [--margin X]
+  appearances review <title folder>... [--threshold X] [--margin X] [--out DIR] [--sheets N]
+                     [--play]
 
 --models defaults to $APPEARANCES_MODELS. --device defaults to auto, which takes an Intel GPU
 when OpenVINO finds one. --threads sets the CPU's inference threads and defaults to 1.
@@ -22,12 +21,13 @@ the folder's .liken/credits.yaml, or from the credits file --credits names, such
 file for a season folder.
 
 A face is named when its closest person's cosine similarity reaches --threshold (0.363) and
-leads the next closest person by --margin (0.05). --self-gallery is an experiment: it adds
-each person's most confident faces in the film to the gallery and names every face again.";
+leads the next closest person by --margin (0.05). A face the headshots leave unnamed takes a
+name when at least 2 named faces of other samples are within 0.5 of it, all name one person,
+and they are at least 30% of all its faces within 0.5.";
 
 // The flags and the positional arguments of one command. Every flag takes
 // one value, except the switches, which take none.
-const SWITCHES: [&str; 2] = ["play", "self-gallery"];
+const SWITCHES: [&str; 1] = ["play"];
 
 struct Args {
     flags: Vec<(String, String)>,
@@ -70,13 +70,10 @@ impl Args {
         self.get(name).map_or(Ok(default), |v| Ok(v.parse()?))
     }
 
-    fn naming(&self) -> Result<Naming, Error> {
-        Ok(Naming {
-            rule: Rule {
-                threshold: self.decimal("threshold", matcher::THRESHOLD)?,
-                margin: self.decimal("margin", matcher::MARGIN)?,
-            },
-            self_gallery: self.get("self-gallery").is_some(),
+    fn rule(&self) -> Result<Rule, Error> {
+        Ok(Rule {
+            threshold: self.decimal("threshold", matcher::THRESHOLD)?,
+            margin: self.decimal("margin", matcher::MARGIN)?,
         })
     }
 
@@ -112,17 +109,17 @@ fn run() -> Result<(), Error> {
         }
         "match" => {
             let models = args.models()?;
-            let naming = args.naming()?;
+            let rule = args.rule()?;
             let credits = args.get("credits").map(PathBuf::from);
             for title in &args.paths {
                 let found =
-                    matches::run(title, credits.as_deref(), &models, &device, threads, naming)?;
+                    matches::run(title, credits.as_deref(), &models, &device, threads, rule)?;
                 println!("{}", serde_json::to_string(&found)?);
             }
         }
         "review" => {
             let settings = review::Settings {
-                naming: args.naming()?,
+                rule: args.rule()?,
                 out: args.get("out").map(PathBuf::from),
                 play: args.get("play").is_some(),
                 sheets: args.get("sheets").map(str::parse).transpose()?,

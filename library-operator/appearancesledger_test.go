@@ -22,14 +22,11 @@ func sampleAppearances() appearancesEntry {
 			{Contributor: ".contributors/bo/bo-reyes", Name: "Bo Reyes", Headshot: "missing"},
 		},
 		Unmatched: []appearancesPerson{{Contributor: ".contributors/bo/bo-reyes", Name: "Bo Reyes", Headshot: "missing"}},
-		Observations: []appearanceObservation{
-			{Time: 4.5, Face: 1, Contributor: ".contributors/ad/ada-quill", Similarity: 0.612, RunnerUp: float32Of(0)},
-			{Time: 9.042, Face: 0, Contributor: ".contributors/ad/ada-quill", Similarity: 0.48},
-		},
+		Named:     appearancesNamed{Headshot: 4210, Film: 1037}, People: 12,
 	}
 }
 
-func TestTheAppearancesLedgerHoldsOneLinePerFace(t *testing.T) {
+func TestTheAppearancesLedgerHoldsTheCountsAndNoFace(t *testing.T) {
 	folder := t.TempDir()
 	writer := newVolumeWriter("movies-appearances")
 
@@ -48,12 +45,15 @@ func TestTheAppearancesLedgerHoldsOneLinePerFace(t *testing.T) {
 	for _, line := range []string{
 		"embedder: {name: face_recognition_sface_2021dec, sha256: 0ba9fbfa}",
 		"- {contributor: .contributors/bo/bo-reyes, name: Bo Reyes, headshot: missing}",
-		"- {time: 4.5, face: 1, contributor: .contributors/ad/ada-quill, similarity: 0.612, runnerUp: 0}",
-		"- {time: 9.042, face: 0, contributor: .contributors/ad/ada-quill, similarity: 0.48}",
+		"named: {headshot: 4210, film: 1037}",
+		"people: 12",
 	} {
 		if !strings.Contains(text, line) {
 			t.Errorf("ledger holds no line %q in:\n%s", line, text)
 		}
+	}
+	if strings.Contains(text, "observations") {
+		t.Errorf("ledger holds observations:\n%s", text)
 	}
 	read := appearancesLedgerOf(t, folder)
 	if len(read.Appearances) != 1 || !sameAppearances(read.Appearances[0], sampleAppearances()) {
@@ -67,7 +67,7 @@ func TestOneFileHoldsOneAppearancesEntry(t *testing.T) {
 	ledger := likenLedger{}
 	first := sampleAppearances()
 	second := sampleAppearances()
-	second.Observations = nil
+	second.Named = appearancesNamed{}
 	other := sampleAppearances()
 	other.Path = appearancesEpisode
 
@@ -75,7 +75,7 @@ func TestOneFileHoldsOneAppearancesEntry(t *testing.T) {
 		ledger.noteAppearances(entry)
 	}
 
-	if len(ledger.Appearances) != 2 || len(ledger.Appearances[0].Observations) != 0 ||
+	if len(ledger.Appearances) != 2 || ledger.Appearances[0].Named != (appearancesNamed{}) ||
 		ledger.Appearances[1].Path != appearancesEpisode {
 		t.Errorf("appearances = %+v, want the second answer for the file and the other file's", ledger.Appearances)
 	}

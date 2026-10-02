@@ -200,7 +200,7 @@ type LibrarySpec struct {
 	Trailers LibraryTrailers `json:"trailers,omitzero"`
 
 	// Whether this library finds which credited people are on screen at each
-	// keyframe of its features, which decodes every feature once.
+	// second of its features, which decodes every frame of every feature once.
 	Appearances LibraryAppearances `json:"appearances,omitzero"`
 }
 
@@ -222,7 +222,7 @@ type LibraryTrickplay struct {
 type LibraryAppearances struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	// The GPU the appearances worker claims to decode keyframes and to run
+	// The GPU the appearances worker claims to decode the video and to run
 	// the face models. Unset, the worker carries no claim and does both on
 	// the CPU.
 	Render *RenderDevice `json:"render,omitempty"`

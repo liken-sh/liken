@@ -303,9 +303,11 @@ file decoded in software, and about 510 MB with VA-API.
 
 ### Step 2: the catalog
 
-The walk reads `.liken/appearances.yaml` into a catalog table, one row
-per observation, deleted with its file and swept with it, the way the
-`marks` table is. The walk never reads the faces record.
+The walk reads each video's `.liken/appearances/<video>.matches.json`
+into a catalog table, one row per observation, deleted with its file and
+swept with it, the way the `marks` table is. The ledger holds only the
+counts, so a walk that reads it for its attempts stays cheap. The walk
+never reads the faces record.
 
 ### Step 3: the user-facing feature
 
@@ -313,6 +315,115 @@ Later, and shaped in its own plan. The candidates are the cast on
 screen when playback pauses, the scenes of one person from the
 person's page, and a jump to the next appearance of a person. Each
 needs only the catalog table.
+
+## Step 1, second round: coverage
+
+On 2026-10-02 the first files reached a screen, as the cast row the
+display shows over a paused film, and the row was empty most of the
+time. This section records the experiments that followed and the design
+they chose. It reverses one choice in [What was set
+aside](#what-was-set-aside): the detect pass now decodes every frame.
+
+### The bench
+
+Nine films from 1976 to 2017, 1080p and one 4K HEVC, each with 40 pause
+moments drawn at random between 5% and 92% of the runtime, 360 in all.
+Each moment is labeled by hand with the credited people in the shot, the
+visibility of each face ("clear", "hard", or "none"), and a confidence.
+A scorer reads a spans file and reports, over the moments: the share
+where the row shows anyone, precision (the people shown who are in the
+shot), recall of the clear faces, recall of all visible faces, and the
+share where the row shows exactly the right people. Measurements ran on
+an Intel laptop iGPU through VA-API. With 40 moments per film, the bench
+does not separate two candidates within a few moments of each other, so
+each naming change was also judged by eye from crops beside headshots.
+
+### What the experiments found
+
+| Pipeline | Precision | Clear faces | All faces | Exact |
+|---|---|---|---|---|
+| Keyframes, cutoff 0.9, the first spans rules | 0.75 | 0.41 | 0.28 | 0.36 |
+| Keyframes, cutoff 0.8, hold 30 s, blank 4 s | 0.69 | 0.54 | 0.41 | 0.39 |
+| Every 1 s, same naming and rules | 0.78 | 0.74 | 0.53 | 0.52 |
+| Every 1 s, `knn-guard`, dense span rules | 0.87 | 0.84 | 0.60 | 0.58 |
+
+- **The detector's cutoff.** At FaceDetectorYN's default of 0.9, the
+  detector found no face in two thirds of the keyframes of films that
+  are mostly people talking. The faces scored from 0.8 to 0.9 were real
+  faces in profile, in shadow, or in a helmet. Under 0.8 the detections
+  included equipment and the backs of heads.
+- **Sampling.** A keyframe stands for up to 10 seconds, and inside that
+  time people turn, enter, and leave, so a correct name showed over a
+  moment it did not describe. A sample every second needs a full
+  decode, at 109 to 250 seconds for a 1080p film and 368 seconds for the
+  4K film, against 8 to 26 seconds for keyframes. Every 2 seconds costs
+  nearly the same, because the decode is the fixed cost, and scored 5
+  points lower on clear faces. Seeking to samples between keyframes, a
+  sample in each keyframe gap over 6 seconds, and samples only in gaps
+  with no face all scored lower for a smaller saving. Decoding every
+  I-frame (`-skip_frame nointra`) found 0 to 16% more frames than the
+  keyframes and gained nothing. Decodes that skip B-frames return
+  damaged pictures from these HEVC files.
+- **Keyframes and cuts.** Keyframes sit within 2 frames of 87% and 71%
+  of the cuts a scene-change filter found in two films. The cuts they
+  miss fall in the encoder's fixed gaps of about 10 seconds. A sample
+  that stops at the next keyframe gained about a point on every
+  measure.
+- **Naming from the film itself.** The headshot is one photograph,
+  often decades from the film, and the films' age correlated with how
+  little the headshots named (Spearman -0.80 across the nine films).
+  `knn-guard` names a face the headshots did not name only when at
+  least 2 named faces from other samples have a similarity of 0.5 or
+  more to it, all those named faces name one person, and named faces
+  are at least 30% of its neighbours at 0.5. The last condition keeps a
+  few wrong names from spreading through a group of similar faces: a
+  plain vote named Worf's faces for another actor. Of 1,085 names it
+  added, 16 were wrong by eye, 1.5%. The `--self-gallery` experiment
+  was wrong in about 10% of its additions, and 25% in one film.
+- **Clustering first.** Grouping a film's faces into tracks and
+  clusters, then naming each cluster once from all its faces, scored
+  within a few moments of `knn-guard` and took 1 to 14 seconds per film
+  in Python. On one film, a change of 0.01 in the cluster threshold
+  moved several hundred faces to the wrong person, so it was set aside.
+- **Span rules for dense samples.** At one sample a second, a span ends
+  at 2 samples with no face, people seen last hold for at most 10
+  seconds, and each sample stands for half the gap on each side of it.
+  The 4-second blank rule let spans run through inserts and wide shots,
+  and the shorter rule raised precision from 0.80 to 0.85 at the same
+  recall.
+
+Of the 36 shows that remain wrong at the bench, 12 are moments where
+the label itself is uncertain, 7 are wrong names (mostly prosthetic
+makeup), and 11 are cuts inside a fixed keyframe gap. Recall of all
+faces stays near 0.60 because a face seen from behind or in a helmet
+does not match; that needs tracking by the body, not the face.
+
+### The design
+
+- `detect` decodes every frame on the GPU and runs the detector on one
+  frame per second, at a cutoff of 0.8. The record also lists the
+  keyframe times, which the decode reports at no extra cost. The
+  record's format is `liken.sh/appearances/detections/v2`. Version 2
+  replaces the format that recorded only the cutoff, which no release
+  carried.
+- `match` names faces from the headshots, then by `knn-guard`. The
+  matches document records which pass named each face, as
+  `liken.sh/appearances/matches/v2`.
+- The faces leave the ledger. `match` writes each video's observations
+  to `.liken/appearances/<video>.matches.json`, and the ledger keeps the
+  inputs and the count of faces each pass named. This answers the open
+  question of the ledger's size on a walk: a film's entry fell from
+  about 680 KB to about 5 KB.
+- The spans rules are the dense rules above, with each sample stopping
+  at the next keyframe. The spans file keeps its format, so the display
+  does not change.
+- `match` reads only the current detections format. The operator reads
+  any other format as stale and decodes the video again. Each record,
+  spans file, and ledger is rewritten in place, so no file of the old
+  format stays on the volume.
+- The worker's time limits grow with the decode: a full decode of a 4K
+  film took 6 minutes on a laptop iGPU, before any time to read the
+  file over the network.
 
 ## What was set aside
 
@@ -401,11 +512,6 @@ needs only the catalog table.
   keyframe times and keeps none of it, so a decode that fails records
   "ffmpeg exited with exit status: 1" and not the reason `ffmpeg`
   gave.
-- **The ledger's size on a walk.** The walk reads every ledger of a
-  folder for its attempts, and this ledger holds every observation.
-  At about 100 bytes per observation, a film of about 800 named faces
-  is about 80 KB of YAML to parse on each walk of the folder, and a season folder holds one entry
-  per episode.
 
 ## The proof
 

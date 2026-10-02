@@ -49,7 +49,7 @@ const (
 	factTrailerFile = "trailerfile"
 
 	// The appearances fact names the credited people on screen at each
-	// keyframe of a feature. It runs in a worker Job of its own and asks no
+	// second of a feature. It runs in a worker Job of its own and asks no
 	// provider, so it is out of factVocabulary. It is in spec.refresh, as
 	// workerRefreshFacts says.
 	factAppearances = "appearances"

@@ -1,7 +1,9 @@
-// The cheap pass: compare each face's vector with each person's vectors,
-// and name the face for the closest person when the cosine similarity
-// reaches the threshold and leads every other person by the margin. Both
-// vectors are unit vectors, so the cosine is their dot product.
+// The headshot pass: compare each face's vector with each person's headshot
+// vector, and name the face for the closest person when the cosine
+// similarity reaches the threshold and leads every other person by the
+// margin. Both vectors are unit vectors, so the cosine is their dot product.
+// knn_guard.rs names more faces after this pass, from the faces this pass
+// named.
 
 use crate::gallery::Gallery;
 use crate::record::{self, Record};
@@ -59,12 +61,9 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-// The vectors of the people who have one, beside each person's index in
-// the gallery, so a person with no headshot never takes a place. A person
-// can have more than one vector: the film's own gallery adds faces from
-// the film to the headshot.
+// The headshot vectors of the people who have one, beside each person's
+// index in the gallery, so a person with no headshot never takes a place.
 pub struct Candidates {
-    people: usize,
     vectors: Vec<(usize, Vec<f32>)>,
 }
 
@@ -76,30 +75,17 @@ impl Candidates {
                 vectors.push((index, record::decode(text)?));
             }
         }
-        Ok(Candidates {
-            people: gallery.people.len(),
-            vectors,
-        })
-    }
-
-    pub fn add(&mut self, person: usize, vector: Vec<f32>) {
-        self.vectors.push((person, vector));
+        Ok(Candidates { vectors })
     }
 
     // The closest person, named or not. A caller that names faces asks
     // `Best::names`. The review tool shows the closest person for an
     // unnamed face too, so a near miss is visible.
     pub fn best(&self, face: &[f32]) -> Option<Best> {
-        let mut closest: Vec<Option<f32>> = vec![None; self.people];
-        for (person, vector) in &self.vectors {
-            let similarity = cosine(face, vector);
-            let slot = &mut closest[*person];
-            *slot = Some(slot.map_or(similarity, |s| s.max(similarity)));
-        }
-        let mut ranked: Vec<(usize, f32)> = closest
-            .into_iter()
-            .enumerate()
-            .filter_map(|(person, s)| s.map(|s| (person, s)))
+        let mut ranked: Vec<(usize, f32)> = self
+            .vectors
+            .iter()
+            .map(|(person, vector)| (*person, cosine(face, vector)))
             .collect();
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
         let (person, similarity) = *ranked.first()?;
@@ -109,15 +95,37 @@ impl Candidates {
             runner_up: ranked.get(1).map(|r| r.1),
         })
     }
+
+    // The face's similarity to one person's headshot, with the closest other
+    // person's similarity as the runner-up. A face that knn_guard.rs names
+    // can be closer to another person's headshot than to its own, so the
+    // runner-up can exceed the similarity.
+    pub fn against(&self, face: &[f32], person: usize) -> Option<Best> {
+        let mut similarity = None;
+        let mut runner_up: Option<f32> = None;
+        for (other, vector) in &self.vectors {
+            let s = cosine(face, vector);
+            if *other == person {
+                similarity = Some(s);
+            } else {
+                runner_up = Some(runner_up.map_or(s, |r| r.max(s)));
+            }
+        }
+        Some(Best {
+            person,
+            similarity: similarity?,
+            runner_up,
+        })
+    }
 }
 
-// Every face's vector in a record, decoded once, by keyframe and by the
-// face's place in its keyframe.
+// Every face's vector in a record, decoded once, by sample and by the
+// face's place in its sample.
 pub type Faces = Vec<Vec<Vec<f32>>>;
 
 pub fn faces(record: &Record) -> Result<Faces, Error> {
     record
-        .keyframes
+        .samples
         .iter()
         .map(|line| {
             line.faces
@@ -192,13 +200,18 @@ mod tests {
     }
 
     #[test]
-    fn the_runner_up_is_another_person_not_another_vector() {
-        let mut candidates = Candidates::new(&gallery()).unwrap();
-        candidates.add(2, vec![0.6, 0.8]);
-        let best = candidates.best(&[0.6, 0.8]).unwrap();
-        assert_eq!(best.person, 2);
-        assert!((best.similarity - 1.0).abs() < 1e-3);
-        assert!((best.runner_up.unwrap() - 0.6).abs() < 1e-3);
+    fn against_scores_one_person_with_the_closest_other_as_runner_up() {
+        let candidates = Candidates::new(&gallery()).unwrap();
+        let best = candidates.against(&[0.6, 0.8], 1).unwrap();
+        assert_eq!(best.person, 1);
+        assert!((best.similarity - 0.6).abs() < 1e-3);
+        assert!((best.runner_up.unwrap() - 0.8).abs() < 1e-3);
+    }
+
+    #[test]
+    fn against_finds_nothing_for_a_person_with_no_headshot() {
+        let candidates = Candidates::new(&gallery()).unwrap();
+        assert_eq!(candidates.against(&[0.6, 0.8], 0), None);
     }
 
     #[test]

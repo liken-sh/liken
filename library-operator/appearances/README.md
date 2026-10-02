@@ -1,26 +1,27 @@
 # appearances
 
-`appearances` finds which credited person is on screen at each keyframe
+`appearances` finds which credited person is on screen at each second
 of a title. It is step 1 of
 [plan 75](../plans/75-scene-level-cast-appearances.md): the files on the
 volume. The tool has three commands:
 
-- `appearances detect <video>` decodes the video's keyframes with
-  `ffmpeg`, finds the faces with YuNet, embeds each face with SFace, and
-  writes `.liken/appearances/<video>.jsonl` beside the video. This is the
+- `appearances detect <video>` decodes every frame of the video with
+  `ffmpeg`, finds the faces with YuNet in every keyframe and in a frame
+  every second, embeds each face with SFace, and writes
+  `.liken/appearances/<video>.jsonl` beside the video. This is the
   expensive pass, and the only one that opens the video.
 - `appearances match <title folder>` embeds the cast's headshots from
   `.liken/credits.yaml` and `.contributors/`, writes the gallery to
-  `.liken/appearances/gallery.json`, and prints one line of JSON on
-  standard output with each face it named. It takes about a second. The
-  operator reads that line and writes the ledger,
+  `.liken/appearances/gallery.json`, and names the faces. For each video
+  it writes `.liken/appearances/<video>.matches.json`, with each face it
+  named, and `.liken/appearances/<video>.spans.json`, the file the liken
+  display reads when the film pauses. Then it prints one line of JSON on
+  standard output, a summary of the title. It takes 1 to 5 seconds for a
+  film. The operator reads the summary and writes the ledger,
   `.liken/appearances.yaml`, with its attempts, as it writes every other
   ledger in `.liken/`. `--credits FILE` names another credits file to
   read the cast from. The credits fact credits a series and not its
   episodes, so the match of a season folder names the series' file.
-  `match` also writes `.liken/appearances/<video>.spans.json` for each
-  video, the file the liken display reads when the film pauses. The
-  section [The spans file](#the-spans-file) gives its shape.
 - `appearances review <title folder>` is a development tool. It runs no
   model and writes nothing into the title's folder.
 
@@ -62,42 +63,73 @@ whose size differs from its probe record as another file, so the
 operator compares `size` with the probe record to tell whether the
 detections still describe the file on the volume. The header also names
 the detector and the embedder with the SHA-256 of each model file, the
-device, the decoded frame size, and the video's length. Each line after
-the header is one keyframe, with each face's box, landmarks, score, and
-embedding.
+device, the decoded frame size, and the video's length.
 
-The format names the detector's score cutoff. A v2 record holds every face
-that YuNet scored at 0.8 or more. A v1 record holds only the faces scored
-at 0.9 or more, the cutoff OpenCV's `FaceDetectorYN` takes by default.
-`match` reads both formats, so a season folder with records of both
-formats matches whole. The operator reads a v1 record as stale, and
-decodes the video again.
+Each line after the header is one sample, with each face's box,
+landmarks, score, and embedding, and a sample with no face is a line
+with no faces. The samples are every keyframe and a frame every second
+between them: the second count starts again at each keyframe. A keyframe
+line carries `"keyframe": true`, and other lines leave the field out:
 
-The cutoff was measured on a 1080p and a 4K film, from the same keyframes:
+    {"time":5.672,"keyframe":true,"faces":[]}
+    {"time":6.673,"faces":[{"x":402.1,"y":96.3,"w":88.0,"h":112.5,...}]}
 
-| Cutoff | Detect pass | Runtime with a face | Runtime with a named face | Runtime inside a span |
-|---|---|---|---|---|
-| 0.9 | 26 s, 23 s | 33%, 50% | 27%, 38% | 33%, 48% |
-| 0.8 | 31 s, 25 s | 51%, 62% | 35%, 40% | 47%, 57% |
+Encoders place a keyframe at most cuts, and the spans use the keyframes
+as the places where a shot can change. The flag is on each line, and not
+a list in the header, because `ffmpeg` reports a keyframe only when the
+decode reaches it. The header is written before the decode starts and
+each line as its frame arrives, so a list in the header would need the
+whole decode in memory or a second pass over the file. Every keyframe is
+also a sample, so the flags list every keyframe.
 
-Each time is the average of three runs on an Intel laptop GPU through
-VA-API. The faces scored from 0.8 to 0.9 were real faces in the contact
-sheets, many in profile, in shadow, or in a helmet. Under 0.8 the
-detections included equipment and the backs of heads, and they named
-0.4% and 0.2% more of the runtime.
+The record holds every face that YuNet scored at 0.8 or more. At
+FaceDetectorYN's default of 0.9, the detector found no face in two
+thirds of the keyframes of films that are mostly people talking. The
+faces scored from 0.8 to 0.9 were real faces in profile, in shadow, or in
+a helmet. Under 0.8 the detections included equipment and the backs of
+heads.
 
-`detect` decodes only the keyframes. On the same two films, a sample
-every 2 seconds from a full decode raised the runtime with a named face
-by 0.6 and 1.2 percentage points, and the runtime inside a span by 4 and
-8 points. The pass took 7 times and 22 times as long. Both files are
-HEVC, and their P-frames reference B-frames, so a decode that skips the
-B-frames returns damaged pictures.
+`match` reads only this format. The operator reads a record of any other
+format as stale and decodes the video again.
+
+### The cost of a sample every second
+
+A keyframe stands for up to 10 seconds, and inside that time people
+turn, enter, and leave. A frame between keyframes needs the frames it
+references, so a sample every second needs a decode of every frame.
+On the bench of nine films, on an Intel laptop iGPU through VA-API:
+
+| Film | Source | Samples | Faces | Detect pass | Peak memory |
+|---|---|---|---|---|---|
+| 1976 | 1080p | 7,491 | 18,426 | 165 s | 412 MB |
+| 1989 | 1080p | 7,997 | 17,483 | 214 s | 413 MB |
+| 1992 | 1080p | 6,174 | 6,294 | 90 s | 393 MB |
+| 1993 | 1080p | 6,689 | 7,798 | 171 s | 392 MB |
+| 1996 | 4K HEVC | 7,239 | 8,532 | 367 s | 460 MB |
+| 2005 | 1080p | 6,445 | 6,672 | 148 s | 389 MB |
+| 2006 | 1080p | 9,262 | 13,184 | 242 s | 414 MB |
+| 2015 | 1080p | 10,162 | 9,842 | 132 s | 388 MB |
+| 2017 | 1080p | 7,556 | 6,903 | 93 s | 386 MB |
+
+Each peak is the sum of the resident memory of the tool and `ffmpeg`,
+read every 0.2 seconds. The keyframes alone took 8 to 26 seconds for the
+same films. In software, on the two decode threads `--decode-threads`
+sets by default and with the models on one CPU thread, the 4K film
+decoded at 3.3 times its running speed, which is 34 minutes for the
+film, and the tool and `ffmpeg` held 740 MB together.
+
+A sample every 2 seconds costs nearly the same, because the decode is
+the fixed cost, and showed 5 points less of the clear faces. Decoding
+every I-frame (`-skip_frame nointra`) found 0 to 16% more frames than the
+keyframes and named no more. These files are HEVC, and their P-frames
+reference B-frames, so a decode that skips the B-frames returns damaged
+pictures.
 
 ## Naming a face
 
-`match` compares each face's vector with each person's headshot vector
-by cosine similarity. A face is named for the closest person when two
-conditions are true:
+`match` names faces in two passes. The headshot pass compares each
+face's vector with each person's headshot vector by cosine similarity. A
+face is named for the closest person when two conditions are true:
 
 - The similarity is at least the threshold, 0.363, the value OpenCV
   publishes for SFace. `--threshold` sets another value.
@@ -110,31 +142,43 @@ about 780 and 650. Of the 5 names it removed, 2 were wrong when checked
 by eye. The margin does not remove a wrong name with a large lead, such
 as a face in heavy makeup named for another actor.
 
-`--self-gallery` is an experiment, and it is off by default. After the
-first pass, each person's most confident faces in the film join the
-gallery as extra vectors for that person: up to 10 faces from 10
-different keyframes, each named with a similarity of at least 0.5. Then
-every face is named again. A person's similarity is their closest
-vector, and the margin compares people, not vectors. On the same two
-films the experiment named 16% and 23% more faces, many of them in
-helmets, in profile, and in makeup. It also added wrong names, about 1
-in 10 of the faces it added in the contact sheets, so it is not the
-default.
+A headshot is one photograph, often decades from the film, and on the
+bench the older the film, the fewer faces its headshots named. So the
+film pass, `knn-guard`, names a face that the headshot pass left unnamed
+from the faces of the same film that the headshot pass named. The face
+takes a name only when three conditions are true:
 
-## The match document
+- At least 2 faces that the headshots named, from other samples, have a
+  similarity of 0.5 or more to it. A face of the same sample is another
+  person in the same picture, so it does not count.
+- All of those named faces name one person.
+- The named faces are at least 30% of all the faces at 0.5 or more to
+  it, named or not. A group of similar faces that the headshots almost
+  never name, such as a character in prosthetic makeup, takes no name
+  from the few of its faces that the headshots named wrong. Without this
+  condition, a plain vote named one character's faces for another actor.
 
-`match` prints one JSON document for each title folder, on one line:
+The film pass reads the headshot names only. A name it gives is never
+evidence for another face, so one wrong name cannot spread through a
+chain of similar faces. Of 1,085 of its names checked by eye on the
+bench, 16 were wrong, 1.5%.
+
+## The matches file and the summary
+
+`match` writes one matches file for each video, whole, beside its
+final name, and renames it into place:
 
 ```rust
 pub struct Matches {
-    pub format: String,          // "liken.sh/appearances/matches/v1"
+    pub format: String,          // "liken.sh/appearances/matches/v2"
+    pub video: String,           // the video file's name in the title's folder
+    pub size: u64,               // the detections record's size
     pub embedder: Model,         // { name, sha256 } of the SFace file
     pub threshold: f32,
     pub margin: f32,
-    pub self_gallery: bool,
     pub gallery: Vec<GalleryInput>,
     pub unmatched: Vec<Unmatched>,
-    pub files: BTreeMap<String, FileMatches>, // by video file name
+    pub observations: Vec<Observation>,
 }
 
 pub struct GalleryInput {
@@ -150,34 +194,65 @@ pub struct Unmatched {
     pub headshot: Headshot,      // "missing" or "no-face"
 }
 
-pub struct FileMatches {
-    pub size: u64,               // the detections record's size
-    pub observations: Vec<Observation>,
-}
-
 pub struct Observation {
-    pub time: f64,               // the keyframe's time in seconds
-    pub face: usize,             // the face's place in its keyframe's line
+    pub time: f64,               // the sample's time in seconds
+    pub face: usize,             // the face's place in its sample's line
     pub contributor: String,
-    pub similarity: f32,
-    pub runner_up: Option<f32>,  // the next person's similarity; absent in a gallery of one
+    pub by: By,                  // "headshot" or "film", the pass that named the face
+    pub similarity: f32,         // to this person's headshot
+    pub runner_up: Option<f32>,  // the closest other person's similarity; absent in a gallery of one
 }
 ```
+
+A film's matches file is about 110 bytes per face named: from 390 KB to
+810 KB on the bench. It is one JSON document, as the spans file is. A
+JSON Lines file would let a reader stream the faces, but
+`.liken/appearances/` holds the detections records as `.jsonl` files,
+and `match` reads every `.jsonl` file there as a record.
+
+`match` then prints one summary for each title folder, on one line:
+
+```rust
+pub struct Summary {
+    pub format: String,          // "liken.sh/appearances/summary/v1"
+    pub embedder: Model,
+    pub threshold: f32,
+    pub margin: f32,
+    pub gallery: Vec<GalleryInput>,
+    pub unmatched: Vec<Unmatched>,
+    pub files: BTreeMap<String, FileSummary>, // by video file name
+}
+
+pub struct FileSummary {
+    pub size: u64,               // the detections record's size
+    pub named: Named,            // { headshot, film }: the faces each pass named
+    pub people: usize,           // the different people the faces name
+}
+```
+
+The operator writes the summary, not the faces, into the ledger. The
+walk reads every ledger of a folder on each pass, and the faces of one
+film made a ledger entry of about 680 KB, against about 5 KB for the
+summary.
 
 `gallery` lists every credited actor in billing order. The operator
 compares each `sha256` with the headshot file to see that a headshot
 changed, and compares each file's `size` with the probe record to see
-that the video changed. Either change means the document is stale.
+that the video changed. Either change means the answer is stale.
 
-`files` leaves out a detections record that another embedder wrote,
-because its vectors cannot be compared with the gallery's, and the match
-names it on standard error. A season folder holds one record per
-episode, so one stale record does not stop the match of the others. The
-operator reads a file with no part in the document as no answer, and
-runs detect again on it. The
-document records `similarity` and `runner_up` to three decimals, so a
-reader can apply a higher threshold or margin without running `match`
-again.
+`match` leaves out a detections record that another embedder wrote,
+because its vectors cannot be compared with the gallery's, and names it
+on standard error. A season folder holds one record per episode, so one
+stale record does not stop the match of the others. The operator reads
+a file with no part in the summary as no answer, and runs detect again
+on it.
+
+The matches file records `similarity` and `runner_up` to three
+decimals, so a reader can apply a higher threshold or margin to the
+faces `by` `headshot` without running `match` again. A face `by` `film`
+took its name from other faces, so its `similarity` to the headshot can
+be under the threshold, and its `runner_up` can be higher than its
+`similarity`.
 
 `match` still reads `.liken/credits.yaml`, which the credits fact
 writes, so the crate keeps `serde_yaml_ng`. The tool reads the cast from
@@ -205,17 +280,39 @@ ordering of its own, so `match` writes one file per video in this shape:
       ]
     }
 
-A span is a run of keyframes that name the same people, from the first
-keyframe's time to the time of the keyframe after the run. The detector
-misses a face turned away, in shadow, or too small to name, so a scene
-breaks into pieces. A run that names nobody belongs to the span before
-it while it ends less than 30 seconds after the last person named, and
-two spans of the same people that then meet join into one. A run of 4
-seconds or longer with no face at all ends the span, because a wide shot
-with nobody in it ends the scene's people. Any other run that names
-nobody is no span, and so is the run after the last person named. A span lists its people left to right by the
-average place of their faces across its keyframes, so the cards read in
-the order the people stand in the picture.
+A span is a run of samples that name the same people. The rules:
+
+- Each sample stands for half the gap to the sample before it and half
+  the gap to the sample after it. Its stretch stops at the next
+  keyframe, because a keyframe is where a cut can fall, and a stretch
+  that crossed one would put the people of one shot over the next.
+- The detector and the match miss faces turned away, in shadow, or too
+  small to name, so a scene breaks into pieces. The people named last
+  hold through samples that have faces but name nobody, for at most 10
+  seconds after the end of their last sample.
+- A single sample with no face at all, such as a cut to a hand or a
+  door, holds the people the same way. Two samples in a row with no face
+  end the span, because a wide shot with nobody in it ends the scene's
+  people.
+- Two spans of the same people that meet join into one. Samples before
+  the first person named, and after a hold ends, are no span.
+
+A span lists its people left to right by the average place of their
+faces across its samples, so the cards read in the order the people
+stand in the picture.
+
+On the bench of nine films, 40 pause moments each labeled by hand with
+the credited people in the shot, the spans of `match` scored:
+
+| Films | Precision | Clear faces shown | All faces shown | Exactly right |
+|---|---|---|---|---|
+| All nine, 360 moments | 0.87 | 0.84 | 0.60 | 0.57 |
+| One film, lowest to highest | 0.74 to 1.00 | 0.62 to 0.96 | 0.38 to 0.73 | 0.33 to 0.78 |
+
+Precision is the share of the people shown who are in the shot. The
+keyframes alone, with the headshot pass only and the earlier rules,
+scored 0.75, 0.41, 0.28, and 0.36. A face seen from behind or in a
+helmet does not match, so the share of all faces shown stays near 0.60.
 
 Each person is keyed by their entry's path under `.contributors/`, and
 `portrait` is a path under the same directory. `released` is the
@@ -246,32 +343,36 @@ the series':
 
 `review` writes the spans as YAML, the spans as an mpv chapters file, and
 each face's box and label to a directory under `/tmp/appearances-review/`,
-or to `--out`. `--threshold`, `--margin`, and `--self-gallery` work as
-they do for `match`, with no model and no pass over the video.
+or to `--out`. It names the faces with both passes, as `match` does.
+`--threshold` and `--margin` work as they do for `match`, with no model
+and no pass over the video. Its spans are not the display's: each
+sample stands until the next one, and a run that names nobody is a
+chapter of its own, so each gap in the naming shows.
 
 `--play` opens `mpv` with the chapters and the overlay script:
 
 - Each span is a chapter. The seek bar shows a tick at each span, and
   Page Up and Page Down move between spans.
 - The top left corner shows the current span's times and people, and the
-  keyframe the boxes come from.
+  sample the boxes come from.
 - A green box is a named face. A yellow box is an unnamed face within
   0.1 of the threshold, or over the threshold but under the margin. A
   red box is a face nobody in the gallery is close to. Each label gives
   the closest person and the similarity.
-- `k` and `j` seek to the next and the previous keyframe with a face, at
-  its exact time, where each box sits on its face. Later in the shot the
-  outline thins, because the faces move. `v` shows and hides the overlay.
+- `k` and `j` seek to the next and the previous sample with a face, at
+  its exact time, where each box sits on its face. Later the outline
+  thins, because the faces move. `v` shows and hides the overlay.
 
 `--sheets N` also writes contact sheets, each with up to N faces:
 
 - For each person, the faces named as that person, with the weakest
   similarity first.
-- `_closest leads`: the named faces whose person leads the next person
-  by the least, which is where the margin decides.
+- `_closest leads`: the faces the headshot pass named whose person leads
+  the next person by the least, which is where the margin decides.
+- `_film <person>`: the faces the film pass named, with the weakest
+  similarity to the headshot first. A wrong name of that pass shows
+  here.
 - `_unnamed`: the tallest faces nobody was named for.
-- With `--self-gallery`, `_new <person>`: the faces that only the second
-  pass named, with the weakest similarity first.
 
 A text file beside each sheet gives each tile's time, similarity, the
 next person's similarity, and face height.

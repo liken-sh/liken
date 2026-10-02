@@ -1,9 +1,17 @@
-// The keyframes of a video, read from ffmpeg. `-skip_frame nokey` makes the
-// decoder decode only the keyframes, and encoders place a keyframe at most
-// cuts, so the sample is close to one frame per shot at a fraction of a full
-// decode. ffmpeg writes raw BGR on its standard output, which carries no
-// time, so the `showinfo` filter prints each frame's time on standard error
-// in the same order, and the reader pairs the two streams frame by frame.
+// The samples of a video, read from ffmpeg: every keyframe, and a frame
+// every second between them. A keyframe stands for up to 10 seconds, and
+// inside that time people turn, enter, and leave, so a sample every second
+// tracks who is on screen. A frame between keyframes needs the frames it
+// references, so ffmpeg decodes every frame and the `select` filter passes on
+// only the samples. On the bench of nine films the full decode took 109 to
+// 250 seconds for a 1080p film and 368 seconds for a 4K film on a laptop
+// iGPU, against 8 to 26 seconds for the keyframes alone. A sample every 2
+// seconds costs nearly the same, because the decode is the fixed cost.
+//
+// ffmpeg writes raw BGR on its standard output, which carries no time, so
+// the `showinfo` filter prints each frame's time and its keyframe flag on
+// standard error in the same order, and the reader pairs the two streams
+// frame by frame.
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -78,20 +86,31 @@ pub fn decoded_size(probe: &Probe, max_width: usize) -> (usize, usize) {
     (max_width, height)
 }
 
-pub struct Keyframe {
+// The longest time between two samples, in seconds.
+pub const SAMPLE_EVERY: f64 = 1.0;
+
+pub struct Sample {
     pub time: f64,
+    pub keyframe: bool,
     pub picture: Picture,
 }
 
-pub struct Keyframes {
+// What showinfo prints for one frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FrameInfo {
+    time: f64,
+    keyframe: bool,
+}
+
+pub struct Samples {
     child: Child,
     stdout: ChildStdout,
-    times: Receiver<f64>,
+    frames: Receiver<FrameInfo>,
     width: usize,
     height: usize,
 }
 
-impl Keyframes {
+impl Samples {
     pub fn open(
         video: &Path,
         width: usize,
@@ -109,7 +128,7 @@ impl Keyframes {
         let (input, filter) = decoding(hwaccel, width, height);
         command
             .args(input)
-            .args(["-skip_frame", "nokey", "-i"])
+            .arg("-i")
             .arg(video)
             .args(["-map", "0:v:0", "-an", "-sn", "-dn"])
             .args(["-vf", &filter])
@@ -122,20 +141,20 @@ impl Keyframes {
         let mut child = command.spawn()?;
         let stdout = child.stdout.take().ok_or("ffmpeg has no stdout")?;
         let stderr = child.stderr.take().ok_or("ffmpeg has no stderr")?;
-        let (send, times) = channel();
+        let (send, frames) = channel();
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                if let Some(time) = showinfo_time(&line)
-                    && send.send(time).is_err()
+                if let Some(frame) = showinfo(&line)
+                    && send.send(frame).is_err()
                 {
                     break;
                 }
             }
         });
-        Ok(Keyframes {
+        Ok(Samples {
             child,
             stdout,
-            times,
+            frames,
             width,
             height,
         })
@@ -150,8 +169,8 @@ impl Keyframes {
     }
 }
 
-impl Iterator for Keyframes {
-    type Item = Result<Keyframe, Error>;
+impl Iterator for Samples {
+    type Item = Result<Sample, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut bgr = vec![0u8; self.width * self.height * 3];
@@ -160,19 +179,30 @@ impl Iterator for Keyframes {
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return None,
             Err(e) => return Some(Err(e.into())),
         }
-        let time = match self.times.recv() {
-            Ok(time) => time,
+        let frame = match self.frames.recv() {
+            Ok(frame) => frame,
             Err(_) => return Some(Err("ffmpeg wrote a frame with no showinfo time".into())),
         };
-        Some(Ok(Keyframe {
-            time,
+        Some(Ok(Sample {
+            time: frame.time,
+            keyframe: frame.keyframe,
             picture: Picture::new(self.width, self.height, bgr),
         }))
     }
 }
 
-// The decoder's options and the filter chain that brings a decoded frame to
-// width by height. With VA-API, the frame stays in GPU memory, the GPU scales
+// The filter that passes on the samples: the first frame, every keyframe,
+// and each frame at least SAMPLE_EVERY after the sample before it. The count
+// starts again at each keyframe, so the first sample of a shot is its
+// keyframe and the next is a second after it. `select` reads only each
+// frame's time and flags, so it runs on frames in GPU memory, before the
+// scale.
+fn select() -> String {
+    format!("select='isnan(prev_selected_t)+key+gte(t-prev_selected_t,{SAMPLE_EVERY})'")
+}
+
+// The decoder's options and the filter chain that picks the samples and
+// brings each to width by height. With VA-API, the frame stays in GPU memory, the GPU scales
 // it and converts it to 8-bit NV12, and only the small frame is copied to the
 // CPU. A 4K frame is 25 MB as BGR, and copying each one before a CPU scale
 // cost more time than the GPU's decode saved. showinfo runs after the copy,
@@ -183,29 +213,41 @@ fn decoding(hwaccel: Option<&str>, width: usize, height: usize) -> (Vec<String>,
             ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]
                 .map(String::from)
                 .to_vec(),
-            format!("scale_vaapi=w={width}:h={height}:format=nv12,hwdownload,format=nv12,showinfo"),
+            format!(
+                "{},scale_vaapi=w={width}:h={height}:format=nv12,hwdownload,format=nv12,showinfo",
+                select()
+            ),
         ),
         Some(other) => (
             vec!["-hwaccel".into(), other.into()],
-            format!("showinfo,scale={width}:{height}:flags=bilinear"),
+            format!(
+                "{},showinfo,scale={width}:{height}:flags=bilinear",
+                select()
+            ),
         ),
         None => (
             vec![],
-            format!("showinfo,scale={width}:{height}:flags=bilinear"),
+            format!(
+                "{},showinfo,scale={width}:{height}:flags=bilinear",
+                select()
+            ),
         ),
     }
 }
 
-// showinfo prints one line for each frame with its number and its
-// presentation time, such as `[Parsed_showinfo_0 @ 0x55] n:   3 pts:
-// 13013 pts_time:13.5135 duration: ...`. Its other lines, for side data
-// and color, carry no `pts_time:`.
-fn showinfo_time(line: &str) -> Option<f64> {
+// showinfo prints one line for each frame with its number, its
+// presentation time, and its keyframe flag, such as `[Parsed_showinfo_1 @
+// 0x55] n:   3 pts:  13013 pts_time:13.5135 duration: ... iskey:1 type:I`.
+// Its other lines, for side data and color, carry no `pts_time:`.
+fn showinfo(line: &str) -> Option<FrameInfo> {
     if !line.contains("Parsed_showinfo") {
         return None;
     }
-    let rest = line.split("pts_time:").nth(1)?;
-    rest.split_whitespace().next()?.parse().ok()
+    let value = |key: &str| line.split(key).nth(1)?.split_whitespace().next();
+    Some(FrameInfo {
+        time: value("pts_time:")?.parse().ok()?,
+        keyframe: value("iskey:") == Some("1"),
+    })
 }
 
 #[cfg(test)]
@@ -213,41 +255,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn showinfo_time_reads_the_frame_line() {
-        let line =
-            "[Parsed_showinfo_0 @ 0x5581] n:   3 pts:  13013 pts_time:13.5135 duration:   1001";
-        assert_eq!(showinfo_time(line), Some(13.5135));
+    fn showinfo_reads_the_time_and_the_keyframe_flag() {
+        let cases = [
+            ("iskey:1 type:I", true),
+            ("iskey:0 type:B", false),
+            ("type:P", false),
+        ];
+        for (flags, keyframe) in cases {
+            let line = format!(
+                "[Parsed_showinfo_1 @ 0x5581] n:   3 pts:  13013 pts_time:13.5135 duration:   1001 {flags} checksum:D386"
+            );
+            assert_eq!(
+                showinfo(&line),
+                Some(FrameInfo {
+                    time: 13.5135,
+                    keyframe
+                }),
+                "{flags}"
+            );
+        }
     }
 
     #[test]
-    fn showinfo_time_skips_the_side_data_lines() {
-        let line = "[Parsed_showinfo_0 @ 0x5581]   color_range:tv color_space:bt709";
-        assert_eq!(showinfo_time(line), None);
+    fn showinfo_skips_the_side_data_lines() {
+        let line = "[Parsed_showinfo_1 @ 0x5581]   color_range:tv color_space:bt709";
+        assert_eq!(showinfo(line), None);
     }
 
     #[test]
-    fn showinfo_time_skips_other_filters() {
-        assert_eq!(showinfo_time("[out#0/rawvideo @ 0x1] pts_time:4"), None);
+    fn showinfo_skips_other_filters() {
+        assert_eq!(showinfo("[out#0/rawvideo @ 0x1] pts_time:4"), None);
     }
 
+    const SELECT: &str = "select='isnan(prev_selected_t)+key+gte(t-prev_selected_t,1)'";
+
     #[test]
-    fn vaapi_scales_on_the_gpu_before_the_copy() {
+    fn vaapi_selects_and_scales_on_the_gpu_before_the_copy() {
         let (input, filter) = decoding(Some("vaapi"), 1280, 720);
         assert_eq!(
             (input.join(" "), filter),
             (
                 "-hwaccel vaapi -hwaccel_output_format vaapi".to_string(),
-                "scale_vaapi=w=1280:h=720:format=nv12,hwdownload,format=nv12,showinfo".to_string()
+                format!(
+                    "{SELECT},scale_vaapi=w=1280:h=720:format=nv12,hwdownload,format=nv12,showinfo"
+                )
             )
         );
     }
 
     #[test]
-    fn software_decoding_scales_on_the_cpu() {
+    fn software_decoding_selects_and_scales_on_the_cpu() {
         let (input, filter) = decoding(None, 1280, 720);
         assert_eq!(
             (input, filter),
-            (vec![], "showinfo,scale=1280:720:flags=bilinear".to_string())
+            (
+                vec![],
+                format!("{SELECT},showinfo,scale=1280:720:flags=bilinear")
+            )
         );
     }
 

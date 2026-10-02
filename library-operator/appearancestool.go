@@ -2,11 +2,12 @@ package main
 
 // appearancestool.go runs the appearances tool, the Rust binary in
 // appearances/ that the appearances image carries. The tool has two passes.
-// detect opens the video, finds and embeds the faces in its keyframes, and
-// writes the detections record beside it. match embeds the cast's headshots
-// and prints one JSON document that names each face. The worker owns the
-// ledger, so the tool writes no attempt, and every failure of the tool comes
-// back here with the tool's own words.
+// detect decodes the whole video, finds and embeds the faces in every
+// keyframe and in a frame every second, and writes the detections record
+// beside it. match embeds the cast's headshots, names the faces, writes each
+// video's matches file and spans file, and prints one JSON summary. The
+// worker owns the ledger, so the tool writes no attempt, and every failure
+// of the tool comes back here with the tool's own words.
 
 import (
 	"bufio"
@@ -31,12 +32,16 @@ var appearancesBinary = "/appearances"
 
 const appearancesModelsVariable = "APPEARANCES_MODELS"
 
-// How long each pass may run. detect reads the keyframes of a whole feature,
-// which takes minutes for a 4K file decoded in software, and the timeout
-// bounds a decode that hangs. match embeds a few dozen headshots and compares
-// vectors, which takes seconds.
+// How long each pass may run. detect decodes every frame of a whole feature,
+// and the timeout bounds only a decode that hangs, so it allows the slowest
+// healthy decode with room to spare. On a laptop, a 4K HEVC film decoded with
+// VA-API in 6 minutes, and in software on the two decode threads at 3.3 times
+// its running speed, 34 minutes for a film of 111 minutes. A node a quarter
+// as fast decodes slower than the film runs, so a 3-hour 4K film there takes
+// about 4 hours, before the time to read the file over the network. match
+// embeds a few dozen headshots and compares vectors, which takes seconds.
 const (
-	appearancesDetectTimeout = 2 * time.Hour
+	appearancesDetectTimeout = 6 * time.Hour
 	appearancesMatchTimeout  = 15 * time.Minute
 )
 
@@ -46,13 +51,16 @@ const (
 const appearancesReasonLimit = 4096
 
 // The format the first line of a detections record names, and the format of
-// the match document. The worker reads only these versions. A v1 record holds
-// only the faces the detector scored at 0.9 or more, and v2 holds those at
-// 0.8 or more, so the worker reads a v1 record as stale and decodes the video
-// again. The tool's README gives the measurements behind the cutoff.
+// the summary match prints. The worker reads only these versions. A v2
+// record holds a sample every second and every keyframe. v1 held the
+// keyframes alone, and a keyframe stands for up to 10 seconds of the film.
+// So the worker reads a record of any other format as stale and decodes the
+// video again, and the match then rewrites the ledger's entry, the matches
+// file, and the spans file in place. The tool's README gives the
+// measurements.
 const (
 	detectionsFormat = "liken.sh/appearances/detections/v2"
-	matchesFormat    = "liken.sh/appearances/matches/v1"
+	summaryFormat    = "liken.sh/appearances/summary/v1"
 )
 
 // One run of the tool that failed: the pass, the exit, and the tool's stderr
@@ -189,8 +197,10 @@ func modelCurrent(models string, model detectionsModel) bool {
 	return hex.EncodeToString(hash.Sum(nil)) == model.SHA256
 }
 
-// The match document, in the shape the tool's README gives it.
-type matchDocument struct {
+// The summary match prints, in the shape the tool's README gives it. The
+// faces themselves are in each video's matches file, which the worker does
+// not read.
+type matchSummary struct {
 	Format    string                 `json:"format"`
 	Embedder  detectionsModel        `json:"embedder"`
 	Threshold float32                `json:"threshold"`
@@ -200,24 +210,25 @@ type matchDocument struct {
 	Files     map[string]matchedFile `json:"files"`
 }
 
-// One video file's part of the document, by the file's name.
+// One video file's part of the summary, by the file's name.
 type matchedFile struct {
-	Size         int64                   `json:"size"`
-	Observations []appearanceObservation `json:"observations"`
+	Size   int64            `json:"size"`
+	Named  appearancesNamed `json:"named"`
+	People int              `json:"people"`
 }
 
 // The ledger entry of one file out of the match's output: entry is the key
-// the ledger takes, name is the file's name in the document, and size is
-// the size of the file on the volume. A document with no part for the file,
-// or a part of another size, holds no answer for the file on the volume.
+// the ledger takes, name is the file's name in the summary, and size is the
+// size of the file on the volume. A summary with no part for the file, or a
+// part of another size, holds no answer for the file on the volume.
 func answerFrom(output []byte, entry, name string, size int64) (appearancesEntry, error) {
-	var d matchDocument
+	var d matchSummary
 	if err := json.Unmarshal(output, &d); err != nil {
 		return appearancesEntry{}, fmt.Errorf("reading the match document: %w", err)
 	}
-	if d.Format != matchesFormat {
+	if d.Format != summaryFormat {
 		return appearancesEntry{}, fmt.Errorf("the match document is %q, and this worker reads %s",
-			d.Format, matchesFormat)
+			d.Format, summaryFormat)
 	}
 	matched, held := d.Files[name]
 	if !held {
@@ -229,6 +240,6 @@ func answerFrom(output []byte, entry, name string, size int64) (appearancesEntry
 	}
 	return appearancesEntry{
 		Path: entry, Size: matched.Size, Embedder: d.Embedder, Threshold: d.Threshold, Margin: d.Margin,
-		Gallery: d.Gallery, Unmatched: d.Unmatched, Observations: matched.Observations,
+		Gallery: d.Gallery, Unmatched: d.Unmatched, Named: matched.Named, People: matched.People,
 	}, nil
 }

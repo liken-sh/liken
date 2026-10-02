@@ -1,21 +1,28 @@
 // The detections record: the output of the expensive pass, which opens the
 // video. It is JSON Lines, so `head` shows the header, `jq` reads any
-// keyframe, and a reader can stream it. The first line names the models and
+// sample, and a reader can stream it. The first line names the models and
 // their hashes, the run, the video file's size in bytes, and the frame size
-// and length of the video. Each line after it is one keyframe, with every
-// face found in it, including a keyframe with no face, because the gaps
-// between keyframes are what bound a span.
+// and length of the video. Each line after it is one sample, with every face
+// found in it, including a sample with no face, because a stretch with no
+// face at all ends a span.
 //
-// The format names the detector's score cutoff. A record of v2 holds every
-// face that scored at least 0.8, and a record of v1 every face that scored
-// at least 0.9, so a v1 line leaves out faces that the v2 line of the same
-// keyframe holds. A reader takes both formats, so a season folder whose
-// episodes have records of both formats still matches whole. The operator
-// reads a v1 record as one to decode again.
+// The samples are every keyframe and a frame every second between them
+// (frames.rs). A keyframe line carries `"keyframe": true`, and other lines
+// leave the field out. Encoders place a keyframe at most cuts, so the spans
+// stop each sample's stretch at the next keyframe (player.rs). The flag is
+// on the line and not in a list in the header, because the decode learns
+// each keyframe only when it reaches it: the header is written before the
+// decode starts, and each line is written as its frame arrives. A list in
+// the header would need the whole decode held in memory, or a second pass
+// over the file.
+//
+// The format names what the record holds: v2 is the samples above, with
+// every face that YuNet scored at 0.8 or more (yunet.rs). A reader takes
+// v2 alone. The operator reads a record of any other format as stale and
+// decodes the video again.
 //
 // Each embedding is SFace's unit vector as 16-bit floats in little-endian
-// order, base64 encoded: 128 values in 256 bytes, which keeps a two-hour
-// film's record near half a megabyte.
+// order, base64 encoded: 128 values in 256 bytes.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -29,7 +36,6 @@ use crate::runtime::Error;
 use crate::yunet::Face;
 
 pub const FORMAT: &str = "liken.sh/appearances/detections/v2";
-const FIRST_FORMAT: &str = "liken.sh/appearances/detections/v1";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
@@ -64,8 +70,11 @@ pub struct Detection {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct KeyframeLine {
+pub struct SampleLine {
     pub time: f64,
+    // True when the frame is a keyframe.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keyframe: bool,
     pub faces: Vec<Detection>,
 }
 
@@ -95,30 +104,25 @@ pub fn write_line<T: Serialize>(out: &mut impl Write, value: &T) -> Result<(), E
 
 pub struct Record {
     pub header: Header,
-    pub keyframes: Vec<KeyframeLine>,
+    pub samples: Vec<SampleLine>,
 }
 
 pub fn read(input: impl BufRead) -> Result<Record, Error> {
     let mut lines = input.lines();
     let first = lines.next().ok_or("the detections record is empty")??;
     let header: Header = serde_json::from_str(&first)?;
-    if header.format != FORMAT && header.format != FIRST_FORMAT {
-        return Err(format!(
-            "the record's format is {}, not {FORMAT} or {FIRST_FORMAT}",
-            header.format
-        )
-        .into());
+    if header.format != FORMAT {
+        return Err(format!("the record's format is {}, not {FORMAT}", header.format).into());
     }
-    let mut keyframes: Vec<KeyframeLine> = Vec::new();
+    let mut samples: Vec<SampleLine> = Vec::new();
     for line in lines {
-        keyframes.push(serde_json::from_str(&line?)?);
+        samples.push(serde_json::from_str(&line?)?);
     }
-    // The record keeps the order ffmpeg delivered the keyframes in, which
-    // is not always the order of their times: with only keyframes decoded,
-    // a keyframe that opens a group of pictures can arrive before the one
-    // shown just ahead of it. Every reader wants time order.
-    keyframes.sort_by(|a, b| a.time.total_cmp(&b.time));
-    Ok(Record { header, keyframes })
+    // The record keeps the order ffmpeg delivered the frames in. Every
+    // reader wants time order, and the sort costs nothing when the two
+    // orders agree.
+    samples.sort_by(|a, b| a.time.total_cmp(&b.time));
+    Ok(Record { header, samples })
 }
 
 // The name a file is written under before it is renamed into place. It
@@ -196,8 +200,9 @@ mod tests {
             score: 0.95,
             landmarks: [(5.0, 6.0); 5],
         };
-        let line = KeyframeLine {
+        let line = SampleLine {
             time: 4.5,
+            keyframe: true,
             faces: vec![Detection {
                 face,
                 embedding: encode(&[0.5; 128]),
@@ -207,18 +212,19 @@ mod tests {
         write_line(&mut out, &header()).unwrap();
         write_line(&mut out, &line).unwrap();
         let record = read(out.as_slice()).unwrap();
-        assert_eq!((record.header, record.keyframes), (header(), vec![line]));
+        assert_eq!((record.header, record.samples), (header(), vec![line]));
     }
 
     #[test]
-    fn a_record_reads_its_keyframes_in_time_order() {
+    fn a_record_reads_its_samples_in_time_order() {
         let mut out = Vec::new();
         write_line(&mut out, &header()).unwrap();
         for time in [9.0, 4.5, 12.0] {
             write_line(
                 &mut out,
-                &KeyframeLine {
+                &SampleLine {
                     time,
+                    keyframe: false,
                     faces: vec![],
                 },
             )
@@ -226,24 +232,47 @@ mod tests {
         }
         let times: Vec<f64> = read(out.as_slice())
             .unwrap()
-            .keyframes
+            .samples
             .iter()
             .map(|k| k.time)
             .collect();
         assert_eq!(times, [4.5, 9.0, 12.0]);
     }
 
-    // The header of a record of the first format, whose cutoff is 0.9.
-    const FIRST_FORMAT_HEADER: &str = r#"{"format":"liken.sh/appearances/detections/v1","video":"film.mkv","size":4000000000,"duration":100.0,"width":1920,"height":800,"detector":{"name":"m","sha256":"00"},"detect_width":1280,"embedder":{"name":"m","sha256":"00"},"device":"CPU"}"#;
+    #[test]
+    fn only_a_keyframe_line_carries_the_flag() {
+        let lines = [
+            SampleLine {
+                time: 1.0,
+                keyframe: true,
+                faces: vec![],
+            },
+            SampleLine {
+                time: 2.0,
+                keyframe: false,
+                faces: vec![],
+            },
+        ];
+        let text: Vec<String> = lines
+            .iter()
+            .map(|l| serde_json::to_string(l).unwrap())
+            .collect();
+        assert_eq!(
+            text,
+            [
+                r#"{"time":1.0,"keyframe":true,"faces":[]}"#,
+                r#"{"time":2.0,"faces":[]}"#
+            ]
+        );
+    }
 
     #[test]
-    fn a_record_of_the_first_format_still_reads() {
-        let text = format!("{FIRST_FORMAT_HEADER}\n{{\"time\":4.5,\"faces\":[]}}\n");
-        let record = read(text.as_bytes()).unwrap();
-        assert_eq!(
-            (record.header.format.as_str(), record.keyframes.len()),
-            (FIRST_FORMAT, 1)
-        );
+    fn a_record_of_the_keyframes_only_format_is_refused() {
+        let mut first = header();
+        first.format = "liken.sh/appearances/detections/v1".into();
+        let mut out = Vec::new();
+        write_line(&mut out, &first).unwrap();
+        assert!(read(out.as_slice()).is_err());
     }
 
     #[test]

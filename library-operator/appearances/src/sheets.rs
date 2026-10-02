@@ -5,7 +5,7 @@
 // lost. Each sheet has a text file beside it that gives each tile's time,
 // similarity, and the next closest person's similarity, row by row.
 //
-// The crops come from the video again, one ffmpeg seek for each keyframe
+// The crops come from the video again, one ffmpeg seek for each sample
 // a sheet uses, because the detections record holds no pixels.
 
 use std::collections::{BTreeMap, BTreeSet};

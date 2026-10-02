@@ -1,6 +1,6 @@
 // The review command, a development tool. It reads a title's detections
-// records and its gallery, names every face at a threshold and a margin the
-// reviewer chooses, and writes three files outside the library: the spans as YAML,
+// records and its gallery, names every face as match does, at a threshold
+// and a margin the reviewer chooses, and writes three files outside the library: the spans as YAML,
 // the spans as an mpv chapters file, and every face with its label for the
 // overlay script. With --play it opens mpv on the video with the chapters
 // and the overlay loaded.
@@ -16,10 +16,9 @@ use std::process::Command;
 
 use serde::Serialize;
 
-use crate::film_gallery::{self, Naming};
 use crate::gallery::Gallery;
-use crate::matcher::{self, Best};
-use crate::matches;
+use crate::matcher::{self, Candidates, Rule};
+use crate::matches::{self, By};
 use crate::record::Record;
 use crate::runtime::Error;
 use crate::sheets;
@@ -39,13 +38,12 @@ struct FaceBox {
     // The next closest person's similarity, or null in a gallery of one.
     runner_up: Option<f32>,
     named: bool,
-    // The person the headshots alone named, or null. With the film's own
-    // gallery off, this is the person when `named` is true.
-    headshots_named: Option<String>,
+    // The pass that named the face, or null.
+    by: Option<By>,
 }
 
 #[derive(Serialize)]
-struct Keyframe {
+struct Sample {
     time: f64,
     faces: Vec<FaceBox>,
 }
@@ -57,8 +55,7 @@ struct Overlay {
     height: usize,
     threshold: f32,
     margin: f32,
-    self_gallery: bool,
-    keyframes: Vec<Keyframe>,
+    samples: Vec<Sample>,
     spans: Vec<Span>,
 }
 
@@ -66,27 +63,22 @@ fn round(value: f32) -> f32 {
     (value * 1000.0).round() / 1000.0
 }
 
-fn overlay(record: &Record, gallery: &Gallery, naming: Naming) -> Result<Overlay, Error> {
+fn overlay(record: &Record, gallery: &Gallery, rule: Rule) -> Result<Overlay, Error> {
     let faces = matcher::faces(record)?;
-    let passes = film_gallery::name(&faces, gallery, naming)?;
-    let name_of = |best: &Option<Best>| {
-        best.filter(|b| b.names(naming.rule))
-            .map(|b| gallery.people[b.person].name.clone())
-    };
-    let mut keyframes = Vec::new();
+    let closest = matcher::closest(&faces, &Candidates::new(gallery)?);
+    let names = matches::name(&faces, gallery, rule)?;
+    let mut samples = Vec::new();
     let mut shots = Vec::new();
-    for ((line, last), headshots) in record
-        .keyframes
-        .iter()
-        .zip(passes.last())
-        .zip(&passes.headshots)
-    {
+    for ((line, closest), names) in record.samples.iter().zip(&closest).zip(&names) {
         let mut boxes = Vec::new();
         let mut people = BTreeSet::new();
-        for ((detection, best), before) in line.faces.iter().zip(last).zip(headshots) {
-            let named = name_of(best);
-            if let Some(person) = &named {
-                people.insert(person.clone());
+        for ((detection, closest), named) in line.faces.iter().zip(closest).zip(names) {
+            // A named face shows its person and the similarity to that
+            // person's headshot. An unnamed face shows the closest person,
+            // so a near miss is visible.
+            let best = named.map(|n| n.best).or(*closest);
+            if let Some(named) = named {
+                people.insert(gallery.people[named.best.person].name.clone());
             }
             let f = &detection.face;
             boxes.push(FaceBox {
@@ -98,10 +90,10 @@ fn overlay(record: &Record, gallery: &Gallery, naming: Naming) -> Result<Overlay
                 similarity: round(best.map_or(0.0, |b| b.similarity)),
                 runner_up: best.and_then(|b| b.runner_up).map(round),
                 named: named.is_some(),
-                headshots_named: name_of(before),
+                by: named.map(|n| n.by),
             });
         }
-        keyframes.push(Keyframe {
+        samples.push(Sample {
             time: line.time,
             faces: boxes,
         });
@@ -111,16 +103,15 @@ fn overlay(record: &Record, gallery: &Gallery, naming: Naming) -> Result<Overlay
         video: record.header.video.clone(),
         width: record.header.width,
         height: record.header.height,
-        threshold: naming.rule.threshold,
-        margin: naming.rule.margin,
-        self_gallery: naming.self_gallery,
-        keyframes,
+        threshold: rule.threshold,
+        margin: rule.margin,
+        samples,
         spans: spans::spans(&shots, record.header.duration),
     })
 }
 
 pub struct Settings {
-    pub naming: Naming,
+    pub rule: Rule,
     pub out: Option<PathBuf>,
     pub play: bool,
     // How many faces each contact sheet shows, or None for no sheets.
@@ -132,18 +123,17 @@ pub struct Settings {
 const UNNAMED_MINIMUM_HEIGHT: f32 = 80.0;
 
 // The tiles for the contact sheets: each person's named faces with the
-// weakest first, the tallest faces nobody was named for, and the named
-// faces whose person leads the next closest person by the least, which is
-// where the margin decides. With the
-// film's own gallery on, each person also gets a sheet of the faces that
-// only the second pass named, weakest first, because those are the faces
-// the experiment adds and the ones to judge it by.
+// weakest first, the tallest faces nobody was named for, and the faces the
+// headshots named whose person leads the next closest person by the least,
+// which is where the margin decides. Each person also gets a sheet of the
+// faces that the film pass named, weakest first, because a wrong name of
+// that pass shows there.
 fn sheet_groups(overlay: &Overlay, per_sheet: usize) -> BTreeMap<String, Vec<sheets::Tile>> {
     let mut groups: BTreeMap<String, Vec<sheets::Tile>> = BTreeMap::new();
-    for keyframe in &overlay.keyframes {
-        for face in &keyframe.faces {
+    for sample in &overlay.samples {
+        for face in &sample.faces {
             let tile = sheets::Tile {
-                time: keyframe.time,
+                time: sample.time,
                 x: face.x,
                 y: face.y,
                 w: face.w,
@@ -152,17 +142,22 @@ fn sheet_groups(overlay: &Overlay, per_sheet: usize) -> BTreeMap<String, Vec<she
                 runner_up: face.runner_up,
                 person: face.person.clone(),
             };
-            if face.named && overlay.self_gallery && face.headshots_named.is_none() {
-                groups
-                    .entry(format!("{NEW}{}", face.person))
-                    .or_default()
-                    .push(tile.clone());
-            }
-            if face.named {
-                groups.entry(CLOSE.into()).or_default().push(tile.clone());
-                groups.entry(face.person.clone()).or_default().push(tile);
-            } else if face.h >= UNNAMED_MINIMUM_HEIGHT {
-                groups.entry(UNNAMED.into()).or_default().push(tile);
+            match face.by {
+                Some(By::Headshot) => {
+                    groups.entry(CLOSE.into()).or_default().push(tile.clone());
+                    groups.entry(face.person.clone()).or_default().push(tile);
+                }
+                Some(By::Film) => {
+                    groups
+                        .entry(format!("{FILM}{}", face.person))
+                        .or_default()
+                        .push(tile.clone());
+                    groups.entry(face.person.clone()).or_default().push(tile);
+                }
+                None if face.h >= UNNAMED_MINIMUM_HEIGHT => {
+                    groups.entry(UNNAMED.into()).or_default().push(tile);
+                }
+                None => {}
             }
         }
     }
@@ -181,7 +176,7 @@ fn sheet_groups(overlay: &Overlay, per_sheet: usize) -> BTreeMap<String, Vec<she
 }
 
 const UNNAMED: &str = "_unnamed";
-const NEW: &str = "_new ";
+const FILM: &str = "_film ";
 const CLOSE: &str = "_closest leads";
 
 pub fn run(title: &Path, settings: &Settings) -> Result<(), Error> {
@@ -203,7 +198,7 @@ pub fn run(title: &Path, settings: &Settings) -> Result<(), Error> {
     let script = out.join("appearances.lua");
     fs::write(&script, SCRIPT)?;
     for record in matches::records(title)? {
-        let overlay = overlay(&record, &gallery, settings.naming)?;
+        let overlay = overlay(&record, &gallery, settings.rule)?;
         let stem = out.join(&overlay.video);
         let chapters = stem.with_extension("chapters.txt");
         let data = stem.with_extension("review.json");
@@ -213,33 +208,21 @@ pub fn run(title: &Path, settings: &Settings) -> Result<(), Error> {
             serde_yaml_ng::to_string(&overlay.spans)?,
         )?;
         fs::write(&data, serde_json::to_vec(&overlay)?)?;
-        let named = overlay
-            .keyframes
-            .iter()
-            .flat_map(|k| &k.faces)
-            .filter(|f| f.named)
-            .count();
-        let faces: usize = overlay.keyframes.iter().map(|k| k.faces.len()).sum();
-        let rule = settings.naming.rule;
+        let faces = || overlay.samples.iter().flat_map(|k| &k.faces);
+        let named = faces().filter(|f| f.named).count();
+        let film = faces().filter(|f| f.by == Some(By::Film)).count();
+        let rule = settings.rule;
         eprintln!(
-            "{}: {} of {} faces named at threshold {} and margin {}, {} spans, in {}",
+            "{}: {} of {} faces named at threshold {} and margin {}, {} of them by the film pass, {} spans, in {}",
             overlay.video,
             named,
-            faces,
+            faces().count(),
             rule.threshold,
             rule.margin,
+            film,
             overlay.spans.len(),
             out.display()
         );
-        if overlay.self_gallery {
-            let before = overlay
-                .keyframes
-                .iter()
-                .flat_map(|k| &k.faces)
-                .filter(|f| f.headshots_named.is_some())
-                .count();
-            eprintln!("  the headshots alone named {before}");
-        }
         if let Some(per_sheet) = settings.sheets {
             let directory = stem.with_extension("sheets");
             // The sheets of an earlier review name people at another rule,
