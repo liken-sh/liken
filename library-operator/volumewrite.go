@@ -133,6 +133,17 @@ func (w *volumeWriter) removeTemporary(path string) error {
 	return os.Remove(path)
 }
 
+// removeToolPartial removes a partial file that a tool this pod ran left
+// when it was killed. The appearances tool names each partial file for its
+// host, and a pod's host name is its own, so the mark proves that this pod's
+// run wrote the file and that no other run is still writing it.
+func (w *volumeWriter) removeToolPartial(path, host string) error {
+	if host == "" || !strings.Contains(filepath.Base(path), ".partial-"+host+"-") {
+		return fmt.Errorf("refusing to remove %s: it carries no partial mark of host %q", path, host)
+	}
+	return os.Remove(path)
+}
+
 // land renames a temporary this writer filled onto its target, for a file
 // too large to hold in memory, which write cannot take. It refuses a source
 // with no temporary mark, so it moves only what this binary wrote.

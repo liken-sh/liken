@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -526,6 +527,40 @@ func TestWhatAFailedAppearancesRunRecords(t *testing.T) {
 				t.Errorf("log = %q, want the tool's words %q", log, test.want)
 			}
 		})
+	}
+}
+
+// A worker Job that is deleted or replaced stops its run in the middle of a
+// video. The video was not answered, so the run records no attempt and the
+// video stays in the gap for the next worker. The killed tool leaves its
+// partial files, and the run removes the ones its own pod wrote, by the
+// host in their names. A partial file of another host may belong to a run
+// that is still writing, so it stays.
+func TestAStoppedAppearancesRunRecordsNothing(t *testing.T) {
+	root := t.TempDir()
+	item := seedAppearancesMovie(t, root)
+	seedAppearancesModels(t)
+	seedRenderNodes(t)
+	t.Setenv("HOSTNAME", "movies-appearances-a1")
+	records := filepath.Join(root, appearancesFolder, likenDirectory, "appearances")
+	ours := filepath.Join(records, appearancesFile+".jsonl.partial-movies-appearances-a1-41")
+	theirs := filepath.Join(records, appearancesFile+".jsonl.partial-movies-appearances-b2-41")
+	writeFile(t, ours, "{}")
+	writeFile(t, theirs, "{}")
+	standInAppearances{record: detectionsLine(t, item.Size),
+		document: matchDocumentFor(appearancesFile, item.Size)}.install(t)
+	work, _ := testFactWorker(t, appearancesWorker, libraryKindMovies, root)
+	ctx, stop := context.WithCancel(t.Context())
+	stop()
+
+	work.appearancesOne(ctx, item)
+
+	ledger := appearancesLedgerOf(t, filepath.Join(root, appearancesFolder))
+	if len(ledger.Attempts) != 0 {
+		t.Errorf("attempts = %+v, want none", ledger.Attempts)
+	}
+	if left := namesIn(t, records); !slices.Equal(left, []string{filepath.Base(theirs)}) {
+		t.Errorf("the records directory holds %v, want the other host's partial alone", left)
 	}
 }
 

@@ -10,9 +10,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -114,19 +117,19 @@ func (w *factWorkerRun) appearancesOne(ctx context.Context, item workItem) {
 	if detectionsCurrent(absolute, item.Size, os.Getenv(appearancesModelsVariable)) {
 		w.logf("reading the faces found before in %s", w.named(absolute))
 	} else if err := w.detectFaces(ctx, absolute, item); err != nil {
-		w.recordAppearances(folder, entry, nil, err)
+		w.failAppearances(ctx, absolute, folder, entry, err)
 		return
 	}
 	output, err := runAppearances(ctx, appearancesMatchTimeout, matchArgs(filepath.Dir(absolute), w.castFile(absolute))...)
 	if err != nil {
 		w.logf("could not match the faces of %s: %v", w.named(absolute), err)
-		w.recordAppearances(folder, entry, nil, err)
+		w.failAppearances(ctx, absolute, folder, entry, err)
 		return
 	}
 	answer, err := answerFrom(output, entry, filepath.Base(absolute), item.Size)
 	if err != nil {
 		w.logf("could not read the match of %s: %v", w.named(absolute), err)
-		w.recordAppearances(folder, entry, nil, err)
+		w.failAppearances(ctx, absolute, folder, entry, err)
 		return
 	}
 	people := "1 person"
@@ -169,6 +172,39 @@ func (w *factWorkerRun) castFile(absolute string) string {
 		title = filepath.Dir(absolute)
 	}
 	return filepath.Join(title, likenDirectory, likenLedgerName(factCredits))
+}
+
+// A failure, unless the run itself was stopped. A worker Job that is deleted
+// or replaced stops its run in the middle of a video, and the tool's error is
+// then the kill and not a fact about the video. An attempt would answer the
+// video and hold it out of the gap until the next refresh, so a stopped run
+// records nothing, and the video goes to the next worker. The killed tool
+// leaves its partial files, and the run removes the ones this pod wrote: the
+// tool names each one for the host, and a pod's host name is its own. A
+// partial file of another host may belong to a run that is still writing.
+func (w *factWorkerRun) failAppearances(ctx context.Context, absolute, folder, entry string, err error) {
+	if ctx.Err() == nil {
+		w.recordAppearances(folder, entry, nil, err)
+		return
+	}
+	w.logf("stopped in the middle of %s, which stays for the next worker", w.named(absolute))
+	host := os.Getenv("HOSTNAME")
+	if host == "" {
+		return
+	}
+	// A title folder's name holds brackets, such as "Film [1992]", which a
+	// glob reads as a pattern, so the directory is read and each name tested.
+	records := filepath.Dir(detectionsPath(absolute))
+	names, _ := os.ReadDir(records)
+	for _, name := range names {
+		if !strings.Contains(name.Name(), ".partial-"+host+"-") {
+			continue
+		}
+		partial := filepath.Join(records, name.Name())
+		if err := w.writer.removeToolPartial(partial, host); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			w.logf("could not remove the partial file %s: %v", w.named(partial), err)
+		}
+	}
 }
 
 // The answer and the attempt, in one write of one file. A failure is an
