@@ -181,10 +181,12 @@ ordering of its own, so `match` writes one file per video in this shape:
 A span is a run of keyframes that name the same people, from the first
 keyframe's time to the time of the keyframe after the run. The detector
 misses a face turned away, in shadow, or too small to name, so a scene
-breaks into pieces. A run that names nobody and lasts under 30 seconds
-belongs to the span before it, and two spans of the same people that then
-meet join into one. A longer run that names nobody is no span, and so is
-the run after the last person named. A span lists its people left to right by the
+breaks into pieces. A run that names nobody belongs to the span before
+it while it ends less than 30 seconds after the last person named, and
+two spans of the same people that then meet join into one. A run of 4
+seconds or longer with no face at all ends the span, because a wide shot
+with nobody in it ends the scene's people. Any other run that names
+nobody is no span, and so is the run after the last person named. A span lists its people left to right by the
 average place of their faces across its keyframes, so the cards read in
 the order the people stand in the picture.
 
