@@ -46,7 +46,7 @@ a new driver, starts a new pod. No timer queries again.
 
 ## Attributes
 
-Each capability is a boolean. Every device has all eleven, `true` or
+Each capability is a boolean. Every device has all eighteen, `true` or
 `false`, so a selector can read any of them with no `has()` check. A
 selector reads one as
 `device.attributes["media.liken.sh"].decodeHEVCMain10`.
@@ -59,11 +59,23 @@ selector reads one as
 | `decodeAV1Main` | `VAProfileAV1Profile0` with `VLD` and the render-target format `YUV420` |
 | `decodeAV1Main10` | `VAProfileAV1Profile0` with `VLD` and the render-target format `YUV420_10` |
 | `decodeVP9` | `VAProfileVP9Profile0` with `VLD` |
-| `encodeH264` | `VAProfileH264High` with `EncSlice` or `EncSliceLP` |
-| `encodeHEVCMain` | `VAProfileHEVCMain` with `EncSlice` or `EncSliceLP` |
-| `encodeHEVCMain10` | `VAProfileHEVCMain10` with `EncSlice` or `EncSliceLP` |
+| `decodeVP9Profile2` | `VAProfileVP9Profile2` with `VLD`. Profile 2 is 10-bit VP9 |
+| `decodeVP8` | `VAProfileVP8Version0_3` with `VLD` |
+| `decodeVC1` | `VAProfileVC1Advanced` with `VLD`. VC-1 on Blu-ray uses the Advanced profile |
+| `decodeMPEG2` | `VAProfileMPEG2Main` with `VLD` |
+| `encodeH264` | `VAProfileH264High` with `EncSlice`, the full slice encoder |
+| `encodeHEVCMain` | `VAProfileHEVCMain` with `EncSlice` |
+| `encodeHEVCMain10` | `VAProfileHEVCMain10` with `EncSlice` |
+| `encodeH264LowPower` | `VAProfileH264High` with `EncSliceLP`, the low-power encoder |
+| `encodeHEVCMainLowPower` | `VAProfileHEVCMain` with `EncSliceLP` |
+| `encodeHEVCMain10LowPower` | `VAProfileHEVCMain10` with `EncSliceLP` |
 | `scale8bit` | a video processor that accepts `NV12` surfaces |
 | `scale10bit` | a video processor that accepts `P010` surfaces |
+
+The full and the low-power encoder are separate capabilities, because
+a transcoder chooses between them in its own settings, and a driver
+can list one without the other. A transcoder with its low-power
+encoders turned off needs `encodeH264`, not `encodeH264LowPower`.
 
 The device also has these attributes:
 

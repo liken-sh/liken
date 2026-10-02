@@ -20,11 +20,15 @@ import (
 // of libva's ABI, so they do not change between releases.
 const (
 	profileNone        int32 = -1
+	profileMPEG2Main   int32 = 1
 	profileH264Main    int32 = 6
 	profileH264High    int32 = 7
+	profileVC1Advanced int32 = 10
+	profileVP8         int32 = 14
 	profileHEVCMain    int32 = 17
 	profileHEVCMain10  int32 = 18
 	profileVP9Profile0 int32 = 19
+	profileVP9Profile2 int32 = 21
 	profileAV1Profile0 int32 = 32
 
 	entrypointVLD        int32 = 1
@@ -69,8 +73,14 @@ type capabilityRule struct {
 // selector reads, as `device.attributes["media.liken.sh"].<name>`.
 //
 // H.264 reads the High profile, because nearly every H.264 file uses
-// it. AV1 has one VA-API profile for 8 and 10 bits, so its bit depth
-// comes from the render-target formats of that profile.
+// it. VC-1 reads the Advanced profile, which is the profile of VC-1 on
+// Blu-ray. VP9 Profile 2 is 10-bit VP9. AV1 has one VA-API profile for
+// 8 and 10 bits, so its bit depth comes from the render-target formats
+// of that profile.
+//
+// The full slice encoder and the low-power one are two capabilities,
+// because a transcoder chooses between them in its own settings, and a
+// driver can list one without the other.
 var capabilityRules = []capabilityRule{
 	{"decodeH264", decodes(profileH264High, 0)},
 	{"decodeHEVCMain", decodes(profileHEVCMain, 0)},
@@ -78,9 +88,16 @@ var capabilityRules = []capabilityRule{
 	{"decodeAV1Main", decodes(profileAV1Profile0, rtFormatYUV420)},
 	{"decodeAV1Main10", decodes(profileAV1Profile0, rtFormatYUV420_10)},
 	{"decodeVP9", decodes(profileVP9Profile0, 0)},
-	{"encodeH264", encodes(profileH264High)},
-	{"encodeHEVCMain", encodes(profileHEVCMain)},
-	{"encodeHEVCMain10", encodes(profileHEVCMain10)},
+	{"decodeVP9Profile2", decodes(profileVP9Profile2, 0)},
+	{"decodeVP8", decodes(profileVP8, 0)},
+	{"decodeVC1", decodes(profileVC1Advanced, 0)},
+	{"decodeMPEG2", decodes(profileMPEG2Main, 0)},
+	{"encodeH264", encodes(profileH264High, entrypointEncSlice)},
+	{"encodeHEVCMain", encodes(profileHEVCMain, entrypointEncSlice)},
+	{"encodeHEVCMain10", encodes(profileHEVCMain10, entrypointEncSlice)},
+	{"encodeH264LowPower", encodes(profileH264High, entrypointEncSliceLP)},
+	{"encodeHEVCMainLowPower", encodes(profileHEVCMain, entrypointEncSliceLP)},
+	{"encodeHEVCMain10LowPower", encodes(profileHEVCMain10, entrypointEncSliceLP)},
 	{"scale8bit", processes("NV12")},
 	{"scale10bit", processes("P010")},
 }
@@ -106,14 +123,13 @@ func decodes(profile int32, format uint32) func(report) bool {
 	}
 }
 
-// encodes holds when the driver lists the profile with either slice
-// encoder. EncSliceLP is the low-power encoder, and some Intel GPUs
-// list H.264 and HEVC encode only on it.
-func encodes(profile int32) func(report) bool {
+// encodes holds when the driver lists the profile with the encoder
+// entrypoint. EncSlice is the full slice encoder and EncSliceLP the
+// low-power one, which some Intel GPUs list alone for H.264 and HEVC.
+func encodes(profile, entrypoint int32) func(report) bool {
 	return func(facts report) bool {
 		return slices.ContainsFunc(facts.Configs, func(c config) bool {
-			return c.Profile == profile &&
-				(c.Entrypoint == entrypointEncSlice || c.Entrypoint == entrypointEncSliceLP)
+			return c.Profile == profile && c.Entrypoint == entrypoint
 		})
 	}
 }

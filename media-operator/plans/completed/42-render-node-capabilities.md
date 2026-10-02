@@ -122,13 +122,28 @@ each capability:
     decodeAV1Main: true
     decodeAV1Main10: true
     decodeVP9: true
+    decodeVP9Profile2: true
+    decodeVP8: true
+    decodeVC1: false
+    decodeMPEG2: true
     encodeH264: true
     encodeHEVCMain: true
     encodeHEVCMain10: true
+    encodeH264LowPower: false
+    encodeHEVCMainLowPower: false
+    encodeHEVCMain10LowPower: false
     scale8bit: true
     scale10bit: true
 
-Every device has all eleven, `true` or `false`. A selector that reads
+The set follows what a transcoder's settings name, so a class can
+mirror them. A Jellyfin server set to QSV lists hardware decode for
+H.264, HEVC, VP9, VP8, VC-1, and MPEG-2, 10-bit HEVC and VP9, and the
+full encoders with the low-power ones turned off. So the full and the
+low-power encoder are separate capabilities: a driver can list one
+without the other, and a GPU that lists only the low-power encoder
+fails the encode of a server set to the full one.
+
+Every device has all eighteen, `true` or `false`. A selector that reads
 an absent attribute fails to evaluate, and `false` is a value a claim
 can select against. The device also states
 `resource.kubernetes.io/pciBusID`, the driver's name in `vaDriver`,
@@ -277,6 +292,12 @@ The video processor accepted 26 surface formats, `NV12` and `P010`
 among them. `scale_vaapi` scaled `p010le` frames on the same GPU with
 no error, so the 10-bit query agrees with the operation. One query
 took 20 ms and peaked at 27 MB of resident memory.
+
+The same day, after the set grew to eighteen, the query on the
+workstation's iHD 26.1.2 read VP8, VP9 Profile 2, and MPEG-2 decode
+as `true`, and VC-1 decode and all three low-power encoders as
+`false`, which matches `vainfo` on the same driver. The image's iHD
+25.2.3 was not queried for the larger set.
 
 ## The proof
 

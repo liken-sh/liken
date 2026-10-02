@@ -7,11 +7,13 @@ import (
 
 // meteorLake is the report of the Meteor Lake GPU the query read with
 // the iHD driver 26.1.2, cut to the profiles the capabilities name. It
-// lists encode with EncSlice, and AV1 decode at 8 and 10 bits.
+// lists encode with EncSlice alone, AV1 decode at 8 and 10 bits, and no
+// VC-1 decode.
 func meteorLake() report {
 	return report{
 		Vendor: "Intel iHD driver for Intel(R) Gen Graphics - 26.1.2 ()",
 		Configs: []config{
+			{Profile: profileMPEG2Main, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420},
 			{Profile: profileH264Main, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420},
 			{Profile: profileH264High, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420},
 			{Profile: profileH264High, Entrypoint: entrypointEncSlice, RTFormat: rtFormatYUV420},
@@ -19,30 +21,67 @@ func meteorLake() report {
 			{Profile: profileHEVCMain, Entrypoint: entrypointEncSlice, RTFormat: rtFormatYUV420},
 			{Profile: profileHEVCMain10, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420_10},
 			{Profile: profileHEVCMain10, Entrypoint: entrypointEncSlice, RTFormat: rtFormatYUV420_10},
+			{Profile: profileVP8, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420},
 			{Profile: profileVP9Profile0, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420},
+			{Profile: profileVP9Profile2, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420_10},
 			{Profile: profileAV1Profile0, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420 | rtFormatYUV420_10},
 		},
 		VideoProcFormats: []string{"NV12", "P010", "YUY2"},
 	}
 }
 
-func TestTheCapabilitiesOfADriverThatAdvertisesEverything(t *testing.T) {
+func TestTheCapabilitiesOfAMeteorLakeDriver(t *testing.T) {
 	got := capabilitiesOf(meteorLake())
 	want := map[string]bool{
-		"decodeH264":       true,
-		"decodeHEVCMain":   true,
-		"decodeHEVCMain10": true,
-		"decodeAV1Main":    true,
-		"decodeAV1Main10":  true,
-		"decodeVP9":        true,
-		"encodeH264":       true,
-		"encodeHEVCMain":   true,
-		"encodeHEVCMain10": true,
-		"scale8bit":        true,
-		"scale10bit":       true,
+		"decodeH264":               true,
+		"decodeHEVCMain":           true,
+		"decodeHEVCMain10":         true,
+		"decodeAV1Main":            true,
+		"decodeAV1Main10":          true,
+		"decodeVP9":                true,
+		"decodeVP9Profile2":        true,
+		"decodeVP8":                true,
+		"decodeVC1":                false,
+		"decodeMPEG2":              true,
+		"encodeH264":               true,
+		"encodeHEVCMain":           true,
+		"encodeHEVCMain10":         true,
+		"encodeH264LowPower":       false,
+		"encodeHEVCMainLowPower":   false,
+		"encodeHEVCMain10LowPower": false,
+		"scale8bit":                true,
+		"scale10bit":               true,
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("capabilities = %v, want %v", got, want)
+	}
+}
+
+// A driver that lists an encoder on the low-power entrypoint alone
+// states the low-power capability and not the full one, because a
+// transcoder set to the full encoder cannot use it.
+func TestALowPowerEncoderIsItsOwnCapability(t *testing.T) {
+	facts := report{Configs: []config{
+		{Profile: profileH264High, Entrypoint: entrypointEncSliceLP, RTFormat: rtFormatYUV420},
+		{Profile: profileHEVCMain, Entrypoint: entrypointEncSliceLP, RTFormat: rtFormatYUV420},
+		{Profile: profileHEVCMain10, Entrypoint: entrypointEncSliceLP, RTFormat: rtFormatYUV420_10},
+		{Profile: profileVC1Advanced, Entrypoint: entrypointVLD, RTFormat: rtFormatYUV420},
+	}}
+
+	got := capabilitiesOf(facts)
+
+	stated := map[string]bool{}
+	for name, value := range got {
+		if value {
+			stated[name] = true
+		}
+	}
+	want := map[string]bool{
+		"encodeH264LowPower": true, "encodeHEVCMainLowPower": true, "encodeHEVCMain10LowPower": true,
+		"decodeVC1": true,
+	}
+	if !maps.Equal(stated, want) {
+		t.Errorf("true capabilities = %v, want %v", stated, want)
 	}
 }
 
@@ -58,6 +97,9 @@ func TestEachCapabilityFollowsTheFactsTheDriverAdvertises(t *testing.T) {
 		{"no HEVC Main decode", dropConfig(profileHEVCMain, entrypointVLD), "decodeHEVCMain"},
 		{"no HEVC Main 10 decode", dropConfig(profileHEVCMain10, entrypointVLD), "decodeHEVCMain10"},
 		{"no VP9 profile 0 decode", dropConfig(profileVP9Profile0, entrypointVLD), "decodeVP9"},
+		{"no VP9 profile 2 decode", dropConfig(profileVP9Profile2, entrypointVLD), "decodeVP9Profile2"},
+		{"no VP8 decode", dropConfig(profileVP8, entrypointVLD), "decodeVP8"},
+		{"no MPEG-2 Main decode", dropConfig(profileMPEG2Main, entrypointVLD), "decodeMPEG2"},
 		{"no H.264 High encode", dropConfig(profileH264High, entrypointEncSlice), "encodeH264"},
 		{"no HEVC Main encode", dropConfig(profileHEVCMain, entrypointEncSlice), "encodeHEVCMain"},
 		{"no HEVC Main 10 encode", dropConfig(profileHEVCMain10, entrypointEncSlice), "encodeHEVCMain10"},
@@ -76,17 +118,6 @@ func TestEachCapabilityFollowsTheFactsTheDriverAdvertises(t *testing.T) {
 				t.Errorf("capabilities = %v, want %v", got, want)
 			}
 		})
-	}
-}
-
-// A driver that lists encode only on the low-power entrypoint, as an
-// Alder Lake GPU's iHD driver does for H.264, encodes.
-func TestTheLowPowerEncoderCountsAsAnEncoder(t *testing.T) {
-	facts := report{Configs: []config{
-		{Profile: profileH264High, Entrypoint: entrypointEncSliceLP, RTFormat: rtFormatYUV420},
-	}}
-	if !capabilitiesOf(facts)["encodeH264"] {
-		t.Error("EncSliceLP is an encoder entrypoint")
 	}
 }
 

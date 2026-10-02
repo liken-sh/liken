@@ -42,17 +42,24 @@ Each device is one GPU:
         decodeH264: {bool: true}
         decodeHEVCMain: {bool: true}
         decodeHEVCMain10: {bool: true}
+        decodeMPEG2: {bool: true}
+        decodeVC1: {bool: false}
+        decodeVP8: {bool: true}
         decodeVP9: {bool: true}
+        decodeVP9Profile2: {bool: true}
         driver: {string: i915}
         encodeH264: {bool: true}
+        encodeH264LowPower: {bool: false}
         encodeHEVCMain: {bool: true}
         encodeHEVCMain10: {bool: true}
+        encodeHEVCMain10LowPower: {bool: false}
+        encodeHEVCMainLowPower: {bool: false}
         name: {string: Meteor Lake-P [Intel Arc Graphics]}
         product: {string: 7d55}
         resource.kubernetes.io/pciBusID: {string: "0000:00:02.0"}
         scale10bit: {bool: true}
         scale8bit: {bool: true}
-        vaDriver: {string: Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 ()}
+        vaDriver: {string: Intel iHD driver for Intel(R) Gen Graphics - 26.1.2 ()}
         vendor: {string: "8086"}
 
 [Render node capabilities](/docs/reference/capabilities/) describes
