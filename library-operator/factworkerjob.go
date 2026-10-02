@@ -40,7 +40,7 @@ const workListAnnotation = "library.liken.sh/work-list"
 // list the last worker took, and empty where this process has started none.
 //
 // A Library that has not turned the fact on, a report with no finished enrich
-// run, and a gap of zero start nothing. A list a worker took starts nothing,
+// run, and a gap of zero with no refresh left to work start nothing. A list a worker took starts nothing,
 // so a worker that finished its list does not start again on it. The worker
 // Jobs the pass listed name their lists as well, so a restarted operator
 // reads which list a worker took for as long as that Job stays. An
@@ -52,7 +52,14 @@ func factWorkerDue(library *Library, worker factWorker, report *libraryReport, j
 		return "", false
 	}
 	listed, ran := runOf(report.Runs, workerEnrich)
-	if !ran || listed.Finished.IsZero() || listed.Job == taken || report.Gaps[worker.fact] <= 0 {
+	if !ran || listed.Finished.IsZero() || listed.Job == taken {
+		return "", false
+	}
+	// The reporter counts a gap with no refresh, so a refresh that reopens
+	// titles the gap counts as answered shows in the fact's oldest attempt
+	// and not in the count. The library Job wrote those titles into the list
+	// with the refresh time, so the worker has them to work.
+	if report.Gaps[worker.fact] <= 0 && !refreshHasWork(library, report, worker.fact) {
 		return "", false
 	}
 	workers := jobsOf(jobs, library.Metadata.Namespace, library.Metadata.Name, worker.fact)

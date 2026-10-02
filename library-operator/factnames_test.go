@@ -77,9 +77,14 @@ func TestTheRefreshVocabularyIsTheFactsAndTheWalk(t *testing.T) {
 	if isContainerFact(refreshWalk) {
 		t.Errorf("%s reads as a container fact", refreshWalk)
 	}
-	if got := len(refreshVocabulary); got != len(factVocabulary)+1 {
-		t.Errorf("refreshVocabulary holds %d names, want one more than the %d facts",
-			got, len(factVocabulary))
+	for _, fact := range workerRefreshFacts {
+		if !isContainerFact(fact) || !slices.Contains(refreshVocabulary, fact) {
+			t.Errorf("the worker fact %s is no refresh target", fact)
+		}
+	}
+	if got, want := len(refreshVocabulary), len(factVocabulary)+len(workerRefreshFacts)+1; got != want {
+		t.Errorf("refreshVocabulary holds %d names, want the %d facts, the %d worker facts, and the walk",
+			got, len(factVocabulary), len(workerRefreshFacts))
 	}
 }
 

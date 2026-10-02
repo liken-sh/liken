@@ -28,8 +28,26 @@ func trickplayJob(status JobStatus, listed string) Job {
 	return job
 }
 
+// A movies Library with trickplay on, asked again from an hour before the
+// test's clock.
+func refreshedTrickplayMovies() *Library {
+	library := trickplayMovies()
+	library.Spec.Refresh = map[string]time.Time{factTrickplay: testNow.Add(-time.Hour)}
+	return library
+}
+
+// A report whose gap is closed, with the fact's oldest attempt at the time
+// given. The reporter counts a gap with no refresh, so a refresh shows only
+// in the oldest attempt.
+func answeredReport(oldest time.Time) *libraryReport {
+	report := listedReport(0)
+	report.OldestAttempts = map[string]time.Time{factTrickplay: oldest}
+	return report
+}
+
 // The worker starts on a list once, where the Library runs the fact, the
-// gap is open, and no worker of the fact runs.
+// gap is open or a refresh has titles left to ask about, and no worker of
+// the fact runs.
 func TestWhenAWorkerIsDue(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -43,6 +61,10 @@ func TestWhenAWorkerIsDue(t *testing.T) {
 		{name: "the fact off", library: studioMovies(), report: listedReport(3)},
 		{name: "no report", library: trickplayMovies()},
 		{name: "a gap of zero", library: trickplayMovies(), report: listedReport(0)},
+		{name: "a refresh with titles left to ask about", library: refreshedTrickplayMovies(),
+			report: answeredReport(testNow.Add(-2 * time.Hour)), due: true},
+		{name: "a refresh every title has answered", library: refreshedTrickplayMovies(),
+			report: answeredReport(testNow.Add(-time.Minute))},
 		{name: "a library Job that has not finished", library: trickplayMovies(),
 			report: &libraryReport{Runs: []libraryRun{{Worker: workerEnrich, Job: "movies-walk-1", Started: testNow}},
 				Gaps: map[string]int{factTrickplay: 3}}},

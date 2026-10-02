@@ -50,8 +50,8 @@ const (
 
 	// The appearances fact names the credited people on screen at each
 	// keyframe of a feature. It runs in a worker Job of its own and asks no
-	// provider, so it is out of factVocabulary and out of spec.refresh, as
-	// trailerfile is.
+	// provider, so it is out of factVocabulary. It is in spec.refresh, as
+	// workerRefreshFacts says.
 	factAppearances = "appearances"
 
 	factContributorIDs       = "contributor.ids"
@@ -138,13 +138,22 @@ var factVocabulary = []string{
 // request, the Job, and the runs row as one thing.
 const refreshWalk = "scan"
 
-// Every key spec.refresh accepts: the facts, then the walk. The CRD's
-// refresh rule holds these names, and a test reads the two together.
-var refreshVocabulary = append(slices.Clone(factVocabulary), refreshWalk)
+// The worker facts a person may ask again for, though no provider serves
+// them. The appearances fact keeps its answer until the file changes, so a
+// refresh is how a new release of its tool reaches the titles it answered.
+// The library Job writes the reopened titles into the worker's list, so a
+// refresh of one of these is a cause for a library Job as a fact's is.
+var workerRefreshFacts = []string{factAppearances}
 
-// Whether a refresh target is work a container runs. The walk is not, so
+// Every key spec.refresh accepts: the facts, the worker facts, then the
+// walk. The CRD's refresh rule holds these names, and a test reads the two
+// together.
+var refreshVocabulary = append(append(slices.Clone(factVocabulary), workerRefreshFacts...), refreshWalk)
+
+// Whether a refresh target is work a Job's container runs: a fact's gap, or
+// the list of a worker fact that the library Job writes. The walk is not, so
 // the code that hands spec.refresh to an enricher, or reads it for an
 // enrichment cause, skips it.
 func isContainerFact(name string) bool {
-	return slices.Contains(factVocabulary, name)
+	return slices.Contains(factVocabulary, name) || slices.Contains(workerRefreshFacts, name)
 }
