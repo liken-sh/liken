@@ -637,8 +637,13 @@ impl Display {
         );
         if bar.is_some() || !counter.is_empty() || !strip.is_empty() {
             // The bottom scrim backs the scrubber and the strip, drawn before
-            // them so their text is on top.
-            if let Some(bottom) = &self.scrims.bottom {
+            // them so their text is on top. While the cast row shows, the
+            // taller cast scrim backs the row as well.
+            let scrim = match self.cast_showing() {
+                true => &self.scrims.cast,
+                false => &self.scrims.bottom,
+            };
+            if let Some(bottom) = scrim {
                 brush.scrim(bottom);
             }
             if let Some(bar) = bar.as_ref() {

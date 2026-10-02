@@ -47,6 +47,17 @@ impl Scrim {
         }
     }
 
+    /// The scrim behind the cast row, which the display draws in place of the
+    /// bottom scrim while the row shows. It holds its peak up past the row's
+    /// heading, so the heading and the names read over a bright frame.
+    pub fn cast() -> Self {
+        Self {
+            edge: Edge::Bottom,
+            hold: theme::SCRIM_CAST_HOLD,
+            clear: theme::SCRIM_CAST_CLEAR,
+        }
+    }
+
     /// The fraction of the ground the scrim covers at one canvas row.
     pub fn opacity_at(&self, row: f32) -> f32 {
         let from_edge = match self.edge {
@@ -97,13 +108,14 @@ impl Scrim {
     }
 }
 
-/// The pictures of both scrims, for one canvas and one scale factor. Only the
+/// The pictures of the scrims, for one canvas and one scale factor. Only the
 /// fade changes between two frames, and the picture takes the fade as its
 /// opacity, so the pictures are resolved once per surface.
 #[derive(Debug, Clone, Default)]
 pub struct Scrims {
     pub top: Option<Picture>,
     pub bottom: Option<Picture>,
+    pub cast: Option<Picture>,
 }
 
 impl Scrims {
@@ -111,6 +123,7 @@ impl Scrims {
         Self {
             top: Scrim::top().picture(canvas, density),
             bottom: Scrim::bottom().picture(canvas, density),
+            cast: Scrim::cast().picture(canvas, density),
         }
     }
 }
@@ -155,6 +168,15 @@ mod tests {
         assert_eq!(bottom.opacity_at(1080.0), peak);
         assert_eq!(bottom.opacity_at(1080.0 - theme::SCRIM_BOTTOM_HOLD), peak);
         assert_eq!(bottom.opacity_at(1080.0 - theme::SCRIM_BOTTOM_CLEAR), 0.0);
+    }
+
+    /// The cast row's scrim holds its peak over the row's heading, and covers
+    /// at least what the bottom scrim covers at every row.
+    #[test]
+    fn the_cast_scrim_holds_over_the_heading_and_covers_the_bottom() {
+        let (cast, bottom) = (Scrim::cast(), Scrim::bottom());
+        assert_eq!(cast.opacity_at(640.0), theme::alpha::SCRIM_EDGE);
+        assert!((0..1080).all(|row| cast.opacity_at(row as f32) >= bottom.opacity_at(row as f32)));
     }
 
     /// Across the fade, the change from one output row to the next grows to
@@ -218,9 +240,13 @@ mod tests {
 
     /// Both scrims of one surface are the pictures its two scrims resolve to.
     #[test]
-    fn the_scrims_of_one_surface_are_its_two_pictures() {
+    fn the_scrims_of_one_surface_are_its_pictures() {
         let scrims = Scrims::for_canvas(&canvas(), 1.0);
-        for (held, scrim) in [(scrims.top, Scrim::top()), (scrims.bottom, Scrim::bottom())] {
+        for (held, scrim) in [
+            (scrims.top, Scrim::top()),
+            (scrims.bottom, Scrim::bottom()),
+            (scrims.cast, Scrim::cast()),
+        ] {
             let held = held.expect("a scrim with rows");
             let fresh = scrim.picture(&canvas(), 1.0).expect("a scrim with rows");
             assert_eq!(held.bounds, fresh.bounds);

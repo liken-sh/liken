@@ -169,6 +169,10 @@ pub const SCRIM_TOP_HOLD: f32 = 180.0;
 pub const SCRIM_TOP_CLEAR: f32 = 380.0;
 pub const SCRIM_BOTTOM_HOLD: f32 = 230.0;
 pub const SCRIM_BOTTOM_CLEAR: f32 = 450.0;
+/// The cast row's heading stands 440 rows above the foot, so its scrim holds
+/// to 470 and is clear by 700.
+pub const SCRIM_CAST_HOLD: f32 = 470.0;
+pub const SCRIM_CAST_CLEAR: f32 = 700.0;
 
 #[cfg(test)]
 mod tests {
