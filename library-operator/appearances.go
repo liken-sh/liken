@@ -50,6 +50,17 @@ var appearancesWorker = factWorker{
 	render:  func(library *Library) *RenderDevice { return library.Spec.Appearances.Render },
 	scratch: appearancesScratch,
 	work:    func(ctx context.Context, run *factWorkerRun, item workItem) { run.appearancesOne(ctx, item) },
+	quick:   appearancesQuick,
+}
+
+// Whether a video of the list needs only the match: a detections record of
+// its size is on the volume. A refresh reopens videos the worker answered
+// before, and each of those takes a second, against minutes for a decode.
+// The order reads only the record's first line, and the work itself still
+// checks the models before it skips the decode.
+func appearancesQuick(run *factWorkerRun, item workItem) bool {
+	header, read := readDetectionsHeader(filepath.Join(run.root, item.Path))
+	return read && header.Size == item.Size
 }
 
 // The gap. A feature the probe gave a length to, whose title credits an actor

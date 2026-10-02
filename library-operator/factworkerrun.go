@@ -102,6 +102,7 @@ func (w *factWorkerRun) work(ctx context.Context) error {
 		return err
 	}
 	w.logf("read %s from the %s work list", counted(len(items), "video"), w.worker.fact)
+	items = w.quickFirst(items)
 	worked, passed := 0, 0
 	unreported := ""
 	for _, item := range items {
@@ -127,6 +128,28 @@ func (w *factWorkerRun) work(ctx context.Context) error {
 	}
 	w.logf("worked on %d of the %s the list named, and passed over %d", worked, counted(len(items), "video"), passed)
 	return nil
+}
+
+// The list with the videos the fact calls quick first. Each group keeps the
+// order of the list, so the videos of one title folder stay together within
+// a group. A folder whose videos fall in both groups is rescanned once after
+// each group's run of it.
+func (w *factWorkerRun) quickFirst(items []workItem) []workItem {
+	if w.worker.quick == nil {
+		return items
+	}
+	quick, slow := []workItem{}, []workItem{}
+	for _, item := range items {
+		if w.worker.quick(w, item) {
+			quick = append(quick, item)
+		} else {
+			slow = append(slow, item)
+		}
+	}
+	if len(quick) > 0 {
+		w.logf("takes the %s that are quick to work first", counted(len(quick), "video"))
+	}
+	return append(quick, slow...)
 }
 
 // Why the worker leaves one video of the list alone, or empty where it works

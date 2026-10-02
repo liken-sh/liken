@@ -565,3 +565,25 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 		})
 	}
 }
+
+// A video is quick for the appearances worker where a detections record of
+// its size is on the volume, because the worker then runs only the match.
+func TestAVideoWithARecordOfItsSizeIsQuick(t *testing.T) {
+	root := t.TempDir()
+	video := filepath.Join(root, "Film", "Film.mkv")
+	writeFile(t, video, "film")
+	run := &factWorkerRun{root: root}
+	item := workItem{Path: "Film/Film.mkv", Size: 4}
+
+	if appearancesQuick(run, item) {
+		t.Error("a video with no record is quick")
+	}
+	writeFile(t, detectionsPath(video), detectionsLine(t, 5))
+	if appearancesQuick(run, item) {
+		t.Error("a video with a record of another size is quick")
+	}
+	writeFile(t, detectionsPath(video), detectionsLine(t, 4))
+	if !appearancesQuick(run, item) {
+		t.Error("a video with a record of its size is not quick")
+	}
+}

@@ -707,7 +707,9 @@ runs starts another one after it. The fact
 rewrites its own files and rows in place, and nothing is deleted.
 The `appearances` key works the same way: the `Job` that fills gaps
 writes the reopened videos into the worker's list, and the worker
-matches them again.
+matches them again. The worker takes the videos whose detections
+record is on the volume first, because each of them needs only the
+match.
 
 `kubectl liken library reenrich movies` writes that field for you and
 asks every fact again. Add `--only overview` to reopen one fact, and

@@ -170,6 +170,38 @@ func TestAWorkerWorksItsListAndAsksForOneRescanPerTitle(t *testing.T) {
 	}
 }
 
+// A worker whose fact names the videos that are quick to work takes those
+// first, each group in the order of the list, so a refresh that reopens
+// many quick videos answers them before the slow ones.
+func TestAWorkerTakesTheQuickVideosFirst(t *testing.T) {
+	root := t.TempDir()
+	listed := time.Now().UTC()
+	items := []workItem{
+		listedVideo(t, root, "Slow One/Slow One.mkv", "one", listed),
+		listedVideo(t, root, "Quick One/Quick One.mkv", "two", listed),
+		listedVideo(t, root, "Slow Two/Slow Two.mkv", "three", listed),
+		listedVideo(t, root, "Quick Two/Quick Two.mkv", "four", listed),
+	}
+	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, items); err != nil {
+		t.Fatal(err)
+	}
+	var worked []string
+	worker := recordingWorker(&worked)
+	worker.quick = func(_ *factWorkerRun, item workItem) bool {
+		return strings.HasPrefix(item.Path, "Quick")
+	}
+	work, _ := testFactWorker(t, worker, libraryKindMovies, root)
+
+	if err := work.work(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{items[1].Path, items[3].Path, items[0].Path, items[2].Path}
+	if !slices.Equal(worked, want) {
+		t.Errorf("worked on %v, want %v", worked, want)
+	}
+}
+
 // A title whose every video the worker passed over has nothing new for the
 // catalog, so the worker asks for no rescan of it.
 func TestAWorkerAsksForNoRescanOfATitleItPassedOver(t *testing.T) {

@@ -144,20 +144,30 @@ func detectionsPath(video string) string {
 // hashes are the evidence that its vectors compare with a gallery this image
 // embeds. A record that cannot be read is not current.
 func detectionsCurrent(video string, size int64, models string) bool {
+	header, read := readDetectionsHeader(video)
+	if !read || header.Size != size {
+		return false
+	}
+	return modelCurrent(models, header.Detector) && modelCurrent(models, header.Embedder)
+}
+
+// The first line of the record of a video, and false where there is no
+// record, or its first line is not a header of the format this worker reads.
+func readDetectionsHeader(video string) (detectionsHeader, bool) {
 	file, err := os.Open(detectionsPath(video))
 	if err != nil {
-		return false
+		return detectionsHeader{}, false
 	}
 	defer file.Close()
 	line, err := bufio.NewReader(file).ReadBytes('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return false
+		return detectionsHeader{}, false
 	}
 	var header detectionsHeader
-	if json.Unmarshal(line, &header) != nil || header.Format != detectionsFormat || header.Size != size {
-		return false
+	if json.Unmarshal(line, &header) != nil || header.Format != detectionsFormat {
+		return detectionsHeader{}, false
 	}
-	return modelCurrent(models, header.Detector) && modelCurrent(models, header.Embedder)
+	return header, true
 }
 
 // Whether the image holds the model a record names: a file of that name in

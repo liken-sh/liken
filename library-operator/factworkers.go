@@ -38,6 +38,11 @@ type factWorker struct {
 	// The work on one video of the list: the fact's outputs and its attempt
 	// in the ledger, whatever the outcome.
 	work func(ctx context.Context, run *factWorkerRun, item workItem)
+	// Whether one video of the list is quick to work, and nil where every
+	// video takes the same work. The worker takes the quick videos first,
+	// so a list that a refresh filled with them answers them in minutes
+	// and not after the slow ones.
+	quick func(run *factWorkerRun, item workItem) bool
 }
 
 // The heavy facts, in the order the operator considers them.
