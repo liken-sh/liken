@@ -29,9 +29,18 @@
 #
 # To capture one frame of the nested screen:
 #   docker exec -e XDG_RUNTIME_DIR=/sockets -e WAYLAND_DISPLAY=wayland-0 \
-#     <the container this script names> weston-screenshooter
+#     -w /sockets <the container this script names> weston-screenshooter
 #
-# The frame lands in the socket directory this script prints.
+# The frame lands in the socket directory this script prints. The capture
+# waits for the compositor's next repaint, and the nested compositor repaints
+# only when the desktop asks it for a frame. A locked or idle desktop asks
+# for none, and the capture then waits for ever.
+#
+# LOCAL_VIDEO_HEADLESS=1 runs the compositor with no window, on the headless
+# backend, so a capture works with no desktop at all. Nothing shows on screen,
+# and the keyboard reaches nothing, so the presses go to mpv's socket as
+# script messages instead:
+#   {"command":["script-message","up"]}
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
@@ -56,7 +65,8 @@ if [ ! -f "$film" ]; then
   echo "local/video: not a file: $film" >&2
   exit 1
 fi
-if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+HEADLESS="${LOCAL_VIDEO_HEADLESS:-}"
+if [ -z "$HEADLESS" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
   echo "local/video: no Wayland session to nest the compositor in" >&2
   exit 1
 fi
@@ -84,8 +94,10 @@ if [ -z "$PRESENTATIONS" ]; then
   # back to mpv's own media-title for the name. The {} fallback covers a
   # failed build or run, so the window still opens with no metadata. go -C
   # runs local/present from the repository root, where a relative film path
-  # names another file, so the path is made absolute first.
-  BLOCK="$(go -C "$root" run ./local/present "$(realpath "$film")" || true)"
+  # names another file, so the path is made absolute first. -s keeps a
+  # symlink as it is: a film linked into a staging folder reads the art and
+  # the .liken files of that folder, not of the folder the link points at.
+  BLOCK="$(go -C "$root" run ./local/present "$(realpath -s "$film")" || true)"
   [ -n "$BLOCK" ] || BLOCK="{}"
   PRESENTATIONS="[$BLOCK]"
 fi
@@ -166,18 +178,28 @@ groups=()
 for node in /dev/dri/card* /dev/dri/renderD*; do
   groups+=(--group-add "$(stat -c '%g' "$node")")
 done
+# The headless backend draws into no window, so it needs no desktop socket.
+# It renders with GL, because mpv hands the compositor dmabufs, and only the
+# GL renderer takes them.
+if [ -n "$HEADLESS" ]; then
+  backend=(--backend=headless --renderer=gl)
+  desktop=()
+else
+  backend=(--backend=wayland)
+  desktop=(-v "$HOST_RUNTIME/$WAYLAND_DISPLAY:/sockets/host-wayland"
+    -e WAYLAND_DISPLAY=host-wayland)
+fi
 docker run -d --name "$CONTAINER" \
   --user "$(id -u):$(id -g)" \
   "${groups[@]}" \
   -v "$SOCKETS:/sockets" \
   -v "$here/weston-nested/weston.ini:/config/weston.ini:ro" \
-  -v "$HOST_RUNTIME/$WAYLAND_DISPLAY:/sockets/host-wayland" \
+  "${desktop[@]}" \
   -e XDG_RUNTIME_DIR=/sockets \
-  -e WAYLAND_DISPLAY=host-wayland \
   -e LIKEN_LAYOUT_SOCKET=/sockets/layout.sock \
   --device /dev/dri:/dev/dri \
   local-video-weston:latest \
-  --backend=wayland --config=/config/weston.ini --socket=wayland-0 \
+  "${backend[@]}" --config=/config/weston.ini --socket=wayland-0 \
   --width=1920 --height=1080 --debug >/dev/null
 WESTON=1
 echo "local/video: compositor container $CONTAINER"

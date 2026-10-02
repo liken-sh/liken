@@ -721,6 +721,12 @@ pub struct Presentation {
     pub art: String,
     /// The trickplay path, relative to the library root.
     pub trickplay: String,
+    /// The spans file the appearances fact wrote for the main file, and
+    /// the library's .contributors directory that the spans file names each
+    /// portrait under, both relative to the library root. Both are empty
+    /// for a file the fact found no faces in.
+    pub appearances: String,
+    pub contributors: String,
     /// Every span the catalog holds for the main file, in the order the
     /// marks ledger holds them.
     pub marks: Vec<Mark>,

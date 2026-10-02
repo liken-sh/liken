@@ -450,7 +450,9 @@ impl UpNext {
     }
 }
 
-fn card_x(canvas: &Canvas) -> f32 {
+/// The card's left edge, which the cast row ends short of while the card
+/// stands.
+pub fn card_x(canvas: &Canvas) -> f32 {
     canvas.right() - CARD_W
 }
 

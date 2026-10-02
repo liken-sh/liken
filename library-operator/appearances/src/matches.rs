@@ -8,10 +8,11 @@
 // The document names each face at its keyframe's time with the person, the
 // similarity, and the next person's similarity, so a reader can raise the
 // threshold or the margin without running the match again. It holds
-// observations at keyframes, not spans. A span from one keyframe to the
-// next is an inference that a reader draws.
+// observations at keyframes, not spans. The match also writes each video's
+// spans for the liken display (player.rs), which draws a span from one
+// keyframe to the next.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use crate::film_gallery::{self, Naming};
 use crate::gallery::{self, Gallery, HEADSHOT_SIDE, Headshot};
 use crate::matcher;
 use crate::models;
+use crate::player;
 use crate::record::{self, Model, Record};
 use crate::runtime::{Detector, Embedder, Engine, Error};
 
@@ -233,7 +235,44 @@ pub fn run(
     )?;
     fs::create_dir_all(gallery_path(title).parent().unwrap())?;
     fs::write(gallery_path(title), serde_json::to_vec_pretty(&gallery)?)?;
-    matches(&gallery, &records(title)?, naming)
+    let records = records(title)?;
+    let found = matches(&gallery, &records, naming)?;
+    write_spans(title, &root, &gallery, &records, &found)?;
+    Ok(found)
+}
+
+// The player's file of each video the document names. It is written whole
+// on every match, so it always follows the latest gallery and the latest
+// rule, and a file that names nobody still replaces an older one.
+fn write_spans(
+    title: &Path,
+    root: &Path,
+    gallery: &Gallery,
+    records: &[Record],
+    found: &Matches,
+) -> Result<(), Error> {
+    let entries: HashMap<String, player::Entry> = gallery
+        .people
+        .iter()
+        .map(|p| (p.contributor.clone(), player::entry(root, &p.contributor)))
+        .collect();
+    for record in records {
+        let Some(file) = found.files.get(&record.header.video) else {
+            continue;
+        };
+        let spans = player::spans(
+            record,
+            &file.observations,
+            &gallery.people,
+            &entries,
+            player::released(title, &record.header.video),
+        );
+        let path = player::path(title, &record.header.video);
+        let partial = path.with_extension("json.partial");
+        fs::write(&partial, serde_json::to_vec(&spans)?)?;
+        fs::rename(&partial, &path)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

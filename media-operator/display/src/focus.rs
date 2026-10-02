@@ -4,6 +4,7 @@
 
 use serde_json::json;
 
+use crate::cast::Cast;
 use crate::fade::{Clock, Fade, Hide};
 use crate::film::Film;
 use crate::images;
@@ -46,9 +47,12 @@ impl Action {
 /// The up-next offer is the stop above the scrubber, so up from the fine axis
 /// lands on it and down returns. The skip control is between the two while
 /// the playhead is inside an intro or a recap, because it is the one a person
-/// reaches for then.
+/// reaches for then. The cast row is the stop above the offer, because a
+/// person browses it once the film is paused, and reaches for the offer and
+/// the skip control while it plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
+    Cast,
     Next,
     Skip,
     Fine,
@@ -57,7 +61,8 @@ pub enum Stop {
     Strip,
 }
 
-const STOPS: [Stop; 6] = [
+const STOPS: [Stop; 7] = [
+    Stop::Cast,
     Stop::Next,
     Stop::Skip,
     Stop::Fine,
@@ -89,6 +94,7 @@ pub struct Parts<'a> {
     pub now: f64,
     pub upnext: &'a mut UpNext,
     pub skip: &'a mut Skip,
+    pub cast: &'a mut Cast,
 }
 
 /// Whether the display stands summoned, where the focus is, and how far the
@@ -170,6 +176,7 @@ impl Focus {
     fn stop_available(stop: Stop, parts: &Parts<'_>) -> bool {
         let film = parts.film;
         match stop {
+            Stop::Cast => parts.cast.available(film),
             Stop::Next => parts.upnext.available(),
             Stop::Skip => parts.skip.available(),
             Stop::Fine => !parts.presentation.is_image() && scrubber::fine_available(film),
@@ -183,7 +190,7 @@ impl Focus {
     /// on the skip control when it shows, so the select after the press
     /// skips.
     pub fn summon(&mut self, parts: &Parts<'_>) {
-        self.raise(parts, &[Stop::Next]);
+        self.raise(parts, &[Stop::Cast, Stop::Next]);
     }
 
     /// Show the display, landing the focus on the first present stop that is
@@ -232,7 +239,7 @@ impl Focus {
     pub fn refocus(&mut self, parts: &Parts<'_>) {
         let present = Self::present(parts);
         if self.focused.is_some_and(|stop| !present.contains(&stop)) {
-            self.focused = Self::first_present(parts, &[Stop::Next, Stop::Skip]);
+            self.focused = Self::first_present(parts, &[Stop::Cast, Stop::Next, Stop::Skip]);
         }
     }
 
@@ -251,7 +258,7 @@ impl Focus {
             return;
         }
         if paused {
-            self.raise(parts, &[Stop::Next, Stop::Skip]);
+            self.raise(parts, &[Stop::Cast, Stop::Next, Stop::Skip]);
             self.clock.ask(Hide::Cancel);
         } else if self.summoned {
             self.dismiss(parts);
@@ -289,6 +296,16 @@ impl Focus {
             // The offer and the skip control are each one thing to take, so
             // they answer select and nothing else.
             Some(Stop::Next | Stop::Skip) | None => Vec::new(),
+            // The cast row moves its own focus, and select falls through to
+            // play-pause, so the press that resumes the film resumes it.
+            Some(Stop::Cast) => {
+                match action {
+                    Action::Left => parts.cast.step(-1, parts.film),
+                    Action::Right => parts.cast.step(1, parts.film),
+                    _ => {}
+                }
+                Vec::new()
+            }
             Some(Stop::Fine) => {
                 match action {
                     Action::Left => parts.scrubber.seek(-1.0, parts.now, parts.film),
@@ -436,6 +453,7 @@ mod tests {
         now: f64,
         upnext: UpNext,
         skip: Skip,
+        cast: Cast,
     }
 
     impl Display {
@@ -467,6 +485,7 @@ mod tests {
                 now: 100.0,
                 upnext: UpNext::default(),
                 skip: Skip::default(),
+                cast: Cast::default(),
             }
         }
 
@@ -497,6 +516,7 @@ mod tests {
                 now: self.now,
                 upnext: &mut self.upnext,
                 skip: &mut self.skip,
+                cast: &mut self.cast,
             }
         }
 

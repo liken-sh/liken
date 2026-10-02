@@ -32,8 +32,8 @@ func mustMatch[T comparable](t *testing.T, got, want T) {
 	}
 }
 
-// fixture writes a media folder under t.TempDir(). Each key is a name in the
-// folder, and a name that ends with a slash becomes a directory.
+// fixture writes a media folder under t.TempDir(). Each key is a path in the
+// folder, and a path that ends with a slash becomes a directory.
 func fixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -43,6 +43,7 @@ func fixture(t *testing.T, files map[string]string) string {
 			mustSucceed(t, os.MkdirAll(path, 0o755))
 			continue
 		}
+		mustSucceed(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		mustSucceed(t, os.WriteFile(path, []byte(content), 0o644))
 	}
 	return dir
@@ -184,6 +185,21 @@ func TestPresentationBlock(t *testing.T) {
 			files: map[string]string{"film.mkv": "", "movie.nfo": movieNFO, "film-clearlogo.png": "", "film.trickplay/": ""},
 			media: "film.mkv",
 			want:  `{"type":"video","hint":"movie","title":"The Film","year":1999,"logo":"{dir}/film-clearlogo.png","trickplay":"{dir}/film.trickplay"}`,
+		},
+		{
+			name: "the spans file and the library's .contributors join the block",
+			files: map[string]string{
+				"Film/film.mkv": "", ".contributors/": "",
+				"Film/.liken/appearances/film.mkv.spans.json": "{}",
+			},
+			media: "Film/film.mkv",
+			want:  `{"appearances":"{dir}/Film/.liken/appearances/film.mkv.spans.json","contributors":"{dir}/.contributors"}`,
+		},
+		{
+			name:  "no spans file leaves out the .contributors too",
+			files: map[string]string{"Film/film.mkv": "", ".contributors/": ""},
+			media: "Film/film.mkv",
+			want:  `{}`,
 		},
 	}
 

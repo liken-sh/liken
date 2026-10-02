@@ -107,6 +107,8 @@ fn presentation(presentation: &Presentation) -> Value {
         ("date", &presentation.date),
         ("art", &presentation.art),
         ("trickplay", &presentation.trickplay),
+        ("appearances", &presentation.appearances),
+        ("contributors", &presentation.contributors),
     ] {
         if !text.is_empty() {
             object.insert(name.into(), Value::from(text.as_str()));
@@ -199,6 +201,22 @@ mod tests {
                 }],
             })
         );
+    }
+
+    /// A film the appearances fact found faces in names its spans file and
+    /// the library's .contributors directory, as paths under the root.
+    #[test]
+    fn a_request_carries_the_spans_file_and_the_contributors() {
+        let mut item = movie();
+        item.presentation.appearances =
+            "Some Film (1999)/.liken/appearances/Some Film (1999).mkv.spans.json".into();
+        item.presentation.contributors = ".contributors".into();
+        let presentation = &decoded("default/films", &[item])["items"][0]["presentation"];
+        assert_eq!(
+            presentation["appearances"],
+            "Some Film (1999)/.liken/appearances/Some Film (1999).mkv.spans.json"
+        );
+        assert_eq!(presentation["contributors"], ".contributors");
     }
 
     /// A trailer names the part it plays in the work, and the request

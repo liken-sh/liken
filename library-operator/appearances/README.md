@@ -18,6 +18,9 @@ volume. The tool has three commands:
   ledger in `.liken/`. `--credits FILE` names another credits file to
   read the cast from. The credits fact credits a series and not its
   episodes, so the match of a season folder names the series' file.
+  `match` also writes `.liken/appearances/<video>.spans.json` for each
+  video, the file the liken display reads when the film pauses. The
+  section [The spans file](#the-spans-file) gives its shape.
 - `appearances review <title folder>` is a development tool. It runs no
   model and writes nothing into the title's folder.
 
@@ -153,6 +156,44 @@ again.
 writes, so the crate keeps `serde_yaml_ng`. The tool reads the cast from
 the volume, the same source the operator reads, and a review on a
 workstation needs no operator to supply it.
+
+## The spans file
+
+The liken display shows the credited people on screen when a film
+pauses. It reads finished spans and does no matching, merging, or
+ordering of its own, so `match` writes one file per video in this shape:
+
+    {
+      "format": "liken.sh/appearances/spans/v1",
+      "released": "2009-10-10",
+      "people": {
+        "jo/john-cusack": {
+          "name": "John Cusack", "character": "Jackson Curtis",
+          "portrait": "jo/john-cusack/headshot.jpg", "born": "1966-06-28"
+        }
+      },
+      "spans": [
+        {"start": 2993.991, "end": 2995.284,
+         "people": ["jo/john-cusack", "am/amanda-peet", "to/tom-mccarthy"]}
+      ]
+    }
+
+A span is a run of keyframes that name the same people, from the first
+keyframe's time to the time of the keyframe after the run. A run that
+names nobody is no span. A span lists its people left to right by the
+average place of their faces across its keyframes, so the cards read in
+the order the people stand in the picture.
+
+Each person is keyed by their entry's path under `.contributors/`, and
+`portrait` is a path under the same directory. `released` is the
+`<premiered>` date of the video's own `.nfo`, or of `movie.nfo`, and
+`born` and `died` come from the entry's `contributor.yaml`. The file
+holds dates and not ages, because an age changes every year and the
+display works it out against its own clock. A field with no value is
+left out.
+
+The file is written whole on every match, so it follows the latest
+gallery and the latest rule.
 
 ## A review
 

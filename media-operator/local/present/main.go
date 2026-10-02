@@ -11,6 +11,9 @@ package main
 //
 // When a logo art file or a trickplay directory sits beside the media, the
 // block carries its path, so the display decodes the art and crops the tiles.
+// When the appearances fact's spans file sits in .liken/appearances/ beside
+// the media, the block carries it and the library's .contributors directory,
+// so the display shows the people on screen when the film pauses.
 //
 // The art does not need an NFO. With no NFO the block starts empty, and the
 // display falls back to mpv's own media-title for the name. The art fields are
@@ -42,6 +45,8 @@ type block struct {
 	Date         string `json:"date,omitempty"`
 	Logo         string `json:"logo,omitempty"`
 	Trickplay    string `json:"trickplay,omitempty"`
+	Appearances  string `json:"appearances,omitempty"`
+	Contributors string `json:"contributors,omitempty"`
 }
 
 // An NFO is read as the direct children of its root, so the root tag itself
@@ -158,6 +163,28 @@ func findTrickplay(media string) string {
 	return absolute(trickplay)
 }
 
+// findAppearances returns the spans file the appearances fact writes for the
+// media, as an absolute path, and the .contributors directory of the library
+// that holds the media, the nearest one at or above the media's folder. The
+// spans file names each portrait by its path under that directory. Both are
+// empty unless both exist, because the display can draw a card only with
+// its portrait.
+func findAppearances(media string) (string, string) {
+	spans := filepath.Join(filepath.Dir(media), ".liken", "appearances", filepath.Base(media)+".spans.json")
+	if !exists(spans) {
+		return "", ""
+	}
+	for dir := filepath.Dir(absolute(media)); ; dir = filepath.Dir(dir) {
+		contributors := filepath.Join(dir, ".contributors")
+		if info, err := os.Stat(contributors); err == nil && info.IsDir() {
+			return absolute(spans), contributors
+		}
+		if dir == filepath.Dir(dir) {
+			return "", ""
+		}
+	}
+}
+
 func stemOf(media string) string {
 	name := filepath.Base(media)
 	return strings.TrimSuffix(name, filepath.Ext(name))
@@ -254,6 +281,7 @@ func presentationBlock(media string) (block, error) {
 	}
 	made.Logo = findLogo(media)
 	made.Trickplay = findTrickplay(media)
+	made.Appearances, made.Contributors = findAppearances(media)
 	return made, nil
 }
 

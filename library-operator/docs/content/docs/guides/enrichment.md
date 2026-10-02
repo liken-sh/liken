@@ -306,11 +306,25 @@ because their entry holds no headshot or the detector found no face in
 it. A failed pass is an `error` attempt whose `reason` holds the tool's
 own error text, and the worker tries the file again after a day.
 
+The match also writes `.liken/appearances/<file>.spans.json` beside
+the video, for the screens. It holds spans, not keyframes: each run of
+keyframes that names the same actors, with the actors left to right in
+the order they stand in the picture, and each actor's name, character,
+headshot, and dates. When a person plays a video whose answer is
+`found`, the screen's browser names the spans file and the library's
+`.contributors/` in the `Play`. The display then shows who is on screen
+when the film pauses. The
+[tool's README](https://github.com/liken-sh/liken/tree/main/library-operator/appearances#the-spans-file)
+gives the file's shape.
+
 A found answer stands until a new file replaces the video at its path.
 The answer does not change when a headshot or the credits change. To
 match a title again, delete its `.liken/appearances.yaml`. The next
 walk opens the gap, and the worker uses the detections records on the
-volume and runs only the match.
+volume and runs only the match. To match every title again, set
+`spec.refresh.appearances` to the current time, as the
+[When a fact asks again](#when-a-fact-asks-again) section describes
+for every fact.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=appearances
 

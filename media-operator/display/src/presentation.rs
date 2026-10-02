@@ -166,6 +166,19 @@ impl Presentation {
         self.word("trickplay")
     }
 
+    /// The spans file the appearances fact wrote for the item, which names
+    /// the people on screen in each span. Nothing means the item shows no
+    /// cast row.
+    pub fn appearances(&self) -> Option<&str> {
+        self.word("appearances")
+    }
+
+    /// The library's .contributors directory, which the spans file names
+    /// each portrait under.
+    pub fn contributors(&self) -> Option<&str> {
+        self.word("contributors")
+    }
+
     /// The cover reference, resolved the way the logo is. It is the first tier
     /// of the art the music layout draws, and the picture inside the file and a
     /// cover beside it follow.

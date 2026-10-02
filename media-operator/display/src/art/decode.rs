@@ -94,6 +94,26 @@ pub fn scale(source: &DynamicImage, box_w: u32, box_h: u32) -> Option<Bitmap> {
     Bitmap::from_rgba(width, height, scaled.into_raw())
 }
 
+/// Decode one picture and fill the box with it. The picture scales until it
+/// covers the box, keeping its ratio, and the overflow is cut away: the sides
+/// evenly, and the top and the bottom one to four. A portrait holds the face
+/// in its upper part, so a tall headshot cut to a shorter box keeps the face
+/// and loses the chest.
+pub fn fill(bytes: &[u8], box_w: u32, box_h: u32) -> Option<Bitmap> {
+    let source = read(bytes)?;
+    let (source_w, source_h) = (source.width(), source.height());
+    if source_w == 0 || source_h == 0 || box_w == 0 || box_h == 0 {
+        return None;
+    }
+    let ratio =
+        (f64::from(box_w) / f64::from(source_w)).max(f64::from(box_h) / f64::from(source_h));
+    let crop_w = ((f64::from(box_w) / ratio).round() as u32).clamp(1, source_w);
+    let crop_h = ((f64::from(box_h) / ratio).round() as u32).clamp(1, source_h);
+    let x = (source_w - crop_w) / 2;
+    let y = (source_h - crop_h) / 5;
+    scale(&source.crop_imm(x, y, crop_w, crop_h), box_w, box_h)
+}
+
 /// One picture with every channel scaled by its own alpha.
 fn premultiplied(source: &DynamicImage) -> RgbaImage {
     let mut pixels = source.to_rgba8();
@@ -203,6 +223,23 @@ pub(super) mod tests {
     }
 
     /// A picture with no pixels, and a box with no pixels, decode nothing.
+    /// A tall portrait fills a shorter box to its edges, and the cut keeps
+    /// more of the top than of the bottom: a picture red above its middle
+    /// and blue below comes back red at its middle.
+    #[test]
+    fn a_portrait_fills_the_box_and_keeps_its_upper_part() {
+        let mut picture = RgbaImage::from_pixel(60, 120, Rgba([0, 0, 255, 255]));
+        for y in 0..52 {
+            for x in 0..60 {
+                picture.put_pixel(x, y, Rgba([255, 0, 0, 255]));
+            }
+        }
+        let bytes = encoded_from(&picture, ImageFormat::Png);
+        let bitmap = fill(&bytes, 60, 80).expect("a portrait fills the box");
+        assert_eq!((bitmap.width, bitmap.height), (60, 80));
+        assert_eq!(centre(&bitmap), [255, 0, 0, 255]);
+    }
+
     #[test]
     fn a_source_or_a_box_with_no_pixels_decodes_nothing() {
         let source = DynamicImage::ImageRgba8(RgbaImage::new(0, 0));

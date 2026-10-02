@@ -376,6 +376,39 @@ func TestResolveOneClaimCostsOneMount(t *testing.T) {
 	}
 }
 
+// A film's spans file sits in the film's folder and the portraits it names
+// sit in the library's .contributors directory, so the one nfs mount widens
+// to the library's root, and both rewrite under it.
+func TestResolveTheAppearancesAndTheirPortraitsShareTheLibraryMount(t *testing.T) {
+	resolved, err := resolvePlay("house", []PlayItem{{
+		URI: "nfs://nas/movies/Action/Film/Film.mkv",
+		Presentation: &Presentation{
+			Appearances:  "nfs://nas/movies/Action/Film/.liken/appearances/Film.mkv.spans.json",
+			Contributors: "nfs://nas/movies/.contributors",
+		},
+	}}, nil, frame{})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/media/1/Action/Film/Film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
+		t.Errorf("items = %v, want %v", resolved.Items, want)
+	}
+	if want := []string{"/media/1/Action/Film/.liken/appearances/Film.mkv.spans.json"}; !reflect.DeepEqual(resolved.Appearances, want) {
+		t.Errorf("appearances = %v, want %v", resolved.Appearances, want)
+	}
+	if want := []string{"/media/1/.contributors"}; !reflect.DeepEqual(resolved.Contributors, want) {
+		t.Errorf("contributors = %v, want %v", resolved.Contributors, want)
+	}
+	volumes := []Volume{{
+		Name: "media-1",
+		NFS:  &NFSVolumeSource{Server: "nas", Path: "/movies", ReadOnly: true},
+	}}
+	if !reflect.DeepEqual(resolved.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
+	}
+}
+
 // Two claims cost two mounts, numbered by first appearance in the
 // playlist.
 func TestResolveMountsOneVolumePerClaim(t *testing.T) {

@@ -487,10 +487,11 @@ type PlayItem struct {
 // display renders an item the way the library that fed liken describes
 // it, not the way a container's tags happen to read.
 //
-// It carries the text fields and two art references, the logo and the
-// trickplay directory. The resolver rewrites each the way it rewrites the
-// media URI, so an nfs reference or a claim reference shares the media's
-// mount and an https reference stays a URL.
+// It carries the text fields and the references to files beside the media:
+// the logo, the cover, the trickplay directory, the appearances' spans, and
+// the library's .contributors directory. The resolver rewrites each the way
+// it rewrites the media URI, so an nfs reference or a claim reference shares
+// the media's mount and an https reference stays a URL.
 type Presentation struct {
 	Type string `json:"type,omitempty"`
 	Hint string `json:"hint,omitempty"`
@@ -524,6 +525,17 @@ type Presentation struct {
 	// logo is. The display shows a tile from its sprite sheets on the scrub
 	// cursor.
 	Trickplay string `json:"trickplay,omitempty"`
+
+	// A reference to the item's spans file, the X.spans.json that the
+	// library's appearances fact writes in .liken/appearances/ beside the
+	// video, resolved the way the logo is. When the film pauses, the display
+	// shows the credited people on screen at the playhead.
+	Appearances string `json:"appearances,omitempty"`
+
+	// A reference to the library's .contributors directory, resolved the way
+	// the logo is. The spans file names each person's portrait by its path
+	// under this directory, so the display reads the portraits from here.
+	Contributors string `json:"contributors,omitempty"`
 
 	// The spans in the file where the intro, the recap, the credits, the
 	// scene after the credits, and the preview are. A community database

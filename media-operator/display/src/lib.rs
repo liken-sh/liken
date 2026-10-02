@@ -3,6 +3,7 @@
 
 pub mod art;
 pub mod canvas;
+pub mod cast;
 pub mod chooser;
 pub mod clock;
 pub mod fade;

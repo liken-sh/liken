@@ -158,6 +158,26 @@ func TestTheArtAndTheTrickplayAreStampedOntoTheSameClaim(t *testing.T) {
 	}
 }
 
+// The spans file and the .contributors directory join the same claim as the
+// film, so the display reads the spans and the portraits they name.
+func TestTheAppearancesAndTheirPortraitsAreStampedOntoTheSameClaim(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	item := film(testFilmPath)
+	item.Presentation.Appearances = "Some Film (1999)/.liken/appearances/Some Film (1999).mkv.spans.json"
+	item.Presentation.Contributors = ".contributors"
+	publishPlay(operator, filmRequest(item))
+
+	operator.pass()
+
+	presentation := cluster.heldPlays()[0].Spec.Items[0].Presentation
+	if want := "claim://house/movies//movies/" + item.Presentation.Appearances; presentation.Appearances != want {
+		t.Errorf("appearances = %q, want %q", presentation.Appearances, want)
+	}
+	if want := "claim://house/movies//movies/.contributors"; presentation.Contributors != want {
+		t.Errorf("contributors = %q, want %q", presentation.Contributors, want)
+	}
+}
+
 // The role travels through the request untouched, because the browser
 // names a trailer with it and the display reads the word off the Play.
 func TestTheRoleTravelsThroughTheRequest(t *testing.T) {

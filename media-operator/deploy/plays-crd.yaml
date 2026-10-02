@@ -231,6 +231,22 @@ spec:
                               The X.trickplay directory URI, claim://, nfs:// or
                               https://, resolved the way the media URI is. The
                               display shows a tile from it on the scrub cursor.
+                          appearances:
+                            type: string
+                            description: >-
+                              The URI of the item's spans file, claim://,
+                              nfs:// or https://, resolved the way the media
+                              URI is. The library's appearances fact writes it
+                              as X.spans.json in .liken/appearances/ beside the
+                              video. When the film pauses, the display shows
+                              the credited people on screen at the playhead.
+                          contributors:
+                            type: string
+                            description: >-
+                              The URI of the library's .contributors
+                              directory, claim://, nfs:// or https://, resolved
+                              the way the media URI is. The spans file names
+                              each portrait by its path under it.
                           marks:
                             type: array
                             x-kubernetes-list-type: atomic

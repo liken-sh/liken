@@ -117,7 +117,7 @@ func buildPod(
 	mounts = append(mounts, resolved.Mounts...)
 	mounts = append(mounts, ipcMount())
 
-	blocks := presentationBlocks(play.Spec.Items, resolved.Logos, resolved.Trickplays, resolved.Arts)
+	blocks := presentationBlocks(play.Spec.Items, resolved)
 	next := nextBlock(play.Spec.Next, resolved.Next)
 
 	container := Container{
@@ -389,8 +389,9 @@ func displaySidecar(
 //
 // Each block carries the resolved logo for its item, so the display reads an
 // nfs or claim logo by an in-pod path and fetches an https logo by its URL.
-// The cover art resolves the same way.
-func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) string {
+// The cover art, the trickplay directory, the spans file, and the
+// .contributors directory resolve the same way.
+func presentationBlocks(items []PlayItem, resolved resolution) string {
 	blocks := make([]json.RawMessage, len(items))
 	for index, item := range items {
 		if item.Presentation == nil {
@@ -398,14 +399,20 @@ func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) stri
 			continue
 		}
 		block := *item.Presentation
-		if index < len(logos) {
-			block.Logo = logos[index]
+		if index < len(resolved.Logos) {
+			block.Logo = resolved.Logos[index]
 		}
-		if index < len(trickplays) {
-			block.Trickplay = trickplays[index]
+		if index < len(resolved.Trickplays) {
+			block.Trickplay = resolved.Trickplays[index]
 		}
-		if index < len(arts) {
-			block.Art = arts[index]
+		if index < len(resolved.Arts) {
+			block.Art = resolved.Arts[index]
+		}
+		if index < len(resolved.Appearances) {
+			block.Appearances = resolved.Appearances[index]
+		}
+		if index < len(resolved.Contributors) {
+			block.Contributors = resolved.Contributors[index]
 		}
 		encoded, err := json.Marshal(block)
 		if err != nil {

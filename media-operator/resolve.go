@@ -47,6 +47,11 @@ type resolution struct {
 	// resolves the way the logo does, and an item with no art has an empty
 	// string.
 	Arts []string
+	// Appearances and Contributors are the resolved spans file and
+	// .contributors directory for each item, in spec order. They resolve the
+	// way the logo does, and an item with neither has empty strings.
+	Appearances  []string
+	Contributors []string
 	// Next is the resolved art of the Play's next block. It is empty for a
 	// Play that carries no next block, and for a block that names no art.
 	Next    string
@@ -120,6 +125,8 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext, screen fram
 	logoRefs := make([]resolvedRef, len(items))
 	trickRefs := make([]resolvedRef, len(items))
 	artRefs := make([]resolvedRef, len(items))
+	appearanceRefs := make([]resolvedRef, len(items))
+	contributorRefs := make([]resolvedRef, len(items))
 
 	var mountOrder []mountKey
 	seen := map[mountKey]bool{}
@@ -159,11 +166,13 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext, screen fram
 		mediaRefs[index] = media
 		register(media)
 
-		logo, trickplay, cover := "", "", ""
+		logo, trickplay, cover, appearances, contributors := "", "", "", "", ""
 		if item.Presentation != nil {
 			logo = item.Presentation.Logo
 			trickplay = item.Presentation.Trickplay
 			cover = item.Presentation.Art
+			appearances = item.Presentation.Appearances
+			contributors = item.Presentation.Contributors
 		}
 		if logo != "" {
 			art, err := parseArt(logo, namespace)
@@ -188,6 +197,22 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext, screen fram
 			}
 			artRefs[index] = art
 			register(art)
+		}
+		if appearances != "" {
+			spans, err := parseArt(appearances, namespace)
+			if err != nil {
+				return resolution{}, err
+			}
+			appearanceRefs[index] = spans
+			register(spans)
+		}
+		if contributors != "" {
+			entries, err := parseArt(contributors, namespace)
+			if err != nil {
+				return resolution{}, err
+			}
+			contributorRefs[index] = entries
+			register(entries)
 		}
 	}
 
@@ -243,11 +268,15 @@ func resolvePlay(namespace string, items []PlayItem, next *PlayNext, screen fram
 	resolved.Logos = make([]string, len(items))
 	resolved.Trickplays = make([]string, len(items))
 	resolved.Arts = make([]string, len(items))
+	resolved.Appearances = make([]string, len(items))
+	resolved.Contributors = make([]string, len(items))
 	for index := range items {
 		resolved.Items[index] = rewrite(mediaRefs[index])
 		resolved.Logos[index] = rewrite(logoRefs[index])
 		resolved.Trickplays[index] = rewrite(trickRefs[index])
 		resolved.Arts[index] = rewrite(artRefs[index])
+		resolved.Appearances[index] = rewrite(appearanceRefs[index])
+		resolved.Contributors[index] = rewrite(contributorRefs[index])
 	}
 	resolved.Next = rewrite(nextRef)
 	return resolved, nil
@@ -477,7 +506,8 @@ func parseRef(raw, namespace string) (resolvedRef, error) {
 	}
 }
 
-// parseArt classifies one art URI: a logo, a trickplay sheet, or a cover.
+// parseArt classifies one URI of a file beside the media: a logo, a trickplay
+// sheet, a cover, a spans file, or the .contributors directory.
 // A pattern is a video to play, not a picture to draw, so an art field
 // that names one fails the Play.
 func parseArt(raw, namespace string) (resolvedRef, error) {

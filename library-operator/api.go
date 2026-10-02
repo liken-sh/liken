@@ -745,6 +745,12 @@ type PlayPresentation struct {
 	Date         string `json:"date,omitempty"`
 	Art          string `json:"art,omitempty"`
 	Trickplay    string `json:"trickplay,omitempty"`
+	// Appearances is the spans file the appearances fact wrote for the item's
+	// file, and Contributors is the library's .contributors directory, which
+	// the spans file names each portrait under. The display reads both when
+	// the film pauses, to show who is on screen.
+	Appearances  string `json:"appearances,omitempty"`
+	Contributors string `json:"contributors,omitempty"`
 	// Marks are the spans of the item's file that the catalog's marks fact
 	// holds: every candidate of every provider, in ledger order. The display
 	// merges the candidates and acts on the result, so the operator carries

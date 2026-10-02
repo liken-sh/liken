@@ -109,6 +109,12 @@ pub const FADE_TICK: Duration = Duration::from_nanos(16_666_667);
 /// window, each on its own timer.
 pub const IDLE_HIDE: Duration = Duration::from_secs(4);
 
+/// The up-next card rises on its own near the end of a work, not on a press,
+/// so a viewer may not be looking when it arrives. It stays up for this
+/// window, long enough to notice it, read the title, and reach for the
+/// remote, before it fades.
+pub const CARD_HIDE: Duration = Duration::from_secs(10);
+
 /// The type scale, in canvas pixels. The sizes are large enough to read from
 /// a couch at 1080. Each number is a line box, the measure the display
 /// states as an ASS `\\fs`, and [`type_size`] turns one into the size the

@@ -184,6 +184,57 @@ fn a_movie_carries_the_marks_of_its_main_file() {
     );
 }
 
+// One attempt of the appearances fact on one file, as the walk writes it off
+// the ledger.
+fn insert_appearances_attempt(path: &Path, file: &str, result: &str) {
+    Connection::open(path)
+        .unwrap()
+        .execute(
+            "INSERT OR REPLACE INTO attempts (library, item, concern, at, result) \
+             VALUES ('default/films', ?, 'appearances', 1, ?)",
+            (file, result),
+        )
+        .unwrap();
+}
+
+// A file the appearances fact found faces in carries its spans file and
+// the library's .contributors directory, and a file with no such attempt
+// carries neither.
+#[test]
+fn a_movie_the_appearances_fact_found_carries_its_spans_file() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/The Lantern.mkv",
+        "movie:tmdb:7001",
+    );
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let bare = source.play("default/films", &movie_chosen());
+    assert_eq!(bare[0].presentation.appearances, "");
+    assert_eq!(bare[0].presentation.contributors, "");
+
+    insert_appearances_attempt(&path, "The Lantern/The Lantern.mkv", "error");
+    let failed = source.play("default/films", &movie_chosen());
+    assert_eq!(failed[0].presentation.appearances, "");
+
+    insert_appearances_attempt(&path, "The Lantern/The Lantern.mkv", "found");
+    let found = source.play("default/films", &movie_chosen());
+    assert_eq!(
+        found[0].presentation.appearances,
+        "The Lantern/.liken/appearances/The Lantern.mkv.spans.json"
+    );
+    assert_eq!(found[0].presentation.contributors, ".contributors");
+}
+
 // An episode's item carries the spans of its own file.
 #[test]
 fn an_episode_carries_the_marks_of_its_file() {

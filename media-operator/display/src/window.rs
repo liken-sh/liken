@@ -16,6 +16,7 @@ use tokio::sync::{broadcast, watch};
 
 use crate::art::{self, Answer, Art, Job};
 use crate::canvas::{Brush, Canvas, Scrims};
+use crate::cast::{Cast, Spans};
 use crate::fade::Hide;
 use crate::film::Film;
 use crate::focus::{Focus, Parts, Stop};
@@ -56,6 +57,9 @@ pub enum Message {
     Resized(Size),
     /// The window's scale factor, the output pixels one logical pixel covers.
     Rescaled(f32),
+    /// One item's spans file came back from the blocking pool, with the
+    /// count of the item that asked for it.
+    Cast(u64, Option<Spans>),
     /// The idle window ran out. The count says which summon armed it, so a
     /// window a later summon replaced dismisses nothing.
     Hide(u64),
@@ -68,23 +72,32 @@ pub enum Message {
     Art(Answer),
 }
 
-/// One hide window: how many have been armed, and which one stands. A window a
-/// later change replaced takes nothing down, so each one carries the count of
-/// the change that armed it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// One hide window: how long it waits, how many have been armed, and which one
+/// stands. A window a later change replaced takes nothing down, so each one
+/// carries the count of the change that armed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Idle {
+    wait: Duration,
     count: u64,
     armed: Option<u64>,
 }
 
 impl Idle {
+    fn new(wait: Duration) -> Self {
+        Self {
+            wait,
+            count: 0,
+            armed: None,
+        }
+    }
+
     fn arm(&mut self, hide: Hide, wrap: fn(u64) -> Message) -> Task<Message> {
         match hide {
             Hide::Arm => {
                 self.count += 1;
                 let at = self.count;
                 self.armed = Some(at);
-                Task::perform(tokio::time::sleep(theme::IDLE_HIDE), move |()| wrap(at))
+                Task::perform(tokio::time::sleep(self.wait), move |()| wrap(at))
             }
             Hide::Cancel => {
                 self.armed = None;
@@ -121,6 +134,7 @@ pub struct Display {
     upnext: UpNext,
     skip: Skip,
     volume: Volume,
+    cast: Cast,
     art: Art,
     /// The hide windows the display, the card, and the row wait out, each on
     /// its own clock and none reading another's.
@@ -184,10 +198,11 @@ impl Display {
             upnext: UpNext::default(),
             skip: Skip::default(),
             volume: Volume::default(),
+            cast: Cast::default(),
             art: Art::default(),
-            idle: Idle::default(),
-            card: Idle::default(),
-            row: Idle::default(),
+            idle: Idle::new(theme::IDLE_HIDE),
+            card: Idle::new(theme::CARD_HIDE),
+            row: Idle::new(theme::IDLE_HIDE),
             started: Instant::now(),
             signature: None,
             canvas,
@@ -254,6 +269,11 @@ impl Display {
                 }
             }
             Message::Hide(_) => {}
+            Message::Cast(item, spans) => {
+                if self.cast.on_read(item, spans) {
+                    self.redraw();
+                }
+            }
             Message::Art(answer) => {
                 let (changed, jobs) = self.art.on_answer(answer);
                 if changed {
@@ -321,6 +341,7 @@ impl Display {
             now,
             upnext: &mut self.upnext,
             skip: &mut self.skip,
+            cast: &mut self.cast,
         }
     }
 
@@ -355,6 +376,15 @@ impl Display {
             // The new item's marks may place the playhead inside a span, or
             // outside the one the last item offered.
             self.follow_marks();
+            let read = self.cast.on_item(
+                self.presentation.appearances(),
+                self.presentation.contributors(),
+            );
+            if let Some((item, path)) = read {
+                self.focus = focus;
+                self.redraw();
+                return Task::batch([self.windows(), read_spans(item, path)]);
+            }
         } else if word == ipc::NEXT {
             self.upnext.receive(words.get(1).map_or("", String::as_str));
         } else if word == ipc::VOLUME_CHANGED {
@@ -388,6 +418,13 @@ impl Display {
                 self.redraw();
             }
             self.follow_marks();
+            // A seek while paused can land where nobody is named, and the
+            // focus on the cast row then moves to the bar.
+            if self.focus.focused_stop() == Some(Stop::Cast) && !self.cast.available(&self.film) {
+                let mut focus = self.focus;
+                focus.refocus(&self.parts());
+                self.focus = focus;
+            }
             // With the display down nothing under it follows the position, so
             // the signature is not worth the work.
             if self.focus.fade().value() > 0.0 {
@@ -463,12 +500,17 @@ impl Display {
     /// configured, the item, the file mpv plays, and the scan in flight.
     fn sync_art(&mut self) -> Vec<Job> {
         let (canvas, preview) = (self.canvas, self.previewing());
+        let portraits = match self.cast_showing() {
+            true => self.cast.portraits(&self.film),
+            false => Vec::new(),
+        };
         self.art.sync(
             &self.presentation,
             &self.film,
             &canvas,
             preview,
             self.upnext.art(),
+            &portraits,
         )
     }
 
@@ -504,6 +546,14 @@ impl Display {
             && self.presentation.trickplay().is_some())
         .then(|| self.scrubber.cursor_time(&self.film))
         .flatten()
+    }
+
+    /// Whether the cast row shows: while the OSD is up over a paused film in
+    /// a span that names someone. A scan's thumbnail stands where the row
+    /// does, and previews another moment than the one the row names, so the
+    /// row steps aside while a scan is in flight.
+    fn cast_showing(&self) -> bool {
+        self.showing() && self.previewing().is_none() && self.cast.available(&self.film)
     }
 
     fn signature(&self, at: Option<f64>) -> Signature {
@@ -597,6 +647,23 @@ impl Display {
             for line in counter.into_iter().chain(strip) {
                 brush.text(line);
             }
+        }
+        // The cast row draws over the bottom scrim, above the skip control
+        // and the chip, and it ends short of the up-next card while the card
+        // stands.
+        if self.cast_showing() {
+            let limit = self
+                .upnext
+                .showing_card()
+                .then(|| upnext::card_x(&canvas) - crate::cast::CARD_CLEAR);
+            self.cast.draw(
+                brush,
+                &self.film,
+                &self.art,
+                self.focus.focused_stop() == Some(Stop::Cast),
+                limit,
+                now.date(),
+            );
         }
         // The skip control draws after the bottom cluster, so it reads over
         // the scrim, and before the thumbnail, so a scan near the start of
@@ -723,6 +790,14 @@ impl Display {
             || self.skip.fade().running()
             || self.volume.fade().running()
     }
+}
+
+// The spans file is on the library's volume, so it is read on tokio's
+// blocking pool like every picture, and a read that panics answers with no
+// spans.
+fn read_spans(item: u64, path: String) -> Task<Message> {
+    Task::future(async move { tokio::task::spawn_blocking(move || Spans::read(&path)).await })
+        .then(move |spans| Task::done(Message::Cast(item, spans.ok().flatten())))
 }
 
 // The decode runs on tokio's blocking pool. A file read, an https fetch,
@@ -1056,6 +1131,14 @@ mod tests {
         let display = Display::new(Ipc::default());
         assert_eq!(display.focus.fade().value(), 0.0);
         assert!(!display.focus.visible());
+    }
+
+    #[test]
+    fn the_up_next_card_stays_longer_than_the_display() {
+        let display = Display::new(Ipc::default());
+        assert_eq!(display.idle.wait, theme::IDLE_HIDE);
+        assert_eq!(display.row.wait, theme::IDLE_HIDE);
+        assert_eq!(display.card.wait, theme::CARD_HIDE);
     }
 
     #[tokio::test]
@@ -1460,6 +1543,32 @@ mod tests {
 
     /// The tile is decoded only while a fine scan is in flight for an item
     /// that declares trickplay.
+    /// A film paused in a span asks for the portraits of the people the
+    /// spans file names there, and a resume asks for none.
+    #[tokio::test]
+    async fn a_pause_in_a_span_decodes_the_portraits_of_its_people() {
+        let (mut display, _) = display();
+        let _ = asks(
+            &mut display,
+            present(r#"{"appearances":"/art/spans.json","contributors":"/art/.contributors"}"#),
+        );
+        let spans = Spans::parse(
+            r#"{"format":"liken.sh/appearances/spans/v1",
+                "people":{"ja/jane":{"name":"Jane","portrait":"ja/jane/headshot.jpg"}},
+                "spans":[{"start":10.0,"end":20.0,"people":["ja/jane"]}]}"#,
+        );
+        let _ = asks(&mut display, Message::Cast(1, spans));
+        let _ = asks(&mut display, property("time-pos", json!(12.0)));
+        let _ = asks(&mut display, pause(false));
+        let jobs = asks(&mut display, pause(true));
+        assert_eq!(
+            jobs.iter().map(Job::reference).collect::<Vec<_>>(),
+            vec!["/art/.contributors/ja/jane/headshot.jpg"]
+        );
+        let _ = asks(&mut display, pause(false));
+        assert!(!display.cast_showing());
+    }
+
     #[tokio::test]
     async fn only_a_scan_on_a_trickplay_item_decodes_a_tile() {
         let (mut display, _) = display();

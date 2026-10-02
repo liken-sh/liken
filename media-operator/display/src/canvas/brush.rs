@@ -45,6 +45,10 @@ pub struct Line {
     /// The line box, which is the number the display states as an ASS `\fs`.
     pub size: f32,
     pub color: Color,
+    /// Whether the line draws in the brand family's italic face. A
+    /// character's name draws in it, the way the library's browser draws
+    /// one, and every other line draws in the roman face.
+    pub italic: bool,
 }
 
 impl Line {
@@ -63,6 +67,15 @@ impl Line {
             anchor,
             size,
             color: theme::at(color, theme::alpha::OPAQUE),
+            italic: false,
+        }
+    }
+
+    /// The same line in the italic face.
+    pub fn italic(self) -> Self {
+        Self {
+            italic: true,
+            ..self
         }
     }
 
@@ -382,7 +395,10 @@ impl<'a> Brush<'a> {
             color: theme::faded(line.color, self.fade),
             size: Pixels(theme::type_size(line.size)),
             line_height: LineHeight::Absolute(Pixels(line.size)),
-            font: liken_iced::font::REGULAR,
+            font: match line.italic {
+                true => liken_iced::font::ITALIC,
+                false => liken_iced::font::REGULAR,
+            },
             align_x: match line.anchor {
                 Anchor::TopLeft | Anchor::Left => text::Alignment::Left,
                 Anchor::TopRight => text::Alignment::Right,

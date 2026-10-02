@@ -42,14 +42,45 @@ fn marks(connection: &Connection, library: &str, path: &str) -> rusqlite::Result
     )
 }
 
+// Whether the appearances fact found faces in one file. A found attempt
+// means the fact's match ran on the file and wrote its spans file beside
+// it, in the file's own .liken/appearances/.
+fn appearing(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<bool> {
+    let found = collect(
+        connection,
+        "SELECT 1 FROM attempts \
+         WHERE library = ? AND item = ? AND concern = 'appearances' AND result = 'found'",
+        &[&library, &path],
+        |_| Ok(()),
+    )?;
+    Ok(!found.is_empty())
+}
+
+// The spans file of one video, which the appearances fact names for the
+// file and writes in .liken/appearances/ beside it.
+fn spans_file(path: &str) -> String {
+    let (folder, name) = path.rsplit_once('/').unwrap_or(("", path));
+    let file = format!(".liken/appearances/{name}.spans.json");
+    match folder {
+        "" => file,
+        _ => format!("{folder}/{file}"),
+    }
+}
+
 // A play list with the marks of each item's main file, so the display can
-// skip an intro and place the credits.
+// skip an intro and place the credits, and with the spans of a file the
+// appearances fact found faces in, so the display can show who is on
+// screen when the film pauses.
 fn marked(
     connection: &Connection,
     library: &str,
     mut items: Vec<PlayItem>,
 ) -> rusqlite::Result<Vec<PlayItem>> {
     for item in &mut items {
+        if appearing(connection, library, &item.path)? {
+            item.presentation.appearances = spans_file(&item.path);
+            item.presentation.contributors = ".contributors".into();
+        }
         item.presentation.marks = marks(connection, library, &item.path)?;
     }
     Ok(items)
