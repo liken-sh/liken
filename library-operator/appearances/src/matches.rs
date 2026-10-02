@@ -268,7 +268,7 @@ fn write_spans(
             player::released(title, &record.header.video),
         );
         let path = player::path(title, &record.header.video);
-        let partial = path.with_extension("json.partial");
+        let partial = record::partial(&path);
         fs::write(&partial, serde_json::to_vec(&spans)?)?;
         fs::rename(&partial, &path)?;
     }

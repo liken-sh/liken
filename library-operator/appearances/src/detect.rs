@@ -84,7 +84,7 @@ pub fn run(video: &Path, settings: &Settings) -> Result<PathBuf, Error> {
     fs::create_dir_all(path.parent().unwrap())?;
     // The record is written beside its final name and renamed into place,
     // so a run that stops partway leaves no record that looks complete.
-    let partial = path.with_extension("jsonl.partial");
+    let partial = record::partial(&path);
     let mut out = BufWriter::new(File::create(&partial)?);
     let header = Header {
         format: record::FORMAT.into(),

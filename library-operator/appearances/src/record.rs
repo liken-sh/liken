@@ -11,6 +11,7 @@
 // film's record near half a megabyte.
 
 use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -108,6 +109,19 @@ pub fn read(input: impl BufRead) -> Result<Record, Error> {
     Ok(Record { header, keyframes })
 }
 
+// The name a file is written under before it is renamed into place. It
+// carries the host and the process, so two writers of one file, such as two
+// clusters that mount one library and decode one film at once, never write
+// into each other's partial file, and each rename puts a whole file in place.
+// The name ends in neither .jsonl nor .json, so no reader takes it for a
+// record or a spans file.
+pub fn partial(path: &Path) -> PathBuf {
+    let host = std::env::var("HOSTNAME").unwrap_or_default();
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".partial-{host}-{}", std::process::id()));
+    path.with_file_name(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +133,20 @@ mod tests {
         for (a, b) in vector.iter().zip(&back) {
             assert!((a - b).abs() < 1e-3, "{a} became {b}");
         }
+    }
+
+    #[test]
+    fn a_partial_file_sits_beside_its_file_under_a_name_no_reader_takes() {
+        let path = Path::new("/films/.liken/appearances/Film.mkv.jsonl");
+        let partial = partial(path);
+        assert_eq!(partial.parent(), path.parent());
+        let name = partial.file_name().unwrap().to_string_lossy();
+        assert!(name.starts_with("Film.mkv.jsonl.partial-"), "{name}");
+        assert!(
+            name.ends_with(&format!("-{}", std::process::id())),
+            "{name}"
+        );
+        assert_ne!(partial.extension().unwrap(), "jsonl");
     }
 
     #[test]
