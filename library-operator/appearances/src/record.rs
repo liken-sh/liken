@@ -2,9 +2,16 @@
 // video. It is JSON Lines, so `head` shows the header, `jq` reads any
 // keyframe, and a reader can stream it. The first line names the models and
 // their hashes, the run, the video file's size in bytes, and the frame size
-// and length of the video. Each line after it
-// is one keyframe, with every face found in it, including a keyframe with no
-// face, because the gaps between keyframes are what bound a span.
+// and length of the video. Each line after it is one keyframe, with every
+// face found in it, including a keyframe with no face, because the gaps
+// between keyframes are what bound a span.
+//
+// The format names the detector's score cutoff. A record of v2 holds every
+// face that scored at least 0.8, and a record of v1 every face that scored
+// at least 0.9, so a v1 line leaves out faces that the v2 line of the same
+// keyframe holds. A reader takes both formats, so a season folder whose
+// episodes have records of both formats still matches whole. The operator
+// reads a v1 record as one to decode again.
 //
 // Each embedding is SFace's unit vector as 16-bit floats in little-endian
 // order, base64 encoded: 128 values in 256 bytes, which keeps a two-hour
@@ -21,7 +28,8 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::Error;
 use crate::yunet::Face;
 
-pub const FORMAT: &str = "liken.sh/appearances/detections/v1";
+pub const FORMAT: &str = "liken.sh/appearances/detections/v2";
+const FIRST_FORMAT: &str = "liken.sh/appearances/detections/v1";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
@@ -94,8 +102,12 @@ pub fn read(input: impl BufRead) -> Result<Record, Error> {
     let mut lines = input.lines();
     let first = lines.next().ok_or("the detections record is empty")??;
     let header: Header = serde_json::from_str(&first)?;
-    if header.format != FORMAT {
-        return Err(format!("the record's format is {}, not {FORMAT}", header.format).into());
+    if header.format != FORMAT && header.format != FIRST_FORMAT {
+        return Err(format!(
+            "the record's format is {}, not {FORMAT} or {FIRST_FORMAT}",
+            header.format
+        )
+        .into());
     }
     let mut keyframes: Vec<KeyframeLine> = Vec::new();
     for line in lines {
@@ -219,6 +231,19 @@ mod tests {
             .map(|k| k.time)
             .collect();
         assert_eq!(times, [4.5, 9.0, 12.0]);
+    }
+
+    // The header of a record of the first format, whose cutoff is 0.9.
+    const FIRST_FORMAT_HEADER: &str = r#"{"format":"liken.sh/appearances/detections/v1","video":"film.mkv","size":4000000000,"duration":100.0,"width":1920,"height":800,"detector":{"name":"m","sha256":"00"},"detect_width":1280,"embedder":{"name":"m","sha256":"00"},"device":"CPU"}"#;
+
+    #[test]
+    fn a_record_of_the_first_format_still_reads() {
+        let text = format!("{FIRST_FORMAT_HEADER}\n{{\"time\":4.5,\"faces\":[]}}\n");
+        let record = read(text.as_bytes()).unwrap();
+        assert_eq!(
+            (record.header.format.as_str(), record.keyframes.len()),
+            (FIRST_FORMAT, 1)
+        );
     }
 
     #[test]

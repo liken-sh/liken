@@ -60,6 +60,13 @@ func detectionsLine(t *testing.T, size int64) string {
 	return string(header) + "\n"
 }
 
+// The header line of a record of the first format, which the tool wrote
+// with a detector cutoff of 0.9, of a file of size bytes.
+func firstFormatDetectionsLine(t *testing.T, size int64) string {
+	t.Helper()
+	return strings.Replace(detectionsLine(t, size), detectionsFormat, "liken.sh/appearances/detections/v1", 1)
+}
+
 // One match document, as the tool prints it, for one video file of size
 // bytes: two people in the gallery, one with no headshot, and one face named.
 func matchDocumentFor(file string, size int64) string {
@@ -398,7 +405,8 @@ func TestTheAppearancesWorkerDecodesOnTheRenderNode(t *testing.T) {
 
 // A detections record already on the volume is reused where its header names
 // the file's size and the models the image holds, so a match that failed costs
-// no second decode. A record of another size or another model is stale.
+// no second decode. A record of another size or another model is stale, and
+// so is a record of the first format, whose detector kept fewer faces.
 func TestAnAppearancesWorkerReusesACurrentRecord(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -412,6 +420,8 @@ func TestAnAppearancesWorkerReusesACurrentRecord(t *testing.T) {
 			header: func(t *testing.T, size int64) string {
 				return strings.Replace(detectionsLine(t, size), appearancesEmbedder.SHA256, sha256Hex("older"), 1)
 			}},
+		{name: "a record of the first format", detect: true,
+			header: func(t *testing.T, size int64) string { return firstFormatDetectionsLine(t, size) }},
 		{name: "a record that is not JSON", detect: true,
 			header: func(*testing.T, int64) string { return "not json\n" }},
 	}
@@ -567,7 +577,8 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 }
 
 // A video is quick for the appearances worker where a detections record of
-// its size is on the volume, because the worker then runs only the match.
+// its size and of the current format is on the volume, because the worker
+// then runs only the match.
 func TestAVideoWithARecordOfItsSizeIsQuick(t *testing.T) {
 	root := t.TempDir()
 	video := filepath.Join(root, "Film", "Film.mkv")
@@ -581,6 +592,10 @@ func TestAVideoWithARecordOfItsSizeIsQuick(t *testing.T) {
 	writeFile(t, detectionsPath(video), detectionsLine(t, 5))
 	if appearancesQuick(run, item) {
 		t.Error("a video with a record of another size is quick")
+	}
+	writeFile(t, detectionsPath(video), firstFormatDetectionsLine(t, 4))
+	if appearancesQuick(run, item) {
+		t.Error("a video with a record of the first format is quick")
 	}
 	writeFile(t, detectionsPath(video), detectionsLine(t, 4))
 	if !appearancesQuick(run, item) {

@@ -56,7 +56,7 @@ publishes, under their published names, in one directory that
 ## The detections record
 
 The first line of `<video>.jsonl` is the header. It names the format,
-`liken.sh/appearances/detections/v1`, the video file's name, and its
+`liken.sh/appearances/detections/v2`, the video file's name, and its
 `size` in bytes, read when `detect` starts. The library treats a file
 whose size differs from its probe record as another file, so the
 operator compares `size` with the probe record to tell whether the
@@ -65,6 +65,33 @@ the detector and the embedder with the SHA-256 of each model file, the
 device, the decoded frame size, and the video's length. Each line after
 the header is one keyframe, with each face's box, landmarks, score, and
 embedding.
+
+The format names the detector's score cutoff. A v2 record holds every face
+that YuNet scored at 0.8 or more. A v1 record holds only the faces scored
+at 0.9 or more, the cutoff OpenCV's `FaceDetectorYN` takes by default.
+`match` reads both formats, so a season folder with records of both
+formats matches whole. The operator reads a v1 record as stale, and
+decodes the video again.
+
+The cutoff was measured on a 1080p and a 4K film, from the same keyframes:
+
+| Cutoff | Detect pass | Runtime with a face | Runtime with a named face | Runtime inside a span |
+|---|---|---|---|---|
+| 0.9 | 26 s, 23 s | 33%, 50% | 27%, 38% | 33%, 48% |
+| 0.8 | 31 s, 25 s | 51%, 62% | 35%, 40% | 47%, 57% |
+
+Each time is the average of three runs on an Intel laptop GPU through
+VA-API. The faces scored from 0.8 to 0.9 were real faces in the contact
+sheets, many in profile, in shadow, or in a helmet. Under 0.8 the
+detections included equipment and the backs of heads, and they named
+0.4% and 0.2% more of the runtime.
+
+`detect` decodes only the keyframes. On the same two films, a sample
+every 2 seconds from a full decode raised the runtime with a named face
+by 0.6 and 1.2 percentage points, and the runtime inside a span by 4 and
+8 points. The pass took 7 times and 22 times as long. Both files are
+HEVC, and their P-frames reference B-frames, so a decode that skips the
+B-frames returns damaged pictures.
 
 ## Naming a face
 

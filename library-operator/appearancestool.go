@@ -46,9 +46,12 @@ const (
 const appearancesReasonLimit = 4096
 
 // The format the first line of a detections record names, and the format of
-// the match document. The worker reads only these versions.
+// the match document. The worker reads only these versions. A v1 record holds
+// only the faces the detector scored at 0.9 or more, and v2 holds those at
+// 0.8 or more, so the worker reads a v1 record as stale and decodes the video
+// again. The tool's README gives the measurements behind the cutoff.
 const (
-	detectionsFormat = "liken.sh/appearances/detections/v1"
+	detectionsFormat = "liken.sh/appearances/detections/v2"
 	matchesFormat    = "liken.sh/appearances/matches/v1"
 )
 
@@ -152,7 +155,8 @@ func detectionsCurrent(video string, size int64, models string) bool {
 }
 
 // The first line of the record of a video, and false where there is no
-// record, or its first line is not a header of the format this worker reads.
+// record, or its first line is not a header of the format this worker reads,
+// which includes a record of an earlier format.
 func readDetectionsHeader(video string) (detectionsHeader, bool) {
 	file, err := os.Open(detectionsPath(video))
 	if err != nil {

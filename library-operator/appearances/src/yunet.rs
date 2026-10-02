@@ -9,10 +9,18 @@ use serde::{Deserialize, Serialize};
 
 pub const STRIDES: [usize; 3] = [8, 16, 32];
 
-// The thresholds FaceDetectorYN takes by default, and the ones the
-// experiments ran with. 0.9 keeps the detector's precision high, because
-// the matcher cannot tell a false face from an unknown person.
-pub const SCORE_THRESHOLD: f32 = 0.9;
+// The lowest score of a face the detector keeps. FaceDetectorYN keeps 0.9
+// by default. The matcher cannot tell a false face from an unknown person,
+// so the cutoff stays where nearly every detection is a face. On a 1080p and
+// a 4K film, the faces scored from 0.8 to 0.9 were real faces in the contact
+// sheets, often in profile, in shadow, or in a helmet. They raised the share
+// of the runtime with a named face from 27% to 35% and from 38% to 40%, and
+// the share inside a span from 33% to 47% and from 48% to 57%. The detect
+// pass took 22% and 8% longer, to embed the extra faces. Under 0.8, the
+// detections included equipment and the backs of heads, and they named 0.4%
+// and 0.2% more of the runtime. The record's format names this cutoff
+// (record.rs).
+pub const SCORE_THRESHOLD: f32 = 0.8;
 pub const NMS_THRESHOLD: f32 = 0.3;
 
 // One detected face, in the pixels of the picture it was found in. The
@@ -163,6 +171,20 @@ mod tests {
             kps: &kps,
         };
         assert!(decode(8, 32, &outputs).is_empty());
+    }
+
+    #[test]
+    fn decode_keeps_a_face_scored_between_0_8_and_0_9() {
+        let (mut cls, mut obj, bbox, kps) = one_face();
+        cls[5] = 0.85;
+        obj[5] = 0.85;
+        let outputs = StrideOutputs {
+            cls: &cls,
+            obj: &obj,
+            bbox: &bbox,
+            kps: &kps,
+        };
+        assert_eq!(decode(8, 32, &outputs).len(), 1);
     }
 
     fn square(x: f32, score: f32) -> Face {

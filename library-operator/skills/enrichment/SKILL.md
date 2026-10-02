@@ -270,10 +270,13 @@ For each video, the worker runs two passes of the `appearances` tool:
    finds the faces with the YuNet detector, embeds each face with the
    SFace model, and writes the detections record
    `.liken/appearances/<file>.jsonl` beside the video. This is the only
-   pass that opens the video. The record's first line names the file's
-   size and the hash of each model. When a record on the volume names
-   the file's size and the models of the image, the worker uses it and
-   does not decode again.
+   pass that opens the video. The detector keeps each face it scores
+   at 0.8 or more. The record's first line names the record's format,
+   the file's size, and the hash of each model. When a record on the
+   volume names the current format, the file's size, and the models of
+   the image, the worker uses it and does not decode again. A record of
+   the format `liken.sh/appearances/detections/v1` holds only the faces
+   scored at 0.9 or more, so the worker decodes its video again.
 2. `appearances match` embeds the headshot of each actor that the
    title folder's `.liken/credits.yaml` names, and compares each face
    with them. A face is named for the closest actor when the similarity
@@ -330,7 +333,9 @@ walk opens the gap, and the worker uses the detections records on the
 volume and runs only the match. To match every title again, set
 `spec.refresh.appearances` to the current time, as the
 [When a fact asks again](#when-a-fact-asks-again) section describes
-for every fact.
+for every fact. A refresh also decodes again each video whose record
+is of an earlier format, which finds the faces that the earlier
+detector left out.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=appearances
 
