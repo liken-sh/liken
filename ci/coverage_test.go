@@ -9,6 +9,12 @@ import (
 	"testing"
 )
 
+// A test's server answers at once, so a fetch that asks again does not
+// wait between asks.
+func init() {
+	fetchPause = 0
+}
+
 // reportTree is a repository of three components with coverage: os,
 // whose manual is the root of the site; app, whose manual is at
 // /app/ and whose report needs a Go and a Rust profile; and lib, which
@@ -257,6 +263,42 @@ func TestThePublishTakesTheServedProfileOnlyWhenItDescribesTheTag(t *testing.T) 
 			got, _ := os.ReadFile(filepath.Join(root, "liken/coverage.out"))
 			if string(got) != c.want {
 				t.Errorf("liken/coverage.out holds %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// The site's CDN answers a request with a 5xx now and then, and one such
+// answer failed a build. A fetch asks again after a server error, and a
+// file the site does not serve is still an answer at once.
+func TestAFetchAsksAgainAfterAServerError(t *testing.T) {
+	cases := []struct {
+		name    string
+		answers []int
+		want    string
+		tries   int
+	}{
+		{name: "one 503, then the file", answers: []int{503, 200}, want: "profile", tries: 2},
+		{name: "a 404", answers: []int{404}, want: "", tries: 1},
+		{name: "503 on every try", answers: []int{503, 503, 503}, want: "", tries: fetchTries},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			tries := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				status := test.answers[min(tries, len(test.answers)-1)]
+				tries++
+				w.WriteHeader(status)
+				if status == http.StatusOK {
+					_, _ = w.Write([]byte("profile"))
+				}
+			}))
+			defer server.Close()
+
+			text, _, _ := fetchServed(server.Client(), server.URL+"/coverage.out")
+
+			if string(text) != test.want || tries != test.tries {
+				t.Errorf("fetch = %q after %d tries, want %q after %d", text, tries, test.want, test.tries)
 			}
 		})
 	}

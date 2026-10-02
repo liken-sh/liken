@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // A component's coverage report shows every language its tests cover,
@@ -120,9 +121,27 @@ func fetchProfile(client *http.Client, url string) ([]byte, error) {
 	return text, err
 }
 
+// How many times a fetch asks, and how long it waits before the next ask.
+// The site's CDN answers with a 5xx now and then, and one such answer
+// failed a build. Any failure but a 404 is asked again, and a 404 is an
+// answer: the site does not serve the file.
+const fetchTries = 3
+
+var fetchPause = 2 * time.Second
+
 // fetchServed reads one file of the site, and the Last-Modified time
 // that the site gives it.
 func fetchServed(client *http.Client, url string) (text []byte, modified string, err error) {
+	for try := 1; ; try++ {
+		text, modified, err = fetchOnce(client, url)
+		if err == nil || errors.Is(err, errNotServed) || try == fetchTries {
+			return text, modified, err
+		}
+		time.Sleep(time.Duration(try) * fetchPause)
+	}
+}
+
+func fetchOnce(client *http.Client, url string) (text []byte, modified string, err error) {
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, "", err
