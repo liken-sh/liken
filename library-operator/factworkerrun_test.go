@@ -18,18 +18,22 @@ import (
 // What a worker container does with its list: which videos it passes over,
 // which it works on, and which folders it asks the operator to rescan.
 
+// The Library whose lists the worker tests write and read.
+const testWorkLibrary = "house/movies"
+
 // A worker of one fact over one root, with no webhook, and the buffer its log
 // goes to.
 func testFactWorker(t *testing.T, worker factWorker, kind, root string) (*factWorkerRun, *bytes.Buffer) {
 	t.Helper()
 	log := &bytes.Buffer{}
 	return &factWorkerRun{
-		worker: worker,
-		kind:   kind,
-		root:   root,
-		writer: newVolumeWriter("movies-trickplay"),
-		log:    log,
-		client: &http.Client{Timeout: time.Second},
+		worker:  worker,
+		library: testWorkLibrary,
+		kind:    kind,
+		root:    root,
+		writer:  newVolumeWriter("movies-trickplay"),
+		log:     log,
+		client:  &http.Client{Timeout: time.Second},
 	}, log
 }
 
@@ -146,7 +150,7 @@ func TestAWorkerWorksItsListAndAsksForOneRescanPerTitle(t *testing.T) {
 		{Path: "Harbour Lights/Season 01/Harbour Lights - S01E03.mkv", Size: 5, Listed: listed},
 		listedVideo(t, root, "Quiet Field/Season 01/Quiet Field - S01E01.mkv", "three", listed),
 	}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, items); err != nil {
+	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
 		t.Fatal(err)
 	}
 	var worked []string
@@ -182,7 +186,7 @@ func TestAWorkerTakesTheQuickVideosFirst(t *testing.T) {
 		listedVideo(t, root, "Slow Two/Slow Two.mkv", "three", listed),
 		listedVideo(t, root, "Quick Two/Quick Two.mkv", "four", listed),
 	}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, items); err != nil {
+	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
 		t.Fatal(err)
 	}
 	var worked []string
@@ -207,7 +211,7 @@ func TestAWorkerTakesTheQuickVideosFirst(t *testing.T) {
 func TestAWorkerAsksForNoRescanOfATitleItPassedOver(t *testing.T) {
 	root := t.TempDir()
 	items := []workItem{{Path: filepath.Join(trickplayFolder, trickplayFile), Size: 5, Listed: time.Now()}}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, items); err != nil {
+	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
 		t.Fatal(err)
 	}
 	var worked []string
@@ -233,7 +237,7 @@ func TestARefusedRescanIsLoggedAndTheWorkGoesOn(t *testing.T) {
 		listedVideo(t, root, "A Quiet Field (1950)/A Quiet Field (1950).mkv", "one", listed),
 		listedVideo(t, root, "The Long Survey (1982)/The Long Survey (1982).mkv", "two", listed),
 	}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, items); err != nil {
+	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
 		t.Fatal(err)
 	}
 	var worked []string
@@ -283,6 +287,8 @@ func TestAWorkerReadsItsWiringOutOfTheEnvironment(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv(libraryFactVariable, test.fact)
+			t.Setenv(libraryNamespaceVariable, "house")
+			t.Setenv(libraryNameVariable, "movies")
 			t.Setenv(libraryKindVariable, libraryKindMovies)
 			t.Setenv(libraryRootVariable, "films")
 			t.Setenv(libraryWebhookVariable, "http://library-operator.media.svc/webhook/house/movies")
@@ -296,8 +302,9 @@ func TestAWorkerReadsItsWiringOutOfTheEnvironment(t *testing.T) {
 			if !test.ok {
 				return
 			}
-			if work.root != "/library/films" || work.webhook == "" || work.worker.fact != factTrickplay {
-				t.Errorf("worker = %+v, want the root under the mount, the address, and the fact", work)
+			if work.root != "/library/films" || work.webhook == "" || work.worker.fact != factTrickplay ||
+				work.library != "house/movies" {
+				t.Errorf("worker = %+v, want the root under the mount, the address, the fact, and the Library", work)
 			}
 		})
 	}
@@ -312,10 +319,10 @@ func TestAWorkListReadsBackAsItWasWritten(t *testing.T) {
 		{Path: "The Long Survey (1982)/The Long Survey (1982).mkv", Size: 7, Listed: ledgerTime},
 	}
 
-	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, items); err != nil {
+	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
 		t.Fatal(err)
 	}
-	read, err := readWorkList(root, factTrickplay)
+	read, err := readWorkList(root, testWorkLibrary, factTrickplay)
 
 	if err != nil {
 		t.Fatal(err)
@@ -323,8 +330,31 @@ func TestAWorkListReadsBackAsItWasWritten(t *testing.T) {
 	if !slices.EqualFunc(read, items, func(a, b workItem) bool { return a == b }) {
 		t.Errorf("read %+v, want %+v", read, items)
 	}
-	if left := namesIn(t, filepath.Dir(workListPath(root, factTrickplay))); !slices.Equal(left, []string{"trickplay.jsonl"}) {
+	if left := namesIn(t, filepath.Dir(workListPath(root, testWorkLibrary, factTrickplay))); !slices.Equal(left, []string{"trickplay.jsonl"}) {
 		t.Errorf("the list directory holds %v, want the list alone", left)
+	}
+}
+
+// Two clusters can mount one volume with a Library each over the same root,
+// and each Library reads back its own list and not the other's.
+func TestTwoLibrariesOverOneRootKeepTheirOwnLists(t *testing.T) {
+	root := t.TempDir()
+	house := []workItem{{Path: "A/a.mkv", Size: 1, Listed: ledgerTime}}
+	lab := []workItem{{Path: "B/b.mkv", Size: 2, Listed: ledgerTime}}
+	writer := newVolumeWriter("movies-close")
+	if err := writer.writeWorkList(root, "media/movies", factAppearances, house); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.writeWorkList(root, "default/movies", factAppearances, lab); err != nil {
+		t.Fatal(err)
+	}
+
+	read, err := readWorkList(root, "media/movies", factAppearances)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(read, house) {
+		t.Errorf("media/movies read %+v, want its own list %+v", read, house)
 	}
 }
 
@@ -332,16 +362,16 @@ func TestAWorkListReadsBackAsItWasWritten(t *testing.T) {
 // rather than working a part of it.
 func TestAWorkListThatDoesNotParseIsAnError(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, workListPath(root, factTrickplay), "{\"path\":\"A/a.mkv\"}\nnot a line of a list\n")
+	writeFile(t, workListPath(root, testWorkLibrary, factTrickplay), "{\"path\":\"A/a.mkv\"}\nnot a line of a list\n")
 
-	if _, err := readWorkList(root, factTrickplay); err == nil {
+	if _, err := readWorkList(root, testWorkLibrary, factTrickplay); err == nil {
 		t.Error("readWorkList = nil error, want the line it could not read")
 	}
 }
 
 // The walk skips every dot name, so the list directory never becomes a row.
 func TestTheWalkNeverReadsAWorkList(t *testing.T) {
-	path := workListPath("/library", factTrickplay)
+	path := workListPath("/library", testWorkLibrary, factTrickplay)
 	relative := strings.Split(strings.TrimPrefix(path, "/library/"), string(filepath.Separator))
 
 	if !skipName(relative[0]) {

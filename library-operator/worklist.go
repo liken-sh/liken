@@ -24,17 +24,23 @@ import (
 	"time"
 )
 
-// The directory under the root's .liken directory that holds the work lists,
-// one file per fact. The walk skips every name that starts with a dot, so it
-// never reads a list as media, and mark and sweep acts on catalog rows and
-// never on files, so it never removes one. No other tool reads the root's
-// .liken directory. A Library owns its root, so one list per fact at the root
-// serves one Library.
+// The directory under the root's .liken directory that holds the work lists:
+// one directory per Library, by its namespace and name, and one file per fact
+// in it. The walk skips every name that starts with a dot, so it never reads
+// a list as media, and mark and sweep acts on catalog rows and never on
+// files, so it never removes one. No other tool reads the root's .liken
+// directory.
+//
+// Two clusters can mount one volume, each with a Library over the same root.
+// The facts beside the media are the same facts for both, but a list is one
+// Library's gap, read from its own catalog with its own refresh times, so
+// each Library writes and reads its own.
 const workListDirectory = "worklists"
 
-// The file one fact's list is in.
-func workListPath(root, fact string) string {
-	return filepath.Join(root, likenDirectory, workListDirectory, fact+".jsonl")
+// The file one Library's list of one fact is in. library is the Library's
+// key, its namespace and its name.
+func workListPath(root, library, fact string) string {
+	return filepath.Join(root, likenDirectory, workListDirectory, filepath.FromSlash(library), fact+".jsonl")
 }
 
 // One video of a work list. The size is the size the walk read, which is the
@@ -86,7 +92,7 @@ func (c *Catalog) workItems(ctx context.Context, fact, library string, now, refr
 // The whole list goes onto the volume in one write: a temporary and a rename,
 // so a worker that reads the list while the next one lands reads the whole of
 // one list or the whole of the other.
-func (w *volumeWriter) writeWorkList(root, fact string, items []workItem) error {
+func (w *volumeWriter) writeWorkList(root, library, fact string, items []workItem) error {
 	var lines []byte
 	for _, item := range items {
 		line, err := json.Marshal(item)
@@ -95,15 +101,15 @@ func (w *volumeWriter) writeWorkList(root, fact string, items []workItem) error 
 		}
 		lines = append(append(lines, line...), '\n')
 	}
-	path := workListPath(root, fact)
+	path := workListPath(root, library, fact)
 	return w.writeInto(filepath.Dir(path), filepath.Base(path), lines)
 }
 
 // One fact's list as the last library Job wrote it. A root with no list reads
 // as no work and not as an error, because a Library that has turned a fact on
 // has no list until its next library Job ends.
-func readWorkList(root, fact string) ([]workItem, error) {
-	file, err := os.Open(workListPath(root, fact))
+func readWorkList(root, library, fact string) ([]workItem, error) {
+	file, err := os.Open(workListPath(root, library, fact))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

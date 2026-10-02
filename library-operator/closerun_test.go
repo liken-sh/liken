@@ -274,7 +274,7 @@ func TestTheCloseContainerWritesTheWorkList(t *testing.T) {
 		t.Fatalf("the job failed: %v", err)
 	}
 
-	items, err := readWorkList(run.root, factTrickplay)
+	items, err := readWorkList(run.root, run.library, factTrickplay)
 	if err != nil {
 		t.Fatal(err)
 	}

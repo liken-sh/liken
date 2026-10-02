@@ -198,7 +198,7 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 func TestTheTrickplayWorkerWritesSheetsBesideTheVideo(t *testing.T) {
 	root := t.TempDir()
 	item := seedTrickplayItem(t, root, 1050*time.Second)
-	if err := newVolumeWriter("movies-close").writeWorkList(root, factTrickplay, []workItem{item}); err != nil {
+	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, []workItem{item}); err != nil {
 		t.Fatal(err)
 	}
 	standInFFmpeg(t, 2)

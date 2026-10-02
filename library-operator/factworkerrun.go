@@ -42,10 +42,12 @@ const workerWebhookTimeout = 10 * time.Second
 // where it sends a rescan.
 type factWorkerRun struct {
 	worker factWorker
-	kind   string
-	root   string
-	writer *volumeWriter
-	log    io.Writer
+	// The Library's key, its namespace and its name, which names its list.
+	library string
+	kind    string
+	root    string
+	writer  *volumeWriter
+	log     io.Writer
 	// The Library's webhook address, and empty where the operator named none.
 	webhook string
 	client  *http.Client
@@ -81,6 +83,7 @@ func newFactWorkerRun(log io.Writer) (*factWorkerRun, error) {
 	}
 	return &factWorkerRun{
 		worker:  worker,
+		library: libraryKey(os.Getenv(libraryNamespaceVariable), os.Getenv(libraryNameVariable)),
 		kind:    os.Getenv(libraryKindVariable),
 		root:    path.Join(libraryMountPath, os.Getenv(libraryRootVariable)),
 		writer:  newVolumeWriter(writerName(os.Getenv(jobNameVariable), fact)),
@@ -97,7 +100,7 @@ func newFactWorkerRun(log io.Writer) (*factWorkerRun, error) {
 // on the operator, which collapses more than heldPathLimit paths into a full
 // walk.
 func (w *factWorkerRun) work(ctx context.Context) error {
-	items, err := readWorkList(w.root, w.worker.fact)
+	items, err := readWorkList(w.root, w.library, w.worker.fact)
 	if err != nil {
 		return err
 	}

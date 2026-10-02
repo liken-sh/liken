@@ -134,7 +134,7 @@ func (r *closeRun) writeWorkList(ctx context.Context, fact string) error {
 	if err != nil {
 		return err
 	}
-	if err := r.writer.writeWorkList(r.root, fact, items); err != nil {
+	if err := r.writer.writeWorkList(r.root, r.library, fact, items); err != nil {
 		return err
 	}
 	r.logf("wrote the %s work list: %s", fact, counted(len(items), "video"))

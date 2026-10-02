@@ -201,10 +201,14 @@ claim, so a walk and a webhook's rescan never wait for a decode, and
 no decode adds a copy of the catalog.
 
 Each `Job` of the `Library` ends by writing the trickplay gap onto the
-volume as a work list, `.liken/worklists/trickplay.jsonl` under the
+volume as a work list,
+`.liken/worklists/<namespace>/<library>/trickplay.jsonl` under the
 library root: one line per video, with its path, its size, and its
-length. When that `Job` has ended, the gap in `status.gaps` is above
-zero, and no trickplay worker of the `Library` runs, the operator
+length. The list is named for the `Library`, so two clusters whose
+`Library`s mount one volume never read each other's list. When that
+`Job` has ended, the gap in `status.gaps` is above zero or a
+`spec.refresh` time has titles left, and no trickplay worker of the
+`Library` runs, the operator
 starts one, named `<library>-trickplay-<suffix>`. The worker reads the
 list and checks each video again before it decodes it. It passes over
 a video that is gone, a video whose size changed, and a video with an
@@ -248,7 +252,8 @@ the headshots that the people facts put in `.contributors/`. A first
 pass decodes the keyframes of every feature, so the fact runs in a
 worker `Job` of its own, named `<library>-appearances-<suffix>`, in the
 same way as the [trickplay](#trickplay) worker. It reads the list
-`.liken/worklists/appearances.jsonl`, checks each video again before it
+`.liken/worklists/<namespace>/<library>/appearances.jsonl`, checks each
+video again before it
 opens it, and asks the operator to rescan each title folder when the
 folder is done.
 
