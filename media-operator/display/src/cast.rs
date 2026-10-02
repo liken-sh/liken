@@ -30,28 +30,33 @@ use crate::theme;
 use crate::upnext::{CARD_ALPHA, CARD_R};
 
 /// The portrait's box, which the decode fills.
-pub const PORTRAIT_W: f32 = 66.0;
-pub const PORTRAIT_H: f32 = 88.0;
+pub const PORTRAIT_W: f32 = 57.0;
+pub const PORTRAIT_H: f32 = 76.0;
+
+/// The card's type sizes. The row shows while the film plays, so the cards
+/// draw a step under the bar's own type and cover less of the picture.
+const NAME_SIZE: f32 = 30.0;
+const LINE_SIZE: f32 = 24.0;
 
 /// One card's box and the pitch between two cards. The card is wide enough
 /// for a long name and the ages line at the type sizes it draws in.
-const CARD_W: f32 = 380.0;
+const CARD_W: f32 = 330.0;
 const CARD_H: f32 = PORTRAIT_H + 2.0 * PAD;
-const GAP: f32 = 16.0;
+const GAP: f32 = 14.0;
 const PAD: f32 = 8.0;
-const TEXT_GAP: f32 = 14.0;
+const TEXT_GAP: f32 = 12.0;
 
 /// The row's top edge and its heading. The cards end above the row where the
 /// skip control and the up-next chip draw, so the row never moves when one
 /// of them comes or goes.
-const ROW_TOP: f32 = 676.0;
-const HEADING_Y: f32 = 640.0;
+const ROW_TOP: f32 = 688.0;
+const HEADING_Y: f32 = 652.0;
 const HEADING: &str = "IN THIS SCENE";
 
 /// The drop from the card's top to each of its three lines.
-const NAME_Y: f32 = 6.0;
-const CHARACTER_Y: f32 = 40.0;
-const AGES_Y: f32 = 68.0;
+const NAME_Y: f32 = 5.0;
+const CHARACTER_Y: f32 = 34.0;
+const AGES_Y: f32 = 58.0;
 
 /// While the up-next card stands, the row ends this far short of it.
 pub const CARD_CLEAR: f32 = 24.0;
@@ -176,7 +181,7 @@ pub struct Cast {
     item: u64,
     spans: Option<Spans>,
     contributors: Option<String>,
-    /// The span the focus belongs to. A seek while paused lands in another
+    /// The span the focus belongs to. Playback or a seek moves into another
     /// span, and the focus starts again at its first card.
     span: Option<usize>,
     /// The focused card, and the first card the row shows.
@@ -231,9 +236,11 @@ impl Cast {
         Some((spans, spans.at(film.position?)?))
     }
 
-    /// The row shows while the film is paused in a span that names someone.
+    /// The row shows while the playhead stands in a span that names
+    /// someone, playing or paused, so the display shows who is on screen
+    /// whenever it is up.
     pub fn available(&self, film: &Film) -> bool {
-        film.paused && !self.people(film).is_empty()
+        !self.people(film).is_empty()
     }
 
     /// Move the focus one card left or right. The focus stops at both ends,
@@ -383,30 +390,12 @@ fn draw_card(
             color,
         )
     };
-    brush.text(line(
-        &person.name,
-        NAME_Y,
-        theme::type_scale::SMALL,
-        theme::color::text(),
-    ));
+    brush.text(line(&person.name, NAME_Y, NAME_SIZE, theme::color::text()));
     if let Some(character) = &person.character {
-        brush.text(
-            line(
-                character,
-                CHARACTER_Y,
-                theme::type_scale::TINY,
-                theme::color::muted(),
-            )
-            .italic(),
-        );
+        brush.text(line(character, CHARACTER_Y, LINE_SIZE, theme::color::muted()).italic());
     }
     if let Some(ages) = ages(person, released, today) {
-        brush.text(line(
-            &ages,
-            AGES_Y,
-            theme::type_scale::TINY,
-            theme::color::muted(),
-        ));
+        brush.text(line(&ages, AGES_Y, LINE_SIZE, theme::color::muted()));
     }
 }
 
@@ -492,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn the_row_is_a_stop_only_while_paused_in_a_span() {
+    fn the_row_is_a_stop_only_in_a_span_playing_or_paused() {
         let cast = cast();
         assert!(cast.available(&paused_at(12.0)));
         assert!(!cast.available(&paused_at(25.0)));
@@ -500,7 +489,7 @@ mod tests {
             paused: false,
             ..paused_at(12.0)
         };
-        assert!(!cast.available(&playing));
+        assert!(cast.available(&playing));
         assert!(!Cast::default().available(&paused_at(12.0)));
     }
 

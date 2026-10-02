@@ -418,7 +418,7 @@ impl Display {
                 self.redraw();
             }
             self.follow_marks();
-            // A seek while paused can land where nobody is named, and the
+            // Playback or a seek can move where nobody is named, and the
             // focus on the cast row then moves to the bar.
             if self.focus.focused_stop() == Some(Stop::Cast) && !self.cast.available(&self.film) {
                 let mut focus = self.focus;
@@ -548,8 +548,8 @@ impl Display {
         .flatten()
     }
 
-    /// Whether the cast row shows: while the OSD is up over a paused film in
-    /// a span that names someone. A scan's thumbnail stands where the row
+    /// Whether the cast row shows: while the OSD is up and the playhead
+    /// stands in a span that names someone. A scan's thumbnail stands where the row
     /// does, and previews another moment than the one the row names, so the
     /// row steps aside while a scan is in flight.
     fn cast_showing(&self) -> bool {
