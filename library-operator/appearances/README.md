@@ -111,6 +111,14 @@ On the bench of nine films, on an Intel laptop iGPU through VA-API:
 | 2015 | 1080p | 10,162 | 9,842 | 132 s | 388 MB |
 | 2017 | 1080p | 7,556 | 6,903 | 93 s | 386 MB |
 
+The GPU scales each sample before the copy to the CPU. Some GPUs decode
+a format that their video processor cannot scale: an older Intel GPU
+decodes 10-bit HEVC, and its `scale_vaapi` fails before the first frame.
+`detect` tries the GPU's scale on the video's first 2 seconds. Where it
+fails, the GPU still decodes, and the CPU scales. On a 10-bit 1080p
+film on such a GPU, that ran at 4.8 times real time, against 2.5 for a
+software decode.
+
 Each peak is the sum of the resident memory of the tool and `ffmpeg`,
 read every 0.2 seconds. The keyframes alone took 8 to 26 seconds for the
 same films. In software, on the two decode threads `--decode-threads`

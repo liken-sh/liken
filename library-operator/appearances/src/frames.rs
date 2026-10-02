@@ -125,7 +125,14 @@ impl Samples {
         // its own frames, so a 4K HEVC decode on a 22-thread machine held
         // 1.7 GB. A fixed count bounds the memory.
         command.args(["-threads", &threads.to_string()]);
-        let (input, filter) = decoding(hwaccel, width, height);
+        let scale_on_gpu = hwaccel == Some("vaapi") && gpu_scales(video, width, height, threads);
+        if hwaccel == Some("vaapi") && !scale_on_gpu {
+            eprintln!(
+                "{}: the GPU cannot scale these frames, so the CPU scales them",
+                video.display()
+            );
+        }
+        let (input, filter) = decoding(hwaccel, scale_on_gpu, width, height);
         command
             .args(input)
             .arg("-i")
@@ -201,15 +208,47 @@ fn select() -> String {
     format!("select='isnan(prev_selected_t)+key+gte(t-prev_selected_t,{SAMPLE_EVERY})'")
 }
 
+// Whether the GPU's video processor scales this video's frames. Some GPUs
+// decode a format that their video processor cannot convert: an older
+// Intel GPU decodes 10-bit HEVC, but scale_vaapi fails on its frames before
+// the first one, with "the requested VAProfile is not supported". The test
+// decodes the video's first 2 seconds through the same chain, and costs
+// about a second. On a 10-bit film, a GPU decode with the scale on the CPU
+// ran at 4.8 times real time, and a software decode at 2.5.
+fn gpu_scales(video: &Path, width: usize, height: usize, threads: usize) -> bool {
+    Command::new("ffmpeg")
+        .args(["-v", "error", "-nostdin", "-threads", &threads.to_string()])
+        .args(["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"])
+        .args(["-t", "2", "-i"])
+        .arg(video)
+        .args(["-map", "0:v:0", "-an", "-sn", "-dn"])
+        .arg("-vf")
+        .arg(format!(
+            "scale_vaapi=w={width}:h={height}:format=nv12,hwdownload,format=nv12"
+        ))
+        .args(["-f", "null", "-"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 // The decoder's options and the filter chain that picks the samples and
 // brings each to width by height. With VA-API, the frame stays in GPU memory, the GPU scales
 // it and converts it to 8-bit NV12, and only the small frame is copied to the
 // CPU. A 4K frame is 25 MB as BGR, and copying each one before a CPU scale
 // cost more time than the GPU's decode saved. showinfo runs after the copy,
-// because it reads frames in CPU memory.
-fn decoding(hwaccel: Option<&str>, width: usize, height: usize) -> (Vec<String>, String) {
+// because it reads frames in CPU memory. Where the GPU cannot scale the
+// frames, as gpu_scales tells, the GPU decodes and ffmpeg copies each frame
+// to the CPU, which selects and scales as a software decode does.
+fn decoding(
+    hwaccel: Option<&str>,
+    scale_on_gpu: bool,
+    width: usize,
+    height: usize,
+) -> (Vec<String>, String) {
     match hwaccel {
-        Some("vaapi") => (
+        Some("vaapi") if scale_on_gpu => (
             ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]
                 .map(String::from)
                 .to_vec(),
@@ -291,7 +330,7 @@ mod tests {
 
     #[test]
     fn vaapi_selects_and_scales_on_the_gpu_before_the_copy() {
-        let (input, filter) = decoding(Some("vaapi"), 1280, 720);
+        let (input, filter) = decoding(Some("vaapi"), true, 1280, 720);
         assert_eq!(
             (input.join(" "), filter),
             (
@@ -303,9 +342,24 @@ mod tests {
         );
     }
 
+    // A GPU whose video processor cannot scale the source's frames, such
+    // as 10-bit HEVC on an older Intel GPU, still decodes them. ffmpeg
+    // copies each decoded frame to the CPU, and the CPU selects and scales.
+    #[test]
+    fn vaapi_without_gpu_scaling_decodes_on_the_gpu_and_scales_on_the_cpu() {
+        let (input, filter) = decoding(Some("vaapi"), false, 1280, 720);
+        assert_eq!(
+            (input.join(" "), filter),
+            (
+                "-hwaccel vaapi".to_string(),
+                format!("{SELECT},showinfo,scale=1280:720:flags=bilinear")
+            )
+        );
+    }
+
     #[test]
     fn software_decoding_selects_and_scales_on_the_cpu() {
-        let (input, filter) = decoding(None, 1280, 720);
+        let (input, filter) = decoding(None, false, 1280, 720);
         assert_eq!(
             (input, filter),
             (
