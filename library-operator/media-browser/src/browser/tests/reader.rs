@@ -25,12 +25,16 @@ fn threaded() -> Browser<Fake, NoArt> {
     browser
 }
 
-// Pump until a page lands, which a read on a thread takes milliseconds
-// to answer.
+// Pump until every read the browser asked for has landed. A pump that asks
+// for a read also takes whatever has landed by then, so a thread that
+// answers inside the asking pump leaves nothing for a later pump to
+// report. The reader says whether a read is still in flight, and that
+// answer does not depend on which pump took the page.
 fn settled(browser: &mut Browser<Fake, NoArt>) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if browser.pump(2.0) {
+        browser.pump(2.0);
+        if !browser.reader.reading() {
             return;
         }
         thread::sleep(Duration::from_millis(5));
