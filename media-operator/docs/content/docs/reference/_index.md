@@ -18,6 +18,9 @@ reports, commands, button events, and state.
 [The media API](/docs/reference/api/) is the HTTPS face of a
 `Player`: it captures what is on the unit now, its screen, its audio,
 or the two composed into one stream.
+[Render node capabilities](/docs/reference/capabilities/) describes
+the `media.liken.sh` devices that state what each GPU's media driver
+can decode, encode, and scale.
 
 Each resource page gives the resource's fields, then its topics and
 payloads in an "On the bus" section. `MediaPreferences` alone has no

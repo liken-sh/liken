@@ -11,15 +11,18 @@ The guides give the steps to operate this project: the
 [mapping a controller](/docs/guides/mapping-a-controller/) whose
 codes no one has written down,
 [handing the idle screen to another controller](/docs/guides/handing-the-idle-screen-to-another-controller/),
-and [recording what a player is playing](/docs/guides/record/).
+[recording what a player is playing](/docs/guides/record/), and
+[claiming a GPU by what it decodes](/docs/guides/claim-a-gpu-by-capability/).
 After those guides, declare the resources you need. The
 [reference](/docs/reference/) describes each resource.
 
 ## How the pieces fit
 
 The install puts two `Deployments` in `liken-system`: the operator
-and the message bus, one Mosquitto broker. Nothing else runs
-continuously.
+and the message bus, one Mosquitto broker. It also puts one
+`DaemonSet` there: the capabilities agent, one pod on each node with
+a GPU, which publishes what each GPU's media driver can do. Nothing
+else runs continuously.
 
 The resources divide the work by how often you write them. A
 `Player` is written once per unit of equipment. It selects the

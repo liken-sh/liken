@@ -71,6 +71,7 @@ group "default" {
     "media-operator-idle",
     "media-operator-display",
     "media-operator-api",
+    "media-operator-capabilities",
     "media-operator-cli",
     "people-operator",
     "per-node-csi-driver",
@@ -524,6 +525,22 @@ target "media-operator-api" {
   tags       = ["ghcr.io/liken-sh/media-operator-api:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache"]
   cache-to   = CACHE_WRITE == "media-operator-api" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "media-operator-capabilities" {
+  context    = "media-operator"
+  dockerfile = "Dockerfile.capabilities"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "vaapi" = "target:vaapi"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/media-operator-capabilities:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-capabilities:buildcache"]
+  cache-to   = CACHE_WRITE == "media-operator-capabilities" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-capabilities:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "media-operator-cli" {

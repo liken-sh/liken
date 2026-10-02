@@ -1,6 +1,8 @@
 // One module, one package, one program. The Go version matches
 // liken's, because the operator deploys onto liken clusters and
-// follows the same build discipline: a static binary, no cgo.
+// follows the same build discipline: a static binary, no cgo. The
+// capabilities agent also builds with no cgo, and it is the one program
+// that is not static: it loads libva when it runs (capabilities/libva.go).
 module github.com/liken-sh/media-operator
 
 go 1.27.1
@@ -9,16 +11,26 @@ replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
+	// The capabilities agent calls libva through purego, which opens a
+	// shared library and calls it from Go with CGO_ENABLED=0, so the
+	// agent builds in the same Go stage as every other program here.
+	github.com/ebitengine/purego v0.11.1
 	// The client, the watch, and the cache that the operators share. The
 	// module is in this repository, and the replace above builds against
 	// the copy in the tree, so no version of it is published.
 	github.com/liken-sh/liken/kubernetes v0.0.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/pflag v1.0.9
+	google.golang.org/grpc v1.83.2
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
 	k8s.io/cli-runtime v0.36.3
 	k8s.io/client-go v0.36.3
+	// The DRA plugin API that the node's kubelet calls on the
+	// capabilities agent. This side of a gRPC contract must not lead
+	// the side that answers it, so the pin follows the Kubernetes minor
+	// that liken's k3s/VERSION names, v1.36.
+	k8s.io/kubelet v0.36.3
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -92,6 +104,7 @@ require (
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect

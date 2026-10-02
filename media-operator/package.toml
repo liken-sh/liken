@@ -4,7 +4,7 @@ name = "media-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "vaapi", "vulkan"]
 
 [docs]
 prefix = "media"
@@ -92,6 +92,15 @@ name = "media-operator-api"
 file = "Dockerfile.api"
 contexts = { kubernetes = "kubernetes" }
 smoke = "media-operator/smoke/media-operator-api.sh"
+
+# The capabilities agent's image builds on the vaapi base, because its
+# query loads libva and the media driver, and only from the
+# capabilities package of this module.
+[[outputs.images]]
+name = "media-operator-capabilities"
+file = "Dockerfile.capabilities"
+contexts = { kubernetes = "kubernetes" }
+smoke = "media-operator/smoke/media-operator-capabilities.sh"
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is

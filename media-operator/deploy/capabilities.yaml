@@ -1,0 +1,220 @@
+# The capabilities agent: one pod on each node with a GPU, which asks
+# each render node's VA-API driver what it decodes, encodes, and
+# scales, and publishes the answer as media.liken.sh devices. A
+# workload's claim pairs one of those devices with the render node of
+# the same GPU, so the scheduler places the workload on a GPU whose
+# driver states what the workload needs. capability-classes.yaml holds
+# the classes that a claim names.
+---
+# The render nodes, as liken publishes them. liken publishes a render
+# node as a shareable device, so the agent's hold takes nothing away
+# from the workloads that decode on the same GPU.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: media-render
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].renderNode)
+---
+# Every render node of the node, in one claim. allocationMode All
+# allocates each render node that liken publishes on the node when the
+# scheduler places the pod, so the claim delivers every node the agent
+# queries. A node with no render node has nothing to allocate, and the
+# pod stays Pending there. The node label in the DaemonSet keeps the
+# pod off such a node.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: media-capabilities
+spec:
+  spec:
+    devices:
+      requests:
+        - name: render-nodes
+          exactly:
+            deviceClassName: media-render
+            allocationMode: All
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: media-capabilities
+spec:
+  selector:
+    matchLabels:
+      app: media-capabilities
+  # The render nodes are shareable, so a new pod can claim them while
+  # the old pod still holds them. The old pod stops first anyway,
+  # because both pods would register the same kubelet plugin socket.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: media-capabilities
+    spec:
+      serviceAccountName: media-capabilities
+      # The kubelet starts a pod whose claim holds a media.liken.sh
+      # device only while this driver's plugin is registered on the
+      # node, so the agent schedules ahead of the workloads that
+      # depend on it, and runs whatever the node is marked with.
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      # A node labeled media.liken.sh/gpu: none gets no pod. The claim
+      # alone leaves a pod on a node with no render node Pending for
+      # good, so a person marks such a node with that one label. NotIn
+      # also matches a node with no such label, so with no label the
+      # DaemonSet makes a pod on every node, and the claim decides
+      # where it can start. A patch that sets its own node affinity
+      # replaces this list of terms, because the list is atomic.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: media.liken.sh/gpu
+                    operator: NotIn
+                    values: ["none"]
+      containers:
+        - name: agent
+          image: ghcr.io/liken-sh/media-operator-capabilities:latest
+          env:
+            # The slice names the node it describes, and the agent reads
+            # its own pod to find the claim the kubelet made from the
+            # template. The downward API gives all three values.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            # No capabilities. The agent opens the render nodes its
+            # claim delivers, reads sysfs, and serves two sockets in the
+            # kubelet's directories, which root owns.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            # One query loads the GPU's media driver in a child
+            # process. The iHD driver's query measured 27 MB at its
+            # peak, and it runs once for each render node when the pod
+            # starts.
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+            claims:
+              - name: render-nodes
+          volumeMounts:
+            # The two mounts every DRA driver takes: the registry
+            # directory, where the kubelet finds the plugin, and the
+            # plugin's own directory, which holds the socket that
+            # answers the prepare calls.
+            - name: kubelet-plugin
+              mountPath: /var/lib/kubelet/plugins/media.liken.sh
+            - name: kubelet-plugins-registry
+              mountPath: /var/lib/kubelet/plugins_registry
+      resourceClaims:
+        - name: render-nodes
+          resourceClaimTemplateName: media-capabilities
+      volumes:
+        # DirectoryOrCreate, because a node that has never run a DRA
+        # driver has neither path.
+        - name: kubelet-plugin
+          hostPath:
+            path: /var/lib/kubelet/plugins/media.liken.sh
+            type: DirectoryOrCreate
+        - name: kubelet-plugins-registry
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: media-capabilities
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: media-capabilities
+rules:
+  # The agent's own slice, <node>-media.liken.sh, which it creates,
+  # replaces, and deletes, and the liken.sh slice of its node, which it
+  # watches for render nodes. RBAC cannot name the slice of one node,
+  # because resourceNames cannot follow the pod's node, so the grant
+  # covers every slice. The agent writes only the slice it names from
+  # NODE_NAME, and watches only the liken.sh slice of its node, by name.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, list, watch, create, update, delete]
+  # The node, read once at start for the UID of the slice's owner
+  # reference. The Node owns the slice, so a Node that leaves the
+  # cluster takes the slice with it.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: media-capabilities
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: media-capabilities
+subjects:
+  - kind: ServiceAccount
+    name: media-capabilities
+    namespace: liken-system
+---
+# The agent's own pod and claim, in its own namespace. It reads the pod
+# for the name of its claim, and the claim for the render nodes it
+# holds. It deletes its own pod when liken publishes a render node the
+# claim does not hold, because a pod's claim keeps its allocation for
+# the life of the pod, and the DaemonSet's next pod claims every render
+# node. RBAC cannot name a DaemonSet's pod, so the delete covers every
+# pod in the namespace, and the agent deletes only the pod that
+# POD_NAME names.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: media-capabilities
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, delete]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: media-capabilities
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: media-capabilities
+subjects:
+  - kind: ServiceAccount
+    name: media-capabilities
+    namespace: liken-system

@@ -1,0 +1,49 @@
+# The capabilities agent's image: the agent on liken's vaapi base, which
+# carries libva, libva-drm, and the Intel media driver on scratch. The
+# agent queries each render node's driver through libva, so it needs
+# both libraries and the driver, and none of ffmpeg.
+
+FROM golang:1.27.1-bookworm AS build
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the build.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the git that this image includes. `GOSUMDB` keeps its
+# default, so the checksum database still verifies a module that `go`
+# fetched from its origin.
+ENV GOPROXY="https://proxy.golang.org|direct"
+WORKDIR /src
+# The module files come first, so a source edit reuses the cached
+# download layer.
+COPY go.mod go.sum ./
+# go.mod replaces the shared kubernetes module with ../kubernetes, and
+# the build takes that directory as a second build context named
+# kubernetes. It lands at /kubernetes, the same place relative to /src
+# that kubernetes/ has relative to this component. Its module file
+# comes first for the same reason as this module's.
+COPY --from=kubernetes go.mod go.sum /kubernetes/
+RUN go mod download
+COPY --from=kubernetes . /kubernetes/
+COPY capabilities/ ./capabilities/
+# CGO_ENABLED=0 with -trimpath is liken's build discipline. purego calls
+# libva with no cgo, so the build needs no C toolchain and no libva
+# headers. The binary names the system's dynamic loader, which the base
+# carries for libva itself.
+RUN CGO_ENABLED=0 go build -trimpath -o /media-capabilities ./capabilities
+
+# purego's build with no cgo names libdl.so.2 and libpthread.so.0 as
+# well as libc.so.6. Since glibc 2.34 both are empty stubs whose symbols
+# libc.so.6 holds, and the vaapi base carries only the libraries its
+# programs load, so neither stub is there. The two files come from the
+# Debian image that every base on Debian builds from, by the same
+# digest, so they are the stubs of the glibc release the base carries.
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS glibc
+
+# The bake file at the top of the repository gives this build the vaapi
+# image of the same commit as the named context vaapi.
+FROM vaapi
+COPY --from=glibc /usr/lib/x86_64-linux-gnu/libdl.so.2 \
+     /usr/lib/x86_64-linux-gnu/libpthread.so.0 \
+     /usr/lib/x86_64-linux-gnu/
+COPY --from=build /media-capabilities /media-capabilities
+ENTRYPOINT ["/media-capabilities"]

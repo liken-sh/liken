@@ -10,7 +10,8 @@ This guide installs `media-operator` on a
 [`liken`](https://liken.sh/docs/) cluster. At the end, the operator
 and its message bus run in `liken-system`, and the cluster accepts
 the five resources: `Player`, `Play`, `Remote`, `Keymap`, and
-`MediaPreferences`.
+`MediaPreferences`. On each node with a GPU, the capabilities agent
+publishes what the GPU's media driver can decode, encode, and scale.
 
 You need:
 
@@ -22,18 +23,24 @@ You need:
   and Bluetooth speakers. Install the ones your equipment has; a
   `Player` can only select what an installed operator publishes.
 * `kubectl` with cluster-admin access, because the install creates
-  the CRDs and a `ClusterRole`.
+  the CRDs, the `DeviceClass` objects, and the `ClusterRoles`.
 
 ## The device classes are yours
 
-The install manifests define no `DeviceClass` objects. The operator
-claims no devices for itself. The classes a `Player` names are the
-cluster owner's vocabulary, the same classes a hand-written
-`ResourceClaim` would use. Each hardware operator's manual gives the
-YAML for its class:
+The classes a `Player` names are the cluster owner's vocabulary, the
+same classes a hand-written `ResourceClaim` would use, and the install
+manifests do not define them. Each hardware operator's manual gives
+the YAML for its class:
 [displays](https://liken.sh/display/docs/guides/install/),
 [audio outputs](https://liken.sh/audio/docs/guides/install/), and
 [Bluetooth devices](https://liken.sh/bluetooth/docs/guides/install/).
+
+The install defines the classes of the capabilities agent alone.
+`capabilities.yaml` defines `media-render`, the class of the agent's
+own claim on the render nodes, and `capability-classes.yaml` defines
+the classes that select the agent's `media.liken.sh` devices.
+[Render node capabilities](/docs/reference/capabilities/#device-classes)
+lists them.
 
 ## Apply the manifests
 
@@ -49,12 +56,14 @@ the install needs no clone:
       -f https://liken.sh/media/deploy/mediapreferences-crd.yaml \
       -f https://liken.sh/media/deploy/rbac.yaml \
       -f https://liken.sh/media/deploy/operator.yaml \
-      -f https://liken.sh/media/deploy/bus.yaml
+      -f https://liken.sh/media/deploy/bus.yaml \
+      -f https://liken.sh/media/deploy/capabilities.yaml \
+      -f https://liken.sh/media/deploy/capability-classes.yaml
 
-The `-n` flag places the `ServiceAccount`, the two `Deployments`,
-and the `Service` in `liken-system`, the namespace every `liken`
-cluster has. The CRDs and the `ClusterRole` are cluster-scoped, so
-the flag does not apply to them.
+The `-n` flag places the `ServiceAccounts`, the two `Deployments`,
+the `DaemonSet`, and the `Service` in `liken-system`, the namespace
+every `liken` cluster has. The CRDs, the `DeviceClasses`, and the
+`ClusterRoles` are cluster-scoped, so the flag does not apply to them.
 
 For GitOps, point a `Kustomization` at the served URLs. `kustomize`
 takes a raw YAML URL as a resource:
@@ -71,6 +80,8 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/media/deploy/rbac.yaml
       - https://liken.sh/media/deploy/operator.yaml
       - https://liken.sh/media/deploy/bus.yaml
+      - https://liken.sh/media/deploy/capabilities.yaml
+      - https://liken.sh/media/deploy/capability-classes.yaml
 
 A clone works too: `kubectl apply -k media-operator/deploy/` from the
 repository applies the same files through
@@ -107,8 +118,8 @@ can pull that artifact by the version, with no sha.
 
 ## What the install runs
 
-The install runs two `Deployments` in `liken-system`, and they are
-separate on purpose:
+The install runs two `Deployments` and one `DaemonSet` in
+`liken-system`, and they are separate on purpose:
 
 * `media-operator` watches the five resources and reconciles them
   into claims and pods. It keeps no state on a volume and serves no
@@ -123,6 +134,14 @@ separate on purpose:
   the operator's pod, so the operator restarts without dropping a
   message, and a button press reaches `mpv` while the operator is
   down.
+* `media-capabilities` is the capabilities agent, one pod on each node
+  with a GPU. It holds a shareable claim on every render node of its
+  node, asks each one's VA-API driver what it supports, and publishes
+  a `media.liken.sh` device for each GPU. It also registers the
+  `media.liken.sh` DRA driver with the node's kubelet, which a pod
+  whose claim holds one of those devices needs before it starts.
+  [Render node capabilities](/docs/reference/capabilities/) describes
+  the devices.
 
 ## Container resources
 
@@ -184,7 +203,8 @@ refuses such a pod.
 
     kubectl -n liken-system get pods
 
-Both pods report `Running`. The operator's log names the `Lease` it
+The operator's pod and the bus's pod report `Running`, and so does a
+`media-capabilities` pod on each node with a GPU. The operator's log names the `Lease` it
 holds, and then counts what it found. client-go's leader election
 writes lines of its own beside these:
 
@@ -197,10 +217,81 @@ instead is a second copy. It takes over within about 11 seconds when
 the holder shuts down, and 30 to 41 seconds after the holder's last
 renewal when the holder stops without a shutdown.
 
+The capabilities agent's log has one line for each GPU, with the
+driver's name and every capability it publishes:
+
+    kubectl -n liken-system logs ds/media-capabilities
+    capabilities: pci-0000-00-02-0 (/dev/dri/renderD128, Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 ()): decodeH264=true decodeHEVCMain=true ...
+    slice: created node-1-media.liken.sh with 1 devices
+
 From here, the work is declaring resources. The
 [reference](/docs/reference/) describes each one, and
 [the message bus](/docs/reference/bus/) describes every topic the
 pods and your own programs share.
+
+## Keep the capabilities pods off nodes with no GPU
+
+The `DaemonSet` makes a pod on every node. On a node with no GPU, the
+claim matches no device, and the pod stays `Pending`. To make no pod
+on such a node, label the node `media.liken.sh/gpu: none`.
+
+The `DaemonSet` in the base carries this node affinity, so no patch is
+needed:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: media.liken.sh/gpu
+              operator: NotIn
+              values: ["none"]
+```
+
+`NotIn` matches a node whose label has a different value, and also a
+node that has no such label. The Kubernetes page on
+[set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
+gives this rule. So with no label the `DaemonSet` makes a pod on every
+node, and a node labeled `none` gets no pod. When a label changes, the
+[`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
+controller deletes the pod from a node that no longer matches, and
+adds one to a node that matches again.
+
+Declare the label in the node's `Machine`, so the label is part of
+the record of the machine:
+
+    spec:
+      nodeLabels:
+        media.liken.sh/gpu: none
+
+A `Machine` accepts a key in a `liken.sh` subdomain from `liken`
+2026.09.28-002 on, and an older release refuses it, so on an older
+release use the `kubectl label` way below.
+
+The `liken` machine operator applies the label to the running node. A
+machine that is demoted or installed again registers a new Node, and
+the Node has the label from registration. To run the pod on that
+node again, remove the key from `spec.nodeLabels`, and `liken`
+removes the label from the node. `liken` also removes a label that
+you set with `kubectl` before the `Machine` declared it, when the key
+leaves the spec.
+
+You can also label the node with `kubectl`:
+
+    kubectl label node node-1 media.liken.sh/gpu=none
+
+The label stays on the node across reboots. `liken` leaves it in
+place, because `liken` removes only the labels that a `Machine`
+declared. The label goes with the Node object: a machine that is
+demoted or installed again registers a new Node, and you label it
+again. To run the pod on that node again, remove the label:
+
+    kubectl label node node-1 media.liken.sh/gpu-
+
+A patch of your own that sets a node affinity on this `DaemonSet`
+replaces the list of terms in the base, and the `none` term with it.
+Copy the `none` requirement into each term of your patch.
 
 ## Read the player's full output
 
@@ -233,7 +324,9 @@ itself:
     kubectl delete -n liken-system \
       -f https://liken.sh/media/deploy/rbac.yaml \
       -f https://liken.sh/media/deploy/operator.yaml \
-      -f https://liken.sh/media/deploy/bus.yaml
+      -f https://liken.sh/media/deploy/bus.yaml \
+      -f https://liken.sh/media/deploy/capabilities.yaml \
+      -f https://liken.sh/media/deploy/capability-classes.yaml
 
 **Deleting a CRD deletes every resource of that kind.** Delete the
 five `*-crd.yaml` files only when every player, play, remote,

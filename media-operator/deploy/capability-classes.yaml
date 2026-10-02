@@ -1,0 +1,64 @@
+# The classes a workload's claim names to ask for a GPU by what its
+# media driver states. Each one selects media.liken.sh devices, which
+# deliver nothing, so a claim pairs the request with a request for the
+# render node of the same GPU through a matchAttribute constraint on
+# resource.kubernetes.io/pciBusID. The capabilities guide gives the
+# claim.
+#
+# The classes ship with the base because they name this driver's own
+# attributes. A claim that needs a set no class names states its own
+# selector on media-capabilities.
+---
+# Every media.liken.sh device: every GPU the agent queried, whatever
+# its driver states.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: media-capabilities
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "media.liken.sh"
+---
+# A GPU that decodes 10-bit HEVC and scales 10-bit frames on its video
+# processor, which is the whole path of a 10-bit film from the decoder
+# to a scaled frame.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: media-decode-10bit
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "media.liken.sh" &&
+          device.attributes["media.liken.sh"].decodeHEVCMain10 &&
+          device.attributes["media.liken.sh"].scale10bit
+---
+# A GPU that decodes AV1 at 8 and 10 bits.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: media-decode-av1
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "media.liken.sh" &&
+          device.attributes["media.liken.sh"].decodeAV1Main &&
+          device.attributes["media.liken.sh"].decodeAV1Main10
+---
+# A GPU that encodes H.264 and HEVC at 8 and 10 bits, which is what a
+# transcoding server such as Jellyfin uses.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: media-encode
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "media.liken.sh" &&
+          device.attributes["media.liken.sh"].encodeH264 &&
+          device.attributes["media.liken.sh"].encodeHEVCMain &&
+          device.attributes["media.liken.sh"].encodeHEVCMain10
