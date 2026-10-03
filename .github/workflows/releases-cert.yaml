@@ -34,9 +34,9 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-26.04
-    # A renewal takes about a minute, so 15 stops a hung run with
-    # wide margin for a slow DNS-01 challenge.
-    timeout-minutes: 15
+    # A renewal takes about a minute. 30 stops a hung run and leaves
+    # room for the three DNS-01 attempts below.
+    timeout-minutes: 30
     steps:
       # lego is a single static binary, and the runner needs nothing
       # else. So this workflow has no checkout step. This step pins
@@ -54,14 +54,29 @@ jobs:
       # see it, then removes it. The long propagation window accounts
       # for Linode's nameservers, which pick up zone edits on a
       # refresh cycle rather than immediately.
+      #
+      # lego's propagation check proves only that the nameservers it
+      # reaches from the runner serve the record. Linode's nameservers
+      # are anycast, and Let's Encrypt validates from several networks,
+      # so a validator can reach a nameserver that has not refreshed
+      # yet and get NXDOMAIN. So the step tries three times, two
+      # minutes apart. Let's Encrypt allows five failed validations
+      # per hostname per hour, so three attempts stay under that limit.
       - name: obtain a certificate
         env:
           LINODE_TOKEN: ${{ secrets.RELEASES_CERT_TOKEN }}
-          LINODE_PROPAGATION_TIMEOUT: "900"
+          LINODE_PROPAGATION_TIMEOUT: "300"
           LINODE_POLLING_INTERVAL: "15"
         run: |
-          ./lego run --accept-tos --email c@guid.foo \
-            --dns linode --domains releases.liken.sh
+          for attempt in 1 2 3; do
+            if ./lego run --accept-tos --email c@guid.foo \
+              --dns linode --domains releases.liken.sh; then
+              exit 0
+            fi
+            echo "attempt $attempt failed" >&2
+            [ "$attempt" -lt 3 ] && sleep 120
+          done
+          exit 1
 
       # The bucket holds at most one certificate, so renewal deletes
       # the old one, then uploads the new one. The delete step is
