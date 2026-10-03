@@ -224,13 +224,122 @@ another worker, which passes over every title the first one finished.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
 
-The worker decodes on the node's GPU when `spec.trickplay.render` names
-a DeviceClass. The operator keeps a `ResourceClaimTemplate` for the
-`Library`, and the worker's pod claims one device from it. `ffmpeg`
-decodes through VA-API, and it falls back to software for a codec the
-GPU refuses. With no render block the worker decodes in software. With
-a render block on a cluster where no node offers such a device, the
-pod stays `Pending`, and its events say so.
+The worker decodes on a GPU when `spec.trickplay.gpuResourceClaimTemplate`
+names a `ResourceClaimTemplate`, as the next section describes.
+`ffmpeg` decodes through VA-API, and it falls back to software for a
+codec the GPU refuses. With no template, the worker decodes in
+software.
+
+#### A worker on a GPU
+
+The operator does not build the GPU claim of a worker. A claim can
+take any shape that dynamic resource allocation allows, and the choice
+of a GPU is the cluster owner's, so the device classes and selectors
+stay in your own YAML. You write a `ResourceClaimTemplate` in the
+namespace of the `Library`, and the `Library` names it in
+`spec.trickplay.gpuResourceClaimTemplate` or
+`spec.appearances.gpuResourceClaimTemplate`. Each pod of the worker
+claims a device from that template. The field is named for the role
+of the claim, the GPU the worker decodes on, so a claim for another
+kind of device, such as an NPU for the face models, takes a field of
+its own.
+
+The simplest template asks for one render node of a class. The class
+here selects every render node that `liken` publishes:
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: gpu-render
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].renderNode)
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: trickplay-gpu
+  namespace: media
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu-render
+```
+
+```yaml
+apiVersion: library.liken.sh/v1alpha1
+kind: Library
+metadata:
+  name: movies
+  namespace: media
+spec:
+  trickplay:
+    enabled: true
+    gpuResourceClaimTemplate: trickplay-gpu
+```
+
+On a fleet of mixed GPUs, a render node alone can land on a GPU whose
+driver cannot decode the library's codecs. The template can pair the
+render node with a `media.liken.sh` capability device of the same GPU,
+so the scheduler places the pod only on a GPU whose driver decodes
+10-bit HEVC and scales 10-bit frames.
+[Claim a GPU by what it decodes](https://liken.sh/media/docs/guides/claim-a-gpu-by-capability/)
+describes the capability devices and writes the `decode-10bit` class:
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: appearances-gpu
+  namespace: media
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu-render
+        - name: decodes
+          exactly:
+            deviceClassName: decode-10bit
+      constraints:
+        - requests: [gpu, decodes]
+          matchAttribute: resource.kubernetes.io/pciBusID
+```
+
+This template needs a `liken` release that publishes
+`resource.kubernetes.io/pciBusID` on its render nodes. On an older
+release, the claim never allocates, and the worker's pods stay
+`Pending`.
+
+The operator reads only whether the template exists. When the
+`Library` names a template that its namespace does not hold, the
+operator starts no worker of that fact, because the worker's pods
+would stay `Pending` until the `Job`'s 24-hour deadline. The
+`GPUClaimTemplates` condition of the `Library` is then `False` with
+the reason `ClaimTemplateNotFound`, and its message names the
+template:
+
+    kubectl -n media get library movies -o jsonpath='{.status.conditions[?(@.type=="GPUClaimTemplates")]}'
+
+The operator watches the templates, so the next worker starts as soon
+as you create the template. A template that exists but that no node
+can allocate leaves the worker's pods `Pending`, and their events say
+so.
+
+The `Library` schema has no `render` field. An earlier release of the
+operator built a template for each worker from that field, named
+`<library>-trickplay` or `<library>-appearances`, with the `Library`
+as its owner. The operator deletes each such template the first time
+it reconciles the `Library`, and leaves a template you wrote at the
+same name.
 
 #### A worker on several nodes
 
@@ -244,8 +353,7 @@ spec:
   appearances:
     enabled: true
     parallelism: 3
-    render:
-      class: display-render
+    gpuResourceClaimTemplate: appearances-gpu
 ```
 
 At 1, the default, the worker is one pod. Above 1, the worker is an
@@ -256,8 +364,8 @@ ask for a rescan of one folder. Each pod logs its share:
 
     library.liken.sh: index 1 of 3 takes 482 of the 1447 videos
 
-Each pod claims its own device from the worker's
-`ResourceClaimTemplate`. The pods prefer different nodes. When fewer
+Each pod claims its own device from the template that
+`gpuResourceClaimTemplate` names. The pods prefer different nodes. When fewer
 nodes offer the device than the worker has pods, two pods share a
 node and its device, because `liken` publishes a render node for many
 claims at once. Kubernetes retries a failed pod up to twice on its own
@@ -409,10 +517,10 @@ laptop, the detect pass took 1.5 to 4 minutes for a 1080p film and 6
 minutes for a 4K film through VA-API, and 34 minutes for the 4K film in
 software. The worker allows each detect pass 6 hours.
 
-With no render block, the worker decodes and runs the models on the
-CPU. `spec.appearances.render` names a DeviceClass, and the operator
-keeps a `ResourceClaimTemplate` for the worker, as it does for
-trickplay. With the claim, `ffmpeg` decodes and scales the video on
+With no template, the worker decodes and runs the models on the CPU.
+`spec.appearances.gpuResourceClaimTemplate` names a
+`ResourceClaimTemplate`, as [A worker on a GPU](#a-worker-on-a-gpu)
+describes for both workers. With the claim, `ffmpeg` decodes and scales the video on
 the render node through VA-API, and OpenVINO runs the models on the
 Intel GPU. A file the render node refuses to decode is decoded again in
 software. OpenVINO compiles the models for the GPU when the worker

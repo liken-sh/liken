@@ -565,20 +565,20 @@ func TestAStoppedAppearancesRunRecordsNothing(t *testing.T) {
 }
 
 // The worker's Job runs the appearances image with the memory the measured
-// runs need, an emptyDir for the GPU's kernel cache, and the render claim
-// where the Library names a render block.
+// runs need, an emptyDir for the GPU's kernel cache, and the GPU claim
+// where the Library names a template.
 func TestAnAppearancesWorkerJob(t *testing.T) {
 	cases := []struct {
-		name   string
-		render *RenderDevice
+		name     string
+		template string
 	}{
 		{name: "on the CPU"},
-		{name: "on a GPU", render: &RenderDevice{Class: "gpu.liken.sh"}},
+		{name: "on a GPU", template: "appearances-gpu"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			library := studioMovies()
-			library.Spec.Appearances = LibraryAppearances{Enabled: true, Render: test.render}
+			library.Spec.Appearances = LibraryAppearances{Enabled: true, GPUResourceClaimTemplate: test.template}
 
 			pod := buildFactWorkerJob(library, appearancesWorker,
 				jobImages{operator: testScannerImage, ffmpeg: testFFmpegImage, appearances: testAppearancesImage},
@@ -600,9 +600,9 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 				t.Errorf("volumes = %+v mounted at %+v, want the scratch emptyDir at %s",
 					pod.Volumes, container.VolumeMounts, appearancesScratch)
 			}
-			claimed := len(pod.ResourceClaims) == 1 && pod.ResourceClaims[0].ResourceClaimTemplateName == "movies-appearances"
-			if claimed != (test.render != nil) {
-				t.Errorf("claims = %+v, want the appearances template: %v", pod.ResourceClaims, test.render != nil)
+			claimed := len(pod.ResourceClaims) == 1 && pod.ResourceClaims[0].ResourceClaimTemplateName == "appearances-gpu"
+			if claimed != (test.template != "") {
+				t.Errorf("claims = %+v, want the appearances template: %v", pod.ResourceClaims, test.template != "")
 			}
 		})
 	}

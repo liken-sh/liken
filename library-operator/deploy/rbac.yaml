@@ -148,15 +148,16 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, list, watch, create, delete]
-  # The ResourceClaimTemplate each Library that names a render node keeps, one
-  # per Library, owned by it. The operator watches the templates that carry
-  # its Library label, and each pass reads them from the watch. A library Job that runs trickplay names the template and the
-  # kubelet mints the claim from it. The delete covers two cases: a Library that
-  # no longer names a render node, and a render block that changed, because a
-  # template's spec is immutable.
+  # The ResourceClaimTemplates a Library names for the GPU of its trickplay
+  # and appearances workers. The cluster owner writes them, so the operator
+  # watches every template and reads only whether the one a Library names
+  # exists: it starts no worker whose template is missing. The delete
+  # covers one case, guarded by an owner reference to the Library's UID:
+  # the templates an earlier release of the operator created for each
+  # Library, which no pod claims from.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaimtemplates]
-    verbs: [get, list, watch, create, delete]
+    verbs: [get, list, watch, delete]
   # The StorageClass every claim names, read by name for one answer: the
   # provisioner behind it. A class the per-node driver serves is the one
   # the operator writes the volume for itself. The operator never

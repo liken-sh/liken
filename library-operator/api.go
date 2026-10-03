@@ -213,9 +213,10 @@ type LibraryTrailers struct {
 type LibraryTrickplay struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	// The render node the trickplay worker claims for its decode. Unset, the
+	// The ResourceClaimTemplate in the Library's namespace that the trickplay
+	// worker's pod claims its render node from (gpuclaim.go). Unset, the
 	// worker carries no claim and decodes in software.
-	Render *RenderDevice `json:"render,omitempty"`
+	GPUResourceClaimTemplate string `json:"gpuResourceClaimTemplate,omitempty"`
 
 	// How many pods the trickplay worker runs at once, each on its own share
 	// of the list. The CRD defaults it to 1.
@@ -226,22 +227,15 @@ type LibraryTrickplay struct {
 type LibraryAppearances struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	// The GPU the appearances worker claims to decode the video and to run
-	// the face models. Unset, the worker carries no claim and does both on
-	// the CPU.
-	Render *RenderDevice `json:"render,omitempty"`
+	// The ResourceClaimTemplate in the Library's namespace that the
+	// appearances worker's pod claims its GPU from, to decode the video and
+	// to run the face models (gpuclaim.go). Unset, the worker carries no
+	// claim and does both on the CPU.
+	GPUResourceClaimTemplate string `json:"gpuResourceClaimTemplate,omitempty"`
 
 	// How many pods the appearances worker runs at once, each on its own
 	// share of the list. The CRD defaults it to 1.
 	Parallelism int `json:"parallelism,omitempty"`
-}
-
-// One DeviceClass name, and a CEL expression over that class's devices where
-// the class alone chooses too many. A worker that holds one decodes on the
-// render node the claim allocates.
-type RenderDevice struct {
-	Class    string `json:"class"`
-	Selector string `json:"selector,omitempty"`
 }
 
 // The schedule the Library's full walk runs on, as a cron expression
@@ -788,6 +782,9 @@ const (
 	conditionBound     = "Bound"
 	conditionReady     = "Ready"
 	conditionDeparting = "Departing"
+	// GPUClaimTemplates reports the ResourceClaimTemplates that the
+	// Library's enabled workers name.
+	conditionGPUClaimTemplates = "GPUClaimTemplates"
 )
 
 // The reasons each condition takes. A reason is one CamelCase word a
@@ -797,6 +794,11 @@ const (
 	reasonClaimNotFound  = "ClaimNotFound"
 	reasonClaimUnbound   = "ClaimUnbound"
 	reasonVolumeNotFound = "VolumeNotFound"
+
+	// The GPUClaimTemplates condition's reasons: every template exists, and
+	// a template does not exist in the Library's namespace.
+	reasonClaimTemplatesFound   = "ClaimTemplatesFound"
+	reasonClaimTemplateNotFound = "ClaimTemplateNotFound"
 
 	reasonReady        = "Ready"
 	reasonNotBound     = "NotBound"

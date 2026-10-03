@@ -305,25 +305,16 @@ spec:
                       type: boolean
                       default: false
                       description: "Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, each Job of this library writes the gap as a work list onto the volume when it ends, and the operator then starts a trickplay worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It works through the list one feature at a time and asks the operator to rescan each title's folder when the title is done, so the catalog shows the sheets within seconds."
-                    render:
-                      type: object
-                      description: "The render node the trickplay worker decodes on. Set, the operator keeps a ResourceClaimTemplate for the Library and the worker's pod claims one device of the class. Unset, the worker decodes in software."
-                      required: [class]
-                      properties:
-                        class:
-                          type: string
-                          minLength: 1
-                          description: "The name of the DeviceClass the render node is allocated from."
-                        selector:
-                          type: string
-                          minLength: 1
-                          description: "A CEL expression over device.attributes, for a class that offers more than one render node."
+                    gpuResourceClaimTemplate:
+                      type: string
+                      minLength: 1
+                      description: "The name of a ResourceClaimTemplate in the Library's namespace. The trickplay worker's pod claims a render node from it and decodes on that node. The cluster owner writes the template, so the claim can take any shape that dynamic resource allocation allows, and the operator reads only whether the template exists. While it does not exist, the operator starts no trickplay worker, and the GPUClaimTemplates condition names the template. Unset, the worker carries no claim and decodes in software."
                     parallelism:
                       type: integer
                       minimum: 1
                       maximum: 16
                       default: 1
-                      description: "How many pods the trickplay worker Job runs at once. At 1, its default, one pod works the whole list. Above 1, the worker is an Indexed Job, and each pod takes the videos of the title folders that hash to its index, so a series and its ledger stay in one pod. Each pod claims its own render node where the render block names one. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
+                      description: "How many pods the trickplay worker Job runs at once. At 1, its default, one pod works the whole list. Above 1, the worker is an Indexed Job, and each pod takes the videos of the title folders that hash to its index, so a series and its ledger stay in one pod. Each pod claims its own render node from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
                 trailers:
                   type: object
                   default: {}
@@ -342,25 +333,16 @@ spec:
                       type: boolean
                       default: false
                       description: "Off by default, because a first pass decodes every frame of every feature in the library, which took 1.5 to 6 minutes for a film on a laptop GPU in the measurements of plan 75, and takes longer in software. A feature is in the gap when the probe gave it a length and its title credits at least one actor with a headshot. An episode takes its series' cast. Turned on, each Job of this library writes the gap as a work list onto the volume when it ends, and the operator then starts an appearances worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It finds and embeds the faces of one feature at a time, matches them with the cast, writes the answer and the attempt to the ledger, and asks the operator to rescan each title's folder when the title is done. A found answer stands until the file at its path is replaced."
-                    render:
-                      type: object
-                      description: "The GPU the appearances worker decodes the video and runs the face models on. Set, the operator keeps a ResourceClaimTemplate for the Library and the worker's pod claims one device of the class: ffmpeg decodes and scales on the render node through VA-API, and OpenVINO runs the models on the Intel GPU. A file the render node will not decode is decoded again in software. Unset, the worker does both on the CPU."
-                      required: [class]
-                      properties:
-                        class:
-                          type: string
-                          minLength: 1
-                          description: "The name of the DeviceClass the GPU is allocated from."
-                        selector:
-                          type: string
-                          minLength: 1
-                          description: "A CEL expression over device.attributes, for a class that offers more than one GPU."
+                    gpuResourceClaimTemplate:
+                      type: string
+                      minLength: 1
+                      description: "The name of a ResourceClaimTemplate in the Library's namespace. The appearances worker's pod claims a GPU from it: ffmpeg decodes and scales on the render node through VA-API, and OpenVINO runs the models on the Intel GPU. A file the render node will not decode is decoded again in software. The cluster owner writes the template, and the operator reads only whether it exists. While it does not exist, the operator starts no appearances worker, and the GPUClaimTemplates condition names the template. Unset, the worker carries no claim and does both on the CPU."
                     parallelism:
                       type: integer
                       minimum: 1
                       maximum: 16
                       default: 1
-                      description: "How many pods the appearances worker Job runs at once. At 1, its default, one pod works the whole list. Above 1, the worker is an Indexed Job, and each pod takes the videos of the title folders that hash to its index, so a series and its ledger stay in one pod. Each pod claims its own GPU where the render block names one. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
+                      description: "How many pods the appearances worker Job runs at once. At 1, its default, one pod works the whole list. Above 1, the worker is an Indexed Job, and each pod takes the videos of the title folders that hash to its index, so a series and its ledger stay in one pod. Each pod claims its own GPU from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
                 languages:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -623,7 +605,17 @@ spec:
                     serves each fact this library needs, and False
                     with the reason ProviderNotFound, ProviderNotReady,
                     or FactNotServed. A library that names no source
-                    carries no Sources condition.
+                    carries no Sources condition. GPUClaimTemplates
+                    reports the ResourceClaimTemplates that
+                    spec.trickplay.gpuResourceClaimTemplate and
+                    spec.appearances.gpuResourceClaimTemplate name for
+                    an enabled worker: True with the reason
+                    ClaimTemplatesFound when each one exists in the
+                    library's namespace, and False with the reason
+                    ClaimTemplateNotFound when one does not, which
+                    holds that worker back. A library whose enabled
+                    workers name no template carries no
+                    GPUClaimTemplates condition.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.

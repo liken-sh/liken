@@ -27,8 +27,8 @@ const (
 
 // The trickplay worker. It runs where the Library turns the fact on, on the
 // image that holds ffmpeg, and it decodes on the render node its claim
-// allocates where the Library names a render block. With no render block it
-// decodes in software.
+// allocates where the Library names a ResourceClaimTemplate. With no template
+// it decodes in software.
 var trickplayWorker = factWorker{
 	fact:    factTrickplay,
 	enabled: func(library *Library) bool { return library.Spec.Trickplay.Enabled },
@@ -39,9 +39,9 @@ var trickplayWorker = factWorker{
 			Limits:   map[string]string{"memory": trickplayMemoryLimit},
 		}
 	},
-	render:      func(library *Library) *RenderDevice { return library.Spec.Trickplay.Render },
-	parallelism: func(library *Library) int { return podsOf(library.Spec.Trickplay.Parallelism) },
-	work:        func(ctx context.Context, run *factWorkerRun, item workItem) { run.trickplayOne(ctx, item) },
+	gpuClaimTemplate: func(library *Library) string { return library.Spec.Trickplay.GPUResourceClaimTemplate },
+	parallelism:      func(library *Library) int { return podsOf(library.Spec.Trickplay.Parallelism) },
+	work:             func(ctx context.Context, run *factWorkerRun, item workItem) { run.trickplayOne(ctx, item) },
 }
 
 // The gap. A feature the probe gave a length to, with no trickplay directory

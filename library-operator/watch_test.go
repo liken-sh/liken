@@ -227,6 +227,15 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 		{name: "a Service somebody deleted", wakes: true, change: func(cluster *fakeCluster) {
 			delete(cluster.services, "house/catalog")
 		}},
+		{name: "a ResourceClaimTemplate the cluster owner writes", wakes: true, change: func(cluster *fakeCluster) {
+			cluster.claimTemplates["house/appearances-gpu"] = ownersTemplate("appearances-gpu")
+		}},
+		{name: "a ResourceClaimTemplate the cluster owner deletes", wakes: true, change: func(cluster *fakeCluster) {
+			delete(cluster.claimTemplates, "house/trickplay-gpu")
+		}},
+		{name: "a new label on a ResourceClaimTemplate", wakes: false, change: func(cluster *fakeCluster) {
+			cluster.claimTemplates["house/trickplay-gpu"].Metadata.Labels = map[string]string{"team": "media"}
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -240,6 +249,7 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 				cluster.jobs["house/movies-walk-a"] = &Job{Metadata: ObjectMeta{Name: "movies-walk-a", Namespace: "house",
 					Labels: map[string]string{scannerLabelKey: workerLabelValue}}}
 				cluster.services["house/catalog"] = buildCatalogService("house", nil)
+				cluster.claimTemplates["house/trickplay-gpu"] = ownersTemplate("trickplay-gpu")
 				_, wake := watchedCluster(t, cluster, nil)
 
 				cluster.mutex.Lock()
@@ -415,15 +425,17 @@ func TestTheWatchesDropANodesImages(t *testing.T) {
 // list for any of them. A pass that finds nothing changed writes nothing,
 // so its own writes wake no pass after it. The two Catalogs name no
 // Jellyfin server, so the pass sends no read or delete for the backfill
-// Job or the Jellyfin Service, and it reads the trickplay template of the
-// Library with a render block from its watch: a settled pass sends the
-// API server nothing. The same pass sent 20 requests when it listed the claims, the
+// Job or the Jellyfin Service. It reads the template the Library's
+// trickplay worker names, and the names of the templates an earlier
+// release created, from the watch: a settled pass sends the API server
+// nothing. The same pass sent 20 requests when it listed the claims, the
 // volumes, the pods, the Jobs, and the nodes, and read the Services and
 // the slices by name.
 func TestASteadyPassListsNoWatchedCollectionAndWakesNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
-		boundHouse(cluster).Spec.Trickplay.Render = libraryWithRender("gpu.liken.sh", "").Spec.Trickplay.Render
+		boundHouse(cluster).Spec.Trickplay = LibraryTrickplay{Enabled: true, GPUResourceClaimTemplate: "trickplay-gpu"}
+		cluster.claimTemplates["house/trickplay-gpu"] = ownersTemplate("trickplay-gpu")
 		boundStudio(cluster)
 		for _, namespace := range []string{"house", "studio"} {
 			pod := readyCatalogPod(namespace, namespace)

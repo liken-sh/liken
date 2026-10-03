@@ -45,8 +45,8 @@ const appearancesScratch = "/var/cache/appearances"
 
 // The appearances worker. It runs where the Library turns the fact on, on the
 // image that holds the tool and the models, and it decodes and runs the
-// models on the GPU its claim allocates where the Library names a render
-// block. With no render block it does both on the CPU.
+// models on the GPU its claim allocates where the Library names a
+// ResourceClaimTemplate. With no template it does both on the CPU.
 var appearancesWorker = factWorker{
 	fact:    factAppearances,
 	enabled: func(library *Library) bool { return library.Spec.Appearances.Enabled },
@@ -57,11 +57,11 @@ var appearancesWorker = factWorker{
 			Limits:   map[string]string{"memory": appearancesMemoryLimit},
 		}
 	},
-	render:      func(library *Library) *RenderDevice { return library.Spec.Appearances.Render },
-	parallelism: func(library *Library) int { return podsOf(library.Spec.Appearances.Parallelism) },
-	scratch:     appearancesScratch,
-	work:        func(ctx context.Context, run *factWorkerRun, item workItem) { run.appearancesOne(ctx, item) },
-	quick:       appearancesQuick,
+	gpuClaimTemplate: func(library *Library) string { return library.Spec.Appearances.GPUResourceClaimTemplate },
+	parallelism:      func(library *Library) int { return podsOf(library.Spec.Appearances.Parallelism) },
+	scratch:          appearancesScratch,
+	work:             func(ctx context.Context, run *factWorkerRun, item workItem) { run.appearancesOne(ctx, item) },
+	quick:            appearancesQuick,
 }
 
 // Whether a video of the list needs only the match: a detections record of

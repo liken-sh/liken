@@ -57,8 +57,8 @@ type fakeCluster struct {
 	// The events the operator reads about a pod that has not started, which
 	// the operator reads and never writes.
 	events []Event
-	// The ResourceClaimTemplates the operator keeps for the Libraries that name
-	// a render node, by namespace and name.
+	// The ResourceClaimTemplates the cluster owner writes, and the ones an
+	// earlier release of the operator created, by namespace and name.
 	claimTemplates map[string]*ResourceClaimTemplate
 	// The Plays the operator creates, in the order it created them. They
 	// are a list and not a map, because every Play takes a name the API
@@ -534,21 +534,10 @@ func (f *fakeCluster) serveCronJob(w http.ResponseWriter, r *http.Request, key s
 }
 
 // ServeClaimTemplate answers a ResourceClaimTemplate the way the API server
-// does: an absent template is a 404, a create stores what the body carries, and
-// a delete removes it. There is no update, because the API server refuses every
-// change to a template's spec.
+// does: an absent template is a 404, and a delete removes it. The operator
+// creates no template, so the fake takes no create.
 func (f *fakeCluster) serveClaimTemplate(w http.ResponseWriter, r *http.Request, key string) {
 	switch r.Method {
-	case http.MethodPost:
-		if f.refuseCreate {
-			w.WriteHeader(http.StatusConflict)
-			return
-		}
-		var created ResourceClaimTemplate
-		_ = json.NewDecoder(r.Body).Decode(&created)
-		created.Metadata.ResourceVersion = "1"
-		f.claimTemplates[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
-		_ = json.NewEncoder(w).Encode(created)
 	case http.MethodDelete:
 		if _, held := f.claimTemplates[key]; !held {
 			w.WriteHeader(http.StatusNotFound)
@@ -561,7 +550,7 @@ func (f *fakeCluster) serveClaimTemplate(w http.ResponseWriter, r *http.Request,
 }
 
 // HeldClaimTemplate is the template the cluster holds, so a test reads what a
-// pass wrote.
+// pass deleted.
 func (f *fakeCluster) heldClaimTemplate(namespace, name string) *ResourceClaimTemplate {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()

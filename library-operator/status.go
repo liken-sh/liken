@@ -44,6 +44,9 @@ type libraryObservation struct {
 	// The Job of this Library whose pod has not started, or the Job that
 	// failed with no later success, and nil while the Jobs do their work.
 	fault *jobFault
+	// The GPU claim templates the Library's enabled workers name, and
+	// whether each one exists.
+	gpuTemplates gpuClaimTemplates
 }
 
 // deriveLibraryStatus builds the whole status of one Library from one
@@ -101,6 +104,14 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 	// because there is nothing to report about a list it does not have.
 	if seen.sources.reason != "" {
 		conditions = SetCondition(conditions, sourcesCondition(seen.sources, generation), now)
+	}
+	// A Library whose enabled workers name no template carries no
+	// GPUClaimTemplates condition, and one it carried before is removed.
+	templates, named := gpuClaimTemplatesCondition(seen.gpuTemplates, library.Metadata.Namespace, generation)
+	if named {
+		conditions = SetCondition(conditions, templates, now)
+	} else {
+		conditions = slices.DeleteFunc(conditions, func(c Condition) bool { return c.Type == conditionGPUClaimTemplates })
 	}
 	status.Conditions = conditions
 	status.Phase = libraryPhase(ready, library, seen)

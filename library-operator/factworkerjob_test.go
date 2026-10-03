@@ -104,7 +104,7 @@ func TestThePassStartsOneWorkerPerList(t *testing.T) {
 	operator, logged := loggingOperator(t, cluster)
 
 	for range 2 {
-		if err := operator.runFactWorkers(t.Context(), library, listedReport(3), nil, testNow); err != nil {
+		if err := operator.runFactWorkers(t.Context(), library, listedReport(3), nil, nil, testNow); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,35 +153,6 @@ func TestATrickplayWorkerHoldsNoCatalog(t *testing.T) {
 	}
 	if job.Metadata.Annotations[workListAnnotation] != "movies-walk-1" {
 		t.Errorf("annotations = %v, want the list it works", job.Metadata.Annotations)
-	}
-}
-
-// The worker holds the render claim where the Library names a render block,
-// and decodes in software with none.
-func TestTheRenderClaimGoesToTheTrickplayWorker(t *testing.T) {
-	cases := []struct {
-		name   string
-		render *RenderDevice
-		want   bool
-	}{
-		{name: "a render block", render: &RenderDevice{Class: "display-render"}, want: true},
-		{name: "no render block"},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			library := trickplayMovies()
-			library.Spec.Trickplay.Render = one.render
-
-			pod := buildFactWorkerJob(library, trickplayWorker, jobImages{}, "", "", testNow).Spec.Template.Spec
-
-			if (len(pod.ResourceClaims) == 1) != one.want || (len(pod.Containers[0].Resources.Claims) == 1) != one.want {
-				t.Fatalf("claims = %+v and %+v, want one: %v", pod.ResourceClaims,
-					pod.Containers[0].Resources.Claims, one.want)
-			}
-			if one.want && pod.ResourceClaims[0].ResourceClaimTemplateName != "movies-trickplay" {
-				t.Errorf("template = %q, want the Library's own", pod.ResourceClaims[0].ResourceClaimTemplateName)
-			}
-		})
 	}
 }
 

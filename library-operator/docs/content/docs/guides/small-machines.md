@@ -128,7 +128,8 @@ measured yet.
 
 * **Leave `spec.trickplay.enabled` off**, its default. The first pass
   reads every video end to end, hours of CPU on any library. Where it
-  is on, `spec.trickplay.render` moves the decode onto the GPU.
+  is on, `spec.trickplay.gpuResourceClaimTemplate` moves the decode
+  onto the GPU.
 * **Leave `spec.appearances.enabled` off**, its default. The first
   pass decodes every frame of every feature, and its limit of
   `1536Mi` is more than a one-gigabyte machine holds.

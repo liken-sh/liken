@@ -28,10 +28,9 @@ type factWorker struct {
 	image func(images jobImages) string
 	// What the container asks for and the memory it may take.
 	resources func() ResourceRequirements
-	// The render node the pod claims, and nil where the Library names none.
-	// The operator keeps one ResourceClaimTemplate per worker that names one
-	// (renderclaim.go).
-	render func(library *Library) *RenderDevice
+	// The ResourceClaimTemplate the pod claims its GPU from, and empty where
+	// the Library names none (gpuclaim.go).
+	gpuClaimTemplate func(library *Library) string
 	// How many pods the worker Job runs, each on its own share of the list
 	// (workershare.go). It is never below 1.
 	parallelism func(library *Library) int

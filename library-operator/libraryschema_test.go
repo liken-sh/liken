@@ -203,27 +203,29 @@ func TestTheOperatorReadsAFranchisesSpecTheSchemaAdmits(t *testing.T) {
 	}
 }
 
-// The render block the API server admits is the block the operator reads: a
-// DeviceClass name it requires, and a CEL selector it does not.
-func TestTheOperatorReadsARenderBlockTheSchemaAdmits(t *testing.T) {
-	render := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
-		"spec", "properties", "trickplay", "properties", "render").(map[string]any)
-
-	required := render["required"].([]any)
-	if len(required) != 1 || required[0] != "class" {
-		t.Errorf("required = %v, want the class alone", required)
-	}
-	spec := LibrarySpec{}
-	if err := json.Unmarshal([]byte(`{"trickplay":{"enabled":true,`+
-		`"render":{"class":"gpu.liken.sh","selector":"true"}}}`), &spec); err != nil {
-		t.Fatal(err)
-	}
-	if spec.Trickplay.Render == nil {
-		t.Fatal("the operator read no render block")
-	}
-	if spec.Trickplay.Render.Class != "gpu.liken.sh" || spec.Trickplay.Render.Selector != "true" {
-		t.Errorf("render = %+v, want the class and the selector the schema states",
-			spec.Trickplay.Render)
+// The template name the API server admits under each worker's block is the
+// name the operator reads: a string, and no render block beside it.
+func TestTheOperatorReadsAGPUClaimTemplateTheSchemaAdmits(t *testing.T) {
+	for _, worker := range factWorkers {
+		t.Run(worker.fact, func(t *testing.T) {
+			block := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+				"spec", "properties", worker.fact, "properties").(map[string]any)
+			field := block["gpuResourceClaimTemplate"].(map[string]any)
+			if field["type"] != "string" || field["minLength"] != 1 {
+				t.Errorf("gpuResourceClaimTemplate = %+v, want a string that is not empty", field)
+			}
+			if _, held := block["render"]; held {
+				t.Error("the schema admits a render block, which the operator does not read")
+			}
+			library := &Library{}
+			if err := json.Unmarshal([]byte(`{"spec":{"`+worker.fact+`":{"enabled":true,`+
+				`"gpuResourceClaimTemplate":"house-gpu"}}}`), library); err != nil {
+				t.Fatal(err)
+			}
+			if got := worker.gpuClaimTemplate(library); got != "house-gpu" {
+				t.Errorf("the operator reads %q, want house-gpu", got)
+			}
+		})
 	}
 }
 

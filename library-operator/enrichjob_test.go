@@ -519,14 +519,14 @@ func TestThePhasesThatOpenAFileTakeTheirOwnImageAndMemory(t *testing.T) {
 	}
 }
 
-// The library Job runs no trickplay container and holds no render claim,
+// The library Job runs no trickplay container and holds no GPU claim,
 // whatever the Library's trickplay block says, because the trickplay worker
 // decodes outside it. Its close container names the list it writes for the
 // worker.
 func TestTheLibraryJobLeavesTrickplayToItsWorker(t *testing.T) {
 	library := studioMovies()
 	library.Spec.Trickplay.Enabled = true
-	library.Spec.Trickplay.Render = &RenderDevice{Class: "display-render"}
+	library.Spec.Trickplay.GPUResourceClaimTemplate = "trickplay-gpu"
 
 	job := testEnrichJob(library, "")
 

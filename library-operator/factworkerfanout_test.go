@@ -11,12 +11,12 @@ import (
 // The worker Job of a fact the Library spreads over several pods, and the Job
 // of a fact it leaves at one.
 
-// A movies Library with appearances on, on a render node, in the pods given.
+// A movies Library with appearances on, on a GPU template, in the pods given.
 // Zero leaves the field unset, as a Library from before the field has it.
 func spreadAppearances(parallelism int) *Library {
 	library := studioMovies()
 	library.Spec.Appearances.Enabled = true
-	library.Spec.Appearances.Render = &RenderDevice{Class: "display-render"}
+	library.Spec.Appearances.GPUResourceClaimTemplate = "appearances-gpu"
 	library.Spec.Appearances.Parallelism = parallelism
 	return library
 }
@@ -95,7 +95,7 @@ func TestTheSpreadPodsPreferDifferentNodes(t *testing.T) {
 			t.Errorf("the selector names %s=%s, which the worker's own pods do not carry", key, value)
 		}
 	}
-	if pod.Spec.ResourceClaims[0].ResourceClaimTemplateName != "movies-appearances" {
+	if pod.Spec.ResourceClaims[0].ResourceClaimTemplateName != "appearances-gpu" {
 		t.Errorf("claims = %+v, want each pod's claim from the worker's template", pod.Spec.ResourceClaims)
 	}
 }
@@ -150,7 +150,7 @@ func TestThePassNamesThePodsOfASpreadWorker(t *testing.T) {
 	library.Spec.Trickplay.Parallelism = 3
 	operator, logged := loggingOperator(t, cluster)
 
-	if err := operator.runFactWorkers(t.Context(), library, listedReport(3), nil, testNow); err != nil {
+	if err := operator.runFactWorkers(t.Context(), library, listedReport(3), nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 

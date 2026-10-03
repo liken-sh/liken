@@ -75,11 +75,16 @@ func factWorkerDue(library *Library, worker factWorker, report *libraryReport, j
 }
 
 // The worker step of one Library's pass. It starts at most one worker per
-// heavy fact.
+// heavy fact. A worker whose GPU claim template does not exist starts no Job,
+// because its pods would stay Pending until the Job's deadline. The template's
+// create wakes a pass, and that pass starts the worker.
 func (o *operator) runFactWorkers(ctx context.Context, library *Library, report *libraryReport,
-	jobs []Job, now time.Time) error {
+	jobs []Job, templates gpuClaimTemplates, now time.Time) error {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	for _, worker := range factWorkers {
+		if templates.missing(worker.fact) {
+			continue
+		}
 		key := libraryKey(namespace, name) + "/" + worker.fact
 		listed, due := factWorkerDue(library, worker, report, jobs, o.workListsTaken[key])
 		if !due {
@@ -216,7 +221,7 @@ func factWorkerPod(library *Library, worker factWorker, images jobImages, webhoo
 		AutomountServiceAccountToken:  &noToken,
 		Volumes:                       []Volume{factWorkerVolume(library)},
 	}
-	if claim := renderClaim(library, worker); claim != nil {
+	if claim := gpuClaim(library, worker); claim != nil {
 		spec.ResourceClaims = []PodResourceClaim{*claim}
 		container.Resources.Claims = []ResourceClaim{{Name: claim.Name}}
 	}

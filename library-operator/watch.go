@@ -69,9 +69,6 @@ const (
 		catalogLabelValue + "," + progressLabelValue + "," + jellyfinLabelValue + ")"
 	ownedSlicesSelector     = managedByLabel + "=" + endpointSliceManager
 	ownedConfigMapsSelector = scannerLabelKey + "=" + screenLabelValue
-	// Every trickplay template carries the label of the Library it
-	// belongs to.
-	ownedClaimTemplatesSelector = libraryLabelKey
 )
 
 func mustGroupVersion(apiVersion string) schema.GroupVersion {
@@ -96,8 +93,11 @@ type watches struct {
 	// The objects the pass stands, and the objects it reads to stand
 	// them. A Library names any claim in its namespace, and a bound
 	// claim names any volume, so the claims, the volumes, and the nodes
-	// are watched whole. The pods, the Jobs, the Services, the slices,
-	// and the ConfigMaps are the operator's own, selected by its labels.
+	// are watched whole. A Library also names any ResourceClaimTemplate
+	// in its namespace, which the cluster owner writes with no label of
+	// this operator, so the templates are watched whole too. The pods,
+	// the Jobs, the Services, the slices, and the ConfigMaps are the
+	// operator's own, selected by its labels.
 	claims          *collection[PersistentVolumeClaim]
 	volumes         *collection[PersistentVolume]
 	stoodPods       *collection[Pod]
@@ -185,8 +185,12 @@ func startWatches(ctx context.Context, client dynamic.Interface, wake chan<- str
 			ownedSlicesSelector, addedOrRemoved[EndpointSlice]),
 		configMaps: newCollection(ctx, client, wake, m, "people config maps", kindConfigMap, configMapResource,
 			ownedConfigMapsSelector, addedOrRemoved[ConfigMap]),
-		claimTemplates: newCollection(ctx, client, wake, m, "trickplay templates", kindClaimTemplate,
-			claimTemplateResource, ownedClaimTemplatesSelector, addedOrRemoved[ResourceClaimTemplate]),
+		// The pass reads only whether a template exists, so a create or a
+		// delete wakes it and an edit does not. A template the cluster
+		// owner creates wakes the pass that starts the worker that names
+		// it.
+		claimTemplates: newCollection(ctx, client, wake, m, "claim templates", kindClaimTemplate,
+			claimTemplateResource, "", addedOrRemoved[ResourceClaimTemplate]),
 	}
 	for _, one := range w.all() {
 		w.group.Go(one.wait)

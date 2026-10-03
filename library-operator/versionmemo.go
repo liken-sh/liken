@@ -64,7 +64,8 @@ func (t *ResourceClaimTemplate) GetObjectMeta() memo.Meta { return &t.Metadata }
 // reads back from a store to decide whether to write again: the status of
 // the Libraries, the Catalogs, and the MetadataProviders, the whole of the
 // Services, the EndpointSlices, and the people ConfigMaps it stands, and
-// the worker Jobs and the trickplay templates it creates and deletes. A library Job's name holds the
+// the worker Jobs it creates and deletes, and the ResourceClaimTemplates
+// an earlier release created, which it deletes. A library Job's name holds the
 // time it was created, so a second create of one never meets a 409, and
 // the pass must read each Job it created before the watch delivers it
 // (informer.CurrentList on a whole store).

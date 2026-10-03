@@ -52,16 +52,18 @@ you are likely to set:
 * `spec.trickplay.enabled` builds the thumbnail sheets for the scrub
   bar. It is off by default, because the first pass reads every video
   end to end. A trickplay worker `Job` of its own decodes the videos
-  after each `Job` of the `Library` ends. `spec.trickplay.render` names
-  the DeviceClass of the node's GPU, so the decode runs there instead
-  of on the CPU.
+  after each `Job` of the `Library` ends.
+  `spec.trickplay.gpuResourceClaimTemplate` names a
+  `ResourceClaimTemplate` you write, so the decode runs on the GPU it
+  claims instead of on the CPU.
 * `spec.appearances.enabled` records which credited actor is on screen
   at each second of each feature, from the faces in the video and the
   actors' headshots. It is off by default, because the first pass
   decodes every frame of every feature. An appearances worker `Job`
   runs after each `Job` of the `Library` ends, and
-  `spec.appearances.render` names the DeviceClass of a GPU to decode
-  and run the face models on. The
+  `spec.appearances.gpuResourceClaimTemplate` names the
+  `ResourceClaimTemplate` of a GPU to decode and run the face models
+  on. The
   [enrichment guide](https://liken.sh/library/docs/guides/enrichment/#appearances) describes
   the fact.
 * `spec.refresh` reopens one fact at a time, so it asks its provider
@@ -115,6 +117,15 @@ Four conditions report why the phase is what it is:
   names none.
 * `Departing` reports the teardown of a deleted library, for as long
   as its finalizer keeps the object from being removed.
+
+A fifth condition, `GPUClaimTemplates`, does not change the phase. It
+reports the `ResourceClaimTemplates` that the enabled trickplay and
+appearances workers name. The reason for `False` is
+`ClaimTemplateNotFound`, and the operator starts no worker whose
+template is missing. It is absent on a library whose enabled workers
+name none.
+[A worker on a GPU](https://liken.sh/library/docs/guides/enrichment/#a-worker-on-a-gpu)
+describes the templates.
 
 `status.runs` holds the last run of each worker, with its `Job`, its
 times, and its failure if it had one. `scan` is a full walk, `rescan`
