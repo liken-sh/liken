@@ -419,53 +419,10 @@ func TestARunThatNeverReportedPublishesNoEnding(t *testing.T) {
 	})
 }
 
-// A volume press writes nothing to mpv. It publishes the unit's
-// next level, retained, and the subscription is what applies it.
-func TestAVolumePressPublishesTheNextLevelAndWritesNoMpvCommand(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		bus, brokers, connected := startBus(t, 1, nil, nil)
-		waitForConnect(t, connected)
-		server, client := net.Pipe()
-		t.Cleanup(func() { server.Close() })
-
-		c := &commander{
-			commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
-			volumeTopic:   playerVolumeTopic(defaultTopicBase, "house", "theater"),
-			bus:           bus,
-			mpv:           client,
-			volume:        volumeState{Level: 40},
-			haveVolume:    true,
-		}
-		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
-
-		published := waitForPublish(t, brokers[0].pubs)
-		mustMatch(t, published.topic, c.volumeTopic)
-		mustMatch(t, published.retained, true)
-		mustMatch(t, string(published.payload), `{"level":45,"muted":false}`)
-		mustWriteNothing(t, server)
-	})
-}
-
-// A mute press toggles the flag the topic holds, and it too writes
-// nothing to mpv.
-func TestAMutePressPublishesTheToggledFlag(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-
-	c := &commander{
-		commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
-		volumeTopic:   playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		bus:           bus,
-	}
-	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionMute}))
-
-	published := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, string(published.payload), `{"level":100,"muted":true}`)
-}
-
-// The message on the volume topic is what reaches mpv, so the pod
-// that pressed and every pod that only listened run one apply path.
-func TestAMessageOnTheVolumeTopicReachesMpv(t *testing.T) {
+// A live level on the volume topic reaches the display as one script
+// message with the level and the mute, and sets nothing in mpv, which
+// plays at unity.
+func TestALiveLevelSendsTheDisplayTheLevel(t *testing.T) {
 	server, client := net.Pipe()
 	t.Cleanup(func() { server.Close() })
 	lines := readAsync(server)
@@ -474,49 +431,61 @@ func TestAMessageOnTheVolumeTopicReachesMpv(t *testing.T) {
 		volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
 		mpv:         client,
 	}
-	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":true}`))
+	c.handle(c.volumeTopic, []byte(`{"level":0.63,"muted":true}`))
 
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","yes"]}`)
-	mustMatch(t, c.heldVolume(), volumeState{Level: 45, Muted: true})
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed","0.63","yes"]}`)
 }
 
-// The first level of a bus session is the broker's retained
-// catch-up, so it applies with no signal and the display pops no indicator
-// at pod start. Every level after it applies and then signals the display to
-// draw. A fresh session redelivers the retained level, so the first message
-// after a reconnect is silent again.
-func TestTheFirstLevelOfASessionAppliesSilently(t *testing.T) {
+// The level the broker delivers at subscribe is the level the room
+// already had, so it draws no indicator. A retained focus mark still
+// reaches the gate.
+func TestARetainedLevelDrawsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		bus, _, connected := startBus(t, 1, nil, nil)
-		waitForConnect(t, connected)
+		events, focus := keyTestTopics()
 		server, client := net.Pipe()
 		t.Cleanup(func() { server.Close() })
-		lines := readAsync(server)
-
 		c := &commander{
 			volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-			bus:         bus,
 			mpv:         client,
+			remotes:     map[string]playRemote{events: {focus: focus}},
+			marks:       map[string]string{},
 		}
 
-		c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-		mustNoLine(t, lines, 100*time.Millisecond)
+		c.handleRetained(c.volumeTopic, []byte(`{"level":0.63,"muted":false}`))
+		c.handleRetained(focus, []byte(keyTestPlayer))
 
-		c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"],"request_id":1}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"],"request_id":2}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed"]}`)
-
-		c.onConnect(bus)
-
-		c.handle(c.volumeTopic, []byte(`{"level":50,"muted":false}`))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-		mustNoLine(t, lines, 100*time.Millisecond)
+		mustWriteNothing(t, server)
+		mustMatch(t, c.marks[events], keyTestPlayer)
 	})
+}
+
+// The volume and mute actions are gone from the Play's commands topic.
+// A program that asks for a level publishes on the Player's
+// volume/commands topic, so an action here writes nothing to mpv and
+// publishes nothing.
+func TestAVolumeActionOnThePlaysCommandsTopicDoesNothing(t *testing.T) {
+	for _, action := range []string{"volume", "mute", "unmute"} {
+		t.Run(action, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				bus, brokers, connected := startBus(t, 1, nil, nil)
+				waitForConnect(t, connected)
+				server, client := net.Pipe()
+				t.Cleanup(func() { server.Close() })
+
+				c := &commander{
+					commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
+					volumeTopic:   playerVolumeTopic(defaultTopicBase, "house", "theater"),
+					bus:           bus,
+					mpv:           client,
+					log:           io.Discard,
+				}
+				c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: action, Amount: 5}))
+
+				mustPublishNothing(t, brokers[0])
+				mustWriteNothing(t, server)
+			})
+		})
+	}
 }
 
 // bridgeToMPV is a commander wired to a socket a test reads, so a message the
@@ -556,29 +525,6 @@ func mustNoLine(t *testing.T, lines <-chan string, window time.Duration) {
 		t.Fatalf("the sidecar wrote %s, and should have written nothing", line)
 	case <-time.After(window):
 	}
-}
-
-// A Player with no sinks hands its sidecar no volume topic. That
-// sidecar publishes nothing on a press and writes nothing to mpv, because
-// a unit with nothing to hear has no level to mean anything.
-func TestASidecarWithNoSpeakersIgnoresTheVolume(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		bus, brokers, connected := startBus(t, 1, nil, nil)
-		waitForConnect(t, connected)
-		server, client := net.Pipe()
-		t.Cleanup(func() { server.Close() })
-
-		c := &commander{
-			commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
-			bus:           bus,
-			mpv:           client,
-		}
-		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
-		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionMute}))
-
-		mustPublishNothing(t, brokers[0])
-		mustWriteNothing(t, server)
-	})
 }
 
 // mustEncode marshals one message the way a program on the bus publishes
@@ -949,214 +895,15 @@ func requestFor(name string) <-chan clientMessage {
 	return messages
 }
 
-// While the owner mark stands, the equipment holds the level: mpv goes
-// to unity, a level off the topic re-asserts unity and draws no
-// indicator, and a press still publishes the next state from the level
-// the topic delivered.
-func TestWhileTheMarkStandsTheLevelDoesNotReachMpv(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		bus, brokers, connected := startBus(t, 1, nil, nil)
-		waitForConnect(t, connected)
-		server, client := net.Pipe()
-		t.Cleanup(func() { server.Close() })
-		lines := readAsync(server)
-
-		c := ownedCommander(bus, client)
-
-		c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-		c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-		mustNoLine(t, lines, 100*time.Millisecond)
-		mustMatch(t, c.heldVolume(), volumeState{Level: 45})
-
-		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
-		published := waitForPublish(t, brokers[0].pubs)
-		mustMatch(t, published.topic, c.volumeTopic)
-		mustMatch(t, string(published.payload), `{"level":50,"muted":false}`)
-	})
-}
-
-// The mark and the level arrive in either order. A level that reached
-// mpv before the mark is undone by the unity write the mark brings, so
-// both orders end with mpv at unity.
-func TestALevelThatArrivesBeforeTheMarkEndsAtUnity(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
-
-	c := ownedCommander(nil, client)
-
-	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":true}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","yes"]}`)
-
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-}
-
-// Every mark re-asserts unity, so a redelivered mark writes unity again
-// and a mark that arrives after a reconnect does too.
-func TestEveryMarkReAssertsUnity(t *testing.T) {
-	bus, _, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
-
-	c := ownedCommander(bus, client)
-
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-	c.onConnect(bus)
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-}
-
-// Every message on the volume topic re-asserts unity while the mark
-// stands, and the level it carries never reaches mpv.
-func TestEveryLevelWhileOwnedReAssertsUnity(t *testing.T) {
+// mpv plays at unity, so a socket that opens gets no level: the sidecar
+// writes its observe requests and nothing about the volume.
+func TestASocketThatOpensGetsNoLevel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
 		t.Cleanup(func() { server.Close() })
 		lines := readAsync(server)
 
-		c := ownedCommander(nil, client)
-
-		c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-		c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-		c.handle(c.volumeTopic, []byte(`{"level":30,"muted":true}`))
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-		mustNoLine(t, lines, 100*time.Millisecond)
-		mustMatch(t, c.heldVolume(), volumeState{Level: 30, Muted: true})
-	})
-}
-
-// An empty payload is the mark cleared. mpv takes the level back at the
-// state the topic last delivered, and every level after it applies as
-// it does with no equipment at all.
-func TestTheClearedMarkGivesTheLevelBackToMpv(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
-
-	c := ownedCommander(nil, client)
-
-	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-	c.handle(c.volumeOwnerTopic, nil)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-
-	c.handle(c.volumeTopic, []byte(`{"level":50,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"],"request_id":1}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"],"request_id":2}`)
-}
-
-// A mark cleared before any level arrived writes nothing, because there
-// is no state to give mpv back.
-func TestAClearedMarkWithNoLevelWritesNothing(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		server, client := net.Pipe()
-		t.Cleanup(func() { server.Close() })
-		lines := readAsync(server)
-
-		c := ownedCommander(nil, client)
-
-		c.handle(c.volumeOwnerTopic, nil)
-
-		mustNoLine(t, lines, 100*time.Millisecond)
-	})
-}
-
-// ownedCommander is a sidecar for a unit with speakers, wired to both
-// the level and the owner mark.
-func ownedCommander(bus *Bus, mpv net.Conn) *commander {
-	return &commander{
-		commandsTopic:    playCommandsTopic(defaultTopicBase, "house", "movie"),
-		volumeTopic:      playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		volumeOwnerTopic: playerVolumeOwnerTopic(defaultTopicBase, "house", "theater"),
-		bus:              bus,
-		mpv:              mpv,
-	}
-}
-
-// The retained mark reaches the sidecar before mpv opens its socket,
-// so the sidecar has no socket to write. Applying the state again once
-// the socket is live starts the film at unity while the equipment
-// holds the level.
-func TestTheHeldMarkReachesMpvWhenTheSocketOpens(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		server, client := net.Pipe()
-		t.Cleanup(func() { server.Close() })
-		lines := readAsync(server)
-
-		c := ownedCommander(nil, nil)
-		c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-
-		driveInBackground(t, c, client)
-
-		skipObserves(t, lines)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-		mustNoLine(t, lines, 100*time.Millisecond)
-	})
-}
-
-// A level that arrived before the socket opened is applied the same
-// way, so a film starts at the level the unit holds.
-func TestTheHeldLevelReachesMpvWhenTheSocketOpens(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		server, client := net.Pipe()
-		t.Cleanup(func() { server.Close() })
-		lines := readAsync(server)
-
-		c := ownedCommander(nil, nil)
-		c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
-
-		driveInBackground(t, c, client)
-
-		skipObserves(t, lines)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
-		mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
-		mustNoLine(t, lines, 100*time.Millisecond)
-	})
-}
-
-// A sidecar no message reached holds no state to apply, so it writes
-// no level and mpv keeps the level its command line set.
-func TestASocketWithNoHeldStateGetsNoLevel(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		server, client := net.Pipe()
-		t.Cleanup(func() { server.Close() })
-		lines := readAsync(server)
-
-		c := ownedCommander(nil, nil)
+		c := &commander{volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"), log: io.Discard}
 
 		driveInBackground(t, c, client)
 

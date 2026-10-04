@@ -15,7 +15,7 @@ use super::{Frame, Layout};
 use crate::look;
 use media_screen::Moment;
 use media_screen::status::{Activity, Component, Play, Status};
-use media_screen::volume::{MIN_LEVEL, UNITY_LEVEL, Volume};
+use media_screen::volume::{MAX_LEVEL, MIN_LEVEL, Volume};
 
 /// The kind the preview gives every part but the last. A screen and a set of
 /// speakers both draw at full brightness with no presence, so one word covers
@@ -37,10 +37,10 @@ const PLAY_TITLE: &str = "Sailing";
 /// index is always the first.
 const REMOTE: usize = 0;
 
-/// How far one volume key moves the level, out of the 100 that is unity: a
-/// step big enough to read on the bar at a glance, and small enough that the
-/// range takes twenty of them.
-const VOLUME_STEP: i64 = 5;
+/// How far one volume key moves the level, out of the 1.0 that is the top of
+/// the range: a step big enough to read on the bar at a glance, and small
+/// enough that the range takes twenty of them.
+const VOLUME_STEP: f64 = 0.05;
 
 /// The state behind the keys: what the fake status says about the unit now.
 ///
@@ -48,7 +48,7 @@ const VOLUME_STEP: i64 = 5;
 /// broker the presses have to hold it themselves, so each key changes one field
 /// here and then states the whole unit again, the way the operator republishes
 /// a whole status for one change.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Keys {
     /// The unit's name and its parts, from the same environment seed the
     /// operator sets on the idle container. The preview calls the last part the
@@ -179,14 +179,14 @@ impl Keys {
 
     /// Move the level by one step, held inside the range the operator holds it
     /// in, and state it.
-    fn step(&mut self, step: i64) -> Moment {
-        self.volume.level = (self.volume.level + step).clamp(MIN_LEVEL, UNITY_LEVEL);
+    fn step(&mut self, step: f64) -> Moment {
+        self.volume.level = (self.volume.level + step).clamp(MIN_LEVEL, MAX_LEVEL);
         self.level()
     }
 
-    /// The level as a press. The first level of a bus session is the broker's
-    /// retained catch-up, which a person did not press and which draws no
-    /// indicator. A key is a press every time, so the indicator shows every
+    /// The level as a live message. The first level of a bus session is the
+    /// broker's retained catch-up, which no person changed and which draws no
+    /// indicator. A key is a change every time, so the indicator shows every
     /// time.
     fn level(&self) -> Moment {
         Moment::Level {
@@ -383,7 +383,7 @@ mod tests {
             keys.press("9"),
             [Moment::Level {
                 volume: Volume {
-                    level: UNITY_LEVEL - VOLUME_STEP,
+                    level: MAX_LEVEL - VOLUME_STEP,
                     muted: false,
                 },
                 pressed: true,
@@ -393,7 +393,7 @@ mod tests {
             keys.press("0"),
             [Moment::Level {
                 volume: Volume {
-                    level: UNITY_LEVEL,
+                    level: MAX_LEVEL,
                     muted: false,
                 },
                 pressed: true,
@@ -412,7 +412,7 @@ mod tests {
         for _ in 0..30 {
             keys.press("0");
         }
-        assert_eq!(keys.volume.level, UNITY_LEVEL);
+        assert_eq!(keys.volume.level, MAX_LEVEL);
     }
 
     #[test]
@@ -423,7 +423,7 @@ mod tests {
             keys.press("m"),
             [Moment::Level {
                 volume: Volume {
-                    level: UNITY_LEVEL,
+                    level: MAX_LEVEL,
                     muted: true,
                 },
                 pressed: true,
@@ -433,7 +433,7 @@ mod tests {
             keys.press("m"),
             [Moment::Level {
                 volume: Volume {
-                    level: UNITY_LEVEL,
+                    level: MAX_LEVEL,
                     muted: false,
                 },
                 pressed: true,

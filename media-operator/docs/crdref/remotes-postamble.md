@@ -67,6 +67,13 @@ topic is not retained
 ([why](/docs/reference/bus/#retained-state-and-events)), so a
 subscriber that joins later reads no stale press.
 
+The operator reads the volume keys here: `KEY_VOLUMEUP` and
+`KEY_VOLUMEDOWN` on each press and repeat, and `KEY_MUTE` and
+`KEY_UNMUTE` on each press. It sets the level of the unit the
+controller's focus mark names
+([how](/docs/reference/players/#volume)), so neither the playback pod
+nor the idle client handles them.
+
 ### keys
 
 The controller's key table, as the operator compiled it: the base
@@ -114,8 +121,9 @@ declaration.
 The focus mark is the plain name of the `Player` this controller
 drives now, as bytes, not JSON. The operator is the only writer,
 and the topic is retained, so a press reaches its unit even while
-the operator is down. Every reader of the controller's presses
-gates on the mark. The playback pod's command sidecar acts only when
+the operator is down, except a volume key, which the operator
+reads itself. Every reader of the controller's presses gates on the
+mark. The playback pod's command sidecar acts only when
 the mark names the `Player` its film runs on. An idle unit's sidecar
 acts only when the mark names that `Player` itself, and the idle
 screen draws a small hexagon beside the focused controller in its

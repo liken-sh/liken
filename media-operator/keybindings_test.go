@@ -22,10 +22,6 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 		{key: "KEY_FASTFORWARD", want: mediaCommand{Action: actionSeek, Amount: 10}},
 		{key: "KEY_PREVIOUSSONG", want: mediaCommand{Action: actionChapter, Amount: -1}},
 		{key: "KEY_NEXTSONG", want: mediaCommand{Action: actionChapter, Amount: 1}},
-		{key: "KEY_VOLUMEUP", want: mediaCommand{Action: actionVolume, Amount: 5}},
-		{key: "KEY_VOLUMEDOWN", want: mediaCommand{Action: actionVolume, Amount: -5}},
-		{key: "KEY_MUTE", want: mediaCommand{Action: actionMute}},
-		{key: "KEY_UNMUTE", want: mediaCommand{Action: actionUnmute}},
 		{key: "KEY_SUBTITLE", want: mediaCommand{Action: actionSubtitles}},
 		{key: "KEY_AUDIO", want: mediaCommand{Action: actionAudio}},
 		{key: "KEY_INFO", want: mediaCommand{Action: actionInfo}},
@@ -57,9 +53,9 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 	}
 }
 
-// A seek, a chapter step, a volume step, and an arrow act on the
-// repeat as well, because those are the four a person holds.
-func TestTheFourHeldKindsActOnARepeat(t *testing.T) {
+// A seek, a chapter step, and an arrow act on the repeat as well,
+// because those are the kinds a person holds.
+func TestTheHeldKindsActOnARepeat(t *testing.T) {
 	cases := []struct {
 		key  string
 		want bool
@@ -68,12 +64,9 @@ func TestTheFourHeldKindsActOnARepeat(t *testing.T) {
 		{key: "KEY_REWIND", want: true},
 		{key: "KEY_NEXTSONG", want: true},
 		{key: "KEY_PREVIOUSSONG", want: true},
-		{key: "KEY_VOLUMEUP", want: true},
-		{key: "KEY_VOLUMEDOWN", want: true},
 		{key: "KEY_UP", want: true},
 		{key: "KEY_RIGHT", want: true},
 		{key: "KEY_PLAYPAUSE"},
-		{key: "KEY_MUTE"},
 		{key: "KEY_ENTER"},
 		{key: "KEY_BACK"},
 		{key: "KEY_INFO"},
@@ -100,6 +93,11 @@ func TestAReleaseAndAnUnboundKeyDoNothing(t *testing.T) {
 		{name: "the mode button", event: keyEvent{Key: "BTN_MODE", Value: 1}},
 		{name: "a letter on a keyboard remote", event: keyEvent{Key: "KEY_Q", Value: 1}},
 		{name: "a value no kernel reports", event: keyEvent{Key: "KEY_PLAYPAUSE", Value: 7}},
+		// The volume keys are the operator's, which sets the room's level.
+		{name: "volume up", event: keyEvent{Key: "KEY_VOLUMEUP", Value: 1}},
+		{name: "volume down", event: keyEvent{Key: "KEY_VOLUMEDOWN", Value: 2}},
+		{name: "mute", event: keyEvent{Key: "KEY_MUTE", Value: 1}},
+		{name: "unmute", event: keyEvent{Key: "KEY_UNMUTE", Value: 1}},
 	}
 
 	for _, each := range cases {

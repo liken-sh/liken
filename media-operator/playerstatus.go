@@ -239,11 +239,6 @@ func deriveIdleStatus(
 		PanelTopic:    playerPanelTopic(topicBase, namespace, name),
 		Remotes:       idleBusRemotes(remotes),
 	}
-	// The owner mark travels with the level, the way it does to the
-	// command sidecar. A unit with no sinks names neither topic.
-	if bus.VolumeTopic != "" {
-		bus.VolumeOwnerTopic = playerVolumeOwnerTopic(topicBase, namespace, name)
-	}
 	// A power press turns the equipment only when the unit's screen is
 	// wired through a Receiver, so the bus carries the power topic for
 	// such a unit and nothing for one that is not. That is the gate the

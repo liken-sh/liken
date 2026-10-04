@@ -1,30 +1,18 @@
 // The keys this crate answers itself while nothing plays, beside the
 // playback pod's table in `media-operator`'s `keybindings.go`. The two
-// share the level keys and the cycle key. This crate owns those four
-// because no client draws a list for them: the cycle key is answered
-// for the operator, and the level keys step a state the crate holds.
-// Every other key passes through to the client under the kernel's
-// name, and the client binds it. The crate holds no table of the keys
-// a client may want, because a remote with a keyboard sends letters,
-// and only the client knows what a letter does on its screen.
-
-use super::press::Press;
-use crate::volume::{STEP, Volume};
+// share the cycle key. This crate owns it because no client draws a
+// list for it: the cycle key is answered for the operator. The volume
+// keys belong to neither table. `media-operator` reads them off the
+// remote's events topic and sets the level of the unit's devices, and a
+// screen draws the level the operator relays. Every other key passes
+// through to the client under the kernel's name, and the client binds
+// it. The crate holds no table of the keys a client may want, because a
+// remote with a keyboard sends letters, and only the client knows what
+// a letter does on its screen.
 
 /// The key that asks the operator to move the focus mark to the next unit. It
 /// is the same name during a film and between films.
 pub const CYCLE: &str = "KEY_CYCLEWINDOWS";
-
-/// The three keys that step the level. They are named once here, so the
-/// level rule and the owned check read the same names.
-pub const VOLUME_UP: &str = "KEY_VOLUMEUP";
-pub const VOLUME_DOWN: &str = "KEY_VOLUMEDOWN";
-pub const MUTE: &str = "KEY_MUTE";
-
-/// The key the kernel's `rc-cec` keymap names a TV remote's Restore Volume
-/// Function (HDMI-CEC 1.3a, CEC 13.13.3). It unmutes, and a second press
-/// leaves the level unmuted, where [`MUTE`] toggles.
-pub const UNMUTE: &str = "KEY_UNMUTE";
 
 /// The three back synonyms. A shell sends whichever one it was built
 /// with, so a client reads all three. This crate never sleeps the
@@ -74,7 +62,7 @@ pub const HOME: &str = "KEY_HOMEPAGE";
 /// that keeps a key from the client; every key it refuses passes
 /// through.
 pub fn owned(key: &str) -> bool {
-    matches!(key, CYCLE | VOLUME_UP | VOLUME_DOWN | MUTE | UNMUTE)
+    key == CYCLE
 }
 
 /// Whether one kernel key name is a back synonym.
@@ -99,37 +87,13 @@ pub fn power_action(key: &str) -> Option<&'static str> {
     }
 }
 
-/// What one press means for the level, and nothing for a key that names no
-/// level. The two steps act on the press and on the repeat, because a person
-/// ramps a level by holding the key. Mute acts on the press alone, because a
-/// held mute that toggled on every repeat would flip the flag back and forth
-/// under the hand.
-pub fn level(press: &Press, held: Volume) -> Option<Volume> {
-    match press.key.as_str() {
-        VOLUME_UP => Some(held.stepped(STEP)),
-        VOLUME_DOWN => Some(held.stepped(-STEP)),
-        MUTE if press.down() => Some(held.toggled()),
-        UNMUTE if press.down() => Some(held.unmuted()),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn press(key: &str, value: i64) -> Press {
-        Press {
-            key: key.into(),
-            value,
-        }
-    }
-
     #[test]
-    fn the_cycle_key_and_the_level_keys_are_this_crates_own() {
-        for key in [CYCLE, VOLUME_UP, VOLUME_DOWN, MUTE] {
-            assert!(owned(key));
-        }
+    fn the_cycle_key_is_this_crates_own() {
+        assert!(owned(CYCLE));
     }
 
     #[test]
@@ -142,6 +106,10 @@ mod tests {
             "KEY_HOMEPAGE",
             "KEY_BACKSPACE",
             "KEY_PLAYPAUSE",
+            "KEY_VOLUMEUP",
+            "KEY_VOLUMEDOWN",
+            "KEY_MUTE",
+            "KEY_UNMUTE",
             "",
         ] {
             assert!(!owned(key));
@@ -168,69 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn the_level_keys_step_by_five_on_the_press_and_the_repeat() {
-        let held = Volume {
-            level: 40,
-            muted: false,
-        };
-        for value in [1, 2] {
-            assert_eq!(
-                level(&press("KEY_VOLUMEUP", value), held),
-                Some(Volume {
-                    level: 45,
-                    muted: false
-                })
-            );
-            assert_eq!(
-                level(&press("KEY_VOLUMEDOWN", value), held),
-                Some(Volume {
-                    level: 35,
-                    muted: false
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn mute_toggles_on_the_press_alone() {
-        let held = Volume::default();
-        assert_eq!(
-            level(&press("KEY_MUTE", 1), held),
-            Some(Volume {
-                level: 100,
-                muted: true
-            })
-        );
-        assert_eq!(level(&press("KEY_MUTE", 2), held), None);
-    }
-
-    #[test]
-    fn unmute_unmutes_and_leaves_an_unmuted_level_unmuted() {
-        for muted in [true, false] {
-            let held = Volume { level: 40, muted };
-            assert_eq!(
-                level(&press(UNMUTE, 1), held),
-                Some(Volume {
-                    level: 40,
-                    muted: false
-                })
-            );
-        }
-        assert!(owned(UNMUTE));
-    }
-
-    #[test]
     fn each_power_key_names_its_ask() {
         assert_eq!(power_action("KEY_POWER"), Some("toggle"));
         assert_eq!(power_action("KEY_POWER2"), Some("toggle"));
         assert_eq!(power_action(POWER_OFF), Some("off"));
         assert_eq!(power_action(POWER_ON), Some("on"));
         assert_eq!(power_action("KEY_UP"), None);
-    }
-
-    #[test]
-    fn a_key_that_names_no_level_is_no_level_press() {
-        assert_eq!(level(&press("KEY_UP", 1), Volume::default()), None);
-        assert_eq!(level(&press(CYCLE, 1), Volume::default()), None);
     }
 }

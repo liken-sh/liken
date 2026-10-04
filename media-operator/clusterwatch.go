@@ -14,10 +14,10 @@ package main
 //     pass that follows an eviction, a lost node, or its own delete
 //     creates what it owes. A playback pod also wakes it when its
 //     status changes, because the Play's status is derived from it.
-//   - A claim, a ResourceSlice, a Display, or a Receiver wakes the pass
-//     when a change reaches a field the pass reads, and not when this
-//     operator writes it. changewake.go holds each rule, the pods'
-//     rule too.
+//   - A claim, a ResourceSlice, a Display, a Receiver, a Sink, or a
+//     Television wakes the pass when a change reaches a field the pass
+//     reads, and not when this operator writes it. changewake.go holds
+//     each rule, the pods' rule too.
 //
 // A watch is scoped the way the pass reads: the pods by the component
 // label this operator stamps on each pod it creates, and every other
@@ -62,6 +62,8 @@ var (
 	displayResource     = resourceOf(displayAPIVersion, "displays")
 	sliceResource       = resourceOf(claimAPIVersion, "resourceslices")
 	receiverResource    = resourceOf(receiverAPIVersion, "receivers")
+	sinkResource        = resourceOf(sinkAPIVersion, "sinks")
+	televisionResource  = resourceOf(televisionAPIVersion, "televisions")
 )
 
 // ownPodsSelector selects every pod this operator creates, by the
@@ -121,12 +123,17 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, reader *a
 		{kindPod, collectionWatch{resource: podResource, labels: ownPodsSelector, handler: podRule.handler(wake)}, keepIn(&view.pods)},
 		{kindResourceClaim, collectionWatch{resource: claimResource, handler: claimRule.handler(wake)}, keepIn(&view.claims)},
 		{kindResourceSlice, collectionWatch{resource: sliceResource, handler: sliceRule.handler(wake)}, keepIn(&view.slices)},
-		// The display-operator and the equipment-operator define these
-		// two, and a cluster can run the media operator with neither.
+		// The display-operator, the equipment-operator, and the
+		// audio-operator define these four, and a cluster can run the
+		// media operator with none of them.
 		{kindDisplay, collectionWatch{resource: displayResource, optional: true,
 			handler: displayRule.handler(wake)}, keepIn(&view.displays)},
 		{kindReceiver, collectionWatch{resource: receiverResource, optional: true,
 			handler: receiverRule.handler(wake)}, keepIn(&view.receivers)},
+		{kindSink, collectionWatch{resource: sinkResource, optional: true,
+			handler: sinkRule.handler(wake)}, keepIn(&view.sinks)},
+		{kindTelevision, collectionWatch{resource: televisionResource, optional: true,
+			handler: televisionRule.handler(wake)}, keepIn(&view.televisions)},
 	}
 	type read struct {
 		kind   string

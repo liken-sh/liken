@@ -323,7 +323,7 @@ spec:
                         screen. The image starts with its own entrypoint
                         and reads the unit's state from the bus. It
                         implements the fade and off windows, the focus
-                        gate, the shade, the volume step, and the panel
+                        gate, the shade, the volume indicator, and the panel
                         desire in its own process. Omit it to inherit the
                         default from MediaPreferences. Where no tier
                         names an image, the screen runs the idle client
@@ -590,17 +590,17 @@ spec:
                           type: string
                           description: |-
                             The retained topic that carries the unit's
-                            level and its muted flag. Empty means the
-                            unit has no sinks: the client subscribes to
-                            no level, draws none, and publishes none.
-                        volumeOwnerTopic:
-                          type: string
-                          description: |-
-                            The retained topic that carries the owner mark for the
-                            unit's level, present whenever volumeTopic is. A
-                            non-empty payload means equipment owns the level, and
-                            the client then draws no level of its own and applies
-                            none. An empty payload means no owner holds it.
+                            level, as {"level": 0.63, "muted": false},
+                            where the level is the fraction of the
+                            device's max. The media operator is its only
+                            writer. The client draws the indicator for
+                            each live message and publishes no level. A
+                            volume key reaches the media operator from
+                            the controller's events topic, and a client
+                            that asks for a step publishes on this topic
+                            plus /commands. Empty means the unit has no
+                            sinks: the client subscribes to no level and
+                            draws none.
                         commandsTopic:
                           type: string
                           description: |-
@@ -633,15 +633,16 @@ spec:
                             KEY_POWER and KEY_POWER2, off for KEY_SLEEP, and
                             on for KEY_WAKEUP, the names the kernel gives a
                             TV remote's Power Off Function and Power On
-                            Function. The equipment operator answers each
-                            ask by turning the room off or on. It also
-                            publishes wake here when a person picks the
-                            unit's input in the TV's source menu while the
-                            screen sleeps, and sleep when the TV goes to
-                            standby, and the client wakes or sleeps the
-                            screen. A unit with none carries no topic, and a
-                            power press reaches its client, which lowers
-                            the shade.
+                            Function. The media operator writes each ask
+                            into the Receiver's session, and the equipment
+                            operator turns the room off or on. The media
+                            operator also publishes wake here when a
+                            person picks the unit's input in the TV's
+                            source menu while the screen sleeps, and
+                            sleep when the TV goes to standby, and the
+                            client wakes or sleeps the screen. A unit with
+                            none carries no topic, and a power press
+                            reaches its client, which lowers the shade.
                         remotes:
                           type: array
                           x-kubernetes-list-type: atomic

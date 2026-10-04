@@ -307,7 +307,6 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: presentationsVariable, Value: "[{}]"},
 			{Name: playerNameVariable, Value: "theater"},
 			{Name: playerVolumeTopicVariable, Value: playerVolumeTopic(testTopicBase, "house", "theater")},
-			{Name: playerVolumeOwnerTopicVariable, Value: playerVolumeOwnerTopic(testTopicBase, "house", "theater")},
 			{Name: metricsAddressVariable, Value: "0.0.0.0:9200"},
 			{Name: mediaVersionVariable, Value: "test"},
 		},
@@ -494,22 +493,9 @@ func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
 	}
 }
 
-// The level the operator resolved reaches mpv on its command line,
-// so the film starts at the level the unit already holds instead of at
-// unity. The subscription is the live authority from there.
-func TestBuildPodStartsMpvAtTheUnitsLevel(t *testing.T) {
-	play := testPlay()
-	play.Spec.Volume = &PlayVolume{Level: level(35), Muted: muted(true)}
-	pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
-		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
-
-	mustMatch(t, envValue(pod.Spec.Containers[0], playerOptionsVariable), "--volume=35\n--mute=yes")
-}
-
-// A unit nothing has answered for carries no level onto the pod, so
-// mpv keeps its own default and the subscription sets the level a moment
-// later.
-func TestBuildPodWithNoLevelCarriesNoVolumeOption(t *testing.T) {
+// mpv plays at unity, its own default: no level and no mute reach its
+// command line, because the receiver or the sinks set the room's level.
+func TestBuildPodCarriesNoVolumeOption(t *testing.T) {
 	mustMatch(t, envValue(testPod(t).Spec.Containers[0], playerOptionsVariable), "")
 }
 
@@ -528,23 +514,6 @@ func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
 	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeTopicVariable), "")
 	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeTopicVariable),
 		playerVolumeTopic(testTopicBase, "house", "theater"))
-}
-
-// The owner mark travels with the level and nowhere else. Its topic is
-// the volume topic plus the owner suffix, so a sidecar with speakers
-// reads both and a sidecar without speakers reads neither.
-func TestTheCommandSidecarCarriesTheOwnerTopicWithTheVolumeTopic(t *testing.T) {
-	speakerless := &Player{
-		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
-		Spec:     PlayerSpec{Display: &PlayerDevice{Class: "display-output"}},
-	}
-	play := testPlay()
-	pod := buildPod(play, buildClaim(play, speakerless), testResolution(t),
-		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
-
-	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeOwnerTopicVariable), "")
-	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeOwnerTopicVariable),
-		playerVolumeTopic(testTopicBase, "house", "theater")+"/owner")
 }
 
 // A Play with a next block passes the whole block to both containers in

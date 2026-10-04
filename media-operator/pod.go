@@ -149,11 +149,9 @@ func buildPod(
 	// tier stated a preference, so mpv keeps its own default and the feature adds
 	// no behavior.
 	//
-	// The unit's level joins the same list, so mpv starts at the
-	// level the unit already holds rather than at unity, and nothing
-	// drops a moment later when the subscription catches up. The
-	// subscription is the live authority from there.
-	options := append(mpvPreferenceOptions(prefs), mpvVolumeOptions(play.Spec.Volume)...)
+	// mpv plays at unity, its own default, so no level joins the list.
+	// The receiver or the sinks set the room's level (volumeengine.go).
+	options := mpvPreferenceOptions(prefs)
 	if len(options) > 0 {
 		container.Env = append(container.Env,
 			EnvVar{Name: playerOptionsVariable, Value: strings.Join(options, "\n")})
@@ -239,24 +237,6 @@ func mpvPreferenceOptions(prefs resolvedPreferences) []string {
 	return append(options, "--subs-match-os-language=no")
 }
 
-// mpvVolumeOptions turns the level the pod starts at into mpv's own
-// flags. The operator fills the block with the unit's current state
-// before it creates the pod, so what reaches mpv here is a snapshot,
-// and the volume topic stays the authority.
-func mpvVolumeOptions(volume *PlayVolume) []string {
-	if volume == nil {
-		return nil
-	}
-	var options []string
-	if volume.Level != nil {
-		options = append(options, "--volume="+strconv.Itoa(*volume.Level))
-	}
-	if volume.Muted != nil {
-		options = append(options, "--mute="+mpvYesNo(*volume.Muted))
-	}
-	return options
-}
-
 // commandSidecar is the playback pod's owner of the mpv IPC socket:
 // the sidecar image in its command mode, holding no device claim. It
 // subscribes to the Play's commands topic, drives mpv through the
@@ -303,19 +283,12 @@ func commandSidecar(
 	// The volume topic travels only for a unit that has speakers, and
 	// the claim answers that: it holds a sink request only for a
 	// Player that states sinks. A unit with nothing to hear names no
-	// topic, and its sidecar answers no volume press.
+	// topic, and its sidecar draws no level.
 	if claimHasSink(claim) {
-		// The owner mark travels with the level. The sidecar reads the two
-		// together to decide whether it applies a level to mpv at all.
-		env = append(env,
-			EnvVar{
-				Name:  playerVolumeTopicVariable,
-				Value: playerVolumeTopic(topicBase, play.Metadata.Namespace, playerName(play)),
-			},
-			EnvVar{
-				Name:  playerVolumeOwnerTopicVariable,
-				Value: playerVolumeOwnerTopic(topicBase, play.Metadata.Namespace, playerName(play)),
-			})
+		env = append(env, EnvVar{
+			Name:  playerVolumeTopicVariable,
+			Value: playerVolumeTopic(topicBase, play.Metadata.Namespace, playerName(play)),
+		})
 	}
 	// The sidecar serves its own /metrics, milestone 65's port 9200,
 	// and reports the version its own image's tag carries: the same tag

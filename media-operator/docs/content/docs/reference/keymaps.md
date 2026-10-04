@@ -20,8 +20,9 @@ any namespace names it without a namespace qualifier.
 
 Both sides of the table use evdev's names, because every Linux
 controller driver reports the south face button as `BTN_SOUTH`,
-whatever is printed on the button, and every consumer binds
-`KEY_VOLUMEUP` the same way. A `Keymap` renames a control and nothing
+whatever is printed on the button, and `KEY_VOLUMEUP` means one step
+up of the room's level from every controller. A `Keymap` renames a
+control and nothing
 more. The right side is a kernel key name, or `none` to drop the
 control, and each consumer holds its own table from key names to what
 they mean there.

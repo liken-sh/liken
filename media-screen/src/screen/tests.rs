@@ -8,7 +8,6 @@ use crate::status::Activity;
 const PLAYER: &str = "theater";
 const STATUS: &str = "liken/media/players/house/theater/status";
 const VOLUME: &str = "liken/media/players/house/theater/volume";
-const VOLUME_OWNER: &str = "liken/media/players/house/theater/volume/owner";
 const COMMANDS: &str = "liken/media/players/house/theater/commands";
 const PANEL: &str = "liken/media/players/house/theater/panel";
 const POWER: &str = "liken/media/players/house/theater/power";
@@ -23,7 +22,6 @@ fn wiring() -> Wiring {
         player_name: PLAYER.into(),
         status_topic: STATUS.into(),
         volume_topic: VOLUME.into(),
-        volume_owner_topic: Some(VOLUME_OWNER.into()),
         commands_topic: COMMANDS.into(),
         panel_topic: PANEL.into(),
         remotes: vec![Remote {
@@ -142,7 +140,6 @@ fn the_screen_subscribes_to_every_topic_the_operator_named() {
         [
             STATUS,
             VOLUME,
-            VOLUME_OWNER,
             COMMANDS,
             PANEL,
             ARMCHAIR_EVENTS,
@@ -157,24 +154,11 @@ fn the_screen_subscribes_to_every_topic_the_operator_named() {
 fn a_unit_with_no_sinks_subscribes_to_no_level() {
     let wiring = Wiring {
         volume_topic: String::new(),
-        volume_owner_topic: None,
         ..wiring()
     };
     assert_eq!(
         Screen::new(&wiring).filters(),
         [STATUS, COMMANDS, PANEL, SOFA_EVENTS, SOFA_FOCUS]
-    );
-}
-
-#[test]
-fn a_unit_whose_operator_named_no_owner_topic_subscribes_to_no_mark() {
-    let wiring = Wiring {
-        volume_owner_topic: None,
-        ..wiring()
-    };
-    assert_eq!(
-        Screen::new(&wiring).filters(),
-        [STATUS, VOLUME, COMMANDS, PANEL, SOFA_EVENTS, SOFA_FOCUS]
     );
 }
 
@@ -189,7 +173,7 @@ fn a_controller_with_no_focus_topic_subscribes_to_no_mark() {
     };
     assert_eq!(
         Screen::new(&wiring).filters(),
-        [STATUS, VOLUME, VOLUME_OWNER, COMMANDS, PANEL, SOFA_EVENTS]
+        [STATUS, VOLUME, COMMANDS, PANEL, SOFA_EVENTS]
     );
 }
 
@@ -218,7 +202,6 @@ fn a_client_subscribes_to_its_own_topics_beside_the_screens() {
         [
             STATUS,
             VOLUME,
-            VOLUME_OWNER,
             COMMANDS,
             PANEL,
             SOFA_EVENTS,
@@ -237,7 +220,6 @@ fn a_client_topic_with_no_name_is_no_topic() {
         [
             STATUS,
             VOLUME,
-            VOLUME_OWNER,
             COMMANDS,
             PANEL,
             SOFA_EVENTS,
@@ -535,6 +517,10 @@ fn every_key_this_crate_acts_on_no_further_reaches_the_client() {
         "KEY_HOMEPAGE",
         "KEY_SEARCH",
         "KEY_PLAYPAUSE",
+        "KEY_VOLUMEUP",
+        "KEY_VOLUMEDOWN",
+        "KEY_MUTE",
+        "KEY_UNMUTE",
     ] {
         for value in [1, 2] {
             let mut screen = idling(&wiring(), now);
@@ -548,16 +534,14 @@ fn every_key_this_crate_acts_on_no_further_reaches_the_client() {
 }
 
 #[test]
-fn the_keys_this_crate_answers_itself_reach_no_client() {
+fn the_cycle_key_reaches_no_client() {
     let now = Instant::now();
-    for name in [keys::CYCLE, "KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE"] {
-        for value in [1, 2] {
-            let mut screen = idling(&wiring(), now);
-            assert!(
-                moments(screen.deliver(SOFA_EVENTS, &key(name, value), false, now)).is_empty(),
-                "{name} at value {value}"
-            );
-        }
+    for value in [1, 2] {
+        let mut screen = idling(&wiring(), now);
+        assert!(
+            moments(screen.deliver(SOFA_EVENTS, &key(keys::CYCLE, value), false, now)).is_empty(),
+            "value {value}"
+        );
     }
 }
 
@@ -784,39 +768,32 @@ fn a_press_from_an_unfocused_controller_reaches_nothing() {
 // The level.
 
 #[test]
-fn the_screen_holds_the_level_the_topic_delivered_and_hands_it_to_the_client() {
+fn a_retained_level_is_the_catch_up() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
     assert_eq!(
-        moments(screen.deliver(VOLUME, br#"{"level":45,"muted":true}"#, true, now)),
+        moments(screen.deliver(VOLUME, br#"{"level":0.45,"muted":true}"#, true, now)),
         [Moment::Level {
             volume: Volume {
-                level: 45,
+                level: 0.45,
                 muted: true
             },
             pressed: false,
         }]
     );
-    assert_eq!(
-        screen.volume,
-        Some(Volume {
-            level: 45,
-            muted: true
-        })
-    );
 }
 
 #[test]
-fn a_retained_level_is_the_catch_up_and_a_live_level_is_a_press() {
+fn a_live_level_is_a_change_the_client_draws() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
     assert_eq!(
-        moments(screen.deliver(VOLUME, br#"{"level":45,"muted":false}"#, false, now)),
+        moments(screen.deliver(VOLUME, br#"{"level":0.45,"muted":false}"#, false, now)),
         [Moment::Level {
             volume: Volume {
-                level: 45,
+                level: 0.45,
                 muted: false
             },
             pressed: true,
@@ -825,223 +802,36 @@ fn a_retained_level_is_the_catch_up_and_a_live_level_is_a_press() {
 }
 
 #[test]
-fn the_screen_keeps_the_level_through_a_message_that_does_not_decode() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.deliver(VOLUME, br#"{"level":45,"muted":true}"#, true, now);
-
-    assert!(screen.deliver(VOLUME, b"not json", true, now).is_empty());
-
-    assert_eq!(
-        screen.volume,
-        Some(Volume {
-            level: 45,
-            muted: true
-        })
-    );
-}
-
-#[test]
-fn a_level_press_steps_from_unity_before_any_message() {
+fn a_level_that_does_not_decode_is_nothing() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
-    assert_eq!(
-        publishes(screen.deliver(SOFA_EVENTS, &key("KEY_VOLUMEDOWN", 1), false, now)),
-        [Publish {
-            topic: VOLUME.into(),
-            payload: br#"{"level":95,"muted":false}"#.to_vec(),
-            retained: true,
-        }]
-    );
+    assert!(screen.deliver(VOLUME, b"not json", false, now).is_empty());
 }
 
 #[test]
-fn a_level_press_publishes_the_units_next_level_and_draws_nothing() {
+fn a_volume_key_publishes_no_level() {
     let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.deliver(VOLUME, br#"{"level":40,"muted":false}"#, true, now);
-
-    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 1), false, now);
-
-    assert!(moments(effects.clone()).is_empty());
-    assert_eq!(
-        publishes(effects),
-        [Publish {
-            topic: VOLUME.into(),
-            payload: br#"{"level":45,"muted":false}"#.to_vec(),
-            retained: true,
-        }]
-    );
-}
-
-#[test]
-fn a_mute_press_publishes_the_toggled_flag() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-
-    assert_eq!(
-        publishes(screen.deliver(SOFA_EVENTS, &key("KEY_MUTE", 1), false, now))[0].payload,
-        br#"{"level":100,"muted":true}"#
-    );
-}
-
-#[test]
-fn a_mute_repeat_toggles_nothing() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-
-    assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_MUTE", 2), false, now)
-            .is_empty()
-    );
-}
-
-#[test]
-fn a_level_repeat_steps_the_level_again() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.deliver(VOLUME, br#"{"level":40,"muted":false}"#, true, now);
-
-    assert_eq!(
-        publishes(screen.deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 1), false, now))[0].payload,
-        br#"{"level":45,"muted":false}"#
-    );
-    // The press publishes and reads its own level back off the topic, so the
-    // repeat that follows steps from the level the topic now holds.
-    screen.deliver(VOLUME, br#"{"level":45,"muted":false}"#, false, now);
-
-    assert_eq!(
-        publishes(screen.deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 2), false, now))[0].payload,
-        br#"{"level":50,"muted":false}"#
-    );
-}
-
-#[test]
-fn a_level_release_steps_nothing() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-
-    assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 0), false, now)
-            .is_empty()
-    );
-}
-
-#[test]
-fn a_level_press_publishes_no_level_while_a_play_runs() {
-    let now = Instant::now();
-    let mut screen = focused(&wiring());
-    screen.deliver(STATUS, &status("Playing"), true, now);
-
-    for value in [1, 2] {
+    for name in ["KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE", "KEY_UNMUTE"] {
+        let mut screen = idling(&wiring(), now);
         assert!(
-            screen
-                .deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", value), false, now)
-                .is_empty()
+            publishes(screen.deliver(SOFA_EVENTS, &key(name, 1), false, now))
+                .iter()
+                .all(|publish| publish.topic != VOLUME),
+            "{name}"
         );
     }
 }
 
 #[test]
-fn a_level_press_on_a_sleeping_screen_only_wakes_it() {
+fn a_volume_key_on_a_sleeping_screen_only_wakes_it() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
     screen.asleep = true;
 
     let effects = screen.deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 1), false, now);
 
-    assert_eq!(moments(effects.clone()), [Moment::Wake]);
-    assert!(publishes(effects).is_empty());
-}
-
-#[test]
-fn a_unit_with_no_sinks_answers_no_level_press() {
-    let wiring = Wiring {
-        volume_topic: String::new(),
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-
-    assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 1), false, now)
-            .is_empty()
-    );
-}
-
-#[test]
-fn a_level_press_from_an_unfocused_controller_publishes_nothing() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.deliver(SOFA_FOCUS, b"cinema", true, now);
-
-    assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 1), false, now)
-            .is_empty()
-    );
-}
-
-#[test]
-fn a_level_repeat_after_the_mark_moves_away_steps_nothing() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    assert_eq!(
-        publishes(screen.deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 1), false, now)).len(),
-        1
-    );
-
-    screen.deliver(SOFA_FOCUS, b"cinema", false, now);
-
-    assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 2), false, now)
-            .is_empty()
-    );
-}
-
-// The owner mark.
-
-#[test]
-fn an_owner_mark_reaches_the_client_as_the_payload_it_carries() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-
-    assert_eq!(
-        moments(screen.deliver(VOLUME_OWNER, b"receiver", true, now)),
-        [Moment::Owner(b"receiver".to_vec())]
-    );
-}
-
-#[test]
-fn a_cleared_owner_mark_reaches_the_client_empty() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-
-    assert_eq!(
-        moments(screen.deliver(VOLUME_OWNER, b"", false, now)),
-        [Moment::Owner(Vec::new())]
-    );
-}
-
-#[test]
-fn a_unit_whose_operator_named_no_owner_topic_reads_no_mark() {
-    let wiring = Wiring {
-        volume_owner_topic: None,
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-
-    assert!(
-        screen
-            .deliver(VOLUME_OWNER, b"receiver", true, now)
-            .is_empty()
-    );
+    assert_eq!(moments(effects), [Moment::Wake]);
 }
 
 // The focus gate.

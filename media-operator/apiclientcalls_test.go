@@ -160,13 +160,26 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 	}{
 		{
 			name:    "a session the run holds",
-			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, Awake: true, VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, Awake: true},
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true}}}`,
 		},
 		{
 			name:    "a session at a dark panel",
-			session: &ReceiverSession{Player: "house/theater", Input: "GAME", VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			session: &ReceiverSession{Player: "house/theater", Input: "GAME"},
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false}}}`,
+		},
+		{
+			name: "a session with its three asks",
+			session: &ReceiverSession{
+				Player:    "house/theater",
+				Input:     "GAME",
+				Awake:     true,
+				VolumeAsk: &VolumeAsk{Level: 44.5, At: "2026-10-04T12:15:25.164Z"},
+				PowerAsk:  &ReceiverAction{Action: "toggle", At: "2026-10-04T12:20:01.002Z"},
+				InputAsk:  &ReceiverAction{Action: inputEnsure, At: "2026-10-04T12:20:07.410Z"},
+			},
+			want: `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":true,` +
+				`"volumeAsk":{"level":44.5,"mute":false,"at":"2026-10-04T12:15:25.164Z"},"powerAsk":{"action":"toggle","at":"2026-10-04T12:20:01.002Z"},"inputAsk":{"action":"ensure","at":"2026-10-04T12:20:07.410Z"}}}}`,
 		},
 		{
 			name: "the lift",

@@ -30,8 +30,10 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "player panel filter", got: playerPanelFilter(base), want: "liken/media/players/+/+/panel"},
 		{name: "player volume", got: playerVolumeTopic(base, "house", "theater"), want: "liken/media/players/house/theater/volume"},
 		{name: "player volume filter", got: playerVolumeFilter(base), want: "liken/media/players/+/+/volume"},
-		{name: "player volume owner", got: playerVolumeOwnerTopic(base, "house", "theater"), want: "liken/media/players/house/theater/volume/owner"},
-		{name: "player volume owner filter", got: playerVolumeOwnerFilter(base), want: "liken/media/players/+/+/volume/owner"},
+		{name: "player volume commands", got: playerVolumeCommandsTopic(base, "house", "theater"), want: "liken/media/players/house/theater/volume/commands"},
+		{name: "player volume commands filter", got: playerVolumeCommandsFilter(base), want: "liken/media/players/+/+/volume/commands"},
+		{name: "player power", got: playerPowerTopic(base, "house", "theater"), want: "liken/media/players/house/theater/power"},
+		{name: "player power filter", got: playerPowerFilter(base), want: "liken/media/players/+/+/power"},
 		{name: "keys", got: remoteKeysTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/keys"},
 		{name: "status filter", got: playStatusFilter(base), want: "liken/media/plays/+/+/status"},
 		{name: "availability filter", got: playAvailabilityFilter(base), want: "liken/media/plays/+/+/availability"},
@@ -215,7 +217,7 @@ func TestParsePlayerVolumeTopicNamesThePlayer(t *testing.T) {
 		},
 		{name: "the panel topic", topic: playerPanelTopic(base, "house", "theater")},
 		{name: "the status topic", topic: playerStatusTopic(base, "house", "theater")},
-		{name: "the owner topic", topic: playerVolumeOwnerTopic(base, "house", "theater")},
+		{name: "the volume commands topic", topic: playerVolumeCommandsTopic(base, "house", "theater")},
 		{name: "another base", topic: "other/players/house/theater/volume"},
 		{name: "an empty namespace", topic: base + "/players//theater/volume"},
 		{name: "an empty player name", topic: base + "/players/house//volume"},
@@ -231,9 +233,9 @@ func TestParsePlayerVolumeTopicNamesThePlayer(t *testing.T) {
 	}
 }
 
-// The owner mark maps back to the unit whose level it names, and no
-// other players topic reads as one.
-func TestParsePlayerVolumeOwnerTopicNamesThePlayer(t *testing.T) {
+// The volume/commands topic maps back to the unit whose level it asks
+// for, and no other players topic reads as one.
+func TestParsePlayerVolumeCommandsTopicNamesThePlayer(t *testing.T) {
 	base := defaultTopicBase
 	cases := []struct {
 		name      string
@@ -243,24 +245,22 @@ func TestParsePlayerVolumeOwnerTopicNamesThePlayer(t *testing.T) {
 		ok        bool
 	}{
 		{
-			name:      "an owner topic",
-			topic:     playerVolumeOwnerTopic(base, "house", "theater"),
+			name:      "a volume commands topic",
+			topic:     playerVolumeCommandsTopic(base, "house", "theater"),
 			namespace: "house",
 			player:    "theater",
 			ok:        true,
 		},
 		{name: "the volume topic", topic: playerVolumeTopic(base, "house", "theater")},
-		{name: "the panel topic", topic: playerPanelTopic(base, "house", "theater")},
-		{name: "another kind with the same depth", topic: base + "/players/house/theater/panel/owner"},
-		{name: "another last segment", topic: base + "/players/house/theater/volume/level"},
-		{name: "another base", topic: "other/players/house/theater/volume/owner"},
-		{name: "an empty namespace", topic: base + "/players//theater/volume/owner"},
-		{name: "an empty player name", topic: base + "/players/house//volume/owner"},
-		{name: "a segment too many", topic: base + "/players/house/theater/volume/owner/who"},
+		{name: "the player commands topic", topic: playerCommandsTopic(base, "house", "theater")},
+		{name: "another kind with the same depth", topic: base + "/players/house/theater/panel/commands"},
+		{name: "another base", topic: "other/players/house/theater/volume/commands"},
+		{name: "an empty namespace", topic: base + "/players//theater/volume/commands"},
+		{name: "a segment too many", topic: base + "/players/house/theater/volume/commands/now"},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			namespace, player, ok := parsePlayerVolumeOwnerTopic(base, each.topic)
+			namespace, player, ok := parsePlayerVolumeCommandsTopic(base, each.topic)
 			mustMatch(t, ok, each.ok)
 			mustMatch(t, namespace, each.namespace)
 			mustMatch(t, player, each.player)
@@ -268,8 +268,18 @@ func TestParsePlayerVolumeOwnerTopicNamesThePlayer(t *testing.T) {
 	}
 }
 
-// The operator reads the owner mark, so its filter list carries the
-// owner filter beside the level's.
+// The power topic maps back to the unit whose room it turns.
+func TestParsePlayerPowerTopicNamesThePlayer(t *testing.T) {
+	base := defaultTopicBase
+	namespace, player, ok := parsePlayerPowerTopic(base, playerPowerTopic(base, "house", "theater"))
+	mustMatch(t, ok, true)
+	mustMatch(t, namespace+"/"+player, "house/theater")
+	_, _, ok = parsePlayerPowerTopic(base, playerPanelTopic(base, "house", "theater"))
+	mustMatch(t, ok, false)
+}
+
+// The operator reads its own levels back, the volume asks, and the
+// power asks, so its filter list carries all three beside the rest.
 func TestTheOperatorSubscribesToEveryFilterItReads(t *testing.T) {
 	base := defaultTopicBase
 	want := []string{
@@ -282,7 +292,8 @@ func TestTheOperatorSubscribesToEveryFilterItReads(t *testing.T) {
 		"liken/media/remotes/+/+/codes",
 		"liken/media/players/+/+/panel",
 		"liken/media/players/+/+/volume",
-		"liken/media/players/+/+/volume/owner",
+		"liken/media/players/+/+/volume/commands",
+		"liken/media/players/+/+/power",
 	}
 	mustMatchAll(t, busFilters(base), want)
 }

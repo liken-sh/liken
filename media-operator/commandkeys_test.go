@@ -136,21 +136,27 @@ func TestTheCycleKeyPublishesTheCycleRequest(t *testing.T) {
 	mustMatch(t, published.retained, false)
 }
 
-// A volume key publishes the unit's next level, retained, and writes
-// nothing to mpv: the subscription on the level is what applies it.
-func TestAVolumeKeyPublishesTheUnitsNextLevel(t *testing.T) {
-	c, broker, _ := keyTestCommander(t)
-	events, _ := keyTestTopics()
-	focusHere(c)
+// A volume key is the operator's: it sets the room's level from the
+// same events topic. The sidecar publishes nothing for it, writes
+// nothing to mpv, and writes no line.
+func TestAVolumeKeyIsLeftToTheOperator(t *testing.T) {
+	for _, key := range []string{"KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE", "KEY_UNMUTE"} {
+		t.Run(key, func(t *testing.T) {
+			c, broker, lines := keyTestCommander(t)
+			var log logBuffer
+			c.log = &log
+			events, _ := keyTestTopics()
+			focusHere(c)
 
-	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_VOLUMEDOWN", Value: 1}))
+			for _, value := range []int32{1, 2, 0} {
+				c.handle(events, mustEncode(t, keyEvent{Key: key, Value: value}))
+			}
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, c.volumeTopic)
-	mustMatch(t, published.retained, true)
-	state, decoded := parseVolumeState(published.payload)
-	mustMatch(t, decoded, true)
-	mustMatch(t, state.Level, defaultVolumeState().Level-volumeStep)
+			mustPublishNothing(t, broker)
+			mustNoLine(t, lines, 100*time.Millisecond)
+			mustMatch(t, len(log.lines()), 0)
+		})
+	}
 }
 
 // The two topic lists the operator sets pair by position, so each

@@ -260,7 +260,6 @@ func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 		`"bus":{"address":"bus.liken-system.svc:1883",` +
 		`"statusTopic":"liken/media/players/house/den/status",` +
 		`"volumeTopic":"liken/media/players/house/den/volume",` +
-		`"volumeOwnerTopic":"liken/media/players/house/den/volume/owner",` +
 		`"commandsTopic":"liken/media/players/house/den/commands",` +
 		`"panelTopic":"liken/media/players/house/den/panel",` +
 		`"remotes":[{"events":"liken/media/remotes/house/sofa/events",` +
@@ -278,12 +277,11 @@ func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 			status.Idle.FadeAfterSeconds, status.Idle.OffAfterSeconds)
 	}
 	want := PlayerIdleBus{
-		Address:          "bus.liken-system.svc:1883",
-		StatusTopic:      "liken/media/players/house/den/status",
-		VolumeTopic:      "liken/media/players/house/den/volume",
-		VolumeOwnerTopic: "liken/media/players/house/den/volume/owner",
-		CommandsTopic:    "liken/media/players/house/den/commands",
-		PanelTopic:       "liken/media/players/house/den/panel",
+		Address:       "bus.liken-system.svc:1883",
+		StatusTopic:   "liken/media/players/house/den/status",
+		VolumeTopic:   "liken/media/players/house/den/volume",
+		CommandsTopic: "liken/media/players/house/den/commands",
+		PanelTopic:    "liken/media/players/house/den/panel",
 		Remotes: []PlayerIdleRemote{{
 			Events: "liken/media/remotes/house/sofa/events",
 			Focus:  "liken/media/remotes/house/sofa/focus",

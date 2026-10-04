@@ -70,7 +70,7 @@ sha2 = "=0.10.9"
 # the read path loads no extension and matches no system library.
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 # media-screen is the bus half of a screen client: the connection, the
-# timers, the focus gate, the shade, the volume step, the cycle request,
+# timers, the focus gate, the shade, the volume level, the cycle request,
 # and the panel desire. media-operator's idle client links it too, so
 # the two clients of one contract hold the same rules. It brings
 # rumqttc, so this manifest names no broker client of its own. The crate

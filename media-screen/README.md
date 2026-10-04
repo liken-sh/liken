@@ -1,9 +1,18 @@
 # media-screen
 
 media-screen is the bus half of a screen client for one Player: the
-timers, the focus gate, the shade, the volume step and the owner mark,
-the cycle request, and the panel desire. A screen client holds these
-rules in its own process. Two clients link this crate by path, so they
+timers, the focus gate, the shade, the volume level, the cycle request,
+and the panel desire. A screen client holds these rules in its own
+process.
+
+The crate reads the Player's `volume` topic and hands each level to the
+client to draw. `media-operator` is the only writer of that topic: it
+reads the volume keys off each remote, sets the level of the unit's
+`Receiver` or `Sink`, and relays the level the device reports as
+`{"level": 0.63, "muted": false}`, where `level` runs from 0.0 to 1.0 of
+the device's `spec.volume.max`. A screen publishes nothing on the topic
+and answers no volume key. A retained level sets the level and draws
+nothing. A live level draws the indicator. Two clients link this crate by path, so they
 hold the same rules:
 
 - media-operator's idle screen, in `media-operator/idle/`

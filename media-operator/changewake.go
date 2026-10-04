@@ -1,7 +1,7 @@
 package main
 
-// The claims, the ResourceSlices, the Displays, the Receivers, and the
-// operator's own pods wake the pass when a change reaches a field the
+// The claims, the ResourceSlices, the Displays, the Receivers, the
+// Sinks, the Televisions, and the operator's own pods wake the pass when a change reaches a field the
 // pass reads, and a change to anything else wakes nothing. Each rule names those fields as a
 // mark, and the handler compares the mark of the copy the informer held
 // with the mark of the new copy. The informer hands an update both, so
@@ -9,7 +9,8 @@ package main
 //
 // Each mark leaves out what this operator writes itself, so its own
 // write does not wake the pass that made it: a Display's spec.override,
-// and a Receiver's session in its spec and its status. A claim's spec
+// a Receiver's session in its spec and its status, and a Sink's session
+// in its status. A claim's spec
 // is immutable, and the operator writes nothing else on a claim, so a
 // claim's mark is what the scheduler writes. Each mark holds the UID
 // and the deletion mark too. After a gap in the watch, an object
@@ -167,17 +168,39 @@ var displayRule = changeRule[Display]{
 }
 
 // receiverRule wakes the pass when a person rewires a Receiver's inputs
-// or its commands topic, or when the equipment-operator writes its
-// power, its input, or its conditions. The session, in the spec or the
-// status, is this operator's to write, and the pass decides it from its
-// own record, so the mark leaves it out.
+// or its volume scale, or when the equipment-operator writes its power,
+// its input, its zones, or its conditions. The session, in the spec or
+// the status, is this operator's to write, and the pass decides it from
+// its own record, so the mark leaves it out. A zone's volume is in the
+// mark, because the pass hands each report to the volume engine.
 var receiverRule = changeRule[Receiver]{
 	what: "the Receivers",
 	mark: func(receiver Receiver) string {
 		status := receiver.Status
 		status.Session = nil
 		return identity(receiver.Metadata) + "|" + markOf(receiver.Spec.Inputs) + "|" +
-			receiver.Spec.CommandsTopic + "|" + markOf(status)
+			markOf(receiver.Spec.Volume) + "|" + markOf(status)
+	},
+}
+
+// sinkRule wakes the pass when a person changes a Sink's volume scale,
+// or when the audio-operator reports a new level or mute. The pass
+// hands each report to the volume engine. The session is this
+// operator's own write, and the rest of the status changes nothing the
+// pass reads, so the mark leaves both out.
+var sinkRule = changeRule[Sink]{
+	what: "the Sinks",
+	mark: func(sink Sink) string {
+		return identity(sink.Metadata) + "|" + markOf(sink.Spec.Volume) + "|" + markOf(sink.Status.Observed)
+	},
+}
+
+// televisionRule wakes the pass when the CEC node workload writes a new
+// ask for a Player's screen, which the pass relays (screenask.go).
+var televisionRule = changeRule[Television]{
+	what: "the Televisions",
+	mark: func(television Television) string {
+		return identity(television.Metadata) + "|" + markOf(television.Status.ScreenAsk)
 	},
 }
 

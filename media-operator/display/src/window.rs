@@ -388,7 +388,10 @@ impl Display {
         } else if word == ipc::NEXT {
             self.upnext.receive(words.get(1).map_or("", String::as_str));
         } else if word == ipc::VOLUME_CHANGED {
-            self.volume.show();
+            let Some((level, muted)) = crate::volume::changed(words) else {
+                return Task::none();
+            };
+            self.volume.show(level, muted);
         } else {
             return Task::none();
         }
@@ -408,9 +411,6 @@ impl Display {
     /// Those are the two things a position does with the display down.
     fn on_property(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
         self.film.apply(name, value);
-        if !draws(name) {
-            return self.own_clock(name, value);
-        }
         if name == "time-pos" {
             let rose = self
                 .upnext
@@ -451,22 +451,6 @@ impl Display {
         // item drops it.
         if name == "playlist-pos" {
             self.upnext.on_playlist_pos(value.as_i64());
-        }
-        Task::none()
-    }
-
-    /// The two properties no part of the display draws by itself. The volume
-    /// row records the level and the muted flag, and redraws only while it is
-    /// on screen, so a level that lands after the sidecar's message reaches
-    /// the bar it belongs to.
-    fn own_clock(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
-        match name {
-            "volume" => self.volume.on_volume(value.as_f64()),
-            "mute" => self.volume.on_mute(value.as_bool()),
-            _ => return Task::none(),
-        }
-        if self.volume.showing() {
-            self.redraw_above();
         }
         Task::none()
     }
@@ -946,14 +930,6 @@ impl upnext::Art for Bridge<'_> {
         };
         next.draw(brush, bounds.position());
     }
-}
-
-/// Whether one property push changes anything the display draws.
-///
-/// The volume indicator comes and goes on a clock of its own, so neither of
-/// the two properties it reads redraws the layer by itself.
-fn draws(name: &str) -> bool {
-    !matches!(name, "volume" | "mute")
 }
 
 /// Which of the two layers one canvas draws.
@@ -1884,10 +1860,9 @@ mod tests {
     #[tokio::test]
     async fn a_level_change_shows_the_row_alone() {
         let (mut display, _) = display();
-        let _ = display.update(property("volume", json!(40.0)));
         assert!(!display.volume.showing());
 
-        let _ = display.update(message("volume-changed"));
+        let _ = display.update(words(&["volume-changed", "0.4", "no"]));
         settle(&mut display);
         assert!(display.volume.showing());
         assert!(!display.focus.visible());
@@ -1899,19 +1874,24 @@ mod tests {
         assert!(!display.volume.showing());
     }
 
-    /// The row draws for a level the observer reported, so a message with no
-    /// level behind it draws nothing.
+    /// A message with no level the display reads draws nothing.
     #[tokio::test]
     async fn a_level_change_with_no_level_draws_nothing() {
         let (mut display, _) = display();
         let _ = display.update(message("volume-changed"));
         settle(&mut display);
         assert!(!display.volume.showing());
+    }
 
+    /// mpv plays at unity, so its own volume and mute say nothing about the
+    /// room's level and show no row.
+    #[tokio::test]
+    async fn mpvs_own_volume_shows_no_row() {
+        let (mut display, _) = display();
         let _ = display.update(property("volume", json!(40.0)));
-        assert!(display.volume.showing());
         let _ = display.update(property("mute", json!(true)));
-        assert!(display.volume.showing());
+        settle(&mut display);
+        assert!(!display.volume.showing());
     }
 
     /// The frame tick runs while any of the three fades moves, and the card's
@@ -1927,8 +1907,7 @@ mod tests {
         settle(&mut display);
         assert!(!display.fading());
 
-        let _ = display.update(property("volume", json!(40.0)));
-        let _ = display.update(message("volume-changed"));
+        let _ = display.update(words(&["volume-changed", "0.4", "no"]));
         assert!(display.fading());
         settle(&mut display);
         assert!(!display.fading());

@@ -63,6 +63,11 @@ type clusterView struct {
 	displays  objectSource
 	slices    objectSource
 	receivers objectSource
+	// sinks and televisions are the audio operator's and the equipment
+	// operator's. The volume engine reads the Sinks a unit plays
+	// through, and the screen relay reads the Televisions' asks.
+	sinks       objectSource
+	televisions objectSource
 }
 
 // listOf converts every object in a source, in the order the API server
@@ -132,6 +137,13 @@ func (v *clusterView) ResourceSlices() ([]ResourceSlice, error) {
 }
 
 func (v *clusterView) Receivers() ([]Receiver, error) { return listOf[Receiver](v.receivers) }
+
+func (v *clusterView) Televisions() ([]Television, error) {
+	return listOf[Television](v.televisions)
+}
+
+// Sink reads one cluster-scoped Sink by name.
+func (v *clusterView) Sink(name string) (*Sink, error) { return oneOf[Sink](v.sinks, name) }
 
 func (v *clusterView) Remote(namespace, name string) (*Remote, error) {
 	return oneOf[Remote](v.remotes, namespacedKey(namespace, name))

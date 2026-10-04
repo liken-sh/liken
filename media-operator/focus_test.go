@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -19,13 +20,15 @@ import (
 // never Run, so publishFocus drops on the wire and records on the desk.
 func focusOperator(t *testing.T) *operator {
 	t.Helper()
-	return &operator{
+	media := &operator{
 		topicBase: defaultTopicBase,
 		bus:       newBus("bus.media.svc:1883", "focus-test", nil, nil, nil),
 		focus:     newFocusDesk(make(chan struct{}, 1)),
 		ensure:    newEnsureDesk(),
-		volumes:   newVolumeDesk(),
+		log:       io.Discard,
 	}
+	media.levels = media.newVolumeEngine()
+	return media
 }
 
 // focusBrokerOperator wires the focus desk to a fake broker, so a test
@@ -34,13 +37,15 @@ func focusBrokerOperator(t *testing.T) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
-	return &operator{
+	media := &operator{
 		topicBase: defaultTopicBase,
 		bus:       bus,
 		focus:     newFocusDesk(make(chan struct{}, 1)),
 		ensure:    newEnsureDesk(),
-		volumes:   newVolumeDesk(),
-	}, brokers[0]
+		log:       io.Discard,
+	}
+	media.levels = media.newVolumeEngine()
+	return media, brokers[0]
 }
 
 // focusPlay is one Play on one Player in the house namespace.

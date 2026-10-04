@@ -2,8 +2,10 @@
 //!
 //! The row comes and goes on a clock of its own, and it draws alone: a level
 //! change brings up the row and nothing else on the screen. The bus holds the
-//! level and the muted flag, and the client only reads them, because the idle
-//! sidecar owns every change to them.
+//! level and the muted flag, and the client only reads them. `media-operator`
+//! is the only writer: it turns each volume key into an ask on the unit's
+//! `Receiver` or `Sink`, and relays the level the device reports, from 0.0 to
+//! 1.0 of the device's `spec.volume.max`.
 
 use iced_widget::canvas::{LineJoin, Path, Stroke, Style};
 use iced_winit::core::{Color, Point, Rectangle};
@@ -12,16 +14,12 @@ use super::{Frame, Layout};
 use crate::look;
 use crate::unit::Unit;
 
-/// The bar fills at this level, which is unity. A level above it fills no
-/// further.
-const FULL: f64 = 100.0;
-
 /// A fade takes this long to reach full and this long to reach clear. The out
 /// is longer than the in, so the row leaves more slowly than it arrives.
 const FADE_IN: f64 = 0.35;
 const FADE_OUT: f64 = 0.6;
-/// The row leaves this many seconds after the last press. Each press restarts
-/// the wait, so a run of presses holds the row on screen.
+/// The row leaves this many seconds after the last change. Each change
+/// restarts the wait, so a run of presses holds the row on screen.
 const HOLD: f64 = 4.0;
 
 /// The number reserves this much width at the right margin, so the bar and the
@@ -71,9 +69,10 @@ const SLASH_BORDER: f32 = 2.0;
 
 /// The row's own fade, from 0 off screen to 1 full.
 ///
-/// The idle command pod publishes a press after it applies a level from the bus,
-/// and never for the retained value a client reads when it first connects. So
-/// the row answers a press, and it stays off screen while a pod restores the
+/// A live message on the volume topic is a change: a press that
+/// `media-operator` turned into a level, or a turn of a receiver's knob. The
+/// retained message a client reads when it first connects is no change. So
+/// the row answers a change, and it stays off screen while a pod restores the
 /// level it starts with.
 pub fn fade(unit: &Unit, at: f64) -> f64 {
     let Some(pressed) = unit.pressed else {
@@ -117,9 +116,10 @@ pub fn next_frame(unit: &Unit, at: f64) -> Option<f64> {
     }
 }
 
-/// How much of the bar the level fills, in canvas pixels.
-fn filled(level: i64) -> f32 {
-    BAR_WIDTH * (level as f64 / FULL).clamp(0.0, 1.0) as f32
+/// How much of the bar the level fills, in canvas pixels. The level runs
+/// from 0.0 to 1.0, and a level outside that range fills no further.
+fn filled(level: f64) -> f32 {
+    BAR_WIDTH * level.clamp(0.0, 1.0) as f32
 }
 
 /// Where the parts of the row stand.
@@ -244,7 +244,7 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
     }
 
     frame.fill_text(look::line(
-        unit.volume.level.to_string(),
+        unit.volume.percent().to_string(),
         row.number,
         look::Anchor::TopRight,
         look::SMALL,
@@ -266,7 +266,7 @@ mod tests {
     fn pressed(at: f64) -> Unit {
         let mut unit = Unit::default();
         let volume = Volume {
-            level: 40,
+            level: 0.4,
             muted: false,
         };
         unit.fold(
@@ -319,11 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_fills_at_unity_and_no_further() {
-        assert_eq!(filled(0), 0.0);
-        assert_eq!(filled(50), BAR_WIDTH / 2.0);
-        assert_eq!(filled(100), BAR_WIDTH);
-        assert_eq!(filled(140), BAR_WIDTH);
+    fn the_bar_fills_at_the_top_of_the_range_and_no_further() {
+        assert_eq!(filled(0.0), 0.0);
+        assert_eq!(filled(0.5), BAR_WIDTH / 2.0);
+        assert_eq!(filled(1.0), BAR_WIDTH);
+        assert_eq!(filled(1.4), BAR_WIDTH);
     }
 
     #[test]

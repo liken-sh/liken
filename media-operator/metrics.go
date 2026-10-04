@@ -47,6 +47,8 @@ const (
 	kindResourceSlice    = "ResourceSlice"
 	kindDisplay          = "Display"
 	kindReceiver         = "Receiver"
+	kindSink             = "Sink"
+	kindTelevision       = "Television"
 )
 
 // The fixed vocabulary for media_playback_failures_total. A Play that

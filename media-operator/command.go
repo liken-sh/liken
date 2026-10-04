@@ -88,13 +88,9 @@ type commander struct {
 	next json.RawMessage
 
 	// The unit's volume topic, empty for a Player with no sinks.
-	// Empty is the speaker gate: the sidecar subscribes to no level,
-	// applies none, and answers no volume press.
+	// Empty is the speaker gate: the sidecar subscribes to no level and
+	// draws none.
 	volumeTopic string
-
-	// The topic the owner mark stands on, set whenever the volume topic
-	// is.
-	volumeOwnerTopic string
 
 	// The unit's controllers, keyed by the events topic each one
 	// publishes on, and the Player this Play runs on, which is the value
@@ -144,28 +140,6 @@ type commander struct {
 	reportMutex sync.Mutex
 	lastReport  playReport
 	haveReport  bool
-
-	// The last state the volume topic delivered, and whether one
-	// arrived at all. A press computes from this and never from what
-	// mpv reports, which keeps a held button from becoming its own
-	// echo. The bus reader writes it and a press reads it, so it
-	// takes a lock of its own.
-	volumeMutex sync.Mutex
-	volume      volumeState
-	haveVolume  bool
-
-	// volumeOwned is the owner mark: equipment controls the level, so a state
-	// the topic delivers is recorded and never written to mpv. volumeOwner is
-	// the owner the mark names, for the lines that say where a level went.
-	volumeOwned bool
-	volumeOwner string
-
-	// volumeCaughtUp marks that this bus session has already
-	// delivered a level. The first message of a session is the
-	// broker's retained catch-up, a restore and not a press, so it
-	// applies silently and the display draws no indicator at pod
-	// start. Every message after it signals the display.
-	volumeCaughtUp bool
 
 	// ended is set once any of the three endings has happened. It is held
 	// rather than sent and forgotten, so every later report of this run
@@ -236,7 +210,6 @@ func runCommand() {
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		commandsTopic:     playCommandsTopic(base, namespace, name),
 		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
-		volumeOwnerTopic:  os.Getenv(playerVolumeOwnerTopicVariable),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
 		next:              parseNext(os.Getenv(nextVariable)),
 		grace:             exitGrace,
@@ -260,21 +233,16 @@ func runCommand() {
 	// after the grace signal ends the report side.
 	busCtx, stopBus := context.WithCancel(context.Background())
 	cmd.bus = newBus(busAddress, "play-"+namespace+"-"+name, cmd.will(), cmd.onConnect, cmd.handle)
+	cmd.bus.retainedHandler = cmd.handleRetained
 	// The subscription is made once. The Bus remembers the filter and
 	// re-sends it on every reconnect, so a broker restart does not need
 	// the command sidecar to subscribe again.
 	cmd.bus.Subscribe(cmd.commandsTopic)
-	// The volume topic is retained, so the broker delivers the
-	// unit's current level on this subscribe and the level reaches
-	// mpv with no request of its own. A Player with no sinks names no
-	// topic, so this pod subscribes to no level at all.
+	// Each live level on the volume topic draws the indicator. A Player
+	// with no sinks names no topic, so this pod subscribes to no level
+	// at all.
 	if cmd.volumeTopic != "" {
 		cmd.bus.Subscribe(cmd.volumeTopic)
-	}
-	// The mark is retained too, and it arrives in either order against the
-	// level, so each handler answers for both orders.
-	if cmd.volumeOwnerTopic != "" {
-		cmd.bus.Subscribe(cmd.volumeOwnerTopic)
 	}
 	// The controllers' own topics, two per Remote the unit names.
 	cmd.subscribeRemotes(cmd.bus)
@@ -312,25 +280,8 @@ func (c *commander) will() *busWill {
 // It publishes online, and re-publishes the last-known report, because
 // the broker drops its retained set on a restart and a reconnect must
 // leave the current status behind again.
-//
-// It re-publishes the level too, once the topic delivered one. The pod
-// holds the level the room hears, and after a broker restart the
-// broker holds none, so the operator would seed unity and the film
-// would jump to full volume. A first session holds no level yet and
-// publishes none, so a pod that starts writes nothing it did not read.
 func (c *commander) onConnect(bus *Bus) {
-	// A fresh session redelivers the retained level, so that message
-	// is a catch-up again and applies silently again.
-	c.volumeMutex.Lock()
-	c.volumeCaughtUp = false
-	held, state := c.haveVolume, c.volume
-	c.volumeMutex.Unlock()
 	bus.Publish(c.availabilityTopic, playAvailability(availabilityOnline, c.podUID), true)
-	if held && c.volumeTopic != "" {
-		if payload, err := marshalVolumeState(state); err == nil {
-			bus.Publish(c.volumeTopic, payload, true)
-		}
-	}
 	c.reportMutex.Lock()
 	payload, have := c.marshalLastReport()
 	c.reportMutex.Unlock()
@@ -356,6 +307,18 @@ func (c *commander) marshalLastReport() ([]byte, bool) {
 	return payload, true
 }
 
+// handleRetained takes a retained message the broker delivered at
+// subscribe. The level on the volume topic is the level the room
+// already had, and no person pressed anything, so it draws nothing.
+// Every other retained topic, such as a controller's focus mark, is
+// read the same as a live message.
+func (c *commander) handleRetained(topic string, payload []byte) {
+	if c.volumeTopic != "" && topic == c.volumeTopic {
+		return
+	}
+	c.handle(topic, payload)
+}
+
 // handle sorts one inbound message by its topic. The volume topic and
 // the controllers' topics carry payloads that are not the command
 // vocabulary, so each is read before it. A payload that does not
@@ -363,12 +326,8 @@ func (c *commander) marshalLastReport() ([]byte, bool) {
 // so a newer program's command degrades to no effect rather than a
 // crash.
 func (c *commander) handle(topic string, payload []byte) {
-	if c.volumeOwnerTopic != "" && topic == c.volumeOwnerTopic {
-		c.applyVolumeOwner(payload)
-		return
-	}
 	if c.volumeTopic != "" && topic == c.volumeTopic {
-		c.applyVolume(payload)
+		c.showVolume(payload)
 		return
 	}
 	if c.handleRemote(topic, payload) {
@@ -385,10 +344,7 @@ func (c *commander) handle(topic string, payload []byte) {
 
 // apply is the one path from a command to mpv, for a press this pod
 // read off a controller and for a command another program published
-// alike. A volume step and a mute leave without reaching mpv: they
-// publish the unit's next state, and the subscription applies it, so
-// the pod that pressed and every pod that only listened run one apply
-// path. A seek and a chapter jump send a second command, because they
+// alike. A seek and a chapter jump send a second command, because they
 // carry no-osd and the sidecar summons the display to draw the new
 // position.
 //
@@ -397,10 +353,6 @@ func (c *commander) handle(topic string, payload []byte) {
 // line, because the press already wrote one and the release writes the
 // count.
 func (c *commander) apply(trigger string, command mediaCommand, quiet bool) {
-	if isVolumeAction(command.Action) {
-		c.pressVolume(trigger, command, quiet)
-		return
-	}
 	// A home or a power command publishes the ask on the Player's
 	// commands topic and then runs the ending path. A stop runs the
 	// ending path alone.
@@ -515,11 +467,6 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 	if c.metrics != nil {
 		defer c.metrics.clearDecode()
 	}
-	// The socket is live now, so the state the bus already delivered
-	// reaches mpv here. Every message before this point found no
-	// socket and wrote nothing.
-	c.applyHeldVolume()
-
 	changes := make(chan propertyChange, 16)
 	messages := make(chan clientMessage, 16)
 	replies := make(chan mpvReply, 16)

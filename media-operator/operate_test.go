@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"path"
 	"reflect"
@@ -61,6 +62,13 @@ type fakeCluster struct {
 	sessionsFail    bool
 	receiversAbsent bool
 
+	// The Sinks the audio operator publishes, and every session apply
+	// this operator sent to one, in order. The Televisions the equipment
+	// operator publishes, whose screen asks the pass relays.
+	sinks        map[string]*Sink
+	sinkSessions []sinkApplied
+	televisions  map[string]*Television
+
 	// podPatchFails is a pod label patch the API server refuses, the
 	// failure a pass answers by leaving the pod unlabeled and patching
 	// again on the next pass.
@@ -103,6 +111,13 @@ type displayApplied struct {
 	manager  string
 }
 
+// One session apply the operator made on a Sink.
+type sinkApplied struct {
+	name    string
+	session *SinkSession
+	manager string
+}
+
 // One session apply the operator made: the Receiver it named, the block
 // it wrote, and the field manager it wrote under.
 type receiverApplied struct {
@@ -124,7 +139,9 @@ func newFakeCluster() *fakeCluster {
 		claimsLinger: map[string]bool{},
 		displays:     map[string]*Display{},
 
-		receivers: map[string]*Receiver{},
+		receivers:   map[string]*Receiver{},
+		sinks:       map[string]*Sink{},
+		televisions: map[string]*Television{},
 
 		peripherals: map[string]*Peripheral{},
 		fails:       map[string]bool{},
@@ -202,6 +219,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			answer(w, f.remotes[name])
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
 			f.patchPlay(w, r, name)
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/sinks/") && name == "status":
+			f.applySinkSession(w, r, path.Base(path.Dir(r.URL.Path)))
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/") && name == "status":
 			f.applySession(w, r, path.Base(path.Dir(r.URL.Path)))
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/"):
@@ -374,6 +393,25 @@ func (f *fakeCluster) applySession(w http.ResponseWriter, r *http.Request, name 
 	_ = json.NewEncoder(w).Encode(held)
 }
 
+// applySinkSession folds one server-side apply of the status onto a
+// Sink. The session the body carries replaces the one the status holds.
+func (f *fakeCluster) applySinkSession(w http.ResponseWriter, r *http.Request, name string) {
+	held, standing := f.sinks[name]
+	if !standing {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var applied sinkStatusApply
+	_ = json.NewDecoder(r.Body).Decode(&applied)
+	f.sinkSessions = append(f.sinkSessions, sinkApplied{
+		name:    name,
+		session: applied.Status.Session,
+		manager: r.URL.Query().Get("fieldManager"),
+	})
+	held.Status.Session = applied.Status.Session
+	_ = json.NewEncoder(w).Encode(held)
+}
+
 // releaseSpecSession folds one server-side apply of the spec onto a
 // Receiver. The apply states no session, so the API server removes the
 // spec.session this manager owned.
@@ -441,7 +479,6 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		receiverSessions: map[string]receiverSession{},
 		heldScreens:      map[string]heldScreen{},
 		specReleased:     map[string]bool{},
-		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]string{},
 		positionWrites:   map[string]time.Time{},
 		displayRestarts:  map[string]displayRestartMemo{},
@@ -451,6 +488,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		wake:             wake,
 		now:              time.Now,
 	}
+	media.levels = media.newVolumeEngine()
 	media.reports.readPodsFrom(media.view)
 	return media
 }
@@ -1894,9 +1932,9 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		panels:      newPanelDesk(nil),
 		// These tests read what the status publish leaves on the bus.
 		// catchUpEnds stays zero, so the operator reads the broker as not
-		// caught up and seeds no level. The volume tests run their own
+		// caught up and publishes no level. The relay tests run their own
 		// operator with the grace elapsed.
-		volumes: newVolumeDesk(),
+		levels: newVolumeEngine(nil, func(string, []byte) {}, io.Discard),
 	}, brokers[0]
 }
 
@@ -2039,7 +2077,7 @@ func caughtUpOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroke
 	return media, brokers[0]
 }
 
-// theaterVolumeTopic is the one unit these tests seed and write through.
+// theaterVolumeTopic is the one unit the relay tests publish for.
 func theaterVolumeTopic() string {
 	return playerVolumeTopic(defaultTopicBase, "house", "theater")
 }
@@ -2057,12 +2095,6 @@ func mustPublishVolume(t *testing.T, broker *fakeBroker) brokerPublish {
 	}
 }
 
-// theaterVolumeOwnerTopic is the owner mark for the one unit these
-// tests write.
-func theaterVolumeOwnerTopic() string {
-	return playerVolumeOwnerTopic(defaultTopicBase, "house", "theater")
-}
-
 // mustPublishNoVolume drains the broker for the window a publish would
 // take and fails on any message that reached the unit's volume topic.
 func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
@@ -2078,227 +2110,6 @@ func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
 			return
 		}
 	}
-}
-
-// A unit the broker holds no level for is seeded at unity, so the
-// state is always readable off the bus and no reader carries a
-// default. The seed runs once: the pass that follows reads the level
-// it wrote and writes nothing more.
-func TestAPassSeedsAPlayerWithNoLevel(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		media, broker := caughtUpOperator(t, newFakeCluster())
-		player := settledPlayer(housePlayer())
-
-		media.reconcilePlayers([]Player{player}, nil, "", nil)
-
-		published := waitForPublish(t, broker.pubs)
-		mustMatch(t, published.topic, theaterVolumeTopic())
-		mustMatch(t, published.retained, true)
-		mustMatch(t, string(published.payload), `{"level":100,"muted":false}`)
-
-		media.reconcilePlayers([]Player{player}, nil, "", nil)
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// The seed is a write to the room's level, so it writes one line that
-// says why and where, and the pass that follows writes none.
-func TestTheSeedLogsWhatItPublished(t *testing.T) {
-	media, broker := caughtUpOperator(t, newFakeCluster())
-	var log logBuffer
-	media.log = &log
-	player := settledPlayer(housePlayer())
-
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-	mustPublishVolume(t, broker)
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-
-	mustMatchAll(t, linesAbout(&log, "player house/theater"), []string{
-		"player house/theater: no level on the broker after the catch-up, published level 100, not muted to " + theaterVolumeTopic(),
-	})
-}
-
-// A level that stands on the broker is never written over by the
-// seed, so a room keeps the level a person set across an operator restart.
-func TestThePassDoesNotSeedOverALevelThatStands(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		media, broker := caughtUpOperator(t, newFakeCluster())
-		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":30,"muted":true}`))
-
-		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
-
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// A Player with no sinks is not seeded, because a unit with nothing
-// to hear has no level to mean anything.
-func TestThePassDoesNotSeedASpeakerlessPlayer(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		media, broker := caughtUpOperator(t, newFakeCluster())
-		player := housePlayer()
-		player.Spec.Sinks = nil
-
-		media.reconcilePlayers([]Player{settledPlayer(player)}, nil, "", nil)
-
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// A fresh broker session delivers its retained levels on its own
-// goroutine moments after the subscribe, so the pass holds the seed back
-// for the grace. A seed inside that window would write unity over a level
-// a person had set.
-func TestTheSeedWaitsOutTheGraceAfterAConnect(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		media, broker := caughtUpOperator(t, newFakeCluster())
-
-		media.reestablishRetained()
-		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
-
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// A pass that runs before the first session's catch-up has started seeds
-// nothing. The session's queue opens a moment before the pass learns of the
-// connect, and a seed in that moment would put unity over the retained
-// level on its way to the desk.
-func TestTheSeedWaitsForTheFirstCatchUp(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		media, broker := caughtUpOperator(t, newFakeCluster())
-		media.catchUpEnds = time.Time{}
-
-		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
-
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// A unit with a standing Play is not seeded after a broker restart. Its
-// playback pod holds the level the room hears and publishes it again when
-// it reconnects, and that reconnect can come after the grace.
-func TestThePassDoesNotSeedAUnitWithAStandingPlay(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		media, broker := caughtUpOperator(t, newFakeCluster())
-
-		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, standingPlays(), "", nil)
-
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// A Play that declares a starting level has it written through to
-// the unit's topic before the pod exists, merged over what the unit already
-// holds, and mpv starts at the merged value.
-func TestAPlayWritesItsLevelThroughBeforeThePodExists(t *testing.T) {
-	cluster := newFakeCluster()
-	play := housePlay("https://nas/film.mkv")
-	play.Spec.Volume = &PlayVolume{Level: level(35)}
-	cluster.plays["movie"] = play
-	cluster.players["theater"] = housePlayer()
-	media, broker := caughtUpOperator(t, cluster)
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":true}`))
-
-	media.pass()
-
-	published := mustPublishVolume(t, broker)
-	mustMatch(t, published.retained, true)
-	mustMatch(t, string(published.payload), `{"level":35,"muted":true}`)
-	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
-		"--volume=35\n--mute=yes")
-}
-
-// The write-through runs on the creating pass alone. A republish on
-// a later pass of the same run would write the Play's level over every
-// press a person made during the film.
-func TestAPlayWritesItsLevelThroughOnlyOnce(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cluster := newFakeCluster()
-		play := housePlay("https://nas/film.mkv")
-		play.Spec.Volume = &PlayVolume{Level: level(35)}
-		cluster.plays["movie"] = play
-		cluster.players["theater"] = housePlayer()
-		media, broker := caughtUpOperator(t, cluster)
-
-		media.pass()
-		mustPublishVolume(t, broker)
-		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":60,"muted":false}`))
-
-		media.pass()
-
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// A Play may declare a level for a unit that has nothing to hear. The
-// write-through reads the same speaker gate the seed does, so the
-// declaration publishes nothing and the topic stays empty.
-func TestAPlayAgainstASpeakerlessPlayerWritesNoLevelThrough(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cluster := newFakeCluster()
-		play := housePlay("https://nas/film.mkv")
-		play.Spec.Volume = &PlayVolume{Level: level(35)}
-		cluster.plays["movie"] = play
-		player := housePlayer()
-		player.Spec.Sinks = nil
-		cluster.players["theater"] = player
-		media, broker := caughtUpOperator(t, cluster)
-
-		media.pass()
-
-		mustPublishNoVolume(t, broker)
-	})
-}
-
-// A Play that declares no level starts the run at whatever the unit
-// already holds, and the operator publishes nothing of its own.
-func TestAPlayWithNoLevelStartsAtTheUnitsOwn(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cluster := newFakeCluster()
-		cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-		cluster.players["theater"] = housePlayer()
-		media, broker := caughtUpOperator(t, cluster)
-		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":false}`))
-
-		media.pass()
-
-		mustPublishNoVolume(t, broker)
-		mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
-			"--volume=80\n--mute=no")
-	})
-}
-
-// While the owner mark stands the equipment applies the level, so the
-// pod carries no level at all and mpv starts at its own default.
-func TestAnOwnedLevelCarriesNoLevelOntoThePod(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayer()
-	media, _ := caughtUpOperator(t, cluster)
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":40,"muted":false}`))
-	media.handleBusMessage(theaterVolumeOwnerTopic(), []byte("house/theater"))
-
-	media.pass()
-
-	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable), "")
-}
-
-// An empty payload clears the mark, so the unit's level reaches mpv
-// on the command line again.
-func TestAClearedMarkCarriesTheLevelOntoThePod(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayer()
-	media, _ := caughtUpOperator(t, cluster)
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":40,"muted":false}`))
-	media.handleBusMessage(theaterVolumeOwnerTopic(), []byte("house/theater"))
-	media.handleBusMessage(theaterVolumeOwnerTopic(), nil)
-
-	media.pass()
-
-	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
-		"--volume=40\n--mute=no")
 }
 
 // settledPlayer is a Player already idle, so a pass over it crosses no

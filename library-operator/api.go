@@ -580,14 +580,6 @@ type PlayerIdleBus struct {
 	// with no sinks, which is the speaker gate: no level is drawn and
 	// no volume key publishes.
 	VolumeTopic string `json:"volumeTopic,omitempty"`
-	// VolumeOwnerTopic is VolumeTopic with "/owner" after it. A retained
-	// non-empty payload on it names equipment that owns the room's
-	// level, and while that mark stands the browser draws no level,
-	// because the equipment carries its own indicator. An empty payload
-	// clears the mark, and the row then shows what the last level said.
-	// An older media-operator publishes no such field, and the browser
-	// then draws the level with no gate over it.
-	VolumeOwnerTopic string `json:"volumeOwnerTopic,omitempty"`
 	// The Player's commands topic. One message on it reaches the
 	// browser: the play-next ask the playback pod publishes when a
 	// person takes the up-next offer on the scrubber, which carries

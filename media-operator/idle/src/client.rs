@@ -574,7 +574,7 @@ mod tests {
 
         client.key("9");
 
-        assert_eq!(client.unit().volume.level, 95);
+        assert_eq!(client.unit().volume.percent(), 95);
         assert_eq!(client.unit().pressed, Some(7.0));
 
         client.key("m");

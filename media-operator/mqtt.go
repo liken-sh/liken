@@ -31,6 +31,9 @@ const (
 	mqttPingresp  = 0xD0
 )
 
+// mqttRetainFlag is bit 0 of a PUBLISH's first byte.
+const mqttRetainFlag = 0x01
+
 // The MQTT 3.1.1 protocol name and level. The name is the literal
 // string "MQTT" and the level is 4, which together tell the broker
 // which version of the protocol this client speaks.
@@ -150,7 +153,7 @@ func encodeConnect(clientID string, keepalive uint16, will *busWill) []byte {
 func encodePublish(topic string, payload []byte, retained bool) []byte {
 	first := byte(mqttPublish)
 	if retained {
-		first |= 0x01
+		first |= mqttRetainFlag
 	}
 	body := appendString(nil, topic)
 	body = append(body, payload...)

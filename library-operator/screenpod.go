@@ -90,14 +90,11 @@ const (
 // unit with no sinks, and the power variable for a screen on the panel
 // directly.
 const (
-	mediaBusAddressVariable  = "MEDIA_BUS_ADDRESS"
-	mediaPlayerNameVariable  = "MEDIA_PLAYER_NAME"
-	mediaStatusTopicVariable = "MEDIA_PLAYER_STATUS_TOPIC"
-	mediaVolumeTopicVariable = "MEDIA_PLAYER_VOLUME_TOPIC"
-	// The owner topic. The playback pod's command sidecar reads it under
-	// the same name, so one variable serves both clients.
-	mediaVolumeOwnerTopicVariable = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC"
-	mediaCommandsTopicVariable    = "MEDIA_PLAYER_COMMANDS_TOPIC"
+	mediaBusAddressVariable    = "MEDIA_BUS_ADDRESS"
+	mediaPlayerNameVariable    = "MEDIA_PLAYER_NAME"
+	mediaStatusTopicVariable   = "MEDIA_PLAYER_STATUS_TOPIC"
+	mediaVolumeTopicVariable   = "MEDIA_PLAYER_VOLUME_TOPIC"
+	mediaCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
 	// The power topic. The browser forwards a remote power press to
 	// it when the unit's screen is wired through a receiver; a screen
 	// on the panel directly leaves the variable absent, so the press
@@ -367,12 +364,6 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 		if bus.VolumeTopic != "" {
 			environment = append(environment,
 				EnvVar{Name: mediaVolumeTopicVariable, Value: bus.VolumeTopic})
-		}
-		// An older media-operator states no owner topic, and the browser
-		// then draws the level with no gate over it.
-		if bus.VolumeOwnerTopic != "" {
-			environment = append(environment,
-				EnvVar{Name: mediaVolumeOwnerTopicVariable, Value: bus.VolumeOwnerTopic})
 		}
 		// A screen on the panel directly states no power topic, and the
 		// browser then keeps the power key as a shade.

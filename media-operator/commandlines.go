@@ -21,12 +21,6 @@ func describeCommand(command mediaCommand) string {
 		return "seek " + signed(command.Amount) + " s"
 	case actionChapter:
 		return "chapter " + signed(command.Amount)
-	case actionVolume:
-		return "volume " + signed(command.Amount)
-	case actionMute:
-		return "mute or unmute"
-	case actionUnmute:
-		return "unmute"
 	case actionSubtitles:
 		return "next subtitle track"
 	case actionAudio:

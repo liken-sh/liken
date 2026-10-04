@@ -586,9 +586,6 @@ impl<S: Source, A: Art> Browser<S, A> {
             // A level brings up the volume row, which draws over every
             // screen.
             Moment::Level { volume, pressed } => self.level.fold(volume, pressed, self.clock),
-            // The mark stands between the equipment that owns the room's
-            // level and this client's row.
-            Moment::Owner(mark) => self.level.own(&mark),
             // The picker's identity block reads focus from the status and
             // draws no beat when focus moves, so a focus moment changes
             // nothing here.

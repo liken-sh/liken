@@ -429,11 +429,11 @@ fn the_client_reads_the_bus_and_draws_what_it_says() {
             r#"{"displayName":"The Den","activity":"Idle"}"#,
         ),
         // The first level of a session is the broker's catch-up and shows no
-        // indicator. The second is a press, and it is what lifts the volume
+        // indicator. The second is a live change, and it lifts the volume
         // row: the row draws for four seconds, fades out over 600 ms, and is
         // gone well inside this run.
-        publish(VOLUME_TOPIC, r#"{"level":40,"muted":false}"#),
-        publish(VOLUME_TOPIC, r#"{"level":45,"muted":false}"#),
+        publish(VOLUME_TOPIC, r#"{"level":0.4,"muted":false}"#),
+        publish(VOLUME_TOPIC, r#"{"level":0.45,"muted":false}"#),
         // The ask a person makes on the up-next offer. The stock idle screen
         // writes no `Play`, so it acts on none, and the run draws on.
         publish(COMMANDS_TOPIC, r#"{"action":"play-next"}"#),

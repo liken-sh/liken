@@ -191,5 +191,11 @@ func (f *fakeCluster) view() *clusterView {
 			}
 			return valuesOf(f.receivers)()
 		}, receiversPath, clusterPath(receiversPath)},
+		sinks:       fakeSource[Sink]{f, valuesOf(f.sinks), sinksPath, clusterPath(sinksPath)},
+		televisions: fakeSource[Television]{f, valuesOf(f.televisions), televisionsPath, clusterPath(televisionsPath)},
 	}
 }
+
+// televisionsPath is the collection the fake cluster's Televisions are
+// named under.
+const televisionsPath = "/apis/equipment.liken.sh/v1alpha1/televisions"

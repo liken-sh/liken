@@ -172,6 +172,13 @@ func TestAReceiverWakesThePassWhenTheEquipmentOrItsWiringChanges(t *testing.T) {
 	rewired.Spec.Inputs = rewired.Spec.Inputs[:1]
 	unreachable := houseReceiver()
 	unreachable.Status.Conditions[0].Status = "False"
+	turned := houseReceiver()
+	turned.Status.Zones = map[string]ReceiverZone{mainZone: {Volume: "46.5"}}
+	rescaled := houseReceiver()
+	rescaled.Spec.Volume = &ReceiverVolume{Max: 60}
+	asked := houseReceiver()
+	asked.Status.Session = &ReceiverSession{Player: "house/theater", Input: "GAME",
+		VolumeAsk: &VolumeAsk{Level: 45, At: "2026-10-04T12:15:25.164Z"}}
 
 	cases := []struct {
 		name   string
@@ -184,12 +191,71 @@ func TestAReceiverWakesThePassWhenTheEquipmentOrItsWiringChanges(t *testing.T) {
 		{name: "the receiver changes input", before: held, after: switched, want: true},
 		{name: "a person rewires the inputs", before: held, after: rewired, want: true},
 		{name: "the receiver stops answering", before: held, after: unreachable, want: true},
+		{name: "the receiver reports a level", before: held, after: turned, want: true},
+		{name: "a person changes the volume scale", before: held, after: rescaled, want: true},
+		{name: "this operator writes a volume ask", before: held, after: asked, want: false},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			wake := make(chan struct{}, 1)
 
 			handChange(t, receiverRule.handler(wake), each.before, each.after)
+
+			mustMatch(t, len(wake) == 1, each.want)
+		})
+	}
+}
+
+func TestASinkWakesThePassWhenItsScaleOrItsReportChanges(t *testing.T) {
+	held := frontSink()
+	reported := frontSink()
+	level := 45
+	reported.Status.Observed.Volume = &level
+	rescaled := frontSink()
+	maxPercent := 80
+	rescaled.Spec.Volume = &SinkVolume{Max: &maxPercent}
+	asked := frontSink()
+	asked.Status.Session = &SinkSession{Player: "house/theater",
+		VolumeAsk: &SinkVolumeAsk{Level: 45, At: "2026-10-04T12:15:25.164Z"}}
+
+	cases := []struct {
+		name   string
+		before *Sink
+		after  *Sink
+		want   bool
+	}{
+		{name: "the sink reports a level", before: held, after: reported, want: true},
+		{name: "a person changes the volume scale", before: held, after: rescaled, want: true},
+		{name: "this operator writes a volume ask", before: held, after: asked, want: false},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			wake := make(chan struct{}, 1)
+
+			handChange(t, sinkRule.handler(wake), each.before, each.after)
+
+			mustMatch(t, len(wake) == 1, each.want)
+		})
+	}
+}
+
+func TestATelevisionWakesThePassForANewScreenAsk(t *testing.T) {
+	cases := []struct {
+		name   string
+		before *Television
+		after  *Television
+		want   bool
+	}{
+		{name: "a new ask", before: screenAskOn("2026-10-04T12:00:00.000Z", "Wake"),
+			after: screenAskOn("2026-10-04T12:05:00.000Z", "Wake"), want: true},
+		{name: "the same ask", before: screenAskOn("2026-10-04T12:00:00.000Z", "Wake"),
+			after: screenAskOn("2026-10-04T12:00:00.000Z", "Wake"), want: false},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			wake := make(chan struct{}, 1)
+
+			handChange(t, televisionRule.handler(wake), each.before, each.after)
 
 			mustMatch(t, len(wake) == 1, each.want)
 		})

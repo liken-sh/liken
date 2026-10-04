@@ -36,7 +36,7 @@ pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 /// The two delays are observed here. An IPC client reads a property over the
 /// same socket it draws from, so the display holds every value it draws and
 /// asks for nothing inside a frame.
-pub const OBSERVED: [&str; 16] = [
+pub const OBSERVED: [&str; 14] = [
     "duration",
     "time-pos",
     "chapter",
@@ -49,8 +49,6 @@ pub const OBSERVED: [&str; 16] = [
     "playlist-pos",
     "playlist-count",
     "pause",
-    "volume",
-    "mute",
     "audio-delay",
     "sub-delay",
 ];
@@ -74,10 +72,11 @@ pub const PRESENTATION: &str = "presentation";
 /// means the Play names no next work, and the display draws nothing for it.
 pub const NEXT: &str = "next";
 
-/// The message the sidecar sends after it applies a level from the bus, for
-/// every message except the first one it reads after it connects. That first
-/// one is the retained value, which a starting pod restores and a person did
-/// not press, so the indicator stays off screen for it.
+/// The message the sidecar sends for each live message on the `Player`'s
+/// volume topic, with the level from 0.0 to 1.0 and `yes` or `no` for the
+/// mute: `volume-changed 0.63 no`. The sidecar sends none for the retained
+/// value it reads when it connects, which a starting pod restores and no
+/// person changed, so the indicator stays off screen for it.
 pub const VOLUME_CHANGED: &str = "volume-changed";
 
 // The request id every command the display sends carries. No observe uses

@@ -61,7 +61,6 @@ operator resolves the two into one name.
           address: bus.liken-system.svc:1883
           statusTopic: liken/media/players/den/den/status
           volumeTopic: liken/media/players/den/den/volume
-          volumeOwnerTopic: liken/media/players/den/den/volume/owner
           commandsTopic: liken/media/players/den/den/commands
           panelTopic: liken/media/players/den/den/panel
           remotes:
@@ -120,9 +119,9 @@ finds the same code whichever client the image runs.
 ## Read the presses
 
 The client that draws a screen also answers its controllers. It holds
-the focus gate, the shade, the fade and off windows, the volume step,
-the cycle request, and the panel desire, in its own process. The
-operator runs no pod between the bus and the client.
+the focus gate, the shade, the fade and off windows, the volume
+indicator, the cycle request, and the panel desire, in its own
+process. The operator runs no pod between the bus and the client.
 
 There are two ways to hold that contract:
 
@@ -144,17 +143,21 @@ Set these variables on your container. Each value comes from
   friendly name. Every focus mark holds this value, so a client that
   sets it wrong answers no press.
 * `MEDIA_PLAYER_STATUS_TOPIC`, from `bus.statusTopic`.
-* `MEDIA_PLAYER_VOLUME_TOPIC`, from `bus.volumeTopic`. It is empty for
-  a unit with no sinks. Set nothing then, and the client draws no level
-  and steps none.
-* `MEDIA_PLAYER_VOLUME_OWNER_TOPIC`, from `bus.volumeOwnerTopic`. It
-  is present whenever `bus.volumeTopic` is. The topic holds the
-  retained [owner mark](https://liken.sh/media/docs/reference/players/#volumeowner): a
-  non-empty payload means equipment applies the unit's level, and an
-  empty payload means no owner holds it. While the mark is non-empty, draw
-  no level of your own and apply none to any audio the client plays.
-  A press still publishes the next state on the volume topic, and the
-  equipment moves one step in its direction.
+* `MEDIA_PLAYER_VOLUME_TOPIC`, from `bus.volumeTopic`. The media
+  operator relays the unit's level there, retained, as
+  `{"level": 0.63, "muted": false}`, where the level is the fraction
+  of the device's max. Draw the level and send none. The retained
+  message the broker delivers when the client subscribes sets the
+  level and draws nothing, and each live message draws the indicator.
+  The client handles no volume key: the operator reads
+  `KEY_VOLUMEUP`, `KEY_VOLUMEDOWN`, `KEY_MUTE`, and `KEY_UNMUTE` from
+  the controller's events topic and sets the room's level. A client
+  that offers a volume control of its own, such as an on-screen
+  slider, publishes `{"step": "up"}`, `{"step": "down"}`,
+  `{"mute": "toggle"}`, `{"mute": true}`, or `{"mute": false}`, not
+  retained, on this topic plus `/commands`, and the operator treats
+  each message the same as a press. The field is empty for a unit with
+  no sinks. Set nothing then, and the client draws no level.
 * `MEDIA_PLAYER_COMMANDS_TOPIC`, from `bus.commandsTopic`. The playback
   pod publishes `{"action": "play-next"}` there when a person takes the
   up-next offer on the scrubber, for a client that starts what follows.
@@ -176,12 +179,13 @@ Set these variables on your container. Each value comes from
 * `MEDIA_PLAYER_POWER_TOPIC`, from `bus.powerTopic`. It is present
   only when the unit's screen is wired through a `Receiver`. A power
   press between films publishes `{"action": "toggle"}` there, not
-  retained, and the equipment operator turns the room off or on.
+  retained. The media operator writes the ask into the `Receiver`, and
+  the equipment operator turns the room off or on.
   `KEY_SLEEP` and `KEY_WAKEUP`, the names the kernel gives a TV
   remote's Power Off Function and Power On Function, publish
   `{"action": "off"}` and `{"action": "on"}`, which leave a room
   already off or on as it is. The client also subscribes to the topic:
-  the equipment operator publishes `{"action": "wake"}` there when a
+  the media operator publishes `{"action": "wake"}` there when a
   person picks the unit's input in the TV's source menu while the
   screen sleeps, and `{"action": "sleep"}` when the TV goes to standby.
   The client wakes the screen and states the `on` desire for the first,
@@ -245,4 +249,6 @@ client that publishes no panel desire leaves the panel lit, because
 the operator writes no override without one.
 
 The fade window, the off window, the press gate, the shade, the volume
-step, and the panel desire are the client's.
+indicator, and the panel desire are the client's. The room's level is
+the operator's: it sets the level from the volume keys and the
+`volume/commands` asks, and relays it on the volume topic.

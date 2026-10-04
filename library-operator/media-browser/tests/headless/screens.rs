@@ -500,13 +500,13 @@ fn page_brightness(name: &str, status: Option<&str>) -> u8 {
         .expect("the band holds pixels")
 }
 
-// A level a remote pressed on the bus brings up the volume row, which draws
+// A live level on the bus brings up the volume row, which draws
 // over whatever screen the browser holds. The broker states the level again
 // every quarter second, so the row is up for the whole run and the captured
 // frame carries it.
 #[test]
 fn a_level_on_the_bus_draws_the_volume_row() {
-    let frame = a_level_of("volume", "{\"level\":40,\"muted\":false}");
+    let frame = a_level_of("volume", "{\"level\":0.4,\"muted\":false}");
 
     paints(&frame, BAR, media_browser::look::accent());
 }
@@ -515,19 +515,19 @@ fn a_level_on_the_bus_draws_the_volume_row() {
 // level and the speaker draws in the muted ink.
 #[test]
 fn a_muted_level_draws_the_slash_on_the_glyph() {
-    let frame = a_level_of("muted", "{\"level\":40,\"muted\":true}");
+    let frame = a_level_of("muted", "{\"level\":0.4,\"muted\":true}");
 
     paints(&frame, BAR, media_browser::look::accent());
     paints(&frame, GLYPH, media_browser::look::muted());
 }
 
-// The topic the operator names for a unit with sinks.
+// The topic the operator names for a unit whose level it relays.
 const VOLUME_TOPIC: &str = "liken/media/players/house/den/volume";
 
 // Two points of the row in a 1920 by 1080 frame, which the frames below
 // are read at. The row is in the top right corner: the number's box ends
 // on the screen's side margin, the bar is the 220 before the 84 the
-// number reserves, and a level of 40 of 100 fills the first 88 of it.
+// number reserves, and a level of 0.4 fills the first 88 of it.
 // The glyph is 26 wide and 16 to the left of the bar, and the point
 // below is inside the speaker's driver box.
 const BAR: (u32, u32) = (1564, 74);

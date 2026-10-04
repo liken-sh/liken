@@ -117,10 +117,11 @@ pub struct Unit {
     /// than vanishing on the frame the activity changes.
     pub title: Option<String>,
     pub volume: Volume,
-    /// The second of the last volume press. The volume row draws from here, and
-    /// the broker's catch-up sets no second, so a pod that starts draws no row.
+    /// The second of the last live volume message, which is a change a person
+    /// made. The volume row draws from here, and the broker's catch-up sets no
+    /// second, so a pod that starts draws no row.
     pub pressed: Option<f64>,
-    /// The row's own fade at that second, from 0 off screen to 1 full. A press
+    /// The row's own fade at that second, from 0 off screen to 1 full. A change
     /// that lands while the row fades out lifts it from where it stands, so a
     /// run of presses holds one row on screen instead of blinking it.
     pub pressed_from: f64,
@@ -170,9 +171,6 @@ impl Unit {
             // idle screen draws no list, so the unit changes for none
             // of them.
             Moment::Press(_) => {}
-            // The stock idle screen draws the level it holds and nothing
-            // about who owns it.
-            Moment::Owner(_) => {}
             // The up-next offer is for the client that wrote the `Play`. The
             // stock idle screen writes none, so it acts on none.
             Moment::PlayNext(_) => {}
@@ -584,7 +582,7 @@ mod tests {
     fn the_catch_up_sets_the_level_and_a_press_sets_the_second() {
         let mut unit = seeded();
         let volume = Volume {
-            level: 40,
+            level: 0.4,
             muted: false,
         };
 
@@ -601,36 +599,15 @@ mod tests {
         unit.fold(
             Moment::Level {
                 volume: Volume {
-                    level: 45,
+                    level: 0.45,
                     muted: false,
                 },
                 pressed: true,
             },
             2.5,
         );
-        assert_eq!(unit.volume.level, 45);
+        assert_eq!(unit.volume.level, 0.45);
         assert_eq!(unit.pressed, Some(2.5));
-    }
-
-    #[test]
-    fn an_owner_mark_changes_no_level_this_screen_draws() {
-        let mut unit = seeded();
-        let volume = Volume {
-            level: 40,
-            muted: false,
-        };
-        unit.fold(
-            Moment::Level {
-                volume,
-                pressed: false,
-            },
-            1.0,
-        );
-
-        unit.fold(Moment::Owner(b"receiver".to_vec()), 2.0);
-
-        assert_eq!(unit.volume, volume);
-        assert_eq!(unit.pressed, None);
     }
 
     #[test]
@@ -753,7 +730,7 @@ mod tests {
     fn a_press_during_the_fade_out_lifts_the_row_from_where_it_stands() {
         let mut unit = seeded();
         let volume = Volume {
-            level: 40,
+            level: 0.4,
             muted: false,
         };
 

@@ -226,24 +226,20 @@ type PlayerIdleStatus struct {
 // reads or writes. The broker and the topic base are this operator's
 // configuration, so the status carries the built topics and a client
 // derives none. VolumeTopic is empty for a unit with no sinks, which is
-// the speaker gate: the client subscribes to no level, draws none, and
-// publishes none. Remotes has one entry per spec.remotes entry, in spec
-// order, because that position is the index a focus moment carries.
+// the speaker gate: the client subscribes to no level and draws none.
+// The client draws the level this operator relays there and publishes
+// no level of its own. Remotes has one entry per spec.remotes entry, in
+// spec order, because that position is the index a focus moment
+// carries.
 type PlayerIdleBus struct {
 	Address     string `json:"address"`
 	StatusTopic string `json:"statusTopic"`
 	VolumeTopic string `json:"volumeTopic,omitempty"`
 
-	// VolumeOwnerTopic carries the owner mark for the level, and it is
-	// present whenever VolumeTopic is. A non-empty payload means equipment
-	// owns the level. The client then draws no level of its own and
-	// applies none.
-	VolumeOwnerTopic string `json:"volumeOwnerTopic,omitempty"`
-
 	// PowerTopic is the topic a power press on this unit publishes an ask
 	// on, toggle, on, or off, present only when the unit's screen is
-	// wired through a Receiver. The equipment operator publishes wake and
-	// sleep there for the screen. A unit with none carries no topic, and
+	// wired through a Receiver. This operator publishes wake and sleep
+	// there for the screen. A unit with none carries no topic, and
 	// a power press reaches its client, which lowers the shade.
 	PowerTopic string `json:"powerTopic,omitempty"`
 
@@ -442,13 +438,6 @@ type PlaySpec struct {
 	// scrubber, and the program that wrote the Play starts it when a person
 	// takes the offer.
 	Next *PlayNext `json:"next,omitempty"`
-
-	// The level this run starts at. The operator writes it through to
-	// the unit's volume topic before it creates the pod, so the
-	// override becomes the Player's state and everything after it is
-	// the ordinary path. Absent, the run starts at whatever the topic
-	// already holds.
-	Volume *PlayVolume `json:"volume,omitempty"`
 }
 
 // PlayNext is the offer: three lines of text the display draws as given,
@@ -464,15 +453,6 @@ type PlayNext struct {
 	// Request is raw JSON because the writer of the Play defines its shape,
 	// and this operator carries it back unread.
 	Request json.RawMessage `json:"request,omitempty"`
-}
-
-// PlayVolume contains a Play's starting level, its muted flag, or both.
-// Each field is a pointer because absent and zero differ: an absent
-// level contains no request and leaves the unit unchanged, and a
-// level of zero is silence the Play asked for.
-type PlayVolume struct {
-	Level *int  `json:"level,omitempty"`
-	Muted *bool `json:"muted,omitempty"`
 }
 
 // A PlayItem is one entry in the list: the media URI and an optional

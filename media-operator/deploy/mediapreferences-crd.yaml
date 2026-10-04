@@ -123,7 +123,7 @@ spec:
                         screen. The image starts with its own entrypoint
                         and reads each unit's state from the bus. It
                         implements the fade and off windows, the focus
-                        gate, the shade, the volume step, and the panel
+                        gate, the shade, the volume indicator, and the panel
                         desire in its own process. Unset, every screen the
                         household does not override runs the idle client
                         the media operator ships.

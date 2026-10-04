@@ -236,7 +236,7 @@ mod tests {
         unit.fold(
             Moment::Level {
                 volume: Volume {
-                    level: 40,
+                    level: 0.4,
                     muted: false,
                 },
                 pressed: true,

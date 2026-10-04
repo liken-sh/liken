@@ -19,19 +19,20 @@ import (
 // internal step between a key name and mpv's own words. cycle-focus
 // never reaches a player program.
 //
-// pause and mute toggle. play, hold, and unmute set the state they name,
-// so a second press leaves the film or the level where the first put
-// it: a TV remote's Play Function, Pause, and Restore Volume Function
-// are deterministic (HDMI-CEC 1.3a, CEC 13.13.3), and the kernel's
-// rc-cec keymap names them KEY_PLAYCD, KEY_PAUSECD, and KEY_UNMUTE.
+// pause toggles. play and hold set the state they name, so a second
+// press leaves the film where the first put it: a TV remote's Play
+// Function and Pause are deterministic (HDMI-CEC 1.3a, CEC 13.13.3), and
+// the kernel's rc-cec keymap names them KEY_PLAYCD and KEY_PAUSECD.
+//
+// The level has no action word. The operator reads the volume keys off
+// the controllers' events topics and sets the level of the room
+// (volumeengine.go), and a program that is not a remote asks on the
+// Player's volume/commands topic.
 const (
 	actionPause      = "pause"
 	actionPlay       = "play"
 	actionHold       = "hold"
-	actionMute       = "mute"
-	actionUnmute     = "unmute"
 	actionSeek       = "seek"
-	actionVolume     = "volume"
 	actionChapter    = "chapter"
 	actionSubtitles  = "subtitles"
 	actionAudio      = "audio"
@@ -272,12 +273,8 @@ func nextCommand(block json.RawMessage) []any {
 // the liken display draws their feedback and mpv's own overlay would
 // draw a second time over it. The rest carry osd-auto, so mpv shows
 // a short line, such as the track name, that the display does not
-// yet draw. Volume and mute are absent on purpose: a press of either
-// publishes the unit's next state on the volume topic, and the
-// subscription applies it, so neither action becomes a command a
-// sidecar sends on the press. An action this build has no case for
-// sends nothing, so a command from a newer program has no effect
-// rather than a crash.
+// yet draw. An action this build has no case for sends nothing, so a
+// command from a newer program has no effect rather than a crash.
 func commandFor(command mediaCommand) []any {
 	switch command.Action {
 	case actionPause:

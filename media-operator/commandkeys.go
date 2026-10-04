@@ -78,6 +78,12 @@ func (c *commander) key(topic string, remote playRemote, payload []byte) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return
 	}
+	// The operator reads the volume keys off the same events topic, sets
+	// the room's level, and writes the press's line, so the sidecar
+	// does nothing with them and writes no line of its own.
+	if _, theOperators := volumeKeys[event.Key]; theOperators {
+		return
+	}
 	trigger := event.Key + " from remote " + remoteOfTopic(topic)
 	if event.Value == 0 {
 		c.release(topic, trigger, event.Key)

@@ -24,31 +24,7 @@ fn a_press_writes_one_line_that_says_what_it_did() {
         (
             wiring(),
             "KEY_VOLUMEUP",
-            format!(
-                "KEY_VOLUMEUP from remote house/sofa: volume +5, published level 100, not muted to {VOLUME}"
-            ),
-        ),
-        (
-            wiring(),
-            "KEY_VOLUMEDOWN",
-            format!(
-                "KEY_VOLUMEDOWN from remote house/sofa: volume -5, published level 95, not muted to {VOLUME}"
-            ),
-        ),
-        (
-            wiring(),
-            "KEY_MUTE",
-            format!(
-                "KEY_MUTE from remote house/sofa: mute or unmute, published level 100, muted to {VOLUME}"
-            ),
-        ),
-        (
-            Wiring {
-                volume_topic: String::new(),
-                ..wiring()
-            },
-            "KEY_MUTE",
-            "KEY_MUTE from remote house/sofa ignored, because the player has no sinks".to_string(),
+            "KEY_VOLUMEUP from remote house/sofa passed to the client".to_string(),
         ),
         (
             wiring(),
@@ -237,7 +213,7 @@ fn a_status_that_moves_nothing_writes_no_line() {
     let mut screen = idling(&wiring(), now);
 
     screen.deliver(STATUS, &status("Idle"), true, now);
-    screen.deliver(VOLUME, br#"{"level":40,"muted":false}"#, true, now);
+    screen.deliver(VOLUME, br#"{"level":0.4,"muted":false}"#, true, now);
 
     assert!(screen.take_lines().is_empty());
 }

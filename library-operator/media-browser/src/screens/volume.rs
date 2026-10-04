@@ -1,9 +1,9 @@
 // The state the volume row is in, as a pure function of the clock: the
-// level the bus last delivered, the second of the last press, and how far
-// up the row stood when that press landed.
-//
-// The state also holds the owner mark, which takes the row off the
-// screen while equipment owns the room's level.
+// level the bus last delivered, the second of the last change, and how far
+// up the row stood when that change landed. `media-operator` is the only
+// writer of the level: it relays what the unit's `Receiver` or `Sink`
+// reports, so a press on a remote and a turn of a receiver's knob both
+// arrive here as a live change.
 
 use media_screen::volume::Volume;
 
@@ -28,29 +28,18 @@ pub struct Level {
     // How far up the row stood when that press landed, so a press on a
     // leaving row lifts it from where it stands.
     from: f32,
-    // Whether equipment owns the room's level, which is the mark the
-    // owner topic carries.
-    owned: bool,
 }
 
 impl Level {
-    /// Fold one level in at this second. The operator marks a press, and
-    /// the broker's retained catch-up carries none, so a browser that
-    /// connects to a running unit draws no row.
+    /// Fold one level in at this second. A live message is a change, and
+    /// the broker's retained catch-up is none, so a browser that connects
+    /// to a running unit draws no row.
     pub fn fold(&mut self, volume: Volume, pressed: bool, at: f64) {
         if pressed {
             self.from = self.fade(at);
             self.pressed = Some(at);
         }
         self.volume = volume;
-    }
-
-    /// Fold one message off the owner topic. A non-empty payload hands
-    /// the room's level to equipment, and an empty payload clears the
-    /// mark. The level fold runs either way, so the row shows what the
-    /// last level said the moment the mark clears.
-    pub fn own(&mut self, mark: &[u8]) {
-        self.owned = !mark.is_empty();
     }
 
     /// The row's own fade, from 0 off screen to 1 full.
@@ -78,8 +67,7 @@ impl Level {
     /// second it starts to leave, and the loop sleeps through the hold. A
     /// row that has left states nothing.
     pub fn next_frame(&self, at: f64) -> Option<f64> {
-        // An owned level draws no row, so it asks for no frame either.
-        if self.owned || self.gone(at) {
+        if self.gone(at) {
             return None;
         }
         let pressed = self.pressed?;
@@ -100,9 +88,7 @@ impl Level {
     /// What one frame draws at this second, and nothing while the row is
     /// off screen.
     pub fn row(&self, at: f64) -> Option<Row> {
-        // The equipment that owns the level carries its own indicator,
-        // so this client draws none over it.
-        if self.owned || self.gone(at) {
+        if self.gone(at) {
             return None;
         }
         let fade = self.fade(at);
@@ -125,7 +111,7 @@ mod tests {
     // then a press of it.
     fn level() -> Volume {
         Volume {
-            level: 40,
+            level: 0.4,
             muted: false,
         }
     }
@@ -198,7 +184,7 @@ mod tests {
 
         state.fold(
             Volume {
-                level: 40,
+                level: 0.4,
                 muted: true,
             },
             true,
@@ -206,48 +192,6 @@ mod tests {
         );
         let row = state.row(PRESS + 2.0).expect("the row is up");
         assert!(row.volume.muted);
-    }
-
-    // The mark the owner topic carries, which names the equipment that
-    // holds the room's level.
-    const OWNER: &[u8] = b"house/theater";
-
-    #[test]
-    fn a_mark_takes_off_the_row_a_press_brought_up() {
-        let mut state = pressed(PRESS);
-        state.own(OWNER);
-
-        assert_eq!(state.row(PRESS + 1.0), None);
-        assert_eq!(state.next_frame(PRESS + 1.0), None);
-    }
-
-    #[test]
-    fn a_mark_that_stood_first_lets_no_press_bring_the_row_up() {
-        let mut state = Level::default();
-        state.own(OWNER);
-        state.fold(level(), true, PRESS);
-
-        assert_eq!(state.row(PRESS + 1.0), None);
-        assert_eq!(state.next_frame(PRESS + 1.0), None);
-    }
-
-    #[test]
-    fn an_empty_payload_is_no_owner() {
-        let mut state = pressed(PRESS);
-        state.own(b"");
-
-        assert!(state.row(PRESS + 1.0).is_some());
-    }
-
-    #[test]
-    fn a_cleared_mark_brings_the_row_back_at_the_last_level() {
-        let mut state = pressed(PRESS);
-        state.own(OWNER);
-        state.own(b"");
-
-        let row = state.row(PRESS + 1.0).expect("the row is up");
-        assert_eq!(row.volume, level());
-        assert_eq!(state.next_frame(PRESS + 1.0), Some(PRESS + 4.0));
     }
 
     #[test]

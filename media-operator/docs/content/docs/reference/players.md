@@ -129,7 +129,7 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specidle--controller"></span>`controller` | string | no | The operator that draws this unit's idle screen, as a domain-qualified name. Two names belong to the media operator: media.liken.sh/idle-screen, which is the default and draws the idle screen this operator ships, and media.liken.sh/none, under which nothing draws an idle screen on this unit and no claim exists. Any other name hands the screen to the operator that handles it, which reads status.idle for the claim to reference, the requests it carries, the two windows, and the bus it joins; image has no effect under such a name, because that operator brings its own pod. Omit it to inherit the default MediaPreferences. Pattern: `^[a-z0-9.-]+/[a-z0-9-]+$`. |
-| <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus. It implements the fade and off windows, the focus gate, the shade, the volume step, and the panel desire in its own process. Omit it to inherit the default from MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
+| <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus. It implements the fade and off windows, the focus gate, the shade, the volume indicator, and the panel desire in its own process. Omit it to inherit the default from MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
 | <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
 | <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; state it only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
@@ -210,11 +210,10 @@ The bus facts a delegate's client reads. With the two windows above, this block 
 | --- | --- | --- | --- |
 | <span id="statusidlebus--address"></span>`address` | string | no | The broker, as host:port. It is the address the operator itself connects to. |
 | <span id="statusidlebus--statustopic"></span>`statusTopic` | string | no | The retained topic that carries the unit's presentable state: its name, its activity, the Play it runs, and its parts. A client reads it on subscribe and asks for nothing. |
-| <span id="statusidlebus--volumetopic"></span>`volumeTopic` | string | no | The retained topic that carries the unit's level and its muted flag. Empty means the unit has no sinks: the client subscribes to no level, draws none, and publishes none. |
-| <span id="statusidlebus--volumeownertopic"></span>`volumeOwnerTopic` | string | no | The retained topic that carries the owner mark for the unit's level, present whenever volumeTopic is. A non-empty payload means equipment owns the level, and the client then draws no level of its own and applies none. An empty payload means no owner holds it. |
+| <span id="statusidlebus--volumetopic"></span>`volumeTopic` | string | no | The retained topic that carries the unit's level, as {"level": 0.63, "muted": false}, where the level is the fraction of the device's max. The media operator is its only writer. The client draws the indicator for each live message and publishes no level. A volume key reaches the media operator from the controller's events topic, and a client that asks for a step publishes on this topic plus /commands. Empty means the unit has no sinks: the client subscribes to no level and draws none. |
 | <span id="statusidlebus--commandstopic"></span>`commandsTopic` | string | no | The topic the playback pod publishes play-next on when a person takes the up-next offer on the scrubber. The client that wrote the Play reads that ask and starts the next work. When a Play ends, the client's own surface is on the screen again and the retained status is the cue, so nothing is published here for it. The pod also publishes home when a person presses home during a film, just before the Play ends, and the client reads that ask as a press of the home key. |
 | <span id="statusidlebus--paneltopic"></span>`panelTopic` | string | no | The retained topic a client states its panel desire on, as on or off. The client holds no API credentials, so the operator reads the desire here and overrides the screen's Display. |
-| <span id="statusidlebus--powertopic"></span>`powerTopic` | string | no | The topic a power press on this unit publishes an ask on, present only when the unit's screen is wired through a Receiver: toggle for KEY_POWER and KEY_POWER2, off for KEY_SLEEP, and on for KEY_WAKEUP, the names the kernel gives a TV remote's Power Off Function and Power On Function. The equipment operator answers each ask by turning the room off or on. It also publishes wake here when a person picks the unit's input in the TV's source menu while the screen sleeps, and sleep when the TV goes to standby, and the client wakes or sleeps the screen. A unit with none carries no topic, and a power press reaches its client, which lowers the shade. |
+| <span id="statusidlebus--powertopic"></span>`powerTopic` | string | no | The topic a power press on this unit publishes an ask on, present only when the unit's screen is wired through a Receiver: toggle for KEY_POWER and KEY_POWER2, off for KEY_SLEEP, and on for KEY_WAKEUP, the names the kernel gives a TV remote's Power Off Function and Power On Function. The media operator writes each ask into the Receiver's session, and the equipment operator turns the room off or on. The media operator also publishes wake here when a person picks the unit's input in the TV's source menu while the screen sleeps, and sleep when the TV goes to standby, and the client wakes or sleeps the screen. A unit with none carries no topic, and a power press reaches its client, which lowers the shade. |
 | <span id="statusidlebus--remotes"></span>`remotes` | [\[\]object](#statusidlebusremotes) | no | The unit's controllers, one entry each, in spec.remotes order. That position is the index a focus moment carries, and it is the order the status topic lists the parts in. A unit with no controllers lists none. |
 
 #### status.idle.bus.remotes[]
@@ -235,11 +234,11 @@ every topic follows and lists every writer and reader of each.
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
 | `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
-| `players/{namespace}/{name}/volume` | the operator, the pod that handles a press, and the equipment operator | yes | the listening level |
-| `players/{namespace}/{name}/volume/owner` | the equipment operator | yes | who applies the level |
+| `players/{namespace}/{name}/volume` | the operator | yes | the listening level |
+| `players/{namespace}/{name}/volume/commands` | any program that is not a remote | no | an ask for a step or a mute |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
 | `players/{namespace}/{name}/commands` | the playback pod | no | a command for the idle pod |
-| `players/{namespace}/{name}/power` | the idle pod and the equipment operator | no | an ask for the room's power, or for the screen |
+| `players/{namespace}/{name}/power` | the idle pod and the operator | no | an ask for the room's power, or for the screen |
 
 ### `status`
 
@@ -293,78 +292,67 @@ this topic reads `Idle` as it does after any film.
 
 The unit's listening level and its muted flag:
 
-    {"level": 40, "muted": false}
+    {"level": 0.63, "muted": false}
 
-Both fields are always written, so a reader never needs a default
-for a missing key. The level runs 0 to 100, and 100 is unity, the
-player's own default and the cap. A published level outside 0 to 100
-is clamped to the range.
+The level is a fraction of the device's `max`, from 0.0 to 1.0, so a
+screen draws one scale for every unit. Both fields are always
+written, so a reader never needs a default for a missing key.
 
-Three writers publish here. The operator writes unity when it seeds
-a unit the broker holds no level for, it writes the level it holds
-again after a broker restart, and it writes a `Play`'s
-`spec.volume` over the unit's current state before it creates the
-pod. The pod that handles a `volume` or `mute` press writes the next
-state back. That pod is the playback pod's command sidecar during a
-film and the idle screen client between films, and each computes the
-next state from the last message the topic delivered. The
-[equipment operator](https://liken.sh/equipment/docs/reference/receivers/)'s
-receiver session writes the receiver's true level here whenever its
-mark on `volume/owner` is non-empty: the position it adopts when the
-session starts, and the position the receiver reports after a press
-or a turn of its own knob.
+The operator is the only writer. It sets the room's level through the
+device that sets it: the
+[`Receiver`](https://liken.sh/equipment/docs/reference/receivers/) the
+unit's screen is wired into, while its `Reachable` condition is
+`True`, and otherwise every
+[`Sink`](https://liken.sh/audio/docs/reference/sinks/) in the
+`Player`'s `status.sinks`. A press of `KEY_VOLUMEUP` or
+`KEY_VOLUMEDOWN`, from a remote whose focus mark names this `Player`,
+moves a target one step of the device's `spec.volume.step`. A held
+key moves it once for each repeat. `KEY_MUTE` toggles the mute, and
+`KEY_UNMUTE` clears it. The target never goes past the device's
+`spec.volume.max`. The operator writes the target into the device's
+`status.session.volumeAsk`, at most once every 100 ms, and the
+device's operator applies it.
 
-The seed waits out the broker's retained catch-up after each connect,
-and it skips a unit while a `Play` stands on it. The playback pod's
-command sidecar holds the level the room hears, and it publishes that
-level again on each reconnect, so a broker restart does not move a
-playing film to unity. Between films the operator holds the level:
-after a broker restart, it publishes the level it last read for each
-unit the new session delivers none for, unless equipment owns that
-level. An operator and a broker that restart together hold no level,
-so the seed writes unity, and the next `Play` starts there.
+The operator publishes here:
 
-Every pod for the unit subscribes and applies what it reads, so the
-unit plays at the one level the topic holds. While the owner mark is
-non-empty, no pod applies the level: each holds `mpv` at unity, volume
-100 and unmuted, and the equipment applies the level instead. A
-press still publishes the next state here, and the equipment reads
-it as a press and moves one step in its direction.
+* the target, as soon as a press moves it, so the indicator moves at
+  bus speed;
+* the level the device reports while no target is pending, such as a
+  turn of a receiver's own knob;
+* the level the device reports when it did not report the target
+  within one second, as when a receiver's own limit is below the
+  target;
+* each unit's level once a broker session's retained values have had
+  time to arrive, after the operator starts and after the broker
+  restarts, unless the broker already holds that level.
+
+When a unit has several sinks, each one steps in its own units, and
+the topic carries the first one in `spec.sinks` order. `mpv` plays at
+unity and sets no level of its own.
 
 A client reads `status` for the name, the activity, and the parts,
-and `volume` for the level. The first `volume` message of a session
-is the broker's retained catch-up, which sets the level and shows no
-indicator, and every message after it is a press.
+and `volume` for the level. A retained message that the broker
+delivers when the client subscribes sets the level and draws nothing.
+Each live message draws the indicator. A client publishes no level
+here, and it handles no volume key: the operator reads the keys from
+the remote's own `events` topic.
 
-### `volume/owner`
+### `volume/commands`
 
-The mark that says equipment applies the unit's level, one segment
-below `volume`:
+The asks for the unit's level from a program that is not a remote,
+one segment below `volume`. They are not retained, because an ask is
+an event. The operator treats each message the same as a press:
 
-    {"owner": "receiver/den-receiver"}
+| Message | What the operator does |
+|---|---|
+| `{"step": "up"}` | Moves the level one step up, as `KEY_VOLUMEUP` does. |
+| `{"step": "down"}` | Moves the level one step down, as `KEY_VOLUMEDOWN` does. |
+| `{"mute": "toggle"}` | Toggles the mute, as `KEY_MUTE` does. |
+| `{"mute": true}` | Mutes the unit. |
+| `{"mute": false}` | Clears the mute, as `KEY_UNMUTE` does. |
 
-The equipment operator's receiver session is the only writer. It
-publishes the mark, retained, on every fresh broker session while it
-holds a receiver for the unit, and it clears the mark with an empty
-retained payload when the session stops. The topic is the session's
-MQTT Last Will, with an empty retained payload, so a session that
-dies without a clean disconnect clears its own mark.
-
-A non-empty payload means equipment owns the level. An empty payload,
-or no message at all, means no owner holds it and the pods apply the
-level themselves. The value inside names the owner and nothing reads
-it: every reader tests only whether the payload is empty.
-
-Three readers subscribe. The playback pod's command sidecar holds
-`mpv` at unity while the mark is non-empty and applies the level the topic
-last delivered when the mark clears. It re-applies the held state
-once `mpv`'s socket opens, because the broker delivers the retained
-mark and level within milliseconds of the subscribe and `mpv` opens
-its socket seconds later. The operator builds a playback pod with no
-`--volume` flag while the mark is non-empty, so `mpv` starts at its own
-default, unity. A delegate's idle screen client reads the topic from
-`status.idle.bus.volumeOwnerTopic` and draws no level of its own
-while the mark is non-empty.
+A message with no step and no mute does nothing, and the operator's
+log says so.
 
 ### `panel`
 
@@ -425,12 +413,13 @@ power topic, or the shade on a unit with no `Receiver`.
 ### `power`
 
 The room's power, for a unit whose screen is wired through a
-`Receiver`. The operator names the topic in the session it applies on
-the `Receiver`, and in `status.idle.bus.powerTopic`, only for such a
-unit. Each message is an ask, so none is retained.
+`Receiver`. The operator names the topic in
+`status.idle.bus.powerTopic` only for such a unit. Each message is an
+ask, so none is retained.
 
-The idle screen client publishes a power press between films here,
-and the equipment operator answers it:
+The idle screen client publishes a power press between films here.
+The operator writes each ask into the `Receiver`'s
+`status.session.powerAsk`, and the equipment operator answers it:
 
 | Message | Key | What the equipment operator does |
 |---|---|---|
@@ -444,8 +433,11 @@ HDMI-CEC 1.3a, CEC 13.13.3, says each one puts the device in the
 state it names and keeps it there when a person presses it again, so
 neither is a toggle.
 
-The equipment operator publishes two asks for the screen here, when
-the room's TV speaks over HDMI-CEC:
+The operator publishes two asks for the screen here, when the room's
+TV speaks over HDMI-CEC. The equipment operator's CEC node workload
+writes each ask into the `Television`'s `status.screenAsk`, and the
+operator relays each new one once. It relays nothing for an ask that
+the `Television` already held when the operator started.
 
 | Message | When | What the client does |
 |---|---|---|

@@ -17,8 +17,9 @@ comments included.
 ## What belongs here
 
 A rule belongs here when both clients hold it: the timers, the focus
-gate, the shade, the volume step and the owner mark, the cycle request,
-and the panel desire. A rule that only one client holds stays in that
+gate, the shade, the volume level that `media-operator` relays, the
+cycle request, and the panel desire. No volume key and no volume
+publish belong here: `media-operator` alone turns a press into a level. A rule that only one client holds stays in that
 client. The crate names no window library, because each client draws
 with a toolkit of its own.
 

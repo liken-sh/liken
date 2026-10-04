@@ -17,9 +17,7 @@ gives the payload shapes for its own topics.
 Three operators meet on the broker. The media operator, its playback
 pods, each `Remote`'s pod, and each idle pod connect to it. The
 [library operator](https://liken.sh/library/) runs its own tree on
-the same broker. The
-[equipment operator](https://liken.sh/equipment/) writes into the
-media operator's `players` tree. Your program can connect too. A
+the same broker. Your program can connect too. A
 phone app, a Home Assistant instance, and a library application all
 join the same way, with a plain MQTT client and no Kubernetes
 credentials.
@@ -28,7 +26,7 @@ The broker is `deploy/bus.yaml`: one Mosquitto `Deployment` with its
 `Service` and `ConfigMap`, all named `bus`, beside the operator's
 `Deployment` and never inside it. The two are separate so the
 operator restarts without dropping a message: a button press reaches
-`mpv` while the operator is down. The broker holds no volume, so a
+`mpv` while the operator is down. The broker holds no storage volume, so a
 broker restart loses only the retained set. Each connected program
 republishes the retained state it owns when its session reconnects,
 and the next report from each running `Play` refills the rest within
@@ -89,10 +87,6 @@ it puts the same UID on each report. A run's new pod has the old pod's
 name, and the broker can publish the old pod's Last Will after the new
 pod is online, so the UID is how a reader tells the two pods apart.
 
-The same pattern carries the owner mark on a unit's level. The
-equipment operator names the mark's topic as its Last Will with an
-empty retained payload, so a dead session clears its own mark.
-
 ## The trees
 
 Two operators publish trees on the broker. Each tree's page lists its
@@ -103,11 +97,11 @@ topics, and the resource pages give the payloads.
 | `liken/media` | the media operator | runs, units, and controllers: the table below | this page |
 | `liken/library` | the library operator | library reports, catalog availability, and play requests | [The library bus](https://liken.sh/library/docs/reference/bus/) |
 
-The equipment operator publishes no tree of its own. Its receiver
-session writes into the media tree's `players` branch, on the volume
-topic, the owner mark beside it, and the power topic, and
-[its reference](https://liken.sh/equipment/docs/reference/receivers/)
-describes that session.
+No device operator connects to the bus. The media operator writes a
+unit's asks for its level, its power, and its input into the
+[`Receiver`](https://liken.sh/equipment/docs/reference/receivers/) or
+the [`Sink`](https://liken.sh/audio/docs/reference/sinks/) that serves
+the unit, and reads back what the device reports there.
 
 ## The media tree
 
@@ -123,12 +117,12 @@ shape.
 | `plays/{namespace}/{name}/status` | the playback pod; the operator clears it | the operator | yes | [the run's report](/docs/reference/plays/#status-1) |
 | `plays/{namespace}/{name}/availability` | the playback pod and its Last Will; the operator clears it | the operator | yes | [`online` or `offline`, and the pod's UID](/docs/reference/plays/#availability) |
 | `players/{namespace}/{name}/status` | the operator | the idle pod, or a delegate's client | yes | [the unit's name, activity, `Play`, and parts](/docs/reference/players/#status-1) |
-| `players/{namespace}/{name}/volume` | the operator, the pod that handles a press, and the equipment operator | the playback pod, the idle pod or a delegate's client, the equipment operator, and the operator | yes | [the level and the muted flag](/docs/reference/players/#volume) |
-| `players/{namespace}/{name}/volume/owner` | the equipment operator and its Last Will | the playback pod, a delegate's client, and the operator | yes | [the owner mark, or empty](/docs/reference/players/#volumeowner) |
+| `players/{namespace}/{name}/volume` | the operator | the playback pod, the idle pod or a delegate's client, and the operator | yes | [the level and the muted flag](/docs/reference/players/#volume) |
+| `players/{namespace}/{name}/volume/commands` | any program that is not a remote | the operator | no | [an ask for a step or a mute](/docs/reference/players/#volumecommands) |
 | `players/{namespace}/{name}/panel` | the idle pod, or a delegate's client; the operator clears it | the operator | yes | [the panel desire](/docs/reference/players/#panel) |
-| `players/{namespace}/{name}/power` | the idle pod or a delegate's client, and the equipment operator | the equipment operator, and the idle pod or a delegate's client | no | [an ask for the room's power, or for the screen](/docs/reference/players/#power) |
+| `players/{namespace}/{name}/power` | the idle pod or a delegate's client, and the operator | the operator, and the idle pod or a delegate's client | no | [an ask for the room's power, or for the screen](/docs/reference/players/#power) |
 | `players/{namespace}/{name}/commands` | the playback pod | the idle pod, or a delegate's client | no | [the ask for the next work, or for home](/docs/reference/players/#commands) |
-| `remotes/{namespace}/{name}/events` | the `Remote`'s pod | the playback pod, the idle pod, or a delegate's client | no | [one key event](/docs/reference/remotes/#events) |
+| `remotes/{namespace}/{name}/events` | the `Remote`'s pod | the playback pod, the idle pod or a delegate's client, and the operator | no | [one key event](/docs/reference/remotes/#events) |
 | `remotes/{namespace}/{name}/keys` | the operator | the `Remote`'s pod | yes | [the compiled key table](/docs/reference/remotes/#keys) |
 | `remotes/{namespace}/{name}/codes` | the `Remote`'s pod | the operator | yes | [the declared code set](/docs/reference/remotes/#codes) |
 | `remotes/{namespace}/{name}/availability` | the `Remote`'s pod and its Last Will | the operator | yes | [`online` or `offline`](/docs/reference/remotes/#availability) |
@@ -155,7 +149,7 @@ reads and writes the same `players` and `remotes` topics from
 
 ## What the operator reads
 
-The operator subscribes to nine filters, one per retained or event
+The operator subscribes to eleven filters, one per retained or event
 kind it folds into a status or a decision:
 
 | Filter | What the operator does with it |
@@ -164,13 +158,18 @@ kind it folds into a status or a decision:
 | `plays/+/+/availability` | gates a retained report on a live sidecar, from the run's current pod only |
 | `remotes/+/+/focus` | reads its own marks back after a restart, and publishes again only a mark a restarted broker lost |
 | `remotes/+/+/focus/cycle` | advances the mark to the next bound `Player` |
+| `remotes/+/+/events` | moves the level for a volume key, and asks the unit's `Receiver` for the unit's input |
 | `remotes/+/+/availability` | gates the declared codes on a live pod |
 | `remotes/+/+/codes` | subtracts the key table and reports `status.unbound` |
 | `players/+/+/panel` | overrides the screen's `Display` from the desire |
-| `players/+/+/volume` | learns which units already hold a level, so the seed writes only where nothing stands |
-| `players/+/+/volume/owner` | builds a playback pod with no level of its own while a mark stands |
+| `players/+/+/volume` | reads its own levels back, so after a restart it publishes no level the broker already holds |
+| `players/+/+/volume/commands` | moves the level the same as a volume key |
+| `players/+/+/power` | writes each power ask into the unit's `Receiver` |
 
-Presses never pass through the operator. A key event travels from
-the `Remote`'s pod to the playback pod or the idle client directly,
-gated on the retained focus mark, so a controller keeps working while
-the operator is down.
+Most presses never pass through the operator. A key event travels
+from the `Remote`'s pod to the playback pod or the idle client
+directly, gated on the retained focus mark, so a controller keeps
+working while the operator is down. The volume keys, the power asks,
+and the input asks are the exceptions, because a device operator
+acts on them through the `Receiver` or the `Sink`. They do nothing
+while no operator holds the lease.

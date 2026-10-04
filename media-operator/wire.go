@@ -194,16 +194,11 @@ const (
 	playerPowerTopicVariable = "MEDIA_PLAYER_POWER_TOPIC"
 
 	// The unit's volume topic, on the playback pod's command sidecar and
-	// on the idle client. It is the speaker
-	// gate as well as the address: the operator sets it only for a Player
-	// that states sinks, so a container that reads nothing here
-	// subscribes to no level, draws none, and publishes none.
+	// on the idle client. It is the speaker gate as well as the address:
+	// the operator sets it only for a Player that states sinks, so a
+	// container that reads nothing here subscribes to no level and draws
+	// none. The operator is the topic's only writer.
 	playerVolumeTopicVariable = "MEDIA_PLAYER_VOLUME_TOPIC"
-
-	// The topic the owner mark stands on, set on the command sidecar
-	// whenever the volume topic is. A retained mark means equipment holds
-	// the level, so mpv sits at unity and applies none.
-	playerVolumeOwnerTopicVariable = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC"
 
 	// metricsAddressVariable is declared in operate.go, alongside the
 	// operator's own MEDIA_METRICS_ADDRESS read: milestone 65 fixes the

@@ -145,6 +145,25 @@ rules:
   - apiGroups: [equipment.liken.sh]
     resources: [receivers/status]
     verbs: [get, patch]
+  # The equipment operator's televisions, cluster-scoped. The operator
+  # watches them for status.screenAsk, the CEC node workload's ask for a
+  # Player's screen, and publishes each new ask on the Player's power
+  # topic. It writes nothing on a Television.
+  - apiGroups: [equipment.liken.sh]
+    resources: [televisions]
+    verbs: [get, list, watch]
+  # The audio operator's sinks, cluster-scoped. The operator watches them
+  # for each sink's volume scale and its reported level, and applies
+  # status.session under its own field manager to ask for a level for the
+  # unit that plays through the sink. Server-side apply keeps each write
+  # to this manager's own fields, so the audio operator's status stays
+  # its own.
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks]
+    verbs: [get, list, watch]
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks/status]
+    verbs: [get, patch]
   # The playback pods and the standing pods, on the same terms as the
   # claims: created once, and deleted to replace a stale one, a playback
   # pod at the film's place or a standing pod on a template that

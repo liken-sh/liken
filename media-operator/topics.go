@@ -90,6 +90,10 @@ const playerPanelKind = "panel"
 // tree.
 const playerVolumeKind = "volume"
 
+// The last segment of the players topic that carries the room's power
+// asks.
+const playerPowerKind = "power"
+
 // remoteEventsTopic carries one Remote's key events. The standing
 // remote pod publishes {"key": "KEY_UP", "value": 1} to it, not
 // retained, because a press is an event and not a state. The pod
@@ -243,8 +247,9 @@ func parseRemoteFocusCycleTopic(base, topic string) (namespace, name string, ok 
 }
 
 // playCommandsTopic carries the commands any program on the bus may
-// publish to drive one Play: play-pause, a seek, a volume step, and
-// the rest of the vocabulary in input.go. It is not retained, because
+// publish to drive one Play: play-pause, a seek, a chapter step, and
+// the rest of the vocabulary in input.go. The level is the unit's and
+// not the Play's, so its asks go on playerVolumeCommandsTopic. It is not retained, because
 // a command is an event and not a state. This is the one open surface
 // a program joins a Play on in media terms, so a phone or a Home
 // Assistant integration reaches the Play the same way the playback
@@ -289,13 +294,23 @@ func playerPanelTopic(base, namespace, name string) string {
 // playerPowerTopic carries the ask a power press on a unit whose screen
 // is wired through a Receiver publishes, not retained, because an ask
 // is an event and not a state: toggle, or on and off for a TV remote's
-// deterministic power functions. The equipment operator reads it and
-// turns the room off or on, and publishes wake and sleep back on it for
-// the screen when the TV speaks for the room over HDMI-CEC. It is the
-// same string the session it applies carries, so the equipment and the
-// idle client share one topic.
+// deterministic power functions. This operator reads it and writes the
+// ask into the Receiver's session (roompower.go). It also publishes wake
+// and sleep on it for the screen, when the TV asks for the Player's
+// screen over HDMI-CEC (screenask.go).
 func playerPowerTopic(base, namespace, name string) string {
-	return base + "/players/" + namespace + "/" + name + "/power"
+	return base + "/players/" + namespace + "/" + name + "/" + playerPowerKind
+}
+
+// playerPowerFilter is the operator's one subscription that reaches
+// every unit's power topic.
+func playerPowerFilter(base string) string {
+	return base + "/players/+/+/" + playerPowerKind
+}
+
+// parsePlayerPowerTopic maps a power topic back to the Player it names.
+func parsePlayerPowerTopic(base, topic string) (namespace, name string, ok bool) {
+	return parsePlayerTopic(base, topic, playerPowerKind)
 }
 
 // playerPanelFilter is the operator's one subscription that reaches
@@ -329,36 +344,39 @@ func parsePlayerTopic(base, topic, kind string) (namespace, name string, ok bool
 	return parts[0], parts[1], true
 }
 
-// playerVolumeTopic carries the unit's listening level and its
-// muted flag, retained, because the level is a state and not an
-// event. Every pod for the unit subscribes and applies what it
-// reads, and only a press or the operator publishes, so the topic is
-// the authority and no observer ever writes back what it saw.
+// playerVolumeTopic carries the unit's listening level and its muted
+// flag, retained, because the level is a state and not an event. The
+// payload is {"level": 0.63, "muted": false}, and the level is the
+// fraction of the device's max. This operator is its only writer: it
+// publishes each target as a press moves it, and each level the device
+// reports while no target is pending (volumeengine.go). The screens
+// read it and draw the indicator for each live message.
 func playerVolumeTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerVolumeKind
 }
 
-// playerVolumeOwnerTopic carries the owner mark for a unit's level,
-// retained. A non-empty payload means equipment owns the level. An
-// empty payload means no owner holds it.
-func playerVolumeOwnerTopic(base, namespace, name string) string {
-	return playerVolumeTopic(base, namespace, name) + "/owner"
+// playerVolumeCommandsTopic carries the asks a program that is not a
+// remote makes of the unit's level, not retained, because an ask is an
+// event: {"step": "up"}, {"step": "down"}, {"mute": "toggle"}, and
+// {"mute": true} or {"mute": false}. This operator treats each message
+// the same as a press of a volume key.
+func playerVolumeCommandsTopic(base, namespace, name string) string {
+	return playerVolumeTopic(base, namespace, name) + "/commands"
 }
 
-// playerVolumeFilter is the operator's one subscription across
-// every unit's level. The operator reads it to learn which units the
-// broker already holds a level for, so the seed writes only where
-// nothing stands.
+// playerVolumeFilter is the operator's subscription across every unit's
+// level. The operator reads its own retained writes back, so after a
+// restart it publishes no level the broker already holds.
 func playerVolumeFilter(base string) string {
 	return base + "/players/+/+/" + playerVolumeKind
 }
 
-// playerVolumeOwnerFilter is the operator's one subscription across
-// every unit's owner mark. The mark is one segment below the level,
-// so playerVolumeFilter matches no mark, and this filter matches no
+// playerVolumeCommandsFilter is the operator's one subscription across
+// every unit's volume asks. The asks are one segment below the level,
+// so playerVolumeFilter matches no ask, and this filter matches no
 // level.
-func playerVolumeOwnerFilter(base string) string {
-	return playerVolumeFilter(base) + "/owner"
+func playerVolumeCommandsFilter(base string) string {
+	return playerVolumeFilter(base) + "/commands"
 }
 
 // parsePlayerVolumeTopic maps a volume topic back to the Player it
@@ -367,14 +385,14 @@ func parsePlayerVolumeTopic(base, topic string) (namespace, name string, ok bool
 	return parsePlayerTopic(base, topic, playerVolumeKind)
 }
 
-// parsePlayerVolumeOwnerTopic maps an owner mark back to the Player
-// whose level it names. A level topic has no owner segment, so it is
-// not a mark.
-func parsePlayerVolumeOwnerTopic(base, topic string) (namespace, name string, ok bool) {
-	if !strings.HasSuffix(topic, "/owner") {
+// parsePlayerVolumeCommandsTopic maps a volume/commands topic back to
+// the Player it names. A level topic has no commands segment, so it is
+// not an ask.
+func parsePlayerVolumeCommandsTopic(base, topic string) (namespace, name string, ok bool) {
+	if !strings.HasSuffix(topic, "/commands") {
 		return "", "", false
 	}
-	return parsePlayerVolumeTopic(base, strings.TrimSuffix(topic, "/owner"))
+	return parsePlayerVolumeTopic(base, strings.TrimSuffix(topic, "/commands"))
 }
 
 // busFilters is every subscription the operator makes, in one list.
@@ -391,7 +409,8 @@ func busFilters(base string) []string {
 		remoteCodesFilter(base),
 		playerPanelFilter(base),
 		playerVolumeFilter(base),
-		playerVolumeOwnerFilter(base),
+		playerVolumeCommandsFilter(base),
+		playerPowerFilter(base),
 	}
 }
 

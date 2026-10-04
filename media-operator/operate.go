@@ -109,11 +109,12 @@ const positionWriteInterval = 8 * time.Second
 
 // catchUpGrace is how long the pass waits after a broker session
 // begins before it writes a retained value it did not read: a unit's
-// first level, or a controller's first focus mark. The broker delivers
-// the retained values within milliseconds of the subscribe, and the
-// wait covers that delivery, so the pass reads desks that already hold
-// what the broker holds. A write inside the window would put unity over
-// a level a person set, or move a controller to another room.
+// level, or a controller's first focus mark. The broker delivers the
+// retained values within milliseconds of the subscribe, and the wait
+// covers that delivery, so the pass reads desks that already hold what
+// the broker holds. A level written inside the window would draw the
+// indicator on every screen for a level the broker already held, and a
+// mark written inside it would move a controller to another room.
 const catchUpGrace = 2 * time.Second
 
 // defaultTTLSecondsAfterFinished is how long a Finished Play stands when
@@ -168,10 +169,26 @@ type operator struct {
 	// that arbitrates it.
 	focus *focusDesk
 
-	// ensure is the desk for each unit's receiver commands topic. The
-	// pass fills it from the Receivers, and the bus reader reads it when
-	// a controller press asks the unit's receiver for the unit's input.
+	// ensure is the desk for each unit's Receiver. The pass fills it from
+	// the Receivers, and the bus reader reads it when a controller press
+	// asks the unit's receiver for the unit's input, and when a power ask
+	// arrives on the unit's power topic.
 	ensure *ensureDesk
+
+	// sessions composes and sends every write of a Receiver's
+	// status.session, from the pass and from the bus reader alike
+	// (receiverasks.go).
+	sessions sessionWriter
+
+	// levels is the volume engine: each unit's devices, each device's
+	// pending target, and the relay onto each unit's volume topic. The
+	// pass hands it the devices' reports, and the bus reader hands it
+	// the presses (volumeengine.go).
+	levels *volumeEngine
+
+	// screenAsks is the record of the Televisions' asks the pass relayed
+	// (screenask.go). Only the pass goroutine touches it.
+	screenAsks screenAsks
 
 	// peripherals is the desk for the bluetooth-operator's Peripherals and
 	// for the Peripheral each Remote's claim allocated. The pass fills it
@@ -230,13 +247,6 @@ type operator struct {
 	// one whose spec.session it released this run. Only the pass
 	// goroutine touches it.
 	specReleased map[string]bool
-
-	// volumes is the desk for each unit's level. Unlike the desks
-	// above, it wakes no pass, because the level folds into no status.
-	// The pass reads it for one question alone: whether the broker
-	// already holds a level for a unit. It seeds only where the desk
-	// holds none.
-	volumes *volumeDesk
 
 	// catchUpEnds is when the current broker session's retained values
 	// have had time to arrive. Each connect pushes it out by catchUpGrace.
@@ -407,7 +417,6 @@ func operate() {
 		receiverSessions: map[string]receiverSession{},
 		heldScreens:      map[string]heldScreen{},
 		specReleased:     map[string]bool{},
-		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]string{},
 		positionWrites:   map[string]time.Time{},
 		displayRestarts:  map[string]displayRestartMemo{},
@@ -419,19 +428,20 @@ func operate() {
 		metrics:          metrics,
 		log:              os.Stdout,
 	}
+	media.levels = media.newVolumeEngine()
 
 	// onConnect marks that a fresh broker session began, so the next pass
 	// re-establishes the retained state the operator owns. A broker that
 	// restarted holds none of it, so without this the keymaps and focus
-	// marks would stay missing until a person edited one. The two desks
-	// forget what the last session delivered, so the pass can tell a
-	// value the broker still holds from one it lost.
+	// marks would stay missing until a person edited one. The focus desk
+	// and the volume engine forget what the last session delivered, so
+	// the pass can tell a value the broker still holds from one it lost.
 	onConnect := func(bus *Bus) {
 		// The mark goes first, so a pass that runs between these lines
 		// reads the catch-up as not over and publishes no mark from the
 		// record the two desks are about to clear.
 		media.busReconnected.Store(true)
-		media.volumes.newSession()
+		media.levels.newSession()
 		media.focus.newSession()
 		poke(wake)
 	}
@@ -703,6 +713,7 @@ func (o *operator) pass() {
 		o.reconcileFocus(players)
 		start := time.Now()
 		o.reconcilePlayers(players, plays, zone, defaultIdle)
+		o.relayScreenAsks()
 		if o.metrics != nil {
 			o.metrics.observeReconcile(kindPlayer, time.Since(start), nil)
 		}
@@ -757,9 +768,11 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	}
 	// A press on a controller asks the unit's receiver for the unit's
 	// input, in the receiver's own generic vocabulary. A repeat or a
-	// release is dropped inside, so one held control asks once.
+	// release is dropped inside, so one held control asks once. A volume
+	// key moves the unit's level on a press and on each repeat.
 	if namespace, name, ok := parseRemoteEventsTopic(o.topicBase, topic); ok {
 		o.ensureInput(namespace, name, payload)
+		o.pressVolume(namespace, name, payload)
 		return
 	}
 	// An availability with an empty payload is a cleared retained value and
@@ -803,25 +816,22 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.panels.setState(playerKey(namespace, name), panel.Desire)
 		return
 	}
-	// The operator reads the level only to learn that one stands, so
-	// the seed skips the unit. An empty payload is a cleared retained
-	// value, and it changes nothing on the desk.
+	// The level the broker holds is this operator's own write, read back
+	// so a restarted operator publishes no level the broker already
+	// holds. An empty payload is a cleared retained value and holds no
+	// level.
 	if namespace, name, ok := parsePlayerVolumeTopic(o.topicBase, topic); ok {
-		if len(payload) == 0 {
-			return
+		if len(payload) > 0 {
+			o.levels.heardLevel(playerKey(namespace, name), payload)
 		}
-		state, decoded := parseVolumeState(payload)
-		if !decoded {
-			return
-		}
-		o.volumes.setState(playerKey(namespace, name), state)
 		return
 	}
-	// The owner mark. A payload means equipment holds the level, and an
-	// empty payload clears the mark. The operator reads it for one
-	// decision: a pod for an owned unit carries no level of its own.
-	if namespace, name, ok := parsePlayerVolumeOwnerTopic(o.topicBase, topic); ok {
-		o.volumes.setOwned(playerKey(namespace, name), len(payload) > 0)
+	if namespace, name, ok := parsePlayerVolumeCommandsTopic(o.topicBase, topic); ok {
+		o.commandVolume(namespace, name, payload)
+		return
+	}
+	if namespace, name, ok := parsePlayerPowerTopic(o.topicBase, topic); ok {
+		o.askPower(namespace, name, payload)
 		return
 	}
 }
@@ -840,10 +850,8 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 func (o *operator) reestablishRetained() {
 	o.keysPublished = map[string]string{}
 	o.playerStatuses.reset()
-	// The levels are the one retained state this rewrite skips. The
-	// sidecars and the broker hold them, not the operator, so the pass
-	// waits out catchUpGrace and then seeds only the units nothing
-	// answered for.
+	// The levels wait out catchUpGrace, and the volume engine then
+	// publishes each unit's level the broker did not deliver back.
 	o.catchUpEnds = time.Now().Add(catchUpGrace)
 	// The focus marks wait out the same grace, and reconcileFocus then
 	// publishes only the marks the broker did not deliver back. This wake
@@ -1166,7 +1174,10 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
 			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase),
 			desired.Receiver != nil)
-		o.seedVolume(player, key, standing)
+		// The devices that set the unit's level, and their reports, reach
+		// the volume engine on every pass, because a report is what the
+		// relay publishes and what a pending target waits for.
+		o.levels.observe(key, o.volumeDevices(player, desired.Sinks), o.caughtUp())
 		// The retained status is what says the film is over, and the idle
 		// screen client draws its return from it. The client subscribes to
 		// that topic itself, so the status reaches it in bus time, seconds
@@ -1197,10 +1208,8 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// releases the equipment it held.
 	o.retainSessions(matched)
 	o.retainHeldScreens(live)
-	// The volume desk shrinks the same way. The retained level itself
-	// stays on the broker, so a Player recreated under the same name
-	// keeps the level the room was left at.
-	o.volumes.retain(live)
+	// The volume engine shrinks the same way.
+	o.levels.retain(live)
 	// A topic whose Player no longer exists has its retained value cleared
 	// with an empty publish, so a deleted Player leaves no unit on the bus
 	// for a subscriber to draw.
@@ -1257,97 +1266,6 @@ func playOf(status PlayerStatus) string {
 		return ""
 	}
 	return ", play " + status.Play
-}
-
-// seedVolume writes unity to a unit whose level the broker holds
-// nothing for, so the state is always readable off the bus and no
-// reader carries a default. It never writes over a level that
-// stands: the desk answers that, and a duplicate seed from a racing
-// pass writes the same value, so the race settles itself. A Player
-// with no sinks is not seeded, because a unit with nothing to hear
-// has no level to mean anything.
-//
-// A unit with a standing Play is not seeded either. Its playback pod
-// holds the level the room hears and publishes it again on each
-// connect, so after a broker restart the pod restores the level.
-// The pod's reconnect can come later than catchUpGrace, and a seed in
-// that gap would put the film at unity.
-//
-// A broker that restarts alone loses the idle unit's level, and the
-// operator still holds it, so the pass publishes the held level again.
-// Without that, an operator that restarts later finds no level on the
-// broker and seeds unity over the level a person set. A unit whose
-// level equipment owns is left to the equipment, which writes its own
-// level.
-func (o *operator) seedVolume(player *Player, key string, standing bool) {
-	if len(player.Spec.Sinks) == 0 || standing || !o.caughtUp() {
-		return
-	}
-	if o.volumes.deliveredFor(key) {
-		return
-	}
-	if state, held := o.volumes.stateFor(key); held {
-		if o.volumes.owned(key) {
-			return
-		}
-		logLine(o.log, "player %s: the broker held no level after the catch-up, published the held %s to %s",
-			key, describeVolume(state), playerVolumeTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name))
-		o.publishVolume(player.Metadata.Namespace, player.Metadata.Name, state)
-		return
-	}
-	logLine(o.log, "player %s: no level on the broker after the catch-up, published %s to %s",
-		key, describeVolume(defaultVolumeState()), playerVolumeTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name))
-	o.publishVolume(player.Metadata.Namespace, player.Metadata.Name, defaultVolumeState())
-}
-
-// writeThroughVolume lays a Play's declared starting state over the
-// unit's current one and publishes the result, retained, before the
-// pod exists. The override becomes the Player's state, and everything
-// after it is the ordinary path. It runs on the creating pass alone:
-// a republish on a later pass of the same run would write the Play's
-// level over every press a person made during the film.
-func (o *operator) writeThroughVolume(play *Play) {
-	if play.Spec.Volume == nil {
-		return
-	}
-	namespace, name := play.Metadata.Namespace, playerName(play)
-	key := playerKey(namespace, name)
-	current, held := o.volumes.stateFor(key)
-	if !held {
-		current = defaultVolumeState()
-	}
-	state := current.mergedWith(play.Spec.Volume)
-	o.publishVolume(namespace, name, state)
-	logLine(o.log, "play %s/%s: spec.volume set player %s to %s, published to %s",
-		namespace, play.Metadata.Name, name, describeVolume(state), playerVolumeTopic(o.topicBase, namespace, name))
-}
-
-// publishVolume writes one unit's level to its topic, retained, and
-// records it on the desk at once. Recording the operator's own write
-// keeps the next pass from seeding the same unit again before the
-// broker echoes the message back.
-func (o *operator) publishVolume(namespace, name string, state volumeState) {
-	payload, err := marshalVolumeState(state)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "publishing player %s/%s volume: %v\n", namespace, name, err)
-		return
-	}
-	o.bus.Publish(playerVolumeTopic(o.topicBase, namespace, name), payload, true)
-	o.volumes.setState(playerKey(namespace, name), state)
-}
-
-// volumeFor is the level the pod's mpv starts at, and whether the
-// broker holds one at all. A unit nothing has answered for carries
-// no level onto the pod, so mpv keeps its own default and the
-// subscription sets the level a moment later.
-func (o *operator) volumeFor(play *Play) (volumeState, bool) {
-	return o.volumes.stateFor(playerKey(play.Metadata.Namespace, playerName(play)))
-}
-
-// volumeOwnedFor answers whether equipment holds the level of the
-// unit this Play runs on.
-func (o *operator) volumeOwnedFor(play *Play) bool {
-	return o.volumes.owned(playerKey(play.Metadata.Namespace, playerName(play)))
 }
 
 // reconcileRemotes reconciles a standing pod for every Remote in the
@@ -1690,16 +1608,6 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		if err := ensureClaim(o.client, claim); err != nil {
 			return nil, false, err
 		}
-		// A run that starts here for the first time is the one pass a
-		// Play's declared level is written through on. A run that
-		// resumes skips it, the way the recreate paths below do,
-		// because a run that already played must keep the level a
-		// person set while it played. The claim carries the speaker
-		// gate: a Play against a unit with no sinks writes no level
-		// through, the same gate the seed reads off the Player.
-		if !resuming && claimHasSink(claim) {
-			o.writeThroughVolume(play)
-		}
 		// The session goes on the unit's Receiver before the pod exists, so
 		// the equipment is awake and on the right input by the time mpv draws
 		// its first frame.
@@ -1815,18 +1723,6 @@ func podMessage(pod *Pod) string {
 func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	resume := *play
 	resume.Spec.Start = o.stashedPosition(play)
-	// The copy carries the unit's current level, not the override the
-	// Play declared, so the pod builder reads one field and never
-	// reads the bus. It is the same move the saved place above makes:
-	// the pod is built from the Play as the run stands right now.
-	//
-	// While the owner mark stands the equipment applies the level, so
-	// the pod carries none and mpv starts at its own default, unity.
-	// The sidecar holds mpv at unity from there.
-	resume.Spec.Volume = nil
-	if volume, held := o.volumeFor(play); held && !o.volumeOwnedFor(play) {
-		resume.Spec.Volume = volume.asPlayVolume()
-	}
 	return o.createPod(&resume, claim, resolved, prefs, remotes)
 }
 

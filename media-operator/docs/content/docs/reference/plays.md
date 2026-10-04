@@ -79,7 +79,6 @@ What to play and where. The spec is immutable: a different film or a different p
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order, the most specific tier; omit it to inherit the Player. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Play override of the subtitle language order, the most specific tier; omit it to inherit the Player. |
 | <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Play override of when subtitles show, the most specific tier; omit it to inherit the Player. One of: `on`, `off`, `auto`. |
-| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The level this run starts at. The operator writes it to the Player's volume topic before it creates the pod, so the value becomes the unit's state and stays after the film ends. Omitted, the run starts at whatever the unit already holds. |
 
 ### spec.items[]
 
@@ -137,15 +136,6 @@ The work that follows this run. The display offers it on the scrubber as a chip,
 | <span id="specnext--detail"></span>`detail` | string | no | The third line of the card, under the title: the series and the season, or the year and the runtime. The display draws it as given. |
 | <span id="specnext--art"></span>`art` | string | no | The art of the work that follows, as a claim://, nfs://, or https:// URI, resolved the way an item's art is. The display fits it inside the card's box and keeps its ratio, so a poster is letterboxed. |
 | <span id="specnext--request"></span>`request` | object | no | An object the operator never reads. When a person takes the offer, it is published byte for byte on the Player's commands topic, so the program that wrote the Play gets its own words back and needs no other record of what it offered. |
-
-### spec.volume
-
-The level this run starts at. The operator writes it to the Player's volume topic before it creates the pod, so the value becomes the unit's state and stays after the film ends. Omitted, the run starts at whatever the unit already holds.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="specvolume--level"></span>`level` | integer | no | The listening level, 0 to 100. 100 is unity, the player's own default, and the cap: a software gain above unity only distorts. Omitted, the level the unit already holds stays. |
-| <span id="specvolume--muted"></span>`muted` | boolean | no | Whether the run starts muted. Omitted, the muted state the unit already holds stays. |
 
 ## status
 
@@ -259,8 +249,8 @@ press becomes one of these commands inside the pod.
     {"action": "seek", "amount": -30}
 
 `action` names a word from the vocabulary below. `amount` belongs
-only to the three actions that move by one, and its sign is the
-direction: seconds for `seek`, a step for `volume` and `chapter`.
+only to the two actions that move by one, and its sign is the
+direction: seconds for `seek`, and chapters for `chapter`.
 
 | Action | What it does |
 |---|---|
@@ -270,9 +260,6 @@ direction: seconds for `seek`, a step for `volume` and `chapter`.
 | `stop` | ends the run, the way the display's exit ends it |
 | `seek` | moves the playhead by `amount` seconds |
 | `chapter` | jumps by `amount` chapters |
-| `volume` | steps the unit's level by `amount` |
-| `mute` | toggles the unit's muted flag |
-| `unmute` | clears the unit's muted flag |
 | `subtitles` | cycles the subtitle track |
 | `audio` | cycles the audio track |
 | `info` | shows the file name and position for a few seconds |
@@ -281,24 +268,22 @@ direction: seconds for `seek`, a step for `volume` and `chapter`.
 | `power` | asks the unit's client to do what power does between films, then ends the run |
 | `power-off` | asks the unit's client to turn the room off, then ends the run |
 
-`play`, `hold`, `stop`, `unmute`, and `power-off` set the state they
-name, so a second one changes nothing. The playback pod binds them to
-the names the kernel's `rc-cec` keymap gives a TV remote's
-deterministic functions (HDMI-CEC 1.3a, CEC 13.13.3): `KEY_PLAYCD`,
-`KEY_PAUSECD`, `KEY_STOPCD`, `KEY_UNMUTE`, and `KEY_SLEEP`. The keymap
-also gives the Pause-Play Function and the Mute Function the names
-`KEY_PLAYPAUSE` and `KEY_MUTE`, which a Bluetooth remote's play and
-mute buttons send too, so those two stay toggles. A `Keymap` row on
-the `Remote` that holds the CEC adapter's input device can name the
-Pause-Play Function `KEY_PAUSECD`. No key name mutes without a
-toggle, so the Mute Function stays one.
+`play`, `hold`, `stop`, and `power-off` set the state they name, so a
+second one changes nothing. The playback pod binds them to the names
+the kernel's `rc-cec` keymap gives a TV remote's deterministic
+functions (HDMI-CEC 1.3a, CEC 13.13.3): `KEY_PLAYCD`, `KEY_PAUSECD`,
+`KEY_STOPCD`, and `KEY_SLEEP`. The keymap also gives the Pause-Play
+Function the name `KEY_PLAYPAUSE`, which a Bluetooth remote's play
+button sends too, so it stays a toggle. A `Keymap` row on the
+`Remote` that holds the CEC adapter's input device can name the
+Pause-Play Function `KEY_PAUSECD`.
 
-A `volume`, `mute`, or `unmute` command changes no player directly: the pod
-computes the unit's next state and publishes it on the
-[Player's volume topic](/docs/reference/players/#volume), and every
-pod for the unit applies what that topic delivers. An action this
-build has no case for does nothing, so a command from a newer
-program has no effect rather than a crash. A focus cycle never
+The level belongs to the unit and not to the run, so this topic
+carries no volume action. The operator reads the volume keys from the
+`Remote`'s events topic, and a program that is not a remote asks on
+the [Player's `volume/commands` topic](/docs/reference/players/#volumecommands).
+An action this build has no case for does nothing, so a command from a
+newer program has no effect rather than a crash. A focus cycle never
 travels here: the key that asks for one, `KEY_CYCLEWINDOWS`, becomes
 a request on the [Remote's tree](/docs/reference/remotes/) instead.
 

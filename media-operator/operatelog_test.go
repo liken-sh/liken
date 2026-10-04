@@ -173,24 +173,6 @@ func TestADeletedPlayLogsItsRelease(t *testing.T) {
 	})
 }
 
-// A Play's spec.volume is a level a person asked for, so its write says
-// where it went.
-func TestASpecVolumeLogsTheLevelItSet(t *testing.T) {
-	cluster := newFakeCluster()
-	play := housePlay("https://nas/film.mkv")
-	play.Spec.Volume = &PlayVolume{Level: level(35)}
-	cluster.plays["movie"] = play
-	cluster.players["theater"] = housePlayer()
-	media, _ := caughtUpOperator(t, cluster)
-	var log logBuffer
-	media.log = &log
-
-	media.pass()
-
-	lines := linesAbout(&log, "play house/movie")
-	mustMatch(t, lines[0], "play house/movie: spec.volume set player theater to level 35, not muted, published to "+theaterVolumeTopic())
-}
-
 // A moving mark writes one line with its reason, and a mark that stands
 // writes none.
 func TestAFocusMoveLogsItsReason(t *testing.T) {
@@ -285,17 +267,14 @@ func TestAFreshPlayLogsTheFocusItTakes(t *testing.T) {
 // A press on a controller whose unit has a receiver asks it for the
 // unit's input, and the line names the press and the ask.
 func TestAPressLogsTheInputAskItSent(t *testing.T) {
-	media, broker := focusBrokerOperator(t)
+	media, _ := askOperator(t)
 	var log logBuffer
 	media.log = &log
-	media.focus.setMark(controllerKey("media", "den-remote"), "den")
-	media.ensure.set(playerKey("media", "den"), "liken/equipment/den-receiver/commands")
 
-	media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "media", "den-remote"), []byte(`{"key":"KEY_UP","value":1}`))
-	waitForPublish(t, broker.pubs)
-	media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "media", "den-remote"), []byte(`{"key":"KEY_UP","value":2}`))
+	press(media, "KEY_UP", 1)
+	press(media, "KEY_UP", 2)
 
-	mustLogOnce(t, &log, "remote media/den-remote: KEY_UP pressed with focus on player den, published input.ensure to liken/equipment/den-receiver/commands")
+	mustLogOnce(t, &log, "remote house/sofa: KEY_UP pressed with focus on player theater, wrote inputAsk ensure on receiver den-receiver")
 }
 
 // A new key table writes one line, and the same table republished after

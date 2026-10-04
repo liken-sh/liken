@@ -26,6 +26,12 @@ const receiverAPIVersion = "equipment.liken.sh/v1alpha1"
 // equipment. The Player status folds it to one word.
 const receiverReachableCondition = "Reachable"
 
+// The condition the equipment operator sets while the receiver reports
+// the session's input. An ensure ask goes out only while it is not
+// True, so a press on a room that already shows the unit writes
+// nothing to the API server.
+const receiverInputSelectedCondition = "InputSelected"
+
 // A Receiver carries only what this operator reads or writes: the
 // wiring it matches on, the session it applies, and the observed values
 // it folds into the Player's status.
@@ -37,18 +43,23 @@ type Receiver struct {
 	Status     ReceiverStatus `json:"status"`
 }
 
-// The cluster owner states the inputs and the topics. The equipment
-// operator reads spec.session when the status holds no session, so this
-// operator reads it to adopt it, and releases it once status.session
-// holds the session.
+// The cluster owner states the inputs and the volume scale. The
+// equipment operator reads spec.session when the status holds no
+// session, so this operator reads it to adopt it, and releases it once
+// status.session holds the session.
 type ReceiverSpec struct {
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
-	// CommandsTopic is the receiver's own commands topic, where a
-	// controller press asks for the unit's input. The cluster owner
-	// writes it and this operator only reads it, so the spec release
-	// below never sends it.
-	CommandsTopic string `json:"commandsTopic,omitempty"`
+	Volume  *ReceiverVolume  `json:"volume,omitempty"`
+}
+
+// ReceiverVolume is the receiver's volume scale for a press, in the
+// receiver's own units: the loudest level an ask may set, and the
+// distance one press moves the level. A Denon counts 0 to 98 in half
+// steps.
+type ReceiverVolume struct {
+	Max  float64 `json:"max,omitempty"`
+	Step float64 `json:"step,omitempty"`
 }
 
 // One input of the equipment, and the machine and monitor id wired into
@@ -61,7 +72,7 @@ type ReceiverInput struct {
 }
 
 // The session one Player holds on the equipment: the unit that holds
-// it, the input it plays through, and the topic the level comes from.
+// it, the input it plays through, and the asks the unit made.
 //
 // Active says whether a Play stands on the unit. The session itself
 // stands at the idle screen too, so a volume press moves the room while
@@ -72,22 +83,49 @@ type ReceiverInput struct {
 // desire the idle client publishes: the off desire is a dark room, and
 // the on desire is a room that is awake. A unit with no desire yet
 // keeps the flag its session already carries.
+//
+// The three asks are events. The equipment operator acts on an ask
+// once for each new time in its at field, and it does not act on an
+// ask it finds in its first pass after a start (receiverasks.go).
+//
+// VolumeTopic and PowerTopic are read and never written. A session
+// that still names either topic is applied again without it, so the
+// equipment operator stops reading the bus for that unit.
 type ReceiverSession struct {
-	Player      string `json:"player,omitempty"`
-	Input       string `json:"input,omitempty"`
-	Active      bool   `json:"active"`
-	Awake       bool   `json:"awake"`
-	VolumeTopic string `json:"volumeTopic,omitempty"`
-	PowerTopic  string `json:"powerTopic,omitempty"`
+	Player      string          `json:"player,omitempty"`
+	Input       string          `json:"input,omitempty"`
+	Active      bool            `json:"active"`
+	Awake       bool            `json:"awake"`
+	VolumeAsk   *VolumeAsk      `json:"volumeAsk,omitempty"`
+	PowerAsk    *ReceiverAction `json:"powerAsk,omitempty"`
+	InputAsk    *ReceiverAction `json:"inputAsk,omitempty"`
+	VolumeTopic string          `json:"volumeTopic,omitempty"`
+	PowerTopic  string          `json:"powerTopic,omitempty"`
+}
+
+// base is the part of a session the pass decides: the unit, the
+// input, and the two flags. Two sessions with the same base and no
+// topics are the same session to the pass, whatever asks they carry.
+func (s ReceiverSession) base() ReceiverSession {
+	return ReceiverSession{Player: s.Player, Input: s.Input, Active: s.Active, Awake: s.Awake}
 }
 
 // The session is this operator's block of the status. Every other
 // field is the equipment operator's.
 type ReceiverStatus struct {
-	Power      string              `json:"power,omitempty"`
-	Input      string              `json:"input,omitempty"`
-	Session    *ReceiverSession    `json:"session,omitempty"`
-	Conditions []ReceiverCondition `json:"conditions,omitempty"`
+	Power      string                  `json:"power,omitempty"`
+	Input      string                  `json:"input,omitempty"`
+	Driver     string                  `json:"driver,omitempty"`
+	Zones      map[string]ReceiverZone `json:"zones,omitempty"`
+	Session    *ReceiverSession        `json:"session,omitempty"`
+	Conditions []ReceiverCondition     `json:"conditions,omitempty"`
+}
+
+// ReceiverZone is what one zone of the receiver last reported. The
+// volume is a string in the receiver's own scale, such as 45.5.
+type ReceiverZone struct {
+	Volume string `json:"volume,omitempty"`
+	Mute   bool   `json:"mute,omitempty"`
 }
 
 type ReceiverCondition struct {
@@ -192,8 +230,14 @@ func matchReceiverInput(receiver *Receiver, node, monitor string) (string, bool)
 // The Reachable condition's status word, empty for a Receiver that
 // carries no such condition.
 func receiverReachable(receiver *Receiver) string {
+	return receiverCondition(receiver, receiverReachableCondition)
+}
+
+// receiverCondition reads one condition's status word, empty for a
+// Receiver that carries no such condition.
+func receiverCondition(receiver *Receiver, kind string) string {
 	for _, condition := range receiver.Status.Conditions {
-		if condition.Type == receiverReachableCondition {
+		if condition.Type == kind {
 			return condition.Status
 		}
 	}
@@ -220,14 +264,17 @@ func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerRecei
 	receiver, input, matched := o.matchReceiver(player)
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	if !matched {
-		o.ensure.set(key, "")
+		o.ensure.set(key, unitReceiver{})
 		return nil
 	}
 	o.applySession(player, receiver, input, standing, o.awake(player, receiver))
-	// A unit that matches a receiver keeps its commands topic on the
-	// ensure desk, so a press on its controller asks that receiver for
-	// the unit's input.
-	o.ensure.set(key, receiver.Spec.CommandsTopic)
+	// A unit that matches a receiver keeps the receiver on the ensure
+	// desk, so a press on its controller asks that receiver for the
+	// unit's input, and a power ask on its power topic reaches it.
+	o.ensure.set(key, unitReceiver{
+		name:          receiver.Metadata.Name,
+		inputSelected: receiverCondition(receiver, receiverInputSelectedCondition) == conditionTrue,
+	})
 	return &PlayerReceiverStatus{
 		Name:      receiver.Metadata.Name,
 		Input:     input,
@@ -298,12 +345,10 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 	key := playerKey(namespace, name)
 	session := ReceiverSession{
-		Player:      namespace + "/" + name,
-		Input:       input,
-		Active:      active,
-		Awake:       awake,
-		VolumeTopic: playerVolumeTopic(o.topicBase, namespace, name),
-		PowerTopic:  playerPowerTopic(o.topicBase, namespace, name),
+		Player: namespace + "/" + name,
+		Input:  input,
+		Active: active,
+		Awake:  awake,
 	}
 	held, tracked := o.receiverSessions[key]
 	standing := standingSession(receiver)
@@ -311,12 +356,13 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 	switch {
 	case tracked && held.receiver == receiver.Metadata.Name && held.session == session:
 		// The session this run applied still stands, so nothing is sent.
-	case !tracked && standing != nil && *standing == session && statusHolds:
+	case !tracked && sameSession(standing, session) && statusHolds:
 		// A session the Receiver already carries is the one an earlier
 		// run of this operator applied. The equipment acts on power and
 		// input once, so the same session is recorded and not sent again.
 		o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
-	case !tracked && standing != nil && *standing == session:
+		o.sessions.adopt(receiver.Metadata.Name, session)
+	case !tracked && sameSession(standing, session):
 		// The same session, held in spec by an earlier build of this
 		// operator. It moves to the status once, so the old spec field can
 		// be released and later dropped from the schema. The equipment
@@ -335,6 +381,16 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 	o.releaseSpecSession(key, receiver, statusHolds)
 }
 
+// sameSession answers whether a session the Receiver holds is the one
+// this operator would apply. A held session that still names a topic
+// is not, so the apply that follows removes the topic.
+func sameSession(standing *ReceiverSession, session ReceiverSession) bool {
+	if standing == nil || standing.VolumeTopic != "" || standing.PowerTopic != "" {
+		return false
+	}
+	return standing.base() == session
+}
+
 // writeSession lifts the session a moved unit left on its old Receiver,
 // then applies the new one. It answers whether the new session landed.
 func (o *operator) writeSession(key string, receiver *Receiver, session ReceiverSession, held receiverSession, tracked bool) bool {
@@ -346,7 +402,7 @@ func (o *operator) writeSession(key string, receiver *Receiver, session Receiver
 		logLine(o.log, "player %s: lifted the session on receiver %s, because the unit moved to receiver %s",
 			key, held.receiver, receiver.Metadata.Name)
 	}
-	if err := ApplyReceiverSession(o.client, receiver.Metadata.Name, &session); err != nil {
+	if err := o.sessions.apply(o.client, receiver.Metadata.Name, session); err != nil {
 		fmt.Fprintf(os.Stderr, "applying the session on receiver %s: %v\n",
 			receiver.Metadata.Name, err)
 		return false
@@ -397,7 +453,7 @@ func (o *operator) liftSession(name string) bool {
 		}
 		o.specReleased[name] = true
 	}
-	err := ApplyReceiverSession(o.client, name, nil)
+	err := o.sessions.lift(o.client, name)
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Fprintf(os.Stderr, "lifting the session on receiver %s: %v\n", name, err)
 		return false

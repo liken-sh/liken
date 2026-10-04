@@ -20,8 +20,8 @@ impl Press {
         self.value == 1 || self.value == 2
     }
 
-    /// Whether this event is the control going down, which is the edge mute
-    /// acts on and the cycle key asks on.
+    /// Whether this event is the control going down, which is the edge the
+    /// cycle key and a power key ask on.
     pub fn down(&self) -> bool {
         self.value == 1
     }

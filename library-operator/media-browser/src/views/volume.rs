@@ -13,7 +13,7 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle, Theme, mouse};
 use std::convert::Infallible;
 
-use media_screen::volume::{UNITY_LEVEL, Volume};
+use media_screen::volume::Volume;
 
 use super::{area, label, rounded, screen, text};
 use crate::look;
@@ -150,7 +150,7 @@ impl canvas::Program<Infallible, Theme, Renderer> for Row {
         }
 
         frame.fill_text(label(
-            &self.volume.level.to_string(),
+            &self.volume.percent().to_string(),
             row.number,
             look::ROW_NAME,
             faded(look::text(), fade),
@@ -163,10 +163,10 @@ impl canvas::Program<Infallible, Theme, Renderer> for Row {
     }
 }
 
-// How much of the bar the level fills, in logical pixels. A level above
-// unity fills no further.
-fn filled(level: i64) -> f32 {
-    BAR_WIDTH * (level as f32 / UNITY_LEVEL as f32).clamp(0.0, 1.0)
+// How much of the bar the level fills, in logical pixels. The level runs
+// from 0.0 to 1.0, and a level above 1.0 fills no further.
+fn filled(level: f64) -> f32 {
+    BAR_WIDTH * level.clamp(0.0, 1.0) as f32
 }
 
 // Where the parts of the row stand. The three parts hang off the right
@@ -228,11 +228,11 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_fills_at_unity_and_no_further() {
-        assert_eq!(filled(0), 0.0);
-        assert_eq!(filled(50), BAR_WIDTH / 2.0);
-        assert_eq!(filled(100), BAR_WIDTH);
-        assert_eq!(filled(140), BAR_WIDTH);
+    fn the_bar_fills_at_the_top_of_the_range_and_no_further() {
+        assert_eq!(filled(0.0), 0.0);
+        assert_eq!(filled(0.5), BAR_WIDTH / 2.0);
+        assert_eq!(filled(1.0), BAR_WIDTH);
+        assert_eq!(filled(1.4), BAR_WIDTH);
     }
 
     #[test]

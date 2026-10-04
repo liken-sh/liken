@@ -1,8 +1,13 @@
 //! The volume indicator: a speaker glyph, a short bar, and the number. It
 //! comes and goes on a clock of its own, and it draws alone: a level change
-//! brings up the indicator and nothing else on the display. The module only
-//! reads mpv's volume and mute properties, because the bus holds the state
-//! and the command sidecar owns every change to it.
+//! brings up the indicator and nothing else on the display.
+//!
+//! The level is the one `media-operator` relays on the `Player`'s volume
+//! topic: the level the unit's `Receiver` or `Sink` reports, from 0.0 to 1.0
+//! of the device's `spec.volume.max`. The command sidecar reads the topic and
+//! sends each live change to the display as a `volume-changed` message. mpv
+//! plays at unity, so its own `volume` and `mute` properties say nothing about
+//! the room's level, and the display does not read them.
 
 use iced::widget::canvas::Path;
 use iced::{Point, Rectangle, Size};
@@ -10,10 +15,6 @@ use iced::{Point, Rectangle, Size};
 use crate::canvas::{Anchor, Brush, Canvas, Line};
 use crate::fade::{Clock, Fade, Hide};
 use crate::theme;
-
-/// The level runs 0 to 100, where 100 is unity, so the bar fills at 100 and a
-/// level above it fills no further.
-const FULL: f64 = 100.0;
 
 /// The row draws in the top-right column, two line pitches under the clock,
 /// because the scrubber draws across the low center of the screen.
@@ -105,12 +106,30 @@ fn polygon(at: Point, points: &[(f32, f32)]) -> Path {
     })
 }
 
-/// The last values the observers reported, and the indicator's own fade. The
-/// OSD runs the same clock at the same rates, and neither one reads the other,
-/// so a level change shows the level alone and a summoned OSD shows no level.
+/// Read the level and the muted flag off the words of one `volume-changed`
+/// message: the level as a decimal from 0.0 to 1.0, then `yes` or `no`. A
+/// message that carries anything else is none of the sidecar's, and it
+/// changes nothing.
+pub fn changed(words: &[String]) -> Option<(f64, bool)> {
+    let level = words
+        .get(1)?
+        .parse::<f64>()
+        .ok()
+        .filter(|level| level.is_finite())?;
+    let muted = match words.get(2)?.as_str() {
+        "yes" => true,
+        "no" => false,
+        _ => return None,
+    };
+    Some((level, muted))
+}
+
+/// The last level the sidecar sent, and the indicator's own fade. The OSD
+/// runs the same clock at the same rates, and neither one reads the other, so
+/// a level change shows the level alone and a summoned OSD shows no level.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Volume {
-    level: Option<f64>,
+    level: f64,
     muted: bool,
     clock: Clock,
 }
@@ -137,33 +156,23 @@ impl Volume {
         self.clock.hide();
     }
 
-    /// The command sidecar sends volume-changed after it applies a level from
-    /// the bus, and not for the retained value it reads when it first
-    /// connects. So the indicator answers a press, and it stays off screen
-    /// while a pod restores the level it starts with.
+    /// Record one level and show the row. The command sidecar sends
+    /// `volume-changed` for each live message on the volume topic, and not for
+    /// the retained value it reads when it first connects. So the indicator
+    /// answers a change, and it stays off screen while a pod restores the
+    /// level it starts with.
     ///
     /// Each change restarts the wait, so a run of presses holds the indicator
     /// on screen and the fade out starts from the last one.
-    pub fn show(&mut self) {
+    pub fn show(&mut self, level: f64, muted: bool) {
+        self.level = level;
+        self.muted = muted;
         self.clock.show(Hide::Arm);
     }
 
-    /// Record each value of mpv's volume property and show nothing on its own.
-    pub fn on_volume(&mut self, value: Option<f64>) {
-        if let Some(value) = value {
-            self.level = Some(value);
-        }
-    }
-
-    /// Record the muted flag the way `on_volume` records the level.
-    pub fn on_mute(&mut self, value: Option<bool>) {
-        self.muted = value == Some(true);
-    }
-
-    /// Whether the row is on screen. It redraws while it is, so a level that
-    /// lands after the sidecar's message reaches the bar it belongs to.
+    /// Whether the row is on screen.
     pub fn showing(&self) -> bool {
-        self.fade().value() > 0.0 && self.level.is_some()
+        self.fade().value() > 0.0
     }
 
     /// The dark surface the three parts read against.
@@ -184,9 +193,9 @@ impl Volume {
     }
 
     /// The bar's fill, which is nothing at a level too low to draw a pixel of.
+    /// A level above 1.0 fills no further.
     fn fill(&self, canvas: &Canvas) -> Option<Rectangle> {
-        let level = self.level?;
-        let width = BAR_W * (level / FULL).clamp(0.0, 1.0) as f32;
+        let width = BAR_W * self.level.clamp(0.0, 1.0) as f32;
         (width >= canvas.to_canvas(1.0)).then(|| {
             Rectangle::new(
                 Point::new(columns(canvas).bar_x, BAR_TOP),
@@ -201,16 +210,16 @@ impl Volume {
         Point::new(columns(canvas).glyph_x, GLYPH_TOP)
     }
 
-    /// The number, which reads the level rounded to a whole percent.
-    fn number(&self, canvas: &Canvas) -> Option<Line> {
-        let level = self.level?;
-        Some(Line::new(
-            format!("{}", (level + 0.5).floor() as i64),
+    /// The number, which reads the level as a whole percent.
+    fn number(&self, canvas: &Canvas) -> Line {
+        let percent = (self.level.clamp(0.0, 1.0) * 100.0).round() as i64;
+        Line::new(
+            format!("{percent}"),
             Point::new(canvas.right(), ROW_Y),
             Anchor::TopRight,
             theme::type_scale::SMALL,
             theme::color::text(),
-        ))
+        )
     }
 
     /// Draw the row, or nothing while the indicator is off screen. The glyph
@@ -258,9 +267,7 @@ impl Volume {
                     theme::at(theme::color::SHADOW, theme::alpha::OPAQUE),
                 );
             }
-            if let Some(number) = self.number(&canvas) {
-                brush.text(number);
-            }
+            brush.text(self.number(&canvas));
         });
     }
 }
@@ -269,56 +276,61 @@ impl Volume {
 mod tests {
     use super::*;
 
-    /// One indicator at a level, on screen the way a press puts it there.
+    /// One indicator at a level, on screen the way a change puts it there.
     fn shown(level: f64) -> Volume {
         let mut volume = Volume::default();
-        volume.on_volume(Some(level));
-        volume.show();
+        volume.show(level, false);
         while volume.fade().running() {
             volume.fade_mut().step();
         }
         volume
     }
 
+    fn words(line: &str) -> Vec<String> {
+        line.split(' ').map(String::from).collect()
+    }
+
     fn canvas() -> Canvas {
         Canvas::default()
     }
 
-    /// The message alone shows the row. The two observers only record, so a
-    /// pod that restores the retained level draws no indicator.
+    /// The message carries the level as a decimal and the flag as `yes` or
+    /// `no`.
     #[test]
-    fn the_observers_record_and_show_nothing() {
-        let mut volume = Volume::default();
-        volume.on_volume(Some(40.0));
-        volume.on_mute(Some(true));
-        assert!(!volume.showing());
-        assert!(!volume.fade().running());
-
-        volume.show();
-        assert!(volume.fade().running());
-    }
-
-    /// A level that never arrived draws nothing, although the message did.
-    #[test]
-    fn a_row_with_no_level_draws_nothing() {
-        let mut volume = Volume::default();
-        volume.show();
-        while volume.fade().running() {
-            volume.fade_mut().step();
+    fn a_change_reads_the_level_and_the_flag() {
+        for (line, read) in [
+            ("volume-changed 0.63 no", Some((0.63, false))),
+            ("volume-changed 1 yes", Some((1.0, true))),
+            ("volume-changed 0.000000 no", Some((0.0, false))),
+        ] {
+            assert_eq!(changed(&words(line)), read, "{line}");
         }
-        assert!(!volume.showing());
-        assert_eq!(volume.number(&canvas()), None);
-        assert_eq!(volume.fill(&canvas()), None);
     }
 
-    /// A push that carries no number leaves the level the last one reported.
+    /// A message the sidecar did not write changes nothing.
     #[test]
-    fn a_push_with_no_number_leaves_the_level_standing() {
-        let mut volume = shown(40.0);
-        volume.on_volume(None);
-        assert_eq!(volume.number(&canvas()).unwrap().content, "40");
-        volume.on_mute(None);
-        assert!(!volume.muted);
+    fn a_change_that_does_not_parse_is_nothing() {
+        for line in [
+            "volume-changed",
+            "volume-changed 0.5",
+            "volume-changed loud no",
+            "volume-changed NaN no",
+            "volume-changed 0.5 maybe",
+        ] {
+            assert_eq!(changed(&words(line)), None, "{line}");
+        }
+    }
+
+    /// A change records the level and the flag and shows the row.
+    #[test]
+    fn a_change_shows_the_level_it_carries() {
+        let mut volume = Volume::default();
+        assert!(!volume.showing());
+
+        volume.show(0.4, true);
+        assert!(volume.fade().running());
+        assert!(volume.muted);
+        assert_eq!(volume.number(&canvas()).content, "40");
     }
 
     /// The row rises on the in rate and leaves on the out rate, the way the
@@ -326,9 +338,8 @@ mod tests {
     #[test]
     fn the_row_rises_and_leaves_on_the_shared_rates() {
         let mut volume = Volume::default();
-        volume.on_volume(Some(40.0));
 
-        volume.show();
+        volume.show(0.4, false);
         assert_eq!(volume.take_hide(), Hide::Arm);
         let mut ticks = 0;
         while volume.fade().running() {
@@ -351,7 +362,7 @@ mod tests {
     /// A change while the row is leaving reverses the same fade in place.
     #[test]
     fn a_change_during_a_fade_out_reverses_it() {
-        let mut volume = shown(40.0);
+        let mut volume = shown(0.4);
         volume.hide();
         for _ in 0..18 {
             volume.fade_mut().step();
@@ -359,7 +370,7 @@ mod tests {
         let standing = volume.fade().value();
         assert!(standing > 0.0 && standing < 1.0);
 
-        volume.show();
+        volume.show(0.4, false);
         assert_eq!(volume.take_hide(), Hide::Arm);
         volume.fade_mut().step();
         assert!(volume.fade().value() > standing);
@@ -380,17 +391,17 @@ mod tests {
     #[test]
     fn the_row_follows_the_screens_own_margin() {
         let wide = Canvas::for_output(Size::new(2560.0, 1080.0));
-        let volume = shown(40.0);
+        let volume = shown(0.4);
         assert_eq!(
             volume.surface(&wide).x + volume.surface(&wide).width,
             wide.right() + PAD_X
         );
-        assert_eq!(volume.number(&wide).unwrap().at.x, wide.width() - 96.0);
+        assert_eq!(volume.number(&wide).at.x, wide.width() - 96.0);
     }
 
     #[test]
     fn the_surface_covers_the_three_parts_and_the_padding() {
-        let surface = shown(40.0).surface(&canvas());
+        let surface = shown(0.4).surface(&canvas());
         assert_eq!(surface.x, 1454.0);
         assert_eq!(surface.y, 170.0);
         assert_eq!(surface.width, 394.0);
@@ -399,19 +410,19 @@ mod tests {
 
     #[test]
     fn the_bar_centres_on_the_numbers_line() {
-        let track = shown(40.0).track(&canvas());
+        let track = shown(0.4).track(&canvas());
         assert_eq!(track.x, 1520.0);
         assert_eq!(track.y, 193.0);
         assert_eq!(track.width, 220.0);
         assert_eq!(track.height, 12.0);
-        assert_eq!(shown(40.0).glyph_at(&canvas()), Point::new(1478.0, 184.0));
+        assert_eq!(shown(0.4).glyph_at(&canvas()), Point::new(1478.0, 184.0));
     }
 
     /// The fill runs the share of the bar the level names, and a level above
-    /// unity fills no further.
+    /// 1.0 fills no further.
     #[test]
     fn the_fill_runs_the_share_the_level_names() {
-        for (level, width) in [(50.0, 110.0), (100.0, 220.0), (150.0, 220.0)] {
+        for (level, width) in [(0.5, 110.0), (1.0, 220.0), (1.5, 220.0)] {
             assert_eq!(shown(level).fill(&canvas()).unwrap().width, width);
         }
     }
@@ -420,15 +431,21 @@ mod tests {
     #[test]
     fn a_level_with_no_pixel_to_draw_draws_no_fill() {
         assert_eq!(shown(0.0).fill(&canvas()), None);
-        assert_eq!(shown(-10.0).fill(&canvas()), None);
-        assert!(shown(1.0).fill(&canvas()).is_some());
+        assert_eq!(shown(-0.1).fill(&canvas()), None);
+        assert!(shown(0.01).fill(&canvas()).is_some());
     }
 
     /// The number reads the level rounded to a whole percent, at the margin.
     #[test]
     fn the_number_reads_the_level_rounded() {
-        for (level, reading) in [(40.0, "40"), (40.4, "40"), (40.5, "41"), (100.0, "100")] {
-            let number = shown(level).number(&canvas()).unwrap();
+        for (level, reading) in [
+            (0.4, "40"),
+            (0.404, "40"),
+            (0.406, "41"),
+            (1.0, "100"),
+            (1.5, "100"),
+        ] {
+            let number = shown(level).number(&canvas());
             assert_eq!(number.content, reading);
             assert_eq!(number.at, Point::new(1824.0, 182.0));
             assert_eq!(number.anchor, Anchor::TopRight);
@@ -440,11 +457,11 @@ mod tests {
     /// alone.
     #[test]
     fn a_mute_changes_the_glyph_and_leaves_the_bar() {
-        let mut volume = shown(40.0);
+        let mut volume = shown(0.4);
         let fill = volume.fill(&canvas());
-        volume.on_mute(Some(true));
+        volume.show(0.4, true);
         assert!(volume.muted);
         assert_eq!(volume.fill(&canvas()), fill);
-        assert_eq!(volume.number(&canvas()).unwrap().content, "40");
+        assert_eq!(volume.number(&canvas()).content, "40");
     }
 }

@@ -86,6 +86,12 @@ func (b *fakeBroker) push(topic string, payload []byte) {
 	b.conn.Write(encodePublish(topic, payload, true))
 }
 
+// forward sends the client a live message, the way the broker forwards
+// a publish to a subscriber that is already connected.
+func (b *fakeBroker) forward(topic string, payload []byte) {
+	b.conn.Write(encodePublish(topic, payload, false))
+}
+
 // readTopicFilter reads the length-prefixed filter a SUBSCRIBE carries.
 func readTopicFilter(body []byte) (int, string, bool) {
 	if len(body) < 2 {
@@ -104,6 +110,13 @@ func readTopicFilter(body []byte) (int, string, bool) {
 // the test's context ends.
 func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus, []*fakeBroker, <-chan *Bus) {
 	t.Helper()
+	return startBusWith(t, count, will, handler, nil)
+}
+
+// startBusWith is startBus with a handler for the retained messages, set
+// before the client runs.
+func startBusWith(t *testing.T, count int, will *busWill, handler, retained busHandler) (*Bus, []*fakeBroker, <-chan *Bus) {
+	t.Helper()
 	conns := make(chan net.Conn, count)
 	brokers := make([]*fakeBroker, count)
 	for index := range brokers {
@@ -118,6 +131,7 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 
 	connected := make(chan *Bus, count)
 	bus := newBus("pipe", "media-operator", will, func(b *Bus) { connected <- b }, handler)
+	bus.retainedHandler = retained
 	bus.dial = func(ctx context.Context) (net.Conn, error) {
 		select {
 		case conn := <-conns:
@@ -378,4 +392,46 @@ func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
 			t.Errorf("Run returned %s after its context ended, want at once", waited)
 		}
 	})
+}
+
+// A message the broker marks retained, which it delivers because of a
+// new subscription, reaches the retained handler, and a live message
+// reaches the ordinary one. A reader tells the state it catches up on
+// from a change made now.
+func TestARetainedMessageReachesTheRetainedHandler(t *testing.T) {
+	live := make(chan string, 2)
+	retained := make(chan string, 2)
+	_, brokers, connected := startBusWith(t, 1, nil,
+		func(topic string, _ []byte) { live <- topic },
+		func(topic string, _ []byte) { retained <- topic })
+	waitForConnect(t, connected)
+
+	brokers[0].push("liken/media/players/house/theater/volume", []byte(`{"level":0.5,"muted":false}`))
+	brokers[0].forward("liken/media/players/house/theater/volume", []byte(`{"level":0.55,"muted":false}`))
+
+	mustMatch(t, waitForTopic(t, retained), "liken/media/players/house/theater/volume")
+	mustMatch(t, waitForTopic(t, live), "liken/media/players/house/theater/volume")
+}
+
+// A client with no retained handler reads every message through its one
+// handler, the retained ones too.
+func TestWithNoRetainedHandlerEveryMessageReachesTheHandler(t *testing.T) {
+	live := make(chan string, 2)
+	_, brokers, connected := startBus(t, 1, nil, func(topic string, _ []byte) { live <- topic })
+	waitForConnect(t, connected)
+
+	brokers[0].push("liken/media/remotes/house/sofa/focus", []byte("theater"))
+
+	mustMatch(t, waitForTopic(t, live), "liken/media/remotes/house/sofa/focus")
+}
+
+func waitForTopic(t *testing.T, topics <-chan string) string {
+	t.Helper()
+	select {
+	case topic := <-topics:
+		return topic
+	case <-time.After(busTestTimeout):
+		t.Fatal("no message reached the handler")
+		return ""
+	}
 }

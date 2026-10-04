@@ -540,22 +540,19 @@ func TestReconcilePlayersWritesTheIdleBlock(t *testing.T) {
 	mustMatch(t, written.Bus.PanelTopic, playerPanelTopic(testTopicBase, "house", "theater"))
 }
 
-// The owner mark travels with the level, the way it travels to the
-// command sidecar. A unit with no sinks names neither topic, so its
-// client reads no owner and draws no level at all.
-func TestTheIdleBusCarriesTheOwnerTopicWithTheLevelTopic(t *testing.T) {
+// A unit with no sinks names no level topic, so its client reads no
+// level and draws none.
+func TestTheIdleBusCarriesTheLevelTopicOnlyWithSinks(t *testing.T) {
 	cases := []struct {
 		name       string
 		sinks      []PlayerDevice
 		wantVolume string
-		wantOwner  string
 	}{
 		{name: "a unit with nothing to hear"},
 		{
 			name:       "a unit with speakers",
 			sinks:      []PlayerDevice{{Class: "audio-sink"}},
 			wantVolume: playerVolumeTopic(testTopicBase, "house", "theater"),
-			wantOwner:  playerVolumeOwnerTopic(testTopicBase, "house", "theater"),
 		},
 	}
 	for _, each := range cases {
@@ -568,7 +565,6 @@ func TestTheIdleBusCarriesTheOwnerTopicWithTheLevelTopic(t *testing.T) {
 				gatherIdleRemotes(player, testTopicBase), false)
 
 			mustMatch(t, got.Bus.VolumeTopic, each.wantVolume)
-			mustMatch(t, got.Bus.VolumeOwnerTopic, each.wantOwner)
 		})
 	}
 }

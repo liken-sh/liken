@@ -233,11 +233,9 @@ func TestAnIdleUnitReportsItsReceiverAndHoldsAnIdleSession(t *testing.T) {
 	mustMatch(t, status.Reachable, "True")
 	mustMatch(t, len(cluster.sessions), 1)
 	mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
-		Player:      "house/theater",
-		Input:       "GAME",
-		Awake:       true,
-		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
+		Player: "house/theater",
+		Input:  "GAME",
+		Awake:  true,
 	})
 }
 
@@ -255,20 +253,19 @@ func TestAUnitWiredToNoReceiverReportsNoBlock(t *testing.T) {
 }
 
 // The idle bus carries the power topic only when the unit's screen is
-// wired through a Receiver, and the session carries the same topic. That
-// is the gate a client reads: no topic, and a power press reaches the
-// client, which lowers the shade.
+// wired through a Receiver. That is the gate a client reads: no topic,
+// and a power press reaches the client, which lowers the shade. The
+// session names no topic, because the operator writes the power asks
+// into it.
 func TestTheIdleBusCarriesThePowerTopicOnlyWithAReceiver(t *testing.T) {
 	cases := []struct {
 		name    string
 		cluster func() *fakeCluster
-		session bool
 		want    string
 	}{
 		{
 			name:    "a unit wired through a receiver",
 			cluster: receiverCluster,
-			session: true,
 			want:    playerPowerTopic(defaultTopicBase, "house", "theater"),
 		},
 		{name: "a unit straight into a panel", cluster: screenCluster},
@@ -284,11 +281,6 @@ func TestTheIdleBusCarriesThePowerTopicOnlyWithAReceiver(t *testing.T) {
 			bus := cluster.players["theater"].Status.Idle.Bus
 			if bus.PowerTopic != each.want {
 				t.Errorf("powerTopic = %q, want %q", bus.PowerTopic, each.want)
-			}
-			if each.session && len(cluster.sessions) == 1 &&
-				cluster.sessions[0].session.PowerTopic != each.want {
-				t.Errorf("session powerTopic = %q, want %q",
-					cluster.sessions[0].session.PowerTopic, each.want)
 			}
 		})
 	}
@@ -323,12 +315,10 @@ func TestAStandingPlayHoldsOneSessionOnTheReceiver(t *testing.T) {
 	mustMatch(t, cluster.sessions[0].name, "den-receiver")
 	mustMatch(t, cluster.sessions[0].manager, applyFieldManager)
 	mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
-		Player:      "house/theater",
-		Input:       "GAME",
-		Active:      true,
-		Awake:       true,
-		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
+		Player: "house/theater",
+		Input:  "GAME",
+		Active: true,
+		Awake:  true,
 	})
 	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "den-receiver")
 }
@@ -395,11 +385,9 @@ func TestThePanelDesireMovesTheAwakeFlag(t *testing.T) {
 
 			mustMatch(t, len(cluster.sessions), 1)
 			mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
-				Player:      "house/theater",
-				Input:       "GAME",
-				Awake:       each.want,
-				VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-				PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
+				Player: "house/theater",
+				Input:  "GAME",
+				Awake:  each.want,
 			})
 		})
 	}
@@ -409,11 +397,9 @@ func TestThePanelDesireMovesTheAwakeFlag(t *testing.T) {
 // house Receiver, with the given awake flag.
 func heldSession(awake bool) *ReceiverSession {
 	return &ReceiverSession{
-		Player:      "house/theater",
-		Input:       "GAME",
-		Awake:       awake,
-		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
+		Player: "house/theater",
+		Input:  "GAME",
+		Awake:  awake,
 	}
 }
 
@@ -468,6 +454,24 @@ func TestARestartAgainstTheHeldSessionAppliesNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A session an older release applied names the volume and power topics.
+// The pass applies it again without them, so the equipment operator
+// stops reading the bus for the unit, and the next pass sends nothing.
+func TestAHeldSessionThatNamesTopicsIsAppliedWithoutThem(t *testing.T) {
+	cluster := receiverCluster()
+	held := heldSession(true)
+	held.VolumeTopic = playerVolumeTopic(defaultTopicBase, "house", "theater")
+	held.PowerTopic = playerPowerTopic(defaultTopicBase, "house", "theater")
+	cluster.receivers["den-receiver"].Status.Session = held
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	runPlayers(media, []Player{*housePlayer()}, nil)
+	runPlayers(media, []Player{*housePlayer()}, nil)
+
+	mustMatch(t, len(cluster.sessions), 1)
+	mustMatch(t, *cluster.sessions[0].session, *heldSession(true))
 }
 
 // The session goes to the status subresource, under this operator's field

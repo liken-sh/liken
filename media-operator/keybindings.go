@@ -4,16 +4,20 @@ package main
 // film, and the documentation of that pod's controls. This is the
 // consumer's half of the two layers: the pod binds the kernel's names
 // the way Kodi and mpv bind them, and the amounts here are this
-// consumer's defaults, stated in no Keymap. Four keys act on a repeat
-// as well as a press, because they are the four a person holds: a
-// seek, a chapter step, a volume step, and an arrow.
+// consumer's defaults, stated in no Keymap. Three kinds of key act on a
+// repeat as well as a press, because they are the ones a person holds:
+// a seek, a chapter step, and an arrow.
+//
+// The volume keys have no row. The operator reads them off the
+// controllers' events topics and sets the level of the room
+// (volumeengine.go), so a press means the same during a film and
+// between films.
 
 // The amounts. They are this pod's own defaults. A cluster that wants
 // other numbers gets them from a later preferences tier, and no
 // per-controller table states them.
 const (
 	seekSeconds = 10
-	volumeStep  = 5
 	chapterStep = 1
 )
 
@@ -32,13 +36,11 @@ type keyBinding struct {
 // deterministic functions (HDMI-CEC 1.3a, CEC 13.13.3) with names of
 // their own, and each sets the state it names, so a second press
 // changes nothing: KEY_PLAYCD, from Play and Play Function, plays;
-// KEY_PAUSECD pauses; KEY_STOPCD ends the run; and KEY_UNMUTE, from
-// Restore Volume Function, unmutes. KEY_PLAYPAUSE stays a toggle,
-// because a Bluetooth remote's play button sends it too, and rc-cec
-// names a TV remote's Pause-Play Function with it; a Keymap row on the
-// Remote of the CEC adapter's input device can name that button
-// KEY_PAUSECD instead. KEY_MUTE stays a toggle for the same reason, and
-// no key name mutes without a toggle.
+// KEY_PAUSECD pauses; and KEY_STOPCD ends the run. KEY_PLAYPAUSE stays
+// a toggle, because a Bluetooth remote's play button sends it too, and
+// rc-cec names a TV remote's Pause-Play Function with it; a Keymap row
+// on the Remote of the CEC adapter's input device can name that button
+// KEY_PAUSECD instead.
 // KEY_WAKEUP, a TV remote's Power On Function, has no row: a film
 // plays, so the room is on already.
 // KEY_CYCLEWINDOWS asks the operator to move the focus mark and
@@ -66,11 +68,6 @@ var playbackKeys = withPowerRows(map[string]keyBinding{
 
 	"KEY_PREVIOUSSONG": {command: mediaCommand{Action: actionChapter, Amount: -chapterStep}, repeats: true},
 	"KEY_NEXTSONG":     {command: mediaCommand{Action: actionChapter, Amount: chapterStep}, repeats: true},
-
-	"KEY_VOLUMEUP":   {command: mediaCommand{Action: actionVolume, Amount: volumeStep}, repeats: true},
-	"KEY_VOLUMEDOWN": {command: mediaCommand{Action: actionVolume, Amount: -volumeStep}, repeats: true},
-	"KEY_MUTE":       {command: mediaCommand{Action: actionMute}},
-	"KEY_UNMUTE":     {command: mediaCommand{Action: actionUnmute}},
 
 	"KEY_SUBTITLE": {command: mediaCommand{Action: actionSubtitles}},
 	"KEY_AUDIO":    {command: mediaCommand{Action: actionAudio}},

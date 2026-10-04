@@ -1,7 +1,6 @@
 //! The rules a screen client holds for one `Player`: the quiet window and the
-//! off window, the focus gate, the shade, the level a press steps and the
-//! mark that says equipment owns it, the cycle request, and the panel
-//! desire.
+//! off window, the focus gate, the shade, the level the operator relays,
+//! the cycle request, and the panel desire.
 //!
 //! [`Screen`] reaches no socket and holds no clock. Every rule below is
 //! a function of what arrived and what time it is, so a test proves
@@ -37,7 +36,7 @@ const POWER_TOGGLE: &str = "toggle";
 /// none of them is a decision the client makes again. The shade moments
 /// say which way the cover eases. A focus names the controller a live
 /// mark landed on, by its place in `spec.remotes`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Moment {
     /// One press this crate does not act on itself, under the kernel's
     /// name for the control. The client holds its own table from these
@@ -53,8 +52,9 @@ pub enum Moment {
     Focus { remote: usize },
     /// The unit's whole presentable state.
     Status(Status),
-    /// The unit's listening level. `pressed` is false for the broker's
-    /// catch-up and true for a press.
+    /// The unit's listening level, as `media-operator` relays it. `pressed` is
+    /// false for the broker's catch-up and true for a live message, which is
+    /// a person changing the level with a remote or at the device.
     Level { volume: Volume, pressed: bool },
     /// A person took the up-next offer on the scrubber. The bytes are the
     /// `request` of the `Play`'s next block, which this crate never reads:
@@ -62,10 +62,6 @@ pub enum Moment {
     /// what follows. The moment fires whether or not the unit is idle,
     /// because the unit is never idle when this arrives.
     PlayNext(Vec<u8>),
-    /// The owner mark as it stands, as the raw payload. A non-empty mark
-    /// means equipment owns the level. An empty one means the mark is
-    /// cleared. The client decides what to draw for it.
-    Owner(Vec<u8>),
     /// One message on a topic the client owns. The rules read nothing in
     /// the payload and hold no state from it, because the topic is the
     /// client's own. `retained` is the broker's mark on the delivery, so a
@@ -95,7 +91,7 @@ pub struct Publish {
 
 /// What one fold leaves to do: something the client draws, or something the
 /// crate sends.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Moment(Moment),
     Publish(Publish),
@@ -134,12 +130,10 @@ pub struct Screen {
     /// none answers no press.
     player_name: String,
     status_topic: String,
-    /// The unit's volume topic, empty for a `Player` with no sinks. Empty is
-    /// the speaker gate: the client subscribes to no level and answers no
-    /// volume press.
+    /// The unit's volume topic, empty for a `Player` whose level the operator
+    /// does not relay. Empty is the speaker gate: the client subscribes to no
+    /// level.
     volume_topic: String,
-    /// The owner mark's topic, present only when the volume topic is.
-    volume_owner_topic: Option<String>,
     commands_topic: String,
     panel_topic: String,
     /// The topic a power press publishes a toggle on. Empty is the receiver
@@ -162,9 +156,6 @@ pub struct Screen {
     /// at on forever.
     off_after: Duration,
 
-    /// The last state the volume topic delivered. A press steps from it, and
-    /// from unity before any message arrives.
-    volume: Option<Volume>,
     /// Whether the last status named the activity `Idle`, the only state the
     /// timer arms in. It starts false, so a client answers no press until the
     /// retained status reaches it.
@@ -198,7 +189,6 @@ impl Screen {
             player_name: wiring.player_name.clone(),
             status_topic: wiring.status_topic.clone(),
             volume_topic: wiring.volume_topic.clone(),
-            volume_owner_topic: wiring.volume_owner_topic.clone(),
             commands_topic: wiring.commands_topic.clone(),
             panel_topic: wiring.panel_topic.clone(),
             power_topic: wiring.power_topic.clone(),
@@ -207,7 +197,6 @@ impl Screen {
             client_topics: Vec::new(),
             fade_after: wiring.fade_after,
             off_after: wiring.off_after,
-            volume: None,
             idle: false,
             asleep: false,
             // A client that starts has not read the retained desire yet. It
@@ -246,7 +235,8 @@ impl Screen {
     }
 
     /// The topics to subscribe to. An empty topic is one the operator did not
-    /// set, and a unit with no sinks has no volume topic at all.
+    /// set, and a unit whose level the operator does not relay has no volume
+    /// topic at all.
     ///
     /// A press on any of the unit's controllers reaches the quiet window, so
     /// every events topic is read. The focus topic is retained, so each mark
@@ -257,7 +247,6 @@ impl Screen {
         let mut filters = vec![
             self.status_topic.clone(),
             self.volume_topic.clone(),
-            self.volume_owner_topic.clone().unwrap_or_default(),
             self.commands_topic.clone(),
             self.panel_topic.clone(),
             self.power_topic.clone(),
@@ -287,8 +276,8 @@ impl Screen {
     /// message on a topic has no effect rather than a crash.
     ///
     /// `retained` is the broker's own mark on a delivery from its retained
-    /// store. A retained level is the catch-up, which a person did not press,
-    /// so it sets the level and shows no indicator; a live level is a press.
+    /// store. A retained level is the catch-up, which no person changed, so
+    /// it sets the level and shows no indicator; a live level is a change.
     pub fn deliver(
         &mut self,
         topic: &str,
@@ -302,12 +291,7 @@ impl Screen {
         // The volume topic carries a state and not a named command, so it is
         // read before the command vocabulary below.
         if !self.volume_topic.is_empty() && topic == self.volume_topic {
-            return self.on_level(payload, retained);
-        }
-        // The mark is a state beside the level, read for the same reason
-        // the level is. The client decides what an owner means.
-        if self.volume_owner_topic.as_deref() == Some(topic) {
-            return vec![Effect::Moment(Moment::Owner(payload.to_vec()))];
+            return on_level(payload, retained);
         }
         // A controller's presses are checked before the commands topic,
         // because a key event is not the operator's command vocabulary.
@@ -478,20 +462,6 @@ impl Screen {
         vec![Effect::Moment(Moment::Sleep)]
     }
 
-    /// Fold one message off the volume topic. The level is held for two
-    /// reasons: a volume press steps from the last level the topic delivered,
-    /// and the client draws the indicator from it.
-    fn on_level(&mut self, payload: &[u8], retained: bool) -> Vec<Effect> {
-        let Some(volume) = crate::volume::parse(payload) else {
-            return Vec::new();
-        };
-        self.volume = Some(volume);
-        vec![Effect::Moment(Moment::Level {
-            volume,
-            pressed: !retained,
-        })]
-    }
-
     /// Fold one key event. The checks run in this order. The cycle key
     /// asks the operator to move the mark and does nothing else. A power
     /// key, on a unit whose screen is wired through a Receiver, reaches the
@@ -499,14 +469,12 @@ impl Screen {
     /// else, and the shade and the panel desire stand as they were. A
     /// sleeping screen wakes on any other press, so a person
     /// gets the screen back with whatever control they touched, and that
-    /// press does nothing else. A level key, while the unit plays nothing,
-    /// publishes the unit's next level. Every other key, while the unit
-    /// plays nothing, reaches the client. Every press restarts the quiet
-    /// window.
+    /// press does nothing else. Every other key, while the unit plays
+    /// nothing, reaches the client. Every press restarts the quiet window.
     ///
     /// A press acts only while the remote's mark names this `Player`. A pad
     /// pointed at another room touches nothing here, not the shade and not
-    /// the level. A release changes nothing at all: the standing pod holds
+    /// the client. A release changes nothing at all: the standing pod holds
     /// the repeat and stops it at the release, so this crate has nothing to
     /// stop.
     fn on_press(&mut self, index: usize, payload: &[u8], now: Instant) -> Vec<Effect> {
@@ -610,18 +578,9 @@ impl Screen {
             moment = Some(Moment::Wake);
             line = Some(format!("{trigger} woke the screen and did nothing else"));
         } else if self.idle && keys::owned(&press.key) {
-            let level = self.level(&press);
-            if press.down() {
-                line = Some(match &level {
-                    Some((next, volume)) => format!(
-                        "{trigger}: {}, published {volume} to {}",
-                        level_word(&press.key),
-                        next.topic
-                    ),
-                    None => format!("{trigger} ignored, because the player has no sinks"),
-                });
-            }
-            publish = level.map(|(next, _)| next);
+            // A repeat of the cycle key asks nothing: one press is one
+            // cycle, and the key is the crate's, so it never reaches the
+            // client.
         } else if self.idle {
             if press.down() {
                 line = Some(format!("{trigger} passed to the client"));
@@ -723,24 +682,6 @@ impl Screen {
         }
     }
 
-    /// What a level press publishes, retained. A key that names no level, and
-    /// a unit with no sinks, publish nothing. The level steps from the last
-    /// message the topic delivered, or from unity before any message arrives.
-    fn level(&self, press: &press::Press) -> Option<(Publish, Volume)> {
-        if self.volume_topic.is_empty() {
-            return None;
-        }
-        let next = keys::level(press, self.volume.unwrap_or_default())?;
-        Some((
-            Publish {
-                topic: self.volume_topic.clone(),
-                payload: next.payload(),
-                retained: true,
-            },
-            next,
-        ))
-    }
-
     /// Add one fold's shade moment. A wake also states the on desire, which
     /// is what lifts the override. No moment is the ordinary case of a fold
     /// that changed no state, and it adds nothing.
@@ -839,14 +780,16 @@ impl Screen {
     }
 }
 
-/// What a level key does, in the words every line uses.
-fn level_word(key: &str) -> String {
-    match key {
-        keys::VOLUME_UP => format!("volume +{}", crate::volume::STEP),
-        keys::VOLUME_DOWN => format!("volume -{}", crate::volume::STEP),
-        keys::UNMUTE => "unmute".into(),
-        _ => "mute or unmute".into(),
-    }
+/// Fold one message off the volume topic into the moment the client draws.
+/// The screen holds no level of its own, because no rule here reads it.
+fn on_level(payload: &[u8], retained: bool) -> Vec<Effect> {
+    let Some(volume) = crate::volume::parse(payload) else {
+        return Vec::new();
+    };
+    vec![Effect::Moment(Moment::Level {
+        volume,
+        pressed: !retained,
+    })]
 }
 
 /// The `Remote` a controller topic belongs to, as `namespace/name`. Every

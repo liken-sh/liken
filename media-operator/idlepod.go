@@ -212,8 +212,8 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // runs only where the resolved controller is this operator's own.
 //
 // The client holds the fade and off windows, the focus gate, the shade,
-// the volume step, the cycle request, and the panel desire in its own
-// process, through the media-screen crate. So the container carries the
+// the volume indicator, the cycle request, and the panel desire in its
+// own process, through the media-screen crate. So the container carries the
 // whole contract that crate reads: the two windows, the unit's name,
 // the bus address, and every topic the client subscribes to or
 // publishes on.

@@ -19,14 +19,8 @@ func TestCommandFor(t *testing.T) {
 		// the film where the first put it (HDMI-CEC 1.3a, CEC 13.13.3).
 		{name: "play", command: mediaCommand{Action: actionPlay}, want: []any{"no-osd", "set", "pause", "no"}},
 		{name: "hold", command: mediaCommand{Action: actionHold}, want: []any{"no-osd", "set", "pause", "yes"}},
-		{name: "unmute", command: mediaCommand{Action: actionUnmute}, want: nil},
-		// A volume step and a mute press become no mpv command at
-		// all. Each publishes the unit's next level, and the subscription
-		// on the volume topic is what applies it.
-		{name: "mute", command: mediaCommand{Action: actionMute}, want: nil},
 		{name: "seek forward", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"no-osd", "seek", 30}},
 		{name: "seek back", command: mediaCommand{Action: actionSeek, Amount: -10}, want: []any{"no-osd", "seek", -10}},
-		{name: "volume", command: mediaCommand{Action: actionVolume, Amount: 5}, want: nil},
 		{name: "chapter", command: mediaCommand{Action: actionChapter, Amount: -1}, want: []any{"no-osd", "add", "chapter", -1}},
 		{name: "subtitles", command: mediaCommand{Action: actionSubtitles}, want: []any{"osd-auto", "cycle", "sub"}},
 		{name: "audio", command: mediaCommand{Action: actionAudio}, want: []any{"osd-auto", "cycle", "audio"}},
@@ -70,7 +64,6 @@ func TestFeedbackFor(t *testing.T) {
 		{name: "seek summons the display", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"script-message", "summon"}},
 		{name: "chapter summons the display", command: mediaCommand{Action: actionChapter, Amount: 1}, want: []any{"script-message", "summon"}},
 		{name: "pause needs no follow-up", command: mediaCommand{Action: actionPause}, want: nil},
-		{name: "volume needs no follow-up", command: mediaCommand{Action: actionVolume, Amount: 5}, want: nil},
 		{name: "up needs no follow-up", command: mediaCommand{Action: actionUp}, want: nil},
 	}
 

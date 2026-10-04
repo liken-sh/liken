@@ -64,6 +64,14 @@ type Bus struct {
 	handler   busHandler
 	dial      func(context.Context) (net.Conn, error)
 
+	// retainedHandler, when it is set, receives each message the broker
+	// marks retained, in place of handler. The broker marks a retained
+	// message it delivers because of a new subscription, and marks none
+	// it forwards as it is published (MQTT 3.1.1, 3.3.1.3). So a reader
+	// tells the state it catches up on from a change made now. Set it
+	// before Run.
+	retainedHandler busHandler
+
 	mutex    sync.Mutex
 	filters  map[string]struct{}
 	out      chan []byte
@@ -223,7 +231,11 @@ func (b *Bus) readLoop(reader *bufio.Reader) {
 		}
 		if first&0xF0 == mqttPublish {
 			topic, payload, ok := parsePublish(body)
-			if ok && b.handler != nil {
+			switch {
+			case !ok:
+			case first&mqttRetainFlag != 0 && b.retainedHandler != nil:
+				b.retainedHandler(topic, payload)
+			case b.handler != nil:
 				b.handler(topic, payload)
 			}
 		}

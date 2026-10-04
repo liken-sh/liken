@@ -24,15 +24,11 @@ pub const PLAYER_NAME: &str = "MEDIA_PLAYER_NAME";
 /// activity, the current `Play`, and the parts.
 pub const STATUS_TOPIC: &str = "MEDIA_PLAYER_STATUS_TOPIC";
 
-/// The `Player`'s retained volume topic. The operator sets it only for a unit
-/// that states sinks, so an empty value is the speaker gate: the client
-/// subscribes to no level, draws no volume row, and answers no volume press.
+/// The `Player`'s retained volume topic, which `media-operator` alone writes.
+/// The operator sets the variable only for a unit whose level it relays, so an
+/// empty value is the speaker gate: the client subscribes to no level and
+/// draws no volume row.
 pub const VOLUME_TOPIC: &str = "MEDIA_PLAYER_VOLUME_TOPIC";
-
-/// The `Player`'s retained owner-mark topic, set beside the volume topic.
-/// A non-empty retained payload on it means equipment owns the level, and
-/// the client draws no volume row of its own while it stands.
-pub const VOLUME_OWNER_TOPIC: &str = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC";
 
 /// The address this client's `/metrics` listener binds, written `host:port`.
 /// An empty value is milestone 65's off switch: no listener opens, and the
@@ -97,8 +93,6 @@ pub struct Wiring {
     pub player_name: String,
     pub status_topic: String,
     pub volume_topic: String,
-    /// The owner mark's topic, present only when the volume topic is.
-    pub volume_owner_topic: Option<String>,
     pub commands_topic: String,
     pub panel_topic: String,
     /// The topic a power press publishes a toggle on, present only when
@@ -132,20 +126,11 @@ impl Wiring {
 
         let fade_after = seconds(&read(FADE_AFTER_SECONDS));
         let off_after = seconds(&read(OFF_AFTER_SECONDS));
-        let volume_topic = read(VOLUME_TOPIC);
-        // The speaker gate covers the mark too: no level means no owner
-        // topic, whatever the variable says.
-        let volume_owner_topic = read(VOLUME_OWNER_TOPIC);
-        let volume_owner_topic = match volume_topic.is_empty() || volume_owner_topic.is_empty() {
-            true => None,
-            false => Some(volume_owner_topic),
-        };
         Self {
             bus_address: read(BUS_ADDRESS),
             player_name: read(PLAYER_NAME),
             status_topic: read(STATUS_TOPIC),
-            volume_topic,
-            volume_owner_topic,
+            volume_topic: read(VOLUME_TOPIC),
             commands_topic: read(COMMANDS_TOPIC),
             panel_topic: read(PANEL_TOPIC),
             power_topic: read(POWER_TOPIC),
@@ -234,7 +219,6 @@ mod tests {
             (PLAYER_NAME, "den-tv"),
             (STATUS_TOPIC, "media/players/den/tv/status"),
             (VOLUME_TOPIC, "media/players/den/tv/volume"),
-            (VOLUME_OWNER_TOPIC, "media/players/den/tv/volume/owner"),
             (COMMANDS_TOPIC, "media/players/den/tv/commands"),
             (PANEL_TOPIC, "media/players/den/tv/panel"),
             (POWER_TOPIC, "media/players/den/tv/power"),
@@ -250,10 +234,6 @@ mod tests {
         assert_eq!(read.player_name, "den-tv");
         assert_eq!(read.status_topic, "media/players/den/tv/status");
         assert_eq!(read.volume_topic, "media/players/den/tv/volume");
-        assert_eq!(
-            read.volume_owner_topic.as_deref(),
-            Some("media/players/den/tv/volume/owner")
-        );
         assert_eq!(read.commands_topic, "media/players/den/tv/commands");
         assert_eq!(read.panel_topic, "media/players/den/tv/panel");
         assert_eq!(read.power_topic, "media/players/den/tv/power");
@@ -261,18 +241,6 @@ mod tests {
         assert_eq!(read.off_after, Duration::from_secs(1800));
         assert_eq!(read.metrics_address, "0.0.0.0:9200");
         assert_eq!(read.version, "2026.09.10-001");
-    }
-
-    #[test]
-    fn a_unit_with_no_sinks_reads_no_owner_topic() {
-        let read = wiring(&[(VOLUME_OWNER_TOPIC, "media/players/den/tv/volume/owner")]);
-        assert_eq!(read.volume_owner_topic, None);
-    }
-
-    #[test]
-    fn a_unit_whose_operator_named_no_owner_topic_reads_none() {
-        let read = wiring(&[(VOLUME_TOPIC, "media/players/den/tv/volume")]);
-        assert_eq!(read.volume_owner_topic, None);
     }
 
     #[test]
