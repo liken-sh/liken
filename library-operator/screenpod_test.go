@@ -860,16 +860,31 @@ func TestScreenPodWithNoSinksNamesNoVolumeTopic(t *testing.T) {
 	}
 }
 
-// An older media-operator states no power topic, and the browser then
-// forwards the power key to its shade.
-func TestScreenPodWithNoPowerTopicNamesNoPowerVariable(t *testing.T) {
-	player := denScreenOnTheBus()
-	player.Status.Idle.Bus.PowerTopic = ""
+// The power topic is copied with no condition, so the template is the
+// same whatever the topic holds. An older media-operator states no topic
+// for a unit with no Receiver, and the variable then carries the empty
+// value, which the browser reads as no topic and keeps the power key as
+// a shade.
+func TestScreenPodCopiesThePowerTopicAsItStands(t *testing.T) {
+	cases := []struct {
+		name  string
+		topic string
+	}{
+		{name: "a current media-operator", topic: "liken/media/players/house/den/power"},
+		{name: "an older media-operator with no receiver", topic: ""},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			player := denScreenOnTheBus()
+			player.Status.Idle.Bus.PowerTopic = each.topic
 
-	environment := browserEnvironment(player)
+			environment := browserEnvironment(player)
 
-	if _, set := environment[mediaPowerTopicVariable]; set {
-		t.Errorf("env = %v, want no power topic", environment)
+			value, set := environment[mediaPowerTopicVariable]
+			if !set || value != each.topic {
+				t.Errorf("env = %v, want %s=%q", environment, mediaPowerTopicVariable, each.topic)
+			}
+		})
 	}
 }
 

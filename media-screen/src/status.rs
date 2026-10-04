@@ -21,6 +21,33 @@ pub struct Status {
     pub play: Option<Play>,
     #[serde(default)]
     pub components: Vec<Component>,
+    /// Where a power press goes. `None` is a status that states no mode: an
+    /// operator that predates the field, or one that has not matched the
+    /// unit against the `Receiver`s yet. The screen keeps the mode it last
+    /// read through such a status.
+    #[serde(default, deserialize_with = "power_mode")]
+    pub power: Option<Power>,
+}
+
+/// Where a power press goes, as the operator states it in `power`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Power {
+    /// The unit's screen is wired through a `Receiver`. A power press is an
+    /// ask on the power topic, and the equipment operator turns the room.
+    Room,
+    /// The unit's screen is wired through no `Receiver`. The client handles a
+    /// power press itself and lowers its shade.
+    Screen,
+}
+
+/// Read the `power` word. A word this client does not name states no mode,
+/// so the screen keeps the one it holds rather than guessing at a new one.
+fn power_mode<'de, D: serde::Deserializer<'de>>(source: D) -> Result<Option<Power>, D::Error> {
+    Ok(match Option::<String>::deserialize(source)?.as_deref() {
+        Some("room") => Some(Power::Room),
+        Some("screen") => Some(Power::Screen),
+        _ => None,
+    })
 }
 
 /// What the unit is doing. The three words are the operator's own, and the
@@ -145,6 +172,22 @@ mod tests {
         assert_eq!(status.activity, Activity::Idle);
         assert_eq!(status.play, None);
         assert!(status.components.is_empty());
+    }
+
+    #[test]
+    fn the_power_mode_decodes_and_an_unknown_word_states_none() {
+        let cases = [
+            (r#""power":"room","#, Some(Power::Room)),
+            (r#""power":"screen","#, Some(Power::Screen)),
+            (r#""power":"later","#, None),
+            (r#""power":null,"#, None),
+            ("", None),
+        ];
+        for (field, want) in cases {
+            let payload = format!(r#"{{{field}"displayName":"The Den"}}"#);
+            let status = parse(payload.as_bytes()).expect("the status decodes");
+            assert_eq!(status.power, want, "{field}");
+        }
     }
 
     #[test]

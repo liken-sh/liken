@@ -170,11 +170,14 @@ func standingSession(receiver *Receiver) *ReceiverSession {
 
 // receivers reads the cluster's Receivers from the view at most once a
 // pass, and only for a unit whose screen resolved. A cluster that runs
-// no equipment operator has no Receivers in the view.
+// no equipment operator has no Receivers in the view. failed records a
+// read that failed, which matches no unit but says nothing about the
+// wiring.
 type receivers struct {
 	view   *clusterView
 	items  []Receiver
 	listed bool
+	failed bool
 }
 
 func newReceivers(view *clusterView) *receivers {
@@ -202,6 +205,7 @@ func (r *receivers) matchFor(node, monitor string) (*Receiver, string, bool) {
 		items, err := r.view.Receivers()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reading receivers: %v\n", err)
+			r.failed = true
 			return nil, "", false
 		}
 		r.items = items
@@ -264,7 +268,13 @@ func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerRecei
 	receiver, input, matched := o.matchReceiver(player)
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	if !matched {
-		o.ensure.set(key, unitReceiver{})
+		// A failed read of the Receivers says nothing about the wiring,
+		// so the unit keeps the entry the last pass left on the ensure
+		// desk. Recording it as unwired would state the screen power mode
+		// for every unit and drop a Television's ask for one pass.
+		if !o.receiverLookup().failed {
+			o.ensure.set(key, unitReceiver{})
+		}
 		return nil
 	}
 	o.applySession(player, receiver, input, standing, o.awake(player, receiver))

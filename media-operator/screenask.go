@@ -86,11 +86,24 @@ func (o *operator) relayScreenAsks() {
 }
 
 // relayScreenAsk publishes one ask on its Player's power topic, not
-// retained, because an ask is an event and not a state.
+// retained, because an ask is an event and not a state. The ask goes
+// only to a unit whose screen is wired through a Receiver. Every unit
+// has a power topic, and a client in the screen mode handles power
+// itself, so a late ask for a unit whose Receiver was removed must not
+// wake or lower that screen.
 func (o *operator) relayScreenAsk(television string, ask TelevisionScreenAsk) {
 	action, known := screenActions[ask.Screen]
 	namespace, name, named := strings.Cut(ask.Player, "/")
 	if !known || !named || namespace == "" || name == "" {
+		return
+	}
+	cause := ask.Cause
+	if cause == "" {
+		cause = "screenAsk " + ask.Screen
+	}
+	if _, held := o.ensure.receiverFor(playerKey(namespace, name)); !held {
+		logLine(o.log, "television %s: %s, relayed nothing, because player %s is wired to no receiver",
+			television, cause, ask.Player)
 		return
 	}
 	payload, err := json.Marshal(powerMessage{Action: action})
@@ -99,9 +112,5 @@ func (o *operator) relayScreenAsk(television string, ask TelevisionScreenAsk) {
 	}
 	topic := playerPowerTopic(o.topicBase, namespace, name)
 	o.bus.Publish(topic, payload, false)
-	cause := ask.Cause
-	if cause == "" {
-		cause = "screenAsk " + ask.Screen
-	}
 	logLine(o.log, "television %s: %s, published %s to %s", television, cause, payload, topic)
 }

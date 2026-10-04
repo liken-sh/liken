@@ -47,7 +47,7 @@ const testIdleImage = "ghcr.io/liken-sh/media-operator-idle:2026.09.01-001"
 // idle policy and owns no remotes, for the tests that are about neither.
 func plainIdlePod(player *Player, claim *ResourceClaim, busAddress, topicBase, timeZone string) *Pod {
 	return buildIdlePod(player, claim, busAddress, topicBase, timeZone,
-		resolveIdle(nil, nil, testIdleImage), nil, "")
+		resolveIdle(nil, nil, testIdleImage), nil)
 }
 
 // The claim holds two requests, the draw device on the Player's own
@@ -158,6 +158,7 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 		playerNameVariable:           "theater",
 		playerCommandsTopicVariable:  playerCommandsTopic(testTopicBase, "house", "theater"),
 		playerPanelTopicVariable:     playerPanelTopic(testTopicBase, "house", "theater"),
+		playerPowerTopicVariable:     playerPowerTopic(testTopicBase, "house", "theater"),
 		idleFadeAfterSecondsVariable: "600",
 		idleOffAfterSecondsVariable:  "0",
 		metricsAddressVariable:       "0.0.0.0:9200",
@@ -201,7 +202,7 @@ func TestBuildIdlePodOmitsTheVersionForAnUntaggedImage(t *testing.T) {
 	player := standingIdlePlayer()
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "",
-		resolveIdle(nil, nil, "ghcr.io/liken-sh/media-operator-idle@sha256:abc"), nil, "")
+		resolveIdle(nil, nil, "ghcr.io/liken-sh/media-operator-idle@sha256:abc"), nil)
 
 	env := containerEnv(pod.Spec.Containers[0])
 	if version, present := env[mediaVersionVariable]; present {
@@ -462,7 +463,7 @@ func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "", resolveIdle(fadeAfter(60), nil, testIdleImage),
-		gatherIdleRemotes(player, testTopicBase), "")
+		gatherIdleRemotes(player, testTopicBase))
 
 	env := containerEnv(pod.Spec.Containers[0])
 	mustMatch(t, env[idleFadeAfterSecondsVariable], "60")
@@ -501,29 +502,36 @@ func TestBuildIdlePodCarriesTheCommandsAndPanelTopics(t *testing.T) {
 		playerPanelTopic(testTopicBase, "house", "theater"))
 }
 
-// The power topic travels on the idle client pod only when the unit's
-// screen is wired through a Receiver, so a power press publishes a toggle
-// on the bus instead of reaching the client.
-func TestBuildIdlePodCarriesThePowerTopicWithAReceiver(t *testing.T) {
+// The power topic travels on every idle client pod, wired through a
+// Receiver or not, so the retained status and not the pod says which
+// way a power press goes.
+func TestBuildIdlePodCarriesThePowerTopic(t *testing.T) {
 	player := standingIdlePlayer()
-	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testBusAddress, testTopicBase, "",
-		resolveIdle(nil, nil, testIdleImage), nil, playerPowerTopic(testTopicBase, "house", "theater"))
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testBusAddress, testTopicBase, "")
 
 	mustMatch(t, envValue(pod.Spec.Containers[0], playerPowerTopicVariable),
 		playerPowerTopic(testTopicBase, "house", "theater"))
 }
 
-// A unit not wired through a Receiver keeps the shade on a power press,
-// so its idle client pod carries no power topic at all.
-func TestBuildIdlePodOmitsThePowerTopicWithoutAReceiver(t *testing.T) {
-	player := standingIdlePlayer()
-	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testBusAddress, testTopicBase, "")
+// Wiring a Receiver to a unit, or removing one, leaves the idle pod's
+// spec as it was, so the pod is not replaced and the screen does not go
+// blank while its replacement starts.
+func TestTheIdlePodIsTheSameWithAndWithoutAReceiver(t *testing.T) {
+	idlePod := func(cluster *fakeCluster) PodSpec {
+		claim := cluster.claims[idleClaimName("theater")]
+		mustSucceed(t, stampTemplateHash(&claim.Metadata, claim.Spec))
+		media := testOperator(t, cluster, make(chan struct{}, 1))
+		media.idleDisplayClass = "display-draw"
+		runPlayers(media, []Player{*housePlayer()}, nil)
+		return cluster.pods[idlePodName("theater")].Spec
+	}
 
-	env := containerEnv(pod.Spec.Containers[0])
-	if _, carried := env[playerPowerTopicVariable]; carried {
-		t.Errorf("env carries %s, want it omitted: %+v", playerPowerTopicVariable, env)
+	wired, unwired := idlePod(receiverCluster()), idlePod(screenCluster())
+
+	mustMatch(t, len(wired.Containers) > 0, true)
+	if !reflect.DeepEqual(wired, unwired) {
+		t.Errorf("the idle pod differs with a receiver:\nwired   %+v\nunwired %+v", wired, unwired)
 	}
 }
 
@@ -595,7 +603,7 @@ func TestBuildIdlePodCarriesTheOffWindow(t *testing.T) {
 	}, nil, testIdleImage)
 
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testBusAddress, testTopicBase, "", idle, nil, "")
+		testBusAddress, testTopicBase, "", idle, nil)
 
 	mustMatch(t, envValue(pod.Spec.Containers[0], idleOffAfterSecondsVariable), "1800")
 }
@@ -610,7 +618,7 @@ const namedIdleImage = "ghcr.io/liken-sh/media-browser:2026.09.01-001"
 func namedIdlePod(player *Player, image string) *Pod {
 	return buildIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "America/New_York",
-		resolveIdle(&IdlePolicy{Image: image}, nil, testIdleImage), nil, "")
+		resolveIdle(&IdlePolicy{Image: image}, nil, testIdleImage), nil)
 }
 
 // A Player that names an image runs that image in place of the one

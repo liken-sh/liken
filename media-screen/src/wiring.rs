@@ -53,10 +53,11 @@ pub const COMMANDS_TOPIC: &str = "MEDIA_PLAYER_COMMANDS_TOPIC";
 /// parses no topic.
 pub const PANEL_TOPIC: &str = "MEDIA_PLAYER_PANEL_TOPIC";
 
-/// The topic a power press on a unit whose screen is wired through a
-/// Receiver publishes a toggle on. The operator sets it only for such a
-/// unit, so an empty value is the receiver gate: a unit with none
-/// forwards the power key, and the client lowers its shade.
+/// The topic a power press publishes its ask on while the unit's status
+/// states the room mode. A current operator sets it for every unit, so
+/// wiring or removing a `Receiver` leaves the pod as it is. An operator that
+/// predates the power mode sets it only for a unit with a `Receiver`, and a
+/// client that read no mode treats an empty value as the screen mode.
 pub const POWER_TOPIC: &str = "MEDIA_PLAYER_POWER_TOPIC";
 
 /// The two lists of the unit's controllers, newline-joined and aligned by
@@ -95,9 +96,8 @@ pub struct Wiring {
     pub volume_topic: String,
     pub commands_topic: String,
     pub panel_topic: String,
-    /// The topic a power press publishes a toggle on, present only when
-    /// the unit's screen is wired through a Receiver. Empty forwards the
-    /// key, so the client keeps the shade.
+    /// The topic a power press publishes its ask on in the room mode. Empty
+    /// keeps every power press on the client.
     pub power_topic: String,
     /// The controllers in `spec.remotes` order.
     pub remotes: Vec<Remote>,

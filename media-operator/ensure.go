@@ -67,40 +67,87 @@ const (
 // pass fills it from the Receivers and the bus reader reads it for a
 // press and for a power ask, so it carries a mutex of its own rather
 // than the pass's.
+//
+// A unit the pass placed with no Receiver keeps an entry with no name.
+// That entry separates a unit the pass found unwired from one the pass
+// has not reached yet: every unit after a start, until the first pass
+// reaches it, which can take seconds on a busy API server. The status a
+// screen client reads states the power mode only for a placed unit
+// (powerFor).
 type ensureDesk struct {
 	mutex     sync.Mutex
 	receivers map[string]unitReceiver
 }
 
 // unitReceiver is the Receiver a unit's cable lands on, and whether its
-// InputSelected condition is True.
+// InputSelected condition is True. An empty name is a unit wired to no
+// Receiver.
 type unitReceiver struct {
 	name          string
 	inputSelected bool
 }
+
+// The two power modes the unit's retained status states. With a
+// Receiver, a power press is an ask on the power topic for the room's
+// equipment (roompower.go). With none, the screen client handles the
+// press itself and lowers its shade.
+const (
+	powerRoom   = "room"
+	powerScreen = "screen"
+)
 
 func newEnsureDesk() *ensureDesk {
 	return &ensureDesk{receivers: map[string]unitReceiver{}}
 }
 
 // set records one unit's Receiver. A Receiver with no name, the shape a
-// unit that stopped matching arrives in, drops the entry.
+// unit that matches no input arrives in, records the unit as unwired.
 func (e *ensureDesk) set(player string, receiver unitReceiver) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	if receiver.name == "" {
-		delete(e.receivers, player)
-		return
-	}
 	e.receivers[player] = receiver
 }
 
-// receiverFor reads one unit's Receiver.
+// receiverFor reads one unit's Receiver. An unwired unit and a unit the
+// pass has not placed both hold none.
 func (e *ensureDesk) receiverFor(player string) (unitReceiver, bool) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	receiver, held := e.receivers[player]
-	return receiver, held
+	receiver, placed := e.receivers[player]
+	return receiver, placed && receiver.name != ""
+}
+
+// powerFor answers the power mode of one unit, from the same entry
+// askPower reads, so the mode a screen client acts on and the ask this
+// operator accepts agree. A unit the pass has not placed answers the
+// empty string, and the status then carries no mode. A screen client
+// keeps the mode it last read, so an operator that restarts does not
+// state screen for a wired unit before its first pass reads the
+// Receivers. A wired unit whose screen does not resolve still reads
+// screen until it does (screengap.go).
+func (e *ensureDesk) powerFor(player string) string {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	receiver, placed := e.receivers[player]
+	switch {
+	case !placed:
+		return ""
+	case receiver.name == "":
+		return powerScreen
+	}
+	return powerRoom
+}
+
+// retain drops every unit outside the live set, so a deleted Player
+// leaves no entry for a Player created again under its name.
+func (e *ensureDesk) retain(live map[string]bool) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	for player := range e.receivers {
+		if !live[player] {
+			delete(e.receivers, player)
+		}
+	}
 }
 
 // pressOf reads one events payload as the start of a press, and names

@@ -222,7 +222,6 @@ func (o *operator) publishPlayerStatuses(players []Player, plays []Play) {
 func deriveIdleStatus(
 	player *Player, controller, busAddress, topicBase string,
 	claim *ResourceClaim, idle resolvedIdle, remotes []idleRemoteTopics,
-	receiver bool,
 ) *PlayerIdleStatus {
 	if claim == nil {
 		return nil
@@ -237,14 +236,13 @@ func deriveIdleStatus(
 		VolumeTopic:   idleVolumeTopic(player, topicBase),
 		CommandsTopic: playerCommandsTopic(topicBase, namespace, name),
 		PanelTopic:    playerPanelTopic(topicBase, namespace, name),
-		Remotes:       idleBusRemotes(remotes),
-	}
-	// A power press turns the equipment only when the unit's screen is
-	// wired through a Receiver, so the bus carries the power topic for
-	// such a unit and nothing for one that is not. That is the gate the
-	// client reads: no topic, and the power key keeps its shade.
-	if receiver {
-		bus.PowerTopic = playerPowerTopic(topicBase, namespace, name)
+		// The power topic is the same for every unit, wired through a
+		// Receiver or not. A delegate builds it into its pod, so a topic
+		// that came and went with the Receiver would replace the pod each
+		// time a Receiver is wired or removed. The retained status says
+		// which way a power press goes (playerBusStatus.Power).
+		PowerTopic: playerPowerTopic(topicBase, namespace, name),
+		Remotes:    idleBusRemotes(remotes),
 	}
 	return &PlayerIdleStatus{
 		Controller:       controller,
@@ -282,6 +280,12 @@ type playerBusStatus struct {
 	Activity    string               `json:"activity"`
 	Play        *playerBusPlay       `json:"play,omitempty"`
 	Components  []playerBusComponent `json:"components,omitempty"`
+	// Power is room while the unit's screen is wired through a Receiver,
+	// and a power press is then an ask on the power topic. It is screen
+	// while the screen client handles the press itself. The status
+	// carries no mode for a unit the pass has not placed yet, and a
+	// client keeps the mode it last read (ensureDesk.powerFor).
+	Power string `json:"power,omitempty"`
 }
 
 // playerBusPlay names the Play that runs or starts on the unit. Name is
@@ -357,11 +361,17 @@ const (
 // them, and a controller a person carries comes and goes and drives one
 // unit at a time. A remote whose standing claim named no Peripheral
 // carries neither a link nor a charge, and its focus is unchanged,
-// because the mark comes from the focus desk.
-func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, peripherals *peripheralDesk, focus *focusDesk) playerBusStatus {
+// because the mark comes from the focus desk. The power mode comes from
+// the ensure desk, the same entry a power ask reads, so every publish
+// states the mode the operator then acts on.
+func derivePlayerBusStatus(
+	player *Player, activity PlayerStatus, plays []Play,
+	peripherals *peripheralDesk, focus *focusDesk, ensure *ensureDesk,
+) playerBusStatus {
 	status := playerBusStatus{
 		DisplayName: idlePlayerName(player),
 		Activity:    activity.Activity,
+		Power:       ensure.powerFor(playerKey(player.Metadata.Namespace, player.Metadata.Name)),
 	}
 	if play := findPlay(plays, player.Metadata.Namespace, activity.Play); play != nil {
 		status.Play = &playerBusPlay{

@@ -628,11 +628,11 @@ spec:
                           type: string
                           description: |-
                             The topic a power press on this unit publishes
-                            an ask on, present only when the unit's screen
-                            is wired through a Receiver: toggle for
-                            KEY_POWER and KEY_POWER2, off for KEY_SLEEP, and
-                            on for KEY_WAKEUP, the names the kernel gives a
-                            TV remote's Power Off Function and Power On
+                            an ask on while the unit's status topic states
+                            the power mode room: toggle for KEY_POWER and
+                            KEY_POWER2, off for KEY_SLEEP, and on for
+                            KEY_WAKEUP, the names the kernel gives a TV
+                            remote's Power Off Function and Power On
                             Function. The media operator writes each ask
                             into the Receiver's session, and the equipment
                             operator turns the room off or on. The media
@@ -640,9 +640,12 @@ spec:
                             person picks the unit's input in the TV's
                             source menu while the screen sleeps, and
                             sleep when the TV goes to standby, and the
-                            client wakes or sleeps the screen. A unit with
-                            none carries no topic, and a power press
-                            reaches its client, which lowers the shade.
+                            client wakes or sleeps the screen. Every unit
+                            carries the topic, wired through a Receiver or
+                            not, so a delegate's pod stays the same when a
+                            Receiver is wired or removed. In the power mode
+                            screen, a power press reaches the client,
+                            which lowers the shade.
                         remotes:
                           type: array
                           x-kubernetes-list-type: atomic

@@ -122,10 +122,10 @@ impl Screen {
     }
 
     /// Answer a power ask the way a press of its key answers while the unit
-    /// is idle. With a Receiver, the key's ask goes out on the power topic,
+    /// is idle. In the room mode, the key's ask goes out on the power topic,
     /// and the shade and the panel desire stand, for the reason the press's
-    /// power branch gives. With none, the client reads the ask as a press of
-    /// the key and lowers its shade.
+    /// power branch gives. In the screen mode, the client reads the ask as a
+    /// press of the key and lowers its shade.
     pub(super) fn answer_power_ask(&mut self, key: &'static str, effects: &mut Vec<Effect>) {
         let ask = if key == keys::POWER_OFF {
             POWER_OFF
@@ -137,7 +137,7 @@ impl Screen {
             self.commands_topic
         );
         let action = keys::power_action(key).unwrap_or("toggle");
-        if self.power_topic.is_empty() {
+        if !self.room_power() {
             self.lines
                 .push(format!("{asked}, so passed to the client as {key}"));
             effects.push(Effect::Moment(Moment::Press(key.into())));

@@ -339,6 +339,7 @@ func TestTheScreenAsksAreRelayedOnce(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:00:00.000Z", "Wake")
 	media, broker := caughtUpOperator(t, cluster)
+	media.ensure.set(playerKey("house", "theater"), unitReceiver{name: "den-receiver"})
 
 	media.relayScreenAsks()
 	mustPublishNothing(t, broker)
@@ -352,4 +353,33 @@ func TestTheScreenAsksAreRelayedOnce(t *testing.T) {
 	mustMatch(t, string(published.payload), `{"action":"sleep"}`)
 	mustMatch(t, published.retained, false)
 	mustPublishNothing(t, broker)
+}
+
+// A screen client in the screen mode handles power itself, so an ask for
+// a unit whose screen is wired through no Receiver reaches no screen. A
+// late ask after the Receiver is removed is the case this guards.
+func TestAScreenAskForAUnitWithNoReceiverIsNotRelayed(t *testing.T) {
+	cases := []struct {
+		name  string
+		shape func(*operator)
+	}{
+		{name: "a unit the pass placed with no receiver", shape: func(media *operator) {
+			media.ensure.set(playerKey("house", "theater"), unitReceiver{})
+		}},
+		{name: "a unit the pass has not placed", shape: func(*operator) {}},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:00:00.000Z", "Wake")
+			media, broker := caughtUpOperator(t, cluster)
+			each.shape(media)
+			media.relayScreenAsks()
+
+			cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:05:00.000Z", "Sleep")
+			media.relayScreenAsks()
+
+			mustPublishNothing(t, broker)
+		})
+	}
 }

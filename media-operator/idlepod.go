@@ -231,7 +231,7 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // pod restart.
 func buildIdlePod(
 	player *Player, claim *ResourceClaim, busAddress, topicBase, timeZone string,
-	idle resolvedIdle, remotes []idleRemoteTopics, powerTopic string,
+	idle resolvedIdle, remotes []idleRemoteTopics,
 ) *Pod {
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 
@@ -305,14 +305,13 @@ func buildIdlePod(
 	container.Env = append(container.Env,
 		EnvVar{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, namespace, name)},
 		EnvVar{Name: playerPanelTopicVariable, Value: playerPanelTopic(topicBase, namespace, name)})
-	// The power topic reaches the client only when the unit's screen is
-	// wired through a Receiver, so a power press turns the equipment and
-	// not the client's shade. A unit with none carries no topic, and a
-	// power press reaches the client, which lowers the shade.
-	if powerTopic != "" {
-		container.Env = append(container.Env,
-			EnvVar{Name: playerPowerTopicVariable, Value: powerTopic})
-	}
+	// The power topic reaches every client, wired through a Receiver or
+	// not, so wiring or removing a Receiver leaves the pod's spec as it
+	// is and the pod is not replaced. The retained status states the
+	// power mode, and the client reads it at each press: room publishes
+	// the ask on this topic, and screen lowers the client's shade.
+	container.Env = append(container.Env,
+		EnvVar{Name: playerPowerTopicVariable, Value: playerPowerTopic(topicBase, namespace, name)})
 	// The two remote lists stay index-aligned, so the client pairs
 	// each events topic with the focus topic that carries its mark. A
 	// remote's position in them is its spec.remotes order, and the
@@ -435,15 +434,7 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 		screen.claim = claim
 		if idle.Controller == idleControllerOwn {
 			remotes := gatherIdleRemotes(player, o.topicBase)
-			// A power press turns the equipment only when the unit's screen
-			// is wired through a Receiver, so the idle client learns the
-			// power topic from the same match that names the unit's
-			// receiver. A unit with none keeps the shade on a power press.
-			powerTopic := ""
-			if _, _, matched := o.matchReceiver(player); matched {
-				powerTopic = playerPowerTopic(o.topicBase, namespace, name)
-			}
-			screen.pod = o.resources.apply(buildIdlePod(player, claim, o.busAddress, o.topicBase, timeZone, idle, remotes, powerTopic))
+			screen.pod = o.resources.apply(buildIdlePod(player, claim, o.busAddress, o.topicBase, timeZone, idle, remotes))
 		}
 	}
 	if err := o.reconcileStanding(screen, claimRead{}); err != nil {

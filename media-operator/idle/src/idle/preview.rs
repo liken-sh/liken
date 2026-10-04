@@ -174,6 +174,7 @@ impl Keys {
                 title: PLAY_TITLE.to_string(),
             }),
             components,
+            power: None,
         })
     }
 

@@ -1172,8 +1172,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
-			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase),
-			desired.Receiver != nil)
+			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase))
 		// The devices that set the unit's level, and their reports, reach
 		// the volume engine on every pass, because a report is what the
 		// relay publishes and what a pending target waits for.
@@ -1208,6 +1207,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// releases the equipment it held.
 	o.retainSessions(matched)
 	o.retainHeldScreens(live)
+	o.ensure.retain(live)
 	// The volume engine shrinks the same way.
 	o.levels.retain(live)
 	// A topic whose Player no longer exists has its retained value cleared
@@ -1242,7 +1242,7 @@ func (o *operator) publishPlayerStatus(player *Player, plays []Play) (string, Pl
 	var desired PlayerStatus
 	was, moved, err := o.playerStatuses.publishDerived(o.bus, topic, func() ([]byte, string, error) {
 		desired = derivePlayerStatus(player, plays, o.reports)
-		status := derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus)
+		status := derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus, o.ensure)
 		payload, err := json.Marshal(status)
 		return payload, status.Activity, err
 	})

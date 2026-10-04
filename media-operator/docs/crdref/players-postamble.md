@@ -6,7 +6,7 @@ every topic follows and lists every writer and reader of each.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
-| `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
+| `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, parts, and power mode |
 | `players/{namespace}/{name}/volume` | the operator | yes | the listening level |
 | `players/{namespace}/{name}/volume/commands` | any program that is not a remote | no | an ask for a step or a mute |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
@@ -17,7 +17,7 @@ every topic follows and lists every writer and reader of each.
 
 What a screen would show about one unit: its name, what it is
 doing, the `Play` it runs, and its parts with the link and the
-battery level of each.
+battery level of each. It also states where a power press goes.
 The operator is the only writer, so an idle pod that just started
 draws the live state the broker already holds, with no request to
 the operator. The operator republishes only when the payload changes,
@@ -35,7 +35,8 @@ deleted.
         {"name": "Built-in Speakers", "kind": "sink"},
         {"name": "Studio Controller", "kind": "remote", "connected": true,
          "battery": 62, "focused": true}
-      ]
+      ],
+      "power": "room"
     }
 
 `activity` is the same word the Kubernetes status carries. `play` is
@@ -49,6 +50,37 @@ reports, from 0 to 100, and a device that reports none omits the key.
 [focus mark](/docs/reference/remotes/#focus-and-focuscycle) names
 this `Player`, and the idle screen draws a small hexagon beside that
 controller in its parts list. Every other component omits the key.
+
+`power` is `room` while the unit's screen is wired through a
+`Receiver`: a power press is then an ask on the
+[`power`](#power) topic, and the equipment operator turns the room
+off or on. It is `screen` while the screen is wired to no
+`Receiver`: the client handles a power press itself and lowers its
+shade, and it ignores `wake` and `sleep` on the `power` topic. A
+client reads the field at each press, so a `Receiver` that is wired
+or removed changes where the next press goes with no pod restart.
+The operator omits the field for a unit it has not matched against
+the `Receiver`s yet: after the operator starts or the `Player` is
+created, until the operator's first pass reaches the unit. That pass
+can take seconds on a busy API server. A client keeps the mode it last
+read through such a message. A client that has read no mode treats a
+non-empty power topic as `room`, the rule an operator that predates
+the field follows.
+
+The field reads `screen` for a wired unit while the unit's idle claim
+is unallocated and its screen does not resolve, for example after a
+restart that finds the claim with no allocation. It reads `room` again
+from the pass after the claim is allocated. A short gap in a screen
+that already resolved keeps `room` for up to 90 seconds.
+
+A client that draws the idle screen must read this field to decide
+where a power press goes. The power topic in
+`status.idle.bus.powerTopic` is set for every unit, so a client that
+reads the topic's presence as the sign of a `Receiver` treats every
+unit as `room`. Upgrade `library-operator` together with this
+operator, because an older media browser follows that rule. When this
+operator is upgraded, the idle pod of each unit with no `Receiver` is
+replaced once, because its environment gains the power topic.
 
 `play.displayAlive` is the run's
 [`DisplayAlive` condition](/docs/reference/plays/#statusconditions)
@@ -166,15 +198,15 @@ during a film, just before the `Play` ends, and the client reads that
 ask as a press of the home key. It publishes `power` when a person
 presses power during a film, also just before the `Play` ends. The
 client holds that ask until this `Player`'s status reads `Idle`, and
-then answers it as a power press between films: on a unit wired
-through a `Receiver`, it publishes the toggle on the power topic, and
-on a unit with none, it lowers the shade. The toggle waits for `Idle`
+then answers it as a power press between films: in the power mode
+`room`, it publishes the toggle on the power topic, and in the mode
+`screen`, it lowers the shade. The toggle waits for `Idle`
 so that the equipment operator reads the room after the film ended. A
 client that reads no `Idle` within 10 seconds drops the ask. The
 sidecar publishes `power-off` in place of `power` for `KEY_SLEEP`, the
 name the kernel gives a TV remote's Power Off Function, and the client
 answers it the way it answers a press of `KEY_SLEEP`: `off` on the
-power topic, or the shade on a unit with no `Receiver`.
+power topic in the mode `room`, or the shade in the mode `screen`.
 
 | Message | Writer | What it says |
 |---|---|---|
@@ -187,10 +219,14 @@ power topic, or the shade on a unit with no `Receiver`.
 
 The room's power, for a unit whose screen is wired through a
 `Receiver`. The operator names the topic in
-`status.idle.bus.powerTopic` only for such a unit. Each message is an
-ask, so none is retained.
+`status.idle.bus.powerTopic` for every unit, so a delegate's pod stays
+the same when a `Receiver` is wired or removed. The
+[`status`](#status) topic's `power` field says whether the topic is in
+use: `room` while a `Receiver` is wired, and `screen` while none is.
+Each message is an ask, so none is retained.
 
-The idle screen client publishes a power press between films here.
+The idle screen client publishes a power press between films here,
+in the power mode `room`.
 The operator writes each ask into the `Receiver`'s
 `status.session.powerAsk`, and the equipment operator answers it:
 
@@ -210,7 +246,9 @@ The operator publishes two asks for the screen here, when the room's
 TV speaks over HDMI-CEC. The equipment operator's CEC node workload
 writes each ask into the `Television`'s `status.screenAsk`, and the
 operator relays each new one once. It relays nothing for an ask that
-the `Television` already held when the operator started.
+the `Television` already held when the operator started, and nothing
+for a unit whose screen is wired through no `Receiver`. A client in
+the power mode `screen` ignores both asks.
 
 | Message | When | What the client does |
 |---|---|---|

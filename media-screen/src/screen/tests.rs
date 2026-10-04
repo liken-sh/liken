@@ -1189,3 +1189,4 @@ mod lines;
 mod panel;
 mod power_ask;
 mod power_keys;
+mod power_mode;

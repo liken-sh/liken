@@ -6,11 +6,11 @@ package main
 // loses its allocation while the pod that holds it is replaced: the old
 // pod is gone, and the scheduler has not placed the new one. A match
 // that followed the claim through that gap would lift the session on
-// the equipment and drop the power topic from status.idle.bus. A
-// delegate that builds the power topic into its pod's template then
-// replaces the pod again, the claim loses its allocation again, and the
-// loop turns the equipment off and on every pass until a pass finds
-// the claim allocated before the delegate reads the status. So the pass keeps the last screen a unit resolved for
+// the equipment, and the pass after the gap would apply it again, so
+// the room would turn off and on each time a screen pod is replaced.
+// The unit's status would also state the screen power mode during the
+// gap, and a power press then would lower the shade instead of turning
+// the room. So the pass keeps the last screen a unit resolved for
 // screenGapBound, and matches the Receivers against that screen.
 //
 // The pass matches the held screen against the Receivers it reads now,

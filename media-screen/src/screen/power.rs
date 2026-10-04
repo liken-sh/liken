@@ -6,6 +6,11 @@
 //! when the TV goes to standby while the screen is awake. The screen
 //! answers each the way a press or the quiet window would, so the panel
 //! desire, and the Receiver session that follows it, move with the TV.
+//!
+//! The operator relays the two asks only to a unit with a `Receiver`. A
+//! client in the screen mode still ignores them, so an ask that was in flight
+//! when the `Receiver` was removed does not move a screen that handles power
+//! itself.
 
 use std::time::Instant;
 
@@ -35,10 +40,22 @@ impl Screen {
         let Some(ask) = crate::object::<Ask>(payload) else {
             return Vec::new();
         };
-        match ask.action.as_str() {
-            WAKE => self.wake_asked(now),
-            SLEEP => self.sleep_asked(now),
-            _ => Vec::new(),
+        let asked = match ask.action.as_str() {
+            WAKE => "wake",
+            SLEEP => "sleep",
+            _ => return Vec::new(),
+        };
+        if !self.room_power() {
+            self.lines.push(format!(
+                "{} asked the screen to {asked}, ignored, because the power mode is screen",
+                self.power_topic
+            ));
+            return Vec::new();
+        }
+        if asked == WAKE {
+            self.wake_asked(now)
+        } else {
+            self.sleep_asked(now)
         }
     }
 

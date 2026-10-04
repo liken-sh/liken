@@ -116,7 +116,7 @@ shape.
 | `plays/{namespace}/{name}/commands` | any program | the playback pod | no | [one named command](/docs/reference/plays/#commands) |
 | `plays/{namespace}/{name}/status` | the playback pod; the operator clears it | the operator | yes | [the run's report](/docs/reference/plays/#status-1) |
 | `plays/{namespace}/{name}/availability` | the playback pod and its Last Will; the operator clears it | the operator | yes | [`online` or `offline`, and the pod's UID](/docs/reference/plays/#availability) |
-| `players/{namespace}/{name}/status` | the operator | the idle pod, or a delegate's client | yes | [the unit's name, activity, `Play`, and parts](/docs/reference/players/#status-1) |
+| `players/{namespace}/{name}/status` | the operator | the idle pod, or a delegate's client | yes | [the unit's name, activity, `Play`, parts, and power mode](/docs/reference/players/#status-1) |
 | `players/{namespace}/{name}/volume` | the operator | the playback pod, the idle pod or a delegate's client, and the operator | yes | [the level and the muted flag](/docs/reference/players/#volume) |
 | `players/{namespace}/{name}/volume/commands` | any program that is not a remote | the operator | no | [an ask for a step or a mute](/docs/reference/players/#volumecommands) |
 | `players/{namespace}/{name}/panel` | the idle pod, or a delegate's client; the operator clears it | the operator | yes | [the panel desire](/docs/reference/players/#panel) |

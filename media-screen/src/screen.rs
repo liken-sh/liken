@@ -15,7 +15,7 @@ pub mod press;
 use std::time::{Duration, Instant};
 
 use crate::panel;
-use crate::status::{Activity, Status};
+use crate::status::{Activity, Power, Status};
 use crate::volume::Volume;
 use crate::wiring::{Remote, Wiring};
 
@@ -136,9 +136,15 @@ pub struct Screen {
     volume_topic: String,
     commands_topic: String,
     panel_topic: String,
-    /// The topic a power press publishes a toggle on. Empty is the receiver
-    /// gate: the key forwards and the client lowers its shade.
+    /// The topic a power press publishes its ask on in the room mode. A
+    /// current operator sets it for every unit, and an operator that
+    /// predates the power mode sets it only for a unit with a `Receiver`.
     power_topic: String,
+    /// The power mode the last status that stated one named, or `None`
+    /// while no status stated one. [`Screen::room_power`] reads it at each
+    /// press, so a `Receiver` that is wired or removed while the client runs
+    /// moves the next press.
+    power: Option<Power>,
     /// The unit's controllers, in `spec.remotes` order, so a controller's
     /// index in this list is the index a focus moment carries.
     remotes: Vec<Remote>,
@@ -192,6 +198,7 @@ impl Screen {
             commands_topic: wiring.commands_topic.clone(),
             panel_topic: wiring.panel_topic.clone(),
             power_topic: wiring.power_topic.clone(),
+            power: None,
             marks: vec![Mark::default(); wiring.remotes.len()],
             remotes: wiring.remotes.clone(),
             client_topics: Vec::new(),
@@ -419,6 +426,12 @@ impl Screen {
             return Vec::new();
         };
         let idle = status.activity == Activity::Idle;
+        // The mode is read before the activity is compared, because the
+        // operator republishes the status when only the mode moves, and a
+        // held power ask below is answered in the mode this status states.
+        if let Some(power) = status.power {
+            self.power = Some(power);
+        }
         let mut effects = vec![Effect::Moment(Moment::Status(status))];
         if idle == self.idle {
             return effects;
@@ -464,12 +477,11 @@ impl Screen {
 
     /// Fold one key event. The checks run in this order. The cycle key
     /// asks the operator to move the mark and does nothing else. A power
-    /// key, on a unit whose screen is wired through a Receiver, reaches the
-    /// equipment and never the client: it publishes the toggle and nothing
-    /// else, and the shade and the panel desire stand as they were. A
-    /// sleeping screen wakes on any other press, so a person
-    /// gets the screen back with whatever control they touched, and that
-    /// press does nothing else. Every other key, while the unit plays
+    /// key, in the room mode, reaches the equipment and never the client:
+    /// it publishes the toggle and nothing else, and the shade and the
+    /// panel desire stand as they were. A sleeping screen wakes on any
+    /// other press, so a person gets the screen back with whatever control
+    /// they touched, and that press does nothing else. Every other key, while the unit plays
     /// nothing, reaches the client. Every press restarts the quiet window.
     ///
     /// A press acts only while the remote's mark names this `Player`. A pad
@@ -525,7 +537,7 @@ impl Screen {
                 None => format!("{trigger} ignored, because the remote has no focus topic"),
             });
         } else if let Some(action) =
-            keys::power_action(&press.key).filter(|_| self.idle && !self.power_topic.is_empty())
+            keys::power_action(&press.key).filter(|_| self.idle && self.room_power())
         {
             // A room with a receiver answers the power key itself, so the
             // key never reaches the client and the shade never operates:
@@ -539,9 +551,9 @@ impl Screen {
             // turns the room on wakes the TV through the equipment
             // operator, and the next press wakes this screen the way any
             // press does. A held key that repeated would flip the equipment
-            // on and off under the hand, so only the press publishes. A unit
-            // with no receiver falls through to the ordinary rules below,
-            // and the client lowers its shade.
+            // on and off under the hand, so only the press publishes. In the
+            // screen mode the press falls through to the ordinary rules
+            // below, and the client lowers its shade.
             //
             // The two deterministic power functions of a TV remote publish
             // off and on in place of the toggle (keys::POWER_OFF), and the
@@ -668,6 +680,15 @@ impl Screen {
             payload: Vec::new(),
             retained: false,
         })
+    }
+
+    /// Whether a power press is an ask for the room, read at the press and at
+    /// the answer to a held power ask. The room mode needs the power topic to
+    /// publish on. A client that read no mode follows the rule of an operator
+    /// that predates the field, which set the topic only for a unit with a
+    /// `Receiver`.
+    fn room_power(&self) -> bool {
+        !self.power_topic.is_empty() && self.power != Some(Power::Screen)
     }
 
     /// The ask a power press publishes on a unit whose screen is wired

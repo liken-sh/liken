@@ -167,31 +167,56 @@ Set these variables on your container. Each value comes from
   `{"action": "power"}` there when a person presses power during a
   film, just before the `Play` ends. The client holds that message
   until the status reads `Idle`, and then answers it as a power press:
-  the toggle on `bus.powerTopic` when the unit has one, and the shade
-  when it has none. The client drops the message when no `Idle`
-  arrives within 10 seconds. It publishes `{"action": "power-off"}`
+  the toggle on `bus.powerTopic` in the power mode `room`, and the
+  shade in the power mode `screen`. The client drops the message when
+  no `Idle` arrives within 10 seconds. It publishes `{"action": "power-off"}`
   in place of `power` for `KEY_SLEEP`, and the client answers it as a
-  press of `KEY_SLEEP`: `off` on `bus.powerTopic`, or the shade. The
+  press of `KEY_SLEEP`: `off` on `bus.powerTopic` in the mode `room`,
+  or the shade in the mode `screen`. The
   `media-screen` crate holds this rule. When a `Play` ends, the client's
   own surface is on the screen again without a command from the client, and the
   retained status is the cue. Nothing else arrives, and the client
   publishes nothing back.
-* `MEDIA_PLAYER_POWER_TOPIC`, from `bus.powerTopic`. It is present
-  only when the unit's screen is wired through a `Receiver`. A power
-  press between films publishes `{"action": "toggle"}` there, not
-  retained. The media operator writes the ask into the `Receiver`, and
-  the equipment operator turns the room off or on.
-  `KEY_SLEEP` and `KEY_WAKEUP`, the names the kernel gives a TV
-  remote's Power Off Function and Power On Function, publish
-  `{"action": "off"}` and `{"action": "on"}`, which leave a room
-  already off or on as it is. The client also subscribes to the topic:
-  the media operator publishes `{"action": "wake"}` there when a
-  person picks the unit's input in the TV's source menu while the
-  screen sleeps, and `{"action": "sleep"}` when the TV goes to standby.
-  The client wakes the screen and states the `on` desire for the first,
-  and brings the shade down and states the `off` desire at once for
-  the second, while the unit plays nothing. Set nothing when the field
-  is absent, and a power press reaches the client.
+* `MEDIA_PLAYER_POWER_TOPIC`, from `bus.powerTopic`. Every unit has
+  it, so your pod stays the same when a `Receiver` is wired or
+  removed. The `power` field of the retained status says where a
+  power press goes, and a `Receiver` that is wired or removed changes
+  that field and nothing else. Read the field at each press, not at
+  startup:
+  * `room`: the unit's screen is wired through a `Receiver`. A power
+    press between films publishes `{"action": "toggle"}` on this
+    topic, not retained. The media operator writes the ask into the
+    `Receiver`, and the equipment operator turns the room off or on.
+    `KEY_SLEEP` and
+    `KEY_WAKEUP`, the names the kernel gives a TV remote's Power Off
+    Function and Power On Function, publish `{"action": "off"}` and
+    `{"action": "on"}`, which leave a room already off or on as it
+    is. The media operator also publishes `{"action": "wake"}` on the
+    topic when a person picks the unit's input in the TV's source
+    menu while the screen sleeps, and `{"action": "sleep"}` when the
+    TV goes to standby. The client wakes the screen and states the
+    `on` desire for the first, and brings the shade down and states
+    the `off` desire at once for the second, while the unit plays
+    nothing.
+  * `screen`: the unit's screen is wired through no `Receiver`. A
+    power press reaches the client, which lowers its shade, and the
+    client ignores `wake` and `sleep` on the topic.
+  * No field: the operator has not matched the unit against the
+    `Receiver`s yet. This lasts from the operator's start, or the
+    `Player`'s creation, until the operator's first pass reaches the
+    unit, which can take seconds on a busy API server. Keep the mode
+    you last read. A client that has read no mode uses `room` when
+    this variable is set, the rule of an operator that predates the
+    field.
+
+  Subscribe to the topic always, because the mode can change while
+  the client runs. Do not read the variable's presence as the sign of
+  a `Receiver`: the operator sets it for every unit, so a client that
+  does treats every unit as `room`. An older `library-operator` media
+  browser reads it that way, so upgrade `library-operator` together
+  with the media operator. The upgrade replaces the idle pod or
+  browser pod of each unit with no `Receiver` once, because the pod's
+  environment gains this variable.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
   publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
   The operator turns the desire into an override on the screen's
@@ -207,8 +232,8 @@ A press arrives on a controller's events topic as
 `Remote`'s events topic gets. A press acts only while the
 controller's focus mark names this `Player`, only while the unit plays
 nothing, and only while the screen is awake. A press on a sleeping
-screen wakes it and does nothing else, except `KEY_SLEEP` on a unit
-with no `Receiver`, which leaves the screen asleep. A held control arrives again as
+screen wakes it and does nothing else, except `KEY_SLEEP` in the power
+mode `screen`, which leaves the screen asleep. A held control arrives again as
 value 2, and a release, value 0, acts on nothing.
 
 A live focus mark that moves to this `Player` wakes the screen. A
@@ -218,8 +243,9 @@ The one repeat that acts is the answer to the client's own cycle
 request, on a controller that only this `Player` lists.
 
 The client brings its own shade down. The operator's client does it on
-back and on power. A client with levels does it on power, and on back
-when back has no level left to return to.
+back, and on power in the power mode `screen`. A client with levels
+does it on power in that mode, and on back when back has no level left
+to return to.
 
 ## Expect the claim to change
 

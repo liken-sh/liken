@@ -35,50 +35,39 @@ func gapOperator(t *testing.T) (*operator, *fakeCluster, *testClock) {
 }
 
 // runGap runs one pass with the idle claim unallocated at the given
-// offset from the start of the gap, and answers the power topic the
-// Player's status carries after it.
-func runGap(media *operator, cluster *fakeCluster, clock *testClock, offset time.Duration) string {
+// offset from the start of the gap, and answers the power mode the
+// unit's status carries after it.
+func runGap(t *testing.T, media *operator, cluster *fakeCluster, clock *testClock, offset time.Duration) string {
+	t.Helper()
 	cluster.claims[idleClaimName("theater")].Status = nil
 	clock.now = gapStart.Add(offset)
 	runPlayers(media, []Player{*housePlayer()}, nil)
-	return statusPowerTopic(cluster)
-}
-
-// statusPowerTopic reads the power topic off the idle bus block, or the
-// word none for a status with no topic.
-func statusPowerTopic(cluster *fakeCluster) string {
-	status := cluster.players["theater"].Status
-	if status.Idle == nil || status.Idle.Bus == nil || status.Idle.Bus.PowerTopic == "" {
-		return "none"
-	}
-	return status.Idle.Bus.PowerTopic
+	return publishedPower(t, media)
 }
 
 // A screen pod that another operator replaces leaves the idle claim
-// unallocated until the scheduler places the new pod. That operator
-// builds the power topic into the pod's template, so a topic that
-// changed during the gap would make it replace the pod again, and each
-// lift and apply would turn the equipment off and on. A gap within the
-// bound changes nothing. A screen that stays away past the bound lifts
-// the session and drops the topic.
+// unallocated until the scheduler places the new pod. A gap within the
+// bound changes nothing: the session stands and the status still states
+// the room's power, so a press during the gap still turns the room. A
+// screen that stays away past the bound lifts the session and states
+// the screen's power until the screen comes back.
 func TestAScreenGapKeepsTheReceiverMatchOnlyWithinTheBound(t *testing.T) {
-	topic := playerPowerTopic(defaultTopicBase, "house", "theater")
 	cases := []struct {
 		name        string
 		offsets     []time.Duration
-		wantTopics  string
+		wantPowers  string
 		wantApplies string
 	}{
 		{
 			name:        "the screen comes back within the bound",
 			offsets:     []time.Duration{0, screenGapBound - time.Second},
-			wantTopics:  topic + ", " + topic + ", " + topic,
+			wantPowers:  "room, room, room",
 			wantApplies: "den-receiver: GAME",
 		},
 		{
 			name:        "the screen stays away past the bound",
 			offsets:     []time.Duration{0, screenGapBound},
-			wantTopics:  topic + ", none, " + topic,
+			wantPowers:  "room, screen, room",
 			wantApplies: "den-receiver: GAME, den-receiver: lift, den-receiver: GAME",
 		},
 	}
@@ -87,16 +76,16 @@ func TestAScreenGapKeepsTheReceiverMatchOnlyWithinTheBound(t *testing.T) {
 			media, cluster, clock := gapOperator(t)
 
 			runPlayers(media, []Player{*housePlayer()}, nil)
-			before := statusPowerTopic(cluster)
+			before := publishedPower(t, media)
 			allocated := cluster.claims[idleClaimName("theater")].Status
 			var gap string
 			for _, offset := range each.offsets {
-				gap = runGap(media, cluster, clock, offset)
+				gap = runGap(t, media, cluster, clock, offset)
 			}
 			cluster.claims[idleClaimName("theater")].Status = allocated
 			runPlayers(media, []Player{*housePlayer()}, nil)
 
-			mustMatch(t, strings.Join([]string{before, gap, statusPowerTopic(cluster)}, ", "), each.wantTopics)
+			mustMatch(t, strings.Join([]string{before, gap, publishedPower(t, media)}, ", "), each.wantPowers)
 			mustMatch(t, appliedSessions(cluster), each.wantApplies)
 		})
 	}
@@ -109,13 +98,13 @@ func TestAScreenThatComesBackStartsTheNextGapAfresh(t *testing.T) {
 
 	runPlayers(media, []Player{*housePlayer()}, nil)
 	allocated := cluster.claims[idleClaimName("theater")].Status
-	runGap(media, cluster, clock, 0)
+	runGap(t, media, cluster, clock, 0)
 	cluster.claims[idleClaimName("theater")].Status = allocated
 	runPlayers(media, []Player{*housePlayer()}, nil)
-	runGap(media, cluster, clock, screenGapBound-time.Second)
-	gap := runGap(media, cluster, clock, screenGapBound+time.Second)
+	runGap(t, media, cluster, clock, screenGapBound-time.Second)
+	gap := runGap(t, media, cluster, clock, screenGapBound+time.Second)
 
-	mustMatch(t, gap, playerPowerTopic(defaultTopicBase, "house", "theater"))
+	mustMatch(t, gap, powerRoom)
 	mustMatch(t, appliedSessions(cluster), "den-receiver: GAME")
 }
 
@@ -127,7 +116,7 @@ func TestAScreenThatNeverResolvedMatchesNothing(t *testing.T) {
 
 	runPlayers(media, []Player{*housePlayer()}, nil)
 
-	mustMatch(t, statusPowerTopic(cluster), "none")
+	mustMatch(t, publishedPower(t, media), powerScreen)
 	mustMatch(t, appliedSessions(cluster), "")
 }
 
@@ -142,7 +131,7 @@ func TestAPlayerThatIsGoneForgetsItsScreen(t *testing.T) {
 	cluster.claims[idleClaimName("theater")].Status = nil
 	runPlayers(media, []Player{*housePlayer()}, nil)
 
-	mustMatch(t, statusPowerTopic(cluster), "none")
+	mustMatch(t, publishedPower(t, media), powerScreen)
 	mustMatch(t, appliedSessions(cluster), "den-receiver: GAME, den-receiver: lift")
 }
 

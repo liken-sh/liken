@@ -237,10 +237,12 @@ type PlayerIdleBus struct {
 	VolumeTopic string `json:"volumeTopic,omitempty"`
 
 	// PowerTopic is the topic a power press on this unit publishes an ask
-	// on, toggle, on, or off, present only when the unit's screen is
-	// wired through a Receiver. This operator publishes wake and sleep
-	// there for the screen. A unit with none carries no topic, and
-	// a power press reaches its client, which lowers the shade.
+	// on, toggle, on, or off, while the unit's status topic states the
+	// power mode room. Every unit carries it, so wiring or removing a
+	// Receiver leaves a delegate's pod as it is. This operator publishes
+	// wake and sleep there for the screen of a unit wired through a
+	// Receiver. In the mode screen, a power press reaches the client,
+	// which lowers the shade.
 	PowerTopic string `json:"powerTopic,omitempty"`
 
 	CommandsTopic string             `json:"commandsTopic"`

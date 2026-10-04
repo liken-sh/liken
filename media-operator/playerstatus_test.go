@@ -171,7 +171,7 @@ func TestDerivePlayerBusStatusListsThePartsInScreenOrder(t *testing.T) {
 	desk := linked(controllerKey("house", "sofa"), true)
 	connected := true
 
-	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, desk, newFocusDesk(nil))
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, desk, newFocusDesk(nil), newEnsureDesk())
 
 	want := playerBusStatus{
 		DisplayName: "Studio Lab",
@@ -200,7 +200,7 @@ func TestDerivePlayerBusStatusFallsBackToTheClassAndTheName(t *testing.T) {
 		},
 	}
 
-	got := derivePlayerBusStatus(player, PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), newFocusDesk(nil))
+	got := derivePlayerBusStatus(player, PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), newFocusDesk(nil), newEnsureDesk())
 
 	mustMatch(t, got.DisplayName, "theater")
 	mustMatchAll(t, componentNames(got), []string{"display-output", "audio-sink", "sofa"})
@@ -232,7 +232,7 @@ func TestDerivePlayerBusStatusMarksTheFocusedRemote(t *testing.T) {
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			got := derivePlayerBusStatus(theaterWithParts(),
-				PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), each.focus)
+				PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), each.focus, newEnsureDesk())
 			remote := got.Components[len(got.Components)-1]
 			mustMatch(t, remote.Focused != nil, each.held)
 			mustMatch(t, remote.Focused != nil && *remote.Focused, each.want)
@@ -244,7 +244,7 @@ func TestDerivePlayerBusStatusMarksTheFocusedRemote(t *testing.T) {
 // not a controller's to hold.
 func TestDerivePlayerBusStatusMarksNoDisplayOrSinkFocused(t *testing.T) {
 	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
-		nil, newPeripheralDesk(), focusedOn(controllerKey("house", "sofa"), "theater"))
+		nil, newPeripheralDesk(), focusedOn(controllerKey("house", "sofa"), "theater"), newEnsureDesk())
 
 	mustMatch(t, got.Components[0].Focused == nil, true)
 	mustMatch(t, got.Components[1].Focused == nil, true)
@@ -254,7 +254,7 @@ func TestDerivePlayerBusStatusMarksNoDisplayOrSinkFocused(t *testing.T) {
 // its JSON and not only by its Go field.
 func TestPlayerBusStatusCarriesTheFocusedKey(t *testing.T) {
 	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
-		nil, newPeripheralDesk(), focusedOn(controllerKey("house", "sofa"), "theater"))
+		nil, newPeripheralDesk(), focusedOn(controllerKey("house", "sofa"), "theater"), newEnsureDesk())
 
 	payload, err := json.Marshal(got)
 	mustSucceed(t, err)
@@ -293,7 +293,7 @@ func TestDerivePlayerBusStatusFoldsTheLink(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, each.desk, newFocusDesk(nil))
+			got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, each.desk, newFocusDesk(nil), newEnsureDesk())
 			remote := got.Components[len(got.Components)-1]
 			mustMatch(t, remote.Connected != nil, each.held)
 			mustMatch(t, remote.Connected != nil && *remote.Connected, each.want)
@@ -309,7 +309,7 @@ func TestDerivePlayerBusStatusCarriesTheCharge(t *testing.T) {
 	charged.Status.Battery = &PeripheralBattery{Percentage: 62}
 
 	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
-		nil, holding(key, charged), newFocusDesk(nil))
+		nil, holding(key, charged), newFocusDesk(nil), newEnsureDesk())
 
 	remote := got.Components[len(got.Components)-1]
 	mustMatch(t, remote.Battery != nil, true)
@@ -320,14 +320,14 @@ func TestDerivePlayerBusStatusCarriesTheCharge(t *testing.T) {
 	mustMatch(t, strings.Contains(string(payload), `"battery":62`), true)
 
 	flat := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
-		nil, linked(key, true), newFocusDesk(nil))
+		nil, linked(key, true), newFocusDesk(nil), newEnsureDesk())
 	mustMatch(t, flat.Components[len(flat.Components)-1].Battery == nil, true)
 }
 
 // An idle unit names no Play, so the payload carries no play block and the
 // screen draws the clock alone.
 func TestDerivePlayerBusStatusCarriesNoPlayWhileIdle(t *testing.T) {
-	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), newFocusDesk(nil))
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), newFocusDesk(nil), newEnsureDesk())
 
 	mustMatch(t, got.Play == nil, true)
 }
@@ -339,7 +339,7 @@ func TestDerivePlayerBusStatusNamesTheStartingPlay(t *testing.T) {
 	play.Spec.Items = []PlayItem{{URI: "https://nas/sailing.mkv", Presentation: &Presentation{Title: "Sailing"}}}
 
 	got := derivePlayerBusStatus(theaterWithParts(),
-		PlayerStatus{Activity: playerStarting, Play: "sailing"}, []Play{play}, newPeripheralDesk(), newFocusDesk(nil))
+		PlayerStatus{Activity: playerStarting, Play: "sailing"}, []Play{play}, newPeripheralDesk(), newFocusDesk(nil), newEnsureDesk())
 
 	mustMatch(t, got.Activity, playerStarting)
 	mustMatch(t, got.Play.Name, "sailing")
@@ -409,6 +409,7 @@ func testIdleBus() *PlayerIdleBus {
 		StatusTopic:   playerStatusTopic(testTopicBase, "house", "theater"),
 		CommandsTopic: playerCommandsTopic(testTopicBase, "house", "theater"),
 		PanelTopic:    playerPanelTopic(testTopicBase, "house", "theater"),
+		PowerTopic:    playerPowerTopic(testTopicBase, "house", "theater"),
 	}
 }
 
@@ -486,7 +487,7 @@ func TestDeriveIdleStatus(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			got := deriveIdleStatus(one.player, one.controller, testBusAddress, testTopicBase,
 				one.claim, resolveIdle(nil, nil, testIdleImage),
-				gatherIdleRemotes(one.player, testTopicBase), false)
+				gatherIdleRemotes(one.player, testTopicBase))
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("idle = %+v, want %+v", got, one.want)
 			}
@@ -562,7 +563,7 @@ func TestTheIdleBusCarriesTheLevelTopicOnlyWithSinks(t *testing.T) {
 
 			got := deriveIdleStatus(player, idleControllerOwn, testBusAddress, testTopicBase,
 				buildIdleClaim(player, "display-draw"), resolveIdle(nil, nil, testIdleImage),
-				gatherIdleRemotes(player, testTopicBase), false)
+				gatherIdleRemotes(player, testTopicBase))
 
 			mustMatch(t, got.Bus.VolumeTopic, each.wantVolume)
 		})
@@ -579,7 +580,7 @@ func TestDeriveIdleStatusCarriesTheLevelAndTheRemotes(t *testing.T) {
 
 	got := deriveIdleStatus(player, idleControllerOwn, testBusAddress, testTopicBase,
 		buildIdleClaim(player, "display-draw"), resolveIdle(nil, nil, testIdleImage),
-		gatherIdleRemotes(player, testTopicBase), false)
+		gatherIdleRemotes(player, testTopicBase))
 
 	mustMatch(t, got.Bus.VolumeTopic, playerVolumeTopic(testTopicBase, "house", "theater"))
 	want := []PlayerIdleRemote{
