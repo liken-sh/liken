@@ -219,7 +219,7 @@ func TestAWatchThatReopensCountsOneRestart(t *testing.T) {
 		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
 		readings := newMetrics("test")
 		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-			"liken-1", func() {}, readings)
+			"liken-1", func() {}, func() {}, readings)
 		time.Sleep(time.Minute)
 		synctest.Wait()
 

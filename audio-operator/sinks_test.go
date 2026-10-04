@@ -71,7 +71,7 @@ func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Re
 	case r.Method == http.MethodGet && r.URL.Path == SinksPath:
 		list := SinkList{}
 		for _, sink := range a.sinks {
-			if selects(r, sink.Status) {
+			if selects(r, sink.Status.EndpointStatus) {
 				list.Items = append(list.Items, *sink)
 			}
 		}
@@ -83,6 +83,8 @@ func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Re
 			return
 		}
 		_ = json.NewEncoder(w).Encode(sink)
+	case r.Method == http.MethodPatch:
+		a.patchSink(t, w, r, name)
 	case r.Method == http.MethodPost, r.Method == http.MethodPut:
 		stored := &Sink{}
 		_ = json.NewDecoder(r.Body).Decode(stored)
@@ -133,6 +135,55 @@ func (a *endpointAPI) serveSources(t *testing.T, w http.ResponseWriter, r *http.
 	default:
 		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 	}
+}
+
+// patchSink applies a merge patch to a Sink's status, the way the API
+// server applies one to the status subresource: a patch that states
+// another resourceVersion than the stored one is answered 409, and the
+// fields the patch does not name keep their values. The caller holds
+// the lock.
+func (a *endpointAPI) patchSink(t *testing.T, w http.ResponseWriter, r *http.Request, name string) {
+	held, found := a.sinks[name]
+	if !found {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if r.Header.Get("Content-Type") != mergePatchType {
+		t.Errorf("a patch of %s carried %q", name, r.Header.Get("Content-Type"))
+	}
+	var patch map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		t.Errorf("a patch of %s does not decode: %v", name, err)
+		return
+	}
+	stated, _ := patch["metadata"].(map[string]any)["resourceVersion"].(string)
+	if stated != "" && stated != held.Metadata.ResourceVersion {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	fields, err := asFields(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields["status"] = applyMergePatch(fields["status"], patch["status"])
+	stored := &Sink{}
+	if err := remarshal(fields, stored); err != nil {
+		t.Fatal(err)
+	}
+	stored.Metadata.ResourceVersion = a.nextVersion()
+	a.sinks[name] = stored
+	_ = json.NewEncoder(w).Encode(stored)
+}
+
+// sinkStatus is a Sink's status with the facts alone and no session.
+func sinkStatus(facts EndpointStatus) SinkStatus {
+	return SinkStatus{EndpointStatus: facts}
+}
+
+// declaredLevel is a Sink's volume declaration with a level and no
+// bounds, the way a person writes it.
+func declaredLevel(level int) *SinkVolume {
+	return &SinkVolume{Level: pointerTo(level)}
 }
 
 // nextVersion answers a new resourceVersion. The caller holds the
@@ -191,10 +242,10 @@ func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 	control := testEndpointControl(t, api, &writeRecord{})
 	withMemos(control)
 	api.sinks[testSinkName] = &Sink{Metadata: EndpointMeta{Name: testSinkName},
-		Status: EndpointStatus{Node: "liken-1"}}
+		Status: sinkStatus(EndpointStatus{Node: "liken-1"})}
 	api.sinks["stick-1-pci-0000-00-0e-0-hdmi-0"] = &Sink{
 		Metadata: EndpointMeta{Name: "stick-1-pci-0000-00-0e-0-hdmi-0"},
-		Status:   EndpointStatus{Node: "stick-1"}}
+		Status:   sinkStatus(EndpointStatus{Node: "stick-1"})}
 	api.sources[testSourceName] = &Source{Metadata: EndpointMeta{Name: testSourceName},
 		Status: EndpointStatus{Node: "liken-1"}}
 

@@ -36,8 +36,10 @@ rules:
     resources: [resourceclaims]
     verbs: [get]
   # The endpoints' own resources (sinks.go, sinkcontrol.go). The operator creates
-  # one Sink or Source for every endpoint it publishes and writes the
-  # whole of its status. The list and the watch are here because a
+  # one Sink or Source for every endpoint it publishes and writes its
+  # status. A Sink's status takes a merge patch, which leaves the
+  # media operator's status.session in place (statuspatch.go), and a
+  # Source's takes an update. The list and the watch are here because a
   # spec a person edited is what the operator reconciles, and because
   # an endpoint that left the node is found by listing the resources
   # this node holds. Both select status.node, so a machine reads only
@@ -47,7 +49,10 @@ rules:
     resources: [sinks, sources]
     verbs: [get, list, watch, create, update]
   - apiGroups: [audio.liken.sh]
-    resources: [sinks/status, sources/status]
+    resources: [sinks/status]
+    verbs: [get, patch]
+  - apiGroups: [audio.liken.sh]
+    resources: [sources/status]
     verbs: [get, update]
   # This node, read once at startup for the UID that the slice's owner
   # reference needs. The Node owns the slice, so a Node that leaves

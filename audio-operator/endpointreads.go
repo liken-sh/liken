@@ -48,23 +48,24 @@ func (e *endpointControl) createSource(name string) (*Source, error) {
 type compose func(published EndpointStatus) (EndpointStatus, bool)
 
 // settleSinkStatus writes the status that want composes from the
-// published one, when it differs. A conflict or a missing resource
-// reads the Sink from the API server and composes the status again
-// from what it holds, so a resource that another machine took in the
-// meantime is left alone. A Sink the API server no longer holds
+// published one, when it differs. The write is a merge patch of this
+// operator's fields alone, so it leaves the media operator's
+// status.session in place (statuspatch.go). A conflict or a missing
+// resource reads the Sink from the API server and composes the status
+// again from what it holds, so a resource that another machine took in
+// the meantime is left alone. A Sink the API server no longer holds
 // answers apiclient.ErrNotFound.
 func (e *endpointControl) settleSinkStatus(sink *Sink, want compose) error {
-	_, err := informer.SettleStatus(e.client, e.cache.sinks.Versions, sinkPath(sink.Metadata.Name), sink, func(held *Sink) bool {
-		status, ours := want(held.Status)
-		if !ours || sameStatus(held.Status, status) {
-			return false
-		}
-		held.APIVersion, held.Kind, held.Status = EndpointAPIVersion, SinkKind, status
-		return true
+	_, err := patchSinkStatus(e.client, e.cache.sinks.Versions, sink, func(published EndpointStatus) (EndpointStatus, bool) {
+		status, ours := want(published)
+		return status, ours && !sameStatus(published, status)
 	})
 	return err
 }
 
+// settleSourceStatus writes a Source's status the way settleSinkStatus
+// writes a Sink's. A Source has one writer, so the write replaces the
+// whole status.
 func (e *endpointControl) settleSourceStatus(source *Source, want compose) error {
 	_, err := informer.SettleStatus(e.client, e.cache.sources.Versions, sourcePath(source.Metadata.Name), source, func(held *Source) bool {
 		status, ours := want(held.Status)

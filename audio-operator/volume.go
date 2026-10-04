@@ -12,9 +12,9 @@ package main
 // loudness belongs to the consumer's own stream volume and to the
 // hardware behind the jack. This file holds the settings fragment
 // that starts every sink at unity, the write that sets a delivered
-// sink there, and the write behind spec.volume and spec.mute, which
-// is the one channel a person has to a level below the consumer's
-// own.
+// sink there, and the write behind a declared level and mute and a
+// volume ask, which are the channels a person has to a level below
+// the consumer's own.
 
 import (
 	"context"
@@ -121,8 +121,8 @@ func levelProps(volumes []float64, mute *bool) string {
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
-// setNodeLevel is the write behind spec.volume and spec.mute on an
-// ALSA endpoint, and on a speaker with no absolute volume. The
+// setNodeLevel is the write behind a declared level and mute, and a
+// volume ask, on an ALSA endpoint, and on a speaker with no absolute volume. The
 // channel count is the node's own, so that a six-channel node does
 // not keep four channels at the old level.
 func setNodeLevel(ctx context.Context, node pwNode, level levelWrite) error {

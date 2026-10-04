@@ -302,11 +302,11 @@ func (h *apiHarness) holds(name, machine, pipewireNode string) {
 	defer h.cluster.mu.Unlock()
 	h.cluster.sinks[name] = Sink{
 		Metadata: EndpointMeta{Name: name, UID: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"},
-		Status: EndpointStatus{
+		Status: SinkStatus{EndpointStatus: EndpointStatus{
 			Node:           machine,
 			NodeName:       pipewireNode,
 			ConnectionType: "usb",
-		},
+		}},
 	}
 }
 

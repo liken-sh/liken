@@ -3,16 +3,22 @@ package main
 // The resting layer: the settings a spec declares, and the write each
 // one lands in.
 //
-// One rule governs every field. The operator writes a declared field
-// where the endpoint diverges from it, and it writes nothing at all
-// for a field the spec leaves out. So an empty spec costs the
-// hardware nothing, a declaration stands through a restart of the
-// operator or a reconnect of the speaker, and a value a person set by
-// hand on an undeclared field stays where they put it. The one
+// The operator writes nothing at all for a field the spec leaves out.
+// So an empty spec costs the hardware nothing, and a value a person
+// set by hand on an undeclared field stays where they put it. The one
 // exception is the unity default: a sink node PipeWire has just built
 // is set to unity when its spec declares no level, because this pod
 // stores no volumes and unity is the one level the operator can
 // defend with no declaration to read.
+//
+// A declared control and a declared codec are written wherever the
+// endpoint diverges from them. A declared level and mute are not. The
+// operator writes them when the declaration changes and when the
+// node appears, such as a speaker that reconnects, and follows the
+// device at every other time. The level has other writers: the media
+// operator's volume asks (asks.go) and a speaker's own buttons. An
+// operator that wrote the declaration back on each divergence would
+// undo each of them on its next pass.
 
 import (
 	"context"
@@ -74,25 +80,103 @@ type endpointWrites struct {
 
 // nodeMemory is what the controller remembers about an endpoint's
 // node: whether PipeWire built it since the last pass, whether the
-// first pass after the operator started found it, and the declared
-// level the node was last judged to hold, if any. A suspended node
-// reports no level, so that judgment is the only thing a declaration
-// on it can be compared with.
+// first pass after the operator started found it, and the declaration
+// the node was last judged against, if any. A declaration that differs
+// from that judgment is a change of the spec.
 type nodeMemory struct {
 	New   bool
 	Found bool
 	Held  *levelWrite
 }
 
+// nodeRecord is one endpoint's node as the controller last saw it.
+//
+// written is the level this operator last wrote, from the spec or from
+// a volume ask, which status.observed reports for an idle node. held is
+// the declaration the node was last judged against: the declaration
+// this operator wrote, or the one it adopted because the node already
+// held it or because the first pass found the node. A declaration is
+// written again only when it differs from held, so a level that moved
+// at the device or by an ask stays where it moved.
+type nodeRecord struct {
+	id      int
+	written *levelWrite
+	held    *levelWrite
+}
+
+// actuate writes what the declaration and the endpoint disagree on.
+func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading endpoint) error {
+	name := reading.facts.Name
+	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts))
+	e.report(name, refusals)
+	err := e.apply(ctx, reading, writes)
+	record, seen := e.nodes[name]
+	switch {
+	case !seen:
+		// The endpoint has no node, so there is nothing to record.
+	case writes.Level != nil && err != nil:
+		// The node is recorded as seen before the write, and a
+		// level that did not land has to be tried again, so the
+		// failure forgets it and the next pass reads it as a new
+		// node.
+		delete(e.nodes, name)
+	case writes.Level != nil:
+		record.written = writes.Level
+		if spec.Volume != nil || spec.Mute != nil {
+			record.held = writes.Level
+		}
+		e.nodes[name] = record
+	case spec.Volume != nil || spec.Mute != nil:
+		// The pass judged the declaration and planned no level write:
+		// the node holds it, the first pass adopted it, or the
+		// declaration is unchanged. Later passes judge against it.
+		record.held = &levelWrite{Volume: spec.Volume, Mute: spec.Mute}
+		e.nodes[name] = record
+	default:
+		// The spec declares no level, so a declaration a person writes
+		// later is a change, even when it states the level held before.
+		record.held = nil
+		e.nodes[name] = record
+	}
+	return err
+}
+
+// remember reports whether PipeWire built this endpoint's node since
+// the operator last looked, with the declaration the node that stands
+// was last judged against, and records the node it sees now.
+//
+// This is what the unity default and a declaration read. A new node
+// takes the declaration, or unity when there is none, once. A level a
+// person or an ask set on a node that stands is left alone: it reaches
+// status.observed and nothing else. A node the first pass finds is not
+// new, because the memory starts empty when the operator starts, and a
+// node that stood before the start can hold a level a person chose,
+// under a claim that plays. The first pass reports it as found, so
+// that a declaration on it is adopted and not written.
+func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
+	if !facts.HasNode {
+		delete(e.nodes, facts.Name)
+		return nodeMemory{}
+	}
+	last, seen := e.nodes[facts.Name]
+	if !seen || last.id != facts.Node.ID {
+		e.nodes[facts.Name] = nodeRecord{id: facts.Node.ID}
+		return nodeMemory{New: e.started, Found: !e.started}
+	}
+	return nodeMemory{Held: last.held}
+}
+
 // plannedWrites is the resting layer's whole decision: what the
 // declaration and the endpoint disagree on, and what the declaration
 // states that the endpoint cannot take.
 //
-// Three rules. A declared field is written where the endpoint
-// diverges from it. A field the spec leaves out is written nowhere,
-// apart from the unity default a new sink node takes. A value the
-// hardware refuses is reported and never written, so a typo in a
-// control name costs one log line and no register.
+// Four rules. A declared level is written when the node is new and
+// when the declaration changed, unless the endpoint already holds it.
+// A declared control or codec is written where the endpoint diverges
+// from it. A field the spec leaves out is written nowhere, apart from
+// the unity default a new sink node takes. A value the hardware
+// refuses is reported and never written, so a typo in a control name
+// costs one log line and no register.
 func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endpointWrites, []string) {
 	var writes endpointWrites
 	var refusals []string
@@ -106,30 +190,21 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 		// are the card's and not the node's.
 	case spec.Volume != nil || spec.Mute != nil:
 		want := levelWrite{Volume: spec.Volume, Mute: spec.Mute}
-		// A suspended node reports no levels at all, so a declared
-		// level on one is compared with the level the node was last
-		// judged to hold. The operator writes it when the node is new,
-		// when no judgment exists, and when the declaration changed. It
-		// does not write it on every pass, because a write that
-		// repeated would raise its own event and answer it forever.
+		// The declaration is compared with the one the node was last
+		// judged against, and not with the level the node reports, so a
+		// level that moved at the device or by an ask stays where it
+		// moved. A node with no judgment yet takes the declaration.
 		//
-		// The first pass after a start writes nothing to a suspended
-		// node. PipeWire 1.4.2 applies a Props write to a suspended
-		// node and announces no change, so the operator cannot read
-		// whether the node already holds the declaration, and a restart
-		// would otherwise write every idle declared level again. The
-		// pass records the declaration as the level the node holds.
-		// The compare runs when the node runs and reports its level,
-		// and a changed declaration is written at once.
-		switch {
-		case known:
-			if (want.Volume != nil && *want.Volume != volume) || (want.Mute != nil && *want.Mute != mute) {
-				writes.Level = &want
-			}
-		case node.New:
-			writes.Level = &want
-		case node.Found:
-		case node.Held == nil || !node.Held.same(want):
+		// The first pass after a start writes nothing. The node stood
+		// before the start, and its level can be an ask or a press of a
+		// speaker's button that the declaration does not know. A
+		// suspended node also reports no level, and PipeWire 1.4.2
+		// applies a Props write to one and announces no change, so the
+		// operator cannot read whether it holds the declaration. The
+		// pass records the declaration as the one the node holds.
+		changed := node.New || (!node.Found && (node.Held == nil || !node.Held.same(want)))
+		holds := known && (want.Volume == nil || *want.Volume == volume) && (want.Mute == nil || *want.Mute == mute)
+		if changed && !holds {
 			writes.Level = &want
 		}
 	case facts.Direction == directionSink && node.New && known && volume != unityPercent:

@@ -5,9 +5,10 @@ package main
 //
 // Both are cluster-scoped, because hardware belongs to a machine and
 // not to a tenant. The operator owns them: it creates the object for
-// every endpoint it publishes and writes the whole of status, and the
-// spec is the cluster owner's declaration of what the endpoint rests
-// at. The two kinds share one status shape, because an input and an
+// every endpoint it publishes and writes the status, apart from a
+// Sink's status.session, which the media operator writes. The spec is
+// the cluster owner's declaration of what the endpoint rests at. The
+// two kinds share one status shape, because an input and an
 // output are described by the same facts, and one status type keeps
 // the composition in sinkstatus.go to one path.
 //
@@ -61,11 +62,11 @@ const (
 
 // Sink is one playback endpoint.
 type Sink struct {
-	APIVersion string         `json:"apiVersion,omitempty"`
-	Kind       string         `json:"kind,omitempty"`
-	Metadata   EndpointMeta   `json:"metadata"`
-	Spec       SinkSpec       `json:"spec"`
-	Status     EndpointStatus `json:"status,omitempty"`
+	APIVersion string       `json:"apiVersion,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   EndpointMeta `json:"metadata"`
+	Spec       SinkSpec     `json:"spec"`
+	Status     SinkStatus   `json:"status,omitempty"`
 }
 
 // Source is one capture endpoint.
@@ -94,11 +95,21 @@ type EndpointMeta struct {
 // it. Layout is an ALSA sink's alone, and an empty list is the same
 // as no list: either one leaves the layout to the hardware.
 type SinkSpec struct {
-	Volume   *int              `json:"volume,omitempty"`
+	Volume   *SinkVolume       `json:"volume,omitempty"`
 	Mute     *bool             `json:"mute,omitempty"`
 	Controls map[string]string `json:"controls,omitempty"`
 	Codec    *string           `json:"codec,omitempty"`
 	Layout   []string          `json:"layout,omitempty"`
+}
+
+// SinkVolume is a Sink's volume declaration, all in percent. Level is
+// the resting level this operator applies. Max and Step are the bounds
+// the media operator steps its volume asks by, and this operator reads
+// neither: the API server fills their defaults.
+type SinkVolume struct {
+	Level *int `json:"level,omitempty"`
+	Max   *int `json:"max,omitempty"`
+	Step  *int `json:"step,omitempty"`
 }
 
 // SourceSpec is the same declaration for a capture endpoint, without
@@ -120,7 +131,11 @@ type declaration struct {
 }
 
 func (s SinkSpec) declaration() declaration {
-	return declaration{Volume: s.Volume, Mute: s.Mute, Controls: s.Controls, Codec: s.Codec}
+	var level *int
+	if s.Volume != nil {
+		level = s.Volume.Level
+	}
+	return declaration{Volume: level, Mute: s.Mute, Controls: s.Controls, Codec: s.Codec}
 }
 
 func (s SourceSpec) declaration() declaration {
@@ -147,6 +162,32 @@ type EndpointStatus struct {
 	Observed       *EndpointObserved            `json:"observed,omitempty"`
 	Claim          *EndpointClaim               `json:"claim,omitempty"`
 	Conditions     []EndpointCondition          `json:"conditions,omitempty"`
+}
+
+// SinkStatus is a Sink's status: the endpoint's facts, which this
+// operator writes, and the session block, which the media operator
+// writes under its own field manager. The facts are a type of their
+// own so that every status write this operator composes holds no
+// session, and a write of the facts can never state, change, or remove
+// the session (endpointreads.go).
+type SinkStatus struct {
+	EndpointStatus
+	Session *SinkSession `json:"session,omitempty"`
+}
+
+// SinkSession is the media operator's block: the Player whose unit
+// uses the Sink, and the last volume ask a press made.
+type SinkSession struct {
+	Player    string     `json:"player,omitempty"`
+	VolumeAsk *VolumeAsk `json:"volumeAsk,omitempty"`
+}
+
+// VolumeAsk is one ask for a level and a mute, in percent. At names the
+// ask: each new time is one ask, applied once (asks.go).
+type VolumeAsk struct {
+	Level int    `json:"level"`
+	Mute  bool   `json:"mute,omitempty"`
+	At    string `json:"at"`
 }
 
 // EndpointCard is the ALSA card the endpoint is on. The number and

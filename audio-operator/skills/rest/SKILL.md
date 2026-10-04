@@ -20,8 +20,10 @@ Every output and input the operator publishes has its own resource:
 a [`Sink`](https://liken.sh/audio/docs/reference/sinks/) for playback and a
 [`Source`](https://liken.sh/audio/docs/reference/sources/) for capture. The operator writes
 hardware facts and the latest readings to `status`. You write desired
-settings to `spec`, and the operator reapplies each declared setting
-when the hardware differs from it. A pod can still claim the speaker
+settings to `spec`. The operator applies a declared volume and mute
+when you change them and when the endpoint appears, and reapplies a
+declared control or codec when the hardware differs from it. A pod
+can still claim the speaker
 while the operator applies these settings. The pod's stream volume is
 separate from the endpoint volume. A claim's codec parameter takes
 precedence while it allocates a Bluetooth speaker. A codec declared on
@@ -48,15 +50,16 @@ Turn a knob on a USB DAC, press the volume button on a Bluetooth
 speaker, or let a client change the graph, and the new value shows
 here within about a second. An endpoint that nothing is playing
 through has no level of its own to read. `observed` then shows the
-level you declared, which is the level it will start at. Until you
-declare one, it shows no level at all.
+level the operator last wrote to it, from your declaration or from a
+volume ask, which is the level it will start at. Until the operator
+writes one, it shows no level at all.
 
 ## 2. Set the volume
 
     kubectl patch sink a0-ab-51-33-b7-12 --type merge \
-      -p '{"spec":{"volume":40}}'
+      -p '{"spec":{"volume":{"level":40}}}'
 
-`volume` is a percentage, where 100 is full level with no gain
+`volume.level` is a percentage, where 100 is full level with no gain
 applied. For an output on the sound card, this is the software
 level PipeWire applies. For a Bluetooth speaker, it is the
 speaker's own volume: the operator sends it over AVRCP when the
@@ -67,10 +70,27 @@ The change takes effect at once, even while a pod is playing
 through the speaker. The pod's own stream volume is a separate
 control on top of this one, so the two never conflict.
 
-Once you have declared a volume, it stays declared. If the speaker
-reconnects, the operator restarts, or some client changes the level
-on its own, the operator writes your value back. If you never
-declare one, the endpoint rests at 100.
+The declared level is where the endpoint starts. The operator writes
+it when you change it and each time the endpoint appears: a speaker
+that reconnects, or a node that PipeWire builds again. Between those
+moments the level can move. A press of the speaker's own button, a
+client that changes the graph, and a remote's volume key all change
+it, and the operator reports the new level in `observed` and does not
+write your value back. An operator restart writes nothing, so the
+level a person chose before the restart stays. If you never declare a
+level, a node that PipeWire builds while the operator runs starts at
+100.
+
+A remote's volume key reaches a `Sink` through the media operator. It
+writes each press as an ask in `status.session.volumeAsk`, and the
+operator applies each new ask once. `volume.max` is the highest level
+an ask sets, 100 unless you declare it, and `volume.step` is how far
+one press moves the level, 5 unless you declare it:
+
+    kubectl patch sink a0-ab-51-33-b7-12 --type merge \
+      -p '{"spec":{"volume":{"level":40,"max":80,"step":2}}}'
+
+A person at the speaker can still turn it above `max`.
 
 ## 3. Mute an output, or close a microphone
 
@@ -108,16 +128,18 @@ range, is skipped and logged rather than written:
 
 Not every endpoint has controls. An HDMI output has only its
 `IEC958 Playback Switch`, because an HDMI PCM has no volume control
-of its own. Use `volume` for its level. A Bluetooth speaker has
+of its own. Use `volume.level` for its level. A Bluetooth speaker has
 none.
 
 <a id="5-take-a-declaration-back"></a>
 
 ## 5. Remove a declared setting
 
-Remove the field, and the operator stops enforcing it. The hardware
+Remove the field, and the operator stops applying it. The hardware
 keeps whatever value it has at that moment, because the operator
-never makes up a value on its own:
+never makes up a value on its own. Removing `volume` also removes
+`max` and `step`, and a remote's volume key then steps by the
+defaults:
 
     kubectl patch sink a0-ab-51-33-b7-12 --type json \
       -p '[{"op":"remove","path":"/spec/volume"}]'
@@ -174,7 +196,7 @@ volume and must never touch a microphone:
         verbs: [get, list, watch, patch]
 
 If two writers share one resource, server-side apply keeps them
-apart. A remote that applies only `spec.volume` under its own field
+apart. A remote that applies only `spec.volume.level` under its own field
 manager and a person who sets `spec.controls` never overwrite each
 other. If they do collide on one field, the API server reports a
 conflict instead of silently taking the last write.

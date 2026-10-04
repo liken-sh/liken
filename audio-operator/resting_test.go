@@ -117,10 +117,33 @@ func TestPlannedWrites(t *testing.T) {
 			newNode: true,
 		},
 		{
-			name:  "a declared level the endpoint does not hold",
+			name:  "a new declaration the endpoint does not hold",
 			spec:  declaration{Volume: pointerTo(50)},
 			facts: alsaSink(100, false),
 			level: &levelWrite{Volume: pointerTo(50)},
+		},
+		{
+			name:  "a changed declaration the endpoint does not hold",
+			spec:  declaration{Volume: pointerTo(50)},
+			facts: alsaSink(100, false),
+			held:  &levelWrite{Volume: pointerTo(70)},
+			level: &levelWrite{Volume: pointerTo(50)},
+		},
+		{
+			// A level that moved at the device or by a volume ask is
+			// followed, and the declaration is not written back.
+			name:  "an endpoint that drifted from the declaration it was judged against",
+			spec:  declaration{Volume: pointerTo(50)},
+			facts: alsaSink(30, false),
+			held:  &levelWrite{Volume: pointerTo(50)},
+		},
+		{
+			name:    "a declaration on a node that is new",
+			spec:    declaration{Volume: pointerTo(50)},
+			facts:   alsaSink(30, false),
+			newNode: true,
+			held:    &levelWrite{Volume: pointerTo(50)},
+			level:   &levelWrite{Volume: pointerTo(50)},
 		},
 		{
 			name:  "a declared level the endpoint already holds",
@@ -232,11 +255,12 @@ func TestPlannedWrites(t *testing.T) {
 			found: true,
 		},
 		{
+			// The level can be an ask or a press at the device that the
+			// declaration does not know, so a start adopts it.
 			name:  "a declaration the first pass found a running node away from",
 			spec:  declaration{Volume: pointerTo(40)},
 			facts: alsaSink(50, false),
 			found: true,
-			level: &levelWrite{Volume: pointerTo(40)},
 		},
 		{
 			name:  "no declaration on a suspended node",
@@ -284,18 +308,24 @@ type writeRecord struct {
 	device int
 	level  levelWrite
 	codec  string
+	// levels is every level written, in order.
+	levels []levelWrite
 }
 
 func recordingControl(record *writeRecord) *endpointControl {
 	return &endpointControl{
 		nodes:    map[string]nodeRecord{},
 		refusals: map[string]string{},
+		asks:     map[string]string{},
+		latest:   map[string]endpointFacts{},
 		setLevel: func(_ context.Context, node pwNode, level levelWrite) error {
 			record.node, record.level = &node, level
+			record.levels = append(record.levels, level)
 			return nil
 		},
 		setRoute: func(_ context.Context, device int, route pwRoute, level levelWrite) error {
 			record.route, record.device, record.level = &route, device, level
+			record.levels = append(record.levels, level)
 			return nil
 		},
 		switchCodec: func(_ context.Context, _, codec string, sink bluezSink) (bluezSink, error) {

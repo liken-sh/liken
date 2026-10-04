@@ -430,7 +430,7 @@ volumes, and WirePlumber's own default for an unstored sink is 40
 percent, a desktop guard that would cost resolution on a machine
 that plays only what a claim delivers. A consumer's stream fader is
 the consumer's own level. The endpoint's level is declared on its
-`Sink` as `spec.volume`, which
+`Sink` as `spec.volume.level`, which
 [Set endpoint volume and controls](/docs/guides/rest/) shows, and an
 endpoint with no declaration rests at unity.
 

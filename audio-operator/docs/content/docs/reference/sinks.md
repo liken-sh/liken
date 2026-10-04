@@ -11,9 +11,10 @@ analog jack, an HDMI or DisplayPort output, the playback side of a
 USB card, or a Bluetooth speaker. The operator creates one for every
 endpoint it publishes, cluster-scoped like a `Node`, named by the
 same device name the `ResourceSlice` carries. You never create or
-delete one. The operator writes the whole of `status`: where the
-endpoint is, the controls the card declares, and the values it last
-read. You write `spec`, which states what the endpoint rests at.
+delete one. The operator writes `status`: where the endpoint is, the
+controls the card declares, and the values it last read. The media
+operator writes `status.session`, the volume asks of a remote's keys.
+You write `spec`, which states what the endpoint rests at.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1
@@ -21,7 +22,10 @@ kind: Sink
 metadata:
   name: node-1-usb-0573-1573-a34004801402-usb-audio
 spec:
-  volume: 80
+  volume:
+    level: 80
+    max: 100
+    step: 5
   controls:
     PCM Playback Volume: "120"
 status:
@@ -80,22 +84,33 @@ One playback endpoint: an analog jack, an HDMI or DisplayPort output, a USB card
 
 ## spec
 
-The desired settings for the endpoint. Every field is optional. The operator writes a declared field back when the endpoint diverges from it. It never writes a field that the spec leaves out.
+The desired settings for the endpoint. Every field is optional. The operator writes volume.level and mute when they change and when the endpoint appears, such as a speaker that reconnects or a node that PipeWire builds again, and otherwise reports the level the endpoint holds. It writes a declared control or codec back when the endpoint diverges from it. It never writes a field that the spec leaves out.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--volume"></span>`volume` | integer | no | The level the endpoint plays at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. It applies at once, under a claim or not, and a claim holder's own stream fader is a separate level above it. |
-| <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. The operator applies this setting at the same layer as volume, and it takes effect at once. |
+| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The endpoint's volume, in percent of unity. level is the resting level the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them. |
+| <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. The operator applies this setting at the same layer as volume.level, and on the same terms. |
 | <span id="spec--controls"></span>`controls` | map[string]string | no | The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range. A boolean control takes on or off. An enumerated control takes one of its values. The operator writes a control only when spec states it. When two endpoints share one control, the last write wins because the hardware has one register. |
 | <span id="spec--layout"></span>`layout` | []string | no | The channel positions of an ALSA sink, in PCM slot order, in PipeWire's channel names, such as FL, FR, FC, LFE, RL, RR, SL, SR, RLC, RRC, TFL, TFR, NA for a slot that plays nothing, and AUX0 to AUX63. A 7.1 receiver on HDMI takes [FL, FR, RL, RR, FC, LFE, SL, SR], and a 5.1 one takes [FL, FR, RL, RR, FC, LFE]. When this field is absent, the operator selects the layout from the monitor's ELD on HDMI and DisplayPort, from the device's own channel map on USB, and declares no positions on the analog jack, whose streams then play in stereo. The operator declares the layout to PipeWire, and a change restarts the PipeWire container once no stream plays on the machine. The number of positions must be a channel count the device accepts, or PipeWire ignores the layout. The operator does not write the kernel's channel map, so on HDMI each slot reaches the speaker the kernel's standard allocation gives it, and a height position names a slot that the kernel routes elsewhere. A Bluetooth speaker ignores this field. |
 | <span id="spec--codec"></span>`codec` | string | no | The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint. |
 
-## status
+### spec.volume
 
-What the hardware declares and what the operator last read. The operator owns every field here.
+The endpoint's volume, in percent of unity. level is the resting level the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="specvolume--level"></span>`level` | integer | no | The level the endpoint rests at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator applies it when it changes and when the endpoint appears, under a claim or not, and a claim holder's own stream fader is a separate level above it. A level that changes after that, at the device or by a volume ask, stays, and status.observed.volume reports it. When it is absent, a node that PipeWire builds while the operator runs starts at unity. |
+| <span id="specvolume--max"></span>`max` | integer | no | The highest level a volume ask can set. The media operator holds its asks at or below it. A person at the device can still set a higher level. Default: `100`. |
+| <span id="specvolume--step"></span>`step` | integer | no | How far one press of a remote's volume key moves the level the media operator asks for. Default: `5`. |
+
+## status
+
+What the hardware declares and what the operator last read. The operator owns every field here apart from session, which the media operator owns.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="status--session"></span>`session` | [object](#statussession) | no | The unit that uses the Sink, and the last volume ask a press made. The media operator writes this block by server-side apply under its own field manager. The operator writes its own status fields as a merge patch that never names this block, so its writes leave the block in place. It is status and not spec because no person declares it, and a status write changes no metadata.generation. |
 | <span id="status--node"></span>`node` | string | no | The machine that holds the endpoint now. For a Bluetooth speaker, the value changes when the speaker moves. The name of every other Sink starts with this machine's name, so a card that moves to another machine gets a new Sink. The operator on each machine lists and watches the Sinks by this field. |
 | <span id="status--location"></span>`location` | string | no | Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6. Absent on a Bluetooth speaker. |
 | <span id="status--connectiontype"></span>`connectionType` | string | no | How sound leaves the machine. One of: `analog`, `hdmi`, `displayport`, `usb`, `bluetooth`. |
@@ -111,6 +126,25 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling. |
 | <span id="status--claim"></span>`claim` | [object](#statusclaim) | no | The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while the kubelet restarts the PipeWire container to load it. |
+
+### status.session
+
+The unit that uses the Sink, and the last volume ask a press made. The media operator writes this block by server-side apply under its own field manager. The operator writes its own status fields as a merge patch that never names this block, so its writes leave the block in place. It is status and not spec because no person declares it, and a status write changes no metadata.generation.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussession--player"></span>`player` | string | no | The Player whose unit uses the Sink, as namespace/name. |
+| <span id="statussession--volumeask"></span>`volumeAsk` | [object](#statussessionvolumeask) | no | The last level a press asked for. The operator applies each new ask once, to the node or to a Bluetooth speaker's Route, the same write that spec.volume.level takes, without waiting for the settle window that gathers hardware events into one ResourceSlice write. When several asks arrive before the operator applies one, it applies only the newest. It applies no ask that it finds the first time it reads the Sink, as in its first pass after a start, and no ask for an endpoint that has no node. It never writes an ask's level again, so a later press of a speaker's own button stays, and status.observed reports the level the endpoint holds. |
+
+#### status.session.volumeAsk
+
+The last level a press asked for. The operator applies each new ask once, to the node or to a Bluetooth speaker's Route, the same write that spec.volume.level takes, without waiting for the settle window that gathers hardware events into one ResourceSlice write. When several asks arrive before the operator applies one, it applies only the newest. It applies no ask that it finds the first time it reads the Sink, as in its first pass after a start, and no ask for an endpoint that has no node. It never writes an ask's level again, so a later press of a speaker's own button stays, and status.observed reports the level the endpoint holds.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessionvolumeask--level"></span>`level` | integer | yes | The level, as a percent of unity. |
+| <span id="statussessionvolumeask--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. Absent means not muted. |
+| <span id="statussessionvolumeask--at"></span>`at` | string | yes | When the press made the ask, with milliseconds. Each new time is one ask. |
 
 ### status.card
 
@@ -263,9 +297,16 @@ monitor never sees the difference.
 
 ## The resting layer
 
-A declared field is a standing instruction. The operator compares
-the declaration with the value it last read, and it writes the
-hardware only where the two diverge. A declared control is
+The operator writes a declared `volume.level` and `mute` when the
+declaration changes and when the endpoint appears: a speaker that
+reconnects, or a node that PipeWire builds again. At every other
+time it follows the device. A press of a speaker's own button, a
+client that changes the graph, and a volume ask move the level, and
+the operator reports the new level in `status.observed` and does not
+write the declaration back. A declared control and a declared `codec`
+are standing instructions: the operator compares each one with the
+value it last read, and writes the hardware only where the two
+diverge. A declared control is
 validated against `status.capabilities`: a name the card does not
 declare, or a value out of its range, fails the pass with the reason
 in the operator's log and is never written. An empty `spec` writes
@@ -277,18 +318,58 @@ node PipeWire builds while the operator runs. After a restart, the
 operator writes nothing to a sink that was there before it started,
 and the sink keeps the level it holds.
 
-An idle node reports no level, and PipeWire announces no write to
-one, so the operator cannot read whether an idle node already holds
-its declared `volume` and `mute`. After a restart, the operator
-treats the declaration as the level an idle node holds and writes
-nothing to it. It compares the declaration with the node's level
-when the node runs, and it writes a changed declaration at once.
+A restart writes no declared level either. The level an endpoint
+holds when the operator starts can be a volume ask or a press of the
+speaker's button that the declaration does not know, and an idle
+node reports no level, so the operator cannot read whether it
+already holds the declaration. The first pass treats the declaration
+as the level each endpoint holds, and a later change of the
+declaration is written at once.
 
-`volume`, `mute`, and `controls` apply at once, whether a claim
+`volume.max` and `volume.step` bound the volume asks below, and the
+operator writes neither to the hardware. Each one has a default, 100
+and 5 percent, which the API server fills in when `spec.volume` is
+present.
+
+`volume.level`, `mute`, and `controls` apply at once, whether a claim
 holds the endpoint or not. `codec` waits for the claim to end,
 because a codec switch replaces the speaker's node and interrupts
 playback, and a claim's own `codec` parameter wins while it holds
 the speaker.
+
+## The volume asks
+
+A remote's volume key reaches a `Sink` through the media operator.
+It turns each press into an absolute level, at most `volume.max`,
+and writes it into `status.session.volumeAsk` with the time of the
+press. It writes that block by server-side apply under its own field
+manager, and this operator writes the rest of `status` as a merge
+patch that never names it, so neither writer removes the other's
+fields.
+
+```yaml
+status:
+  session:
+    player: media/den
+    volumeAsk:
+      level: 45
+      mute: false
+      at: "2026-10-04T12:15:25.164Z"
+```
+
+Each new `at` is one ask, and the operator applies it once, with the
+same write that `volume.level` takes: the node's gain, or a
+Bluetooth speaker's own volume over AVRCP. The ask does not wait for
+the 1.5 second settle window that gathers a burst of hardware events
+into one `ResourceSlice` write, because a level write changes no
+`ResourceSlice`. When several asks arrive before the operator applies
+one, it applies only the newest. When the write lands, the operator
+writes the asked level and mute into `status.observed` at once, and
+the next pass replaces them with what PipeWire reports. It applies no ask that it finds the
+first time it reads the `Sink`, as in its first pass after a start,
+because the last operator applied that ask, or the device's level is
+newer than it. An ask for an endpoint with no node is dropped, and
+the endpoint takes `volume.level` when it appears.
 
 ## Observation
 
@@ -297,8 +378,9 @@ card's control device reports every control write from any process,
 every jack change, every monitor change, and a knob turned on a USB
 DAC. PipeWire's graph reports every node and device change. So a
 change a person made with a knob, a remote, or a speaker's own
-buttons shows in `observed` within about a second. A value the spec
-declares is written back on the same event.
+buttons shows in `observed` within about a second. A declared
+control or codec is written back on the same event, and a declared
+level is not.
 
 ## The channel layout
 

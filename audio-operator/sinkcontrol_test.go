@@ -110,13 +110,7 @@ func TestPassWritesTheStatusOnce(t *testing.T) {
 	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
-	writes := 0
-	for _, request := range api.requests {
-		if request[:3] == "PUT" {
-			writes++
-		}
-	}
-	if writes != 3 {
+	if writes := statusWrites(api); writes != 3 {
 		t.Fatalf("the first pass wrote %d statuses, want one for each endpoint: %v", writes, api.requests)
 	}
 
@@ -124,11 +118,8 @@ func TestPassWritesTheStatusOnce(t *testing.T) {
 	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, request := range api.requests {
-		if request[:3] == "PUT" {
-			t.Errorf("a second pass wrote a status again: %v", api.requests)
-			break
-		}
+	if writes := statusWrites(api); writes != 0 {
+		t.Errorf("a second pass wrote %d statuses again: %v", writes, api.requests)
 	}
 }
 
@@ -206,25 +197,6 @@ func TestUnityIsWrittenOnceForANodeBuiltAfterTheStart(t *testing.T) {
 	}
 }
 
-// A declared level reaches the endpoint on the pass that reads it,
-// under a claim or not.
-func TestPassCarriesADeclaredLevel(t *testing.T) {
-	api := newEndpointAPI()
-	record := &writeRecord{}
-	control := testEndpointControl(t, api, record)
-	api.sinks[testAnalogName] = &Sink{
-		Metadata: EndpointMeta{Name: testAnalogName},
-		Spec:     SinkSpec{Volume: pointerTo(25), Mute: pointerTo(true)},
-	}
-
-	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 || record.level.Mute == nil || !*record.level.Mute {
-		t.Fatalf("the declaration reached the node as %+v", record)
-	}
-}
-
 // An endpoint the machine no longer publishes keeps its resource and
 // its declaration, and the conditions report the absence. Deleting it
 // would lose the level a person declared for a card that is unplugged
@@ -268,7 +240,7 @@ func TestPassLeavesAnotherMachinesEndpointAlone(t *testing.T) {
 	control := testEndpointControl(t, api, &writeRecord{})
 	elsewhere := &Sink{
 		Metadata: EndpointMeta{Name: "stick-1-pci-0000-00-0e-0-hdmi-0"},
-		Status:   EndpointStatus{Node: "stick-1", NodeName: "liken.audio.card0-pcm3"},
+		Status:   sinkStatus(EndpointStatus{Node: "stick-1", NodeName: "liken.audio.card0-pcm3"}),
 	}
 	api.sinks[elsewhere.Metadata.Name] = elsewhere
 
@@ -287,7 +259,7 @@ func statusWrites(api *endpointAPI) int {
 	defer api.mutex.Unlock()
 	writes := 0
 	for _, request := range api.requests {
-		if strings.HasPrefix(request, "PUT ") {
+		if strings.HasPrefix(request, "PUT ") || strings.HasPrefix(request, "PATCH ") {
 			writes++
 		}
 	}
@@ -331,10 +303,10 @@ func TestAResourceNoMachinePublishesIsReportedAbsentOnce(t *testing.T) {
 	const shared = "usb-0573-1573-a34004801402-usb-audio"
 	api.sinks[shared] = &Sink{
 		Metadata: EndpointMeta{Name: shared},
-		Spec:     SinkSpec{Volume: pointerTo(40)},
-		Status: EndpointStatus{Node: "liken-1", NodeName: "liken.audio.card1-pcm0", Conditions: []EndpointCondition{
+		Spec:     SinkSpec{Volume: declaredLevel(40)},
+		Status: sinkStatus(EndpointStatus{Node: "liken-1", NodeName: "liken.audio.card1-pcm0", Conditions: []EndpointCondition{
 			condition(ConnectedCondition, true, "CardPresent", "the card is on the bus", factsTime),
-		}},
+		}}),
 	}
 	ctx := context.Background()
 	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
@@ -345,7 +317,7 @@ func TestAResourceNoMachinePublishesIsReportedAbsentOnce(t *testing.T) {
 		"this machine no longer publishes the endpoint", factsTime)) {
 		t.Errorf("the old Sink's conditions = %+v, want it reported absent", old.Status.Conditions)
 	}
-	if old.Spec.Volume == nil || *old.Spec.Volume != 40 {
+	if old.Spec.Volume == nil || *old.Spec.Volume.Level != 40 {
 		t.Errorf("the old Sink's spec = %+v, want the declaration kept", old.Spec)
 	}
 	written := statusWrites(api)
@@ -441,95 +413,5 @@ func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
 	}
 	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
 		t.Fatalf("the write was not tried again: %+v", record)
-	}
-}
-
-// suspendedGraph is the lab graph with the analog jack's node idle:
-// it stands and runs no stream, so it reports no levels.
-func suspendedGraph() pwGraph {
-	graph := labGraph()
-	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
-	idle := graph.Nodes[address]
-	idle.Volumes = nil
-	graph.Nodes[address] = idle
-	return graph
-}
-
-// An operator that starts again finds an idle node it cannot read,
-// under a declaration it may have written before the restart. The
-// start writes nothing to it, and a person's later change of the
-// declaration still reaches it.
-func TestAStartWritesNothingToASuspendedNodeUntilTheDeclarationChanges(t *testing.T) {
-	api := newEndpointAPI()
-	record := &writeRecord{}
-	control := testEndpointControl(t, api, record)
-	api.sinks[testAnalogName] = &Sink{
-		Metadata: EndpointMeta{Name: testAnalogName},
-		Spec:     SinkSpec{Volume: pointerTo(40)},
-	}
-	ctx := context.Background()
-
-	for range 2 {
-		if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph(), nil); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if record.node != nil {
-		t.Fatalf("a start wrote %+v to a suspended node", record.level)
-	}
-
-	api.sinks[testAnalogName].Spec.Volume = pointerTo(25)
-	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
-		t.Fatalf("a changed declaration reached the suspended node as %+v", record)
-	}
-}
-
-// The compare that a start skips on an idle node runs once the node
-// runs and reports its level, so a level that drifted while the
-// operator was down is still corrected.
-func TestASuspendedNodeIsComparedOnceItRuns(t *testing.T) {
-	api := newEndpointAPI()
-	record := &writeRecord{}
-	control := testEndpointControl(t, api, record)
-	api.sinks[testAnalogName] = &Sink{
-		Metadata: EndpointMeta{Name: testAnalogName},
-		Spec:     SinkSpec{Volume: pointerTo(25)},
-	}
-	ctx := context.Background()
-
-	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := control.pass(ctx, labEndpoints(), nil, turnedDownGraph(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
-		t.Fatalf("the running node at 40 percent was written %+v", record)
-	}
-}
-
-// A running node that matches the declaration is judged to hold it,
-// so the node takes no write when it goes idle and stops reporting
-// its level.
-func TestARunningNodeThatMatchesTakesNoWriteWhenItGoesIdle(t *testing.T) {
-	api := newEndpointAPI()
-	record := &writeRecord{}
-	control := testEndpointControl(t, api, record)
-	api.sinks[testAnalogName] = &Sink{
-		Metadata: EndpointMeta{Name: testAnalogName},
-		Spec:     SinkSpec{Volume: pointerTo(40)},
-	}
-	ctx := context.Background()
-
-	for _, graph := range []pwGraph{turnedDownGraph(), suspendedGraph()} {
-		if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if record.node != nil {
-		t.Errorf("a node that matched the declaration was written %+v when it went idle", record.level)
 	}
 }

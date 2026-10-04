@@ -1,9 +1,12 @@
 # The endpoint API: a Sink for every playback endpoint and a Source
 # for every capture endpoint the operator publishes. The operator
 # creates both, names them by the device name the ResourceSlice
-# carries, and writes the whole of status. The spec fields are the
-# cluster owner's to write, and the operator writes a declared field
-# back to the hardware when the endpoint diverges from it.
+# carries, and writes the status, apart from a Sink's status.session,
+# which the media operator writes. The spec fields are the cluster
+# owner's to write. The operator writes a declared control or codec
+# back to the hardware when the endpoint diverges from it, and writes
+# a declared level when the spec changes and when the endpoint
+# appears.
 #
 # The claim and the resource answer two different needs. A pod that
 # plays or records still holds the endpoint through a claim, and it
@@ -84,7 +87,7 @@ spec:
           properties:
             spec:
               type: object
-              description: "The desired settings for the endpoint. Every field is optional. The operator writes a declared field back when the endpoint diverges from it. It never writes a field that the spec leaves out."
+              description: "The desired settings for the endpoint. Every field is optional. The operator writes volume.level and mute when they change and when the endpoint appears, such as a speaker that reconnects or a node that PipeWire builds again, and otherwise reports the level the endpoint holds. It writes a declared control or codec back when the endpoint diverges from it. It never writes a field that the spec leaves out."
               # A writer clears the spec by applying one with nothing
               # in it. Server-side apply prunes the empty object away,
               # and validation would then read spec as null and refuse
@@ -92,13 +95,29 @@ spec:
               default: {}
               properties:
                 volume:
-                  type: integer
-                  minimum: 0
-                  maximum: 100
-                  description: "The level the endpoint plays at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. It applies at once, under a claim or not, and a claim holder's own stream fader is a separate level above it."
+                  type: object
+                  description: "The endpoint's volume, in percent of unity. level is the resting level the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them."
+                  properties:
+                    level:
+                      type: integer
+                      minimum: 0
+                      maximum: 100
+                      description: "The level the endpoint rests at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator applies it when it changes and when the endpoint appears, under a claim or not, and a claim holder's own stream fader is a separate level above it. A level that changes after that, at the device or by a volume ask, stays, and status.observed.volume reports it. When it is absent, a node that PipeWire builds while the operator runs starts at unity."
+                    max:
+                      type: integer
+                      minimum: 1
+                      maximum: 100
+                      default: 100
+                      description: "The highest level a volume ask can set. The media operator holds its asks at or below it. A person at the device can still set a higher level."
+                    step:
+                      type: integer
+                      minimum: 1
+                      maximum: 100
+                      default: 5
+                      description: "How far one press of a remote's volume key moves the level the media operator asks for."
                 mute:
                   type: boolean
-                  description: "Whether the endpoint is silent. The operator applies this setting at the same layer as volume, and it takes effect at once."
+                  description: "Whether the endpoint is silent. The operator applies this setting at the same layer as volume.level, and on the same terms."
                 controls:
                   type: object
                   additionalProperties:
@@ -139,8 +158,32 @@ spec:
                   description: "The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint."
             status:
               type: object
-              description: "What the hardware declares and what the operator last read. The operator owns every field here."
+              description: "What the hardware declares and what the operator last read. The operator owns every field here apart from session, which the media operator owns."
               properties:
+                session:
+                  type: object
+                  description: "The unit that uses the Sink, and the last volume ask a press made. The media operator writes this block by server-side apply under its own field manager. The operator writes its own status fields as a merge patch that never names this block, so its writes leave the block in place. It is status and not spec because no person declares it, and a status write changes no metadata.generation."
+                  properties:
+                    player:
+                      type: string
+                      description: "The Player whose unit uses the Sink, as namespace/name."
+                    volumeAsk:
+                      type: object
+                      required: [level, at]
+                      description: "The last level a press asked for. The operator applies each new ask once, to the node or to a Bluetooth speaker's Route, the same write that spec.volume.level takes, without waiting for the settle window that gathers hardware events into one ResourceSlice write. When several asks arrive before the operator applies one, it applies only the newest. It applies no ask that it finds the first time it reads the Sink, as in its first pass after a start, and no ask for an endpoint that has no node. It never writes an ask's level again, so a later press of a speaker's own button stays, and status.observed reports the level the endpoint holds."
+                      properties:
+                        level:
+                          type: integer
+                          minimum: 0
+                          maximum: 100
+                          description: "The level, as a percent of unity."
+                        mute:
+                          type: boolean
+                          description: "Whether the endpoint is silent. Absent means not muted."
+                        at:
+                          type: string
+                          format: date-time
+                          description: "When the press made the ask, with milliseconds. Each new time is one ask."
                 node:
                   type: string
                   description: "The machine that holds the endpoint now. For a Bluetooth speaker, the value changes when the speaker moves. The name of every other Sink starts with this machine's name, so a card that moves to another machine gets a new Sink. The operator on each machine lists and watches the Sinks by this field."
@@ -376,7 +419,7 @@ spec:
           properties:
             spec:
               type: object
-              description: "The settings the endpoint rests at. Every field is optional: the operator writes a declared field back when the endpoint diverges from it, and it never writes a field the spec leaves out."
+              description: "The settings the endpoint rests at. Every field is optional. The operator writes volume and mute when they change and when the endpoint appears, and otherwise reports the level the endpoint holds. It writes a declared control back when the endpoint diverges from it. It never writes a field the spec leaves out."
               default: {}
               properties:
                 volume:

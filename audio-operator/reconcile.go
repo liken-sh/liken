@@ -53,6 +53,15 @@ func run(ctx context.Context, operator *reconciler, settled <-chan struct{}) err
 			if err := operator.pass(ctx); err != nil {
 				return err
 			}
+		case <-operator.asks:
+			// A volume ask skips the settle window, because a level
+			// write changes no ResourceSlice (asks.go). The pass that
+			// reports the level the device took comes through the
+			// window, because the graph feed's report of the change is
+			// what it reads.
+			if operator.control.applyAsks(ctx) && operator.poke != nil {
+				operator.poke()
+			}
 		}
 	}
 }
@@ -118,6 +127,15 @@ type reconciler struct {
 	// control reconciles the Sink and the Source of every endpoint.
 	// It is nil in a test that reads the slice alone.
 	control *endpointControl
+
+	// asks carries one wake for each burst of new volume asks on this
+	// machine's Sinks, and poke wakes a pass after an ask applied a
+	// level. applyAsks reports the level it wrote at once, and the pass
+	// replaces that report with what the graph reads. An idle node
+	// announces no change, so no other event would wake that pass.
+	// Both are nil in a test that applies no ask.
+	asks <-chan struct{}
+	poke func()
 
 	// readings is the registry the metrics listener serves. A nil
 	// registry takes every call here and drops it, which is what a

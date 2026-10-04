@@ -100,6 +100,49 @@ func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	}
 }
 
+// asking gives a Sink a volume ask at a time.
+func asking(sink map[string]any, at string) map[string]any {
+	sink["status"].(map[string]any)["session"] = map[string]any{
+		"player":    "media/den",
+		"volumeAsk": map[string]any{"level": int64(30), "at": at},
+	}
+	return sink
+}
+
+// A new volume ask is a status write, which changes no generation, so
+// the Sinks' handler compares the time of the ask as well. A new time
+// calls asked and wakes no pass. Any other status write calls nothing.
+func TestANewVolumeAskCallsAskedAndNothingElse(t *testing.T) {
+	const first, second = "2026-10-04T12:15:25.164Z", "2026-10-04T12:15:25.264Z"
+	held := asObject(t, asking(sinkAt("1", 1), first))
+	cases := []struct {
+		name    string
+		deliver func(cache.ResourceEventHandler)
+		asked   bool
+	}{
+		{name: "a new ask", deliver: updated(held, asObject(t, asking(sinkAt("2", 1), second))), asked: true},
+		{name: "a first ask", deliver: updated(asObject(t, sinkAt("1", 1)), held), asked: true},
+		{name: "a status write that keeps the ask", deliver: updated(held, asObject(t, asking(sinkAt("2", 1), first)))},
+		{name: "a session with no ask", deliver: updated(held, asObject(t, sinkAt("2", 1)))},
+		{name: "a Sink that enters the selection with an ask", deliver: added(held)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			asked, woke := false, false
+			c.deliver(sinkHandler{
+				edits: editHandler[Sink]{what: "the Sinks", wake: func() { woke = true }},
+				asked: func() { asked = true },
+			}.handler())
+			if asked != c.asked {
+				t.Errorf("asked = %v, want %v", asked, c.asked)
+			}
+			if woke && c.asked {
+				t.Error("an ask woke the pass")
+			}
+		})
+	}
+}
+
 // Both collections are watched, because a person declares how a
 // microphone rests as much as a speaker. The list and the watch select
 // the resources whose status.node is this machine: an unselected watch
@@ -110,7 +153,7 @@ func TestTheWatchSelectsThisMachinesResourcesInBothCollections(t *testing.T) {
 		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`})
 		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
 		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-			"liken-1", func() {}, nil)
+			"liken-1", func() {}, func() {}, nil)
 		synctest.Wait()
 
 		for _, server := range []*watchServer{sinks, sources} {
@@ -149,7 +192,7 @@ func TestASpecEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
 		wakes := make(chan struct{}, 8)
 		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-			"liken-1", func() { wakes <- struct{}{} }, nil)
+			"liken-1", func() { wakes <- struct{}{} }, func() {}, nil)
 		synctest.Wait()
 		// The Sink's add and the two syncs.
 		if got := wakeCount(wakes); got != 3 {
@@ -192,7 +235,7 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 				sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
 				wakes := make(chan struct{}, 8)
 				watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-					"liken-1", func() { wakes <- struct{}{} }, nil)
+					"liken-1", func() { wakes <- struct{}{} }, func() {}, nil)
 				synctest.Wait()
 				if got := wakeCount(wakes); got != 3 {
 					t.Errorf("the first reads woke the loop %d times, want 3", got)
@@ -219,7 +262,7 @@ func TestASinkThatEntersOrLeavesTheSelectionWakesTheLoop(t *testing.T) {
 		sources := newWatchServer(SourcesPath, EndpointAPIVersion, SourceKind, []string{`[]`})
 		wakes := make(chan struct{}, 8)
 		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
-			"liken-1", func() { wakes <- struct{}{} }, nil)
+			"liken-1", func() { wakes <- struct{}{} }, func() {}, nil)
 		synctest.Wait()
 		if got := wakeCount(wakes); got != 2 {
 			t.Errorf("the first reads woke the loop %d times, want 2", got)

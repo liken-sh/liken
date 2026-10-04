@@ -67,7 +67,7 @@ One capture endpoint: an analog input, or a USB card's capture side. A Bluetooth
 
 ## spec
 
-The settings the endpoint rests at. Every field is optional: the operator writes a declared field back when the endpoint diverges from it, and it never writes a field the spec leaves out.
+The settings the endpoint rests at. Every field is optional. The operator writes volume and mute when they change and when the endpoint appears, and otherwise reports the level the endpoint holds. It writes a declared control back when the endpoint diverges from it. It never writes a field the spec leaves out.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -172,9 +172,12 @@ Connected reports that the endpoint can capture now: a plug in an analog jack, a
 ## The name and the resting layer
 
 A `Source` is named by the same rule as a `Sink`, and its `spec`
-works the same way: the operator writes a declared field back only
-where the hardware diverges from it, validates a control against
-`status.capabilities`, and invents no value. The
+works the same way: the operator writes a declared `volume` and
+`mute` when the declaration changes and when the endpoint appears,
+writes a declared control back only where the hardware diverges from
+it, validates a control against `status.capabilities`, and invents no
+value. A `Source` has no `status.session`, and its `spec.volume` is a
+number, the level alone. The
 [`Sink` reference](/docs/reference/sinks/) has the name table and
 the rules in full.
 

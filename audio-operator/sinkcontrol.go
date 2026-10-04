@@ -6,11 +6,15 @@ package main
 // each one it does three things in order. It makes the resource
 // exist, created with an empty spec, because the operator declares
 // nothing about how an endpoint should rest: the resource exists so a
-// person can. It writes the resting layer, which is every declared
-// field the endpoint has diverged from, and nothing at all for a
-// field the spec leaves out. And it writes the whole of status, but
-// only where this pass would say something the published status does
-// not already say, so a settled endpoint costs no write.
+// person can. It writes the resting layer: a declared level when the
+// declaration changed or the node is new, every declared control and
+// codec the endpoint has diverged from, and nothing at all for a field
+// the spec leaves out (resting.go). And it writes its part of status,
+// but only where this pass would say something the published status
+// does not already say, so a settled endpoint costs no write.
+//
+// Between passes, the loop applies the volume asks the media operator
+// writes into a Sink's status.session (asks.go).
 //
 // The pass ends with a sweep for the resources this machine holds
 // whose endpoint it no longer publishes, such as a USB card that was
@@ -87,6 +91,13 @@ type endpointControl struct {
 	// write to one line for each run of passes that finds it.
 	refusals map[string]string
 
+	// asks is the time of the last volume ask this operator read on
+	// each Sink, and latest is what the last pass read about each sink
+	// endpoint it publishes. An ask applies to the endpoint as the last
+	// pass read it (asks.go).
+	asks   map[string]string
+	latest map[string]endpointFacts
+
 	// swept and sweptAt hold the endpoints of the last listing and
 	// when it ran, which is what keeps the listing to the slower
 	// cadence.
@@ -111,22 +122,9 @@ func newEndpointControl(client *apiclient.Client, cached objectCache, machine st
 		readings:    readings,
 		nodes:       map[string]nodeRecord{},
 		refusals:    map[string]string{},
+		asks:        map[string]string{},
+		latest:      map[string]endpointFacts{},
 	}
-}
-
-// nodeRecord is one endpoint's node as the controller last saw it.
-//
-// written is the level this operator last wrote, which status.observed
-// reports for an idle node. held is the declared level the node was
-// last judged to hold: the level this operator wrote, the level the
-// node reported when it matched the declaration, or, for an idle node
-// the first pass found, the declaration itself. A suspended node's
-// declaration is compared with held, so a node that matched the
-// declaration and then went idle takes no write.
-type nodeRecord struct {
-	id      int
-	written *levelWrite
-	held    *levelWrite
 }
 
 // endpoint is one endpoint of one pass: the facts it read, and the
@@ -158,6 +156,7 @@ func (e *endpointControl) pass(ctx context.Context, endpoints []alsaEndpoint,
 
 	var failures []error
 	present := map[string]bool{}
+	e.latest = map[string]endpointFacts{}
 	for _, reading := range e.read(cards, endpoints, speakers, graph, layouts) {
 		present[reading.facts.Name] = true
 		if err := e.reconcile(ctx, reading); err != nil {
@@ -351,8 +350,10 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 	if err != nil {
 		return err
 	}
+	e.noteAsk(sink)
 	actuated := e.actuate(ctx, sink.Spec.declaration(), reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
+	e.latest[reading.facts.Name] = reading.facts
 	e.recordEndpoint(reading)
 	now := e.now()
 	want := func(published EndpointStatus) (EndpointStatus, bool) {
@@ -401,63 +402,6 @@ func (e *endpointControl) recordEndpoint(reading endpoint) {
 	connected, _, _ := reading.facts.connected()
 	ready, _, _ := reading.facts.ready()
 	e.readings.endpoint(reading.facts.Name, connected, ready, reading.facts.Claim != nil)
-}
-
-// actuate writes what the declaration and the endpoint disagree on.
-func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading endpoint) error {
-	name := reading.facts.Name
-	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts))
-	e.report(name, refusals)
-	err := e.apply(ctx, reading, writes)
-	record, seen := e.nodes[name]
-	switch {
-	case !seen:
-		// The endpoint has no node, so there is nothing to record.
-	case writes.Level != nil && err != nil:
-		// The node is recorded as seen before the write, and a
-		// level that did not land has to be tried again, so the
-		// failure forgets it and the next pass reads it as a new
-		// node.
-		delete(e.nodes, name)
-	case writes.Level != nil:
-		record.written = writes.Level
-		if spec.Volume != nil || spec.Mute != nil {
-			record.held = writes.Level
-		}
-		e.nodes[name] = record
-	case spec.Volume != nil || spec.Mute != nil:
-		// The pass judged the declaration and planned no level write,
-		// so the node holds the declaration, as read or as adopted.
-		record.held = &levelWrite{Volume: spec.Volume, Mute: spec.Mute}
-		e.nodes[name] = record
-	}
-	return err
-}
-
-// remember reports whether PipeWire built this endpoint's node since
-// the operator last looked, with the level last written to the node
-// that stands, and records the node it sees now.
-//
-// This is what the unity default and a declaration on a suspended
-// node read. A new node is written to unity once. A level a person
-// set by hand on a node that stands is left alone: it reaches
-// status.observed and nothing else, because the spec declares no
-// level and the operator invents none. A node the first pass finds
-// is not new, because the memory starts empty when the operator
-// starts, and a node that stood before the start can hold a level a
-// person chose, under a claim that plays. The first pass reports it
-// as found, so that a declaration on it is adopted and not written.
-func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
-	if !facts.HasNode {
-		delete(e.nodes, facts.Name)
-		return nodeMemory{}
-	}
-	last, seen := e.nodes[facts.Name]
-	if !seen || last.id != facts.Node.ID {
-		e.nodes[facts.Name] = nodeRecord{id: facts.Node.ID}
-		return nodeMemory{New: e.started, Found: !e.started}
-	}
-	return nodeMemory{Held: last.held}
 }
 
 // report prints one line for each run of passes that finds the same

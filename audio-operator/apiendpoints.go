@@ -60,7 +60,7 @@ func (s *apiServer) readEndpoint(route apiRoute, name string) (capturedEndpoint,
 		Kind:   SinkKind,
 		Name:   sink.Metadata.Name,
 		UID:    sink.Metadata.UID,
-		Status: sink.Status,
+		Status: sink.Status.EndpointStatus,
 	}, nil
 }
 

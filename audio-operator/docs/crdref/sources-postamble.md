@@ -1,9 +1,12 @@
 ## The name and the resting layer
 
 A `Source` is named by the same rule as a `Sink`, and its `spec`
-works the same way: the operator writes a declared field back only
-where the hardware diverges from it, validates a control against
-`status.capabilities`, and invents no value. The
+works the same way: the operator writes a declared `volume` and
+`mute` when the declaration changes and when the endpoint appears,
+writes a declared control back only where the hardware diverges from
+it, validates a control against `status.capabilities`, and invents no
+value. A `Source` has no `status.session`, and its `spec.volume` is a
+number, the level alone. The
 [`Sink` reference](/docs/reference/sinks/) has the name table and
 the rules in full.
 

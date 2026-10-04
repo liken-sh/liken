@@ -5,7 +5,7 @@ package main
 // kinds, and wakes the loop when an event carries a change the pass
 // must act on:
 //
-//   - a change to the spec, such as a Sink's spec.volume,
+//   - a change to the spec, such as a Sink's spec.volume.level,
 //   - a deletion request,
 //   - a resource that enters this machine's selection, which is a new
 //     resource or one whose status.node now names this machine,
@@ -32,6 +32,12 @@ package main
 // as an event, so a spec a person wrote before it is read on the pass
 // that follows.
 //
+// A Sink's status.session is the exception. The media operator writes
+// a volume ask there, and a status write changes no generation, so the
+// Sinks' handler also compares the time of the ask, and a new one
+// calls asked. That path does not wake the pass: the loop applies the
+// ask at once, outside the settle window (asks.go).
+//
 // Each watch also wakes the loop once, when its first read of the
 // collection is done. The first pass can read the resources before the
 // watch does, and an edit made between the two reads is in the watch's
@@ -39,6 +45,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -50,18 +57,19 @@ import (
 )
 
 // watchEndpoints turns an edit to one of this machine's resources, on
-// both collections, into one wake. The two watches run until the
-// context ends. It answers the two stores with a memo each, which the
+// both collections, into one wake, and a new volume ask on a Sink into
+// one call of asked. The two watches run until the context ends. It answers the two stores with a memo each, which the
 // pass reads in place of the API server (objectcache.go).
-func watchEndpoints(ctx context.Context, client dynamic.Interface, machine string, wake func(), readings *metrics) objectCache {
+func watchEndpoints(ctx context.Context, client dynamic.Interface, machine string, wake, asked func(), readings *metrics) objectCache {
 	watch := func(kind string, resource schema.GroupVersionResource, handler cache.ResourceEventHandler) informer.Held {
 		collection := informer.Start(ctx, client, informer.Source{Resource: resource, FieldSelector: machineSelector(machine)},
 			informer.Options{Handler: handler, Synced: wake, Reopened: func() { readings.watchRestarted(kind) }})
 		return informer.Held{View: collection.View(), Versions: memo.New()}
 	}
 	return objectCache{
-		sinks: watch(SinkKind, sinkResource,
-			editHandler[Sink]{what: "the Sinks of " + machine, wake: wake}.handler()),
+		sinks: watch(SinkKind, sinkResource, sinkHandler{
+			edits: editHandler[Sink]{what: "the Sinks of " + machine, wake: wake}, asked: asked,
+		}.handler()),
 		sources: watch(SourceKind, sourceResource,
 			editHandler[Source]{what: "the Sources of " + machine, wake: wake}.handler()),
 	}
@@ -145,4 +153,50 @@ func (h editHandler[T]) updated(before, after any) {
 	if err != nil || markOf(held) != markOf(now) {
 		h.wake()
 	}
+}
+
+// sinkHandler is the Sinks' handler: the edits wake the loop as they
+// do for a Source, and a change of status.session.volumeAsk.at calls
+// asked. A Sink that enters the selection calls nothing, because an
+// ask on a Sink this operator has not read is recorded and not
+// applied (asks.go), and the pass the entry wakes records it.
+type sinkHandler struct {
+	edits editHandler[Sink]
+	asked func()
+}
+
+func (h sinkHandler) handler() cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    h.edits.added,
+		UpdateFunc: h.updated,
+		DeleteFunc: h.edits.removed,
+	}
+}
+
+func (h sinkHandler) updated(before, after any) {
+	h.edits.updated(before, after)
+	now, err := askAtOf(after)
+	if err != nil || now == "" {
+		return
+	}
+	// A held copy whose ask cannot be read counts as a copy with
+	// another ask. applyAsks compares the time with its own record, so
+	// a call for an ask it already applied writes nothing.
+	if held, err := askAtOf(before); err != nil || held != now {
+		h.asked()
+	}
+}
+
+// askAtOf answers the time of the volume ask a delivered Sink holds,
+// and an empty string when it holds none.
+func askAtOf(object any) (string, error) {
+	item, err := unwrap(object)
+	if err != nil {
+		return "", err
+	}
+	at, _, err := unstructured.NestedString(item.Object, "status", "session", "volumeAsk", "at")
+	if err != nil {
+		return "", fmt.Errorf("reading the volume ask of %s: %w", item.GetName(), err)
+	}
+	return at, nil
 }

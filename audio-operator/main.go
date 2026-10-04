@@ -247,7 +247,17 @@ func operate() {
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
 	}
-	resources := watchEndpoints(ctx, watcher, nodeName, wake, readings)
+	// A new volume ask on a Sink arrives on its own channel, which the
+	// loop reads outside the settle window. One buffered wake covers a
+	// burst: the loop reads each Sink's newest ask.
+	asks := make(chan struct{}, 1)
+	asked := func() {
+		select {
+		case asks <- struct{}{}:
+		default:
+		}
+	}
+	resources := watchEndpoints(ctx, watcher, nodeName, wake, asked, readings)
 
 	operator := &reconciler{
 		client:   client,
@@ -265,6 +275,8 @@ func operate() {
 		endpoints: &endpointInventory{},
 		cards:     watchCards(ctx, wake),
 		control:   newEndpointControl(client, resources, nodeName, claims, feed, readings),
+		asks:      asks,
+		poke:      wake,
 	}
 
 	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {

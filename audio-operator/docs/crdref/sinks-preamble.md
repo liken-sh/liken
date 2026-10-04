@@ -3,9 +3,10 @@ analog jack, an HDMI or DisplayPort output, the playback side of a
 USB card, or a Bluetooth speaker. The operator creates one for every
 endpoint it publishes, cluster-scoped like a `Node`, named by the
 same device name the `ResourceSlice` carries. You never create or
-delete one. The operator writes the whole of `status`: where the
-endpoint is, the controls the card declares, and the values it last
-read. You write `spec`, which states what the endpoint rests at.
+delete one. The operator writes `status`: where the endpoint is, the
+controls the card declares, and the values it last read. The media
+operator writes `status.session`, the volume asks of a remote's keys.
+You write `spec`, which states what the endpoint rests at.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1
@@ -13,7 +14,10 @@ kind: Sink
 metadata:
   name: node-1-usb-0573-1573-a34004801402-usb-audio
 spec:
-  volume: 80
+  volume:
+    level: 80
+    max: 100
+    step: 5
   controls:
     PCM Playback Volume: "120"
 status:

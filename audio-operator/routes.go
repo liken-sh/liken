@@ -15,10 +15,10 @@ package main
 // more, because the A2DP follower accepts no volume key
 // (spa/plugins/bluez5/media-sink.c in pipewire 1.4.2).
 //
-// So spec.volume on a speaker writes the Route. The Route's read-only
-// volumeStep is how the graph says the transport reports a volume at
-// all, and a speaker without one gets the software gain, like an
-// ALSA endpoint.
+// So a Sink's spec.volume.level and its volume asks write a
+// speaker's Route. The Route's read-only volumeStep is how the graph
+// says the transport reports a volume at all, and a speaker without
+// one gets the software gain, like an ALSA endpoint.
 
 import (
 	"context"

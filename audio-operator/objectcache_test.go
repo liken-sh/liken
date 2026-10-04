@@ -199,7 +199,7 @@ func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	api.sinks[testSinkName] = &Sink{Metadata: EndpointMeta{Name: testSinkName, ResourceVersion: api.nextVersion()},
-		Status: EndpointStatus{Node: "liken-1"}}
+		Status: sinkStatus(EndpointStatus{Node: "liken-1"})}
 	older := cacheOf(t, api).sinks.View
 	api.sinks[testSinkName].Status.Claim = &EndpointClaim{Namespace: "media", Name: "den"}
 	api.sinks[testSinkName].Metadata.ResourceVersion = api.nextVersion()
@@ -363,10 +363,10 @@ func TestTheSweepReplacesACopyOlderThanItsOwnWrite(t *testing.T) {
 	if got := sent(api, "GET"); got != 1 {
 		t.Errorf("the pass sent %d reads, want 1: %v", got, api.requests)
 	}
-	if got := sent(api, "PUT"); got != 1 {
+	if got := sent(api, "PATCH"); got != 1 {
 		t.Errorf("the pass sent %d writes, want 1: %v", got, api.requests)
 	}
-	if connected := conditionOf(api.sinks[testAnalogName].Status, ConnectedCondition); connected != conditionFalse {
+	if connected := conditionOf(api.sinks[testAnalogName].Status.EndpointStatus, ConnectedCondition); connected != conditionFalse {
 		t.Errorf("the Sink reports Connected %q, want the absence reported", connected)
 	}
 }
@@ -383,7 +383,7 @@ func TestTheSweepLeavesOutASinkTheAPIServerNoLongerHolds(t *testing.T) {
 		t.Fatalf("the pass failed: %v", err)
 	}
 
-	if got := sent(api, "PUT"); got != 0 {
+	if got := sent(api, "PATCH"); got != 0 {
 		t.Errorf("the pass sent %d writes, want none: %v", got, api.requests)
 	}
 	if _, held := api.sinks[testAnalogName]; held {
@@ -424,7 +424,7 @@ func TestTheSweepReadsACopyThatDoesNotConvertFromTheAPIServer(t *testing.T) {
 		t.Fatalf("the pass failed: %v", err)
 	}
 
-	if connected := conditionOf(api.sinks[testAnalogName].Status, ConnectedCondition); connected != conditionFalse {
+	if connected := conditionOf(api.sinks[testAnalogName].Status.EndpointStatus, ConnectedCondition); connected != conditionFalse {
 		t.Errorf("the Sink reports Connected %q, want the absence reported", connected)
 	}
 }
