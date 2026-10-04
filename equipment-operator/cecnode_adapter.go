@@ -385,7 +385,7 @@ const scanFailure = "scanning the bus: "
 // timer. A timed question is traffic on the wire, and some TVs answer
 // traffic they did not expect by switching their own input, so a timer
 // that asks would change the room with no person's action;
-// plans/09-cec.md records the measurement. This is the node workload's
+// plans/completed/09-cec.md records the measurement. This is the node workload's
 // rule for the wire: the handle took the follower mode before the
 // claim, so the kernel queues every message the adapter hears from the
 // moment it joins, and the scan here is the one baseline read. When the

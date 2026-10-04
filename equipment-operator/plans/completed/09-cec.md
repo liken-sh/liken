@@ -4,7 +4,11 @@ Plan 09. Phase 1 built 2026-09-26 and tested against `vivid`. Phase 2
 built 2026-09-26 and tested against `vivid`, with `cec-follower`
 playing the TV. Phase 3 built 2026-09-26 and tested against `vivid`,
 with a second `vivid` output playing a streaming player. The hardware
-drills of phases 1 to 3 and phases 4 and 5 are open. The power press
+drills of phases 1 to 3 ran on `liken-1`. Phases 4 and 5 are not built,
+and the open problems
+[`the-receiver-has-no-cec-block`](../open-problems/the-receiver-has-no-cec-block.md)
+and [`cec-has-no-setup-guide`](../open-problems/cec-has-no-setup-guide.md)
+hold them. The power press
 that turns the TV off was built 2026-09-27 and tested against `vivid`
 and the fakes; see "The power press turns the room off". The adapter
 stopped sending on a timer on 2026-09-27, tested against `vivid` and

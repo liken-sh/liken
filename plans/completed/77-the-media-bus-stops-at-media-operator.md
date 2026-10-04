@@ -642,7 +642,7 @@ Proof: the suites pass, nothing names the owner topic, the seed, or
   pod. Each repeat is one step under this design, so the repeat rate
   sets how fast the volume moves.
 * CEC System Audio Mode, which would let a television's remote set the
-  receiver's level (`equipment-operator/plans/09-cec.md`).
+  receiver's level (`equipment-operator/plans/completed/09-cec.md`).
 * Equal loudness across devices. A Denon's scale is in dB and
   PipeWire's gain is linear, so two devices at the same `level` do
   not sound equally loud.

@@ -5,7 +5,7 @@
 # (leader_node.go), so each node runs a program of about half the size.
 # The pod holds the adapter, runs it in the mode its CECBus states,
 # and writes its own entry under that CECBus's status. The Deployment
-# in operator.yaml derives the rest of the status. plans/09-cec.md
+# in operator.yaml derives the rest of the status. plans/completed/09-cec.md
 # gives the design.
 ---
 # The adapter claim. A template rather than a plain claim, so each

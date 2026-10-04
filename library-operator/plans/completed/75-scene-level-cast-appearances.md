@@ -6,7 +6,12 @@ person is on screen at each moment of a title, at a cost a home cluster
 can pay. The first step writes that answer to files on the library's
 volume. A feature that a person sees on a screen comes after the files
 exist. Step 1 is built, as the `appearances` fact and its worker `Job`,
-and its proof on the lab is open. Steps 2 and 3 are not built.
+and proved on the lab. Step 3's first feature, the cast on screen when
+a film pauses, was built on 2026-10-01; it reads a spans file the match
+writes beside the ledger, so it needs no catalog table. Step 2 and the
+rest of step 3 are not built, and the open problem
+[`appearances-are-not-in-the-catalog`](../open-problems/appearances-are-not-in-the-catalog.md)
+holds them.
 
 ## The problem
 
@@ -201,7 +206,7 @@ user needs a udev rule that covers both identities.
 
 ### Step 1: files on the volume
 
-The design rule from [`00-design.md`](00-design.md) applies: the
+The design rule from [`00-design.md`](../00-design.md) applies: the
 volume holds every fact, and the catalog derives from the volume
 alone. The first step is a fact that writes its answer to files beside
 the title, and to nothing else. A lost catalog rebuilds the

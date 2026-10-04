@@ -5,7 +5,7 @@ package main
 // adapter's -cec device, finds the CECBus that names its machine, runs
 // the adapter in the bus's mode, and writes its own entry under that
 // bus's status.adapters. It needs no host network, no message bus, and
-// no receiver credentials. plans/09-cec.md gives the design.
+// no receiver credentials. plans/completed/09-cec.md gives the design.
 
 import (
 	"context"

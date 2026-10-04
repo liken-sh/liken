@@ -4,7 +4,7 @@ package main
 // names its protocol by the block it carries, and the first block is
 // cec:, which names the CECBus the TV is on. A bus has at most one TV,
 // and the TV is always at logical address 0, so the bus alone
-// identifies it. plans/09-cec.md gives the design.
+// identifies it. plans/completed/09-cec.md gives the design.
 
 import (
 	"slices"

@@ -3,7 +3,7 @@
 This directory holds the HDMI-CEC driver: a Go binding of the Linux
 kernel's CEC API, the messages this operator sends and reads, and the
 scan and follower logic built on them. `cectest/` is a CEC bus in
-memory that answers the same ioctls, for tests. `plans/09-cec.md`
+memory that answers the same ioctls, for tests. `plans/completed/09-cec.md`
 gives the design.
 
 ## The references
@@ -188,7 +188,7 @@ address and says so in its entry.
 
 ## Vendor notes
 
-No vendor-specific behavior is built yet. `plans/09-cec.md` states
+No vendor-specific behavior is built yet. `plans/completed/09-cec.md` states
 the rule for adding one: take the behavior from libCEC's handler for
 that brand in
 [`src/libcec/implementations`](https://github.com/Pulse-Eight/libcec/tree/master/src/libcec/implementations),

@@ -2,7 +2,7 @@ package main
 
 // The CECBus resource: one HDMI tree, which means one CEC wire, and
 // the adapters on the cluster's machines that are connected to it.
-// plans/09-cec.md gives the design.
+// plans/completed/09-cec.md gives the design.
 
 // CECMode is the consent a person gives an adapter on the bus.
 type CECMode string

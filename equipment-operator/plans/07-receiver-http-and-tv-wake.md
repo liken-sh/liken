@@ -44,7 +44,7 @@ All, and Power Saving off.
 
 A TV wakes only when a device connected to it originates CEC. The
 `liken` machines have no CEC on their HDMI ports, so the wake needs a
-CEC adapter. [Plan 09](09-cec.md) designs that node-attached
+CEC adapter. [Plan 09](completed/09-cec.md) designs that node-attached
 component: the `CECBus`, the `Television`, and the wake job that runs
 when a `Receiver`'s session wakes. Its phase 3 builds the wake: a
 press of the remote's power button that turns the receiver on also

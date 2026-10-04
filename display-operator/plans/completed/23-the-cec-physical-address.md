@@ -95,7 +95,7 @@ hardware as it is now, so a retained value stays in `status`.
 **What the operator does not do.** It does not open a CEC adapter,
 send a CEC message, or read a CEC bus. It reports the fact that the
 EDID states, and equipment-operator owns everything that speaks CEC
-([plan 09](https://github.com/liken-sh/liken/blob/main/equipment-operator/plans/09-cec.md)).
+([plan 09](https://github.com/liken-sh/liken/blob/main/equipment-operator/plans/completed/09-cec.md)).
 The adapter on the machine comes from `liken`'s
 [milestone 70](https://github.com/liken-sh/liken/blob/main/liken/plans/completed/70-init-attaches-serio-devices.md).
 

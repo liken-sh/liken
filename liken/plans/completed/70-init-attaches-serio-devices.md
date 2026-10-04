@@ -17,7 +17,7 @@ channel that every HDMI port carries. It lets a device wake a TV,
 switch the inputs of a TV or a receiver, and receive the presses of
 the TV's remote. The consumer of this milestone is the CEC support in
 equipment-operator
-([plan 09](https://github.com/liken-sh/equipment-operator/blob/main/plans/09-cec.md)).
+([plan 09](https://github.com/liken-sh/liken/blob/main/equipment-operator/plans/completed/09-cec.md)).
 display-operator's
 [plan 23](../../../display-operator/plans/completed/23-the-cec-physical-address.md)
 supplies the address the adapter announces.

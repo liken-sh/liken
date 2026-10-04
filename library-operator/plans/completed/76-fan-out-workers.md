@@ -3,7 +3,9 @@
 This plan, written on 2026-10-02, lets one worker `Job` of a heavy
 fact run on several nodes at once. Each pod of the `Job` takes a share
 of the fact's work list. The `appearances` and `trickplay` workers
-both take it.
+both take it. Built on 2026-10-02 and proved on the lab. The open
+questions below are the open problem
+[`a-fan-out-share-is-one-title-folder`](../open-problems/a-fan-out-share-is-one-title-folder.md).
 
 ## The problem
 
