@@ -13,8 +13,8 @@ You need:
 
 * A `liken` cluster with the
   [`media-operator`](https://liken.sh/media/) installed. The operator
-  reads a session's level from the media bus that `media-operator`
-  runs.
+  applies the session and the asks that `media-operator` writes into
+  the `Receiver`'s status.
 * A receiver that supports the Denon and Marantz control protocol on
   the network, with network control enabled in its own menu.
 * `kubectl` with cluster-admin access, because the install creates a
@@ -295,15 +295,20 @@ You declare no session by hand. The `media-operator` resolves each
 matches both values. It applies `status.session` while the `Player`
 has that screen, including the idle screen. A `media-operator` that
 does not write `status.session` applies `spec.session` instead, and the
-operator reads that block while `status.session` is absent. The
-session reads the level
-from the `Player` volume topic for that whole period. The room remote
-therefore changes the receiver's level while a film plays and while
-the screen is idle. The topic and payload belong to `media-operator`.
-Its [players page](https://liken.sh/media/docs/reference/players/)
-defines them. This operator's reads and writes on that topic are
-described on [the receiver on the bus](/docs/reference/bus/). When a
-`Play` starts, the session powers the receiver on and selects the input
+operator reads that block while `status.session` is absent.
+
+There are no topics to configure. The operator connects to no message
+bus, and `media-operator` writes each press of the room remote into the
+session as an ask. A press of a volume key writes a `volumeAsk` with an
+absolute level in the receiver's own scale, at or below
+`spec.volume.max`. The operator sends each new ask to the receiver
+once, and when asks arrive faster than the receiver reports the volume
+it was last sent, it sends only the newest. So the room remote changes
+the receiver's level while a film plays and while the screen is idle.
+The [`Receiver`](/docs/reference/receivers/) reference describes each
+ask.
+
+When a `Play` starts, the session powers the receiver on and selects the input
 once. It sends each command only when the receiver reports another
 value. Waking the screen also triggers those commands through
 `status.session.awake`, even with no `Play`. Starting an idle screen after
@@ -311,7 +316,7 @@ a reboot does not by itself power the receiver on, and an operator
 restart sends nothing for the sessions it finds.
 
 The remote's power button turns the whole room on or off. The
-`media-operator` publishes a toggle on the session's power topic. When
+`media-operator` writes a `powerAsk` into the session. When
 the session's input names a `Display` that a `Television` lists, the
 TV's power decides what the press does: a TV that is on means the press
 turns the room off, and a TV in standby means the press turns the room
@@ -334,5 +339,5 @@ A person at the receiver's own remote can change the receiver without
 the cluster changing it back immediately. If the person selects
 another input, the status records that input. The operator selects the
 configured input again only when `active` or `awake` changes from false
-to true. If the person turns the volume knob, the operator writes the
-new level to the volume topic, so the next press starts from that level.
+to true. If the person turns the volume knob, the status reports the
+new volume, and `media-operator` steps the next press from that level.

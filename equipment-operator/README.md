@@ -14,20 +14,20 @@ metadata:
 spec:
   denon:
     address: receiver.example
+  volume:
+    max: 70
   inputs:
     - name: MPLAY
       machine: node-1
       monitor: hdmi-a-1
-  session:
-    player: house/theater
-    input: MPLAY
-    volumeTopic: liken/media/players/house/theater/volume
 ```
 
-The volume topic belongs to the `Player` and is on the media bus run by
-`media-operator`. While the session exists, the operator publishes a
-retained owner mark on the topic plus `/owner`. Playback pods then leave
-volume changes to the receiver operator.
+`media-operator` writes the `Player`'s session into `status.session`
+while the `Player` has a screen on the receiver. The session names the
+input, and it carries an ask for each press of a volume, power, or home
+key: `volumeAsk`, `powerAsk`, and `inputAsk`. The operator applies each
+ask once and reports the volume the receiver reaches in
+`status.zones.main`. It connects to no message bus.
 
 A `CECBus` is one HDMI tree's CEC wire, reached through a USB CEC
 adapter on one of the cluster's machines. In `Listen` the adapter

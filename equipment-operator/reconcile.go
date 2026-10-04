@@ -10,7 +10,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -48,23 +47,20 @@ const backstopInterval = 30 * time.Second
 const statusDebounce = 250 * time.Millisecond
 
 // receiverUnit is one Receiver's running parts: the connection, the
-// status writer, the settings and zones it drives, and the session that
-// holds the level.
+// status writer, the settings and zones it drives, the session a Player
+// holds, and the asks it applies.
 type receiverUnit struct {
 	// ctx is the unit's own context. Each goroutine the unit starts runs
 	// under it, and is counted in the group it carries (work.go).
-	ctx           context.Context
-	name          string
-	address       string
-	settingsTopic string
-	commandsTopic string
-	client        *Client
-	busAddress    string
-	dial          dialFunc
-	now           func() time.Time
-	driver        equipment.Driver
-	denonClient   *denon.Client
-	wiimClient    *wiim.Client
+	ctx         context.Context
+	name        string
+	address     string
+	client      *Client
+	dial        dialFunc
+	now         func() time.Time
+	driver      equipment.Driver
+	denonClient *denon.Client
+	wiimClient  *wiim.Client
 	// foreign tells discovery which device reports a project that is
 	// not a WiiM. It is nil in a test that builds a unit alone.
 	foreign    func(uuid, project, address string)
@@ -73,11 +69,9 @@ type receiverUnit struct {
 	cancel     context.CancelFunc
 	dirty      chan struct{}
 	generation atomic.Int64
-	// The ceiling and the step live here and not on the session, so an
-	// edit to them reaches a standing session with no restart.
-	volume atomic.Pointer[ReceiverVolume]
-	// The declared inputs live here for the same reason: the sound mode
-	// an input names is read when the session selects it.
+	// The declared inputs live here and not on the session, so an edit to
+	// them reaches a standing session with no restart: the sound mode an
+	// input names is read when the session selects it.
 	inputs atomic.Pointer[[]ReceiverInput]
 	// The last power the operator settled, so a reconcile and a toggle
 	// share one memory of what was sent and neither re-asserts it.
@@ -116,8 +110,8 @@ type receiverUnit struct {
 }
 
 // observe is where every line the receiver sends reaches the operator.
-// It wakes the status writer, and it reaches the session that owns the
-// level.
+// It wakes the status writer and the volume ask that waits for a
+// report, and it reaches the session.
 func (u *receiverUnit) observe(event equipment.Event) {
 	poke(u.dirty)
 	u.log.observe()
@@ -192,8 +186,7 @@ func (u *receiverUnit) write() {
 // shots the receiver answers once.
 //
 // A flip of either flag is not a change of session: it reaches the
-// session that stands, which keeps its broker connection and its
-// adopted level.
+// session that stands.
 //
 // adopted is empty for a session the operator sees appear while it
 // runs. Otherwise it names why the session was already standing: the
@@ -219,28 +212,24 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 		u.mutex.Lock()
 		u.session = nil
 		u.mutex.Unlock()
-		u.sessions.detach(held.spec.Player, held)
 		held.stop()
 		u.log.printf("the session for Player %s ended", held.spec.Player)
 		u.sessions.lift(held.spec.Player)
 	}
 	if spec == nil {
-		u.readings.setClaimed(u.name, false)
 		return
 	}
 	adopting := adopted != ""
 	if adopting {
 		adopted = "; " + adopted + ", so it sends nothing for these flags"
 	}
-	u.log.printf("a session for Player %s started: input %s, %s, %s, active %t, awake %t%s",
-		spec.Player, spec.Input, volumeTopicWords(spec.VolumeTopic), powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake, adopted)
-	started := newSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.dial, u.volumeRule, u.inputSoundMode, u.applyPower, u.roomFor(spec))
+	u.log.printf("a session for Player %s started: input %s, active %t, awake %t%s",
+		spec.Player, spec.Input, spec.Active, spec.Awake, adopted)
+	started := newSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.inputSoundMode, u.applyPower, u.roomFor(spec))
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
-	u.sessions.attach(spec.Player, started)
 	started.start(spec.Active, spec.Awake, adopting)
-	u.readings.setClaimed(u.name, true)
 }
 
 // flagFlips names each flag of a standing session that the new spec
@@ -254,41 +243,6 @@ func flagFlips(held *session, spec *ReceiverSession) string {
 		flips = append(flips, fmt.Sprintf("awake went from %t to %t", was, spec.Awake))
 	}
 	return strings.Join(flips, ", ")
-}
-
-// volumeTopicWords names a session's volume topic, or says it has none.
-func volumeTopicWords(topic string) string {
-	if topic == "" {
-		return "no volume topic"
-	}
-	return "volume topic " + topic
-}
-
-// powerTopicWords names a session's power topic, or says it has none.
-func powerTopicWords(topic string) string {
-	if topic == "" {
-		return "no power topic"
-	}
-	return "power topic " + topic
-}
-
-// setVolume records the ceiling and the step a person declared, which
-// every press reads.
-func (u *receiverUnit) setVolume(spec *ReceiverVolume) {
-	rule := ReceiverVolume{}
-	if spec != nil {
-		rule = *spec
-	}
-	u.volume.Store(&rule)
-}
-
-// volumeRule answers what the spec states now, so a press made after an
-// edit is measured against the edited scale.
-func (u *receiverUnit) volumeRule() ReceiverVolume {
-	if held := u.volume.Load(); held != nil {
-		return *held
-	}
-	return ReceiverVolume{}
 }
 
 // setInputs records the declared inputs and the sound mode each names,
@@ -652,92 +606,6 @@ func (u *receiverUnit) applyZone(name string, spec ZoneSpec) error {
 	return nil
 }
 
-// startBus opens the unit's own broker connection and subscribes to
-// the settings and commands topics when the spec names them. The unit
-// bus is separate from a session's bus, so settings and commands reach
-// a receiver with no Play and no screen. It holds no retained state, so
-// it names no will.
-func (u *receiverUnit) startBus(ctx context.Context) {
-	if u.settingsTopic == "" && u.commandsTopic == "" {
-		return
-	}
-	// The bus lives and dies with this unit's context, so nothing here
-	// stores it: the goroutine owns the only reference.
-	bus := newBus(u.busAddress, u.dial, "equipment-operator-"+u.name+"-bus", nil, nil, u.busMessage)
-	if u.settingsTopic != "" {
-		bus.Subscribe(u.settingsTopic)
-	}
-	if u.commandsTopic != "" {
-		bus.Subscribe(u.commandsTopic)
-	}
-	goWork(ctx, func() { bus.Run(ctx) })
-}
-
-// busMessage routes one message off the unit's own bus. Each handler
-// runs in its own goroutine, so a slow settings patch cannot stall the
-// reader and the messages behind it on the topic. The driver client and
-// the API client are thread-safe, so the handlers may overlap. The
-// settings topic and the commands topic each carry their own message
-// shape.
-func (u *receiverUnit) busMessage(topic string, payload []byte) {
-	switch topic {
-	case u.settingsTopic:
-		goWork(u.ctx, func() { u.handleSettings(payload) })
-	case u.commandsTopic:
-		goWork(u.ctx, func() { u.handleCommand(payload) })
-	}
-}
-
-// handleSettings reads one settings message and sends the value it
-// names to the receiver, whichever protocol the unit drives. A value
-// that lands is written back to the leaf of that protocol's settings it
-// came from, so the declared state of the resource stays true. The
-// write is scoped to that one leaf under this operator's own field
-// manager, so a bus-written key is operator-owned and never a key the
-// manifest declared. A manifest-declared key and a bus-written key on
-// the same leaf is a misconfiguration: the operator's forced write wins
-// each round and Flux reverts the leaf on its next sync. A bus write is
-// recorded into the spec on queue acceptance, so the spec is desired
-// state, not a mirror of the hardware. An error is logged and not
-// recorded: the receiver's own echo is the only thing that moves the
-// observed settings.
-func (u *receiverUnit) handleSettings(payload []byte) {
-	var message struct {
-		Setting string                 `json:"setting"`
-		Value   equipment.SettingValue `json:"value"`
-	}
-	if err := json.Unmarshal(payload, &message); err != nil || message.Setting == "" {
-		return
-	}
-	leaf := settingsPath(message.Setting)
-	line := fmt.Sprintf("the settings topic asks %s %s; sent it", message.Setting, declared(message.Value))
-	began := time.Now()
-	switch {
-	case u.denonClient != nil:
-		if err := u.denonClient.Set(message.Setting, message.Value); err != nil {
-			u.log.refused(line, err)
-			return
-		}
-		if _, err := ApplyReceiverSettings(u.client, u.name, leaf, message.Value); err != nil {
-			fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
-		}
-		// Set checked the id and the value, so SettingsFor cannot fail here.
-		one, _ := denon.SettingsFor(message.Setting, message.Value)
-		u.log.confirm(line, began, settingsCheck(func() bool { return one.ConfirmedBy(u.denonClient.Settings()) }))
-	case u.wiimClient != nil:
-		if err := u.wiimClient.Set(message.Setting, message.Value); err != nil {
-			u.log.refused(line, err)
-			return
-		}
-		// A WiiM answers each command over HTTP, and Set returns once
-		// the device answered OK, so that answer is the report.
-		u.log.printf("%s; the receiver answered OK after %s", line, elapsed(time.Since(began)))
-		if _, err := ApplyReceiverWiimSettings(u.client, u.name, leaf, message.Value); err != nil {
-			fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
-		}
-	}
-}
-
 // settingsCheck answers a check for a declared block, which confirmed
 // reads the way ConfirmedBy does: no value the receiver reports differs
 // from the block.
@@ -748,88 +616,6 @@ func settingsCheck(confirmed func() bool) func() (string, bool) {
 		}
 		return "a value that differs", false
 	}
-}
-
-// handleCommand reads one commands message and runs the one-shot it
-// names. The ensure asks the session for its input; every other id is a
-// driver action, and the error is logged and never fatal, so the bus
-// keeps serving.
-func (u *receiverUnit) handleCommand(payload []byte) {
-	var message struct {
-		Command string                            `json:"command"`
-		Args    map[string]equipment.SettingValue `json:"args"`
-	}
-	if err := json.Unmarshal(payload, &message); err != nil || message.Command == "" {
-		return
-	}
-	switch message.Command {
-	case commandEnsureInput:
-		u.ensureInput()
-		return
-	case commandShowInput:
-		u.showInput()
-		return
-	}
-	asks := message.Command
-	if len(message.Args) > 0 {
-		asks += " " + declared(message.Args)
-	}
-	line := fmt.Sprintf("the commands topic asks %s; sent it", asks)
-	began := time.Now()
-	var err error
-	switch {
-	case u.denonClient != nil:
-		err = u.denonClient.Do(message.Command, message.Args)
-	case u.wiimClient != nil:
-		err = u.wiimClient.Do(message.Command, message.Args)
-	}
-	if err != nil {
-		u.log.refused(line, err)
-		return
-	}
-	// A WiiM is the only driver with actions, and Do returns once the
-	// device answered OK.
-	u.log.printf("%s; the receiver answered OK after %s", line, elapsed(time.Since(began)))
-}
-
-// commandEnsureInput is the receiver's one generic player action: make
-// sure the session's player is on the input the session names. A
-// program asks for it in player terms, and the receiver resolves the
-// input, so no input name crosses the bus.
-const commandEnsureInput = "input.ensure"
-
-// commandShowInput is the receiver's generic player action for a home
-// press: the ensure, and the room's TV on the session's Display when
-// the TV is on. session_ensure.go says why a home press needs the TV.
-const commandShowInput = "input.show"
-
-// ensureInput hands one ensure ask to the session that holds the input.
-// A receiver with no session has no player listening, so the ask is
-// dropped.
-func (u *receiverUnit) ensureInput() {
-	if held := u.standing(commandEnsureInput); held != nil {
-		held.ensureInput()
-	}
-}
-
-// showInput hands one show ask to the session that holds the input,
-// and drops it the way ensureInput does.
-func (u *receiverUnit) showInput() {
-	if held := u.standing(commandShowInput); held != nil {
-		held.showInput()
-	}
-}
-
-// standing answers the session an ask reaches, and writes the line of
-// an ask that finds none.
-func (u *receiverUnit) standing(command string) *session {
-	u.mutex.Lock()
-	held := u.session
-	u.mutex.Unlock()
-	if held == nil {
-		u.log.printf("the commands topic asks %s; sent nothing, because no session stands", command)
-	}
-	return held
 }
 
 // powerApplied answers the last power the operator settled on.
@@ -879,28 +665,17 @@ func (u *receiverUnit) player() string {
 	return u.session.spec.Player
 }
 
-// stop lifts the session and closes the connection, which is what a
-// deleted Receiver leaves behind. The metrics scoped to this receiver
-// go with it, so a Receiver that is gone stops being reported.
+// stop ends the session and closes the connection, which is what a
+// deleted Receiver, a new wiring, and an operator shutdown leave
+// behind. The metrics scoped to this receiver go with it, so a Receiver
+// that is gone stops being reported.
 func (u *receiverUnit) stop() {
-	u.end((*session).stop)
-}
-
-// shutdown closes the unit at operator shutdown. The session hands its
-// owner mark to the next operator instead of clearing it.
-func (u *receiverUnit) shutdown() {
-	u.end((*session).handOver)
-}
-
-// end closes the session one way, then the connection.
-func (u *receiverUnit) end(close func(*session)) {
 	u.mutex.Lock()
 	held := u.session
 	u.session = nil
 	u.mutex.Unlock()
 	if held != nil {
-		u.sessions.detach(held.spec.Player, held)
-		close(held)
+		held.stop()
 	}
 	u.cancel()
 	u.readings.forgetReceiver(u.name)
@@ -908,9 +683,8 @@ func (u *receiverUnit) end(close func(*session)) {
 
 // controller holds what every pass needs and the units it runs.
 type controller struct {
-	client     *Client
-	busAddress string
-	// dial reaches the broker and each Denon receiver.
+	client *Client
+	// dial reaches each Denon receiver.
 	dial      dialFunc
 	wake      chan struct{}
 	now       func() time.Time
@@ -938,18 +712,17 @@ type controller struct {
 	log io.Writer
 }
 
-func newController(client *Client, busAddress string, readings *metrics) *controller {
+func newController(client *Client, readings *metrics) *controller {
 	c := &controller{
-		client:     client,
-		busAddress: busAddress,
-		dial:       dialTCP,
-		wake:       make(chan struct{}, 1),
-		now:        time.Now,
-		readings:   readings,
-		units:      map[string]*receiverUnit{},
-		sessions:   newTelevisionSessions(client),
-		log:        os.Stderr,
-		receivers:  &watchStore{},
+		client:    client,
+		dial:      dialTCP,
+		wake:      make(chan struct{}, 1),
+		now:       time.Now,
+		readings:  readings,
+		units:     map[string]*receiverUnit{},
+		sessions:  newTelevisionSessions(client),
+		log:       os.Stderr,
+		receivers: &watchStore{},
 	}
 	// Discovery wakes the same loop a watch event does, so a Receiver it
 	// creates or an address it finds reaches a reconcile pass at once.
@@ -1018,25 +791,21 @@ func (c *controller) doPass(ctx context.Context) error {
 	return nil
 }
 
-// reconcile brings one Receiver's unit up to its spec. An address or a
-// bus topic that changed is a different receiver wiring, so the unit is
-// replaced and not redialled.
+// reconcile brings one Receiver's unit up to its spec. An address that
+// changed is a different receiver wiring, so the unit is replaced and
+// not redialled.
 func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	name := receiver.Metadata.Name
 	unit, held := c.units[name]
 	var replaced *receiverUnit
 	var carried *ReceiverSession
-	if held && (unit.address != c.resolvedAddress(&receiver.Spec) ||
-		unit.settingsTopic != receiver.Spec.SettingsTopic ||
-		unit.commandsTopic != receiver.Spec.CommandsTopic) {
-		// A new wiring is not a new session. The old unit hands its session
-		// over and keeps the owner mark on the broker, and the new unit
-		// starts the same session, with the flags it held, as one that
-		// stands. The lift lets that session return to the same TV without
-		// a wake.
+	if held && unit.address != c.resolvedAddress(&receiver.Spec) {
+		// A new wiring is not a new session. The new unit starts the same
+		// session, with the flags the old one held, as one that stands. The
+		// lift lets that session return to the same TV without a wake.
 		player := unit.player()
 		carried = unit.standingSession()
-		unit.shutdown()
+		unit.stop()
 		delete(c.units, name)
 		held, replaced = false, unit
 		if player != "" {
@@ -1058,7 +827,6 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 		}
 	}
 	unit.generation.Store(receiver.Metadata.Generation)
-	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.setPower(receiver.Spec.Power)
 	if receiver.Spec.Denon != nil && unit.setSettings(receiver.Spec.Denon.Settings) {
@@ -1094,24 +862,20 @@ func protocolAddress(spec *ReceiverSpec) string {
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
-		ctx:           ctx,
-		name:          receiver.Metadata.Name,
-		address:       c.resolvedAddress(&receiver.Spec),
-		settingsTopic: receiver.Spec.SettingsTopic,
-		commandsTopic: receiver.Spec.CommandsTopic,
-		client:        c.client.withWaits(ctx),
-		sessions:      c.sessions,
-		busAddress:    c.busAddress,
-		dial:          c.dial,
-		now:           c.now,
-		readings:      c.readings,
-		log:           newReceiverLog(c.log, receiver.Metadata.Name),
-		cancel:        cancel,
-		dirty:         make(chan struct{}, 1),
-		budget:        newSendBudget(),
-		settled:       newSettledRecord(receiver.Status, receiver.Spec),
+		ctx:      ctx,
+		name:     receiver.Metadata.Name,
+		address:  c.resolvedAddress(&receiver.Spec),
+		client:   c.client.withWaits(ctx),
+		sessions: c.sessions,
+		dial:     c.dial,
+		now:      c.now,
+		readings: c.readings,
+		log:      newReceiverLog(c.log, receiver.Metadata.Name),
+		cancel:   cancel,
+		dirty:    make(chan struct{}, 1),
+		budget:   newSendBudget(),
+		settled:  newSettledRecord(receiver.Status, receiver.Spec),
 	}
-	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.foreign = c.discovery.skip
 	unit.startDriver(receiver, unit.address, c.readings.reportCommand)
@@ -1122,7 +886,6 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	goWork(ctx, func() { unit.report(ctx) })
 	unit.volumeAsks = newVolumeAsker()
 	goWork(ctx, func() { unit.applyVolumeAsks(ctx) })
-	unit.startBus(ctx)
 	// The first write says the operator holds the receiver and has not
 	// reached it yet, before any line arrives.
 	poke(unit.dirty)
@@ -1198,7 +961,7 @@ func (c *controller) startDiscovery(ctx context.Context) {
 func (c *controller) stopAll() {
 	c.sessions.stop()
 	for name, unit := range c.units {
-		unit.shutdown()
+		unit.stop()
 		delete(c.units, name)
 	}
 }
@@ -1232,10 +995,6 @@ func operate() {
 	config, err := readSettings()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	if config.busAddress == "" {
-		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the broker\n", busAddressVariable)
 		os.Exit(1)
 	}
 
@@ -1285,7 +1044,7 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 
 	// serve returns only after the goroutines it started stop, so none
 	// of them reads the API after it.
-	operator := newController(client, config.busAddress, readings)
+	operator := newController(client, readings)
 	if config.dial != nil {
 		operator.dial = config.dial
 	}
@@ -1297,7 +1056,6 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 	// process holds each object once.
 	buses.receivers = operator.receivers
 	operator.sessions.televisions = buses.televisions
-	buses.screens = operator.sessions
 	started.Go(func() { watchReceivers(ctx, client, operator.wake, buses.wake, readings, operator.receivers) })
 	started.Go(func() { buses.run(ctx, readings) })
 	operator.run(ctx)

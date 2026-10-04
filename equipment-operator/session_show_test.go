@@ -13,13 +13,16 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
+// showAsk is the ask the media operator writes for a home press.
+var showAsk = ReceiverInputAsk{Action: "show", At: askAt(1)}
+
 // A show asks the room's TV for the Display and the receiver for the
 // input. The room hears the ask whatever the receiver reports, because
 // the TV, not the receiver, decides whether the room is on for it.
 func TestAShowAsksTheRoomAndTheReceiver(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+		h := newSessionHarness(t)
 		room := &roomRecord{}
 		h.room = room
 		held := h.beginIdle(t, "GAME")
@@ -28,14 +31,13 @@ func TestAShowAsksTheRoomAndTheReceiver(t *testing.T) {
 		handOnTheRemote(t, h.equipment, "SIDVD")
 		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 
-		unit := &receiverUnit{session: held, log: h.lines}
-		unit.handleCommand([]byte(`{"command":"input.show"}`))
+		held.inputAsk(showAsk)
 
 		h.equipment.waitForCommands(t, "SIGAME")
 		mustDeepEqual(t, room.waitFor(t, 3), []string{
 			"opened (awake false)",
 			"woke: the screen of Player theater woke",
-			"show: the commands topic asks input.show",
+			"show: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show",
 		})
 	})
 }
@@ -45,14 +47,14 @@ func TestAShowAsksTheRoomAndTheReceiver(t *testing.T) {
 func TestAShowInStandbyTurnsNothingOn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+		h := newSessionHarness(t)
 		room := &roomRecord{}
 		h.room = room
 		held := h.beginIdle(t, "GAME")
 
-		held.showInput()
+		held.inputAsk(showAsk)
 
-		mustDeepEqual(t, room.waitFor(t, 2), []string{"opened (awake false)", "show: the commands topic asks input.show"})
+		mustDeepEqual(t, room.waitFor(t, 2), []string{"opened (awake false)", "show: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show"})
 		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
 	})
 }

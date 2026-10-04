@@ -143,12 +143,11 @@ func TestAPlayReachesTheTelevisionAndADeletedReceiverLiftsIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
 		amp := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
 		receiver := idleReceiver(amp.address(), ReceiverVolume{Max: 69.5})
 		receiver.Spec.Inputs = []ReceiverInput{{Name: "GAME", Machine: "node-1", Monitor: "acm-0001-receiver"}}
 		api.putReceiver(receiver)
 		api.showing(lounge(""), "acm-0001-receiver")
-		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
 		operator.log = &logBuffer{}
 		t.Cleanup(operator.stopAll)
@@ -355,13 +354,12 @@ func TestTheDeploymentWakesOnlyForAChangeItSees(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
 		amp := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
 		inputs := []ReceiverInput{{Name: "GAME", Machine: "node-1", Monitor: "acm-0001-receiver"}}
 		standing := playingReceiver(amp.address(), ReceiverVolume{Max: 69.5})
 		standing.Spec.Inputs = inputs
 		api.putReceiver(standing)
 		api.showing(lounge(""), "acm-0001-receiver")
-		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
 		operator.log = &logBuffer{}
 		t.Cleanup(operator.stopAll)

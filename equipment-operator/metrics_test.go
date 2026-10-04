@@ -257,17 +257,6 @@ func TestInputInfoMovesToTheNewInputAndDropsTheOld(t *testing.T) {
 	}
 }
 
-func TestSetClaimedTracksWhetherASessionStands(t *testing.T) {
-	t.Parallel()
-	m := testMetrics(t)
-
-	m.setClaimed("theater", true)
-	requireSeries(t, scrape(t, m), `equipment_receiver_claimed{receiver="theater"} 1`)
-
-	m.setClaimed("theater", false)
-	requireSeries(t, scrape(t, m), `equipment_receiver_claimed{receiver="theater"} 0`)
-}
-
 // forgetReceiver takes a Receiver that is gone off every gauge scoped
 // to one, but never off the command counter: a command already sent
 // still happened.
@@ -275,14 +264,13 @@ func TestForgetReceiverRemovesTheReceiverScopedSeries(t *testing.T) {
 	t.Parallel()
 	m := testMetrics(t)
 	m.recordObservation("theater", connectedState(), 2, time.Now())
-	m.setClaimed("theater", true)
 	m.reportCommand(commandOK)
 
 	m.forgetReceiver("theater")
 
 	body := scrape(t, m)
 	for _, name := range []string{
-		"equipment_receiver_connected", "equipment_receiver_claimed",
+		"equipment_receiver_connected",
 		"equipment_observation_valid", "equipment_observation_last_success_timestamp_seconds",
 		"equipment_receiver_power", "equipment_receiver_volume", "equipment_receiver_input_info",
 	} {

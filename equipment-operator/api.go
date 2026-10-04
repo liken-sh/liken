@@ -70,7 +70,7 @@ type ReceiverList struct {
 }
 
 // The spec names one protocol block, the inputs that liken machines
-// feed, the non-main zones, and the bus topics that configure it.
+// feed, and the non-main zones.
 // Session is the place an older media operator writes the session;
 // Receiver.session says how the operator reads it.
 type ReceiverSpec struct {
@@ -84,11 +84,6 @@ type ReceiverSpec struct {
 	// zone2 and zone3; a main key would give one zone two writers and
 	// is rejected.
 	Zones map[string]ZoneSpec `json:"zones,omitempty"`
-	// SettingsTopic and CommandsTopic are the full MQTT topics the bus
-	// configures this receiver on. A topic that is empty subscribes the
-	// unit to nothing.
-	SettingsTopic string `json:"settingsTopic,omitempty"`
-	CommandsTopic string `json:"commandsTopic,omitempty"`
 	// Power is the power state the operator should drive the receiver
 	// to. It is the operator's own field, applied once per change and
 	// never re-asserted, so a GitOps manifest that omits it leaves the
@@ -248,27 +243,21 @@ type ReceiverInput struct {
 	SoundMode string `json:"soundMode,omitempty"`
 }
 
-// A session names the Player, the input it uses, and the topic from
-// which it reads the level. The operator derives the owner-mark topic
-// by adding /owner to VolumeTopic. A session with no VolumeTopic reads
-// no level from the bus and publishes no owner mark.
-// Active says that a Play is present. Awake says that the room's screen
-// is awake. The media operator keeps a session while the Player has a
-// screen, including the idle screen. A session with both flags false
-// owns the level but sends no power or input command to the receiver.
-// The three asks are events that the media operator writes, and the
-// operator applies each one once, when its At changes
-// (session_asks.go).
+// A session names the Player and the input it uses. Active says that a
+// Play is present. Awake says that the room's screen is awake. The
+// media operator keeps a session while the Player has a screen,
+// including the idle screen. A session with both flags false sends no
+// power or input command to the receiver for its flags. The three asks
+// are events that the media operator writes, and the operator applies
+// each one once, when its At changes (session_asks.go).
 type ReceiverSession struct {
-	Player      string             `json:"player"`
-	Input       string             `json:"input"`
-	VolumeTopic string             `json:"volumeTopic,omitempty"`
-	PowerTopic  string             `json:"powerTopic,omitempty"`
-	Active      bool               `json:"active,omitempty"`
-	Awake       bool               `json:"awake,omitempty"`
-	VolumeAsk   *ReceiverVolumeAsk `json:"volumeAsk,omitempty"`
-	PowerAsk    *ReceiverPowerAsk  `json:"powerAsk,omitempty"`
-	InputAsk    *ReceiverInputAsk  `json:"inputAsk,omitempty"`
+	Player    string             `json:"player"`
+	Input     string             `json:"input"`
+	Active    bool               `json:"active,omitempty"`
+	Awake     bool               `json:"awake,omitempty"`
+	VolumeAsk *ReceiverVolumeAsk `json:"volumeAsk,omitempty"`
+	PowerAsk  *ReceiverPowerAsk  `json:"powerAsk,omitempty"`
+	InputAsk  *ReceiverInputAsk  `json:"inputAsk,omitempty"`
 }
 
 // ReceiverVolumeAsk asks for an absolute volume and mute. Level is in
@@ -281,7 +270,7 @@ type ReceiverVolumeAsk struct {
 }
 
 // ReceiverPowerAsk asks the room to toggle, to come on, or to go off,
-// with the rules of togglePower (session_power.go).
+// with the rules of power (session_power.go).
 type ReceiverPowerAsk struct {
 	Action string `json:"action"`
 	At     string `json:"at"`

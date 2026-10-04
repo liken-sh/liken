@@ -39,10 +39,9 @@ type fakeDenon struct {
 	// never reported, which models a control the receiver never answers.
 	settingsHold map[string]string
 	// holdingEchoes makes the receiver apply each volume it is sent but
-	// report none of them until the test releases them, which is a
-	// receiver slower than the presses that reach it.
+	// report none of them, which is a receiver slower than the asks that
+	// reach it.
 	holdingEchoes bool
-	heldEchoes    []string
 	conns         []net.Conn
 }
 
@@ -132,7 +131,6 @@ func (f *fakeDenon) answer(command string) {
 		}
 		f.volume = halves
 		if f.holdingEchoes {
-			f.heldEchoes = append(f.heldEchoes, "MV"+denon.HalfStepDigits(f.volume))
 			return
 		}
 		f.send("MV" + denon.HalfStepDigits(f.volume))

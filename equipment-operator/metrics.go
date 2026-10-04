@@ -119,7 +119,6 @@ type metrics struct {
 	watchRestarts     *prometheus.CounterVec
 
 	connected   *prometheus.GaugeVec
-	claimed     *prometheus.GaugeVec
 	obsValid    *prometheus.GaugeVec
 	obsLastGood *prometheus.GaugeVec
 	power       *prometheus.GaugeVec
@@ -154,10 +153,6 @@ func newMetrics(version string) *metrics {
 		connected: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "receiver_connected",
 			Help: "One while the operator has an answered exchange with the receiver, zero otherwise.",
-		}, []string{"receiver"}),
-		claimed: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: metricsPrefix + "receiver_claimed",
-			Help: "One while a Player holds a session on the receiver, zero otherwise.",
 		}, []string{"receiver"}),
 		obsValid: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "observation_valid",
@@ -203,7 +198,7 @@ func newMetrics(version string) *metrics {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		buildInfo,
 		m.reconcileDuration, m.reconcileErrors, m.watchRestarts,
-		m.connected, m.claimed, m.obsValid, m.obsLastGood,
+		m.connected, m.obsValid, m.obsLastGood,
 		m.power, m.volume, m.inputInfo, m.commands,
 	)
 
@@ -297,13 +292,6 @@ func (m *metrics) setInput(receiver, input string) {
 	m.inputInfo.WithLabelValues(receiver, input).Set(1)
 }
 
-// setClaimed puts whether a Player holds a session on the receiver now
-// on the gauge, the moment the reconcile loop decides it, and not on
-// the next debounced status write.
-func (m *metrics) setClaimed(receiver string, claimed bool) {
-	m.claimed.WithLabelValues(receiver).Set(gaugeValue(claimed))
-}
-
 // reportCommand counts one command by its outcome. m is nil for a
 // denonClient a test builds with no metrics, and a nil receiver reports
 // nothing rather than crash.
@@ -319,7 +307,6 @@ func (m *metrics) reportCommand(status string) {
 // counters are left alone: a command already sent still happened.
 func (m *metrics) forgetReceiver(receiver string) {
 	m.connected.DeleteLabelValues(receiver)
-	m.claimed.DeleteLabelValues(receiver)
 	m.obsValid.DeleteLabelValues(receiver)
 	m.obsLastGood.DeleteLabelValues(receiver)
 	m.power.DeleteLabelValues(receiver)

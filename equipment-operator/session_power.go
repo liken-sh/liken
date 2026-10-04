@@ -2,11 +2,9 @@ package main
 
 // The room's power: the toggle the remote's power button asks for, and
 // the on and off a TV remote's deterministic power functions ask for.
-// The ask arrives on the session's power topic or in
-// status.session.powerAsk, and both reach the same rules.
+// The ask arrives in status.session.powerAsk (session_asks.go).
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -15,37 +13,23 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
-// togglePower turns the room on or off on an ask on the power topic.
-// The remote's power button publishes {"action":"toggle"}, and the
-// operator answers it the way a power button does: a room that is on
-// goes to standby, and one that is not comes on and selects the
-// session's input. A TV remote's Power Off Function and Power On
-// Function publish {"action":"off"} and {"action":"on"}: HDMI-CEC 1.3a,
-// CEC 13.13.3, says each puts the device in the state it names and
-// keeps it there when repeated, so an ask for the state the room
-// already holds sends nothing. The room's TV decides whether the room
-// is on, when the room has one that reports its power, because the TV
-// is what a person sees; otherwise the receiver decides. A room that
-// goes off asks its TV for standby and puts the receiver in standby. A
-// room that comes on wakes its TV and turns the receiver on. The spec's
-// power field is updated to match what the receiver did, so the next
-// reconcile sees no change to re-assert. A receiver the operator
-// cannot reach gets nothing, and the TV, when it reports its power,
-// still turns off or on. Anything else on the topic, such as the asks
-// this operator publishes for the Player's screen
-// (television_screen.go), a malformed body, or an empty payload, does
-// nothing.
-func (s *session) togglePower(payload []byte) {
-	var event powerAsk
-	if err := json.Unmarshal(payload, &event); err != nil {
-		return
-	}
-	s.power(event.Action, "the power topic")
-}
-
-// power runs one power ask with the rules togglePower states. source
-// names where the ask came from, for the lines it writes. An action
-// other than toggle, on, or off does nothing.
+// power runs one power ask from status.session.powerAsk. The remote's
+// power button asks toggle, and the operator answers it the way a power
+// button does: a room that is on goes to standby, and one that is not
+// comes on and selects the session's input. A TV remote's Power Off
+// Function and Power On Function ask off and on: HDMI-CEC 1.3a, CEC
+// 13.13.3, says each puts the device in the state it names and keeps it
+// there when repeated, so an ask for the state the room already holds
+// sends nothing. The room's TV decides whether the room is on, when the
+// room has one that reports its power, because the TV is what a person
+// sees; otherwise the receiver decides. A room that goes off asks its
+// TV for standby and puts the receiver in standby. A room that comes on
+// wakes its TV and turns the receiver on. The spec's power field is
+// updated to match what the receiver did, so the next reconcile sees no
+// change to re-assert. A receiver the operator cannot reach gets
+// nothing, and the TV, when it reports its power, still turns off or
+// on. source names where the ask came from, for the lines it writes.
+// An action other than toggle, on, or off does nothing.
 func (s *session) power(action, source string) {
 	if !powerActions[action] {
 		return
@@ -91,8 +75,7 @@ func (s *session) power(action, source string) {
 	}
 }
 
-// powerActions are the asks on the power topic that move the room's
-// power.
+// powerActions are the power asks that move the room's power.
 var powerActions = map[string]bool{"toggle": true, "on": true, "off": true}
 
 // powerMoves answers whether an ask moves a room that is on or off: a

@@ -1,15 +1,12 @@
 package main
 
-// The session against a fake receiver and a fake broker, both on real
-// sockets.
+// The session against a fake receiver on a real socket.
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -19,13 +16,8 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
-// The topic every session test holds, and the window a test watches for
-// a message that must not arrive.
-const (
-	testVolumeTopic = "liken/players/theater/volume"
-	testPowerTopic  = "liken/equipment/receivers/theater/power"
-	quietPeriod     = 300 * time.Millisecond
-)
+// The window a test watches for a command that must not arrive.
+const quietPeriod = 300 * time.Millisecond
 
 // sessionHolder is the receiverUnit's half of the wiring. It replays
 // what arrived while the session was being started.
@@ -65,11 +57,10 @@ func (h *sessionHolder) set(started *session) {
 	}
 }
 
-// sessionHarness is a running connection to a fake receiver and a fake
-// broker, ready for a session.
+// sessionHarness is a running connection to a fake receiver, ready for
+// a session.
 type sessionHarness struct {
 	equipment *fakeDenon
-	brokers   *fakeBrokerServer
 	denon     *denon.Client
 	holder    *sessionHolder
 	readings  *metrics
@@ -78,32 +69,12 @@ type sessionHarness struct {
 	log        *logBuffer
 	lines      *receiverLog
 	soundModes map[string]string
-	// powerTopic is the topic a test's session subscribes to for the
-	// remote's power toggle. Empty means the session subscribes to none.
-	powerTopic string
 	// applyPower records the power a toggle settled on, wired to the API
 	// in a test that asserts the PATCH.
 	applyPower func(power equipment.Power)
 	// room hears the session's wakes and sleeps, in a test that asserts
 	// them.
 	room roomEvents
-
-	rules sync.Mutex
-	rule  ReceiverVolume
-}
-
-// setRule states the ceiling and the step from the test goroutine while
-// the session reads them from its own.
-func (h *sessionHarness) setRule(rule ReceiverVolume) {
-	h.rules.Lock()
-	defer h.rules.Unlock()
-	h.rule = rule
-}
-
-func (h *sessionHarness) volumeRule() ReceiverVolume {
-	h.rules.Lock()
-	defer h.rules.Unlock()
-	return h.rule
 }
 
 // inputSoundMode answers the sound mode an input names, which a test
@@ -113,17 +84,9 @@ func (h *sessionHarness) inputSoundMode(input string) string {
 }
 
 func newSessionHarness(t *testing.T) *sessionHarness {
-	return newSessionHarnessWith(t, ReceiverVolume{Max: 69.5})
-}
-
-// newSessionHarnessWith names the ceiling and the step the session
-// presses against, which a person states and the receiver never reports.
-func newSessionHarnessWith(t *testing.T, rule ReceiverVolume) *sessionHarness {
 	t.Helper()
 	h := &sessionHarness{
-		rule:      rule,
 		equipment: startFakeDenon(t),
-		brokers:   startFakeBrokerServer(t),
 		log:       &logBuffer{},
 	}
 	h.lines = newReceiverLog(h.log, "theater")
@@ -181,10 +144,25 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	t.Helper()
 	h.drainCommands()
 	h.holder.forget()
-	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, PowerTopic: h.powerTopic, Active: active, Awake: awake}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.lines, h.brokers.address(), testNetwork.dial, h.volumeRule, h.inputSoundMode, h.applyPower, h.room)
+	spec := ReceiverSession{Player: "theater", Input: input, Active: active, Awake: awake}
+	started := newSession(t.Context(), "theater", spec, h.denon, h.readings, h.lines, h.inputSoundMode, h.applyPower, h.room)
 	h.holder.set(started)
+	started.start(active, awake, false)
 	return started
+}
+
+// startSession builds a session and starts it the way the unit starts
+// one that appears while the operator runs.
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, log *receiverLog, applyPower func(power equipment.Power), room roomEvents) *session {
+	started := newSession(ctx, receiver, spec, driver, nil, log, nil, applyPower, room)
+	started.start(spec.Active, spec.Awake, false)
+	return started
+}
+
+// powerAsk hands the session one power ask the way the unit does for a
+// new status.session.powerAsk.
+func powerAsk(held *session, action string) {
+	goWork(held.ctx, func() { held.power(action, "status.session.powerAsk") })
 }
 
 // equipment.PowerOn turns the receiver on before any session stands.
@@ -267,531 +245,16 @@ func TestTheSessionSelectsTheInputOnce(t *testing.T) {
 	})
 }
 
-func TestTheSessionMarksItselfTheOwnerOfTheLevel(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarness(t)
-
-		h.begin(t, "GAME")
-
-		broker := h.brokers.waitForSession(t)
-		mustMatch(t, waitForString(t, broker.subs), testVolumeTopic)
-		mark := broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-		mustMatch(t, string(mark.payload), `{"owner":"receiver/theater"}`)
-		mustMatch(t, mark.retained, true)
-	})
-}
-
-// connectWill reads the will out of an MQTT CONNECT body. The payload
-// holds the client identifier, the will topic, and the will payload,
-// each length-prefixed.
-func connectWill(t *testing.T, body []byte) busWill {
-	t.Helper()
-	const flagsAt, payloadAt = 7, 10
-	identifier, _, ok := readTopicFilter(body[payloadAt:])
-	mustMatch(t, ok, true)
-	topicLength, topic, ok := readTopicFilter(body[payloadAt+identifier:])
-	mustMatch(t, ok, true)
-	_, payload, ok := readTopicFilter(body[payloadAt+identifier+topicLength:])
-	mustMatch(t, ok, true)
-	return busWill{
-		Topic:    topic,
-		Payload:  []byte(payload),
-		Retained: body[flagsAt]&connectWillRetain != 0,
-	}
-}
-
-func waitForFrame(t *testing.T, frames <-chan []byte) []byte {
-	t.Helper()
-	select {
-	case frame := <-frames:
-		return frame
-	case <-time.After(testTimeout):
-		t.Fatal("the session sent no CONNECT")
-		return nil
-	}
-}
-
-func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		frames := make(chan []byte, 1)
-		broker := testNetwork.listen(t, func(conn net.Conn) {
-			defer conn.Close()
-			_, body, err := readPacket(bufio.NewReader(conn))
-			if err != nil {
-				return
-			}
-			frames <- body
-		})
-
-		spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
-		startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(io.Discard, "theater"), broker, testNetwork.dial,
-			func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
-
-		will := connectWill(t, waitForFrame(t, frames))
-		mustMatch(t, will.Topic, ownerTopic(testVolumeTopic))
-		mustMatch(t, will.Retained, true)
-		mustMatch(t, len(will.Payload), 0)
-	})
-}
-
-// listening is a harness whose session has selected its input and
-// marked itself the owner, which is where every level test starts.
-func listening(t *testing.T) (*sessionHarness, *fakeBroker, *session) {
-	return listeningWith(t, ReceiverVolume{Max: 69.5}, 72)
-}
-
-// listeningWith names the ceiling and the step, and the bus level the
-// receiver's own position lands on under them.
-func listeningWith(t *testing.T, rule ReceiverVolume, adoptLevel int) (*sessionHarness, *fakeBroker, *session) {
-	t.Helper()
-	h := newSessionHarnessWith(t, rule)
-	held := h.begin(t, "GAME")
-	broker, adopted := adoptTheLevel(t, h, held)
-	mustMatch(t, positionOf(t, adopted), volumeState{Level: adoptLevel})
-	h.equipment.waitForCommands(t, "SIGAME")
-	return h, broker, held
-}
-
-// adoptTheLevel takes the session past the point from which a press
-// moves the receiver, and answers the message it adopted.
-func adoptTheLevel(t *testing.T, h *sessionHarness, held *session) (*fakeBroker, brokerPublish) {
-	t.Helper()
-	broker := h.brokers.waitForSession(t)
-	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-	// The session publishes where the receiver stands and waits for that
-	// message to come back before it applies anything, so every test
-	// below starts from the other side of that boundary.
-	adopted := broker.waitForTopic(t, testVolumeTopic)
-	broker.push(testVolumeTopic, adopted.payload)
-	waitUntilAdopted(t, held)
-	return broker, adopted
-}
-
-// waitUntilAdopted waits for the session to take the broker's delivery
-// of its own adopt message, which is the point from which a press moves
-// the receiver.
-func waitUntilAdopted(t *testing.T, held *session) {
-	t.Helper()
-	deadline := time.Now().Add(testTimeout)
-	for time.Now().Before(deadline) {
-		held.mutex.Lock()
-		adopted := held.adopted
-		held.mutex.Unlock()
-		if adopted {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("the session never took its own adopt message back")
-}
-
-// positionOf reads the state a message on the volume topic carries.
-func positionOf(t *testing.T, published brokerPublish) volumeState {
-	t.Helper()
-	state, ok := parseVolumeState(published.payload)
-	mustMatch(t, ok, true)
-	return state
-}
-
-// pressFrom publishes the state one press produces from a level the way
-// the sidecar does, and answers the position the session put back on the
-// topic once the receiver had answered.
-func pressFrom(t *testing.T, h *sessionHarness, broker *fakeBroker, from, by int, want string) volumeState {
-	t.Helper()
-	payload, err := marshalVolumeState(volumeState{Level: from + by})
-	mustSucceed(t, err)
-	broker.push(testVolumeTopic, payload)
-	h.equipment.waitForCommands(t, want)
-	return positionOf(t, broker.waitForTopic(t, testVolumeTopic))
-}
-
-// A held key arrives as one message per press, and each one moves the
-// receiver a single step from where it actually stands.
-func TestThreePressesMoveTheReceiverThreeSteps(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
-
-		first := pressFrom(t, h, broker, 72, 5, "MV51")
-		mustMatch(t, first, volumeState{Level: 73})
-		second := pressFrom(t, h, broker, first.Level, 5, "MV52")
-		mustMatch(t, second, volumeState{Level: 75})
-		third := pressFrom(t, h, broker, second.Level, 5, "MV53")
-		mustMatch(t, third, volumeState{Level: 76})
-
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 106 })
-	})
-}
-
-// A press down moves the receiver down by the step a person declared.
-func TestAPressDownMovesTheReceiverDownOneStep(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 0.5}, 72)
-
-		mustMatch(t, pressFrom(t, h, broker, 72, -5, "MV495"), volumeState{Level: 71})
-	})
-}
-
-// A step of two moves the receiver two units of its own scale.
-func TestAStepOfTwoMovesTheReceiverTwoUnits(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 2}, 72)
-
-		mustMatch(t, pressFrom(t, h, broker, 72, 5, "MV52"), volumeState{Level: 75})
-	})
-}
-
-// Presses stop at the ceiling a person declared, and the topic then
-// carries the top of the bus scale.
-func TestPressesStopAtTheDeclaredCeiling(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 52, Step: 1}, 96)
-
-		mustMatch(t, pressFrom(t, h, broker, 96, 5, "MV51"), volumeState{Level: 98})
-
-		// The press that reaches the ceiling already carries the top of the
-		// bus scale, so the session has nothing further to say about it.
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-		h.equipment.waitForCommands(t, "MV52")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 104 })
-
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-		refuseVolumeSets(t, h.equipment, quietPeriod)
-	})
-}
-
-// A hand can leave the receiver above the ceiling. The topic then reads
-// the top of the scale, a press up moves nothing, and a press down still
-// steps.
-func TestAReceiverAboveTheCeilingStaysUntilAPressDown(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 45, Step: 1}, 100)
-
-		// The topic already reads the top of the scale, so a press up has
-		// nothing above it to ask for and the receiver stays where it is.
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-		refuseVolumeSets(t, h.equipment, quietPeriod)
-
-		broker.push(testVolumeTopic, []byte(`{"level":95,"muted":false}`))
-		h.equipment.waitForCommands(t, "MV49")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 98 })
-	})
-}
-
-// The limit a Denon reports wanders while the room is playing, so the
-// session reads none of it and a new figure moves nothing.
-func TestAWanderingReportedLimitMovesNothing(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
-
-		h.equipment.driftLimit(141)
-		h.equipment.driftLimit(129)
-
-		refuseVolumeSets(t, h.equipment, quietPeriod)
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 100 })
-		broker.refuseTopic(t, testVolumeTopic, quietPeriod)
-	})
-}
-
-func TestAKnobTurnPublishesTheLevelBack(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listening(t)
-
-		h.equipment.turnKnob(120)
-
-		published := broker.waitForTopic(t, testVolumeTopic)
-		mustMatch(t, string(published.payload), `{"level":86,"muted":false}`)
-		mustMatch(t, published.retained, true)
-	})
-}
-
-func TestAMuteOnTheEquipmentPublishesBack(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listening(t)
-
-		h.equipment.setMute(true)
-
-		published := broker.waitForTopic(t, testVolumeTopic)
-		mustMatch(t, string(published.payload), `{"level":72,"muted":true}`)
-		mustMatch(t, published.retained, true)
-	})
-}
-
-// refusePublish fails the test if anything reaches the broker on the
-// The position the session publishes comes back to it from the broker,
-// and moves neither the receiver nor the topic again.
-func TestThePositionTheSessionPublishesMovesNothingWhenItComesBack(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
-
-		position := pressFrom(t, h, broker, 72, 5, "MV51")
-		payload, err := marshalVolumeState(position)
-		mustSucceed(t, err)
-
-		broker.push(testVolumeTopic, payload)
-
-		refuseVolumeSets(t, h.equipment, quietPeriod)
-	})
-}
-
-func TestStoppingTheSessionClearsTheOwnerMarkAndLeavesThePowerAlone(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, held := listening(t)
-		h.drainCommands()
-
-		held.stop()
-
-		cleared := broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-		mustMatch(t, len(cleared.payload), 0)
-		mustMatch(t, cleared.retained, true)
-		h.refuseCommands(t, quietPeriod, "PWSTANDBY", "PWOFF")
-	})
-}
-
-// A message the session cannot read leaves the receiver alone, so
-// another program's traffic on the broker never moves the room's level.
-func TestAMessageTheSessionCannotReadMovesNothing(t *testing.T) {
-	cases := []struct {
-		name    string
-		topic   string
-		payload string
-	}{
-		{"another topic", testVolumeTopic + "/owner", `{"level":100}`},
-		{"a payload that is not a state", testVolumeTopic, `not json`},
-	}
-	t.Parallel()
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			t.Parallel()
-			synctest.Test(t, func(t *testing.T) {
-				h, broker, _ := listening(t)
-
-				broker.push(one.topic, []byte(one.payload))
-
-				h.equipment.refuseCommand(t, "MV695", quietPeriod)
-			})
-		})
-	}
-}
-
-// Two neighbouring half steps map to one bus level, so the level a knob
-// turn publishes maps back onto the wrong half step, and the session
-// must not push the equipment there when the broker delivers its own
-// message back to it.
-func TestTheSessionsOwnWriteBackDoesNotMoveTheEquipment(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		const knob, level, wrong = 119, 86, 120
-		h, broker, _ := listening(t)
-
-		h.equipment.turnKnob(knob)
-		published := broker.waitForTopic(t, testVolumeTopic)
-		mustMatch(t, string(published.payload), `{"level":86,"muted":false}`)
-
-		broker.push(testVolumeTopic, published.payload)
-
-		mustMatch(t, stepsForLevelOrZero(level), wrong)
-		h.equipment.refuseCommand(t, denon.VolumeCommand(wrong), quietPeriod)
-		mustMatch(t, mainZone(h.denon.State()).Volume, knob)
-	})
-}
-
-// stepsForLevelOrZero maps a bus level onto the fake receiver's scale,
-// so the case above states the half step the mapping would land on.
-func stepsForLevelOrZero(level int) int {
-	halves, _ := stepsForLevel(level, 139)
-	return halves
-}
-
-// A level left on the topic by an earlier player is in another unit's
-// scale, so the session publishes where the receiver stands and applies
-// nothing until the broker delivers that message back to it.
-func TestASessionAdoptsTheReceiverBeforeItAppliesAnyLevel(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarness(t)
-		h.begin(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-
-		adopted := broker.waitForTopic(t, testVolumeTopic)
-		mustMatch(t, string(adopted.payload), `{"level":72,"muted":false}`)
-		mustMatch(t, adopted.retained, true)
-
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-		refuseVolumeSets(t, h.equipment, quietPeriod)
-
-		broker.push(testVolumeTopic, adopted.payload)
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-
-		h.equipment.waitForCommands(t, "MV51")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
-	})
-}
-
-// refuseVolumeSets fails the test if the session sets the receiver's
-// volume at all, as opposed to asking it what the volume is.
-func refuseVolumeSets(t *testing.T, equipment *fakeDenon, within time.Duration) {
-	t.Helper()
-	deadline := time.After(within)
-	var seen []string
-	for {
-		select {
-		case command := <-equipment.commands:
-			seen = append(seen, command)
-			if strings.HasPrefix(command, denon.VolumePrefix) && command != "MV?" {
-				t.Fatalf("the session set the volume with %q (seen %v)", command, seen)
-			}
-		case <-deadline:
-			return
-		}
-	}
-}
-
-// A position the receiver reports before the adopt, such as a knob
-// turn while the input is still being selected, is the same message
-// the adopt publishes. Its return adopts the session, so the echo of
-// the first position on the topic is enough whichever path wrote it.
-func TestAPositionReportedBeforeTheAdoptIsTheAdoptLine(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarness(t)
-		held := h.begin(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-		h.equipment.turnKnob(60)
-
-		first := broker.waitForTopic(t, testVolumeTopic)
-		broker.push(testVolumeTopic, first.payload)
-
-		waitUntilAdopted(t, held)
-		h.equipment.waitForCommands(t, "SIGAME")
-	})
-}
-
-// A level published after the adopt is a press, and it moves the
-// receiver.
-func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listening(t)
-
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-
-		h.equipment.waitForCommands(t, "MV51")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
-	})
-}
-
-// A press that mutes the room is not a direction: the receiver is muted
-// as the message states, and the session says nothing back because the
-// topic already carries what the equipment now reports.
-func TestAPressThatMutesTheRoomMutesTheReceiver(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
-
-		broker.push(testVolumeTopic, []byte(`{"level":72,"muted":true}`))
-
-		h.equipment.waitForCommands(t, denon.MuteOnCommand)
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Mute })
-		broker.refuseTopic(t, testVolumeTopic, quietPeriod)
-	})
-}
-
-// A press is bounded at both ends of the scale, and a receiver a hand
-// left above the ceiling is not dragged back down by a press up.
-func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
-	press := func(rule ReceiverVolume, volume int, up bool) (int, bool) {
-		held := &session{
-			scale:  func() ReceiverVolume { return rule },
-			driver: denon.NewClient("127.0.0.1:1", nil),
-		}
-		return held.nextPosition(equipment.ZoneState{Volume: volume, VolumeMax: 139}, up)
-	}
-	room := ReceiverVolume{Max: 45, Step: 1}
-
-	cases := []struct {
-		name   string
-		rule   ReceiverVolume
-		volume int
-		up     bool
-		want   int
-		moves  bool
-	}{
-		{"up inside the scale", room, 80, true, 82, true},
-		{"up onto the ceiling", room, 89, true, 90, true},
-		{"up from the ceiling", room, 90, true, 0, false},
-		{"up from above the ceiling", room, 100, true, 0, false},
-		{"down from above the ceiling", room, 100, false, 98, true},
-		{"down onto the floor", room, 1, false, 0, true},
-		{"down from the floor", room, 0, false, 0, false},
-		{"no ceiling declared", ReceiverVolume{Step: 1}, 80, true, 0, false},
-		{"a volume the receiver has not reported", room, equipment.Unknown, true, 0, false},
-	}
-	t.Parallel()
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			t.Parallel()
-			synctest.Test(t, func(t *testing.T) {
-				target, moves := press(one.rule, one.volume, one.up)
-				mustMatch(t, target, one.want)
-				mustMatch(t, moves, one.moves)
-			})
-		})
-	}
-}
-
-// A session can start before anyone has declared a ceiling, so the
-// adopt waits for one instead of giving up and ignoring every press.
-func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarnessWith(t, ReceiverVolume{})
-		held := h.begin(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-
-		broker.refuseTopic(t, testVolumeTopic, quietPeriod)
-
-		h.setRule(ReceiverVolume{Max: 72, Step: 1})
-
-		adopted := broker.waitForTopic(t, testVolumeTopic)
-		mustMatch(t, positionOf(t, adopted), volumeState{Level: 69})
-		broker.push(testVolumeTopic, adopted.payload)
-		waitUntilAdopted(t, held)
-
-		broker.push(testVolumeTopic, []byte(`{"level":80,"muted":false}`))
-		h.equipment.waitForCommands(t, "MV51")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
-	})
-}
-
-// A standby receiver whose session holds a power topic turns on and
-// selects the input, with its sound mode, when the remote's power button
-// toggles.
+// A standby receiver turns on and selects the input, with its sound
+// mode, when the remote's power button asks for a toggle.
 func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		h := newSessionHarness(t)
-		h.powerTopic = testPowerTopic
 		h.soundModes = map[string]string{"GAME": "STEREO"}
-		h.beginIdle(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		held := h.beginIdle(t, "GAME")
 
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 
 		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
@@ -806,13 +269,10 @@ func TestAToggleOnAReceiverAlreadyOnGoesToStandby(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		h := newSessionHarness(t)
-		h.powerTopic = testPowerTopic
 		h.powerOn(t)
-		h.beginIdle(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		held := h.beginIdle(t, "GAME")
 
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 
 		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
 		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
@@ -826,52 +286,29 @@ func TestASecondTogglePowersTheReceiverBackOn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		h := newSessionHarness(t)
-		h.powerTopic = testPowerTopic
 		h.powerOn(t)
-		h.beginIdle(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		held := h.beginIdle(t, "GAME")
 
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
 		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
 
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
 		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
 	})
 }
 
-// A session with no power topic subscribes to nothing and reads nothing
-// as a toggle.
-func TestASessionWithNoPowerTopicIgnoresAToggle(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarness(t)
-		h.beginIdle(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		mustMatch(t, waitForString(t, broker.subs), testVolumeTopic)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
-
-		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
-	})
-}
-
-// A message the session cannot read as a toggle leaves the receiver
-// alone, so another program's traffic on the power topic never moves the
-// room's power.
-func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
+// An action other than toggle, on, or off leaves the receiver alone.
+func TestAPowerAskWithAnotherActionMovesNothing(t *testing.T) {
 	cases := []struct {
-		name    string
-		payload string
+		name   string
+		action string
 	}{
-		{"a different action", `{"action":"dim"}`},
-		{"an ask for the screen", `{"action":"wake"}`},
-		{"a payload that is not a state", `not json`},
-		{"an empty payload", ``},
+		{"a different action", "dim"},
+		{"an ask for the screen", "wake"},
+		{"an empty action", ""},
 	}
 	t.Parallel()
 	for _, one := range cases {
@@ -879,19 +316,9 @@ func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				h := newSessionHarness(t)
-				h.powerTopic = testPowerTopic
-				h.beginIdle(t, "GAME")
-				broker := h.brokers.waitForSession(t)
-				// The fake broker writes CONNACK before it reads a
-				// SUBSCRIBE, so a push after both subscriptions follows the
-				// CONNACK. A push before the CONNACK breaks the client's
-				// read of it, the bus connects again, and the payload
-				// reaches no session, so the test would pass with nothing
-				// read.
-				subscribed := map[string]bool{waitForString(t, broker.subs): true, waitForString(t, broker.subs): true}
-				mustMatch(t, subscribed[testPowerTopic], true)
+				held := h.beginIdle(t, "GAME")
 
-				broker.push(testPowerTopic, []byte(one.payload))
+				powerAsk(held, one.action)
 
 				h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
 			})
@@ -909,18 +336,15 @@ func TestAToggleWritesTheSpecsPower(t *testing.T) {
 		}}
 		client := testAPIClient(t, api.handler())
 		h := newSessionHarness(t)
-		h.powerTopic = testPowerTopic
 		applied := make(chan equipment.Power, 1)
 		h.applyPower = func(power equipment.Power) {
 			_, err := ApplyReceiverPower(client, "theater", power)
 			mustSucceed(t, err)
 			applied <- power
 		}
-		h.beginIdle(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		held := h.beginIdle(t, "GAME")
 
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 
 		mustMatch(t, <-applied, equipment.PowerOn)

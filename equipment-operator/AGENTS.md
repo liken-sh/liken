@@ -7,6 +7,11 @@ the `CECBus` and `Television` resources, which reach the same
 equipment over the HDMI-CEC wire. The manifests and the tests are the
 documentation, and the comments teach how the system works.
 
+The operator connects to no message bus. `media-operator` writes a
+`Player`'s session into `Receiver.status.session`, with an ask for
+each press of a volume, power, or home key, and `session_asks.go`
+applies each ask once.
+
 `plans/` holds the design documents. Code exists only where a plan calls
 for it.
 
@@ -64,12 +69,13 @@ that lists the input's `Display`, and writes that `Television`'s
 adapter speaks for that `Display` runs the wake in
 `cecnode_wake.go`, and claims and guards the active source in
 `cecnode_source.go`. The remote's power button turns the room off the
-same way: the session's `togglePower` asks the room for standby, the
-`Deployment` writes `status.session.standbyAt`, and the node workload
-sends the TV Standby in `cecnode_standby.go`. While the session holds
-the room awake, the same adapter answers Request Active Source and
-Set Stream Path in `cecnode_answer.go`. A home press sends `input.show` on the
-`Receiver`'s commands topic: the `Deployment` writes
+same way: a `powerAsk` reaches the session's `power` in
+`session_power.go`, which asks the room for standby, the `Deployment`
+writes `status.session.standbyAt`, and the node workload sends the TV
+Standby in `cecnode_standby.go`. While the session holds the room
+awake, the same adapter answers Request Active Source and Set Stream
+Path in `cecnode_answer.go`. A home press writes a `show` in the
+`Receiver`'s `status.session.inputAsk`: the `Deployment` writes
 `status.session.showAt` in `television_show.go`, and the node workload
 sends a TV that is on Image View On and Active Source in
 `cecnode_show.go`.
@@ -77,16 +83,15 @@ sends a TV that is on Image View On and Active Source in
 The bus can also ask for the Player's screen. The TV's Set Stream Path
 for the `Display` of a session that sleeps asks it to wake, and a
 Standby while the session holds the room awake asks it to sleep. The
-node workload holds no broker connection, so it writes the ask in the
-`Television`'s `status.screenAsk` in `cecnode_screen.go`, and the
-`Deployment` relays each new ask on the session's power topic in
-`television_screen.go`, where the Player's screen client reads it. The
-screen then moves the session, and the node workload follows the
-session: a wake that answers the TV's pick sends Active Source alone.
-When the session sleeps with no standby, the node workload sends the
-TV Inactive Source in `cecnode_inactive.go`, and it does the same when
-it stops while no session holds the room awake. It reports its own power as On only while a session holds
-the room awake. Every adapter of a bus announces the bus's
+node workload writes the ask in the `Television`'s `status.screenAsk`
+in `cecnode_screen.go`, and `media-operator` relays each new ask to
+the Player's screen client. The screen then moves the session, and
+the node workload follows the session: a wake that answers the TV's
+pick sends Active Source alone. When the session sleeps with no
+standby, the node workload sends the TV Inactive Source in
+`cecnode_inactive.go`, and it does the same when it stops while no
+session holds the room awake. It reports its own power as On only
+while a session holds the room awake. Every adapter of a bus announces the bus's
 `spec.osdName`, `liken` by default.
 
 ## Errors include their source's text

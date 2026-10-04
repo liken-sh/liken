@@ -85,9 +85,6 @@ type televisionSessions struct {
 	// a live pass still adopts what the first pass adopted. A later event
 	// of the same Player replaces it, because it is newer.
 	retries map[string]func() bool
-	// screens maps each Player to the session that holds its room, which
-	// relays an ask for the Player's screen (television_screen.go).
-	screens map[string]*session
 	// liftDelay and liftRetry are sessionLiftDelay and sessionLiftRetry
 	// as they stood when the writer was made. A lift's timer reads its
 	// own writer's copy, so a timer that outlives the writer never reads

@@ -308,49 +308,6 @@
       ]
     },
     {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Receiver claimed",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 8 },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisPlacement": "auto",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" }
-          },
-          "mappings": [],
-          "max": 1,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "none" }
-      },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "equipment_receiver_claimed",
-          "refId": "A",
-          "legendFormat": "{{receiver}}"
-        }
-      ]
-    },
-    {
       "id": 8,
       "type": "timeseries",
       "title": "Observation valid",

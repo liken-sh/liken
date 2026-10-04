@@ -45,12 +45,6 @@ type cecBusController struct {
 	// sharedReceivers says another watch feeds receivers and wakes this
 	// loop for a Receiver's spec, so run starts no Receiver watch.
 	sharedReceivers bool
-	// screens reaches the Receiver sessions, which relay an ask for a
-	// Player's screen, and screenAsks is what the pass holds about the
-	// asks it relayed (television_screen.go). screens is nil in a test
-	// with no sessions.
-	screens    screenRelay
-	screenAsks screenMemory
 }
 
 func newCECBusController(client *Client) *cecBusController {

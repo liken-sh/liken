@@ -47,18 +47,15 @@ func TestALineDuringTheSessionStartReachesTheSession(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
 		api := startFakeAPI(t)
 		unit := &receiverUnit{
-			name:       "theater",
-			client:     api.client,
-			busAddress: brokers.address(),
-			dial:       testNetwork.dial,
-			readings:   testMetrics(t),
-			log:        newReceiverLog(&logBuffer{}, "theater"),
-			dirty:      make(chan struct{}, 1),
+			name:     "theater",
+			client:   api.client,
+			dial:     testNetwork.dial,
+			readings: testMetrics(t),
+			log:      newReceiverLog(&logBuffer{}, "theater"),
+			dirty:    make(chan struct{}, 1),
 		}
-		unit.setVolume(&ReceiverVolume{Max: 69.5})
 		real := denon.NewClient(amp.address(), unit.observe)
 		real.Dial = testNetwork.dial
 		go real.Run(t.Context())

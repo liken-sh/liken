@@ -1,9 +1,10 @@
 package main
 
 // The any-press input ensure. A press on a controller whose mark names
-// this Player asks the receiver for the player's input, and the
-// operator sends the wire command only when the room has drifted off
-// it. The harness is in session_test.go.
+// this Player makes the media operator write an ensure in
+// status.session.inputAsk, and the operator sends the wire command only
+// when the room has drifted off the player's input. The harness is in
+// session_test.go.
 
 import (
 	"context"
@@ -15,11 +16,14 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
+// ensureAsk is the ask the media operator writes for any press.
+var ensureAsk = ReceiverInputAsk{Action: "ensure", At: askAt(1)}
+
 // driftedWhileListening is a harness whose session stands on GAME with
 // the room on, and a hand on the receiver that moved it to DVD.
 func driftedWhileListening(t *testing.T) (*sessionHarness, *session) {
 	t.Helper()
-	h, _, held := idleListening(t)
+	h, held := idleListening(t)
 	held.setFlags(false, true)
 	h.equipment.waitForCommands(t, denon.PowerOnCommand)
 	h.equipment.waitForCommands(t, "SIGAME")
@@ -34,7 +38,7 @@ func TestAnEnsureSelectsTheInputAfterADrift(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h, held := driftedWhileListening(t)
 
-		held.ensureInput()
+		held.inputAsk(ensureAsk)
 
 		h.equipment.waitForCommands(t, "SIGAME")
 		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
@@ -47,11 +51,11 @@ func TestAnEnsureOnTheRightInputSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		h, held := driftedWhileListening(t)
-		held.ensureInput()
+		held.inputAsk(ensureAsk)
 		h.equipment.waitForCommands(t, "SIGAME")
 		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
 
-		held.ensureInput()
+		held.inputAsk(ensureAsk)
 
 		h.refuseCommands(t, quietPeriod, "SIGAME", "SIDVD", denon.PowerOnCommand)
 	})
@@ -62,39 +66,11 @@ func TestAnEnsureOnTheRightInputSendsNothing(t *testing.T) {
 func TestAnEnsureInStandbySendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, held := idleListening(t)
+		h, held := idleListening(t)
 
-		held.ensureInput()
+		held.inputAsk(ensureAsk)
 
 		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
-	})
-}
-
-// The ask travels in player terms on the receiver's commands topic, and
-// the receiver resolves the input from the session it already holds.
-func TestTheEnsureCommandReachesTheStandingSession(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, held := driftedWhileListening(t)
-		unit := &receiverUnit{session: held, log: h.lines}
-
-		unit.handleCommand([]byte(`{"command":"input.ensure"}`))
-
-		h.equipment.waitForCommands(t, "SIGAME")
-	})
-}
-
-// A receiver with no session has no player listening, so the ask is
-// dropped rather than sent to a room nobody asked for.
-func TestTheEnsureCommandWithNoSessionSendsNothing(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarness(t)
-		unit := &receiverUnit{log: h.lines}
-
-		unit.handleCommand([]byte(`{"command":"input.ensure"}`))
-
-		h.refuseCommands(t, quietPeriod, "SIGAME", denon.PowerOnCommand)
 	})
 }
 
@@ -108,14 +84,13 @@ func TestAnEnsureTheReceiverNeverAnsweredEndsWithTheSession(t *testing.T) {
 		var group sync.WaitGroup
 		ctx, cancel := context.WithCancel(withWork(t.Context(), &group))
 		log := &logBuffer{}
-		spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
-		held := startSession(ctx, "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(log, "theater"), startFakeBrokerServer(t).address(), testNetwork.dial,
-			func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
+		spec := ReceiverSession{Player: "theater", Input: "GAME"}
+		held := startSession(ctx, "theater", spec, denon.NewClient("127.0.0.1:1", nil), newReceiverLog(log, "theater"), nil, nil)
 
-		held.ensureInput()
+		held.inputAsk(ensureAsk)
 		cancel()
 
 		mustMatch(t, awaitWork(&group, testTimeout), true)
-		mustMatch(t, len(linesWith(log, "input.ensure")), 0)
+		mustMatch(t, len(linesWith(log, "asks ensure")), 0)
 	})
 }

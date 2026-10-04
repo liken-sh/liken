@@ -1,5 +1,5 @@
 // The settings vocabulary: the wire commands each field carries, the
-// apply path, and the bus writes that reach them.
+// apply path.
 
 package denon
 
@@ -9,8 +9,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 func TestTheCommandBuildersWriteTheWireLines(t *testing.T) {
@@ -364,116 +362,6 @@ func TestApplySettingsRoundTripsThroughTheReceiver(t *testing.T) {
 	})
 }
 
-func TestSetRoutesOneIdToTheWire(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		harness := startHarness(t)
-		drainQueries(t, harness)
-
-		mustSucceed(t, harness.client.Set("tone.bass", equipment.NumberSettingValue(3)))
-
-		mustMatch(t, harness.receiver.waitForCommand(t), "PSBAS 53")
-
-		// The live setting moves on the receiver's echo, not on the write:
-		// a command the receiver never took must not change what the status
-		// reports.
-		got := waitForSettings(t, harness.client, func(s Settings) bool {
-			return s.Tone.Bass != nil && *s.Tone.Bass == 3
-		})
-		mustMatch(t, *got.Tone.Bass, 3)
-	})
-}
-
-func TestSetRoutesAChannelIdToTheWire(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		harness := startHarness(t)
-		drainQueries(t, harness)
-
-		mustSucceed(t, harness.client.Set("channel.FL", equipment.NumberSettingValue(0.5)))
-
-		mustMatch(t, harness.receiver.waitForCommand(t), "CVFL 505")
-
-		got := waitForSettings(t, harness.client, func(s Settings) bool {
-			return s.ChannelVolumes["FL"] == 0.5
-		})
-		mustMatch(t, got.ChannelVolumes["FL"], 0.5)
-	})
-}
-
-func TestSetUnknownIdIsAnErrorThatNamesIt(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("tone.bogus", equipment.NumberSettingValue(3))
-	if err == nil {
-		t.Fatal("an unknown id did not error")
-	}
-	if !strings.Contains(err.Error(), "tone.bogus") {
-		t.Errorf("the error does not name the id: %v", err)
-	}
-}
-
-func TestSetWrongValueTypeIsAnError(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("tone.bass", equipment.StringSettingValue("loud"))
-	if err == nil {
-		t.Fatal("a string on a numeric setting did not error")
-	}
-	if !strings.Contains(err.Error(), "tone.bass") {
-		t.Errorf("the error does not name the id: %v", err)
-	}
-}
-
-func TestSetAnUnknownWordIsAnError(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("system.eco", equipment.StringSettingValue("turbo"))
-	if err == nil {
-		t.Fatal("an unknown eco mode did not error")
-	}
-}
-
-func TestDoHasNoActionsYet(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Do("quick.3", nil)
-	if err == nil {
-		t.Fatal("Do did not error")
-	}
-	if !strings.Contains(err.Error(), "quick.3") {
-		t.Errorf("the error does not name the id: %v", err)
-	}
-}
-
-func TestSetAChannelWithTheWrongTypeIsAnError(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("channel.FL", equipment.StringSettingValue("loud"))
-	if err == nil {
-		t.Fatal("a string on a channel volume did not error")
-	}
-}
-
-func TestSetAChannelWithNoNameIsAnError(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("channel.", equipment.NumberSettingValue(0))
-	if err == nil {
-		t.Fatal("a channel volume with no name did not error")
-	}
-}
-
-// setChannel builds a row from a Settings with no channel map, so the
-// nil map branch of the fold runs.
-func TestSetChannelStartsTheChannelMap(t *testing.T) {
-	s := Settings{}
-	command, err := setChannel(&s, "FL", equipment.NumberSettingValue(0.5))
-	mustSucceed(t, err)
-	mustMatch(t, command, "CVFL 505")
-	mustMatch(t, s.ChannelVolumes["FL"], 0.5)
-}
-
 // ApplySettings must not report success for a declared field no command
 // can carry; it errors naming the setting id and the value instead.
 func TestApplySettingsErrorsWhenADeclaredFieldCannotBeEncoded(t *testing.T) {
@@ -583,41 +471,6 @@ func TestAnUnknownWordLeavesItsFieldUnset(t *testing.T) {
 	}
 }
 
-// An integer setting must not silently truncate a fraction; the error
-// names the id so a caller knows which value was rejected.
-func TestSetRejectsAFractionalInteger(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("tone.bass", equipment.NumberSettingValue(3.7))
-	if err == nil {
-		t.Fatal("a fractional value on an integer setting did not error")
-	}
-	if !strings.Contains(err.Error(), "tone.bass") {
-		t.Errorf("the error does not name the id: %v", err)
-	}
-}
-
-func TestSetAChannelWithAnExtraDotIsAnError(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("channel.FL.extra", equipment.NumberSettingValue(0))
-	if err == nil {
-		t.Fatal("a channel id with an extra dot did not error")
-	}
-	if !strings.Contains(err.Error(), "channel.FL.extra") {
-		t.Errorf("the error does not name the id: %v", err)
-	}
-}
-
-func TestSetAChannelWithWhitespaceIsAnError(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("channel. FL", equipment.NumberSettingValue(0))
-	if err == nil {
-		t.Fatal("a channel id with whitespace did not error")
-	}
-}
-
 // Mutating a returned Settings must not change the next Settings():
 // every pointer and the channel map are deep-copied.
 func TestSettingsDoesNotAliasTheLiveState(t *testing.T) {
@@ -645,17 +498,6 @@ func TestSettingsDoesNotAliasTheLiveState(t *testing.T) {
 		_, held := second.ChannelVolumes["FL"]
 		mustMatch(t, held, false)
 	})
-}
-
-// A command that cannot be delivered is reported to the caller, so a
-// set on a client with no connection is an error and not a silent no-op.
-func TestSetOnADisconnectedClientReportsTheFailure(t *testing.T) {
-	client := NewClient("192.0.2.1", nil)
-
-	err := client.Set("tone.bass", equipment.NumberSettingValue(3))
-	if err == nil {
-		t.Fatal("a set on a disconnected client did not error")
-	}
 }
 
 func TestApplySettingsOnADisconnectedClientReportsTheFailure(t *testing.T) {
@@ -725,17 +567,4 @@ func TestApplySettingsRoundTripsEveryRemainingField(t *testing.T) {
 			})
 		})
 	}
-}
-
-// SettingsFor holds one bus value and nothing else, so ConfirmedBy
-// reads only that value.
-func TestSettingsForHoldsOneValue(t *testing.T) {
-	one, err := SettingsFor("tone.bass", equipment.NumberSettingValue(3))
-	mustSucceed(t, err)
-	three, four := 3, 4
-
-	mustMatch(t, one.ConfirmedBy(Settings{Tone: ToneSettings{Bass: &three, Treble: &four}}), true)
-	mustMatch(t, one.ConfirmedBy(Settings{Tone: ToneSettings{Bass: &four}}), false)
-	_, err = SettingsFor("tone.bogus", equipment.NumberSettingValue(3))
-	mustMatch(t, err.Error(), `unknown setting "tone.bogus"`)
 }

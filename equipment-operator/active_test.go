@@ -1,6 +1,6 @@
 package main
 
-// The two session flags against the fake receiver and the fake broker:
+// The two session flags against the fake receiver:
 // the session the media operator holds at the idle screen, and the
 // flips a Play and a waking screen make on it. The harness these run on
 // is in session_test.go.
@@ -19,13 +19,11 @@ import (
 )
 
 // idleListening is a harness whose session stands with both flags
-// false. It has adopted the level and has sent the equipment nothing.
-func idleListening(t *testing.T) (*sessionHarness, *fakeBroker, *session) {
+// false. It has sent the equipment nothing.
+func idleListening(t *testing.T) (*sessionHarness, *session) {
 	t.Helper()
-	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
-	held := h.beginIdle(t, "GAME")
-	broker, _ := adoptTheLevel(t, h, held)
-	return h, broker, held
+	h := newSessionHarness(t)
+	return h, h.beginIdle(t, "GAME")
 }
 
 // A Player at its idle screen holds a session on the receiver, so an
@@ -33,7 +31,7 @@ func idleListening(t *testing.T) (*sessionHarness, *fakeBroker, *session) {
 func TestAnIdleSessionSendsNoPowerOrInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, _ := idleListening(t)
+		h, _ := idleListening(t)
 
 		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
 
@@ -41,24 +39,10 @@ func TestAnIdleSessionSendsNoPowerOrInput(t *testing.T) {
 	})
 }
 
-// The level is the idle session's whole job, and it does it with the
-// receiver in standby.
-func TestAnIdleSessionStillStepsTheVolume(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, _ := idleListening(t)
-
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-
-		h.equipment.waitForCommands(t, "MV51")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
-	})
-}
-
 func TestAFlipToActivePowersOnThenSelectsTheInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, held := idleListening(t)
+		h, held := idleListening(t)
 
 		held.setFlags(true, false)
 
@@ -73,7 +57,7 @@ func TestAFlipToActivePowersOnThenSelectsTheInput(t *testing.T) {
 func TestAFlipOutOfActiveSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, held := idleListening(t)
+		h, held := idleListening(t)
 		held.setFlags(true, false)
 		h.equipment.waitForCommands(t, "SIGAME")
 
@@ -88,7 +72,7 @@ func TestAFlipOutOfActiveSendsNothing(t *testing.T) {
 func TestASecondFlipToActiveSelectsTheInputAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, held := idleListening(t)
+		h, held := idleListening(t)
 		held.setFlags(true, false)
 		h.equipment.waitForCommands(t, "SIGAME")
 		held.setFlags(false, false)
@@ -102,36 +86,13 @@ func TestASecondFlipToActiveSelectsTheInputAgain(t *testing.T) {
 	})
 }
 
-// A flip is not a new session. One broker connection stands across the
-// flips, the owner mark is never published again, and the level the
-// session adopted is still the level it holds.
-func TestTheFlipsKeepOneBrokerConnection(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, held := idleListening(t)
-
-		held.setFlags(true, false)
-		h.equipment.waitForCommands(t, "SIGAME")
-		held.setFlags(false, false)
-		handOnTheRemote(t, h.equipment, "SIDVD")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
-		held.setFlags(true, false)
-		h.equipment.waitForCommands(t, "SIGAME")
-
-		broker.refuseTopic(t, ownerTopic(testVolumeTopic), quietPeriod)
-		mustMatch(t, len(h.brokers.sessions), 0)
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-		h.equipment.waitForCommands(t, "MV51")
-	})
-}
-
 // The screen waking is the second trigger for the same one-shots, so it
 // powers a dark room on and selects the input by itself, with no Play
 // standing.
 func TestAFlipToAwakePowersOnThenSelectsTheInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, held := idleListening(t)
+		h, held := idleListening(t)
 
 		held.setFlags(false, true)
 
@@ -146,7 +107,7 @@ func TestAFlipToAwakePowersOnThenSelectsTheInput(t *testing.T) {
 func TestASecondFlipToAwakeSelectsTheInputAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, held := idleListening(t)
+		h, held := idleListening(t)
 		held.setFlags(false, true)
 		h.equipment.waitForCommands(t, "SIGAME")
 		held.setFlags(false, false)
@@ -167,7 +128,7 @@ func TestASecondFlipToAwakeSelectsTheInputAgain(t *testing.T) {
 func TestAFlipToAwakeSelectsAgainUnderAStandingPlay(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h, _, held := idleListening(t)
+		h, held := idleListening(t)
 		held.setFlags(true, false)
 		h.equipment.waitForCommands(t, "SIGAME")
 		handOnTheRemote(t, h.equipment, "SIDVD")
@@ -187,7 +148,7 @@ func TestAFlipToAwakeSelectsAgainUnderAStandingPlay(t *testing.T) {
 // them is what the test reads.
 func playingOnAWokenScreen(t *testing.T, input string) *sessionHarness {
 	t.Helper()
-	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+	h := newSessionHarness(t)
 	h.powerOn(t)
 	h.beginSession(t, input, true, true)
 	return h
@@ -206,29 +167,6 @@ func TestASessionThatStartsActiveAndAwakeSelectsOnce(t *testing.T) {
 	})
 }
 
-// A waking screen is not a new session either. One broker connection
-// stands across the awake flips, the owner mark is never published
-// again, and the level the session adopted is still the level it holds.
-func TestTheAwakeFlipsKeepOneBrokerConnection(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		h, broker, held := idleListening(t)
-
-		held.setFlags(false, true)
-		h.equipment.waitForCommands(t, "SIGAME")
-		held.setFlags(false, false)
-		handOnTheRemote(t, h.equipment, "SIDVD")
-		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
-		held.setFlags(false, true)
-		h.equipment.waitForCommands(t, "SIGAME")
-
-		broker.refuseTopic(t, ownerTopic(testVolumeTopic), quietPeriod)
-		mustMatch(t, len(h.brokers.sessions), 0)
-		broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
-		h.equipment.waitForCommands(t, "MV51")
-	})
-}
-
 // A power-on the receiver never confirms is the one wait selectInput
 // gives up on, and giving up is what equipment_commands_total counts
 // as a timeout. readings is wired before the client's Run goroutine
@@ -243,9 +181,7 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 		log := &logBuffer{}
 		lines := newReceiverLog(log, "theater")
 		h := &sessionHarness{
-			rule:      ReceiverVolume{Max: 69.5},
 			equipment: receiver,
-			brokers:   startFakeBrokerServer(t),
 			holder:    &sessionHolder{lines: lines},
 			readings:  readings,
 			log:       log,
@@ -296,7 +232,7 @@ func TestASessionThatEndsDuringThePowerWaitSendsNoInput(t *testing.T) {
 func TestAnInputsSoundModeIsSelectedWithTheInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+		h := newSessionHarness(t)
 		h.powerOn(t)
 		h.soundModes = map[string]string{"GAME": "STEREO"}
 
@@ -319,9 +255,8 @@ func TestAnActiveSessionOnAReceiverThatNeverAnsweredEndsWithNothingSent(t *testi
 		var group sync.WaitGroup
 		ctx, cancel := context.WithCancel(withWork(t.Context(), &group))
 		log := &logBuffer{}
-		spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic, Active: true}
-		startSession(ctx, "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(log, "theater"), startFakeBrokerServer(t).address(), testNetwork.dial,
-			func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
+		spec := ReceiverSession{Player: "theater", Input: "GAME", Active: true}
+		startSession(ctx, "theater", spec, denon.NewClient("127.0.0.1:1", nil), newReceiverLog(log, "theater"), nil, nil)
 
 		cancel()
 

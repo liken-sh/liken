@@ -37,10 +37,9 @@ func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
 // fakeAPI is an API server that answers the collection a test sets and
 // records every status the operator applies.
 type fakeAPI struct {
-	client   *Client
-	written  chan ReceiverStatus
-	powers   chan equipment.Power
-	settings chan []byte
+	client  *Client
+	written chan ReceiverStatus
+	powers  chan equipment.Power
 
 	mutex        sync.Mutex
 	list         ReceiverList
@@ -48,9 +47,8 @@ type fakeAPI struct {
 	statuses     []ReceiverStatus
 	statusBodies [][]byte
 	powersSet    []equipment.Power
-	settingsSet  [][]byte
 	refusing     bool
-	settingsGate chan struct{}
+	powerGate    chan struct{}
 	// lists counts the lists of the Receivers.
 	lists int
 	// applied names the Receiver of each apply on the main resource.
@@ -63,7 +61,7 @@ type fakeAPI struct {
 
 func startFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	api := &fakeAPI{written: make(chan ReceiverStatus, 64), powers: make(chan equipment.Power, 64), settings: make(chan []byte, 64)}
+	api := &fakeAPI{written: make(chan ReceiverStatus, 64), powers: make(chan equipment.Power, 64)}
 	api.client = testAPIClient(t, http.HandlerFunc(api.handle))
 	return api
 }
@@ -157,36 +155,22 @@ func (a *fakeAPI) recordStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // recordPower answers the operator's apply on the main resource, which
-// owns spec.power or one leaf of spec.denon.settings, and records which
-// one the body named. A body whose spec names a denon block is a
-// settings leaf; anything else is a power.
+// owns spec.power, and records the power the body named.
 func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	var applied receiverPowerApply
 	_ = json.Unmarshal(body, &applied)
 	a.mutex.Lock()
 	a.applied = append(a.applied, path.Base(r.URL.Path))
+	a.powersSet = append(a.powersSet, applied.Spec.Power)
+	gate := a.powerGate
 	a.mutex.Unlock()
-	if applied.Spec.Denon != nil {
-		a.mutex.Lock()
-		a.settingsSet = append(a.settingsSet, body)
-		gate := a.settingsGate
-		a.mutex.Unlock()
-		select {
-		case a.settings <- body:
-		default:
-		}
-		if gate != nil {
-			<-gate
-		}
-	} else {
-		a.mutex.Lock()
-		a.powersSet = append(a.powersSet, applied.Spec.Power)
-		a.mutex.Unlock()
-		select {
-		case a.powers <- applied.Spec.Power:
-		default:
-		}
+	select {
+	case a.powers <- applied.Spec.Power:
+	default:
+	}
+	if gate != nil {
+		<-gate
 	}
 	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Spec: applied.Spec})
 }
@@ -205,20 +189,20 @@ func (a *fakeAPI) setReceivers(items ...Receiver) {
 	a.list = ReceiverList{Metadata: ListMeta{ResourceVersion: "1"}, Items: items}
 }
 
-// gateSettings makes every settings write wait until releaseSettings,
-// so a test can hold a handler open at its API patch.
-func (a *fakeAPI) gateSettings() {
+// gatePowers makes every power write wait until releasePowers, so a
+// test can hold a handler open at its API patch.
+func (a *fakeAPI) gatePowers() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	a.settingsGate = make(chan struct{})
+	a.powerGate = make(chan struct{})
 }
 
-func (a *fakeAPI) releaseSettings() {
+func (a *fakeAPI) releasePowers() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	if a.settingsGate != nil {
-		close(a.settingsGate)
-		a.settingsGate = nil
+	if a.powerGate != nil {
+		close(a.powerGate)
+		a.powerGate = nil
 	}
 }
 
@@ -286,7 +270,7 @@ func testReceiver(name, address string) Receiver {
 // unit's writer goroutine outlives the test and would race a restore.
 func startController(t *testing.T, api *fakeAPI) *controller {
 	t.Helper()
-	operator := newController(api.client, "127.0.0.1:1", testMetrics(t))
+	operator := newController(api.client, testMetrics(t))
 	operator.dial = testNetwork.dial
 	operator.now = func() time.Time { return statusNow }
 	return operator
@@ -501,10 +485,9 @@ func TestPassAnswersTheErrorWhenTheListFails(t *testing.T) {
 func sessionedReceiver(name, address, input string) Receiver {
 	held := testReceiver(name, address)
 	held.Spec.Session = &ReceiverSession{
-		Player:      "house/theater",
-		Input:       input,
-		VolumeTopic: "liken/media/players/house/theater/volume",
-		Active:      true,
+		Player: "house/theater",
+		Input:  input,
+		Active: true,
 	}
 	return held
 }
@@ -617,7 +600,7 @@ func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
 		api := startFakeAPI(t)
 		api.breakTheList()
 
-		mustFail(t, serve(t.Context(), api.client, settings{busAddress: "127.0.0.1:1", dial: testNetwork.dial}, testMetrics(t)))
+		mustFail(t, serve(t.Context(), api.client, settings{dial: testNetwork.dial}, testMetrics(t)))
 	})
 }
 
@@ -633,7 +616,7 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
-			mustSucceed(t, serve(ctx, api.client, settings{busAddress: "127.0.0.1:1", networkDiscoveryOff: true, dial: testNetwork.dial}, testMetrics(t)))
+			mustSucceed(t, serve(ctx, api.client, settings{networkDiscoveryOff: true, dial: testNetwork.dial}, testMetrics(t)))
 		}()
 
 		api.waitForStatus(t, connected)
@@ -647,43 +630,6 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 	})
 }
 
-// An edit to spec.volume reaches a session that is already standing, so
-// the step a press takes changes without the receiver being powered or
-// its input selected again.
-func TestAVolumeEditReachesAStandingSession(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		api := startFakeAPI(t)
-		equipment := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
-		operator.dial = testNetwork.dial
-		operator.now = func() time.Time { return statusNow }
-
-		api.setReceivers(testReceiver("theater", equipment.address()))
-		mustSucceed(t, operator.pass(t.Context()))
-		api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 1}))
-		mustSucceed(t, operator.pass(t.Context()))
-
-		broker := brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-		adopted := broker.waitForTopic(t, testVolumeTopic)
-		broker.push(testVolumeTopic, adopted.payload)
-		waitUntilSessionAdopted(t, operator, "theater")
-		equipment.waitForCommands(t, "SIGAME")
-
-		broker.push(testVolumeTopic, []byte(`{"level":77,"muted":false}`))
-		equipment.waitForCommands(t, "MV51")
-
-		api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 2}))
-		mustSucceed(t, operator.pass(t.Context()))
-		equipment.refuseCommand(t, "SIGAME", quietPeriod)
-
-		broker.push(testVolumeTopic, []byte(`{"level":85,"muted":false}`))
-		equipment.waitForCommands(t, "MV53")
-	})
-}
-
 // A Play that starts on a waking screen turns both flags on in one
 // write, and the session selects the input once and at once.
 func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
@@ -691,19 +637,13 @@ func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		equipment := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
 		operator.now = func() time.Time { return statusNow }
 
 		rule := ReceiverVolume{Max: 69.5, Step: 1}
 		api.setReceivers(idleReceiver(equipment.address(), rule))
 		mustSucceed(t, operator.pass(t.Context()))
-		broker := brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-		adopted := broker.waitForTopic(t, testVolumeTopic)
-		broker.push(testVolumeTopic, adopted.payload)
-		waitUntilSessionAdopted(t, operator, "theater")
 		waitForSurvey(t, operator)
 
 		woken := playingReceiver(equipment.address(), rule)
@@ -719,7 +659,7 @@ func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
 }
 
 // playingReceiver is one Denon with a Play standing on it and a
-// declared scale, which is the whole of what a press needs.
+// declared scale.
 func playingReceiver(address string, rule ReceiverVolume) Receiver {
 	held := idleReceiver(address, rule)
 	held.Spec.Session.Active = true
@@ -727,24 +667,15 @@ func playingReceiver(address string, rule ReceiverVolume) Receiver {
 }
 
 // idleReceiver is the same receiver with the Player at its idle screen:
-// a session that owns the level and asks the equipment for nothing.
+// a session that asks the equipment for nothing.
 func idleReceiver(address string, rule ReceiverVolume) Receiver {
 	held := testReceiver("theater", address)
 	held.Spec.Volume = &rule
 	held.Spec.Session = &ReceiverSession{
-		Player:      "house/theater",
-		Input:       "GAME",
-		VolumeTopic: testVolumeTopic,
+		Player: "house/theater",
+		Input:  "GAME",
 	}
 	return held
-}
-
-// waitUntilSessionAdopted waits for a unit's session to take the
-// broker's delivery of its own adopt message, which is the point from
-// which a press moves the receiver.
-func waitUntilSessionAdopted(t *testing.T, operator *controller, name string) {
-	t.Helper()
-	waitUntilAdopted(t, heldSession(t, operator, name))
 }
 
 // heldSession answers the session a unit runs now, which is the same
@@ -762,26 +693,20 @@ func heldSession(t *testing.T, operator *controller, name string) *session {
 
 // The media operator holds the session whenever the Player has a
 // screen, and flips active when a Play starts. The flip must reach the
-// session that stands: the same connection, the same owner mark, and no
-// second adopt.
+// session that stands, and not start another.
 func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		equipment := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
 		operator.now = func() time.Time { return statusNow }
 		rule := ReceiverVolume{Max: 69.5, Step: 1}
 
 		api.setReceivers(idleReceiver(equipment.address(), rule))
 		mustSucceed(t, operator.pass(t.Context()))
-		broker := brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
-		adopted := broker.waitForTopic(t, testVolumeTopic)
-		broker.push(testVolumeTopic, adopted.payload)
-		waitUntilSessionAdopted(t, operator, "theater")
+		waitForSurvey(t, operator)
 		equipment.refuseCommand(t, "SIGAME", quietPeriod)
 		before := heldSession(t, operator, "theater")
 
@@ -790,8 +715,6 @@ func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
 
 		equipment.waitForCommands(t, "SIGAME")
 		mustMatch(t, heldSession(t, operator, "theater"), before)
-		broker.refuseTopic(t, ownerTopic(testVolumeTopic), quietPeriod)
-		mustMatch(t, len(brokers.sessions), 0)
 	})
 }
 
@@ -1010,73 +933,6 @@ func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 	})
 }
 
-// The unit's own bus opens and subscribes to the settings and commands
-// topics with no session standing, so settings and commands reach a
-// receiver no Player is using.
-func TestTheReceiverBusSubscribesWithoutASession(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		api := startFakeAPI(t)
-		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		receiver := testReceiver("theater", fake.address())
-		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-		receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
-		api.setReceivers(receiver)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
-		operator.dial = testNetwork.dial
-		operator.now = func() time.Time { return statusNow }
-
-		mustSucceed(t, operator.pass(t.Context()))
-
-		broker := brokers.waitForSession(t)
-		seen := map[string]bool{}
-		seen[waitForString(t, broker.subs)] = true
-		seen[waitForString(t, broker.subs)] = true
-		mustMatch(t, seen[receiver.Spec.SettingsTopic], true)
-		mustMatch(t, seen[receiver.Spec.CommandsTopic], true)
-	})
-}
-
-// A settings bus message sends the value to the receiver and writes the
-// same leaf back to spec.denon.settings, in a body that carries only
-// that one leaf, so a manifest-declared neighbor is untouched.
-func TestASettingsMessageSendsAndWritesTheLeafBack(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		api := startFakeAPI(t)
-		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		receiver := testReceiver("theater", fake.address())
-		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-		api.setReceivers(receiver)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
-		operator.dial = testNetwork.dial
-		operator.now = func() time.Time { return statusNow }
-
-		mustSucceed(t, operator.pass(t.Context()))
-		api.waitForStatus(t, connected)
-		broker := brokers.waitForSession(t)
-		waitForString(t, broker.subs)
-
-		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
-		fake.waitForCommands(t, "PSBAS 53")
-
-		body := <-api.settings
-		decoded := map[string]any{}
-		mustSucceed(t, json.Unmarshal(body, &decoded))
-		spec := decoded["spec"].(map[string]any)
-		denonBlock := spec["denon"].(map[string]any)
-		settings := denonBlock["settings"].(map[string]any)
-		tone := settings["tone"].(map[string]any)
-		mustMatch(t, tone["bass"].(float64), float64(3))
-		mustMatch(t, len(tone), 1)
-		mustMatch(t, len(settings), 1)
-		mustMatch(t, len(denonBlock), 1)
-		mustMatch(t, len(spec), 1)
-	})
-}
-
 // A declared setting the receiver cannot carry is logged and not
 // recorded, so the next pass tries again; a later valid change lands.
 func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
@@ -1132,83 +988,6 @@ func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
 		mustSucceed(t, operator.pass(t.Context()))
 
 		fake.waitForCommands(t, "Z2MV40")
-	})
-}
-
-// A settings message that does not parse, or that names an unknown id,
-// changes nothing: the error is logged and no leaf is written.
-func TestASettingsMessageThatFailsChangesNothing(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		api := startFakeAPI(t)
-		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		receiver := testReceiver("theater", fake.address())
-		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-		api.setReceivers(receiver)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
-		operator.dial = testNetwork.dial
-		operator.now = func() time.Time { return statusNow }
-
-		mustSucceed(t, operator.pass(t.Context()))
-		broker := brokers.waitForSession(t)
-		waitForString(t, broker.subs)
-
-		broker.push(receiver.Spec.SettingsTopic, []byte(`not json`))
-		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bogus","value":3}`))
-
-		select {
-		case body := <-api.settings:
-			t.Fatalf("a failing settings message wrote a leaf: %s", body)
-		case <-time.After(quietPeriod):
-		}
-		fake.refuseCommand(t, "PSBAS", quietPeriod)
-	})
-}
-
-// A slow settings patch on one message does not block the reader, so
-// the message behind it on the same topic is still handled. Each
-// handler runs on its own goroutine.
-func TestASlowSettingsPatchDoesNotBlockTheReader(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		api := startFakeAPI(t)
-		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		receiver := testReceiver("theater", fake.address())
-		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-		api.setReceivers(receiver)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
-		operator.dial = testNetwork.dial
-		operator.now = func() time.Time { return statusNow }
-
-		mustSucceed(t, operator.pass(t.Context()))
-		api.waitForStatus(t, connected)
-		broker := brokers.waitForSession(t)
-		waitForString(t, broker.subs)
-
-		// Hold the API write of the first message open, then push a second.
-		// A reader that stalled on the patch would never read the second.
-		api.gateSettings()
-		defer api.releaseSettings()
-
-		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
-		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.treble","value":1}`))
-
-		// Both handlers run on their own goroutines while the first message's
-		// API write is still blocked, so both settings reach the receiver. The
-		// two run concurrently, so collect until each one has landed.
-		var sawBass, sawTreble bool
-		deadline := time.After(testTimeout)
-		for !sawBass || !sawTreble {
-			select {
-			case command := <-fake.commands:
-				sawBass = sawBass || command == "PSBAS 53"
-				sawTreble = sawTreble || command == "PSTRE 51"
-			case <-deadline:
-				t.Fatalf("a slow settings patch blocked the reader: bass=%v treble=%v", sawBass, sawTreble)
-			}
-		}
 	})
 }
 
@@ -1343,38 +1122,5 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 		waitForObservedZone(t, operator, "theater", "zone2", 80)
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.refuseCommand(t, "Z2MV40", quietPeriod)
-	})
-}
-
-// A command bus message reaches Do, and the error Do returns for every
-// id is logged and never fatal, so the bus keeps serving later
-// messages.
-func TestACommandMessageErrorIsLoggedAndNotFatal(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		api := startFakeAPI(t)
-		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		receiver := testReceiver("theater", fake.address())
-		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-		receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
-		api.setReceivers(receiver)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
-		operator.dial = testNetwork.dial
-		operator.now = func() time.Time { return statusNow }
-
-		mustSucceed(t, operator.pass(t.Context()))
-		api.waitForStatus(t, connected)
-		broker := brokers.waitForSession(t)
-		waitForString(t, broker.subs)
-		waitForString(t, broker.subs)
-
-		// Do errors for every id; the handler logs and the reader moves on,
-		// so the settings message that follows still lands. A payload that
-		// does not parse changes nothing either.
-		broker.push(receiver.Spec.CommandsTopic, []byte(`not json`))
-		broker.push(receiver.Spec.CommandsTopic, []byte(`{"command":"quick.3","args":{}}`))
-		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
-		fake.waitForCommands(t, "PSBAS 53")
 	})
 }

@@ -43,7 +43,6 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 		fmt.Fprintf(os.Stderr, "listing Receivers: %v\n", err)
 		return
 	}
-	c.relayScreenAsks(televisions.Items)
 	byName := map[string]*CECBus{}
 	for index := range buses {
 		byName[buses[index].Metadata.Name] = &buses[index]

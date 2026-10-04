@@ -178,8 +178,8 @@ func TestApplyDenonLineIgnoresTheLinesTheDriverDoesNotRead(t *testing.T) {
 }
 
 // MVMAX carries the limit set in the receiver's own menu, and it
-// arrives right behind the volume. Reading it as a volume would put the
-// receiver's loudest setting on the bus.
+// arrives right behind the volume. Reading it as a volume would report
+// the receiver's loudest setting as its volume.
 func TestTheVolumeLimitIsNotTheVolume(t *testing.T) {
 	state, _, _, _ := applyDenonLine(newDenonState(), "MV50")
 	state, _, field, known := applyDenonLine(state, "MVMAX 695")

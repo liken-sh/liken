@@ -239,7 +239,7 @@ func runServe(t *testing.T, api *cecAPI) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = serve(ctx, api.client, settings{busAddress: "127.0.0.1:1", dial: testNetwork.dial}, testMetrics(t))
+		_ = serve(ctx, api.client, settings{dial: testNetwork.dial}, testMetrics(t))
 	}()
 	t.Cleanup(func() {
 		cancel()

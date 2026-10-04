@@ -1,11 +1,11 @@
 package main
 
-// The network the fake receivers and the fake broker listen on. Each
+// The network the fake receivers listen on. Each
 // connection to a fake is a net.Pipe, whose reads and writes wait on
 // channels. So a test in a synctest bubble that talks to a fake waits
 // on nothing outside the bubble, and its fake clock advances. The
-// operator reaches the fakes through the dialFunc that the controller,
-// the session, the bus, and the Denon client take.
+// operator reaches the fakes through the dialFunc that the controller
+// and the Denon client take.
 
 import (
 	"context"

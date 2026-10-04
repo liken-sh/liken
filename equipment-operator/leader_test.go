@@ -360,7 +360,7 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, err := waiting.actWhileLeading(ctx, func() error {
-			return operateAsLeader(ctx, api.client, settings{busAddress: "127.0.0.1:1", metricsAddress: metricsAddress, dial: testNetwork.dial})
+			return operateAsLeader(ctx, api.client, settings{metricsAddress: metricsAddress, dial: testNetwork.dial})
 		})
 		done <- err
 	}()

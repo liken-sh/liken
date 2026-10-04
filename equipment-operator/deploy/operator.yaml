@@ -43,8 +43,8 @@ spec:
       serviceAccountName: equipment-operator
       # The operator shares the node's network namespace so its mDNS and
       # SSDP searches reach the LAN. A policy that keeps the cluster's
-      # own DNS is what still resolves the broker and a declared
-      # equipment name from this namespace.
+      # own DNS is what still resolves a declared equipment name from
+      # this namespace.
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
@@ -62,11 +62,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # The broker the operator reads a session's volume from.
-            # The operator cannot derive the Service name, so the
-            # manifest states it.
-            - name: EQUIPMENT_BUS_ADDRESS
-              value: bus.liken-system.svc:1883
             # Host network moves the listener into the node's namespace,
             # where port 9200 is already liken-machine-operator's. This
             # operator takes 9260, the next free port in the series that

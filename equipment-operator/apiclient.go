@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -301,76 +300,4 @@ func deleteObject(c *Client, path, what string) error {
 		return nil
 	}
 	return fmt.Errorf("deleting %s: %w", what, err)
-}
-
-// settingsPath maps a bus setting id onto the leaf of
-// spec.denon.settings that holds it. The channel family lives under
-// channelVolumes, and every other id maps by its dotted segments, so
-// tone.bass becomes ["tone","bass"] and channel.FL becomes
-// ["channelVolumes","FL"].
-func settingsPath(id string) []string {
-	if strings.HasPrefix(id, "channel.") {
-		return []string{"channelVolumes", strings.TrimPrefix(id, "channel.")}
-	}
-	return strings.Split(id, ".")
-}
-
-// settingsLeafSpec is the body of an apply that owns one leaf of one
-// protocol's settings: the protocol block, and the one nested field
-// this operator manages. It is built as raw JSON because the leaf path
-// is dynamic and no typed struct can name it. The protocol key keeps a
-// Denon write and a WiiM write in their own spec blocks.
-func settingsLeafSpec(protocol string, leaf []string, value equipment.SettingValue) (json.RawMessage, error) {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	var node any = json.RawMessage(encoded)
-	for index := len(leaf) - 1; index >= 0; index-- {
-		node = map[string]any{leaf[index]: node}
-	}
-	return json.Marshal(map[string]any{protocol: map[string]any{"settings": node}})
-}
-
-// applySettingsLeaf writes one leaf of one protocol's settings on the
-// main resource under this operator's own field manager, the way
-// ApplyReceiverPower owns spec.power. Server-side apply keeps the write
-// to the one leaf the body states, so a bus write to one key never
-// claims the keys around it and never touches a key a GitOps manifest
-// declared. That is the one-writer invariant: a manifest-declared key
-// is Flux's, and a bus-written key is this operator's, and the two
-// never own the same leaf. force settles a conflict in this manager's
-// favour, because nothing else writes a bus-written key.
-func applySettingsLeaf(c *Client, name, protocol string, leaf []string, value equipment.SettingValue) (*Receiver, error) {
-	spec, err := settingsLeafSpec(protocol, leaf, value)
-	if err != nil {
-		return nil, err
-	}
-	body, err := json.Marshal(struct {
-		APIVersion string          `json:"apiVersion"`
-		Kind       string          `json:"kind"`
-		Metadata   ObjectMeta      `json:"metadata"`
-		Spec       json.RawMessage `json:"spec"`
-	}{
-		APIVersion: equipmentAPIVersion,
-		Kind:       "Receiver",
-		Metadata:   ObjectMeta{Name: name},
-		Spec:       spec,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return applyReceiver(c, name, receiverPath(name)+"?fieldManager="+fieldManager+"&force=true", body)
-}
-
-// ApplyReceiverSettings writes one leaf of spec.denon.settings.
-func ApplyReceiverSettings(c *Client, name string, leaf []string, value equipment.SettingValue) (*Receiver, error) {
-	return applySettingsLeaf(c, name, "denon", leaf, value)
-}
-
-// ApplyReceiverWiimSettings writes one leaf of spec.wiim.settings. It
-// is the same one-writer path in WiiM's own block, so a bus write to a
-// WiiM key and one to a Denon key never touch the same spec.
-func ApplyReceiverWiimSettings(c *Client, name string, leaf []string, value equipment.SettingValue) (*Receiver, error) {
-	return applySettingsLeaf(c, name, "wiim", leaf, value)
 }

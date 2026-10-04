@@ -5,8 +5,7 @@ package main
 // it, a few seconds after the operator starts, and a Denon's declared
 // address can change. Either one replaces the unit, and the session the
 // old unit held is the same session: the new unit takes it over with
-// its flags and sends nothing for them, and the owner mark stays on the
-// broker, so the media side never sees the level without an owner.
+// its flags and sends nothing for them.
 
 import (
 	"testing"
@@ -21,8 +20,7 @@ import (
 func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver)) *logBuffer {
 	t.Helper()
 	api := startFakeAPI(t)
-	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator := newController(api.client, testMetrics(t))
 	operator.dial = testNetwork.dial
 	operator.now = func() time.Time { return statusNow }
 	log := &logBuffer{}
@@ -32,12 +30,12 @@ func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver))
 	receiver.Status.SettingsGeneration, receiver.Status.PowerGeneration = 377, 377
 	api.setReceivers(receiver)
 	mustSucceed(t, operator.pass(t.Context()))
-	waitForLines(t, log, "published the owner mark", 1)
+	waitForLines(t, log, "session for Player", 1)
 
 	move(operator, &receiver)
 	api.setReceivers(receiver)
 	mustSucceed(t, operator.pass(t.Context()))
-	waitForLines(t, log, "published the owner mark", 2)
+	waitForLines(t, log, "session for Player", 2)
 	return log
 }
 
@@ -77,10 +75,9 @@ func TestARewiredUnitKeepsTheSessionThatStands(t *testing.T) {
 			t.Parallel()
 			log := rewired(t, one.receiver(t), one.move(t))
 
-			mustDeepEqual(t, linesWith(log, "cleared the owner mark"), []string(nil))
 			mustDeepEqual(t, linesWith(log, "session for Player"), []string{
-				"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active true, awake true; the operator found it when it started, so it sends nothing for these flags",
-				"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active true, awake true; the unit that held it before the wiring changed handed it over, so it sends nothing for these flags",
+				"Receiver theater: a session for Player house/theater started: input GAME, active true, awake true; the operator found it when it started, so it sends nothing for these flags",
+				"Receiver theater: a session for Player house/theater started: input GAME, active true, awake true; the unit that held it before the wiring changed handed it over, so it sends nothing for these flags",
 			})
 			mustDeepEqual(t, linesWith(log, "sent"), []string(nil))
 		})

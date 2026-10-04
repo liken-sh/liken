@@ -28,8 +28,9 @@ spec:
             deviceClassName: cec-adapter
 ---
 # A DaemonSet, one pod per node. The pod needs no host network, no
-# broker, and no receiver credentials: it speaks to the adapter through
-# its device node and to the API server through its ServiceAccount.
+# message bus, and no receiver credentials: it speaks to the adapter
+# through its device node and to the API server through its
+# ServiceAccount.
 #
 # RollingUpdate with maxSurge 0, because the adapter allocates to one
 # claim at a time. A new pod that claimed the same adapter would stay

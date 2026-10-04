@@ -44,7 +44,7 @@ func TestARestartAtTheSettledPowerSendsNoPower(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := switchedOn(t)
-		_, operator, log := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
+		_, operator, log := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby))
 
 		mustSucceed(t, operator.pass(t.Context()))
 
@@ -72,7 +72,7 @@ func TestAnUpgradeAdoptsTheSpecPower(t *testing.T) {
 		stored := asking(fake, "", "")
 		stored.Status.PowerGeneration = 3
 		stored.Spec.Power = decodedPower(t, `"standby"`)
-		api, operator, log := reachedController(t, stored, "127.0.0.1:1")
+		api, operator, log := reachedController(t, stored)
 
 		mustSucceed(t, operator.pass(t.Context()))
 
@@ -90,7 +90,7 @@ func TestASpecPowerEditedWhileTheOperatorWasDownSendsOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
+		api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby))
 
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.waitForCommands(t, denon.PowerOnCommand)
@@ -109,7 +109,7 @@ func TestASpecPowerEditedWhileTheOperatorWasDownSendsNothingTheReceiverReports(t
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := switchedOn(t)
-		api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
+		api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby))
 
 		mustSucceed(t, operator.pass(t.Context()))
 
@@ -126,7 +126,7 @@ func TestALiveSpecPowerChangeSendsOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		api, operator, _ := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
+		api, operator, _ := reachedController(t, asking(fake, "", ""))
 
 		changed := asking(fake, equipment.PowerOn, "")
 		changed.Metadata.Generation = 5
@@ -146,7 +146,7 @@ func TestALiveChangeSendsNoPowerTheReceiverReports(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := switchedOn(t)
-		api, operator, log := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
+		api, operator, log := reachedController(t, asking(fake, "", ""))
 
 		changed := asking(fake, equipment.PowerOn, "")
 		changed.Metadata.Generation = 5
@@ -168,7 +168,7 @@ func TestAReceiverCreatedWhileRunningSendsItsPowerOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
 		api := startFakeAPI(t)
-		operator, log := loggedController(t, api, "127.0.0.1:1")
+		operator, log := loggedController(t, api)
 		mustSucceed(t, operator.pass(t.Context()))
 
 		api.setReceivers(asking(fake, equipment.PowerOn, ""))
@@ -193,7 +193,7 @@ func TestAnotherFieldsGenerationSendsNoPower(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		api, operator, _ := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
+		api, operator, _ := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby))
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerStandby })
 		handOnTheRemote(t, fake, denon.PowerOnCommand)
@@ -237,7 +237,7 @@ func TestANewAddressSendsNoPower(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		first := startFakeDenon(t)
-		api, operator, _ := reachedController(t, asking(first, equipment.PowerStandby, ""), "127.0.0.1:1")
+		api, operator, _ := reachedController(t, asking(first, equipment.PowerStandby, ""))
 		moved := switchedOn(t)
 
 		api.setReceivers(asking(moved, equipment.PowerStandby, equipment.PowerStandby))

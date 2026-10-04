@@ -131,24 +131,21 @@ func TestAToggleWakesAndSleepsTheRoom(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		h := newSessionHarness(t)
-		h.powerTopic = testPowerTopic
 		room := &roomRecord{}
 		h.room = room
 		h.powerOn(t)
-		h.beginIdle(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		held := h.beginIdle(t, "GAME")
 
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 		h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
 		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 
 		mustDeepEqual(t, room.waitFor(t, 3), []string{
 			"opened (awake false)",
 			"slept",
-			"woke: the power topic asks toggle, and the receiver reports power Standby",
+			"woke: status.session.powerAsk asks toggle, and the receiver reports power Standby",
 		})
 	})
 }

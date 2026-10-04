@@ -11,7 +11,6 @@ Prometheus at all; an owner who runs the prometheus-operator adds the
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |
 | equipment-operator | `equipment_receiver_connected{receiver}` | gauge | the Denon answers |
-| equipment-operator | `equipment_receiver_claimed{receiver}` | gauge | the hardware triple |
 | equipment-operator | `equipment_observation_valid{source}`, `equipment_observation_last_success_timestamp_seconds{source}` | gauge | the session went stale |
 | equipment-operator | `equipment_receiver_power{receiver}`, `equipment_receiver_volume{receiver}` | gauge | what the room is set to |
 | equipment-operator | `equipment_receiver_input_info{receiver, input}` | gauge, info | which input is selected |

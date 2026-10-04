@@ -8,8 +8,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 func TestTheHDMICommandBuildersWriteTheWireLines(t *testing.T) {
@@ -203,32 +201,14 @@ func TestApplySettingsAsksForTheHDMIFamiliesOnce(t *testing.T) {
 	})
 }
 
-// A keyed bus write to an HDMI id sends the set and then the read-back.
-func TestSetRoutesAnHDMIIdToTheWireAndReadsItBack(t *testing.T) {
+// An apply that sends no HDMI command sends no HDMI read-back.
+func TestAnApplyOutsideTheHDMIFamilySendsNoReadBack(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
 		drainQueries(t, harness)
 
-		mustSucceed(t, harness.client.Set("hdmi.passThroughSource", equipment.StringSettingValue("hdmi4")))
-
-		sent := harness.receiver.waitForCommands(t, "SSHOS ?")
-		mustMatch(t, strings.Join(sent, " | "), "SSHOSCONSTS HD4 | SSHOS ?")
-		got := waitForSettings(t, harness.client, func(s Settings) bool {
-			return s.HDMI.PassThroughSource != nil && *s.HDMI.PassThroughSource == "hdmi4"
-		})
-		mustMatch(t, *got.HDMI.PassThroughSource, "hdmi4")
-	})
-}
-
-// A set that sends no HDMI command sends no HDMI read-back.
-func TestSetOutsideTheHDMIFamilySendsNoReadBack(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		harness := startHarness(t)
-		drainQueries(t, harness)
-
-		mustSucceed(t, harness.client.Set("tone.bass", equipment.NumberSettingValue(3)))
+		mustSucceed(t, harness.client.ApplySettings(Settings{Tone: ToneSettings{Bass: intPtr(3)}}))
 		mustMatch(t, harness.receiver.waitForCommand(t), "PSBAS 53")
 
 		mustStaySilentCommands(t, harness.receiver.commands, 100*time.Millisecond)

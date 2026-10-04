@@ -1,7 +1,7 @@
 // equipment-operator drives the A/V receivers of a liken cluster and
 // reports what each one says. It reaches each receiver over the
-// network, applies the session a Player holds on it, and owns the
-// room's level while that session stands.
+// network, applies the session a Player holds on it, and applies the
+// asks the media operator writes into that session.
 package main
 
 import (
@@ -26,10 +26,6 @@ const (
 	// operator holds the Lease under.
 	podNameVariable = "POD_NAME"
 
-	// EQUIPMENT_BUS_ADDRESS is the broker a session's volume topic is read
-	// from, as host:port.
-	busAddressVariable = "EQUIPMENT_BUS_ADDRESS"
-
 	// EQUIPMENT_METRICS_ADDRESS is where /metrics listens, as host:port.
 	// plans/completed/65-prometheus-metrics.md at the top of the
 	// repository gives every process port 9200, since this operator runs
@@ -49,13 +45,12 @@ const (
 type settings struct {
 	namespace      string
 	pod            string
-	busAddress     string
 	metricsAddress string
 	// networkDiscoveryOff is true when the Deployment turned network
 	// discovery off. The zero value is on, the default.
 	networkDiscoveryOff bool
-	// dial reaches the broker and the Denon receivers. Nil, which
-	// readSettings leaves, dials over TCP.
+	// dial reaches the Denon receivers. Nil, which readSettings leaves,
+	// dials over TCP.
 	dial dialFunc
 }
 
@@ -69,7 +64,6 @@ func readSettings() (settings, error) {
 	config := settings{
 		namespace:      os.Getenv(podNamespaceVariable),
 		pod:            os.Getenv(podNameVariable),
-		busAddress:     os.Getenv(busAddressVariable),
 		metricsAddress: os.Getenv(metricsAddressVariable),
 	}
 	switch value := os.Getenv(networkDiscoveryVariable); value {

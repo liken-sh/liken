@@ -22,4 +22,3 @@ spec:
   session:
     player: house/theater
     input: MPLAY
-    volumeTopic: liken/media/house/theater/volume

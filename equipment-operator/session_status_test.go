@@ -80,7 +80,7 @@ func TestASessionThatMovesToTheStatusIsNoChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		fake := startFakeDenon(t)
-		operator, log := loggedController(t, api, "127.0.0.1:1")
+		operator, log := loggedController(t, api)
 		api.setReceivers(testReceiver("theater", fake.address()))
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)

@@ -13,11 +13,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
@@ -124,9 +122,8 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 			Spec: ReceiverSpec{
 				Denon: &DenonProtocol{Address: "receiver.example"},
 				Session: &ReceiverSession{
-					Player:      "house/theater",
-					Input:       "MPLAY",
-					VolumeTopic: "liken/media/house/theater/volume",
+					Player: "house/theater",
+					Input:  "MPLAY",
 				},
 			},
 			Status: ReceiverStoredStatus{ReceiverStatus: ReceiverStatus{Zones: map[string]ZoneStatus{"main": {Power: "On", Input: "MPLAY", Volume: "-30.5"}}}},
@@ -140,67 +137,6 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 	mustMatch(t, receiver.Spec.Session.Player, "house/theater")
 	mustMatch(t, receiver.Status.Zones["main"].Volume, "-30.5")
 	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
-}
-
-// The settings write is a server-side apply on the main resource that
-// owns exactly one leaf of spec.denon.settings, so a bus write to one
-// key never claims the keys around it.
-func TestApplyReceiverSettingsPatchesOneLeaf(t *testing.T) {
-	t.Parallel()
-	bass := 3
-	api := &cannedAPI{answers: map[string]any{
-		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{
-			Metadata: ObjectMeta{Name: "theater"},
-			Spec: ReceiverSpec{Denon: &DenonProtocol{Settings: denon.Settings{
-				Tone: denon.ToneSettings{Bass: &bass},
-			}}},
-		},
-	}}
-
-	_, err := ApplyReceiverSettings(testAPIClient(t, api.handler()), "theater", []string{"tone", "bass"}, equipment.NumberSettingValue(3))
-	mustSucceed(t, err)
-
-	if len(api.requests) != 1 {
-		t.Fatalf("requests = %+v", api.requests)
-	}
-	sent := api.requests[0]
-	mustMatch(t, sent.Method, http.MethodPatch)
-	mustMatch(t, sent.Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
-	mustMatch(t, sent.ContentType, applyContentType)
-	mustMatch(t, sent.Query.Get("fieldManager"), fieldManager)
-	mustMatch(t, sent.Query.Get("force"), "true")
-
-	body := map[string]any{}
-	mustSucceed(t, json.Unmarshal(sent.Body, &body))
-	mustMatch(t, body["apiVersion"], any(equipmentAPIVersion))
-	mustMatch(t, body["kind"], any("Receiver"))
-	spec := body["spec"].(map[string]any)
-	denonBlock := spec["denon"].(map[string]any)
-	settings := denonBlock["settings"].(map[string]any)
-	tone := settings["tone"].(map[string]any)
-	mustMatch(t, tone["bass"].(float64), float64(3))
-	// only the one leaf is in the body
-	mustMatch(t, len(tone), 1)
-	mustMatch(t, len(settings), 1)
-	mustMatch(t, len(denonBlock), 1)
-	mustMatch(t, len(spec), 1)
-}
-
-// settingsPath maps a bus id onto the one leaf of spec.denon.settings
-// it names.
-func TestSettingsPathMapsAnIdToItsLeaf(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		id   string
-		want string
-	}{
-		{"tone.bass", "tone.bass"},
-		{"system.eco", "system.eco"},
-		{"channel.FL", "channelVolumes.FL"},
-	}
-	for _, one := range cases {
-		mustMatch(t, strings.Join(settingsPath(one.id), "."), one.want)
-	}
 }
 
 // The status write is a server-side apply on the status subresource:

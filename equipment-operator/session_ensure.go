@@ -2,33 +2,18 @@ package main
 
 // The asks a controller press makes in player terms: the ensure, which
 // any press sends, and the show, which a home press sends. They arrive
-// on the receiver's commands topic, which reconcile.go routes to the
-// session, or in status.session.inputAsk (session_asks.go).
+// in status.session.inputAsk (session_asks.go).
 
 import "github.com/liken-sh/equipment-operator/equipment"
 
-// ensureInput asks the receiver for the session's input without
-// touching the power. A controller press reaches here, and a room that
-// already shows the player's input is left alone, so the press sends
-// the receiver nothing. A dark room is left dark too: the power key is
-// the one that wakes the equipment.
-func (s *session) ensureInput() {
-	s.ensure("the commands topic asks " + commandEnsureInput)
-}
-
-// showInput asks the room's TV to show the session's Display, and then
-// asks the receiver for the session's input the way the ensure does. A
-// home press reaches here. A TV that shows its own apps is on another
-// input, and the receiver's input alone does not bring the player back
-// to the screen. The TV decides whether the room is on for its part:
-// the node workload sends it Image View On and Active Source only when
-// it reports On, so the ask wakes no TV that is off, and the receiver
-// part turns on no receiver that is off.
-func (s *session) showInput() {
-	s.show("the commands topic asks " + commandShowInput)
-}
-
-// show is showInput, with trigger naming the ask in its lines.
+// show asks the room's TV to show the session's Display, and then asks
+// the receiver for the session's input the way the ensure does. A home
+// press reaches here. A TV that shows its own apps is on another input,
+// and the receiver's input alone does not bring the player back to the
+// screen. The TV decides whether the room is on for its part: the node
+// workload sends it Image View On and Active Source only when it
+// reports On, so the ask wakes no TV that is off, and the receiver part
+// turns on no receiver that is off. trigger names the ask in its lines.
 func (s *session) show(trigger string) {
 	if s.room != nil {
 		s.room.show(trigger)
@@ -36,8 +21,11 @@ func (s *session) show(trigger string) {
 	s.ensure(trigger)
 }
 
-// ensure runs the receiver's part of an ask, with trigger naming the
-// ask in its lines.
+// ensure asks the receiver for the session's input without touching
+// the power. A controller press reaches here, and a room that already
+// shows the player's input is left alone, so the press sends the
+// receiver nothing. A dark room is left dark too: the power key is the
+// one that wakes the equipment. trigger names the ask in its lines.
 func (s *session) ensure(trigger string) {
 	if s.spec.Input == "" {
 		s.log.printf("%s; sent nothing, because Player %s's session names no input", trigger, s.spec.Player)

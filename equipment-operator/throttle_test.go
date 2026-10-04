@@ -100,7 +100,7 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 				defer cancel()
 
-				err := serve(ctx, testAPIClient(t, http.HandlerFunc(api.handle)), settings{busAddress: "127.0.0.1:1", networkDiscoveryOff: true, dial: testNetwork.dial}, testMetrics(t))
+				err := serve(ctx, testAPIClient(t, http.HandlerFunc(api.handle)), settings{networkDiscoveryOff: true, dial: testNetwork.dial}, testMetrics(t))
 
 				mustSucceed(t, err)
 			})

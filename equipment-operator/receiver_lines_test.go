@@ -1,9 +1,8 @@
 package main
 
 // The Deployment's line for each command it sends a receiver: a spec
-// change it acts on, a message on the receiver's own topics, and a
-// session that starts, changes, or ends. A pass that sends nothing
-// adds no line.
+// change it acts on, and a session that starts, changes, or ends. A
+// pass that sends nothing adds no line.
 
 import (
 	"testing"
@@ -14,11 +13,10 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
-// loggedController is a controller with its log in a buffer, on a
-// broker at brokerAddress.
-func loggedController(t *testing.T, api *fakeAPI, brokerAddress string) (*controller, *logBuffer) {
+// loggedController is a controller with its log in a buffer.
+func loggedController(t *testing.T, api *fakeAPI) (*controller, *logBuffer) {
 	t.Helper()
-	operator := newController(api.client, brokerAddress, testMetrics(t))
+	operator := newController(api.client, testMetrics(t))
 	operator.dial = testNetwork.dial
 	operator.now = func() time.Time { return statusNow }
 	log := &logBuffer{}
@@ -29,11 +27,11 @@ func loggedController(t *testing.T, api *fakeAPI, brokerAddress string) (*contro
 // reachedController runs the first passes of a controller for one
 // receiver: the pass that connects, and the pass once the receiver has
 // answered its survey.
-func reachedController(t *testing.T, receiver Receiver, brokerAddress string) (*fakeAPI, *controller, *logBuffer) {
+func reachedController(t *testing.T, receiver Receiver) (*fakeAPI, *controller, *logBuffer) {
 	t.Helper()
 	api := startFakeAPI(t)
 	api.setReceivers(receiver)
-	operator, log := loggedController(t, api, brokerAddress)
+	operator, log := loggedController(t, api)
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
 	waitForSurvey(t, operator)
@@ -105,7 +103,7 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 				fake := startFakeDenon(t)
 				receiver := testReceiver("theater", fake.address())
 				one.declare(&receiver)
-				_, operator, log := reachedController(t, receiver, "127.0.0.1:1")
+				_, operator, log := reachedController(t, receiver)
 				one.prepare(t, fake, operator)
 
 				mustSucceed(t, operator.pass(t.Context()))
@@ -131,7 +129,7 @@ func TestARestartAgainstASettledReceiverWritesNoLine(t *testing.T) {
 		receiver := testReceiver("theater", fake.address())
 		drc := "off"
 		receiver.Spec.Denon.Settings = denon.Settings{Audio: denon.AudioSettings{DRC: &drc}}
-		_, operator, log := reachedController(t, receiver, "127.0.0.1:1")
+		_, operator, log := reachedController(t, receiver)
 		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool { return s.Audio.DRC != nil })
 
 		mustSucceed(t, operator.pass(t.Context()))
@@ -158,90 +156,14 @@ func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
 	})
 }
 
-// A message on the receiver's settings or commands topic is a person's
-// command, and each one is a line.
-func TestAMessageOnTheReceiversTopicsIsOneLine(t *testing.T) {
-	cases := []struct {
-		name    string
-		topic   string
-		payload string
-		want    string
-	}{
-		{
-			"setting",
-			"liken/equipment/theater/settings",
-			`{"setting":"tone.bass","value":3}`,
-			"Receiver theater: the settings topic asks tone.bass 3; sent it; the receiver reported no value that differs after <time>",
-		},
-		{
-			"refused setting",
-			"liken/equipment/theater/settings",
-			`{"setting":"tone.pitch","value":3}`,
-			`Receiver theater: the settings topic asks tone.pitch 3; sent it; the command failed: unknown setting "tone.pitch"`,
-		},
-		{
-			"refused command",
-			"liken/equipment/theater/commands",
-			`{"command":"quick.3","args":{"slot":1}}`,
-			`Receiver theater: the commands topic asks quick.3 {"slot":1}; sent it; the command failed: no actions yet: quick.3`,
-		},
-		{
-			"ensure with no session",
-			"liken/equipment/theater/commands",
-			`{"command":"input.ensure"}`,
-			"Receiver theater: the commands topic asks input.ensure; sent nothing, because no session stands",
-		},
-	}
-	t.Parallel()
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			t.Parallel()
-			synctest.Test(t, func(t *testing.T) {
-				fake := startFakeDenon(t)
-				brokers := startFakeBrokerServer(t)
-				receiver := testReceiver("theater", fake.address())
-				receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
-				receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
-				_, _, log := reachedController(t, receiver, brokers.address())
-				broker := brokers.waitForSession(t)
-				waitForString(t, broker.subs)
-				waitForString(t, broker.subs)
-
-				broker.push(one.topic, []byte(one.payload))
-
-				mustDeepEqual(t, waitForLines(t, log, "topic asks", 1), []string{one.want})
-			})
-		})
-	}
-}
-
-// A WiiM answers each command over HTTP, and that answer is the report
-// the line states.
-func TestAWiimSettingsMessageStatesTheDevicesAnswer(t *testing.T) {
-	t.Parallel()
-	amp := startFakeWiim(t)
-	_, unit := waitingWiim(t, amp)
-	log := &logBuffer{}
-	unit.log = newReceiverLog(log, "studio")
-	unit.client = startFakeAPI(t).client
-
-	unit.handleSettings([]byte(`{"setting":"device.led","value":false}`))
-
-	mustDeepEqual(t, timeless(log.lines()), []string{
-		"Receiver studio: the settings topic asks device.led false; sent it; the receiver answered OK after <time>",
-	})
-}
-
 // A session's start, each change of its flags, and its end are one
 // line each, and a pass that changes nothing adds none.
 func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
 		idle := idleReceiver(fake.address(), ReceiverVolume{Max: 69.5})
-		api, operator, log := reachedController(t, idle, brokers.address())
-		brokers.waitForSession(t).waitForTopic(t, ownerTopic(testVolumeTopic))
+		api, operator, log := reachedController(t, idle)
 
 		api.setReceivers(playingReceiver(fake.address(), ReceiverVolume{Max: 69.5}))
 		mustSucceed(t, operator.pass(t.Context()))
@@ -250,13 +172,9 @@ func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 		mustSucceed(t, operator.pass(t.Context()))
 
 		mustDeepEqual(t, linesWith(log, "session for Player"), []string{
-			"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active false, awake false; the operator found it when it started, so it sends nothing for these flags",
+			"Receiver theater: a session for Player house/theater started: input GAME, active false, awake false; the operator found it when it started, so it sends nothing for these flags",
 			"Receiver theater: the session for Player house/theater: active went from false to true",
 			"Receiver theater: the session for Player house/theater ended",
-		})
-		mustDeepEqual(t, linesWith(log, "owner mark"), []string{
-			`Receiver theater: published the owner mark {"owner":"receiver/theater"} on liken/players/theater/volume/owner`,
-			"Receiver theater: cleared the owner mark on liken/players/theater/volume/owner",
 		})
 	})
 }

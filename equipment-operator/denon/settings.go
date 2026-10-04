@@ -5,17 +5,11 @@ package denon
 // key is not declared, and a present zero means the key is set to zero.
 // That is what lets ApplySettings apply only the declared fields.
 //
-// The id table maps a stable bus id to the field it names and the wire
-// command that sets it. A new family is a struct, a file of specs, and
-// a line in the assembly below.
+// The id table maps a stable dotted id to the field it names and the
+// wire command that sets it. A new family is a struct, a file of specs,
+// and a line in the assembly below.
 
-import (
-	"fmt"
-	"math"
-	"strings"
-
-	"github.com/liken-sh/equipment-operator/equipment"
-)
+import "fmt"
 
 // Settings holds the receiver's settings across the families the driver
 // parses.
@@ -28,14 +22,10 @@ type Settings struct {
 	ChannelVolumes map[string]float64 `json:"channelVolumes,omitempty"`
 }
 
-// settingSpec is one row of the id table: a stable bus id, how to fold
-// one bus value into the settings and answer the wire command, and how
-// to answer the wire command for a declared field.
+// settingSpec is one row of the id table: a stable dotted id, which an
+// error names, and how to answer the wire command for a declared field.
 type settingSpec struct {
 	ID string
-	// parse folds one bus value into the settings and answers the wire
-	// command.
-	parse func(s *Settings, v equipment.SettingValue) (string, error)
 	// command answers the wire command a declared field carries, the
 	// error a declared value that no command can carry returns, and
 	// whether the settings declare the field at all.
@@ -53,16 +43,6 @@ var settingsTable = append(append(append(append(append(
 	audysseySettings...),
 	audioSettings...),
 	hdmiSettings...)
-
-// settingsById is the same table as a map for a bus write that names
-// one id.
-var settingsById = func() map[string]settingSpec {
-	table := make(map[string]settingSpec, len(settingsTable))
-	for _, spec := range settingsTable {
-		table[spec.ID] = spec
-	}
-	return table
-}()
 
 // sameString is true when the two values hold the same word, or either
 // is nil. A nil on either side is a key the receiver has not reported,
@@ -299,68 +279,10 @@ func (d *Client) ApplySettings(want Settings) error {
 	return nil
 }
 
-// Set builds the wire command for one keyed write from the bus. It
-// folds the value into a scratch Settings and not into the live state:
-// the status reports what the receiver said, so a command that never
-// reached the receiver must not leave a value the status would claim.
-// The receiver's own echo is what moves the live setting. An unknown id
-// is an error that names the id.
-func (d *Client) Set(id string, value equipment.SettingValue) error {
-	var scratch Settings
-	command, err := applySetting(&scratch, id, value)
-	if err != nil {
-		return err
-	}
-	if err := d.send(command); err != nil {
-		return err
-	}
-	return d.sendReadBacks([]string{command})
-}
-
-// applySetting folds one bus value into the settings and answers the
-// wire command, routing a channel id to the channel family and any
-// other id to the fixed table.
-func applySetting(s *Settings, id string, value equipment.SettingValue) (string, error) {
-	if strings.HasPrefix(id, channelPrefix) {
-		return setChannel(s, strings.TrimPrefix(id, channelPrefix), value)
-	}
-	spec, held := settingsById[id]
-	if !held {
-		return "", fmt.Errorf("unknown setting %q", id)
-	}
-	return spec.parse(s, value)
-}
-
-// Do runs one one-shot action from the bus. Phase 1 defines no actions,
-// so every id is an error that names it.
-func (d *Client) Do(id string, args map[string]equipment.SettingValue) error {
-	return fmt.Errorf("no actions yet: %s", id)
-}
-
-// settingTypeError is the error a setting that received the wrong kind
-// of value carries.
-func settingTypeError(id, kind string) error {
-	return fmt.Errorf("setting %s needs %s", id, kind)
-}
-
-// wordSetting builds a table row for a setting that carries a word: it
-// reads the string, builds the command, and stores the value in the
-// settings.
+// wordSetting builds a table row for a setting that carries a word.
 func wordSetting(id string, build func(string) (string, error), set func(*Settings, string), get func(*Settings) *string) settingSpec {
 	return settingSpec{
 		ID: id,
-		parse: func(s *Settings, v equipment.SettingValue) (string, error) {
-			value, ok := v.String()
-			if !ok {
-				return "", settingTypeError(id, "a string")
-			}
-			command, err := build(value)
-			if err != nil {
-				return "", err
-			}
-			set(s, value)
-			return command, nil
-		},
 		command: func(s *Settings) (string, error, bool) {
 			value := get(s)
 			if value == nil {
@@ -382,22 +304,6 @@ func wordSetting(id string, build func(string) (string, error), set func(*Settin
 func numberSetting(id string, build func(int) (string, error), set func(*Settings, int), get func(*Settings) *int) settingSpec {
 	return settingSpec{
 		ID: id,
-		parse: func(s *Settings, v equipment.SettingValue) (string, error) {
-			value, ok := v.Number()
-			if !ok {
-				return "", settingTypeError(id, "a number")
-			}
-			if value != math.Trunc(value) {
-				return "", fmt.Errorf("setting %s needs a whole number", id)
-			}
-			whole := int(value)
-			command, err := build(whole)
-			if err != nil {
-				return "", err
-			}
-			set(s, whole)
-			return command, nil
-		},
 		command: func(s *Settings) (string, error, bool) {
 			value := get(s)
 			if value == nil {
@@ -418,18 +324,6 @@ func numberSetting(id string, build func(int) (string, error), set func(*Setting
 func boolSetting(id string, build func(bool) (string, error), set func(*Settings, bool), get func(*Settings) *bool) settingSpec {
 	return settingSpec{
 		ID: id,
-		parse: func(s *Settings, v equipment.SettingValue) (string, error) {
-			value, ok := v.Bool()
-			if !ok {
-				return "", settingTypeError(id, "a boolean")
-			}
-			command, err := build(value)
-			if err != nil {
-				return "", err
-			}
-			set(s, value)
-			return command, nil
-		},
 		command: func(s *Settings) (string, error, bool) {
 			value := get(s)
 			if value == nil {
@@ -444,13 +338,4 @@ func boolSetting(id string, build func(bool) (string, error), set func(*Settings
 			}
 		},
 	}
-}
-
-// SettingsFor answers the settings that hold one bus value and nothing
-// else, so a caller asks ConfirmedBy whether the receiver reports that
-// one value. An unknown id or a value of the wrong kind is Set's error.
-func SettingsFor(id string, value equipment.SettingValue) (Settings, error) {
-	var one Settings
-	_, err := applySetting(&one, id, value)
-	return one, err
 }

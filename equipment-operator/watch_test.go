@@ -357,7 +357,7 @@ func TestAReceiverFromTheWatchIsTheReceiverAListGives(t *testing.T) {
 			"wiim": {"uuid": "uuid:0000-1111"},
 			"volume": {"max": 75, "step": 1},
 			"inputs": [{"name": "GAME", "machine": "node-1", "monitor": "hdmi-a-1", "soundMode": "MULTI CH IN"}],
-			"session": {"player": "house/theater", "input": "GAME", "volumeTopic": "liken/media/house/theater/volume", "active": true}
+			"session": {"player": "house/theater", "input": "GAME", "active": true}
 		},
 		"status": {
 			"address": "192.0.2.10", "driver": "denon",

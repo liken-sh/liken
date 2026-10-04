@@ -42,8 +42,7 @@ func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
 		operator.now = func() time.Time { return statusNow }
 		log := &logBuffer{}
@@ -59,7 +58,7 @@ func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 
 		fake.refuseEveryCommand(t, quietPeriod)
 		mustDeepEqual(t, linesWith(log, "session for Player"), []string{
-			"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active true, awake true; the operator found it when it started, so it sends nothing for these flags",
+			"Receiver theater: a session for Player house/theater started: input GAME, active true, awake true; the operator found it when it started, so it sends nothing for these flags",
 		})
 	})
 }
@@ -70,7 +69,7 @@ func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 func TestAFlipToASettledReceiverSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+		h := newSessionHarness(t)
 		h.powerOn(t)
 		h.soundModes = map[string]string{"GAME": "MULTI CH IN"}
 		handOnTheRemote(t, h.equipment, "SIGAME")
@@ -91,7 +90,7 @@ func TestAFlipToASettledReceiverSendsNothing(t *testing.T) {
 func TestAFlipSendsOnlyTheSoundModeThatDiffers(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+		h := newSessionHarness(t)
 		h.powerOn(t)
 		h.soundModes = map[string]string{"GAME": "STEREO"}
 		handOnTheRemote(t, h.equipment, "SIGAME")
@@ -127,7 +126,7 @@ func TestAFlipSendsNoSoundModeTheReceiverRunsInOtherWords(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+				h := newSessionHarness(t)
 				h.powerOn(t)
 				h.soundModes = map[string]string{"GAME": one.declared}
 				handOnTheRemote(t, h.equipment, "SIGAME")

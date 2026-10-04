@@ -1,13 +1,12 @@
 package main
 
 // The asks the node workload hears on the bus for the Player's screen.
-// A Player's screen wakes and sleeps in media-operator, and the node
-// workload holds no broker connection, so it writes each ask in the
-// Television's status.screenAsk. The Deployment relays a new ask to
-// the Player on the session's power topic (television_screen.go), and
-// the screen client wakes or sleeps as a press would make it. The
-// session then follows the screen, and the node workload acts on the
-// session as it does for any other wake or sleep.
+// A Player's screen wakes and sleeps in media-operator, so the node
+// workload writes each ask in the Television's status.screenAsk.
+// media-operator watches the Television objects and relays each new ask
+// to the Player's screen client, which wakes or sleeps as a press would
+// make it. The session then follows the screen, and the node workload
+// acts on the session as it does for any other wake or sleep.
 //
 // Two messages ask. The TV sends Set Stream Path for the Display when
 // a person picks the Player's input in the TV's source menu, and the

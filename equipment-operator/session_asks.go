@@ -64,8 +64,8 @@ func (u *receiverUnit) carryAsks(replaced *receiverUnit) {
 	u.seen = replaced.seen
 }
 
-// inputAsk runs an ensure or a show with the same rules as the commands
-// topic. An action the session does not know does nothing.
+// inputAsk runs an ensure or a show (session_ensure.go). An action the
+// session does not know does nothing.
 func (s *session) inputAsk(ask ReceiverInputAsk) {
 	trigger := fmt.Sprintf("status.session.inputAsk at %s asks %s", ask.At, ask.Action)
 	switch ask.Action {
@@ -75,6 +75,13 @@ func (s *session) inputAsk(ask ReceiverInputAsk) {
 		s.show(trigger)
 	}
 }
+
+// pendingVolumeWait is how long a volume ask waits for the receiver to
+// report the volume it was sent before the next ask goes out. A Denon
+// reports within a fraction of a second. A receiver that never reports
+// the volume, such as one whose own limit is below it, releases the
+// next ask after this wait.
+const pendingVolumeWait = time.Second
 
 // volumeAsker holds the newest volume ask the receiver has not been
 // sent. A held key writes an ask for each repeat, and a receiver

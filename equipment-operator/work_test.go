@@ -40,12 +40,11 @@ func TestAShutdownEndsTheWaitOfAWriteThatMetA429(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
 		api.setReceivers(testReceiver("theater", fake.address()))
 		api.mutex.Lock()
 		api.throttlingStatus = true
 		api.mutex.Unlock()
-		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
 		operator.networkDiscoveryOff = true
 		operator.now = func() time.Time { return statusNow }
@@ -77,7 +76,7 @@ func TestAShutdownEndsTheWaitOfAWriteThatMetA429(t *testing.T) {
 	})
 }
 
-// At a shutdown, the Receiver loop returns only after a settings write
+// At a shutdown, the Receiver loop returns only after a power write
 // that is in flight has finished, because the Deployment releases its
 // Lease after the loop returns.
 func TestTheLoopWaitsForAWriteInFlightBeforeItReturns(t *testing.T) {
@@ -85,11 +84,9 @@ func TestTheLoopWaitsForAWriteInFlightBeforeItReturns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		receiver := testReceiver("theater", fake.address())
-		receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+		receiver := sessionReceiver(fake.address())
 		api.setReceivers(receiver)
-		operator := newController(api.client, brokers.address(), testMetrics(t))
+		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
 		operator.networkDiscoveryOff = true
 		operator.now = func() time.Time { return statusNow }
@@ -101,25 +98,24 @@ func TestTheLoopWaitsForAWriteInFlightBeforeItReturns(t *testing.T) {
 			operator.run(ctx)
 		}()
 		api.waitForStatus(t, connected)
-		broker := brokers.waitForSession(t)
-		waitForString(t, broker.subs)
-		api.gateSettings()
-		defer api.releaseSettings()
-		broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
+		api.gatePowers()
+		defer api.releasePowers()
+		api.setReceivers(askingPower(receiver, "toggle", askAt(1)))
+		poke(operator.wake)
 		select {
-		case <-api.settings:
+		case <-api.powers:
 		case <-time.After(testTimeout):
-			t.Fatal("the settings write never reached the API server")
+			t.Fatal("the power write never reached the API server")
 		}
 
 		cancel()
 
 		select {
 		case <-stopped:
-			t.Fatal("the loop returned while a settings write was in flight")
+			t.Fatal("the loop returned while a power write was in flight")
 		case <-time.After(300 * time.Millisecond):
 		}
-		api.releaseSettings()
+		api.releasePowers()
 		select {
 		case <-stopped:
 		case <-time.After(testTimeout):

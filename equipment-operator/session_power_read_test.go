@@ -73,13 +73,13 @@ func TestAPowerPressReadsTheTVsPowerFirst(t *testing.T) {
 		asked     func(TelevisionSession) bool
 	}{
 		{"a TV turned off by its own remote", cec.PowerStandby, "On", answers,
-			"Receiver theater: the power topic asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
+			"Receiver theater: status.session.powerAsk asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
 			func(session TelevisionSession) bool { return session.WokeAt != "" && session.Awake }},
 		{"a TV turned on by its own remote", cec.PowerOn, "Standby", answers,
-			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
+			"Receiver theater: status.session.powerAsk asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
 			func(session TelevisionSession) bool { return session.StandbyAt != "" }},
 		{"a TV that is on with no known power", cec.PowerOn, "", noPower,
-			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
+			"Receiver theater: status.session.powerAsk asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
 			func(session TelevisionSession) bool { return session.StandbyAt != "" }},
 	}
 	t.Parallel()
@@ -92,7 +92,6 @@ func TestAPowerPressReadsTheTVsPowerFirst(t *testing.T) {
 				api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 				answeringAs(api, c.stale, c.reachable)
 				h := newSessionHarness(t)
-				h.powerTopic = testPowerTopic
 				h.room = theaterRoom(t, api, h)
 
 				pressPower(t, h)
@@ -113,7 +112,6 @@ func TestAPowerPressWithNoReadDecidesFromTheStatus(t *testing.T) {
 		api.showing(lounge(""), "acm-0001-receiver")
 		answering(api, "On")
 		h := newSessionHarness(t)
-		h.powerTopic = testPowerTopic
 		h.room = theaterRoom(t, api, h)
 
 		pressPower(t, h)
@@ -122,7 +120,7 @@ func TestAPowerPressWithNoReadDecidesFromTheStatus(t *testing.T) {
 		session := loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
 		mustMatch(t, session.PowerReadAt, "")
 		mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0],
-			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby")
+			"Receiver theater: status.session.powerAsk asks toggle, and Television lounge reports power On; asked Television lounge to go to standby")
 	})
 }
 
@@ -139,20 +137,17 @@ func TestAPowerPressOpensNoWatch(t *testing.T) {
 		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 		answeringAs(api, "", noPower)
 		h := newSessionHarness(t)
-		h.powerTopic = testPowerTopic
 		h.room = theaterRoom(t, api, h)
 		api.waitUntil(t, "the writer's Television watch to open", func() bool { return api.watchesOf(televisionsPath) == 2 })
-		h.beginIdle(t, "GAME")
-		broker := h.brokers.waitForSession(t)
-		broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+		held := h.beginIdle(t, "GAME")
 
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 		api.waitUntil(t, "the TV to take Standby", func() bool { return sentOf(wire, cec.OpStandby) == 1 })
-		broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+		powerAsk(held, "toggle")
 
 		mustDeepEqual(t, waitForLines(t, h.log, "asked Television lounge to", 2), []string{
-			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
-			"Receiver theater: the power topic asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
+			"Receiver theater: status.session.powerAsk asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
+			"Receiver theater: status.session.powerAsk asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
 		})
 		mustMatch(t, api.watchesOf(televisionsPath), 2)
 	})

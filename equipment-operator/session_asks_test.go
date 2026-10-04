@@ -2,9 +2,7 @@ package main
 
 // The asks in status.session against the fake Denon: each new at sends
 // once, an ask the first pass finds sends nothing, and volume asks that
-// arrive faster than the receiver reports leave only the newest. The
-// sessions here name no topic, so they set the level only from the
-// asks and open no broker connection.
+// arrive faster than the receiver reports leave only the newest.
 
 import (
 	"fmt"
@@ -17,9 +15,8 @@ import (
 	"github.com/liken-sh/equipment-operator/denon"
 )
 
-// topiclessReceiver is a Denon with an idle session in status.session
-// that names no volume topic and no power topic.
-func topiclessReceiver(address string) Receiver {
+// sessionReceiver is a Denon with an idle session in status.session.
+func sessionReceiver(address string) Receiver {
 	held := testReceiver("theater", address)
 	held.Spec.Volume = &ReceiverVolume{Max: 69.5, Step: 0.5}
 	held.Status.Session = &ReceiverSession{Player: "house/theater", Input: "GAME"}
@@ -66,8 +63,8 @@ func TestANewVolumeAskSendsOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		receiver := topiclessReceiver(fake.address())
-		api, operator, _ := reachedController(t, receiver, "127.0.0.1:1")
+		receiver := sessionReceiver(fake.address())
+		api, operator, _ := reachedController(t, receiver)
 
 		asked := askingVolume(receiver, 44.5, askAt(1))
 		passWith(t, api, operator, asked)
@@ -111,8 +108,8 @@ func TestAnAskTheFirstPassFindsSendsNothing(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				fake := turnedToDVD(t)
-				asked := one.ask(topiclessReceiver(fake.address()))
-				api, operator, _ := reachedController(t, asked, "127.0.0.1:1")
+				asked := one.ask(sessionReceiver(fake.address()))
+				api, operator, _ := reachedController(t, asked)
 
 				passWith(t, api, operator, asked)
 
@@ -132,8 +129,8 @@ func TestAnAskReadWhileAdoptingSendsNothing(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				fake := turnedToDVD(t)
-				receiver := topiclessReceiver(fake.address())
-				api, operator, _ := reachedController(t, receiver, "127.0.0.1:1")
+				receiver := sessionReceiver(fake.address())
+				api, operator, _ := reachedController(t, receiver)
 				asked := one.ask(receiver)
 
 				operator.units["theater"].takeAsks(asked.Status.Session, true)
@@ -153,6 +150,14 @@ func volumeCommands(commands []string) []string {
 	})
 }
 
+// holdEchoes makes the receiver apply each volume it is sent and report
+// none of them.
+func (f *fakeDenon) holdEchoes() {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.holdingEchoes = true
+}
+
 // The receiver reports none of the volumes it takes, so each ask after
 // the first arrives before it answers. The asks that arrive during the
 // wait leave only the newest, and the receiver goes straight to it.
@@ -160,8 +165,8 @@ func TestVolumeAsksFasterThanTheReceiverSendOnlyTheNewest(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		receiver := topiclessReceiver(fake.address())
-		api, operator, _ := reachedController(t, receiver, "127.0.0.1:1")
+		receiver := sessionReceiver(fake.address())
+		api, operator, _ := reachedController(t, receiver)
 		fake.holdEchoes()
 		passWith(t, api, operator, askingVolume(receiver, 45, askAt(1)))
 		fake.waitForCommands(t, "MV45")
@@ -174,14 +179,14 @@ func TestVolumeAsksFasterThanTheReceiverSendOnlyTheNewest(t *testing.T) {
 	})
 }
 
-// A power ask follows the rules of the power topic: a toggle on a room
+// A power ask follows the rules of power: a toggle on a room
 // in standby turns the receiver on and selects the session's input.
 func TestAPowerAskTogglesTheRoom(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		receiver := topiclessReceiver(fake.address())
-		api, operator, _ := reachedController(t, receiver, "127.0.0.1:1")
+		receiver := sessionReceiver(fake.address())
+		api, operator, _ := reachedController(t, receiver)
 
 		passWith(t, api, operator, askingPower(receiver, "toggle", askAt(1)))
 
@@ -199,8 +204,8 @@ func TestAnInputAskEnsuresTheInput(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				fake := turnedToDVD(t)
-				receiver := topiclessReceiver(fake.address())
-				api, operator, _ := reachedController(t, receiver, "127.0.0.1:1")
+				receiver := sessionReceiver(fake.address())
+				api, operator, _ := reachedController(t, receiver)
 
 				passWith(t, api, operator, askingInput(receiver, action, askAt(1)))
 
@@ -229,8 +234,8 @@ func TestAVolumeAskSendsOnlyWhatDiffers(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				fake := startFakeDenon(t)
-				receiver := topiclessReceiver(fake.address())
-				api, operator, log := reachedController(t, receiver, "127.0.0.1:1")
+				receiver := sessionReceiver(fake.address())
+				api, operator, log := reachedController(t, receiver)
 				asked := askingVolume(receiver, one.ask.Level, askAt(1))
 				asked.Status.Session.VolumeAsk.Mute = one.ask.Mute
 
@@ -267,8 +272,8 @@ func TestASessionThatReplacesAnotherSendsNoAskAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		receiver := topiclessReceiver(fake.address())
-		api, operator, _ := reachedController(t, receiver, "127.0.0.1:1")
+		receiver := sessionReceiver(fake.address())
+		api, operator, _ := reachedController(t, receiver)
 		asked := askingVolume(receiver, 44.5, askAt(1))
 		passWith(t, api, operator, asked)
 		fake.waitForCommands(t, "MV445")
@@ -277,23 +282,6 @@ func TestASessionThatReplacesAnotherSendsNoAskAgain(t *testing.T) {
 		passWith(t, api, operator, asked)
 
 		fake.refuseEveryCommand(t, quietPeriod)
-	})
-}
-
-// A session with no volume topic and no power topic has nothing on the
-// bus, so it opens no broker connection: no owner mark and no will.
-func TestASessionWithNoTopicsOpensNoBrokerConnection(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		fake := startFakeDenon(t)
-		brokers := startFakeBrokerServer(t)
-		_, operator, log := reachedController(t, topiclessReceiver(fake.address()), brokers.address())
-
-		time.Sleep(quietPeriod)
-		operator.stopAll()
-
-		mustMatch(t, len(brokers.sessions), 0)
-		mustMatch(t, len(linesWith(log, "owner mark")), 0)
 	})
 }
 
@@ -324,7 +312,7 @@ func TestInputSelectedFollowsTheReportedInput(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				fake := startFakeDenon(t)
-				api, _, _ := reachedController(t, topiclessReceiver(fake.address()), "127.0.0.1:1")
+				api, _, _ := reachedController(t, sessionReceiver(fake.address()))
 
 				handOnTheRemote(t, fake, one.line)
 
@@ -345,7 +333,7 @@ func TestInputSelectedIsUnknownBeforeTheReceiverAnswers(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
-		receiver := topiclessReceiver("127.0.0.1:1")
+		receiver := sessionReceiver("127.0.0.1:1")
 		api.setReceivers(receiver)
 		operator := startController(t, api)
 
