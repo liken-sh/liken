@@ -1,6 +1,7 @@
 # 77, The media bus stops at `media-operator`
 
-Proposed on 2026-10-04. A remote's volume key becomes an ask that
+Proposed, built, and drilled on `liken-1` on 2026-10-04, and released
+in `2026.10.04-003`. A remote's volume key becomes an ask that
 `media-operator` reads from the bus and writes into the `Receiver` or
 the `Sink` that sets the room's level. The device's operator applies
 the ask and reports the device's level in the object's status, and
@@ -650,3 +651,26 @@ Proof: the suites pass, nothing names the owner topic, the seed, or
   After this plan, a program on the bus can still ask for a step, a
   mute, or a power change through `media-operator`, but it can no
   longer drive a receiver's settings or send it a level directly.
+
+## After the plan
+
+The drills on `liken-1` used the `lab-portable` speakers and a fake
+Denon that answers the driver's protocol with a 60 ms echo. The build
+and the drills found three problems that the steps above did not name:
+
+* A suspended PipeWire node keeps printing the level it last ran at,
+  so an ask on an idle sink snapped back to 100 about 1.5 s after a
+  press. `audio-operator` now reports the level it last wrote to a
+  suspended node (`ce68d684`).
+* The idle pod and the library browser got the power topic only while
+  a `Receiver` was wired, so wiring or removing one replaced the pod
+  and blanked the screen for about 18 s. The topic is now always set,
+  and the Player's bus status carries `power: room` or
+  `power: screen` (`3e18d368`).
+* A WiiM `Receiver` can declare no `spec.volume.max`, so a review of
+  step 3 made `media-operator` use the driver's own top of 100 for it,
+  as the receiver session did before.
+
+`2026.10.04-004` added `spec.volume.indicator` to the `Receiver`. With
+`Receiver`, the receiver draws its own volume overlay on the TV, and
+the screens track the level without drawing their bar (`ab06ea45`).
