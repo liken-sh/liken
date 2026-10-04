@@ -419,22 +419,41 @@ impl UpNext {
         }
     }
 
+    /// Whether the risen card is on the bare video and a select may still
+    /// take it: from the rise until its fade out ends, and not once a select
+    /// has asked for the next work.
+    pub fn risen_outside(&self, osd_visible: bool) -> bool {
+        self.offer.is_some() && !osd_visible && self.risen && !self.waiting && self.fade().shown()
+    }
+
     /// Draw what the offer draws over the bare video, on a clock of its own:
     /// the risen card for its few seconds, and the dimmed card for the whole
     /// wait. Once the card fades, nothing remains of it, because a mark at the
     /// screen edge would draw over the film for the rest of it. Before the
-    /// rise, a hidden OSD draws nothing for the offer.
-    pub fn draw_outside(&self, brush: &mut Brush<'_>, osd_visible: bool, art: &dyn Art) {
+    /// rise, a hidden OSD draws nothing for the offer. `focused` draws the
+    /// risen card in the focus panel, for the times a select takes it.
+    pub fn draw_outside(
+        &self,
+        brush: &mut Brush<'_>,
+        osd_visible: bool,
+        focused: bool,
+        art: &dyn Art,
+    ) {
         if !self.draws_outside(osd_visible) {
             return;
         }
-        let (fade, detail, color) = if self.waiting {
-            (WAIT_FADE, Some(WAIT_WORD), theme::color::fill())
+        let (fade, detail, color, focused) = if self.waiting {
+            (WAIT_FADE, Some(WAIT_WORD), theme::color::fill(), false)
         } else {
-            (self.fade().value(), self.detail(), theme::color::muted())
+            (
+                self.fade().value(),
+                self.detail(),
+                theme::color::muted(),
+                focused,
+            )
         };
         brush.at_fade(fade, |brush| {
-            self.card(brush, false, detail, color, art);
+            self.card(brush, focused, detail, color, art);
         });
     }
 

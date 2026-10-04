@@ -717,8 +717,12 @@ impl Display {
         // The card shows itself when the playhead crosses the rise, and it
         // stays for the whole wait, both with the OSD down. So it draws
         // outside the OSD block on a fade of its own.
-        self.upnext
-            .draw_outside(brush, self.focus.visible(), &self.bridge(&canvas));
+        self.upnext.draw_outside(
+            brush,
+            self.focus.visible(),
+            self.focus.card_takes_select(&self.upnext, &self.skip),
+            &self.bridge(&canvas),
+        );
         // The skip control stays over the bare video for the whole span, on a
         // fade of its own, for the same reason.
         self.skip.draw_outside(brush, self.focus.visible());
@@ -1689,6 +1693,44 @@ mod tests {
             sent(&mut commands),
             vec!["{\"command\":[\"script-message\",\"liken-exit\"],\"request_id\":0}"]
         );
+    }
+
+    /// The risen card alone over the bare video takes a select, so one press
+    /// asks for the next work with the display down.
+    #[tokio::test]
+    async fn a_select_at_the_bare_video_takes_the_risen_card() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("time-pos", json!(5940.0)));
+        settle(&mut display);
+
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"script-message\",\"liken-next\"],\"request_id\":0}"]
+        );
+        assert!(display.upnext.waiting());
+        assert!(!display.focus.visible());
+    }
+
+    /// Once the card's hide window runs out, a select at the bare video
+    /// pauses again.
+    #[tokio::test]
+    async fn a_select_after_the_card_leaves_pauses() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("time-pos", json!(5940.0)));
+        settle(&mut display);
+        let armed = display.card.armed.expect("the rise arms a hide window");
+        let _ = display.update(Message::HideCard(armed));
+        settle(&mut display);
+
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"no-osd\",\"cycle\",\"pause\"],\"request_id\":1000}"]
+        );
+        assert!(!display.upnext.waiting());
     }
 
     /// A new item drops the offer, and the first report of the position the

@@ -81,6 +81,12 @@ impl Fade {
         self.value != self.target
     }
 
+    /// Whether any of the element is on the screen: the factor is above
+    /// clear, or it is on its way up from clear, which the next tick shows.
+    pub fn shown(self) -> bool {
+        self.value > 0.0 || self.target > 0.0
+    }
+
     /// Set the target. One factor serves both directions, so a dismiss
     /// during a fade in reverses it from where it stands rather than
     /// dropping the display and raising it again.

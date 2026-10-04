@@ -131,6 +131,16 @@ impl Focus {
         self.summoned
     }
 
+    /// Whether the risen card is the one thing on the bare video a select
+    /// can act on. Then it draws focused, and a select takes it, so the
+    /// viewer reads what select does before pressing it. With the skip
+    /// control beside it, the card draws unfocused and select keeps the
+    /// meaning the control gives it alone, because a skip that lands by
+    /// surprise is undone by a seek back, and a taken offer ends the run.
+    pub fn card_takes_select(self, upnext: &UpNext, skip: &Skip) -> bool {
+        upnext.risen_outside(self.summoned) && !skip.available()
+    }
+
     pub fn focused_stop(self) -> Option<Stop> {
         self.focused
     }
@@ -327,9 +337,10 @@ impl Focus {
 
     /// select carries the main action and play/pause on one button. It acts on
     /// an open chooser, the focused strip control, a fine scan in flight, or
-    /// the skip control the bare video shows focused, and otherwise toggles
-    /// play/pause. So the button confirms a choice when the display has one to
-    /// make, and plays or pauses the film when it does not.
+    /// the skip control or the up-next card the bare video shows focused, and
+    /// otherwise toggles play/pause. So the button confirms a choice when the
+    /// display has one to make, and plays or pauses the film when it does
+    /// not.
     fn select(&mut self, parts: &mut Parts<'_>) -> Vec<Command> {
         if parts.strip.capturing().is_some() {
             return parts.strip.handle(Action::Select, parts.film);
@@ -365,6 +376,12 @@ impl Focus {
         // focused, so the select takes it and the display stays down.
         if !self.summoned && parts.skip.takes_select_outside() {
             return parts.skip.take();
+        }
+        // The risen card alone over the bare video draws focused, so the
+        // select takes the offer and the display stays down.
+        if self.card_takes_select(parts.upnext, parts.skip) {
+            parts.upnext.take();
+            return vec![next()];
         }
         // Toggle mpv's pause. The pause observer summons the display, so a
         // pause from select needs no separate summon. The no-osd prefix
@@ -503,6 +520,17 @@ mod tests {
         /// The block the sidecar sends for the work that follows this one.
         fn offer(&mut self) {
             self.upnext.receive(OFFER);
+        }
+
+        /// The offer, and the playhead past its rise, so the card stands
+        /// over the bare video.
+        fn rise(&mut self) {
+            self.offer();
+            assert!(self.upnext.on_percent(Some(98.0), &self.film, Some(0.0)));
+        }
+
+        fn card_takes_select(&self) -> bool {
+            self.focus.card_takes_select(&self.upnext, &self.skip)
         }
 
         /// The offer taken, which is the rise, a select on the card, and the
@@ -1096,6 +1124,68 @@ mod tests {
         }));
         assert_eq!(display.press(Action::Select), pause_toggle());
         assert!(display.skip.available());
+    }
+
+    /// The risen card alone over the bare video draws focused, so a select
+    /// takes it in one press and the display stays down.
+    #[test]
+    fn a_select_at_the_bare_video_takes_the_risen_card() {
+        let mut display = Display::new("{}");
+        display.rise();
+        assert!(display.card_takes_select());
+        assert_eq!(display.press(Action::Select), ask());
+        assert!(display.upnext.waiting());
+        assert!(!display.focus.visible());
+    }
+
+    /// Once the card's hide window runs out, the card leaves the bare video,
+    /// and a select there plays or pauses again.
+    #[test]
+    fn a_select_at_the_bare_video_pauses_once_the_card_leaves() {
+        let mut display = Display::new("{}");
+        display.rise();
+        display.upnext.hide();
+        assert!(!display.card_takes_select());
+        assert_eq!(display.press(Action::Select), pause_toggle());
+        assert!(!display.upnext.waiting());
+    }
+
+    /// While the OSD is up, the card is one of its stops, so the bare video
+    /// rule does not apply, and a summon lands below the offer as before.
+    #[test]
+    fn a_risen_card_inside_the_osd_takes_select_only_with_focus() {
+        let mut display = Display::new("{}");
+        display.rise();
+        display.summon();
+        assert!(!display.card_takes_select());
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+        assert_eq!(display.press(Action::Select), pause_toggle());
+        assert!(!display.upnext.waiting());
+    }
+
+    /// When the skip control shares the bare video with the card, the card
+    /// draws unfocused, and a select does what it does with the control
+    /// alone: it skips an intro or a recap, and it pauses in the credits. A
+    /// skip that lands by surprise is undone by a seek back, and a taken
+    /// offer ends the run, so the card never takes a select it shares.
+    #[test]
+    fn a_select_beside_the_skip_control_leaves_the_card() {
+        let cases = [
+            (Kind::Intro, skip_to_the_end()),
+            (Kind::Recap, skip_to_the_end()),
+            (Kind::Credits, pause_toggle()),
+        ];
+        for (kind, want) in cases {
+            let mut display = Display::new("{}");
+            display.rise();
+            display.skip.on_position(Some(Jump {
+                span: Span { kind, ..INTRO.span },
+                ..INTRO
+            }));
+            assert!(!display.card_takes_select(), "{kind:?}");
+            assert_eq!(display.press(Action::Select), want, "{kind:?}");
+            assert!(!display.upnext.waiting(), "{kind:?}");
+        }
     }
 
     /// A pause lands below the skip control, so the select that resumes the

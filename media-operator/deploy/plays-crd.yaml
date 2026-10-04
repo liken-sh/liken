@@ -328,11 +328,14 @@ spec:
                     three minutes remain, whichever is less, and an
                     episode's card, for an item whose presentation names a
                     series, rises when one and a half percent of the item
-                    or ninety seconds remain, whichever is less. A select on the offer
-                    publishes the request below on the Player's commands
-                    topic, where the program that wrote the Play reads
-                    it back and creates the next Play. A Play with no
-                    next block offers nothing.
+                    or ninety seconds remain, whichever is less. With the
+                    OSD down, the risen card shows focused, and select
+                    takes it, unless a skip control is up beside it. Then
+                    select does what it does for the skip control alone.
+                    A select on the offer publishes the request below on
+                    the Player's commands topic, where the program that
+                    wrote the Play reads it back and creates the next
+                    Play. A Play with no next block offers nothing.
                   properties:
                     reason:
                       type: string
