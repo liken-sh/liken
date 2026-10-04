@@ -156,8 +156,11 @@ impl Unit {
     pub fn fold(&mut self, moment: Moment, at: f64) {
         match moment {
             Moment::Status(status) => self.receive(status, at),
+            // A live level brings up the row unless the receiver draws its
+            // own overlay or only the indicator changed. The unit tracks
+            // the level either way.
             Moment::Level { volume, pressed } => {
-                if pressed {
+                if pressed && volume.draws_after(self.volume) {
                     self.pressed_from = volume::fade(self, at);
                     self.pressed = Some(at);
                 }
@@ -586,6 +589,7 @@ mod tests {
         let volume = Volume {
             level: 0.4,
             muted: false,
+            ..Volume::default()
         };
 
         unit.fold(
@@ -603,6 +607,7 @@ mod tests {
                 volume: Volume {
                     level: 0.45,
                     muted: false,
+                    ..Volume::default()
                 },
                 pressed: true,
             },
@@ -734,6 +739,7 @@ mod tests {
         let volume = Volume {
             level: 0.4,
             muted: false,
+            ..Volume::default()
         };
 
         unit.fold(

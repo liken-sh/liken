@@ -299,7 +299,7 @@ spec:
                               description: "Whether the touch controls are enabled."
                 volume:
                   type: object
-                  description: "The loudest level a press may set and the distance one press moves, both in the receiver's own scale. The media operator reads both when it turns a press of a volume key into status.session.volumeAsk. A Denon requires max."
+                  description: "The loudest level a press may set and the distance one press moves, both in the receiver's own scale, and who draws the volume indicator. The media operator reads max and step when it turns a press of a volume key into status.session.volumeAsk. A Denon requires max."
                   # A ceiling of zero would mute the room, and a step of
                   # zero would freeze it, so both must be above zero
                   # when stated.
@@ -316,6 +316,11 @@ spec:
                     step:
                       type: number
                       description: "How far one press moves the receiver, in its own scale. Half steps are allowed. Absent means one whole unit."
+                    indicator:
+                      type: string
+                      enum: [Player, Receiver]
+                      default: Player
+                      description: "Who draws the volume indicator when this receiver sets a unit's level. Player means the Player's screens draw their volume bar. Receiver means the receiver shows its own overlay on the TV, so the Player's screens draw no volume bar while this receiver sets the level. The media operator relays the level to the screens either way. The field applies to every protocol, and the equipment operator does not read it."
                 inputs:
                   type: array
                   maxItems: 32

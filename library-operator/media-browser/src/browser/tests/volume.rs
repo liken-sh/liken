@@ -15,6 +15,7 @@ fn level() -> Volume {
     Volume {
         level: 0.4,
         muted: false,
+        ..Volume::default()
     }
 }
 
@@ -81,6 +82,7 @@ fn the_muted_flag_reaches_the_row() {
             Volume {
                 level: 0.4,
                 muted: true,
+                ..Volume::default()
             },
             true,
         )],

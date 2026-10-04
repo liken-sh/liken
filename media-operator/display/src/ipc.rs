@@ -73,8 +73,9 @@ pub const PRESENTATION: &str = "presentation";
 pub const NEXT: &str = "next";
 
 /// The message the sidecar sends for each live message on the `Player`'s
-/// volume topic, with the level from 0.0 to 1.0 and `yes` or `no` for the
-/// mute: `volume-changed 0.63 no`. The sidecar sends none for the retained
+/// volume topic, with the level from 0.0 to 1.0, `yes` or `no` for the mute,
+/// and `yes` or `no` for whether the display draws the row:
+/// `volume-changed 0.63 no yes`. The sidecar sends none for the retained
 /// value it reads when it connects, which a starting pod restores and no
 /// person changed, so the indicator stays off screen for it.
 pub const VOLUME_CHANGED: &str = "volume-changed";

@@ -12,7 +12,11 @@ reads the volume keys off each remote, sets the level of the unit's
 `{"level": 0.63, "muted": false}`, where `level` runs from 0.0 to 1.0 of
 the device's `spec.volume.max`. A screen publishes nothing on the topic
 and answers no volume key. A retained level sets the level and draws
-nothing. A live level draws the indicator. Two clients link this crate by path, so they
+nothing. A live level draws the indicator, unless it carries
+`"indicator": "receiver"`, which a `Receiver` that shows its own volume
+overlay on the TV adds, or differs from the last level only in that
+field. Such a level is tracked and draws nothing
+(`Volume::draws_after`). Two clients link this crate by path, so they
 hold the same rules:
 
 - media-operator's idle screen, in `media-operator/idle/`

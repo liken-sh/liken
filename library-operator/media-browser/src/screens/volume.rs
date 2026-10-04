@@ -33,9 +33,11 @@ pub struct Level {
 impl Level {
     /// Fold one level in at this second. A live message is a change, and
     /// the broker's retained catch-up is none, so a browser that connects
-    /// to a running unit draws no row.
+    /// to a running unit draws no row. A live level brings up no row either
+    /// when the receiver draws its own overlay on the TV, or when only the
+    /// indicator changed. The state tracks the level in every case.
     pub fn fold(&mut self, volume: Volume, pressed: bool, at: f64) {
-        if pressed {
+        if pressed && volume.draws_after(self.volume) {
             self.from = self.fade(at);
             self.pressed = Some(at);
         }
@@ -102,6 +104,7 @@ impl Level {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use media_screen::volume::Indicator;
 
     // The second the first press lands on, which every case measures
     // from.
@@ -113,6 +116,7 @@ mod tests {
         Volume {
             level: 0.4,
             muted: false,
+            ..Volume::default()
         }
     }
 
@@ -131,6 +135,32 @@ mod tests {
         assert_eq!(state.fade(1.0), 0.0);
         assert_eq!(state.fade(2.0), 0.0);
         assert_eq!(state.row(2.0), None);
+    }
+
+    fn at(level: f64, indicator: Indicator) -> Volume {
+        Volume {
+            level,
+            muted: false,
+            indicator,
+        }
+    }
+
+    /// A receiver that shows its own overlay on the TV draws the level, so
+    /// the row stays down while the state tracks the level. A message that
+    /// changes the indicator alone brings up no row either.
+    #[test]
+    fn a_level_the_receiver_draws_shows_no_row() {
+        let mut state = Level::default();
+        state.fold(at(0.4, Indicator::Player), false, 0.0);
+        state.fold(at(0.45, Indicator::Receiver), true, 1.0);
+        assert_eq!(state.row(2.0), None);
+        assert_eq!(state.volume.level, 0.45);
+
+        state.fold(at(0.45, Indicator::Player), true, 3.0);
+        assert_eq!(state.row(4.0), None);
+
+        state.fold(at(0.5, Indicator::Player), true, 5.0);
+        assert_eq!(state.fade(6.0), 1.0);
     }
 
     #[test]
@@ -186,6 +216,7 @@ mod tests {
             Volume {
                 level: 0.4,
                 muted: true,
+                ..Volume::default()
             },
             true,
             PRESS + 1.0,

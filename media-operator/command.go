@@ -92,6 +92,12 @@ type commander struct {
 	// draws none.
 	volumeTopic string
 
+	// The last level the volume topic delivered, retained or live, and
+	// whether one arrived. A live message that changes only the
+	// indicator field is compared against it, and draws no bar.
+	heardLevel relayLevel
+	heardAny   bool
+
 	// The unit's controllers, keyed by the events topic each one
 	// publishes on, and the Player this Play runs on, which is the value
 	// a mark must hold for a press to act. A pod for a Play whose Player
@@ -309,11 +315,12 @@ func (c *commander) marshalLastReport() ([]byte, bool) {
 
 // handleRetained takes a retained message the broker delivered at
 // subscribe. The level on the volume topic is the level the room
-// already had, and no person pressed anything, so it draws nothing.
-// Every other retained topic, such as a controller's focus mark, is
-// read the same as a live message.
+// already had, and no person pressed anything, so it draws nothing and
+// the sidecar only records it. Every other retained topic, such as a
+// controller's focus mark, is read the same as a live message.
 func (c *commander) handleRetained(topic string, payload []byte) {
 	if c.volumeTopic != "" && topic == c.volumeTopic {
+		c.recordVolume(payload)
 		return
 	}
 	c.handle(topic, payload)

@@ -148,6 +148,11 @@ Set these variables on your container. Each value comes from
   of the device's max. Draw the level and send none. The retained
   message the broker delivers when the client subscribes sets the
   level and draws nothing, and each live message draws the indicator.
+  The payload carries `"indicator": "receiver"` while a `Receiver`
+  that shows its own volume overlay on the TV sets the level. Track
+  the level and the mute then, and draw no bar. An absent field means
+  the client draws the bar. A live message that differs from the last
+  one only in `indicator` draws nothing either.
   The client handles no volume key: the operator reads
   `KEY_VOLUMEUP`, `KEY_VOLUMEDOWN`, `KEY_MUTE`, and `KEY_UNMUTE` from
   the controller's events topic and sets the room's level. A client

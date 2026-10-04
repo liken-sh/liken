@@ -95,13 +95,22 @@ this topic reads `Idle` as it does after any film.
 
 ### `volume`
 
-The unit's listening level and its muted flag:
+The unit's listening level, its muted flag, and who draws the volume
+indicator:
 
     {"level": 0.63, "muted": false}
+    {"level": 0.63, "muted": false, "indicator": "receiver"}
 
 The level is a fraction of the device's `max`, from 0.0 to 1.0, so a
-screen draws one scale for every unit. Both fields are always
-written, so a reader never needs a default for a missing key.
+screen draws one scale for every unit. `level` and `muted` are always
+written, so a reader never needs a default for either key.
+
+`indicator` is absent unless the device that sets the level now is a
+`Receiver` whose `spec.volume.indicator` is `Receiver`. That receiver
+shows its own volume overlay on the TV, so the field is `"receiver"`,
+and each screen tracks the level and the muted flag and draws no bar.
+An absent field means the screens draw the bar. When the unit falls
+back to its sinks, the field is absent again.
 
 The operator is the only writer. It sets the room's level through the
 device that sets it: the
@@ -129,7 +138,9 @@ The operator publishes here:
   target;
 * each unit's level once a broker session's retained values have had
   time to arrive, after the operator starts and after the broker
-  restarts, unless the broker already holds that level.
+  restarts, unless the broker already holds that level;
+* the level again when only `indicator` changes, so the retained
+  message holds the current value.
 
 When a unit has several sinks, each one steps in its own units, and
 the topic carries the first one in `spec.sinks` order. `mpv` plays at
@@ -138,7 +149,10 @@ unity and sets no level of its own.
 A client reads `status` for the name, the activity, and the parts,
 and `volume` for the level. A retained message that the broker
 delivers when the client subscribes sets the level and draws nothing.
-Each live message draws the indicator. A client publishes no level
+Each live message draws the indicator, except a message whose
+`indicator` is `"receiver"`, and a message that differs from the last
+one only in `indicator`. Each of those sets the level and draws
+nothing. A client publishes no level
 here, and it handles no volume key: the operator reads the keys from
 the remote's own `events` topic.
 

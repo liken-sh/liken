@@ -5,7 +5,9 @@
 //! The level is the one `media-operator` relays on the `Player`'s volume
 //! topic: the level the unit's `Receiver` or `Sink` reports, from 0.0 to 1.0
 //! of the device's `spec.volume.max`. The command sidecar reads the topic and
-//! sends each live change to the display as a `volume-changed` message. mpv
+//! sends each live change to the display as a `volume-changed` message, with
+//! a word that says whether to draw the row. A `Receiver` that shows its own
+//! overlay on the TV gets no row, so the TV shows one indicator. mpv
 //! plays at unity, so its own `volume` and `mute` properties say nothing about
 //! the room's level, and the display does not read them.
 
@@ -106,22 +108,30 @@ fn polygon(at: Point, points: &[(f32, f32)]) -> Path {
     })
 }
 
-/// Read the level and the muted flag off the words of one `volume-changed`
-/// message: the level as a decimal from 0.0 to 1.0, then `yes` or `no`. A
-/// message that carries anything else is none of the sidecar's, and it
-/// changes nothing.
-pub fn changed(words: &[String]) -> Option<(f64, bool)> {
+/// Read the level, the muted flag, and whether to draw the row off the words
+/// of one `volume-changed` message: the level as a decimal from 0.0 to 1.0,
+/// then `yes` or `no` for the mute, then `yes` or `no` for the draw. The
+/// sidecar sends `no` for the draw while a `Receiver` shows its own overlay on
+/// the TV. A message with no third word draws, the way a sidecar that sends two
+/// words asks. A message that carries anything else is none of the sidecar's,
+/// and it changes nothing.
+pub fn changed(words: &[String]) -> Option<(f64, bool, bool)> {
     let level = words
         .get(1)?
         .parse::<f64>()
         .ok()
         .filter(|level| level.is_finite())?;
-    let muted = match words.get(2)?.as_str() {
-        "yes" => true,
-        "no" => false,
-        _ => return None,
-    };
-    Some((level, muted))
+    let muted = yes_or_no(words.get(2)?)?;
+    let draw = words.get(3).map_or(Some(true), |word| yes_or_no(word))?;
+    Some((level, muted, draw))
+}
+
+fn yes_or_no(word: &str) -> Option<bool> {
+    match word {
+        "yes" => Some(true),
+        "no" => Some(false),
+        _ => None,
+    }
 }
 
 /// The last level the sidecar sent, and the indicator's own fade. The OSD
@@ -168,6 +178,14 @@ impl Volume {
         self.level = level;
         self.muted = muted;
         self.clock.show(Hide::Arm);
+    }
+
+    /// Record one level and leave the row where it is. The receiver draws
+    /// this level on the TV, so the row does not rise for it, and a row that
+    /// is already up reads the new level.
+    pub fn record(&mut self, level: f64, muted: bool) {
+        self.level = level;
+        self.muted = muted;
     }
 
     /// Whether the row is on screen.
@@ -294,14 +312,17 @@ mod tests {
         Canvas::default()
     }
 
-    /// The message carries the level as a decimal and the flag as `yes` or
-    /// `no`.
+    /// The message carries the level as a decimal, the flag as `yes` or
+    /// `no`, and whether to draw the row as `yes` or `no`. A message with no
+    /// third word draws.
     #[test]
     fn a_change_reads_the_level_and_the_flag() {
         for (line, read) in [
-            ("volume-changed 0.63 no", Some((0.63, false))),
-            ("volume-changed 1 yes", Some((1.0, true))),
-            ("volume-changed 0.000000 no", Some((0.0, false))),
+            ("volume-changed 0.63 no", Some((0.63, false, true))),
+            ("volume-changed 1 yes", Some((1.0, true, true))),
+            ("volume-changed 0.000000 no", Some((0.0, false, true))),
+            ("volume-changed 0.63 no yes", Some((0.63, false, true))),
+            ("volume-changed 0.63 yes no", Some((0.63, true, false))),
         ] {
             assert_eq!(changed(&words(line)), read, "{line}");
         }
@@ -316,6 +337,7 @@ mod tests {
             "volume-changed loud no",
             "volume-changed NaN no",
             "volume-changed 0.5 maybe",
+            "volume-changed 0.5 no maybe",
         ] {
             assert_eq!(changed(&words(line)), None, "{line}");
         }
@@ -331,6 +353,19 @@ mod tests {
         assert!(volume.fade().running());
         assert!(volume.muted);
         assert_eq!(volume.number(&canvas()).content, "40");
+    }
+
+    /// A level the row does not draw is recorded, and the row stays down.
+    #[test]
+    fn a_recorded_level_shows_no_row() {
+        let mut volume = Volume::default();
+
+        volume.record(0.45, true);
+
+        assert!(!volume.showing());
+        assert_eq!(volume.take_hide(), Hide::Keep);
+        assert!(volume.muted);
+        assert_eq!(volume.number(&canvas()).content, "45");
     }
 
     /// The row rises on the in rate and leaves on the out rate, the way the

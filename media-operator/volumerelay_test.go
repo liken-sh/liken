@@ -85,6 +85,8 @@ func TestADevicesScaleAndReport(t *testing.T) {
 	plain := houseReceiver()
 	plain.Spec.Volume = &ReceiverVolume{Max: 98}
 	plain.Status.Zones = map[string]ReceiverZone{mainZone: {Volume: "41", Mute: true}}
+	overlay := denonReceiver()
+	overlay.Spec.Volume.Indicator = receiverIndicatorReceiver
 	cases := []struct {
 		name   string
 		device volumeDevice
@@ -94,6 +96,8 @@ func TestADevicesScaleAndReport(t *testing.T) {
 			want: volumeDevice{kind: deviceReceiver, name: "den-receiver", max: 72, step: 0.5, level: 45.5, reported: true}},
 		{name: "a receiver with no step", device: receiverDevice(plain),
 			want: volumeDevice{kind: deviceReceiver, name: "den-receiver", max: 98, step: 1, level: 41, mute: true, reported: true}},
+		{name: "a receiver with its own overlay", device: receiverDevice(overlay),
+			want: volumeDevice{kind: deviceReceiver, name: "den-receiver", max: 72, step: 0.5, level: 45.5, reported: true, indicator: "receiver"}},
 		{name: "a receiver with no report", device: receiverDevice(houseReceiver()),
 			want: volumeDevice{kind: deviceReceiver, name: "den-receiver", step: 1}},
 		{name: "a sink with no scale", device: sinkDevice(frontSink()),

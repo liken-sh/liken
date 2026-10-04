@@ -257,7 +257,7 @@ mod tests {
     use super::*;
     use iced_winit::core::Size;
     use media_screen::Moment;
-    use media_screen::volume::Volume;
+    use media_screen::volume::{Indicator, Volume};
 
     // The x every flush-right part of the row ends on, on a 1920 canvas.
     const RIGHT: f32 = 1920.0 - look::MARGIN_X;
@@ -268,6 +268,7 @@ mod tests {
         let volume = Volume {
             level: 0.4,
             muted: false,
+            ..Volume::default()
         };
         unit.fold(
             Moment::Level {
@@ -298,6 +299,36 @@ mod tests {
         );
         assert_eq!(fade(&unit, 1.0), 0.0);
         assert_eq!(fade(&unit, 2.0), 0.0);
+    }
+
+    /// One level moment off the bus.
+    fn level(level: f64, indicator: Indicator, pressed: bool) -> Moment {
+        Moment::Level {
+            volume: Volume {
+                level,
+                muted: false,
+                indicator,
+            },
+            pressed,
+        }
+    }
+
+    /// A receiver that shows its own overlay on the TV draws the level, so
+    /// the row stays down while the unit tracks the level. A message that
+    /// changes the indicator alone brings up no row either.
+    #[test]
+    fn a_level_the_receiver_draws_shows_no_row() {
+        let mut unit = Unit::default();
+        unit.fold(level(0.4, Indicator::Player, false), 0.0);
+        unit.fold(level(0.45, Indicator::Receiver, true), 1.0);
+        assert_eq!(fade(&unit, 2.0), 0.0);
+        assert_eq!(unit.volume.level, 0.45);
+
+        unit.fold(level(0.45, Indicator::Player, true), 3.0);
+        assert_eq!(fade(&unit, 4.0), 0.0);
+
+        unit.fold(level(0.5, Indicator::Player, true), 5.0);
+        assert_eq!(fade(&unit, 6.0), 1.0);
     }
 
     #[test]

@@ -777,7 +777,8 @@ fn a_retained_level_is_the_catch_up() {
         [Moment::Level {
             volume: Volume {
                 level: 0.45,
-                muted: true
+                muted: true,
+                ..Volume::default()
             },
             pressed: false,
         }]
@@ -794,7 +795,8 @@ fn a_live_level_is_a_change_the_client_draws() {
         [Moment::Level {
             volume: Volume {
                 level: 0.45,
-                muted: false
+                muted: false,
+                ..Volume::default()
             },
             pressed: true,
         }]

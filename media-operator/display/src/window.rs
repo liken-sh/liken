@@ -388,10 +388,14 @@ impl Display {
         } else if word == ipc::NEXT {
             self.upnext.receive(words.get(1).map_or("", String::as_str));
         } else if word == ipc::VOLUME_CHANGED {
-            let Some((level, muted)) = crate::volume::changed(words) else {
+            let Some((level, muted, draw)) = crate::volume::changed(words) else {
                 return Task::none();
             };
-            self.volume.show(level, muted);
+            if draw {
+                self.volume.show(level, muted);
+            } else {
+                self.volume.record(level, muted);
+            }
         } else {
             return Task::none();
         }
@@ -1914,6 +1918,19 @@ mod tests {
         let _ = display.update(Message::HideRow(armed));
         settle(&mut display);
         assert!(!display.volume.showing());
+    }
+
+    /// A level the sidecar marks as not drawn, because the receiver shows
+    /// its own overlay on the TV, sets the level and shows no row.
+    #[tokio::test]
+    async fn a_level_change_the_receiver_draws_shows_no_row() {
+        let (mut display, _) = display();
+
+        let _ = display.update(words(&["volume-changed", "0.4", "no", "no"]));
+        settle(&mut display);
+
+        assert!(!display.volume.showing());
+        assert!(display.row.armed.is_none());
     }
 
     /// A message with no level the display reads draws nothing.

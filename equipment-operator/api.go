@@ -201,10 +201,12 @@ func (z ZoneSpec) Pending(observed equipment.ZoneState, reported bool, previous 
 
 // How loud the room may get and how far one press moves it, both in the
 // receiver's own scale. A Denon requires max. An absent step is one
-// whole unit of that scale.
+// whole unit of that scale. Indicator names who draws the volume
+// indicator. media-operator reads it and this operator does not.
 type ReceiverVolume struct {
-	Max  float64 `json:"max,omitempty"`
-	Step float64 `json:"step,omitempty"`
+	Max       float64 `json:"max,omitempty"`
+	Step      float64 `json:"step,omitempty"`
+	Indicator string  `json:"indicator,omitempty"`
 }
 
 // The Denon and Marantz control protocol, the address it answers on,

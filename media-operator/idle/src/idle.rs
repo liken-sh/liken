@@ -238,6 +238,7 @@ mod tests {
                 volume: Volume {
                     level: 0.4,
                     muted: false,
+                    ..Volume::default()
                 },
                 pressed: true,
             },

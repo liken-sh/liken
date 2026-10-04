@@ -54,7 +54,9 @@ pub enum Moment {
     Status(Status),
     /// The unit's listening level, as `media-operator` relays it. `pressed` is
     /// false for the broker's catch-up and true for a live message, which is
-    /// a person changing the level with a remote or at the device.
+    /// a person changing the level with a remote or at the device. A client
+    /// draws the bar for a pressed level only when `Volume::draws_after` the
+    /// level it held says so.
     Level { volume: Volume, pressed: bool },
     /// A person took the up-next offer on the scrubber. The bytes are the
     /// `request` of the `Play`'s next block, which this crate never reads:

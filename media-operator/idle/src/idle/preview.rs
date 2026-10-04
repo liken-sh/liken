@@ -386,6 +386,7 @@ mod tests {
                 volume: Volume {
                     level: MAX_LEVEL - VOLUME_STEP,
                     muted: false,
+                    ..Volume::default()
                 },
                 pressed: true,
             }]
@@ -396,6 +397,7 @@ mod tests {
                 volume: Volume {
                     level: MAX_LEVEL,
                     muted: false,
+                    ..Volume::default()
                 },
                 pressed: true,
             }]
@@ -426,6 +428,7 @@ mod tests {
                 volume: Volume {
                     level: MAX_LEVEL,
                     muted: true,
+                    ..Volume::default()
                 },
                 pressed: true,
             }]
@@ -436,6 +439,7 @@ mod tests {
                 volume: Volume {
                     level: MAX_LEVEL,
                     muted: false,
+                    ..Volume::default()
                 },
                 pressed: true,
             }]

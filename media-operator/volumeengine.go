@@ -69,6 +69,10 @@ type volumeDevice struct {
 	level    float64
 	mute     bool
 	reported bool
+	// indicator is the relay's indicator field for this device: empty
+	// while the Player's screens draw the bar, relayIndicatorReceiver
+	// for a Receiver that draws its own overlay.
+	indicator string
 }
 
 func (d volumeDevice) key() string { return d.kind + "/" + d.name }
@@ -95,11 +99,18 @@ const (
 )
 
 // relayLevel is the payload of the Player's volume topic: the level as
-// a fraction of the device's max, and the mute.
+// a fraction of the device's max, the mute, and who draws the
+// indicator. An absent indicator means the screens draw the bar.
 type relayLevel struct {
-	Level float64 `json:"level"`
-	Muted bool    `json:"muted"`
+	Level     float64 `json:"level"`
+	Muted     bool    `json:"muted"`
+	Indicator string  `json:"indicator,omitempty"`
 }
+
+// relayIndicatorReceiver marks a level that the receiver draws on the
+// TV itself. The screens track the level and draw no bar for it, so the
+// TV shows one indicator and not two.
+const relayIndicatorReceiver = "receiver"
 
 // volumeTarget is the pending target for one device, and the state of
 // the asks that carry it.
@@ -202,7 +213,7 @@ func (e *volumeEngine) move(unit string, device volumeDevice, change volumeChang
 	nextLevel := clampLevel(roundLevel(level+float64(change.step)*device.step), device.max)
 	nextMute := changeMute(mute, change.mute)
 	if first {
-		e.relay(unit, device.max, nextLevel, nextMute)
+		e.relay(unit, device, nextLevel, nextMute)
 	}
 	if nextLevel == level && nextMute == mute {
 		return fmt.Sprintf("left %s %s at %s", device.kind, device.name, describeLevel(level, mute))
@@ -308,7 +319,7 @@ func (e *volumeEngine) giveUp(key string, generation int) {
 	logLine(e.log, "player %s: %s %s did not report %s within %s, published its report of %s",
 		target.unit, device.kind, device.name, describeLevel(target.level, target.mute), volumeSettleWait,
 		describeLevel(device.level, device.mute))
-	e.relay(target.unit, device.max, device.level, device.mute)
+	e.relay(target.unit, device, device.level, device.mute)
 }
 
 // observe takes one pass's read of a unit's devices. A report of the
@@ -347,15 +358,25 @@ func (e *volumeEngine) observe(unit string, devices []volumeDevice, announce boo
 		switch {
 		case !state.announced && announce:
 			state.announced, state.relayed = true, device.key()
-			if e.heard[unit] != string(relayPayload(device.max, device.level, device.mute)) {
-				e.relay(unit, device.max, device.level, device.mute)
+			if e.heard[unit] != string(relayPayload(device, device.level, device.mute)) {
+				e.relay(unit, device, device.level, device.mute)
 			}
 		case !state.announced:
-		case state.relayed != device.key(), !seen || !before.sameReport(device):
+		case state.relayed != device.key(), !seen || !before.sameReport(device),
+			e.heardIndicator(unit) != device.indicator:
 			state.relayed = device.key()
-			e.relay(unit, device.max, device.level, device.mute)
+			e.relay(unit, device, device.level, device.mute)
 		}
 	}
+}
+
+// heardIndicator is the indicator field the broker holds on a unit's
+// topic. A change of the indicator alone republishes the level, and the
+// comparison reads the broker's payload and not the last pass, so a
+// change that arrived while a target was pending is still published.
+func (e *volumeEngine) heardIndicator(unit string) string {
+	level, _ := parseRelayLevel([]byte(e.heard[unit]))
+	return level.Indicator
 }
 
 // heardLevel records the payload the broker delivered on a unit's
@@ -401,23 +422,24 @@ func (e *volumeEngine) retain(live map[string]bool) {
 	}
 }
 
-// relay publishes one level on the unit's topic. The caller holds the
-// mutex, so two publishes for one unit leave in the order the engine
-// made them.
-func (e *volumeEngine) relay(unit string, max, level float64, mute bool) {
-	payload := relayPayload(max, level, mute)
+// relay publishes one level of a device on the unit's topic. The caller
+// holds the mutex, so two publishes for one unit leave in the order the
+// engine made them.
+func (e *volumeEngine) relay(unit string, device volumeDevice, level float64, mute bool) {
+	payload := relayPayload(device, level, mute)
 	e.heard[unit] = string(payload)
 	e.publish(unit, payload)
 }
 
-// relayPayload is the topic's payload for a level in a device's units.
-func relayPayload(max, level float64, mute bool) []byte {
+// relayPayload is the topic's payload for a level in a device's units,
+// with the device's indicator.
+func relayPayload(device volumeDevice, level float64, mute bool) []byte {
 	fraction := 0.0
-	if max > 0 {
-		fraction = math.Round(level/max*10000) / 10000
+	if device.max > 0 {
+		fraction = math.Round(level/device.max*10000) / 10000
 	}
 	fraction = math.Min(math.Max(fraction, 0), 1)
-	payload, err := json.Marshal(relayLevel{Level: fraction, Muted: mute})
+	payload, err := json.Marshal(relayLevel{Level: fraction, Muted: mute, Indicator: device.indicator})
 	if err != nil {
 		return nil
 	}

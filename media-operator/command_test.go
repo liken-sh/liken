@@ -433,7 +433,7 @@ func TestALiveLevelSendsTheDisplayTheLevel(t *testing.T) {
 	}
 	c.handle(c.volumeTopic, []byte(`{"level":0.63,"muted":true}`))
 
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed","0.63","yes"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed","0.63","yes","yes"]}`)
 }
 
 // The level the broker delivers at subscribe is the level the room

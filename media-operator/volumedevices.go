@@ -59,7 +59,9 @@ var driverScaleTops = map[string]float64{"wiim": 100}
 // (status.driver) when the spec states none. A Receiver with neither
 // has no max, and a press writes nothing for it. A step the spec leaves
 // out is one unit of the receiver's scale, the step the equipment
-// operator takes too.
+// operator takes too. A receiver whose spec.volume.indicator is
+// Receiver marks its level, so the screens draw no bar over its own
+// overlay.
 func receiverDevice(receiver *Receiver) volumeDevice {
 	device := volumeDevice{kind: deviceReceiver, name: receiver.Metadata.Name, step: 1,
 		max: driverScaleTops[receiver.Status.Driver]}
@@ -69,6 +71,9 @@ func receiverDevice(receiver *Receiver) volumeDevice {
 		}
 		if receiver.Spec.Volume.Step > 0 {
 			device.step = receiver.Spec.Volume.Step
+		}
+		if receiver.Spec.Volume.Indicator == receiverIndicatorReceiver {
+			device.indicator = relayIndicatorReceiver
 		}
 	}
 	zone, reported := receiver.Status.Zones[mainZone]

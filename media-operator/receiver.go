@@ -56,11 +56,18 @@ type ReceiverSpec struct {
 // ReceiverVolume is the receiver's volume scale for a press, in the
 // receiver's own units: the loudest level an ask may set, and the
 // distance one press moves the level. A Denon counts 0 to 98 in half
-// steps.
+// steps. Indicator names who draws the volume indicator: the Player's
+// screens, or the receiver's own overlay on the TV.
 type ReceiverVolume struct {
-	Max  float64 `json:"max,omitempty"`
-	Step float64 `json:"step,omitempty"`
+	Max       float64 `json:"max,omitempty"`
+	Step      float64 `json:"step,omitempty"`
+	Indicator string  `json:"indicator,omitempty"`
 }
+
+// receiverIndicatorReceiver is the spec.volume.indicator value of a
+// receiver that draws its own volume overlay on the TV. The CRD defaults
+// the field to Player, and an absent field reads the same.
+const receiverIndicatorReceiver = "Receiver"
 
 // One input of the equipment, and the machine and monitor id wired into
 // it. The monitor id alone names no input, because one receiver

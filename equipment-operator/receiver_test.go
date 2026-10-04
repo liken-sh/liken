@@ -137,6 +137,13 @@ func TestCRDSchema(t *testing.T) {
 		}
 	})
 
+	t.Run("the volume indicator defaults to the Player", func(t *testing.T) {
+		indicator := spec.Properties["volume"].Properties["indicator"]
+		if indicator.Default == nil || string(indicator.Default.Raw) != `"Player"` {
+			t.Errorf("spec.properties.volume.properties.indicator.default = %v, want \"Player\"", indicator.Default)
+		}
+	})
+
 	t.Run("a session requires its player and its input", func(t *testing.T) {
 		session := spec.Properties["session"]
 		for _, name := range []string{"player", "input"} {
@@ -390,6 +397,28 @@ func TestCRDValidatesExamples(t *testing.T) {
 			receiver: receiver(map[string]any{
 				"denon":  map[string]any{"address": "receiver.example"},
 				"volume": map[string]any{"max": 75.0, "step": -1.0},
+			}),
+			wantErr: true,
+		},
+		{
+			name: "a receiver that draws its own volume indicator",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0, "indicator": "Receiver"},
+			}),
+		},
+		{
+			name: "a receiver whose Player draws the volume indicator",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0, "indicator": "Player"},
+			}),
+		},
+		{
+			name: "a volume indicator the enum does not name",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0, "indicator": "receiver"},
 			}),
 			wantErr: true,
 		},
