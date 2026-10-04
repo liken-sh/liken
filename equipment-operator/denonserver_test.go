@@ -38,7 +38,12 @@ type fakeDenon struct {
 	// receiver accepts without applying; a command it does not hold is
 	// never reported, which models a control the receiver never answers.
 	settingsHold map[string]string
-	conns        []net.Conn
+	// holdingEchoes makes the receiver apply each volume it is sent but
+	// report none of them until the test releases them, which is a
+	// receiver slower than the presses that reach it.
+	holdingEchoes bool
+	heldEchoes    []string
+	conns         []net.Conn
 }
 
 // startFakeDenon listens on the test network and answers until the
@@ -126,6 +131,10 @@ func (f *fakeDenon) answer(command string) {
 			return
 		}
 		f.volume = halves
+		if f.holdingEchoes {
+			f.heldEchoes = append(f.heldEchoes, "MV"+denon.HalfStepDigits(f.volume))
+			return
+		}
 		f.send("MV" + denon.HalfStepDigits(f.volume))
 	case strings.HasPrefix(command, "SI"):
 		f.input = command[2:]

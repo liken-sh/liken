@@ -113,6 +113,10 @@ type session struct {
 	// the first of them to come back is the adopt line.
 	awaiting []volumeState
 	adopted  bool
+
+	// pending is the volume the session last sent and the receiver has
+	// not reported yet (session_target.go).
+	pending pendingVolume
 }
 
 // startSession opens the session's own broker connection and claims the
@@ -379,9 +383,11 @@ func (s *session) press(previous, state volumeState) {
 		}
 	}
 	if state.Level != previous.Level {
-		if target, moves := s.nextPosition(reading, state.Level > previous.Level); moves {
+		if target, moves := s.nextPosition(s.position(reading), state.Level > previous.Level); moves {
 			volume := volumeWords(equipment.ZoneState{Volume: target}, s.driver.VolumeResolution())
+			s.aim(target)
 			if err := s.driver.SetVolume(equipment.MainZone, target); err != nil {
+				s.release()
 				s.log.refused(fmt.Sprintf("%s; sent %s", trigger, volume), err)
 			} else {
 				sent = append(sent, volume)
@@ -395,7 +401,7 @@ func (s *session) press(previous, state volumeState) {
 	if len(sent) == 0 {
 		s.log.printf("%s; sent nothing, because the receiver reports %s and %s, and the ceiling is %s",
 			trigger, volumeWords(reading, s.driver.VolumeResolution()), muteWords(reading, 0), s.ceilingWords())
-		s.report(reading)
+		s.report(s.position(reading))
 		return
 	}
 	s.log.confirm(fmt.Sprintf("%s; sent %s", trigger, strings.Join(sent, " and ")), began, mainZoneCheck(s.driver, strings.Join(sent, " and "), words...))
@@ -472,7 +478,9 @@ func (s *session) observe(event equipment.Event) {
 	s.mark(event.State)
 	switch event.Field {
 	case equipment.EventVolume, equipment.EventMute:
-		s.report(mainZone(event.State))
+		if zone := mainZone(event.State); s.settle(zone) {
+			s.report(zone)
+		}
 	}
 }
 
