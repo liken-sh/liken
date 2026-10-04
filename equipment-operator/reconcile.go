@@ -875,6 +875,9 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		dirty:    make(chan struct{}, 1),
 		budget:   newSendBudget(),
 		settled:  newSettledRecord(receiver.Status, receiver.Spec),
+		// The driver's goroutine reads volumeAsks for each line the
+		// receiver sends, so it exists before the driver starts.
+		volumeAsks: newVolumeAsker(),
 	}
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.foreign = c.discovery.skip
@@ -884,7 +887,6 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	unit.generation.Store(receiver.Metadata.Generation)
 	goWork(ctx, func() { unit.driver.Run(ctx) })
 	goWork(ctx, func() { unit.report(ctx) })
-	unit.volumeAsks = newVolumeAsker()
 	goWork(ctx, func() { unit.applyVolumeAsks(ctx) })
 	// The first write says the operator holds the receiver and has not
 	// reached it yet, before any line arrives.
