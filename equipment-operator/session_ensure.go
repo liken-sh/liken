@@ -1,8 +1,9 @@
 package main
 
-// The asks a controller press sends on the receiver's commands topic,
-// in player terms: the ensure, which any press sends, and the show,
-// which a home press sends. reconcile.go routes them to the session.
+// The asks a controller press makes in player terms: the ensure, which
+// any press sends, and the show, which a home press sends. They arrive
+// on the receiver's commands topic, which reconcile.go routes to the
+// session, or in status.session.inputAsk (session_asks.go).
 
 import "github.com/liken-sh/equipment-operator/equipment"
 
@@ -12,7 +13,7 @@ import "github.com/liken-sh/equipment-operator/equipment"
 // the receiver nothing. A dark room is left dark too: the power key is
 // the one that wakes the equipment.
 func (s *session) ensureInput() {
-	s.ensure(commandEnsureInput)
+	s.ensure("the commands topic asks " + commandEnsureInput)
 }
 
 // showInput asks the room's TV to show the session's Display, and then
@@ -24,39 +25,43 @@ func (s *session) ensureInput() {
 // it reports On, so the ask wakes no TV that is off, and the receiver
 // part turns on no receiver that is off.
 func (s *session) showInput() {
-	if s.room != nil {
-		s.room.show("the commands topic asks " + commandShowInput)
-	}
-	s.ensure(commandShowInput)
+	s.show("the commands topic asks " + commandShowInput)
 }
 
-// ensure runs the receiver's part of an ask, with command naming the
+// show is showInput, with trigger naming the ask in its lines.
+func (s *session) show(trigger string) {
+	if s.room != nil {
+		s.room.show(trigger)
+	}
+	s.ensure(trigger)
+}
+
+// ensure runs the receiver's part of an ask, with trigger naming the
 // ask in its lines.
-func (s *session) ensure(command string) {
+func (s *session) ensure(trigger string) {
 	if s.spec.Input == "" {
-		s.log.printf("the commands topic asks %s; sent nothing, because Player %s's session names no input", command, s.spec.Player)
+		s.log.printf("%s; sent nothing, because Player %s's session names no input", trigger, s.spec.Player)
 		return
 	}
-	goWork(s.ctx, func() { s.ensureInputOnce(command) })
+	goWork(s.ctx, func() { s.ensureInputOnce(trigger) })
 }
 
 // ensureInputOnce is the ensure under the one-shot lock, serialized
 // against a toggle and a flag flip so the three never drive the
-// receiver at the same moment. command is the ask that reached it, for
-// its lines.
-func (s *session) ensureInputOnce(command string) {
+// receiver at the same moment. trigger names the ask that reached it,
+// for its lines.
+func (s *session) ensureInputOnce(trigger string) {
 	s.oneShot.Lock()
 	defer s.oneShot.Unlock()
 	if !s.waitForSurvey(s.ctx) {
 		return
 	}
-	trigger := "the commands topic asks " + command
 	state := mainZone(s.driver.State())
 	if state.Power != equipment.PowerOn {
 		s.log.printf("%s; sent nothing, because the receiver reports %s", trigger, powerWords(state, 0))
 		return
 	}
-	if state.Input == s.spec.Input {
+	if onSessionInput(state, s.spec.Input) {
 		s.log.printf("%s; sent nothing, because the receiver reports %s", trigger, inputWords(state, 0))
 		return
 	}

@@ -137,9 +137,9 @@ func TestCRDSchema(t *testing.T) {
 		}
 	})
 
-	t.Run("a session requires all three of its fields", func(t *testing.T) {
+	t.Run("a session requires its player and its input", func(t *testing.T) {
 		session := spec.Properties["session"]
-		for _, name := range []string{"player", "input", "volumeTopic"} {
+		for _, name := range []string{"player", "input"} {
 			if !slices.Contains(session.Required, name) {
 				t.Errorf("spec.properties.session.required = %v, want it to contain %s", session.Required, name)
 			}
@@ -273,6 +273,23 @@ func denonSpec() map[string]any {
 		"denon":  map[string]any{"address": "receiver.example"},
 		"volume": map[string]any{"max": 75.0},
 	}
+}
+
+// askingReceiver is a Receiver whose session holds a volume ask and a
+// power ask and an input ask with the actions named.
+func askingReceiver(volumeAsk map[string]any, power, input string) map[string]any {
+	return receiver(map[string]any{
+		"denon":  map[string]any{"address": "receiver.example"},
+		"volume": map[string]any{"max": 75.0},
+		"inputs": []any{map[string]any{"name": "MPLAY", "machine": "node-1", "monitor": "hdmi-a-1"}},
+		"session": map[string]any{
+			"player":    "house/theater",
+			"input":     "MPLAY",
+			"volumeAsk": volumeAsk,
+			"powerAsk":  map[string]any{"action": power, "at": "2026-10-04T12:20:01.002Z"},
+			"inputAsk":  map[string]any{"action": input, "at": "2026-10-04T12:20:07.410Z"},
+		},
+	})
 }
 
 func TestCRDValidatesExamples(t *testing.T) {
@@ -441,9 +458,38 @@ func TestCRDValidatesExamples(t *testing.T) {
 			receiver: receiver(map[string]any{
 				"denon":   map[string]any{"address": "receiver.example"},
 				"volume":  map[string]any{"max": 75.0},
+				"inputs":  []any{map[string]any{"name": "MPLAY", "machine": "node-1", "monitor": "hdmi-a-1"}},
 				"session": map[string]any{"player": "house/theater", "input": "MPLAY"},
 			}),
-			wantErr: true,
+		},
+		{
+			name:     "a session with all three asks",
+			receiver: askingReceiver(map[string]any{"level": 44.5, "mute": true, "at": "2026-10-04T12:15:25.164Z"}, "toggle", "show"),
+		},
+		{
+			name:     "a power ask with an action it does not name",
+			receiver: askingReceiver(map[string]any{"level": 44.5, "at": "2026-10-04T12:15:25.164Z"}, "wake", "ensure"),
+			wantErr:  true,
+		},
+		{
+			name:     "an input ask with an action it does not name",
+			receiver: askingReceiver(map[string]any{"level": 44.5, "at": "2026-10-04T12:15:25.164Z"}, "on", "select"),
+			wantErr:  true,
+		},
+		{
+			name:     "a volume ask below zero",
+			receiver: askingReceiver(map[string]any{"level": -1.0, "at": "2026-10-04T12:15:25.164Z"}, "off", "ensure"),
+			wantErr:  true,
+		},
+		{
+			name:     "a volume ask with no at",
+			receiver: askingReceiver(map[string]any{"level": 44.5}, "off", "ensure"),
+			wantErr:  true,
+		},
+		{
+			name:     "a volume ask whose at is not a time",
+			receiver: askingReceiver(map[string]any{"level": 44.5, "at": "now"}, "off", "ensure"),
+			wantErr:  true,
 		},
 		{
 			name: "a receiver that declares zone2",

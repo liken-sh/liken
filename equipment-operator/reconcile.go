@@ -100,6 +100,12 @@ type receiverUnit struct {
 	// the status.
 	settled *settledRecord
 
+	// seen holds the at of each ask the unit has read, and volumeAsks
+	// holds the volume ask the receiver has not been sent yet
+	// (session_asks.go).
+	seen       seenAsks
+	volumeAsks *volumeAsker
+
 	mutex   sync.Mutex
 	session *session
 	// sessions writes the status.session of the TV the session shows,
@@ -115,6 +121,9 @@ type receiverUnit struct {
 func (u *receiverUnit) observe(event equipment.Event) {
 	poke(u.dirty)
 	u.log.observe()
+	if u.volumeAsks != nil && (event.Field == equipment.EventVolume || event.Field == equipment.EventMute) {
+		poke(u.volumeAsks.reported)
+	}
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
@@ -162,6 +171,9 @@ func (u *receiverUnit) write() {
 	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.Address(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
 	status.SettledSettings = u.settled.snapshot()
 	status.SettledPower = u.powerApplied()
+	if condition, held := inputSelected(u.sessionInput(), state, u.generation.Load(), u.applied.Conditions, now); held {
+		status.Conditions = append(status.Conditions, condition)
+	}
 	if condition, held := settingsConfirmed(u.budget.unconfirmed(), u.generation.Load(), u.applied.Conditions, now); held {
 		status.Conditions = append(status.Conditions, condition)
 	}
@@ -192,6 +204,9 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
+	// A session that starts or ends changes the InputSelected condition,
+	// which the status writer derives from the session that stands.
+	defer poke(u.dirty)
 
 	if held != nil && spec != nil && held.spec == spec.withoutFlags() {
 		if flips := flagFlips(held, spec); flips != "" {
@@ -217,8 +232,8 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 	if adopting {
 		adopted = "; " + adopted + ", so it sends nothing for these flags"
 	}
-	u.log.printf("a session for Player %s started: input %s, volume topic %s, %s, active %t, awake %t%s",
-		spec.Player, spec.Input, spec.VolumeTopic, powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake, adopted)
+	u.log.printf("a session for Player %s started: input %s, %s, %s, active %t, awake %t%s",
+		spec.Player, spec.Input, volumeTopicWords(spec.VolumeTopic), powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake, adopted)
 	started := newSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.dial, u.volumeRule, u.inputSoundMode, u.applyPower, u.roomFor(spec))
 	u.mutex.Lock()
 	u.session = started
@@ -239,6 +254,14 @@ func flagFlips(held *session, spec *ReceiverSession) string {
 		flips = append(flips, fmt.Sprintf("awake went from %t to %t", was, spec.Awake))
 	}
 	return strings.Join(flips, ", ")
+}
+
+// volumeTopicWords names a session's volume topic, or says it has none.
+func volumeTopicWords(topic string) string {
+	if topic == "" {
+		return "no volume topic"
+	}
+	return "volume topic " + topic
 }
 
 // powerTopicWords names a session's power topic, or says it has none.
@@ -1026,6 +1049,7 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 		switch {
 		case replaced != nil:
 			unit.carryPower(replaced)
+			unit.carryAsks(replaced)
 			if carried != nil {
 				unit.setSession(ctx, carried, "the unit that held it before the wiring changed handed it over")
 			}
@@ -1051,6 +1075,7 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 		adopted = "the operator found it when it started"
 	}
 	unit.setSession(ctx, receiver.session(), adopted)
+	unit.takeAsks(receiver.session(), !c.live)
 }
 
 // protocolAddress is the address the receiver's protocol block declares.
@@ -1095,6 +1120,8 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	unit.generation.Store(receiver.Metadata.Generation)
 	goWork(ctx, func() { unit.driver.Run(ctx) })
 	goWork(ctx, func() { unit.report(ctx) })
+	unit.volumeAsks = newVolumeAsker()
+	goWork(ctx, func() { unit.applyVolumeAsks(ctx) })
 	unit.startBus(ctx)
 	// The first write says the operator holds the receiver and has not
 	// reached it yet, before any line arrives.

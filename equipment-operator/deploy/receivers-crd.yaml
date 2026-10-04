@@ -353,8 +353,8 @@ spec:
                         description: "The sound mode the receiver selects with this input, when present. The session selects it in the same one-shot that selects the input, so a Play brings the picture and the mode together."
                 session:
                   type: object
-                  required: [player, input, volumeTopic]
-                  description: "The Player that currently uses the receiver, as a media operator that does not write status.session writes it. The operator reads status.session first and uses this block only while status.session is absent. A media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
+                  required: [player, input]
+                  description: "The Player that currently uses the receiver, as a media operator that does not write status.session writes it. The operator reads status.session first and uses this block only while status.session is absent. A media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. A session that names volumeTopic owns the level from the volume topic and marks itself owner on that topic plus /owner. A session with no volumeTopic sets the level only from volumeAsk. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
                   properties:
                     player:
                       type: string
@@ -371,7 +371,7 @@ spec:
                       type: string
                       minLength: 1
                       maxLength: 1024
-                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it."
+                      description: "The Player's volume topic on the media bus, in full. When present, the operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, names a Last Will that clears the mark, and writes the receiver's true level back to it. When absent, the operator reads no level from the bus, publishes no owner mark, names no Last Will, and sets the level only from volumeAsk."
                     powerTopic:
                       type: string
                       minLength: 1
@@ -383,6 +383,48 @@ spec:
                     awake:
                       type: boolean
                       description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
+                    volumeAsk:
+                      type: object
+                      required: [level, at]
+                      description: "An ask for an absolute volume and mute, which the media operator writes for a press of a volume key. The operator applies each ask once, when at changes: it sends level as the receiver's own volume command, and sends mute, each only when the receiver reports another value. When asks change faster than the receiver reports the volume it was last sent, the operator sends only the newest one, as soon as the receiver reports the last volume or 1 second after it was sent. An ask that the operator finds in its first pass after a start sends nothing, because a person can have turned the receiver's knob since the ask was made. The operator does not hold the receiver to the ask, so a person using the receiver's remote can still change the volume. The operator does not compare level with spec.volume.max; the media operator keeps its asks at or below that ceiling."
+                      properties:
+                        level:
+                          type: number
+                          minimum: 0
+                          description: "The volume, in the receiver's own scale, the scale of spec.volume.max. A Denon counts 0 to 98 in half steps, and the driver sends a level above the top of the receiver's scale as the top."
+                        mute:
+                          type: boolean
+                          description: "Whether the receiver is muted. Absent means not muted."
+                        at:
+                          type: string
+                          format: date-time
+                          description: "When the ask was made, as an RFC 3339 time with milliseconds. A new value is a new ask."
+                    powerAsk:
+                      type: object
+                      required: [action, at]
+                      description: "An ask to turn the room on or off, which the media operator writes for a press of a power key. The operator applies each ask once, when at changes, with the same rules as a message on powerTopic: toggle turns a room that is on off and a room that is off on, and on and off send nothing to a room that is already in the state they name. An ask that the operator finds in its first pass after a start sends nothing."
+                      properties:
+                        action:
+                          type: string
+                          enum: [toggle, "on", "off"]
+                          description: "toggle, on, or off. Quote on and off in YAML, as action: \"on\": kubectl reads an unquoted on or off as a boolean."
+                        at:
+                          type: string
+                          format: date-time
+                          description: "When the ask was made, as an RFC 3339 time with milliseconds. A new value is a new ask."
+                    inputAsk:
+                      type: object
+                      required: [action, at]
+                      description: "An ask for the session's input, which the media operator writes for a press of a controller's key. The operator applies each ask once, when at changes. ensure sends the session's input, and the sound mode the input names, only when the receiver is on and reports another input. show does the same, and also asks the Television that shows the session's input to show the session's Display, as input.show on commandsTopic does. Neither action turns the receiver on. An ask that the operator finds in its first pass after a start sends nothing. The InputSelected condition says whether an ensure has an input to send."
+                      properties:
+                        action:
+                          type: string
+                          enum: [ensure, show]
+                          description: "ensure for any press, and show for a press of the home key."
+                        at:
+                          type: string
+                          format: date-time
+                          description: "When the ask was made, as an RFC 3339 time with milliseconds. A new value is a new ask."
                 power:
                   type: string
                   enum: ["On", Standby, "Off"]
@@ -505,8 +547,8 @@ spec:
                   description: "The Service that represents the receiver on the cluster network after the operator creates it. Empty until then."
                 session:
                   type: object
-                  required: [player, input, volumeTopic]
-                  description: "The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. It is status and not spec, so a change of either flag changes no metadata.generation. The operator reads this block first and falls back to spec.session only while this block is absent, and its own status apply never states this block. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A Denon reports a sound mode in other words than the command that selects its family, so the operator compares the declared mode with the reported one by the command families the driver knows. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
+                  required: [player, input]
+                  description: "The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. It is status and not spec, so a change of either flag changes no metadata.generation. The operator reads this block first and falls back to spec.session only while this block is absent, and its own status apply never states this block. A session that names volumeTopic owns the level from the volume topic and marks itself owner on that topic plus /owner. A session with no volumeTopic sets the level only from volumeAsk. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A Denon reports a sound mode in other words than the command that selects its family, so the operator compares the declared mode with the reported one by the command families the driver knows. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
                   properties:
                     player:
                       type: string
@@ -523,7 +565,7 @@ spec:
                       type: string
                       minLength: 1
                       maxLength: 1024
-                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it."
+                      description: "The Player's volume topic on the media bus, in full. When present, the operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, names a Last Will that clears the mark, and writes the receiver's true level back to it. When absent, the operator reads no level from the bus, publishes no owner mark, names no Last Will, and sets the level only from volumeAsk."
                     powerTopic:
                       type: string
                       minLength: 1
@@ -535,6 +577,48 @@ spec:
                     awake:
                       type: boolean
                       description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
+                    volumeAsk:
+                      type: object
+                      required: [level, at]
+                      description: "An ask for an absolute volume and mute, which the media operator writes for a press of a volume key. The operator applies each ask once, when at changes: it sends level as the receiver's own volume command, and sends mute, each only when the receiver reports another value. When asks change faster than the receiver reports the volume it was last sent, the operator sends only the newest one, as soon as the receiver reports the last volume or 1 second after it was sent. An ask that the operator finds in its first pass after a start sends nothing, because a person can have turned the receiver's knob since the ask was made. The operator does not hold the receiver to the ask, so a person using the receiver's remote can still change the volume. The operator does not compare level with spec.volume.max; the media operator keeps its asks at or below that ceiling."
+                      properties:
+                        level:
+                          type: number
+                          minimum: 0
+                          description: "The volume, in the receiver's own scale, the scale of spec.volume.max. A Denon counts 0 to 98 in half steps, and the driver sends a level above the top of the receiver's scale as the top."
+                        mute:
+                          type: boolean
+                          description: "Whether the receiver is muted. Absent means not muted."
+                        at:
+                          type: string
+                          format: date-time
+                          description: "When the ask was made, as an RFC 3339 time with milliseconds. A new value is a new ask."
+                    powerAsk:
+                      type: object
+                      required: [action, at]
+                      description: "An ask to turn the room on or off, which the media operator writes for a press of a power key. The operator applies each ask once, when at changes, with the same rules as a message on powerTopic: toggle turns a room that is on off and a room that is off on, and on and off send nothing to a room that is already in the state they name. An ask that the operator finds in its first pass after a start sends nothing."
+                      properties:
+                        action:
+                          type: string
+                          enum: [toggle, "on", "off"]
+                          description: "toggle, on, or off. Quote on and off in YAML, as action: \"on\": kubectl reads an unquoted on or off as a boolean."
+                        at:
+                          type: string
+                          format: date-time
+                          description: "When the ask was made, as an RFC 3339 time with milliseconds. A new value is a new ask."
+                    inputAsk:
+                      type: object
+                      required: [action, at]
+                      description: "An ask for the session's input, which the media operator writes for a press of a controller's key. The operator applies each ask once, when at changes. ensure sends the session's input, and the sound mode the input names, only when the receiver is on and reports another input. show does the same, and also asks the Television that shows the session's input to show the session's Display, as input.show on commandsTopic does. Neither action turns the receiver on. An ask that the operator finds in its first pass after a start sends nothing. The InputSelected condition says whether an ensure has an input to send."
+                      properties:
+                        action:
+                          type: string
+                          enum: [ensure, show]
+                          description: "ensure for any press, and show for a press of the home key."
+                        at:
+                          type: string
+                          format: date-time
+                          description: "When the ask was made, as an RFC 3339 time with milliseconds. A new value is a new ask."
                 settledPower:
                   type: string
                   enum: ["On", Standby, "Off"]
@@ -554,7 +638,7 @@ spec:
                   description: "The record an earlier operator wrote of the metadata.generation whose declared settings it had sent. The operator reads it once, when it starts: a status that holds it and no settledSettings is from that operator, which had sent the declared blocks, so the operator records each declared block as sent and sends nothing for it. The operator does not write it, and its first status apply removes it."
                 conditions:
                   type: array
-                  description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise."
+                  description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise. InputSelected exists while a session stands. It is True, with reason SessionInput, while the receiver reports the session's input. It is False, with reason OtherInput, while the receiver reports another input. It is Unknown, with reason Unreachable or NoInputReported, while the operator cannot reach the receiver or the receiver has reported no input."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -318,8 +319,14 @@ func waitForSurvey(t *testing.T, operator *controller) {
 	}
 }
 
+// connected answers whether a status says Reachable is True and holds
+// no condition other than the InputSelected that a standing session
+// adds.
 func connected(status ReceiverStatus) bool {
-	return len(status.Conditions) == 1 && status.Conditions[0].Status == ConditionTrue
+	others := slices.DeleteFunc(slices.Clone(status.Conditions), func(condition Condition) bool {
+		return condition.Type == inputSelectedConditionType
+	})
+	return len(others) == 1 && others[0].Status == ConditionTrue
 }
 
 func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {

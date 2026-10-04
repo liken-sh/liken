@@ -250,26 +250,58 @@ type ReceiverInput struct {
 
 // A session names the Player, the input it uses, and the topic from
 // which it reads the level. The operator derives the owner-mark topic
-// by adding /owner to VolumeTopic.
+// by adding /owner to VolumeTopic. A session with no VolumeTopic reads
+// no level from the bus and publishes no owner mark.
 // Active says that a Play is present. Awake says that the room's screen
 // is awake. The media operator keeps a session while the Player has a
 // screen, including the idle screen. A session with both flags false
 // owns the level but sends no power or input command to the receiver.
+// The three asks are events that the media operator writes, and the
+// operator applies each one once, when its At changes
+// (session_asks.go).
 type ReceiverSession struct {
-	Player      string `json:"player"`
-	Input       string `json:"input"`
-	VolumeTopic string `json:"volumeTopic"`
-	PowerTopic  string `json:"powerTopic,omitempty"`
-	Active      bool   `json:"active,omitempty"`
-	Awake       bool   `json:"awake,omitempty"`
+	Player      string             `json:"player"`
+	Input       string             `json:"input"`
+	VolumeTopic string             `json:"volumeTopic,omitempty"`
+	PowerTopic  string             `json:"powerTopic,omitempty"`
+	Active      bool               `json:"active,omitempty"`
+	Awake       bool               `json:"awake,omitempty"`
+	VolumeAsk   *ReceiverVolumeAsk `json:"volumeAsk,omitempty"`
+	PowerAsk    *ReceiverPowerAsk  `json:"powerAsk,omitempty"`
+	InputAsk    *ReceiverInputAsk  `json:"inputAsk,omitempty"`
 }
 
-// withoutFlags removes Active and Awake before comparing sessions. A
-// change to either flag updates the existing session. Any other change
-// replaces the session.
+// ReceiverVolumeAsk asks for an absolute volume and mute. Level is in
+// the receiver's own scale, the scale of spec.volume.max. At is the
+// moment the ask was made, and a new At is a new ask.
+type ReceiverVolumeAsk struct {
+	Level float64 `json:"level"`
+	Mute  bool    `json:"mute,omitempty"`
+	At    string  `json:"at"`
+}
+
+// ReceiverPowerAsk asks the room to toggle, to come on, or to go off,
+// with the rules of togglePower (session_power.go).
+type ReceiverPowerAsk struct {
+	Action string `json:"action"`
+	At     string `json:"at"`
+}
+
+// ReceiverInputAsk asks the receiver for the session's input: ensure
+// for any press, and show for a home press, which also asks the TV to
+// show the session's Display (session_ensure.go).
+type ReceiverInputAsk struct {
+	Action string `json:"action"`
+	At     string `json:"at"`
+}
+
+// withoutFlags removes Active, Awake, and the asks before comparing
+// sessions. A change to any of them updates the existing session. Any
+// other change replaces the session.
 func (s ReceiverSession) withoutFlags() ReceiverSession {
 	s.Active = false
 	s.Awake = false
+	s.VolumeAsk, s.PowerAsk, s.InputAsk = nil, nil, nil
 	return s
 }
 

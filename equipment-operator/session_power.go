@@ -1,8 +1,9 @@
 package main
 
-// The room's power on the session's power topic: the toggle the remote's
-// power button publishes, and the on and off a TV remote's deterministic
-// power functions publish.
+// The room's power: the toggle the remote's power button asks for, and
+// the on and off a TV remote's deterministic power functions ask for.
+// The ask arrives on the session's power topic or in
+// status.session.powerAsk, and both reach the same rules.
 
 import (
 	"encoding/json"
@@ -36,7 +37,17 @@ import (
 // nothing.
 func (s *session) togglePower(payload []byte) {
 	var event powerAsk
-	if err := json.Unmarshal(payload, &event); err != nil || !powerActions[event.Action] {
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return
+	}
+	s.power(event.Action, "the power topic")
+}
+
+// power runs one power ask with the rules togglePower states. source
+// names where the ask came from, for the lines it writes. An action
+// other than toggle, on, or off does nothing.
+func (s *session) power(action, source string) {
+	if !powerActions[action] {
 		return
 	}
 	s.oneShot.Lock()
@@ -59,13 +70,13 @@ func (s *session) togglePower(payload []byte) {
 		if television == "" || power == "" {
 			return
 		}
-		s.toggleTelevisionOnly(event.Action, television, power)
+		s.toggleTelevisionOnly(source, action, television, power)
 		return
 	}
 	on, reports := roomIsOn(receiver, television, power)
-	trigger := "the power topic asks " + event.Action + ", and " + reports
+	trigger := source + " asks " + action + ", and " + reports
 	switch {
-	case !powerMoves(event.Action, on):
+	case !powerMoves(action, on):
 		s.log.printf("%s; sent nothing, because the room is already %s", trigger, onOff(on))
 	case on:
 		s.turnOff(trigger, receiver, television)
@@ -101,9 +112,9 @@ func powerMoves(action string, on bool) bool {
 // finds the receiver unreachable, and writes one line that says the
 // receiver got nothing. The spec's power field stays as it is, because
 // the receiver did nothing.
-func (s *session) toggleTelevisionOnly(action, television, power string) {
+func (s *session) toggleTelevisionOnly(source, action, television, power string) {
 	on, reports := roomIsOn(equipment.ZoneState{}, television, power)
-	trigger := "the power topic asks " + action + ", and " + reports
+	trigger := source + " asks " + action + ", and " + reports
 	switch {
 	case !powerMoves(action, on):
 		s.log.printf("%s; sent nothing, because the room is already %s", trigger, onOff(on))

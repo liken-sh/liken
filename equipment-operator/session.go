@@ -162,10 +162,18 @@ func newSession(ctx context.Context, receiver string, spec ReceiverSession, driv
 		connected:      make(chan struct{}),
 	}
 	// The will clears the mark, so an operator that dies hands the level
-	// back to the pods that were leaving it alone.
-	will := &busWill{Topic: ownerTopic(spec.VolumeTopic), Retained: true}
-	s.bus = newBus(busAddress, dial, "equipment-operator-"+receiver, will, s.claim, s.receive)
-	s.bus.Subscribe(spec.VolumeTopic)
+	// back to the pods that were leaving it alone. A session with no
+	// volume topic sets the level only from status.session.volumeAsk, so
+	// it claims nothing on the bus and names no will.
+	var will *busWill
+	var claim func(*Bus)
+	if spec.VolumeTopic != "" {
+		will, claim = &busWill{Topic: ownerTopic(spec.VolumeTopic), Retained: true}, s.claim
+	}
+	s.bus = newBus(busAddress, dial, "equipment-operator-"+receiver, will, claim, s.receive)
+	if spec.VolumeTopic != "" {
+		s.bus.Subscribe(spec.VolumeTopic)
+	}
 	// The remote's power button publishes its toggle on the power topic,
 	// and the session subscribes to it only when the media operator
 	// named one. An absent topic subscribes the session to nothing.
@@ -184,8 +192,14 @@ func newSession(ctx context.Context, receiver string, spec ReceiverSession, driv
 // runs no step, and only a later flip runs one.
 func (s *session) start(active, awake, adopting bool) {
 	s.mark(s.driver.State())
-	goWork(s.ctx, func() { s.bus.Run(s.ctx) })
-	goWork(s.ctx, func() { s.adopt(s.ctx) })
+	// A session that names no topic has nothing to read or publish on the
+	// bus, so it opens no broker connection.
+	if s.spec.VolumeTopic != "" || s.spec.PowerTopic != "" {
+		goWork(s.ctx, func() { s.bus.Run(s.ctx) })
+	}
+	if s.spec.VolumeTopic != "" {
+		goWork(s.ctx, func() { s.adopt(s.ctx) })
+	}
 	if !adopting {
 		s.flags(active, awake, true)
 		return
@@ -283,6 +297,10 @@ func (s *session) raise(flag *atomic.Bool, on bool) bool {
 // closes the connection. It never powers the receiver off, because the
 // room may still be listening to something else.
 func (s *session) stop() {
+	if s.spec.VolumeTopic == "" {
+		s.cancel()
+		return
+	}
 	s.publishOwner(nil)
 	s.log.printf("cleared the owner mark on %s", ownerTopic(s.spec.VolumeTopic))
 	time.Sleep(sessionStopGrace)
@@ -297,6 +315,10 @@ func (s *session) stop() {
 // broker drops the will; an operator that dies sends none, and the will
 // clears the mark.
 func (s *session) handOver() {
+	if s.spec.VolumeTopic == "" {
+		s.cancel()
+		return
+	}
 	s.log.printf("kept the owner mark on %s for the session that takes over", ownerTopic(s.spec.VolumeTopic))
 	s.cancel()
 }
@@ -473,9 +495,13 @@ func (s *session) report(reading equipment.ZoneState) {
 
 // observe is the session's half of every line the receiver sends. It
 // releases the waits the one-shots stand on, and it reports a position
-// the operator did not ask for, such as a knob turn.
+// the operator did not ask for, such as a knob turn, on the volume
+// topic when the session names one.
 func (s *session) observe(event equipment.Event) {
 	s.mark(event.State)
+	if s.spec.VolumeTopic == "" {
+		return
+	}
 	switch event.Field {
 	case equipment.EventVolume, equipment.EventMute:
 		if zone := mainZone(event.State); s.settle(zone) {
