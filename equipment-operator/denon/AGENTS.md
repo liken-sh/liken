@@ -137,5 +137,5 @@ trigger outputs (`TR`), the speaker presets beyond the number, and the
 first four over port 23, so there is no way to prove a parser for them
 here.
 
-Plan 04 holds the four families as future work. Plan 07 records the
-receiver's second interface, where the video controls answer.
+Plan 13 covers these families, the receiver's HTTP interfaces, where
+the video controls answer as remote-key presses, and the speaker setup.

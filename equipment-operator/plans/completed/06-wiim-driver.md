@@ -2,8 +2,8 @@
 
 Plan 06. Built and drilled on a home cluster on 2026-09-22. The
 driver, its status, discovery, the spec settings, and the message bus
-are built. The settings families the Amp will not confirm are [an open
-problem](../open-problems/the-wiim-settings-the-amp-will-not-confirm.md).
+are built. The settings families the Amp will not confirm are in
+[plan 13](../13-every-setting-a-receiver-exposes.md).
 
 ## The problem
 

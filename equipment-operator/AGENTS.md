@@ -17,6 +17,31 @@ for it.
 
 `make test` runs every check CI runs.
 
+## Every setting a receiver exposes
+
+Build every protocol block to this rule, which plan 13 brings the
+existing blocks up to. A block reads every family its receiver answers
+into status, and accepts in its spec every setting the operator can
+send. The operator learns what a model supports from the model, never
+from a table of models. Each field in a driver's family table states
+one tier:
+
+* **Confirmed**: the receiver reads the field back. The operator
+  compares, sends a field that differs, and confirms it.
+* **Sent once**: a documented setter with no read. The operator sends
+  it once for each change of the block, and `status.settledSettings`
+  keeps it from being sent again after a restart.
+* **Reported**: a read with no setter, in status only.
+* **Unsupported**: the model refuses it, and
+  `status.<protocol>.unsupported` names it.
+
+An undocumented setter is declarable only after a drill shows that the
+receiver reads it back. Families that mean the same thing take the
+same name in every block, such as `system`, `tone`, `eq`, and
+`speakers`. A command that acts once, such as a reboot or an alarm, is
+not a setting. A new protocol block follows the same rule. Plan 13
+holds the reasons and the family table.
+
 ## The Denon driver
 
 A protocol is a driver in its own directory. The first is `denon/`, and
