@@ -251,28 +251,29 @@ spec:
                             type: array
                             x-kubernetes-list-type: atomic
                             description: >-
-                              The spans in the file where the intro, the
-                              recap, the credits, the scene after the
-                              credits, and the preview are. A database can
-                              give several candidate spans for one kind, and
-                              the list carries every one. The display merges
-                              the candidates that overlap into one span, from
-                              the median start and the median end. It offers
-                              a skip control while the playhead is inside an
-                              intro or a recap. The credits count when they
-                              start in the second half of the item. A scene
-                              after them is a post-credits span, or the gap
-                              between two credits spans. Inside the credits
-                              before a scene, the display offers a skip to the
-                              scene. The up-next card rises at the start of
-                              the credits, or, when a scene follows them, at
-                              the later of the start of the last credits span
-                              and the end of the last scene. A card after a
-                              scene never rises later than it would with no
-                              marks, when three percent of the item or three
-                              minutes remain, whichever is less. An item with
-                              no marks plays with no skip control, and its
-                              card rises by the time that remains.
+                              The spans in the file where the intro, the recap,
+                              the credits, the scene after the credits, and the
+                              preview are. A database can give several candidate
+                              spans for one kind, and the list carries every
+                              one. The display merges the candidates that
+                              overlap into one span, from the median start and
+                              the median end. It offers a skip control while the
+                              playhead is inside an intro or a recap. With the
+                              OSD down, the control shows focused, and select
+                              skips. The credits count when they start in the
+                              second half of the item. A scene after them is a
+                              post-credits span, or the gap between two credits
+                              spans. Inside the credits before a scene, the
+                              display offers a skip to the scene, and select
+                              takes it only while the OSD is up. The up-next
+                              card rises at the start of the credits,
+                              or, when a scene follows them, at the later of the
+                              start of the last credits span and the end of the
+                              last scene. A card after a scene never rises later
+                              than it would with no marks. An item with no marks
+                              plays with no skip control, and its card rises by
+                              the time that remains, as the next field
+                              describes.
                             items:
                               type: object
                               required: [kind]
@@ -318,12 +319,16 @@ spec:
                   description: >-
                     The work that follows this run. The display offers
                     it on the scrubber as a chip, and as a card near the
-                    end of the run. When the item's marks place credits
-                    in its second half, the card rises at the start of the
-                    credits, or after the scene that follows them, as the
-                    marks field describes. Otherwise it rises when three
-                    percent of the item or three minutes remain, whichever
-                    is less. A select on the offer
+                    end of the run. The card stays up for five seconds,
+                    and the OSD shows it again after that. When the item's
+                    marks place credits in its second half, the card rises
+                    at the start of the credits, or after the scene that
+                    follows them, as the marks field describes. Otherwise
+                    a film's card rises when three percent of the item or
+                    three minutes remain, whichever is less, and an
+                    episode's card, for an item whose presentation names a
+                    series, rises when one and a half percent of the item
+                    or ninety seconds remain, whichever is less. A select on the offer
                     publishes the request below on the Player's commands
                     topic, where the program that wrote the Play reads
                     it back and creates the next Play. A Play with no

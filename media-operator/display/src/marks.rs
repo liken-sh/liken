@@ -180,14 +180,15 @@ impl Marks {
     /// starts, or a second credits span, which is how TheIntroDB states a
     /// scene in the gap.
     ///
-    /// The rise after a scene is capped at the time rule's point, so the card
-    /// never rises later than it does for an item with no marks. The offer is
+    /// The rise after a scene is capped at `latest`, the time rule's point for
+    /// the item, so the card never rises later than it does for an item with
+    /// no marks. The offer is
     /// how a person moves on, and a scene with no end, which IntroDB often
     /// sends, would otherwise put the rise at the end of the file, where the
     /// card never shows.
     ///
     /// Nothing here means the card rises by the time that remains.
-    pub fn credits(&self, duration: Option<f64>) -> Option<f64> {
+    pub fn credits(&self, duration: Option<f64>, latest: fn(f64) -> f64) -> Option<f64> {
         let duration = duration.filter(|duration| *duration > 0.0)?;
         let credits: Vec<Span> = self
             .spans(Kind::Credits, Some(duration))
@@ -207,7 +208,7 @@ impl Marks {
             .iter()
             .map(|scene| scene.end)
             .fold(last.start, f64::max);
-        Some(after.min(crate::upnext::time_rise(duration)))
+        Some(after.min(latest(duration)))
     }
 }
 
@@ -616,7 +617,11 @@ mod tests {
             ("a zero duration", episode(), Some(0.0), None),
         ];
         for (name, marks, duration, want) in cases {
-            assert_eq!(marks.credits(duration), want, "{name}");
+            assert_eq!(
+                marks.credits(duration, crate::upnext::time_rise),
+                want,
+                "{name}"
+            );
         }
     }
 }

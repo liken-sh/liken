@@ -10,6 +10,12 @@
 //! and never collides with the chip or the card at the right margin. It shows
 //! over the bare video for as long as the playhead is inside the span, on a
 //! fade of its own, and inside the OSD it is a focus stop.
+//!
+//! Over the bare video, the control for an intro or a recap draws focused,
+//! and a select takes it, so a viewer skips with one press of the remote.
+//! The skip to the post-credits scene draws unfocused there, because the card
+//! is up during the credits, and a viewer may press select to pause and read
+//! them.
 
 use iced::{Point, Rectangle, Size};
 use serde_json::json;
@@ -77,6 +83,12 @@ impl Skip {
         self.jump.is_some()
     }
 
+    /// Whether a select over the bare video takes the control: while it offers
+    /// an intro or a recap.
+    pub fn takes_select_outside(&self) -> bool {
+        self.jump.is_some_and(|jump| takes_select(jump.span.kind))
+    }
+
     /// Seek to the target, exactly, so the first frame after the intro, or
     /// the first frame of the scene, is the frame that shows. The control
     /// leaves at once, and stays down until the playhead leaves the span it
@@ -99,7 +111,8 @@ impl Skip {
     }
 
     /// Draw the control over the bare video, at its own fade. While the OSD is
-    /// up the OSD draws it, so this draws nothing then.
+    /// up the OSD draws it, so this draws nothing then. An intro or a recap
+    /// draws focused, because a select takes it.
     pub fn draw_outside(&self, brush: &mut Brush<'_>, osd_visible: bool) {
         if !self.draws_outside(osd_visible) {
             return;
@@ -107,7 +120,9 @@ impl Skip {
         let Some(kind) = self.kind else {
             return;
         };
-        brush.at_fade(self.fade().value(), |brush| pill(brush, kind, false));
+        brush.at_fade(self.fade().value(), |brush| {
+            pill(brush, kind, takes_select(kind))
+        });
     }
 
     /// Whether the control has anything to draw over the bare video, so the
@@ -115,6 +130,12 @@ impl Skip {
     pub fn draws_outside(&self, osd_visible: bool) -> bool {
         !osd_visible && self.kind.is_some() && self.fade().value() > 0.0
     }
+}
+
+/// The kinds a select over the bare video takes. The credits are not one,
+/// because the card is up then too.
+fn takes_select(kind: Kind) -> bool {
+    matches!(kind, Kind::Intro | Kind::Recap)
 }
 
 /// The words the control reads. The span's kind picks them: the marks offer a
@@ -250,6 +271,31 @@ mod tests {
                 json!("absolute+exact")
             ]]
         );
+    }
+
+    /// Over the bare video, the control for an intro or a recap takes a
+    /// select, and the skip to the scene after the credits does not.
+    #[test]
+    fn an_intro_or_a_recap_takes_a_select_outside_the_osd() {
+        let cases = [
+            (Kind::Intro, true),
+            (Kind::Recap, true),
+            (Kind::Credits, false),
+        ];
+        for (kind, takes) in cases {
+            let mut skip = Skip::default();
+            assert!(!skip.takes_select_outside(), "{kind:?}");
+            skip.on_position(Some(Jump {
+                span: Span {
+                    kind,
+                    ..intro().span
+                },
+                ..intro()
+            }));
+            assert_eq!(skip.takes_select_outside(), takes, "{kind:?}");
+            skip.take();
+            assert!(!skip.takes_select_outside(), "{kind:?}");
+        }
     }
 
     /// Once the playhead has left the span it skipped, a seek back into it

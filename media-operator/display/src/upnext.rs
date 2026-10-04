@@ -55,6 +55,17 @@ pub(crate) fn time_rise(duration: f64) -> f64 {
     duration - (duration * RISE_PERCENT / 100.0).min(RISE_SECONDS)
 }
 
+/// An episode with no credits mark raises its card at half the time rule,
+/// because an episode is short and three percent of it ends too early.
+const SERIES_RISE_PERCENT: f64 = RISE_PERCENT / 2.0;
+const SERIES_RISE_SECONDS: f64 = RISE_SECONDS / 2.0;
+
+/// The second at which an episode's card rises: the length less the smaller
+/// of the two series amounts.
+pub(crate) fn series_rise(duration: f64) -> f64 {
+    duration - (duration * SERIES_RISE_PERCENT / 100.0).min(SERIES_RISE_SECONDS)
+}
+
 /// The card draws at this fraction of its alpha while it waits for the next
 /// work to start.
 const WAIT_FADE: f32 = 0.6;
@@ -171,14 +182,14 @@ impl UpNext {
     /// property and the display runs no timer to watch for the crossing. The
     /// rise holds after it happens, so a seek back does not take the card down.
     ///
-    /// `credits` is where the item's marks place the rise: the start of the
-    /// credits in its second half, or the point after a scene that follows
-    /// them. `Marks::credits` states the rule. The time that remains decides
-    /// only for an item with no such mark.
+    /// `rise` is the second the item states for the card: where its marks
+    /// place the credits, which `Marks::credits` states, or the item's time
+    /// rule, `time_rise` for a film and `series_rise` for an episode. With
+    /// no rise the card never rises.
     ///
     /// It answers whether the card rose, because that is the one push of this
     /// property that draws anything.
-    pub fn on_percent(&mut self, value: Option<f64>, film: &Film, credits: Option<f64>) -> bool {
+    pub fn on_percent(&mut self, value: Option<f64>, film: &Film, rise: Option<f64>) -> bool {
         let Some(value) = value else {
             return false;
         };
@@ -190,14 +201,10 @@ impl UpNext {
         let Some(duration) = film.duration.filter(|duration| *duration > 0.0) else {
             return false;
         };
-        let reached = match credits {
-            Some(start) => duration * value / 100.0 >= start,
-            None => {
-                let remaining = duration * (100.0 - value) / 100.0;
-                remaining <= (duration * RISE_PERCENT / 100.0).min(RISE_SECONDS)
-            }
+        let Some(rise) = rise else {
+            return false;
         };
-        if !reached {
+        if duration * value / 100.0 < rise {
             return false;
         }
         self.risen = true;
@@ -486,7 +493,7 @@ mod tests {
     fn risen() -> UpNext {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
-        assert!(upnext.on_percent(Some(98.0), &film(100.0), None));
+        assert!(upnext.on_percent(Some(98.0), &film(100.0), Some(97.0)));
         upnext
     }
 
@@ -616,38 +623,54 @@ mod tests {
 
     /// The rule takes whichever of the two amounts leaves less time, so a four
     /// hour film raises the card three minutes from its end and not at three
-    /// percent of its length.
+    /// percent of its length, and a short film raises it at 97 percent.
     #[test]
-    fn a_long_film_raises_the_card_three_minutes_from_its_end() {
-        let long = film(4.0 * 60.0 * 60.0);
+    fn a_film_raises_the_card_by_the_time_rule() {
+        let cases = [
+            ("a 100 second film", 100.0, 97.0),
+            ("a 100 minute film", 6000.0, 5820.0),
+            ("a four hour film", 14400.0, 14220.0),
+        ];
+        for (name, duration, want) in cases {
+            assert!((time_rise(duration) - want).abs() < 1e-9, "{name}");
+        }
+    }
+
+    /// The card rises when the playhead reaches the second it is given.
+    #[test]
+    fn the_card_rises_at_its_second() {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
-
-        assert!(!upnext.on_percent(Some(97.0), &long, None));
+        assert!(!upnext.on_percent(Some(96.0), &film(100.0), Some(97.0)));
         assert!(!upnext.showing_card());
-        assert!(upnext.on_percent(Some(98.75), &long, None));
+        assert!(upnext.on_percent(Some(97.0), &film(100.0), Some(97.0)));
         assert!(upnext.showing_card());
     }
 
+    /// An episode's card rises at half the time rule: when one and a half
+    /// percent of it or ninety seconds remain, whichever is less.
     #[test]
-    fn a_short_film_raises_the_card_at_ninety_seven_percent() {
-        let short = film(100.0);
-        let mut upnext = UpNext::default();
-        upnext.receive(OFFER);
-
-        assert!(!upnext.on_percent(Some(96.0), &short, None));
-        assert!(upnext.on_percent(Some(97.0), &short, None));
+    fn an_episode_raises_the_card_at_half_the_time_rule() {
+        let cases = [
+            ("a 22 minute episode", 1320.0, 1300.2),
+            ("a 100 minute episode", 6000.0, 5910.0),
+            ("a two hour special", 7200.0, 7110.0),
+        ];
+        for (name, duration, want) in cases {
+            assert!((series_rise(duration) - want).abs() < 1e-9, "{name}");
+        }
     }
 
-    /// A work with no length, and a push that carries no number, raise
-    /// nothing.
+    /// A work with no length, a push that carries no number, and a position
+    /// with no rise raise nothing.
     #[test]
     fn a_work_with_no_length_never_raises_the_card() {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
-        assert!(!upnext.on_percent(Some(99.0), &Film::default(), None));
-        assert!(!upnext.on_percent(Some(99.0), &film(0.0), None));
-        assert!(!upnext.on_percent(None, &film(100.0), None));
+        assert!(!upnext.on_percent(Some(99.0), &Film::default(), Some(97.0)));
+        assert!(!upnext.on_percent(Some(99.0), &film(0.0), Some(97.0)));
+        assert!(!upnext.on_percent(None, &film(100.0), Some(97.0)));
+        assert!(!upnext.on_percent(Some(99.0), &film(100.0), None));
         assert!(!upnext.showing_card());
     }
 
@@ -657,7 +680,7 @@ mod tests {
     fn the_rise_holds_and_arms_one_hide_window() {
         let mut upnext = risen();
         assert_eq!(upnext.take_hide(), Hide::Arm);
-        assert!(!upnext.on_percent(Some(20.0), &film(100.0), None));
+        assert!(!upnext.on_percent(Some(20.0), &film(100.0), Some(97.0)));
         assert!(upnext.showing_card());
         assert_eq!(upnext.take_hide(), Hide::Keep);
     }
@@ -698,7 +721,7 @@ mod tests {
     #[test]
     fn a_position_with_no_offer_raises_nothing() {
         let mut upnext = UpNext::default();
-        assert!(!upnext.on_percent(Some(99.0), &film(100.0), None));
+        assert!(!upnext.on_percent(Some(99.0), &film(100.0), Some(97.0)));
     }
 
     #[test]
@@ -816,7 +839,7 @@ mod tests {
         upnext.receive(OFFER);
         assert!(!upnext.draws_outside(false));
 
-        assert!(upnext.on_percent(Some(98.0), &film(100.0), None));
+        assert!(upnext.on_percent(Some(98.0), &film(100.0), Some(97.0)));
         while upnext.fade().running() {
             upnext.fade_mut().step();
         }

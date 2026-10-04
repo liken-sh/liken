@@ -412,8 +412,9 @@ impl Display {
             return self.own_clock(name, value);
         }
         if name == "time-pos" {
-            let credits = self.presentation.marks().credits(self.film.duration);
-            let rose = self.upnext.on_percent(self.percent(), &self.film, credits);
+            let rose = self
+                .upnext
+                .on_percent(self.percent(), &self.film, self.rise());
             if rose {
                 self.redraw();
             }
@@ -546,6 +547,21 @@ impl Display {
             && self.presentation.trickplay().is_some())
         .then(|| self.scrubber.cursor_time(&self.film))
         .flatten()
+    }
+
+    /// The second the up-next card rises at. Every item takes the start of
+    /// its credits when its marks place them. With no credits mark, the time
+    /// rule decides: the series rule for an episode, and the film rule for
+    /// anything else. The same rule caps a wait for a scene after the
+    /// credits.
+    fn rise(&self) -> Option<f64> {
+        let latest = match self.presentation.series() {
+            Some(_) => upnext::series_rise,
+            None => upnext::time_rise,
+        };
+        let duration = self.film.duration.filter(|duration| *duration > 0.0)?;
+        let credits = self.presentation.marks().credits(Some(duration), latest);
+        Some(credits.unwrap_or_else(|| latest(duration)))
     }
 
     /// Whether the cast row shows: while the OSD is up and the playhead
@@ -1767,16 +1783,65 @@ mod tests {
     }
 
     /// Credits in the second half raise the card at their start, earlier than
-    /// the time that remains would.
+    /// the time that remains would, for a film and for an episode.
     #[tokio::test]
     async fn the_credits_raise_the_card_at_their_start() {
+        credits_raise_the_card(MARKED);
+    }
+
+    #[tokio::test]
+    async fn the_credits_raise_an_episodes_card_at_their_start() {
+        credits_raise_the_card(
+            r#"{"series":"Harbor Lights","season":2,"episode":4,
+                "marks":[{"kind":"credits","start":5400.0,"end":5900.0}]}"#,
+        );
+    }
+
+    fn credits_raise_the_card(item: &str) {
         let (mut display, _) = display();
-        let _ = display.update(present(MARKED));
+        let _ = display.update(present(item));
         let _ = display.update(block("next", OFFER));
         let _ = display.update(property("time-pos", json!(5399.0)));
         assert_eq!(display.card.armed, None);
 
         let _ = display.update(property("time-pos", json!(5400.0)));
+        assert!(display.card.armed.is_some());
+        assert!(display.upnext.showing_card());
+    }
+
+    /// An episode caps its wait for the scene after the credits at the series
+    /// rule, ninety seconds from the end, where a film caps it at three
+    /// minutes. So the card waits for a scene that ends in the last three
+    /// minutes of an episode.
+    #[tokio::test]
+    async fn an_episodes_card_waits_for_a_late_scene() {
+        let (mut display, _) = display();
+        let _ = display.update(present(
+            r#"{"series":"Harbor Lights","season":2,"episode":4,"marks":[
+                {"kind":"credits","start":5700.0},
+                {"kind":"post-credits","start":5850.0,"end":5900.0}]}"#,
+        ));
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("time-pos", json!(5899.0)));
+        assert_eq!(display.card.armed, None);
+
+        let _ = display.update(property("time-pos", json!(5900.0)));
+        assert!(display.upnext.showing_card());
+    }
+
+    /// An episode with no credits mark raises the card at half the time
+    /// rule, ninety seconds from the end of a 100 minute file.
+    #[tokio::test]
+    async fn an_unmarked_episode_raises_the_card_at_half_the_time_rule() {
+        let (mut display, _) = display();
+        let _ = display.update(present(
+            r#"{"series":"Harbor Lights","season":2,"episode":4}"#,
+        ));
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("time-pos", json!(5909.0)));
+        assert_eq!(display.card.armed, None);
+
+        let _ = display.update(property("time-pos", json!(5910.0)));
         assert!(display.card.armed.is_some());
         assert!(display.upnext.showing_card());
     }

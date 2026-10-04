@@ -111,9 +111,10 @@ pub const IDLE_HIDE: Duration = Duration::from_secs(4);
 
 /// The up-next card rises on its own near the end of a work, not on a press,
 /// so a viewer may not be looking when it arrives. It stays up for this
-/// window, long enough to notice it, read the title, and reach for the
-/// remote, before it fades.
-pub const CARD_HIDE: Duration = Duration::from_secs(10);
+/// window, long enough to notice it and read the title, and then fades so it
+/// does not cover the end of the work. A press that raises the OSD after
+/// that shows the card again.
+pub const CARD_HIDE: Duration = Duration::from_secs(5);
 
 /// The type scale, in canvas pixels. The sizes are large enough to read from
 /// a couch at 1080. Each number is a line box, the measure the display

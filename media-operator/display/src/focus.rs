@@ -326,9 +326,10 @@ impl Focus {
     }
 
     /// select carries the main action and play/pause on one button. It acts on
-    /// an open chooser, the focused strip control, or a fine scan in flight, and
-    /// otherwise toggles play/pause. So the button confirms a choice when the
-    /// display has one to make, and plays or pauses the film when it does not.
+    /// an open chooser, the focused strip control, a fine scan in flight, or
+    /// the skip control the bare video shows focused, and otherwise toggles
+    /// play/pause. So the button confirms a choice when the display has one to
+    /// make, and plays or pauses the film when it does not.
     fn select(&mut self, parts: &mut Parts<'_>) -> Vec<Command> {
         if parts.strip.capturing().is_some() {
             return parts.strip.handle(Action::Select, parts.film);
@@ -359,6 +360,11 @@ impl Focus {
             if self.focused == Some(Stop::Fine) && parts.scrubber.scanning() {
                 return parts.scrubber.commit();
             }
+        }
+        // Over the bare video the control for an intro or a recap draws
+        // focused, so the select takes it and the display stays down.
+        if !self.summoned && parts.skip.takes_select_outside() {
+            return parts.skip.take();
         }
         // Toggle mpv's pause. The pause observer summons the display, so a
         // pause from select needs no separate summon. The no-osd prefix
@@ -954,7 +960,11 @@ mod tests {
     fn a_select_on_the_risen_card_asks_for_the_next_work() {
         let mut display = Display::new("{}");
         display.offer();
-        assert!(display.upnext.on_percent(Some(98.0), &display.film, None));
+        assert!(
+            display
+                .upnext
+                .on_percent(Some(98.0), &display.film, Some(0.0))
+        );
         display.summon();
         display.press(Action::Up);
 
@@ -1054,14 +1064,38 @@ mod tests {
         }
     }
 
-    /// A select at the bare video plays or pauses, as it does everywhere else,
-    /// so the control never changes what the button does before it shows
-    /// focus.
+    /// Over the bare video, the control for an intro or a recap draws
+    /// focused, so a select takes it in one press and the display stays down.
     #[test]
-    fn a_select_at_the_bare_video_pauses_during_the_intro() {
+    fn a_select_at_the_bare_video_skips_an_intro_or_a_recap() {
+        for kind in [Kind::Intro, Kind::Recap] {
+            let mut display = Display::new("{}");
+            display.skip.on_position(Some(Jump {
+                span: Span { kind, ..INTRO.span },
+                ..INTRO
+            }));
+            assert_eq!(display.press(Action::Select), skip_to_the_end(), "{kind:?}");
+            assert!(!display.skip.available(), "{kind:?}");
+            assert!(!display.focus.visible(), "{kind:?}");
+        }
+    }
+
+    /// The skip to the scene after the credits draws unfocused over the bare
+    /// video, so a select there pauses. The card is up then too, and a viewer
+    /// may press select to stop and read the credits.
+    #[test]
+    fn a_select_at_the_bare_video_pauses_in_the_credits() {
         let mut display = Display::new("{}");
-        display.intro();
+        display.skip.on_position(Some(Jump {
+            span: Span {
+                kind: Kind::Credits,
+                start: 5300.0,
+                end: 5600.0,
+            },
+            to: 5600.0,
+        }));
         assert_eq!(display.press(Action::Select), pause_toggle());
+        assert!(display.skip.available());
     }
 
     /// A pause lands below the skip control, so the select that resumes the
