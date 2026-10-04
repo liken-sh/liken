@@ -62,7 +62,16 @@ func (w *volumeWriter) temporary(target string) string {
 // renamed onto the target. A crash leaves a stray temporary and never a
 // half-written file. The rename lands on a target that may exist, which is
 // how an edited .nfo replaces the one before it.
+//
+// A target that already holds these bytes stays as it is. Jellyfin's library
+// monitor reads every rename under a library as a change, and refreshes the
+// nearest item it holds, so a write that says nothing new would still start
+// a refresh. A target the read cannot open
+// takes the write, which reports the failure the read found.
 func (w *volumeWriter) write(target string, data []byte) error {
+	if held, err := readFileState(target); err == nil && held.holds(data) {
+		return nil
+	}
 	temporary := w.temporary(target)
 	if err := w.stage(temporary, data); err != nil {
 		return err

@@ -92,7 +92,25 @@ func (c *Catalog) workItems(ctx context.Context, fact, library string, now, refr
 // The whole list goes onto the volume in one write: a temporary and a rename,
 // so a worker that reads the list while the next one lands reads the whole of
 // one list or the whole of the other.
+//
+// Every library Job writes the list, and each list carries its own time, so
+// a list of the same videos would differ from the one before it in the time
+// alone. The list on the volume stays where it names the same videos, with
+// the same sizes and lengths, in the same order. Jellyfin's library monitor
+// reads a rename under the library's root as a change to the whole library,
+// because the root is the nearest item it holds above .liken, and a rewrite
+// on every Job starts a refresh of the whole library each time.
+//
+// The earlier time still serves the worker. The catalog takes a video out of
+// the gap for the window of an attempt it has read, so a list of the same
+// videos means the catalog read no attempt on them since the earlier list.
+// An attempt it has not read yet, made after the earlier list, makes the
+// worker pass over the video, which is the rule the time exists for.
 func (w *volumeWriter) writeWorkList(root, library, fact string, items []workItem) error {
+	if held, there, err := heldWorkList(root, library, fact); err == nil && there &&
+		slices.EqualFunc(held, items, workItem.sameVideo) {
+		return nil
+	}
 	var lines []byte
 	for _, item := range items {
 		line, err := json.Marshal(item)
@@ -103,6 +121,22 @@ func (w *volumeWriter) writeWorkList(root, library, fact string, items []workIte
 	}
 	path := workListPath(root, library, fact)
 	return w.writeInto(filepath.Dir(path), filepath.Base(path), lines)
+}
+
+// Whether two items name the same file of the same length, whatever the time
+// of the list each one came from.
+func (i workItem) sameVideo(other workItem) bool {
+	return i.Path == other.Path && i.Size == other.Size && i.DurationMs == other.DurationMs
+}
+
+// The list on the volume, and whether there is one. An empty list that is
+// there is a list, so a Job that finds no gap still leaves one.
+func heldWorkList(root, library, fact string) ([]workItem, bool, error) {
+	if _, err := os.Stat(workListPath(root, library, fact)); err != nil {
+		return nil, false, err
+	}
+	items, err := readWorkList(root, library, fact)
+	return items, err == nil, err
 }
 
 // One fact's list as the last library Job wrote it. A root with no list reads

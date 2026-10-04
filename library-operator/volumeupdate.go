@@ -50,9 +50,17 @@ func (s fileState) same(other fileState) bool {
 	return s.exists == other.exists && bytes.Equal(s.data, other.data)
 }
 
+// Whether the file is there and holds exactly these bytes, which is when a
+// write of them would change nothing but the file's modification time.
+func (s fileState) holds(data []byte) bool {
+	return s.exists && bytes.Equal(s.data, data)
+}
+
 // The read-change-write door. change takes the file's bytes, nil where there
 // is no file, and answers the bytes to land, or nil to leave the file as it
-// is. The answer is the bytes the file holds when the door is done.
+// is. A change that answers the bytes the file already holds leaves it as it
+// is too, for the reason write gives. The answer is the bytes the file holds
+// when the door is done.
 func (w *volumeWriter) update(target string, change func(current []byte) ([]byte, error)) ([]byte, error) {
 	current, err := readFileState(target)
 	if err != nil {
@@ -63,7 +71,7 @@ func (w *volumeWriter) update(target string, change func(current []byte) ([]byte
 		if err != nil {
 			return nil, err
 		}
-		if next == nil {
+		if next == nil || current.holds(next) {
 			return current.data, nil
 		}
 		temporary := w.temporary(target)
