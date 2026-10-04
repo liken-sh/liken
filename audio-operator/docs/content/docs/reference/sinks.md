@@ -220,7 +220,7 @@ The last value the operator read for each setting. The operator reads the card's
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusobserved--volume"></span>`volume` | integer | no | The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, which is the level it will run at, and nothing until a level is declared. |
+| <span id="statusobserved--volume"></span>`volume` | integer | no | The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. A suspended node reports no current level of its own: PipeWire applies a write to it without announcing it, and the node prints no level or the level it last ran at. So a suspended endpoint reports the level the operator last wrote to it, from the spec or a volume ask, which is the level it will run at. With no such write since the node last ran, it reports what the node prints. |
 | <span id="statusobserved--mute"></span>`mute` | boolean | no | Whether the endpoint is silent, on the same terms as volume. |
 | <span id="statusobserved--codec"></span>`codec` | string | no | The codec a Bluetooth speaker plays with now. |
 | <span id="statusobserved--controls"></span>`controls` | map[string]string | no | The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value. |

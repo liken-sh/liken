@@ -61,10 +61,12 @@ type endpointFacts struct {
 	// and on a sink the declaration holds no node for.
 	Layout *layoutState
 
-	// The level this operator last wrote to the node that stands,
-	// and nil when it wrote none. A suspended node reports no level
-	// and PipeWire 1.4.2 announces no change to one, so this is what
-	// observed reports for an idle endpoint.
+	// The level this operator last wrote to the node that stands, from
+	// the spec or an ask, and nil when it wrote none or the node ran
+	// and reported its own level since. PipeWire 1.4.2 announces no
+	// write to a suspended node, which prints no level or the level it
+	// last ran at, so this is what observed reports for an idle
+	// endpoint.
 	Written *levelWrite
 }
 
@@ -95,6 +97,16 @@ func (f endpointFacts) absoluteRoute() (int, pwRoute, bool) {
 		return 0, pwRoute{}, false
 	}
 	return f.Speaker.Sink.Device, route, true
+}
+
+// suspended reports whether the level the endpoint prints can be
+// stale: a software gain on a suspended node. A speaker's Route is the
+// speaker's own report, current whatever the node's state.
+func (f endpointFacts) suspended() bool {
+	if _, _, absolute := f.absoluteRoute(); absolute {
+		return false
+	}
+	return f.HasNode && f.Node.Suspended
 }
 
 // level is the volume and the mute the endpoint reads now, from
@@ -260,19 +272,28 @@ func (f endpointFacts) format() *EndpointFormat {
 // observed is the last value the operator read for each setting, and
 // nothing at all when it read none.
 //
-// A suspended node reports no level, and a Props write to one is
-// applied and kept but never announced (spa/plugins/audioconvert/
-// audioadapter.c in pipewire 1.4.2 compares parameter flags and not
-// the serial, so the cached copy every reader sees stays stale). So
-// an idle endpoint reports the level this operator last wrote, which
-// is the level the node will run at, and the graph takes over once
-// the node runs.
+// A Props write to a suspended node is applied and kept but never
+// announced (spa/plugins/audioconvert/audioadapter.c in pipewire 1.4.2
+// compares parameter flags and not the serial, so the cached copy
+// every reader sees stays stale). A suspended node prints no level at
+// all, as on liken-1, or the level it last ran at, as on stick-1. So a
+// suspended or levelless node reports the level this operator last
+// wrote, which is the level the node will run at, and the graph's
+// value only for a part the operator did not write. A running node
+// reports the graph.
 func (f endpointFacts) observed() *EndpointObserved {
 	values := &EndpointObserved{Controls: f.Values}
-	if volume, mute, known := f.level(); known {
+	volume, mute, known := f.level()
+	if known {
 		values.Volume, values.Mute = &volume, &mute
-	} else if f.HasNode && f.Written != nil {
-		values.Volume, values.Mute = f.Written.Volume, f.Written.Mute
+	}
+	if f.HasNode && f.Written != nil && (!known || f.suspended()) {
+		if f.Written.Volume != nil {
+			values.Volume = f.Written.Volume
+		}
+		if f.Written.Mute != nil {
+			values.Mute = f.Written.Mute
+		}
 	}
 	if f.Speaker != nil && f.Speaker.HasSink {
 		values.Codec = f.Speaker.Sink.Codec

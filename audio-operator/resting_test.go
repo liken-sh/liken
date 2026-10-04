@@ -36,6 +36,14 @@ func suspendedSink() endpointFacts {
 	return facts
 }
 
+// staleSink is an endpoint whose node is suspended and still prints
+// the unity level it last ran at.
+func staleSink() endpointFacts {
+	facts := alsaSink(100, false)
+	facts.Node.Suspended = true
+	return facts
+}
+
 // withControls gives an endpoint the card's controls and the value
 // each one reads now.
 func withControls(facts endpointFacts, controls []control, values map[string]string) endpointFacts {
@@ -261,6 +269,16 @@ func TestPlannedWrites(t *testing.T) {
 			spec:  declaration{Volume: pointerTo(40)},
 			facts: alsaSink(50, false),
 			found: true,
+		},
+		{
+			// A suspended node can print the level it last ran at, so
+			// a level it prints is not proof that it holds the
+			// declaration.
+			name:  "a changed declaration on a suspended node that prints it",
+			spec:  declaration{Volume: pointerTo(100)},
+			facts: staleSink(),
+			held:  &levelWrite{Volume: pointerTo(70)},
+			level: &levelWrite{Volume: pointerTo(100)},
 		},
 		{
 			name:  "no declaration on a suspended node",

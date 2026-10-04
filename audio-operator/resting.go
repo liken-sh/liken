@@ -138,6 +138,16 @@ func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading
 		record.held = nil
 		e.nodes[name] = record
 	}
+	// A node that runs reports its own level, which is newer than any
+	// write, so the record of the written level is cleared. Without
+	// this, a node that later suspends would report an older write
+	// over the level it last ran at.
+	if _, _, known := reading.facts.level(); known && !reading.facts.suspended() && writes.Level == nil {
+		if record, seen := e.nodes[name]; seen {
+			record.written = nil
+			e.nodes[name] = record
+		}
+	}
 	return err
 }
 
@@ -198,12 +208,12 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 		// The first pass after a start writes nothing. The node stood
 		// before the start, and its level can be an ask or a press of a
 		// speaker's button that the declaration does not know. A
-		// suspended node also reports no level, and PipeWire 1.4.2
+		// suspended node also reports no current level, and PipeWire 1.4.2
 		// applies a Props write to one and announces no change, so the
 		// operator cannot read whether it holds the declaration. The
 		// pass records the declaration as the one the node holds.
 		changed := node.New || (!node.Found && (node.Held == nil || !node.Held.same(want)))
-		holds := known && (want.Volume == nil || *want.Volume == volume) && (want.Mute == nil || *want.Mute == mute)
+		holds := known && !facts.suspended() && (want.Volume == nil || *want.Volume == volume) && (want.Mute == nil || *want.Mute == mute)
 		if changed && !holds {
 			writes.Level = &want
 		}

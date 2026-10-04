@@ -387,7 +387,7 @@ func TestObservedIsAbsentWhileTheNodeReportsNoLevels(t *testing.T) {
 	}
 }
 
-// A suspended node reports no level, and PipeWire announces no
+// A suspended node can report no level, and PipeWire announces no
 // change to one, so an idle endpoint reports the level the operator
 // last wrote, which is the level the node will run at.
 func TestObservedIsTheLastWriteWhileTheNodeReportsNoLevels(t *testing.T) {
@@ -402,6 +402,36 @@ func TestObservedIsTheLastWriteWhileTheNodeReportsNoLevels(t *testing.T) {
 	}
 	if status.Observed != nil && status.Observed.Volume != nil {
 		t.Errorf("observed volume = %d, want none: the write carried no volume", *status.Observed.Volume)
+	}
+}
+
+// A suspended node can keep printing the channelVolumes it last ran
+// at, after a write PipeWire applied and did not announce. So a
+// suspended node reports the level the operator last wrote, and the
+// graph's value only when the operator wrote none. A running node
+// reports the graph's value.
+func TestObservedOfANodeThatPrintsAStaleLevel(t *testing.T) {
+	stale := pwNode{ID: 7, Name: sinkNodeName(0, 0), Volumes: []float64{1, 1}, Suspended: true}
+	running := pwNode{ID: 7, Name: sinkNodeName(0, 0), Volumes: []float64{0.5, 0.5}}
+	written := &levelWrite{Volume: pointerTo(70), Mute: pointerTo(false)}
+	cases := []struct {
+		name    string
+		node    pwNode
+		written *levelWrite
+		volume  int
+	}{
+		{name: "a suspended node the operator wrote", node: stale, written: written, volume: 70},
+		{name: "a suspended node the operator did not write", node: stale, volume: 100},
+		{name: "a running node", node: running, written: written, volume: 50},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			facts := endpointFacts{HasNode: true, Node: c.node, Written: c.written}
+			observed := facts.status(EndpointStatus{}, factsTime).Observed
+			if observed == nil || observed.Volume == nil || *observed.Volume != c.volume {
+				t.Errorf("observed = %+v, want %d percent", observed, c.volume)
+			}
+		})
 	}
 }
 

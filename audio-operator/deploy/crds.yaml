@@ -323,7 +323,7 @@ spec:
                   properties:
                     volume:
                       type: integer
-                      description: "The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, which is the level it will run at, and nothing until a level is declared."
+                      description: "The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. A suspended node reports no current level of its own: PipeWire applies a write to it without announcing it, and the node prints no level or the level it last ran at. So a suspended endpoint reports the level the operator last wrote to it, from the spec or a volume ask, which is the level it will run at. With no such write since the node last ran, it reports what the node prints."
                     mute:
                       type: boolean
                       description: "Whether the endpoint is silent, on the same terms as volume."

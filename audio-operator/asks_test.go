@@ -153,6 +153,70 @@ func TestAnIdleNodeReportsTheLevelAnAskSet(t *testing.T) {
 	}
 }
 
+// staleGraph is the lab graph with the analog jack's node suspended
+// at the level it last ran at, which it keeps printing after a write.
+func staleGraph(level float64) pwGraph {
+	graph := labGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	node := graph.Nodes[address]
+	node.Volumes, node.Suspended = []float64{level, level}, true
+	graph.Nodes[address] = node
+	return graph
+}
+
+// runningAt is the lab graph with the analog jack's node running at a
+// level.
+func runningAt(level float64) pwGraph {
+	graph := labGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	node := graph.Nodes[address]
+	node.Volumes = []float64{level, level}
+	graph.Nodes[address] = node
+	return graph
+}
+
+// A suspended node that keeps printing the level it last ran at
+// reports the level an ask set, through the passes that follow. Once
+// the node runs, it reports its own level, and when it suspends again
+// it reports the level it last ran at, not the older ask.
+func TestASuspendedNodeThatPrintsAStaleLevelReportsTheAsk(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := startedControl(t, api, record, staleGraph(1))
+	ctx := context.Background()
+	observed := func() int {
+		t.Helper()
+		volume := api.sinks[testAnalogName].Status.Observed.Volume
+		if volume == nil {
+			t.Fatal("observed reports no volume")
+		}
+		return *volume
+	}
+
+	ask(api, testAnalogName, 70, firstAsk)
+	control.applyAsks(ctx)
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), staleGraph(1), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := observed(); got != 70 {
+		t.Errorf("after the ask, the suspended node reports %d percent, want 70", got)
+	}
+
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), runningAt(0.4), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := observed(); got != 40 {
+		t.Errorf("the running node reports %d percent, want its own 40", got)
+	}
+
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), staleGraph(0.4), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := observed(); got != 40 {
+		t.Errorf("suspended again, the node reports %d percent, want the 40 it ran at", got)
+	}
+}
+
 // The loop applies an ask as it arrives. The settle window holds back
 // the pass, and an ask that waited for it would apply 1.5 s late.
 // The level goes into status.observed at once, well inside the window,

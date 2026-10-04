@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -121,6 +122,29 @@ func TestParseGraphReadsTheFactsAStatusReports(t *testing.T) {
 	}
 	if suspended.Mute {
 		t.Error("a suspended node's mute was read from the ALSA Props block")
+	}
+}
+
+// A node's info carries its state, and a suspended node can still
+// print the channelVolumes it last ran at. The state is what says the
+// level is not current.
+func TestParseGraphReadsWhetherANodeIsSuspended(t *testing.T) {
+	node := func(id int, pcm, state string) string {
+		return `{"id": ` + strconv.Itoa(id) + `, "type": "PipeWire:Interface:Node", "info": {"state": "` + state + `",
+			"props": {"media.class": "Audio/Sink", "node.name": "liken.audio.card0-pcm` + pcm + `",
+				"liken.audio.card": "0", "liken.audio.pcm": "` + pcm + `"},
+			"params": {"Props": [{"mute": false, "channelVolumes": [1.0, 1.0]}]}}}`
+	}
+	graph, err := parseGraph([]byte("[" + node(40, "3", "suspended") + "," + node(41, "7", "running") + "]"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspended := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 3}, Direction: directionSink}]
+	if !suspended.Suspended || len(suspended.Volumes) != 2 {
+		t.Errorf("the suspended node reads as %+v", suspended)
+	}
+	if running := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 7}, Direction: directionSink}]; running.Suspended {
+		t.Errorf("the running node reads as suspended: %+v", running)
 	}
 }
 

@@ -91,12 +91,17 @@ type nodeAddress struct {
 // pwNode is what one audio node reports. Every field here is a fact
 // the endpoint's status carries: the name a consumer targets, the
 // gain and mute PipeWire applies, and the format the node negotiated.
+//
+// Suspended is the node's state in its info block. A suspended node's
+// Props are not current: a write to one is applied and not announced,
+// so the node can print the levels it last ran at (sinkstatus.go).
 type pwNode struct {
-	ID      int
-	Name    string
-	Mute    bool
-	Volumes []float64
-	Format  pwFormat
+	ID        int
+	Name      string
+	Mute      bool
+	Volumes   []float64
+	Format    pwFormat
+	Suspended bool
 }
 
 // pwFormat is the format a node negotiated and runs at now. The
@@ -137,15 +142,16 @@ type pwGraph struct {
 // a write to it goes over AVRCP, where a write to the node's gain
 // stays in software.
 type bluezSink struct {
-	Node    string
-	NodeID  int
-	Codec   string
-	Mute    bool
-	Volumes []float64
-	Format  pwFormat
-	Device  int
-	Codecs  []bluezCodec
-	Route   *pwRoute
+	Node      string
+	NodeID    int
+	Codec     string
+	Mute      bool
+	Volumes   []float64
+	Format    pwFormat
+	Suspended bool
+	Device    int
+	Codecs    []bluezCodec
+	Route     *pwRoute
 }
 
 // bluez5Device is the part of a bluez5 Device object this operator
@@ -214,8 +220,10 @@ type pwObject struct {
 // pwInfo is an object's properties and parameters.
 //
 // A link's info block holds the two node ids it joins, and the block
-// of every other object holds neither.
+// of every other object holds neither. A node's block holds its state:
+// creating, suspended, idle, running, or error.
 type pwInfo struct {
+	State        string                     `json:"state"`
 	Props        map[string]json.RawMessage `json:"props"`
 	Params       pwParams                   `json:"params"`
 	OutputNodeID *int                       `json:"output-node-id"`
@@ -348,6 +356,9 @@ func buildGraph(objects []pwObject) pwGraph {
 			Mute:    props.Mute,
 			Volumes: props.ChannelVolumes,
 			Format:  nodeFormat(object.Info.Params.Format),
+			// The state is read as printed, and a document with no
+			// state reads as a node that is not suspended.
+			Suspended: object.Info.State == "suspended",
 		}
 		if address := normalizeMAC(property(object.Info.Props, bluezAddressProperty)); validMAC(address) {
 			// A Bluetooth capture node is a headset microphone over
@@ -362,12 +373,13 @@ func buildGraph(objects []pwObject) pwGraph {
 				continue
 			}
 			graph.Speakers[address] = bluezSink{
-				Node:    name,
-				NodeID:  node.ID,
-				Codec:   property(object.Info.Props, bluezCodecProperty),
-				Mute:    node.Mute,
-				Volumes: node.Volumes,
-				Format:  node.Format,
+				Node:      name,
+				NodeID:    node.ID,
+				Codec:     property(object.Info.Props, bluezCodecProperty),
+				Mute:      node.Mute,
+				Volumes:   node.Volumes,
+				Format:    node.Format,
+				Suspended: node.Suspended,
 			}
 			continue
 		}
@@ -404,9 +416,12 @@ func buildGraph(objects []pwObject) pwGraph {
 // which carries volume, mute, and channelVolumes, and the ALSA one,
 // which carries the device and its latency. The audioconvert block is
 // the one with the channelVolumes key, and the key's presence is the
-// test, not the list's length: a suspended node on liken-1 prints
-// channelVolumes as an empty list, and a length test would fall
-// through to the ALSA block and read a mute that is not there.
+// test, not the list's length: a suspended node can print
+// channelVolumes as an empty list, as on liken-1, and a length test
+// would fall through to the ALSA block and read a mute that is not
+// there. Another suspended node keeps printing the list it last ran
+// with, as on stick-1, so the list's contents say nothing about
+// whether the level is current either. The node's state does.
 func nodeProps(params []json.RawMessage) pwProps {
 	for _, raw := range params {
 		var block struct {

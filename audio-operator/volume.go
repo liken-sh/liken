@@ -139,7 +139,7 @@ func setNodeLevel(ctx context.Context, node pwNode, level levelWrite) error {
 // volume, because on a speaker that does, the Route is the level
 // that moves.
 func (s bluezSink) sinkNode() pwNode {
-	return pwNode{ID: s.NodeID, Name: s.Node, Mute: s.Mute, Volumes: s.Volumes, Format: s.Format}
+	return pwNode{ID: s.NodeID, Name: s.Node, Mute: s.Mute, Volumes: s.Volumes, Format: s.Format, Suspended: s.Suspended}
 }
 
 // volumeLevels maps the spec's percent onto PipeWire's gain:
@@ -175,7 +175,7 @@ const stereoChannels = 2
 
 // channelCount is how many channels a level write covers: the count
 // the graph reported, or stereo when it reported none, which is what
-// a suspended node prints in channelVolumes.
+// a suspended node can print in channelVolumes.
 func channelCount(volumes []float64) int {
 	if len(volumes) == 0 {
 		return stereoChannels
