@@ -2,8 +2,9 @@
 
 Proposed on 2026-10-05, and settled the same day. Built on 2026-10-05
 as the 20 CRDs in `deploy/` and the Go types in the package
-`observatory-operator/observatory`, and tested on a throwaway minikube
-cluster with Kubernetes 1.33.4. No controller runs yet. "What was
+`observatory-operator/observatory`. Its tests run the CRDs through the
+API server's own validators, and a temporary local experiment applied
+them to a Kubernetes 1.33.4 API server. No controller runs yet. "What was
 built" states where the build differs from the design below, and "What
 the API server showed" gives the results. Plan 05 is not built: the
 specs hold only the hand-written fields that activation needs.
@@ -489,7 +490,7 @@ stated otherwise:
 
 ## What the API server showed
 
-On the minikube cluster, `kubectl apply -k deploy/` created the
+In the local experiment, `kubectl apply -k deploy/` created the
 namespace and the 20 CRDs, and every CRD reached `Established`.
 `kubectl apply -n observatory -f examples/simulators.yaml` created the
 28 resources of the example with no error, and `kubectl get astro`

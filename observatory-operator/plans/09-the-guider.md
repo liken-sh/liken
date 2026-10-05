@@ -33,7 +33,7 @@ the node of the server and the guide camera when the link is slow.
 ## How we test it
 
 PHD2 calibrates and guides on the simulators on the `lab` fleet, as it
-did in Docker: 19 calibration steps, then about one guide step a
+did in root plan 74's experiment: 19 calibration steps, then about one guide step a
 second with 1-second exposures.
 
 ## Upstream issues

@@ -1,9 +1,10 @@
 # 04, The INDI client in Go
 
 Proposed on 2026-10-05. Built on 2026-10-05 as the package
-`observatory-operator/indi`, and tested against transcripts of the 15
-simulators and against a real `indiserver` in Docker, with the
-`20261005-3` images. "What the tests showed" gives the results.
+`observatory-operator/indi`, and tested against transcripts recorded
+from the 15 simulators of the `20261005-3` images. A temporary local
+experiment also ran the client against a real `indiserver`. "What the
+tests showed" gives the results.
 
 ## The problem
 
@@ -96,8 +97,8 @@ replay the 48 files, 283 KB in all, from a real listener.
   move was sent and before the driver read it, so `Settle` takes an
   update as the answer only after a Busy, or when it carries the
   values sent.
-- **A real server, with restarts.** Against `indiserver` and the focuser
-  simulator in Docker, the client took the baseline, connected the
+- **A real server, with restarts.** In the local experiment, against
+  `indiserver` and the focuser simulator in containers, the client took the baseline, connected the
   device, moved it to 52000, and disconnected it. A restart of the
   driver's container gave a `delProperty` for the whole device, and
   the driver came back disconnected. The restart, the new baseline,
@@ -107,10 +108,6 @@ replay the 48 files, 283 KB in all, from a real listener.
   1.34 seconds. The driver's container must restart
   on its own, as a device pod's does: `socat` serves one connection
   and exits.
-
-The test against the real server skips itself when Docker or the
-pinned `indi-simulators` image is missing. CI runs it when the pinned
-tag is published.
 
 ## Upstream issues
 
