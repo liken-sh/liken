@@ -33,6 +33,10 @@ Each top-level directory is one component, named for what it ships:
   bus rules of a screen client. The idle screen and the media browser
   both link it.
 - [`people-operator/`](people-operator/) defines the `Person` resource.
+- [`observatory-operator/`](observatory-operator/) will control an
+  observatory's hardware through INDI, and
+  [`astrophotography-operator/`](astrophotography-operator/) will run
+  imaging sessions on it. Both hold only plans so far.
 - [`git-csi-driver/`](git-csi-driver/) mounts git repositories as
   volumes.
 - [`per-node-csi-driver/`](per-node-csi-driver/) gives a pod a
