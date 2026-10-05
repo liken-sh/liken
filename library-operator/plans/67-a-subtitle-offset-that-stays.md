@@ -73,6 +73,3 @@ design that builds this plan decides how to meet them.
 The audio offset is not saved. It corrects the latency of the room's
 receiver and television, not the media, so it does not belong in the
 library.
-
-An automatic sync of a subtitle to the audio is a separate later plan,
-named in [plan 60](60-the-subtitle-fact.md).

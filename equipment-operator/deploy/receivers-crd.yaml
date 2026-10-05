@@ -527,9 +527,6 @@ spec:
                   type: object
                   description: "The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it."
                   x-kubernetes-preserve-unknown-fields: true
-                service:
-                  type: string
-                  description: "The Service that represents the receiver on the cluster network after the operator creates it. Empty until then."
                 session:
                   type: object
                   required: [player, input]

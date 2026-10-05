@@ -332,7 +332,6 @@ func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
 		mustMatch(t, status.Zones["main"].VolumeMax, "69.5")
 		mustMatch(t, status.Zones["main"].Mute, false)
 		mustMatch(t, status.Zones["main"].SoundMode, "MULTI CH IN")
-		mustMatch(t, status.Service, "")
 		mustMatch(t, status.Conditions[0].Reason, reasonConnected)
 		mustMatch(t, status.Conditions[0].ObservedGeneration, int64(4))
 	})

@@ -59,7 +59,6 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 			mustMatch(t, main.Volume, one.volume)
 			mustMatch(t, main.VolumeMax, one.volumeMax)
 			mustMatch(t, main.SoundMode, "MULTI CH IN")
-			mustMatch(t, status.Service, "")
 			mustMatch(t, len(status.Conditions), 1)
 		})
 	}

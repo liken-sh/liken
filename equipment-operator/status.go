@@ -92,8 +92,7 @@ func settingsConfirmed(unconfirmed []string, generation int64, previous []Condit
 // buildReceiverStatus is the whole status one receiver's state makes,
 // in the receiver's own units, plus the protocol's own typed snapshot:
 // the Denon settings or the WiiM status, whichever the receiver's
-// protocol block names. status.service stays empty until the operator
-// makes the Service front.
+// protocol block names.
 func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimStatus *wiim.Status, address string, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
 	zones := make(map[string]ZoneStatus, len(state.Zones))
 	for name, zone := range state.Zones {
@@ -143,7 +142,7 @@ func sleepMinutes(minutes int) int {
 
 // sameStatus answers whether a write would change anything.
 func sameStatus(a, b ReceiverStatus) bool {
-	if a.Service != b.Service || a.Driver != b.Driver || a.Model != b.Model || a.Manufacturer != b.Manufacturer || a.SettledPower != b.SettledPower || !maps.Equal(a.SettledSettings, b.SettledSettings) || !reflect.DeepEqual(a.Denon, b.Denon) ||
+	if a.Driver != b.Driver || a.Model != b.Model || a.Manufacturer != b.Manufacturer || a.SettledPower != b.SettledPower || !maps.Equal(a.SettledSettings, b.SettledSettings) || !reflect.DeepEqual(a.Denon, b.Denon) ||
 		!reflect.DeepEqual(a.Wiim, b.Wiim) ||
 		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
 		return false

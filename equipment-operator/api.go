@@ -297,8 +297,7 @@ func (s ReceiverSession) withoutFlags() ReceiverSession {
 }
 
 // What the receiver last reported, grouped by zone, the protocol's own
-// typed settings snapshot, the Service that represents the receiver
-// when one exists, and the Reachable condition.
+// typed settings snapshot, and the Reachable condition.
 type ReceiverStatus struct {
 	// Address is the address the operator reached the receiver on. A
 	// receiver declared by name reports its resolved address, and a WiiM
@@ -313,7 +312,6 @@ type ReceiverStatus struct {
 	Driver       string                `json:"driver,omitempty"`
 	Denon        *denon.Settings       `json:"denon,omitempty"`
 	Wiim         *wiim.Status          `json:"wiim,omitempty"`
-	Service      string                `json:"service,omitempty"`
 	// SettledSettings holds a digest of each declared block the operator
 	// has sent, including the fields the receiver does not report, keyed
 	// by the block's path in the spec. After a restart the operator sends

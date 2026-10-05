@@ -3,8 +3,7 @@
 This is a plan for later. Nothing here is built. The enricher gets a new
 fact that fetches the subtitles a video lacks in the household's
 languages. Then no other tool needs to write subtitle files beside the
-media. Syncing a subtitle
-to the audio is a later plan.
+media.
 
 ## The problem
 

@@ -155,7 +155,7 @@ func TestCRDSchema(t *testing.T) {
 
 	t.Run("the status holds what the operator reads back", func(t *testing.T) {
 		status := schema.Properties["status"]
-		for _, name := range []string{"zones", "denon", "service", "conditions"} {
+		for _, name := range []string{"zones", "denon", "conditions"} {
 			if _, held := status.Properties[name]; !held {
 				t.Errorf("status has no property %s", name)
 			}
