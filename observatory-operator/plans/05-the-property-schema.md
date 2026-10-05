@@ -2,6 +2,12 @@
 
 Proposed on 2026-10-05. Not built.
 
+Plan 06 wrote by hand the few typed fields that activation needs, such
+as a camera's `temperature` setpoint and a filter wheel's `filters`, in
+the package `observatory` and the CRDs in `deploy/`. This plan
+generates the fields of the other standard properties, and the
+generated fields join those types and CRDs.
+
 ## The problem
 
 The resources need typed fields for the properties that every driver

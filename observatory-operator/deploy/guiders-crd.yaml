@@ -1,0 +1,156 @@
+# A `Guider` runs PHD2 for one `Telescope`. Plan 09 builds its pod, and
+# until then its `Ready` condition is `False` with the reason
+# `NotImplemented`. The singular, `guider`, is already short, so the
+# kind has no short name.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: guiders.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: Guider
+    listKind: GuiderList
+    plural: guiders
+    singular: guider
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.telescope
+      additionalPrinterColumns:
+        - name: Telescope
+          type: string
+          jsonPath: .spec.telescope
+        - name: Train
+          type: string
+          jsonPath: .spec.opticalTrain
+        - name: Pulses
+          type: string
+          jsonPath: .spec.pulses
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Ready
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].reason'
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A `Guider` runs PHD2 for one `Telescope`, as a client of the
+            telescope's INDI server, and guides with the camera of one
+            `OpticalTrain`. A guide scope is a train with its own small
+            tube, and an off-axis guider is a train on the imaging
+            train's tube. The guider's pod is not built yet: its `Ready`
+            condition is `False` with the reason `NotImplemented`.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [telescope, opticalTrain, pulses]
+              description: "What the guider guides, and how."
+              properties:
+                telescope:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Telescope` that the guider
+                    corrects.
+                opticalTrain:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `OpticalTrain` whose camera guides.
+                pulses:
+                  type: string
+                  enum: [Mount, Camera]
+                  description: >-
+                    Where PHD2 sends its corrections: `Mount` sends them
+                    to the mount's driver, and `Camera` sends them
+                    through the guide camera's ST-4 port.
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The `metadata.generation` of the spec that the
+                    operator last acted on.
+                phase:
+                  type: string
+                  enum: [Inventory, Activating, Ready, Deactivating, Error]
+                  description: >-
+                    The state in one word. `Inventory`: no reservation
+                    needs it, and nothing runs. `Activating`: a
+                    reservation's activation steps run. `Ready`:
+                    everything it needs runs and is connected.
+                    `Deactivating`: a reservation's deactivation steps
+                    run. `Error`: a step failed, and the `Ready`
+                    condition gives the reason.
+                conditions:
+                  type: array
+                  description: >-
+                    `Ready` is `True` while PHD2 runs and is connected
+                    to the telescope's server. Until plan 09 builds the
+                    guider's pod, it is `False` with the reason
+                    `NotImplemented`.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Ready`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition judged.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.

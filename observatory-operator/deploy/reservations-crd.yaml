@@ -1,0 +1,252 @@
+# A `Reservation` gives one holder the use of one `Telescope`. Device
+# resources are inventory, and the operator starts a telescope's pods
+# only while a `Reservation` of it is active.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: reservations.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: Reservation
+    listKind: ReservationList
+    plural: reservations
+    singular: reservation
+    shortNames: [rsv]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.telescope
+      additionalPrinterColumns:
+        - name: Telescope
+          type: string
+          jsonPath: .spec.telescope
+        - name: Holder
+          type: string
+          jsonPath: .spec.holder
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Step
+          type: string
+          jsonPath: .status.step
+        - name: Start
+          type: string
+          jsonPath: .spec.start
+        - name: End
+          type: string
+          jsonPath: .spec.end
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Host
+          type: string
+          jsonPath: .status.endpoint.host
+          priority: 1
+        - name: Port
+          type: integer
+          jsonPath: .status.endpoint.port
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A `Reservation` gives one holder the use of one `Telescope`.
+            Activation runs when `spec.start` arrives, or at once with
+            no start. Deactivation runs when `spec.end` arrives, or when
+            the `Reservation` is deleted, and it parks the mount, warms
+            the cameras, and closes the dust caps before it stops the
+            pods. `status.steps` lists every step and its state.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [telescope, holder]
+              description: "The telescope, the holder, and the times."
+              x-kubernetes-validations:
+                - rule: "!has(self.start) || !has(self.end) || self.end > self.start"
+                  message: "spec.end must be after spec.start"
+              properties:
+                telescope:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Telescope` to reserve. It cannot
+                    change after the reservation is created.
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "spec.telescope cannot change; create another Reservation"
+                holder:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  description: >-
+                    Who uses the telescope: a person's desktop client,
+                    or a `Session` of `astrophotography-operator`.
+                start:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When activation begins, as an RFC 3339 time.
+                    Optional. With no start, activation begins when the
+                    reservation is created.
+                end:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When deactivation begins, as an RFC 3339 time.
+                    Optional. With no end, the reservation lasts until
+                    it is deleted.
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The `metadata.generation` of the spec that the
+                    operator last acted on.
+                phase:
+                  type: string
+                  enum: [Scheduled, Activating, Ready, Deactivating, Released, Failed]
+                  description: >-
+                    The reservation's state in one word. `Scheduled`:
+                    waiting for `spec.start`. `Activating`: the
+                    activation steps run. `Ready`: the telescope is
+                    ready, and `endpoint` names its server.
+                    `Deactivating`: the deactivation steps run.
+                    `Released`: the deactivation steps are done, and the
+                    devices are safe to power off. `Failed`: a step
+                    failed, and the `Ready` condition names it.
+                step:
+                  type: string
+                  enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, Abort, Secure, Disconnect, StopDevices, PowerOff, StopSite]
+                  description: >-
+                    The step that runs now, or the last step that ran.
+                steps:
+                  type: array
+                  description: >-
+                    Every step, in the order it runs. The activation
+                    steps are `Wait`, `StartSite`, `PowerOn`,
+                    `StartDevices`, `Connect`, `Configure`, and
+                    `Prepare`, and the list holds them from the start.
+                    The deactivation steps are `Abort`, `Secure`,
+                    `Disconnect`, `StopDevices`, `PowerOff`, and
+                    `StopSite`, and the list holds them from when
+                    deactivation begins. A step starts only when the
+                    step before it is `Done` or `Skipped`.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [name]
+                  items:
+                    type: object
+                    required: [name, state]
+                    description: "One step."
+                    properties:
+                      name:
+                        type: string
+                        enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, Abort, Secure, Disconnect, StopDevices, PowerOff, StopSite]
+                        description: "The step's name."
+                      state:
+                        type: string
+                        enum: [Pending, Running, Done, Failed, Skipped]
+                        description: >-
+                          The step's progress: `Pending`, `Running`,
+                          `Done`, `Failed`, or `Skipped` when it has
+                          nothing to do.
+                      startTime:
+                        type: string
+                        format: date-time
+                        description: "When the step began to run."
+                      finishTime:
+                        type: string
+                        format: date-time
+                        description: "When the step ended."
+                      message:
+                        type: string
+                        description: >-
+                          What the step waits for or did. It names the
+                          device when one device holds the step up.
+                endpoint:
+                  type: object
+                  required: [service, host, port]
+                  description: >-
+                    The telescope's INDI server, while the phase is
+                    `Ready`. KStars connects to its `host` and `port`.
+                  properties:
+                    service:
+                      type: string
+                      description: "The name of the server's `Service`."
+                    host:
+                      type: string
+                      description: "The `Service`'s DNS name in the cluster."
+                    port:
+                      type: integer
+                      format: int32
+                      description: "The INDI port of the `Service`, 7624."
+                conditions:
+                  type: array
+                  description: >-
+                    `Ready` is `True` while the phase is `Ready`, so
+                    `kubectl wait --for=condition=Ready` waits for the
+                    telescope. When a step fails, it is `False` and its
+                    message names the step and the device.
+                    `SafeToPowerOff` is `True` when the deactivation
+                    steps are done.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Ready`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition judged.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.

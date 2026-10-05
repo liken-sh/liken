@@ -2,7 +2,9 @@
 
 This directory will hold the operator that controls an observatory's
 hardware through INDI, and the manifests that run it. So far it holds
-the Go module with the INDI client in `indi/`, and the plans.
+the Go module with the resources' Go types in `observatory/` and the
+INDI client in `indi/`, the CRDs in `deploy/`, the example in
+`examples/`, and the plans.
 
 `plans/00-design.md` is the design, and the `plans/` directory holds the
 plans that build it. Code exists only where a plan calls for it. [Root
@@ -12,6 +14,28 @@ simulator tests that support it.
 
 `make test` runs every check CI runs. The `topology/` manifests are
 plan 03's, and no code reads them.
+
+## The resources
+
+The CRDs in `deploy/` are written by hand, one file for each kind, and
+`observatory/` holds the Go type of each kind. The tests in
+`observatory/` read the CRDs through the API server's own validators
+and hold them to the Go types:
+
+- `drift_test.go` compares each Go type with its CRD, field by field.
+  A field on one side only, or a field with another type, fails.
+- `shared_test.go` holds the fields that every device shares equal in
+  all 14 device CRDs, descriptions and rules included. A change to
+  `DeviceSpec` or `DeviceStatus` is a change to all 14 files.
+- `enum_test.go` holds each CRD enum equal to the Go constants.
+- `validation_test.go` runs resources that a person could write
+  through the structural schema and the CEL rules.
+- `example_test.go` holds `examples/simulators.yaml` to the CRDs, to
+  the Go types, and to itself: every name it gives exists in it.
+
+So a new field takes three edits: the Go type, the CRD, and a
+description with the field's unit. `kubectl explain` prints the
+description, and a test fails on a field with none.
 
 ## The INDI client
 

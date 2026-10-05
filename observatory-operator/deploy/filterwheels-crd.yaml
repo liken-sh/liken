@@ -1,0 +1,373 @@
+# A `FilterWheel` holds the filters in front of a camera: an INDI driver
+# with `FILTER_INTERFACE`.
+#
+# A device resource is inventory: `observatory-operator` starts its pod
+# only while a `Reservation` needs it. The fields that every device
+# shares, `spec.driver`, `spec.power`, `spec.claim`, and every status
+# field except `status.readings`, are the same in all 14 device CRDs. A
+# test in the `observatory` package holds them equal, and holds each CRD
+# equal to its Go type.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: filterwheels.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: FilterWheel
+    listKind: FilterWheelList
+    plural: filterwheels
+    singular: filterwheel
+    shortNames: [fw]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.opticalTrain
+      additionalPrinterColumns:
+        - name: Train
+          type: string
+          jsonPath: .spec.opticalTrain
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Slot
+          type: integer
+          jsonPath: .status.readings.slot
+        - name: Filter
+          type: string
+          jsonPath: .status.readings.filter
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Driver
+          type: string
+          jsonPath: .spec.driver.name
+          priority: 1
+        - name: Device
+          type: string
+          jsonPath: .status.indiDevice
+          priority: 1
+        - name: Node
+          type: string
+          jsonPath: .status.node
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A `FilterWheel` holds the filters in front of a camera: an
+            INDI driver with `FILTER_INTERFACE`.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [opticalTrain, driver]
+              description: "One filter wheel, with INDI's `FILTER_INTERFACE`."
+              properties:
+                opticalTrain:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `OpticalTrain` that the device is
+                    on. The train's members set what each camera on it
+                    snoops.
+                driver:
+                  type: object
+                  required: [name]
+                  description: >-
+                    The INDI driver that runs the device. With no
+                    `image`, the operator runs the image that the `indi`
+                    build lists for the driver, so `name` must then be
+                    an INDI driver that the image holds, such as
+                    `indi_simulator_ccd`.
+                  x-kubernetes-validations:
+                    - rule: "has(self.image) || self.name.matches('^indi_[a-z0-9_]+$')"
+                      message: "driver.name must match ^indi_[a-z0-9_]+$ when driver.image is not set"
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$"
+                      description: >-
+                        The driver's executable, such as
+                        `indi_simulator_ccd`. The device's pod runs it
+                        under `socat`, so the name holds no path, no
+                        space, no comma, and no colon.
+                    image:
+                      type: string
+                      minLength: 1
+                      maxLength: 512
+                      description: >-
+                        The container image that holds the driver, used
+                        as written. The image must hold `/usr/bin/socat`
+                        and the driver on `PATH`, and must run as user
+                        1000 with a read-only root filesystem and a
+                        writable `/tmp`. An image built `FROM
+                        ghcr.io/liken-sh/indi` meets all three.
+                        Optional.
+                power:
+                  type: object
+                  required: [switch, output]
+                  description: >-
+                    The `Switch` output that powers the device.
+                    Activation switches the output on before the
+                    device's pod starts, and deactivation switches it
+                    off after the pod stops. Optional. With no power, a
+                    person powers the device on and off by hand.
+                  properties:
+                    switch:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                      description: "The name of a `Switch` in this namespace."
+                    output:
+                      type: integer
+                      format: int32
+                      minimum: 1
+                      description: >-
+                        The number of the output, from 1, as the driver
+                        numbers `DIGITAL_OUTPUT_1`.
+                claim:
+                  type: object
+                  description: >-
+                    A `ResourceClaimSpec` of the `resource.k8s.io` API,
+                    for real hardware. The operator creates a
+                    `ResourceClaim` from it for the device's pod. The
+                    API server validates it when the operator creates
+                    the claim. Optional. A simulator needs no claim.
+                  x-kubernetes-preserve-unknown-fields: true
+                filters:
+                  type: array
+                  description: >-
+                    The name of the filter in each slot, from slot 1,
+                    such as `Luminance` or `H_Alpha`. The operator
+                    writes them to `FILTER_NAME`. Optional.
+                  maxItems: 64
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                    description: "The name of one filter."
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The `metadata.generation` of the spec that the
+                    operator last acted on.
+                phase:
+                  type: string
+                  enum: [Inventory, Starting, Connecting, Connected, Disconnecting, Error]
+                  description: >-
+                    The device's state in one word. `Inventory`: no
+                    reservation needs the device, and it has no pod.
+                    `Starting`: the device's pod starts. `Connecting`:
+                    the operator asked the driver to connect.
+                    `Connected`: the driver reports the device
+                    connected. `Disconnecting`: the operator asked the
+                    driver to disconnect, or stops the pod. `Error`: a
+                    step failed, and the `Ready` condition gives the
+                    reason.
+                conditions:
+                  type: array
+                  description: >-
+                    `Ready` is `True` while the device is connected.
+                    `ParentFound` is `False` when a resource that the
+                    spec names, up to the `Observatory`, does not exist,
+                    and its message names the missing resource.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Ready`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition judged.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.
+                indiDevice:
+                  type: string
+                  description: >-
+                    The name that the driver gives its device on the
+                    INDI server, such as `CCD Simulator`. KStars shows
+                    this name.
+                driver:
+                  type: string
+                  description: "The driver that the device's pod runs."
+                image:
+                  type: string
+                  description: >-
+                    The image that the device's pod runs, after the
+                    operator resolved it.
+                pod:
+                  type: string
+                  description: "The name of the device's pod, while it exists."
+                node:
+                  type: string
+                  description: "The node that runs the device's pod."
+                properties:
+                  type: array
+                  description: >-
+                    Every property that the device defines, as the
+                    driver defines it, with the values of its last
+                    update. A vendor's own properties are here, and no
+                    typed reading depends on one. The list holds no BLOB
+                    data.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [name]
+                  items:
+                    type: object
+                    required: [name, type, permission, state]
+                    description: "One INDI property."
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The property's name, such as
+                          `CCD_TEMPERATURE`.
+                      label:
+                        type: string
+                        description: >-
+                          The label that the driver gives the property.
+                      group:
+                        type: string
+                        description: >-
+                          The group, or tab, that the driver puts the
+                          property in.
+                      type:
+                        type: string
+                        enum: [Number, Switch, Text, Light, BLOB]
+                        description: "The type of the members' values."
+                      permission:
+                        type: string
+                        enum: [ro, wo, rw]
+                        description: >-
+                          Whether a client can write the property: `ro`
+                          read-only, `wo` write-only, or `rw` read and
+                          write.
+                      state:
+                        type: string
+                        enum: [Idle, Ok, Busy, Alert]
+                        description: >-
+                          The property's state: `Busy` while the driver
+                          carries out a change, `Ok` or `Alert` when the
+                          change ends.
+                      rule:
+                        type: string
+                        enum: [OneOfMany, AtMostOne, AnyOfMany]
+                        description: >-
+                          For a switch property, how many members can be
+                          on at once.
+                      members:
+                        type: array
+                        description: >-
+                          The property's members, in the driver's order.
+                        x-kubernetes-list-type: map
+                        x-kubernetes-list-map-keys: [name]
+                        items:
+                          type: object
+                          required: [name]
+                          description: "One member of the property."
+                          properties:
+                            name:
+                              type: string
+                              minLength: 1
+                              description: >-
+                                The member's name, such as
+                                `CCD_TEMPERATURE_VALUE`.
+                            label:
+                              type: string
+                              description: >-
+                                The label that the driver gives the
+                                member.
+                            value:
+                              type: string
+                              description: >-
+                                The value as text: a number in the
+                                member's format, `On` or `Off` for a
+                                switch, a state for a light, or the
+                                text. A BLOB member has no value here.
+                            min:
+                              type: number
+                              description: >-
+                                For a number, the least value that the
+                                driver accepts.
+                            max:
+                              type: number
+                              description: >-
+                                For a number, the greatest value that
+                                the driver accepts.
+                            step:
+                              type: number
+                              description: >-
+                                For a number, the step between values.
+                                Zero means any step.
+                readings:
+                  type: object
+                  description: >-
+                    What the filter wheel reports, from `FILTER_SLOT`
+                    and `FILTER_NAME`. A field is absent until the
+                    driver sends it.
+                  properties:
+                    slot:
+                      type: integer
+                      format: int32
+                      minimum: 1
+                      description: "The slot in the light path, from 1."
+                    filter:
+                      type: string
+                      description: "The name of the filter in that slot."

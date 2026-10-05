@@ -21,7 +21,7 @@ Plan 03 tested this topology on a cluster.
 ## The resources
 
 The resources are in the API group `observatory.liken.sh`. [Plan
-06](06-the-resources.md) gives the names, the reasons for them, and an
+06](completed/06-the-resources.md) gives the names, the reasons for them, and an
 example.
 
 ```
@@ -34,7 +34,10 @@ Observatory          Dome, WeatherStation, policies across telescopes
 
 Each resource names its parent in its `spec`. Owner references are
 only on the objects that the operator creates. The first device kinds
-are the 14 that have a simulator in the `indi-simulators` image.
+are the 14 that have a simulator in the `indi-simulators` image. The
+CRDs are in `deploy/`, every kind is in the category `astro`, and the
+package `observatory` holds the Go types. `examples/simulators.yaml` is
+an observatory of simulators with a device of every kind.
 
 A device resource is inventory, and the operator starts nothing for it.
 A `Reservation` gives one holder the use of one `Telescope`: a
@@ -60,7 +63,7 @@ must hold.
 | [01](completed/01-the-indi-base-image.md), [02](completed/02-driver-and-simulator-images.md), [03](completed/03-the-topology-by-hand.md) | Built: the images, and the topology from static manifests |
 | [04](completed/04-the-indi-client-in-go.md) | Built: the INDI client in Go, the package `indi` |
 | [05](05-the-property-schema.md) | Typed fields generated from the simulators and INDI's documentation |
-| [06](06-the-resources.md) | The resources |
+| [06](completed/06-the-resources.md) | Built: the resources, as CRDs and the package `observatory` |
 | [07](07-the-operator-runs-the-topology.md) | The operator creates the topology from the resources |
 | [08](08-the-reconciler.md) | The reconciler |
 | [09](09-the-guider.md) | The guider |

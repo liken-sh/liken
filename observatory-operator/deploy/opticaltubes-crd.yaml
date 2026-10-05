@@ -1,0 +1,144 @@
+# An `OpticalTube` is the optical tube assembly: the lens or mirror that
+# collects the light. It has no driver, and the operator starts nothing
+# for it.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: opticaltubes.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: OpticalTube
+    listKind: OpticalTubeList
+    plural: opticaltubes
+    singular: opticaltube
+    shortNames: [ota]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.telescope
+      additionalPrinterColumns:
+        - name: Telescope
+          type: string
+          jsonPath: .spec.telescope
+        - name: Aperture
+          type: number
+          jsonPath: .spec.aperture
+        - name: "Focal Length"
+          type: number
+          jsonPath: .spec.focalLength
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Trains
+          type: string
+          jsonPath: .status.trains
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            An `OpticalTube` is the optical tube assembly, or OTA: the
+            lens or mirror that collects the light. It has no driver.
+            Two OpticalTrains can name one tube, such as an imaging
+            train and an off-axis guider.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [telescope, aperture, focalLength]
+              description: "The tube's optics."
+              properties:
+                telescope:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Telescope` that the tube is on.
+                aperture:
+                  type: number
+                  exclusiveMinimum: true
+                  minimum: 0
+                  description: >-
+                    The diameter of the lens or the primary mirror, in
+                    millimeters.
+                focalLength:
+                  type: number
+                  exclusiveMinimum: true
+                  minimum: 0
+                  description: >-
+                    The focal length, in millimeters, with any reducer
+                    or barlow that stays on the tube.
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The `metadata.generation` of the spec that the
+                    operator last acted on.
+                conditions:
+                  type: array
+                  description: >-
+                    `ParentFound` is `False` when the `Telescope` or its
+                    `Observatory` does not exist.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Ready`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition judged.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.
+                trains:
+                  type: array
+                  description: "Each `OpticalTrain` that names this tube."
+                  x-kubernetes-list-type: set
+                  items:
+                    type: string

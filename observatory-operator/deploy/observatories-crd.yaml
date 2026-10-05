@@ -1,0 +1,265 @@
+# An `Observatory` is the building and the site: the roof, the weather,
+# and the location. It is the top of the tree, and every other kind
+# names it, directly or through a `Telescope`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: observatories.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: Observatory
+    listKind: ObservatoryList
+    plural: observatories
+    singular: observatory
+    shortNames: [obs]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Latitude
+          type: number
+          jsonPath: .spec.location.latitude
+        - name: Longitude
+          type: number
+          jsonPath: .spec.location.longitude
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Weather
+          type: string
+          jsonPath: .status.weather
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Telescopes
+          type: string
+          jsonPath: .status.telescopes
+          priority: 1
+        - name: Reservations
+          type: string
+          jsonPath: .status.reservations
+          priority: 1
+        - name: Server
+          type: string
+          jsonPath: .status.server.host
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            An `Observatory` is the building and the site: the roof, the
+            weather, and the location. `observatory-operator` runs one
+            INDI server for the devices that no telescope owns, such as
+            the `Dome` and the `WeatherStation`, while at least one
+            `Reservation` of a telescope here is active.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [location]
+              description: "The site and its policies."
+              properties:
+                location:
+                  type: object
+                  required: [latitude, longitude, elevation]
+                  description: >-
+                    Where the site is. The operator writes it to each
+                    mount and GPS as `GEOGRAPHIC_COORD`, which takes the
+                    longitude from 0 to 360 degrees east, and converts a
+                    negative longitude to that range.
+                  properties:
+                    latitude:
+                      type: number
+                      minimum: -90
+                      maximum: 90
+                      description: >-
+                        The latitude, in degrees north, from -90 to 90.
+                    longitude:
+                      type: number
+                      minimum: -180
+                      maximum: 180
+                      description: >-
+                        The longitude, in degrees east, from -180 to
+                        180. A site west of Greenwich has a negative
+                        longitude.
+                    elevation:
+                      type: number
+                      minimum: -500
+                      maximum: 9000
+                      description: >-
+                        The elevation, in meters above mean sea level.
+                policies:
+                  type: object
+                  description: >-
+                    The rules between the dome and the mounts. Each one
+                    is off unless it is set here. With one mount, the
+                    operator writes them to the drivers, and the drivers
+                    enforce them while the operator is down. INDI's dome
+                    snoops one mount only, so with several mounts the
+                    operator enforces them across the servers. Optional.
+                  properties:
+                    domeLocksMount:
+                      type: boolean
+                      description: >-
+                        Sets the mount's `DOME_POLICY` to `DOME_LOCKS`:
+                        the mount does not unpark while the dome is
+                        parked, and parks when the dome parks.
+                    mountLocksDome:
+                      type: boolean
+                      description: >-
+                        Sets the dome's `MOUNT_POLICY` to `MOUNT_LOCKS`:
+                        the dome does not park while a mount is
+                        unparked.
+                    closeShutterOnPark:
+                      type: boolean
+                      description: >-
+                        Sets `SHUTTER_CLOSE_ON_PARK` in the dome's
+                        `DOME_SHUTTER_PARK_POLICY`: the dome closes its
+                        shutter when it parks.
+                    openShutterOnUnpark:
+                      type: boolean
+                      description: >-
+                        Sets `SHUTTER_OPEN_ON_UNPARK` in the dome's
+                        `DOME_SHUTTER_PARK_POLICY`: the dome opens its
+                        shutter when it unparks.
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The `metadata.generation` of the spec that the
+                    operator last acted on.
+                phase:
+                  type: string
+                  enum: [Inventory, Activating, Ready, Deactivating, Error]
+                  description: >-
+                    The state in one word. `Inventory`: no reservation
+                    needs it, and nothing runs. `Activating`: a
+                    reservation's activation steps run. `Ready`:
+                    everything it needs runs and is connected.
+                    `Deactivating`: a reservation's deactivation steps
+                    run. `Error`: a step failed, and the `Ready`
+                    condition gives the reason. The observatory's server
+                    runs from the first active reservation here to the
+                    end of the last one.
+                conditions:
+                  type: array
+                  description: >-
+                    `Ready` is `True` while the observatory's server and
+                    devices run and are connected.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Ready`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition judged.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.
+                server:
+                  type: object
+                  required: [service, host, port]
+                  description: >-
+                    The observatory's own INDI server, while it runs.
+                  properties:
+                    service:
+                      type: string
+                      description: "The name of the server's `Service`."
+                    host:
+                      type: string
+                      description: "The `Service`'s DNS name in the cluster."
+                    port:
+                      type: integer
+                      format: int32
+                      description: "The INDI port of the `Service`, 7624."
+                    pod:
+                      type: string
+                      description: "The name of the server's pod."
+                    node:
+                      type: string
+                      description: "The node that runs the server's pod."
+                telescopes:
+                  type: array
+                  description: >-
+                    Each `Telescope` whose `spec.observatory` names this
+                    observatory.
+                  x-kubernetes-list-type: set
+                  items:
+                    type: string
+                devices:
+                  type: array
+                  description: "Each device whose parent is this observatory."
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required: [kind, name]
+                    description: "One device, with its phase."
+                    properties:
+                      kind:
+                        type: string
+                        enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver]
+                        description: "The device's kind."
+                      name:
+                        type: string
+                        description: "The device's name."
+                      phase:
+                        type: string
+                        enum: [Inventory, Starting, Connecting, Connected, Disconnecting, Error]
+                        description: "The device's `status.phase`."
+                reservations:
+                  type: array
+                  description: "Each active `Reservation` of a telescope here."
+                  x-kubernetes-list-type: set
+                  items:
+                    type: string
+                weather:
+                  type: string
+                  enum: [Safe, Warning, Danger, Unknown]
+                  description: >-
+                    The worst verdict of the observatory's weather
+                    stations, or `Unknown` when no station reports.

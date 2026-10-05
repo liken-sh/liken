@@ -13,9 +13,9 @@
 profile: coverage.out
 
 threshold:
-  # One package, so the total is the whole gate. The tests measure
-  # 97.3% when the integration test skips itself, which is the lower
-  # of the two numbers. The rest is the error paths of writes to a
-  # connection that closed, and of a BLOB whose base64 does not
-  # decode.
+  # The total covers both packages. The tests measure 97.3% when the
+  # integration test in indi/ skips itself, which is the lower of the
+  # two numbers. observatory/ measures 100%. The rest is in indi/: the
+  # error paths of writes to a connection that closed, and of a BLOB
+  # whose base64 does not decode.
   total: 97

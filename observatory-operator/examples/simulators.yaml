@@ -1,0 +1,326 @@
+# An observatory of INDI simulators, with a device of every kind that
+# observatory-operator has. Every driver is an `indi_simulator_*` in
+# the `indi-simulators` image, so the whole stack runs with no
+# hardware.
+#
+# Apply the CRDs first, then this file to the `observatory` namespace:
+#
+#   kubectl apply -k deploy/
+#   kubectl apply -n observatory -f examples/simulators.yaml
+#   kubectl get astro -n observatory
+#
+# The tree, from the top down:
+#
+#   Observatory lab                 Dome, WeatherStation, SkyQualityMeter
+#    ├─ Telescope east              Mount, GPS, PolarAligner, Switch,
+#    │   │                          Receiver, Guider
+#    │   ├─ OpticalTube east-refractor
+#    │   │   └─ OpticalTrain east-imaging
+#    │   │        Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel
+#    │   └─ OpticalTube east-guidescope
+#    │       └─ OpticalTrain east-guiding
+#    │            Camera
+#    └─ Telescope west              Mount
+#        └─ OpticalTube west-newtonian
+#            └─ OpticalTrain west-imaging
+#                 Camera
+#
+# Each resource names its parent in its spec. These resources are
+# inventory: the operator starts nothing for them. The Reservation at
+# the end starts the `east` telescope, and `west` stays down, because
+# each telescope has its own INDI server.
+
+# The site. The location is Cerro Tololo Inter-American Observatory in
+# Chile, a public observatory. The operator writes it to each mount and
+# GPS. The policies are off unless they are set: here the dome does not
+# park while a mount is unparked, and it closes its shutter when it
+# parks. With two mounts, the operator enforces the first rule across
+# the two telescopes' servers.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Observatory
+metadata:
+  name: lab
+spec:
+  location:
+    latitude: -30.169
+    longitude: -70.806
+    elevation: 2207
+  policies:
+    mountLocksDome: true
+    closeShutterOnPark: true
+---
+# The devices that no telescope owns run on the observatory's own INDI
+# server. That server runs while at least one reservation here is
+# active.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Dome
+metadata:
+  name: dome
+spec:
+  observatory: lab
+  driver: {name: indi_simulator_dome}
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: WeatherStation
+metadata:
+  name: weather
+spec:
+  observatory: lab
+  driver: {name: indi_simulator_weather}
+---
+# A sky quality meter can belong to the site or to one telescope. This
+# one is on the roof, so it belongs to the site.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: SkyQualityMeter
+metadata:
+  name: sky
+spec:
+  observatory: lab
+  driver: {name: indi_simulator_sqm}
+---
+# The first telescope has a device of every kind. Its mount, its trains,
+# and its other devices run on one INDI server, because a camera snoops
+# the mount and the focuser of its train only on the same server.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Telescope
+metadata:
+  name: east
+spec:
+  observatory: lab
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Mount
+metadata:
+  name: east-mount
+spec:
+  telescope: east
+  driver: {name: indi_simulator_telescope}
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: GPS
+metadata:
+  name: east-gps
+spec:
+  telescope: east
+  driver: {name: indi_simulator_gps}
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: PolarAligner
+metadata:
+  name: east-pac
+spec:
+  telescope: east
+  driver: {name: indi_simulator_pac}
+---
+# A relay board with four outputs, which powers the imaging train. The
+# devices below name an output in spec.power. Activation switches each
+# named output on before the device's pod starts, and deactivation
+# switches it off after the pod stops.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Switch
+metadata:
+  name: east-power
+spec:
+  telescope: east
+  driver: {name: indi_simulator_io}
+---
+# A radio receiver on the same mount, such as an RTL-SDR on a dish.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Receiver
+metadata:
+  name: east-radio
+spec:
+  telescope: east
+  driver: {name: indi_simulator_receiver}
+---
+# Two tubes on one mount: an 80 mm refractor for imaging and a 50 mm
+# guide scope. The aperture and the focal length are in millimeters.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: OpticalTube
+metadata:
+  name: east-refractor
+spec:
+  telescope: east
+  aperture: 80
+  focalLength: 480
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: OpticalTube
+metadata:
+  name: east-guidescope
+spec:
+  telescope: east
+  aperture: 50
+  focalLength: 200
+---
+# A train is one light path. The operator writes each camera's
+# ACTIVE_DEVICES from its train, so the main camera's frames name the
+# focuser, the filter wheel, and the rotator of this train.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: OpticalTrain
+metadata:
+  name: east-imaging
+spec:
+  telescope: east
+  opticalTube: east-refractor
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: OpticalTrain
+metadata:
+  name: east-guiding
+spec:
+  telescope: east
+  opticalTube: east-guidescope
+---
+# The main camera, on output 1. Activation writes the gain and the
+# offset, and waits until the sensor cools to -10 degrees Celsius.
+# Deactivation warms it before its output switches off.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Camera
+metadata:
+  name: east-main
+spec:
+  opticalTrain: east-imaging
+  driver: {name: indi_simulator_ccd}
+  power: {switch: east-power, output: 1}
+  gain: 100
+  offset: 10
+  temperature: -10
+---
+# The filter wheel, the focuser, and the rotator share output 2, the
+# way a USB hub on one 12 V line does.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: FilterWheel
+metadata:
+  name: east-wheel
+spec:
+  opticalTrain: east-imaging
+  driver: {name: indi_simulator_wheel}
+  power: {switch: east-power, output: 2}
+  # The filter in each slot, from slot 1. The simulator has 8 slots.
+  filters: [Luminance, Red, Green, Blue, H_Alpha, OIII, SII, Dark]
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Focuser
+metadata:
+  name: east-focuser
+spec:
+  opticalTrain: east-imaging
+  driver: {name: indi_simulator_focus}
+  power: {switch: east-power, output: 2}
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Rotator
+metadata:
+  name: east-rotator
+spec:
+  opticalTrain: east-imaging
+  driver: {name: indi_simulator_rotator}
+  power: {switch: east-power, output: 2}
+---
+# The dust cap and the flat panel are on output 3. Activation opens the
+# cap. Deactivation switches the panel's light off and closes the cap
+# before the output switches off.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: DustCap
+metadata:
+  name: east-cap
+spec:
+  opticalTrain: east-imaging
+  driver: {name: indi_simulator_dustcover}
+  power: {switch: east-power, output: 3}
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: FlatPanel
+metadata:
+  name: east-flat
+spec:
+  opticalTrain: east-imaging
+  driver: {name: indi_simulator_lightpanel}
+  power: {switch: east-power, output: 3}
+---
+# The guide camera, behind the guide scope. It has no power output, so
+# a person powers it by hand.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Camera
+metadata:
+  name: east-guide
+spec:
+  opticalTrain: east-guiding
+  driver: {name: indi_simulator_guide}
+---
+# PHD2 guides the east telescope with the guide train's camera, and
+# sends its corrections to the mount. The guider's pod is not built
+# yet, so its Ready condition is False with the reason NotImplemented.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Guider
+metadata:
+  name: east
+spec:
+  telescope: east
+  opticalTrain: east-guiding
+  pulses: Mount
+---
+# The second telescope has its own INDI server. Its camera runs the same
+# simulator as the east camera, and both register "CCD Simulator", on
+# two servers with no conflict.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Telescope
+metadata:
+  name: west
+spec:
+  observatory: lab
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Mount
+metadata:
+  name: west-mount
+spec:
+  telescope: west
+  driver: {name: indi_simulator_telescope}
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: OpticalTube
+metadata:
+  name: west-newtonian
+spec:
+  telescope: west
+  aperture: 200
+  focalLength: 1000
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: OpticalTrain
+metadata:
+  name: west-imaging
+spec:
+  telescope: west
+  opticalTube: west-newtonian
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Camera
+metadata:
+  name: west-main
+spec:
+  opticalTrain: west-imaging
+  driver: {name: indi_simulator_ccd}
+---
+# The reservation that starts the east telescope. With no spec.start,
+# activation begins when it is created. With no spec.end, it lasts
+# until it is deleted. Add both as RFC 3339 times to reserve a night:
+#
+#   start: 2026-10-05T20:00:00-04:00
+#   end: 2026-10-06T05:00:00-04:00
+#
+# Watch the steps, and wait for the telescope:
+#
+#   kubectl get reservation east-tonight -n observatory -w
+#   kubectl wait --for=condition=Ready reservation/east-tonight -n observatory
+#
+# Then connect KStars to the host and port in status.endpoint.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Reservation
+metadata:
+  name: east-tonight
+spec:
+  telescope: east
+  holder: desktop

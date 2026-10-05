@@ -1,7 +1,12 @@
 # 06, The resources
 
-Proposed on 2026-10-05. Not built. The design below was settled on
-2026-10-05.
+Proposed on 2026-10-05, and settled the same day. Built on 2026-10-05
+as the 20 CRDs in `deploy/` and the Go types in the package
+`observatory-operator/observatory`, and tested on a throwaway minikube
+cluster with Kubernetes 1.33.4. No controller runs yet. "What was
+built" states where the build differs from the design below, and "What
+the API server showed" gives the results. Plan 05 is not built: the
+specs hold only the hand-written fields that activation needs.
 
 ## The problem
 
@@ -295,7 +300,7 @@ apiVersion: observatory.liken.sh/v1alpha1
 kind: Observatory
 metadata: {name: lab}
 spec:
-  location: {latitude: -30.17, longitude: -70.81, elevation: 2207}
+  location: {latitude: -30.169, longitude: -70.806, elevation: 2207}
 ---
 kind: WeatherStation
 metadata: {name: weather}
@@ -315,14 +320,14 @@ spec:
   driver: {name: indi_simulator_telescope}
 ---
 kind: OpticalTube
-metadata: {name: refractor-80}
+metadata: {name: east-refractor}
 spec:
   telescope: east
   aperture: 80
   focalLength: 480
 ---
 kind: OpticalTube
-metadata: {name: guidescope-50}
+metadata: {name: east-guidescope}
 spec:
   telescope: east
   aperture: 50
@@ -332,13 +337,13 @@ kind: OpticalTrain
 metadata: {name: east-imaging}
 spec:
   telescope: east
-  opticalTube: refractor-80
+  opticalTube: east-refractor
 ---
 kind: OpticalTrain
 metadata: {name: east-guiding}
 spec:
   telescope: east
-  opticalTube: guidescope-50
+  opticalTube: east-guidescope
 ---
 kind: Camera
 metadata: {name: east-main}
@@ -370,10 +375,10 @@ metadata: {name: east}
 spec:
   telescope: east
   opticalTrain: east-guiding
-  pulses: mount
+  pulses: Mount
 ---
 kind: Reservation
-metadata: {name: tonight}
+metadata: {name: east-tonight}
 spec:
   telescope: east
   holder: desktop
@@ -382,6 +387,11 @@ spec:
 
 The shape of `holder` is open. It names a person's desktop client in
 mode 1 and a `Session` in mode 2.
+
+`examples/simulators.yaml` is the full stack of this example: two
+telescopes, a device of every kind, and a `Switch` that powers the
+imaging train. Every resource there has an `apiVersion`, and the
+example above leaves it out after the first resource.
 
 ## Open questions
 
@@ -411,6 +421,111 @@ The CRDs apply on the `dev-cluster`, and validation refuses a resource
 that breaks the schema. The example above applies with no error. No
 controller runs yet.
 
+## What was built
+
+The CRDs are written by hand, one file for each kind, as the other
+operators of the repository write theirs. The Go types copy the shapes
+of `metav1.ObjectMeta` and `metav1.Condition`, so the package imports
+no Kubernetes module. Tests in the package hold the two together:
+each Go type against its CRD field by field, the fields that every
+device shares equal in all 14 device CRDs, each enum against its Go
+constants, and the example against the CRDs, the Go types, and
+itself.
+
+The build settled these points, which the design above left open or
+stated otherwise:
+
+- **Typed fields.** Plan 05 was to generate the typed fields. The
+  build wrote by hand only the fields that activation needs: the
+  driver, the parent, `power`, `claim`, the camera's `gain`, `offset`,
+  and `temperature` setpoint, the filter wheel's `filters`, the
+  observatory's `location` and `policies`, the tube's `aperture` and
+  `focalLength`, the guider's `opticalTrain` and `pulses`, and the
+  reservation's `telescope`, `holder`, `start`, and `end`. Plan 05
+  stays open.
+- **The parent fields.** A device's spec embeds one of four structs,
+  by where the kind can be: `TelescopeDevice`, `TrainDevice`,
+  `ObservatoryDevice`, or `TelescopeOrObservatoryDevice`. Each holds
+  the parent field and embeds `DeviceSpec`, so each CRD has only the
+  parent fields its kind admits. A CEL rule makes a `SkyQualityMeter`,
+  a `Switch`, or a `Receiver` name exactly one of `telescope` and
+  `observatory`.
+- **The driver.** `driver.name` must match `^indi_[a-z0-9_]+$` unless
+  `driver.image` is set, and holds no path, space, comma, or colon,
+  because the pod runs it under `socat`.
+- **The claim.** `spec.claim` is a `ResourceClaimSpec`, kept as raw
+  JSON with `x-kubernetes-preserve-unknown-fields`. The API server
+  validates it when the operator creates the `ResourceClaim`.
+- **The holder.** `spec.holder` is a string.
+- **The guider's pulses.** `Mount` or `Camera`, in the case that
+  Kubernetes uses for enum values.
+- **The device status.** Every device kind has `phase`, `conditions`,
+  `observedGeneration`, `indiDevice`, `driver`, `image`, `pod`,
+  `node`, and `properties`, which lists every INDI property with its
+  members' values and limits and no BLOB data. One `readings` block
+  holds the typed values of the kind.
+- **The reservation's steps.** `status.steps` lists the activation
+  steps `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`,
+  `Configure`, and `Prepare`, and then the deactivation steps `Abort`,
+  `Secure`, `Disconnect`, `StopDevices`, `PowerOff`, and `StopSite`.
+  Each name is unique, so a JSONPath selects one step by name.
+  `status.phase` is `Scheduled`, `Activating`, `Ready`,
+  `Deactivating`, `Released`, or `Failed`, and the conditions `Ready`
+  and `SafeToPowerOff` serve `kubectl wait`. Plan 07 states what each
+  step does.
+- **A reservation's telescope.** A CEL transition rule refuses a
+  change to `spec.telescope`. Moving an active reservation would leave
+  the first telescope running.
+- **The category and the short names.** Every kind is in the category
+  `astro`. The short names are `obs`, `tel`, `ota`, `train`, `mnt`,
+  `cam`, `fw`, `foc`, `rot`, `cap`, `flat`, `pac`, `weather`, `sqm`,
+  `sw`, `rx`, and `rsv`. `GPS`, `Dome`, and `Guider` have none,
+  because the singular is already short.
+- **Field selectors.** Each CRD declares its parent fields as
+  `selectableFields`, so the operator can list one telescope's or one
+  train's devices.
+- **The namespace.** `deploy/` creates the namespace `observatory`
+  for the operator and the resources.
+
+## What the API server showed
+
+On the minikube cluster, `kubectl apply -k deploy/` created the
+namespace and the 20 CRDs, and every CRD reached `Established`.
+`kubectl apply -n observatory -f examples/simulators.yaml` created the
+28 resources of the example with no error, and `kubectl get astro`
+listed all of them, one table for each kind. Each short name answered
+its kind.
+
+The status subresource took a status written by hand, as the operator
+will write it. The printer columns then showed the readings: a camera
+at `-9.8` with setpoint `-10`, cooler `42`, and exposure `Busy`, and a
+mount's RA and Dec. A printer column shows only the first value of a
+JSONPath that matches several, so a `Switch`'s outputs that are on are
+also listed in `status.readings.on`, which the `On` column prints
+whole as `[1,3]`. `kubectl wait --for=condition=Ready` on the
+reservation returned when its `Ready` condition became `True`, and
+`kubectl describe` listed each step with its state and times.
+`--field-selector spec.opticalTrain=east-imaging` listed one train's
+camera.
+
+The API server refused each of these with the message shown:
+
+| Resource | Refusal |
+|---|---|
+| A `Camera` with no `opticalTrain` | `spec.opticalTrain: Required value` |
+| A `Camera` with the driver `ccd` and no image | `driver.name must match ^indi_[a-z0-9_]+$ when driver.image is not set` |
+| A `Switch` with a telescope and an observatory | `set exactly one parent: spec.telescope or spec.observatory` |
+| A `Focuser` on output 0 | `spec.power.output ... should be greater than or equal to 1` |
+| A `Reservation` that ends before it starts | `spec.end must be after spec.start` |
+| A `Reservation` moved to another telescope | `spec.telescope cannot change; create another Reservation` |
+| A `Guider` with `pulses: mount` | `supported values: "Mount", "Camera"` |
+| A `Mount` with a `location` | `strict decoding error: unknown field "spec.location"` |
+| An `Observatory` at latitude 91 | `spec.location.latitude ... should be less than or equal to 90` |
+
+A `Camera` with the driver `acme-ccd` in its own image passed a dry
+run. The same cases, and more, run in `validation_test.go` through the
+API server's own validators.
+
 ## References
 
 - INDI's interface bits: `DRIVER_INTERFACE` in
@@ -427,4 +542,4 @@ controller runs yet.
 - ASCOM's device types: <https://ascom-standards.org/alpyca/alpacaclasses.html>
 - equipment-operator's `Receiver` and `Television` resources, and
   media-operator's `Play`
-- [Root plan 74](../../plans/74-astrophotography.md), "Resources"
+- [Root plan 74](../../../plans/74-astrophotography.md), "Resources"

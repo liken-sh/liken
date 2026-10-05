@@ -1,0 +1,42 @@
+# The kustomize base for observatory-operator: the namespace and the
+# resource definitions of the observatory.liken.sh group. Plan 07 adds
+# the operator and its RBAC.
+#
+# This base is for the cluster owner to take. `liken` does not apply it
+# and does not name it. Take it through your own GitOps with patches of
+# your own, or read it and write your own manifests.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  # The site, the telescope, and the optics, from the top of the tree
+  # down.
+  - observatories-crd.yaml
+  - telescopes-crd.yaml
+  - opticaltubes-crd.yaml
+  - opticaltrains-crd.yaml
+  # The 14 device kinds, in the order of plan 06's table.
+  - mounts-crd.yaml
+  - cameras-crd.yaml
+  - filterwheels-crd.yaml
+  - focusers-crd.yaml
+  - rotators-crd.yaml
+  - dustcaps-crd.yaml
+  - flatpanels-crd.yaml
+  - polaraligners-crd.yaml
+  - gpses-crd.yaml
+  - domes-crd.yaml
+  - weatherstations-crd.yaml
+  - skyqualitymeters-crd.yaml
+  - switches-crd.yaml
+  - receivers-crd.yaml
+  # The guider, and the reservation that activates a telescope.
+  - guiders-crd.yaml
+  - reservations-crd.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: observatory-operator
+      app.kubernetes.io/part-of: liken

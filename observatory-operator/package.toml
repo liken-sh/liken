@@ -1,6 +1,7 @@
 # The operator that runs an observatory's hardware through INDI. So far
-# it holds the Go INDI client in indi/. The operator, its image, and its
-# manifests come with plans 06 and 07.
+# it holds the Go INDI client in indi/, and the resources: their Go
+# types in observatory/ and their CRDs in deploy/. The operator and its
+# image come with plan 07.
 [package]
 name = "observatory-operator"
 license = "MIT"

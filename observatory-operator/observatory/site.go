@@ -1,0 +1,103 @@
+package observatory
+
+// The Observatory is the building and the site: the roof, the weather,
+// and the location. It runs one INDI server of its own for the devices
+// that no telescope owns, while at least one Reservation in it is
+// active.
+
+type Observatory = Object[ObservatorySpec, ObservatoryStatus]
+
+type ObservatorySpec struct {
+	Location Location  `json:"location"`
+	Policies *Policies `json:"policies,omitempty"`
+}
+
+// Location is the site on the Earth. The operator writes it to each
+// mount and GPS as GEOGRAPHIC_COORD, which takes longitude from 0 to
+// 360 degrees east, and converts a negative longitude to that range.
+type Location struct {
+	// Latitude is in degrees north, from -90 to 90.
+	Latitude float64 `json:"latitude"`
+	// Longitude is in degrees east, from -180 to 180.
+	Longitude float64 `json:"longitude"`
+	// Elevation is in meters above mean sea level.
+	Elevation float64 `json:"elevation"`
+}
+
+// Policies are the rules between the dome and the mounts. Each one is
+// off unless the spec sets it. With one mount, the operator writes
+// them to the drivers, and the drivers enforce them while the operator
+// is down. INDI's dome snoops one mount only, so with several mounts
+// the operator enforces them across the servers.
+type Policies struct {
+	// DomeLocksMount sets the mount's DOME_POLICY to DOME_LOCKS: the
+	// mount does not unpark while the dome is parked, and parks when
+	// the dome parks.
+	DomeLocksMount bool `json:"domeLocksMount,omitempty"`
+	// MountLocksDome sets the dome's MOUNT_POLICY to MOUNT_LOCKS: the
+	// dome does not park while a mount is unparked.
+	MountLocksDome bool `json:"mountLocksDome,omitempty"`
+	// CloseShutterOnPark sets SHUTTER_CLOSE_ON_PARK in the dome's
+	// DOME_SHUTTER_PARK_POLICY.
+	CloseShutterOnPark bool `json:"closeShutterOnPark,omitempty"`
+	// OpenShutterOnUnpark sets SHUTTER_OPEN_ON_UNPARK in the dome's
+	// DOME_SHUTTER_PARK_POLICY.
+	OpenShutterOnUnpark bool `json:"openShutterOnUnpark,omitempty"`
+}
+
+type ObservatoryStatus struct {
+	ObservedGeneration int64       `json:"observedGeneration,omitempty"`
+	Phase              Phase       `json:"phase,omitempty"`
+	Conditions         []Condition `json:"conditions,omitempty"`
+	// Server is the observatory's own INDI server, while it runs.
+	Server *Server `json:"server,omitempty"`
+	// Telescopes names each Telescope whose spec.observatory names this
+	// Observatory.
+	Telescopes []string `json:"telescopes,omitempty"`
+	// Devices lists the devices whose parent is this Observatory.
+	Devices []DeviceRef `json:"devices,omitempty"`
+	// Reservations names each active Reservation of a telescope here.
+	Reservations []string `json:"reservations,omitempty"`
+	// Weather is the verdict of the observatory's weather stations:
+	// the worst one, or Unknown when no station reports.
+	Weather Safety `json:"weather,omitempty"`
+}
+
+// Phase is the state in one word of a resource that runs while a
+// reservation needs it: an Observatory, a Telescope, or a Guider.
+type Phase string
+
+const (
+	// PhaseInventory: no reservation needs it, and nothing runs.
+	PhaseInventory Phase = "Inventory"
+	// PhaseActivating: a reservation's activation steps run.
+	PhaseActivating Phase = "Activating"
+	// PhaseReady: everything it needs runs and is connected.
+	PhaseReady Phase = "Ready"
+	// PhaseDeactivating: a reservation's deactivation steps run.
+	PhaseDeactivating Phase = "Deactivating"
+	// PhaseError: a step failed. The Ready condition gives the reason.
+	PhaseError Phase = "Error"
+)
+
+// Endpoint is the address of an INDI server's Service. KStars and
+// astrophotography-operator connect to Host and Port.
+type Endpoint struct {
+	Service string `json:"service"`
+	Host    string `json:"host"`
+	Port    int32  `json:"port"`
+}
+
+// Server is one INDI server: its Service, and the pod that runs it.
+type Server struct {
+	Endpoint
+	Pod  string `json:"pod,omitempty"`
+	Node string `json:"node,omitempty"`
+}
+
+// DeviceRef names one device in a parent's status, with its phase.
+type DeviceRef struct {
+	Kind  string      `json:"kind"`
+	Name  string      `json:"name"`
+	Phase DevicePhase `json:"phase,omitempty"`
+}

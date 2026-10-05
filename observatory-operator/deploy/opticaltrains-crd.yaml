@@ -1,0 +1,151 @@
+# An `OpticalTrain` is one light path: a tube, and the camera, filter
+# wheel, focuser, and rotator behind it. KStars' Ekos uses the same term
+# for the same group of devices.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: opticaltrains.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: OpticalTrain
+    listKind: OpticalTrainList
+    plural: opticaltrains
+    singular: opticaltrain
+    shortNames: [train]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.telescope
+      additionalPrinterColumns:
+        - name: Telescope
+          type: string
+          jsonPath: .spec.telescope
+        - name: Tube
+          type: string
+          jsonPath: .spec.opticalTube
+        - name: Camera
+          type: string
+          jsonPath: '.status.devices[?(@.kind=="Camera")].name'
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            An `OpticalTrain` is one light path: an `OpticalTube`, and
+            the devices behind it, which name the train in their
+            `spec.opticalTrain`. The operator writes each camera's
+            `ACTIVE_DEVICES` from its train, so the train sets which
+            mount, focuser, filter wheel, and rotator the camera snoops.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [telescope, opticalTube]
+              description: "The train's place and its tube."
+              properties:
+                telescope:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Telescope` that the train is on.
+                opticalTube:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `OpticalTube` that collects the
+                    train's light. Two trains can name one tube.
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The `metadata.generation` of the spec that the
+                    operator last acted on.
+                conditions:
+                  type: array
+                  description: >-
+                    `ParentFound` is `False` when the `Telescope`, its
+                    `Observatory`, or the `OpticalTube` does not exist.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Ready`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition judged.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.
+                devices:
+                  type: array
+                  description: >-
+                    Each device whose `spec.opticalTrain` names this
+                    train.
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required: [kind, name]
+                    description: "One device, with its phase."
+                    properties:
+                      kind:
+                        type: string
+                        enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver]
+                        description: "The device's kind."
+                      name:
+                        type: string
+                        description: "The device's name."
+                      phase:
+                        type: string
+                        enum: [Inventory, Starting, Connecting, Connected, Disconnecting, Error]
+                        description: "The device's `status.phase`."
