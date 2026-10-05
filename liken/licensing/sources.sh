@@ -89,7 +89,7 @@ done
 # carries.
 kernel_version="$(cat "$here/../kernel/VERSION")"
 xtables_version="$(cat "$here/../xtables/VERSION")"
-trust_version="$(cat "$here/../trust/VERSION")"
+trust_version="$(cat "$here/../../trust/VERSION")"
 e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
 openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
 nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
@@ -331,7 +331,7 @@ mirror "grub/$grub_version" "grub2_$grub_version.dsc" \
 # The CA bundle: MPL-2.0, whose obligation is to keep the file's own
 # source form available. The PEM file is that form.
 place "trust/$trust_version" "cacert-$trust_version.pem" \
-    "$here/../trust/dist/$trust_version/cacert.pem"
+    "$here/../../trust/dist/$trust_version/cacert.pem"
 
 # The PCI naming database: dual-licensed, redistributed under its
 # 3-clause BSD option, which asks only for notices. The file is its

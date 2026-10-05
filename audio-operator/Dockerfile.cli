@@ -43,6 +43,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # Distroless static carries a CA bundle and nonroot user and no
 # shell, which is all a static Go binary that calls an HTTPS API needs.
 FROM gcr.io/distroless/static:nonroot
+# distroless carries its own Debian CA bundle. The one that the trust
+# component pins for every image of liken replaces it.
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /kubectl-liken-audio /usr/local/bin/kubectl-liken-audio
 # The binary is the entrypoint, so docker run passes the verbs
 # straight to it and a Job in the cluster runs it the same way.

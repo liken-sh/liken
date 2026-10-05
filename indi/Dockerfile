@@ -14,11 +14,10 @@
 FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7 AS builder
 ARG VERSION
 # The snapshot services answer only over HTTPS, and the Ubuntu image
-# has no CA bundle. Mozilla's bundle, as curl.se publishes it, comes in
-# by its checksum, so the build fetches the same file every time. It
-# stays in the builder; only indi-open ships it, for its weather drivers.
-ADD --chmod=644 --checksum=sha256:a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505 \
-    https://curl.se/ca/cacert-2026-09-25.pem /etc/apt/cacert.pem
+# has no CA bundle. The bundle is the one that the trust component pins
+# for every image of liken. It stays in the builder; only indi-open
+# ships it, for its weather drivers.
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY mutlaqja.asc /etc/apt/trusted.gpg.d/mutlaqja.asc
 COPY snapshot.sh /snapshot.sh
 RUN sh /snapshot.sh "$VERSION" \

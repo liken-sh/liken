@@ -240,6 +240,7 @@ jobs:
             --all-files
             --skip workflows
             --skip kubernetes/
+            --skip trust/
             --skip audio-operator/
             --skip bluetooth-operator/
             --skip brand/
@@ -337,8 +338,38 @@ jobs:
       contents: read
       packages: write
 
-  audio-operator:
+  trust:
     needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['trust'].check }}
+    uses: ./.github/workflows/component-trust.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['trust'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['trust'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['trust'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['trust'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['trust'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  trust-publish:
+    needs: [plan, trust]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['trust'].publish != 'none' }}
+    uses: ./.github/workflows/component-trust.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['trust'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['trust'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
+  audio-operator:
+    needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
@@ -353,7 +384,7 @@ jobs:
       packages: write
 
   audio-operator-publish:
-    needs: [plan, audio-operator, kubernetes]
+    needs: [plan, audio-operator, kubernetes, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
@@ -368,7 +399,7 @@ jobs:
       packages: write
 
   bluetooth-operator:
-    needs: [plan]
+    needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
@@ -383,7 +414,7 @@ jobs:
       packages: write
 
   bluetooth-operator-publish:
-    needs: [plan, bluetooth-operator, kubernetes]
+    needs: [plan, bluetooth-operator, kubernetes, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
@@ -546,7 +577,7 @@ jobs:
       packages: write
 
   display-operator:
-    needs: [plan, ffmpeg, weston]
+    needs: [plan, ffmpeg, trust, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].check }}
     uses: ./.github/workflows/component-display-operator.yaml
     with:
@@ -561,7 +592,7 @@ jobs:
       packages: write
 
   display-operator-publish:
-    needs: [plan, display-operator, ffmpeg, kubernetes, vaapi, vulkan, weston]
+    needs: [plan, display-operator, ffmpeg, kubernetes, trust, vaapi, vulkan, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-display-operator.yaml
     with:
@@ -606,7 +637,7 @@ jobs:
       packages: write
 
   git-csi-driver:
-    needs: [plan]
+    needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].check }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
@@ -621,7 +652,7 @@ jobs:
       packages: write
 
   git-csi-driver-publish:
-    needs: [plan, git-csi-driver]
+    needs: [plan, git-csi-driver, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
@@ -636,7 +667,7 @@ jobs:
       packages: write
 
   indi:
-    needs: [plan]
+    needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].check }}
     uses: ./.github/workflows/component-indi.yaml
     with:
@@ -651,7 +682,7 @@ jobs:
       packages: write
 
   indi-publish:
-    needs: [plan, indi]
+    needs: [plan, indi, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].publish != 'none' }}
     uses: ./.github/workflows/component-indi.yaml
     with:
@@ -680,7 +711,7 @@ jobs:
       packages: write
 
   library-operator:
-    needs: [plan, ffmpeg, vulkan]
+    needs: [plan, ffmpeg, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].check }}
     uses: ./.github/workflows/component-library-operator.yaml
     with:
@@ -695,7 +726,7 @@ jobs:
       packages: write
 
   library-operator-publish:
-    needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, vaapi, vulkan]
+    needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, trust, vaapi, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-library-operator.yaml
     with:
@@ -710,7 +741,7 @@ jobs:
       packages: write
 
   liken:
-    needs: [plan]
+    needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].check }}
     uses: ./.github/workflows/component-liken.yaml
     with:
@@ -724,7 +755,7 @@ jobs:
       packages: write
 
   liken-publish:
-    needs: [plan, liken, brand, kubernetes]
+    needs: [plan, liken, brand, kubernetes, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].publish != 'none' }}
     uses: ./.github/workflows/component-liken.yaml
     with:
@@ -770,7 +801,7 @@ jobs:
       packages: write
 
   media-operator:
-    needs: [plan, ffmpeg, mpv, vaapi, vulkan]
+    needs: [plan, ffmpeg, mpv, trust, vaapi, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].check }}
     uses: ./.github/workflows/component-media-operator.yaml
     with:
@@ -785,7 +816,7 @@ jobs:
       packages: write
 
   media-operator-publish:
-    needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, vaapi, vulkan]
+    needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, trust, vaapi, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-media-operator.yaml
     with:
@@ -800,7 +831,7 @@ jobs:
       packages: write
 
   people-operator:
-    needs: [plan]
+    needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].check }}
     uses: ./.github/workflows/component-people-operator.yaml
     with:
@@ -815,7 +846,7 @@ jobs:
       packages: write
 
   people-operator-publish:
-    needs: [plan, people-operator, kubernetes]
+    needs: [plan, people-operator, kubernetes, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-people-operator.yaml
     with:
@@ -878,7 +909,7 @@ jobs:
   # check jobs. So it waits for the plan and each component's checks,
   # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, indi, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, kubernetes, trust, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, indi, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -1116,7 +1147,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, kubernetes, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, kubernetes, trust, trust-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

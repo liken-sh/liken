@@ -165,6 +165,21 @@ The files that a base's `.dockerignore` leaves out, such as its
 `README.md` and its `smoke/` check, are not in the recipe, and a
 change to them needs no revision.
 
+## 5b. The trust store
+
+`trust` at the top of the repository pins the CA bundle that every part
+of `liken` trusts: the OS build reads its `VERSION` through
+`trust/fetch.sh`, and every image that verifies TLS copies the bundle
+from the `trust` image. `make versions` reports it as the domain
+`../trust`. Its `--bump` writes the new date into `VERSION`, the image's
+version and `[package.upstream]` into `package.toml`, and the snapshot
+and its published checksum into the `Dockerfile`. Then run
+`make workflows` at the top of the repository and raise the revision of
+`indi`, the one pinned component that copies the bundle. The tracked
+components that copy it release because their `[depends]` names
+`trust`. A snapshot removes trust as well as adding it, so read what
+left the bundle before taking the bump.
+
 ## 5a. The INDI images
 
 `indi` is a pinned component too, with the 16 images that

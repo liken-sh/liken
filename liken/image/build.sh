@@ -407,8 +407,8 @@ cp "$here"/../flux/manifests/*.yaml "$root/etc/liken/features/flux/manifests/"
 # (trust/fetch.sh explains where these roots come from). The staged
 # name is the conventional path that Go's crypto/x509, and most TLS
 # stacks, check first.
-trust_version="$(cat "$here/../trust/VERSION")"
-cp "$here/../trust/dist/$trust_version/cacert.pem" \
+trust_version="$(cat "$here/../../trust/VERSION")"
+cp "$here/../../trust/dist/$trust_version/cacert.pem" \
    "$root/etc/ssl/certs/ca-certificates.crt"
 
 # This is the PCI naming database (see hwdata/fetch.sh). It lets the

@@ -30,8 +30,8 @@ K3S_VERSION := $(strip $(file <k3s/VERSION))
 K3S_DIST := k3s/dist/$(K3S_VERSION)
 XTABLES_VERSION := $(strip $(file <xtables/VERSION))
 XTABLES_DIST := xtables/dist/$(XTABLES_VERSION)
-TRUST_VERSION := $(strip $(file <trust/VERSION))
-TRUST_DIST := trust/dist/$(TRUST_VERSION)
+TRUST_VERSION := $(strip $(file <../trust/VERSION))
+TRUST_DIST := ../trust/dist/$(TRUST_VERSION)
 E2FSPROGS_VERSION := $(strip $(file <e2fsprogs/VERSION))
 E2FSPROGS_DIST := e2fsprogs/dist/$(E2FSPROGS_VERSION)
 OPENISCSI_VERSION := $(strip $(file <open-iscsi/VERSION))
@@ -79,9 +79,10 @@ $(XTABLES_DIST)/bin/xtables-legacy-multi: xtables/VERSION xtables/fetch.sh
 xtables: $(XTABLES_DIST)/bin/xtables-legacy-multi
 
 # These are the CA certificates that the machine trusts. The build
-# pins them by snapshot date. See trust/fetch.sh.
-$(TRUST_DIST)/cacert.pem: trust/VERSION trust/fetch.sh
-	$(MAKE) -C trust
+# pins them by snapshot date. See ../trust/fetch.sh: the trust store is
+# its own component, which the INDI and other images read too.
+$(TRUST_DIST)/cacert.pem: ../trust/VERSION ../trust/fetch.sh
+	$(MAKE) -C ../trust
 
 trust: $(TRUST_DIST)/cacert.pem
 
@@ -764,7 +765,7 @@ test-docs:
 # because which pin owns which is the domain's own knowledge.
 #
 # This target reaches the network, so it is not part of any build.
-VERSION_DOMAINS := kernel k3s xtables trust e2fsprogs open-iscsi \
+VERSION_DOMAINS := kernel k3s xtables ../trust e2fsprogs open-iscsi \
 	nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware \
 	microcode flux docs licensing dev-cluster/storage
 
@@ -788,7 +789,7 @@ clean:
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
 	$(MAKE) -C xtables clean
-	$(MAKE) -C trust clean
+	$(MAKE) -C ../trust clean
 	$(MAKE) -C e2fsprogs clean
 	$(MAKE) -C open-iscsi clean
 	$(MAKE) -C nfs-utils clean

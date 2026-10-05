@@ -6,9 +6,8 @@
 # snapshot installs the same files again.
 #
 # Both services answer only over HTTPS, and the Ubuntu image has no CA
-# bundle. The Dockerfile fetches Mozilla's bundle from curl.se by its
-# checksum to /etc/apt/cacert.pem before this runs, and this copies it
-# to the path where apt and libcurl read a bundle.
+# bundle. The Dockerfile copies the trust component's bundle in before
+# this runs, and apt reads it from the path below.
 #
 # Usage: snapshot.sh <YYYYMMDD>
 set -eu
@@ -23,8 +22,6 @@ case $date in
 esac
 stamp=${date}T000000Z
 
-mkdir -p /etc/ssl/certs
-cp /etc/apt/cacert.pem /etc/ssl/certs/ca-certificates.crt
 echo 'Acquire::https::CAInfo "/etc/ssl/certs/ca-certificates.crt";' >/etc/apt/apt.conf.d/99snapshot-ca
 rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*
 cat >/etc/apt/sources.list.d/snapshot.sources <<SOURCES

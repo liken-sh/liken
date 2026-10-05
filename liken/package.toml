@@ -5,7 +5,7 @@ name = "liken"
 license = "MIT"
 
 [depends]
-components = ["brand", "kubernetes"]
+components = ["brand", "kubernetes", "trust"]
 
 [docs]
 # liken's manual is the root of the site.

@@ -35,7 +35,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /people-operator .
 FROM scratch
 COPY --from=build /people-operator /people-operator
 # A scratch image carries no trust store, and every HTTPS fetch of a
-# picture fails without one. The bundle is the build stage's own
-# Debian set.
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# picture fails without one. The bundle is the one that the trust
+# component pins for every image of liken.
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENTRYPOINT ["/people-operator"]

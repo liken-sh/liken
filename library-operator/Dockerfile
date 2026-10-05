@@ -48,6 +48,7 @@ FROM scratch
 COPY --from=build /library-operator /library-operator
 COPY --from=build /library-operator-pod /library-operator-pod
 # A scratch image carries no trust store, and every TLS call fails without
-# one. The bundle is the build stage's own Debian set.
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# one. The bundle is the one that the trust component pins for every
+# image of liken.
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENTRYPOINT ["/library-operator"]

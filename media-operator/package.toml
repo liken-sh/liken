@@ -4,7 +4,7 @@ name = "media-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "vaapi", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "trust", "vaapi", "vulkan"]
 
 [docs]
 prefix = "media"

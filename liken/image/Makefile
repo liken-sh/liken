@@ -31,7 +31,7 @@ WPASUPPLICANT_VERSION := $(strip $(file <../wpa-supplicant/VERSION))
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
 XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
-TRUST_VERSION := $(strip $(file <../trust/VERSION))
+TRUST_VERSION := $(strip $(file <../../trust/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 TZDATA_VERSION := $(strip $(file <../tzdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
@@ -46,7 +46,7 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		../k3s/dist/$(K3S_VERSION)/k3s \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
-		../trust/dist/$(TRUST_VERSION)/cacert.pem \
+		../../trust/dist/$(TRUST_VERSION)/cacert.pem \
 		../hwdata/dist/$(HWDATA_VERSION)/pci.ids \
 		../tzdata/dist/$(TZDATA_VERSION)/zoneinfo/UTC \
 		../linux-firmware/dist/$(LINUXFIRMWARE_VERSION)/derived.txt \

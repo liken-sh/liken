@@ -53,8 +53,8 @@ equipment people own.
 shell: the CCD simulator runs `gsc` through `popen()`
 (`drivers/ccd/sky_renderer.cpp`), which starts `/bin/sh`, and the
 prototype drew an empty frame until the image had `dash` as `/bin/sh`.
-`indi-open` carries a CA bundle, because the network weather drivers
-fetch over HTTPS with libcurl.
+`indi-open` carries the CA bundle of the `trust` component, because
+the network weather drivers fetch over HTTPS with libcurl.
 
 ## Loads that ldd does not see
 

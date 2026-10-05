@@ -9,6 +9,10 @@ prefix = "git"
 # gofmt, vet, a tidy check of go.mod, and one run of the tests that
 # checks for races and writes the coverage profile, then the coverage
 # gate on that profile. .testcoverage.yml holds the floor.
+# The CA bundle that the image copies.
+[depends]
+components = ["trust"]
+
 [[jobs]]
 name = "go"
 toolchain = "go"

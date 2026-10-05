@@ -125,8 +125,9 @@ the jobs and the images that run for each component, and why.
 
 ## Pinned components
 
-The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, and
-the INDI images of `indi`, are pinned components. A pinned component's `package.toml` states a
+The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, the
+INDI images of `indi`, and the CA bundle of `trust` are pinned
+components. A pinned component's `package.toml` states a
 `version` and a `revision`, and it publishes under its own tag,
 `<version>-<revision>`, such as `20260928-1`. That tag never looks
 like a release version. The version of a base is the date of the

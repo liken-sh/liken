@@ -25,7 +25,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: driver
-          image: ghcr.io/liken-sh/indi:20261005-1
+          image: ghcr.io/liken-sh/indi:20261005-2
           command: [/usr/bin/socat]
           # pipes gives the driver a pipe for stdout. On a Unix socket,
           # a driver sends each BLOB as a file descriptor, which socat
@@ -79,7 +79,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: driver
-          image: ghcr.io/liken-sh/indi-simulators:20261005-1
+          image: ghcr.io/liken-sh/indi-simulators:20261005-2
           command: [/usr/bin/socat]
           # pipes gives the driver a pipe for stdout. On a Unix socket,
           # a driver sends each BLOB as a file descriptor, which socat
@@ -133,7 +133,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: driver
-          image: ghcr.io/liken-sh/indi:20261005-1
+          image: ghcr.io/liken-sh/indi:20261005-2
           command: [/usr/bin/socat]
           # pipes gives the driver a pipe for stdout. On a Unix socket,
           # a driver sends each BLOB as a file descriptor, which socat

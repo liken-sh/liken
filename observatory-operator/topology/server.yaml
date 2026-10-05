@@ -22,7 +22,7 @@ spec:
     spec:
       initContainers:
         - name: links
-          image: ghcr.io/liken-sh/indi:20261005-1
+          image: ghcr.io/liken-sh/indi:20261005-2
           command: [/usr/bin/indi-shim, link, /run/indi/drivers, "mount:7625", "ccd:7625", "focuser:7625"]
           securityContext:
             runAsNonRoot: true
@@ -35,7 +35,7 @@ spec:
           volumeMounts: [{name: drivers, mountPath: /run/indi/drivers}]
       containers:
         - name: indiserver
-          image: ghcr.io/liken-sh/indi:20261005-1
+          image: ghcr.io/liken-sh/indi:20261005-2
           args: [-v, -r, "2147483647", /run/indi/drivers/mount:7625, /run/indi/drivers/ccd:7625, /run/indi/drivers/focuser:7625]
           ports: [{name: indi, containerPort: 7624}]
           securityContext:

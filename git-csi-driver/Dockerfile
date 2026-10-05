@@ -32,18 +32,20 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}"
 
 FROM debian:trixie-slim AS closure
 # git is the program the driver runs. openssh-client is the transport a
-# deploy key uses. ca-certificates verifies an HTTPS forge.
+# deploy key uses.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         openssh-client \
-        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY git-closure.sh /
 RUN sh /git-closure.sh /out
 
 FROM scratch
 COPY --from=closure /out /
+# The CA bundle that verifies an HTTPS forge is the one that the trust
+# component pins for every image of liken.
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 COPY --from=build /git-csi-driver /usr/local/bin/git-csi-driver
 

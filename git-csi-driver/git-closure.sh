@@ -1,8 +1,8 @@
 #!/bin/sh
 # Collects git, ssh, and every file the two of them open at runtime
 # into one directory tree, so the image ships that tree and nothing
-# else. Run it in a builder that has git, openssh-client, and
-# ca-certificates installed, with the output directory as the
+# else. Run it in a builder that has git and openssh-client
+# installed, with the output directory as the
 # argument. audio-operator's audio-closure.sh is the same shape for
 # the same reason.
 set -eu
@@ -73,7 +73,6 @@ seeds="
 # driver runs git init for the store and again for every work tree.
 # The 88 kB buys a clean report from the command a volume starts with.
 data="
-/etc/ssl/certs/ca-certificates.crt
 /usr/share/git-core/templates
 "
 

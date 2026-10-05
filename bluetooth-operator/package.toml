@@ -4,7 +4,7 @@ name = "bluetooth-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes"]
+components = ["kubernetes", "trust"]
 
 [docs]
 prefix = "bluetooth"

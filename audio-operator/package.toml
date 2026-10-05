@@ -4,7 +4,7 @@ name = "audio-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes"]
+components = ["kubernetes", "trust"]
 
 [docs]
 prefix = "audio"

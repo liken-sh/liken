@@ -1,0 +1,26 @@
+# The trust store: the CA certificates that liken trusts, from the
+# Mozilla CA program as curl.se publishes it. The OS build reads the
+# pin in VERSION through fetch.sh, and every image that verifies TLS
+# copies the bundle from the trust image, so one bump reaches all of
+# them.
+[package]
+name = "trust"
+# The date of the curl.se snapshot, as YYYYMMDD. VERSION holds the same
+# date as curl names it, and the Dockerfile fetches that snapshot by
+# its checksum. latest.sh --bump writes all three, and the smoke check
+# fails when they disagree.
+version = "20260925"
+revision = 1
+license = "MIT"
+
+[package.upstream]
+mozilla-ca = "2026-09-25"
+
+# shellcheck and the whitespace checks, from .pre-commit-config.yaml.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+
+[[outputs.images]]
+name = "trust"
+smoke = "trust/smoke/trust.sh"
