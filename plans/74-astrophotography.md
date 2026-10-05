@@ -283,8 +283,8 @@ container in the pod restarts.
 
 ## Images
 
-observatory-operator plans [01](../observatory-operator/plans/01-the-indi-base-image.md)
-and [02](../observatory-operator/plans/02-driver-and-simulator-images.md)
+observatory-operator plans [01](../observatory-operator/plans/completed/01-the-indi-base-image.md)
+and [02](../observatory-operator/plans/completed/02-driver-and-simulator-images.md)
 replace the layers below with library closures on `scratch`, measured
 on 2026-10-05: a 71 MB base with every core driver, and one image for
 each vendor SDK family.

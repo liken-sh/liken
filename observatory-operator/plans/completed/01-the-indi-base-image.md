@@ -1,8 +1,8 @@
 # 01, The INDI base image
 
-Proposed on 2026-10-05. Not built. A prototype of this image was built
-and tested on a workstation on 2026-10-05, and the measurements below
-come from it.
+Built on 2026-10-05, and published as `ghcr.io/liken-sh/indi:20261005-1`
+and `-2`. The measurements below come from a prototype on a workstation
+and from the published image.
 
 ## The problem
 
@@ -144,5 +144,5 @@ that `ldd` does not see.
 - The INDI PPA: <https://launchpad.net/~mutlaqja/+archive/ubuntu/ppa>
 - Ubuntu snapshots: <https://snapshot.ubuntu.com/>
 - The closure method: `vulkan/closure.sh`, and
-  [Loads that ldd cannot see](../../display-operator/plans/open-problems/loads-that-ldd-cannot-see.md)
-- [Root plan 74](../../plans/74-astrophotography.md), "Images"
+  [Loads that ldd cannot see](../../../display-operator/plans/open-problems/loads-that-ldd-cannot-see.md)
+- [Root plan 74](../../../plans/74-astrophotography.md), "Images"

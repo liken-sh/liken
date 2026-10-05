@@ -23,6 +23,11 @@ wants to watch it.
 stays open until display-operator decides on a remedy. Until then, a
 modal dialog during a night ends PHD2, and the pod restarts it.
 
+On a slow link, PHD2's guide frames cost a hop each way: plan 03
+measured 1,082 ms from the end of an exposure to a client two hops
+away, at 76 Mbit/s, against 13 ms on one host. The guider's pod runs on
+the node of the server and the guide camera when the link is slow.
+
 ## How we test it
 
 PHD2 calibrates and guides on the simulators on the `lab` fleet, as it

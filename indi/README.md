@@ -31,7 +31,7 @@ symbolic link to it, named for the address of the device pod's
 from its own name, connects, and copies bytes in both directions until
 either side closes. The device pod serves its driver with
 `socat TCP-LISTEN:7625,reuseaddr EXEC:<driver>,pipes`.
-`observatory-operator/plans/03-the-topology-by-hand.md` gives the
+`observatory-operator/plans/completed/03-the-topology-by-hand.md` gives the
 design.
 
 ## The version and the revision

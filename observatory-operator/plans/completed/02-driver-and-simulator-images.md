@@ -1,8 +1,8 @@
 # 02, Driver and simulator images
 
-Proposed on 2026-10-05. Not built. A prototype of every image below was
-built and tested on a workstation on 2026-10-05, and the measurements
-come from it.
+Built on 2026-10-05, and published at `20261005-1` and `-2`. The sizes
+below come from a prototype on a workstation; the published images are
+about 2 MB larger each, for the shim and the image's own loader cache.
 
 ## The problem
 
@@ -129,4 +129,4 @@ image lists, so a new driver is a decision, not a silent addition.
 - The driver catalog: `/usr/share/indi/drivers.xml`, 291 devices
 - The CCD simulator: `drivers/ccd/ccd_simulator.cpp` and
   `drivers/ccd/sky_renderer.cpp` in `indilib/indi`
-- [Root plan 74](../../plans/74-astrophotography.md), "Images"
+- [Root plan 74](../../../plans/74-astrophotography.md), "Images"

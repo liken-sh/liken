@@ -23,6 +23,14 @@ on a running server. Each device is a symbolic link to the shim of
 plan 03, so adding a device is a new link and a `start` command. How
 the operator reaches the fifo in the server's pod is open.
 
+The operator also places the pods. On the test cluster of plan 03, the
+link between two nodes carried 76 Mbit/s, and a guide-sized frame took
+430 ms for each hop it crossed. So the guide camera's pod and the
+server's pod run on one node when the link between nodes is slow. The
+server's pod stops with a grace period of 1 second, because
+`indiserver` runs as process 1 and ignores `SIGTERM`, and a longer
+period leaves every device offline for its whole length.
+
 The operator watches through client-go's reflector, as every operator
 in the repository does. The `operators` skill holds the rules.
 

@@ -1,6 +1,7 @@
 # 03, The topology by hand
 
-Proposed on 2026-10-05. Not built.
+Built on 2026-10-05, and run on a two-node test cluster with the
+`20261005-1` images. "What the test cluster measured" gives the results.
 
 ## The problem
 
@@ -97,6 +98,57 @@ and it would put protocol state in the shim that can drift from what
   The server's log shows one restart for each deadline, and nothing
   faster.
 
+## What the test cluster measured
+
+The manifests ran on a test cluster of two nodes, with the server on
+one node and the three device pods on the other. Every container ran as
+user 1000 on a read-only root filesystem.
+
+- **The server reached every device on the first try**, through the
+  shims and the `Service` names, with no shim restart at startup.
+- **A frame crossed the cluster intact.** The CCD simulator at 500 mm
+  wrote a frame with 337 bright pixels and the mount's `OBJCTRA` in its
+  header, and `solve-field` solved it at RA 83.556°, Dec −5.412°, the
+  same field as in Docker.
+- **The link between the nodes is slow, and it dominates the guide
+  path.** Pod to pod, with no INDI involved, the link carried
+  76 Mbit/s. A guide-sized frame, 1280 by 960 at 16 bits and 3.34 MB on
+  the wire as base64, took from the end of its exposure to the client:
+
+  | Path | Median | p90 | Max |
+  |---|---|---|---|
+  | Docker bridge on one host | 13 ms | 14 ms | 15 ms |
+  | One hop: CCD pod to the server, client on the server's node | 430 ms | 1,056 ms | 1,193 ms |
+  | Two hops: CCD pod to the server to a client on the CCD's node | 1,082 ms | 1,590 ms | 1,885 ms |
+
+  At 76 Mbit/s, one hop of 3.34 MB is about 350 ms, so the transfer
+  accounts for most of each result. On 1 GbE the same arithmetic gives
+  about 27 ms per hop, which was not measured. On a slow link, the
+  guide camera's pod, the server, and PHD2 belong on one node, which
+  plans 07 and 09 have to provide for.
+- **A device's restart costs that device alone.** The mount's pod was
+  deleted during a 15-second exposure: the exposure finished and wrote
+  its frame, the CCD stayed connected, and the mount came back
+  disconnected. The CCD's pod was deleted while the mount tracked: the
+  mount's right ascension did not change, and it stayed connected.
+- **The server stopped slowly until its grace period was cut.** The
+  first restart of the server's pod took 35 seconds, because
+  `indiserver` runs as process 1 with no handler for `SIGTERM`, and the
+  old pod took 31.2 seconds to stop: the whole grace period, then a
+  kill. A device pod, with `socat` as process 1, stopped in 2.1
+  seconds. With `terminationGracePeriodSeconds: 1`, all three devices
+  were on a new server 3 seconds after the old one was deleted.
+- **A device that stays down costs one restart a minute.** With the
+  mount scaled to 0 for 200 seconds, the server's log showed the shim
+  give up and restart at 16:42:24, 16:43:24, and 16:44:24, as
+  `restart #0`, `#1`, and `#2`, and nothing between. The mount was on
+  the server 1 second after its pod was ready again.
+
+Every restart left its device disconnected with its settings lost, as
+in Docker, so a script configured the devices again. Plan 08's
+reconciler replaces it. A server that starts long before its devices
+was not tested on the cluster.
+
 ## Upstream issues
 
 - [indi#1927](https://github.com/indilib/indi/issues/1927): a server
@@ -114,5 +166,5 @@ and it would put protocol state in the shim that can drift from what
 - A driver chooses descriptor passing for BLOBs in `is_unix_io()` in
   `libs/indibase/indidriverio.c`. A pipe makes it send base64, which is
   why the listener needs `pipes`.
-- [Root plan 74](../../plans/74-astrophotography.md), "The rig" and
+- [Root plan 74](../../../plans/74-astrophotography.md), "The rig" and
   "Evidence"
