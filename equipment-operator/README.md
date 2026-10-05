@@ -19,7 +19,7 @@ spec:
   inputs:
     - name: MPLAY
       machine: node-1
-      monitor: hdmi-a-1
+      monitor: acm-0001-receiver
 ```
 
 `media-operator` writes the `Player`'s session into `status.session`

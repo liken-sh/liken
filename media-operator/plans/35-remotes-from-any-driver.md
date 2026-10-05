@@ -45,17 +45,33 @@ CEC input device, so no eviction needs a second toleration. If `liken`
 adds a device taint later, a toleration derived from the
 `DeviceClass`'s driver is the change to make then.
 
-## What the design must answer
+## A relay node that answers `ENODEV` for a while
 
-The design assumes that a Bluetooth reader never meets the rule,
-because its relay node never ends. The comment on `nodePollDelay`
-states a case that contradicts this: a relay node answers `ENODEV`
-while bluetooth-operator restores its relay, and answers again when
-the relay's virtual device is back. During that window the glob finds
-no node that answers, so the rule as written exits a Bluetooth reader
-too. The design must tell a node that the kernel removed from a node
-that answers `ENODEV` for a while, or accept a restart of the
-Bluetooth reader in that window.
+The comment on `nodePollDelay` states a case the rule must not catch:
+a Bluetooth relay node answers `ENODEV` while bluetooth-operator
+restores its relay, and answers again when the relay's virtual device
+is back. During that window the glob finds no node that answers. The
+rule as written would exit a Bluetooth reader too.
+
+**The reader tells the two cases apart, and exits only for a node that
+cannot come back.** The node files in the container's `/dev/input`
+never change while the container runs, so the file's presence tells
+nothing. The reader therefore records what each node is when it opens
+it, while the node still answers. A relay node that bluetooth-operator
+restores keeps the scan that runs today. Any other node that ends
+counts toward the exit. The reader exits when every node it opened has
+ended and none of them was a relay.
+
+The mark comes from the device itself or from the claim. Two sources
+are open, and the build picks the one that holds:
+
+* The input id the reader reads with `EVIOCGID` at open. This works
+  only if bluetooth-operator gives its relays a bus type that no other
+  input device on a `liken` machine uses. Check the relay's bus type.
+* The driver of the `Remote`'s device. `media-operator` builds the
+  reader pod from the `Remote`, so it can pass the device's driver,
+  `bluetooth.liken.sh` or `liken.sh`, to the reader in an environment
+  variable.
 
 ## What was set aside
 

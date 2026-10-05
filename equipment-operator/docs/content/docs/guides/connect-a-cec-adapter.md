@@ -225,8 +225,8 @@ When a `CECBus` in `Control` finds a TV, the operator creates a
 `status.displays` lists the `Display` the bus's adapter names, and
 `via` names the `Receiver` the picture passes through. The operator
 sets `via` when a `Receiver` input names the `Display`'s machine and
-the `Display` as its monitor, and the receiver is above the `Display`
-in the tree:
+the `Display` as its monitor. The receiver must also be above the
+`Display` in the tree:
 
     kubectl get television living-room -o jsonpath='{.status.displays}' | jq
 
@@ -265,9 +265,9 @@ the operator cannot wake that TV.
 ## Wake the TV with the room
 
 The TV wakes with the receiver. A `Receiver` session wakes the room
-when a Play starts on it, when its screen wakes, when the remote's
-power button turns the room on, and when a session appears with a Play
-or its screen already on. The operator then finds the `Television`
+when a Play starts on it, when its screen wakes, or when the remote's
+power button turns the room on. A session that appears with a Play or
+its screen already on also wakes the room. The operator then finds the `Television`
 whose `status.displays` lists the session's `Display`, and writes a
 new `status.session.wokeAt` on it.
 
@@ -432,8 +432,9 @@ that is connected straight to the machine, with no `Receiver`, has no
 session to follow, and it does not wake with the room.
 
 The node workload writes one log line for each wake, standby, and
-power read, and one line for each message that a person notices, such
-as Active Source, Routing Change, Image View On, or Standby:
+power read. It also writes one line for each message that a person
+notices, such as Active Source, Routing Change, Image View On, or
+Standby:
 
     kubectl get pods -n liken-system -l app=equipment-operator-cec -o wide
     kubectl logs -n liken-system <pod on node-1>
