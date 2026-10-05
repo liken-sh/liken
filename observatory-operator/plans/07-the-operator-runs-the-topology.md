@@ -12,9 +12,16 @@ the server, and has to restart the server to add it.
 
 The operator turns the resources of plan 06 into the topology of plan
 03: one pod and one `Service` for each device, with its DRA claim, and
-the server pod with one shim for each device. The manifests of plan 03
-become the operator's output, and the operator's tests compare against
-them.
+one server pod for each `Telescope` with one shim for each of its
+devices. The `Observatory` has one more server pod for the devices that
+no telescope owns. The manifests of plan 03 become the operator's
+output, and the operator's tests compare against them.
+
+The operator starts a telescope's pods only while a `Reservation` for
+it is active, and runs activation and deactivation in the order that
+plan 06 gives. Activation waits for each device's DRA device to appear,
+because a person powers the devices on by hand, or a `Switch` output
+switches them on.
 
 A device added after the server starts reaches the server without a
 server restart. `indiserver` reads `start` and `stop` commands for

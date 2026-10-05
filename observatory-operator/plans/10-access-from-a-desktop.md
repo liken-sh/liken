@@ -16,9 +16,9 @@ command PHD2. `indiserver` parses XML from every client that connects.
   network reaches them.
 - A `NetworkPolicy` allows only that path and the observatory's own
   pods.
-- A field on the observatory records which client drives the rig, so a
-  person can take the rig with KStars and give it back. In mode 1 the
-  field is informative. `astrophotography-operator` reads it in mode 2.
+- The holder of the telescope's `Reservation`, from plan 06, records
+  which client drives the telescope, so a person can take it with
+  KStars and give it back.
 - KStars receives frames as BLOBs, through the `pipes` shim, in
   `UPLOAD_CLIENT` or `UPLOAD_BOTH`.
 

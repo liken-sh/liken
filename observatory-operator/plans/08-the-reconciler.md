@@ -17,6 +17,10 @@ settings from its resource when the device appears on the server. It
 applies them only then. A reconciler that applies settings on every
 change would undo what KStars changes, such as `UPLOAD_MODE`.
 
+It also writes each camera's `ACTIVE_DEVICES` from the camera's
+`OpticalTrain`, and the mount and dome policies that the `Observatory`
+configures for one mount, as plan 06 describes.
+
 The reconciler also writes each device's state to its resource's
 status from the INDI updates, through the client of plan 04. It reads
 every update on one connection, and opens no timer to read state

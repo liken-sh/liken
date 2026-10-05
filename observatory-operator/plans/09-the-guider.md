@@ -12,7 +12,9 @@ a compositor with no seat, and its instance lock outlives a crash.
 
 ## The requirement
 
-A guider pod runs PHD2 from its PPA as a client of the INDI server,
+A `Guider` belongs to a `Telescope` and names the `OpticalTrain` whose
+camera guides, as plan 06 describes. Its pod runs PHD2 from its PPA as
+a client of the telescope's INDI server,
 with no device claims, and the `weston` image as a headless sidecar.
 Before each start, the pod writes PHD2's whole profile, including
 `ConfigVersion=2001` and the INDI camera and mount, and removes the

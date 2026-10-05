@@ -395,7 +395,9 @@ again.
 
 ## Resources
 
-A first sketch, with names that are not settled:
+A first sketch, with names that are not settled. [Plan 06 of
+`observatory-operator`](../observatory-operator/plans/06-the-resources.md)
+settles the names of the hardware layer.
 
 ```yaml
 kind: Telescope
