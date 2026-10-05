@@ -251,14 +251,10 @@ from the bus to the `Receiver`'s status.
 ## What this design leaves for later
 
 - A room with picture on the receiver and sound on a Bluetooth
-  speaker. Plan 77 gives a `Sink` its own session and `volumeAsk`, but
-  it does not cover this room. `volumeDevices` in
-  `media-operator/volumedevices.go` chooses the `Receiver` whenever the
-  unit's screen matches a reachable one, and the sinks only otherwise.
-  So in this room a volume press moves the receiver, and the speaker
-  that plays the sound does not change. Power and input still belong
-  to the receiver, which the display finds. The level would have to
-  come from the sinks: two lookups instead of one.
+  speaker. A volume press moves the receiver, and the speaker that
+  plays the sound does not change. media-operator
+  [plan 43](../../media-operator/plans/43-the-level-follows-the-sound.md)
+  sets the level on the device that carries the sound.
 - HEOS as a second protocol block on a Denon, on port 1255, for music.
 - A `Projector` kind. PJLink would be the first protocol that is a
   standard and not a brand.

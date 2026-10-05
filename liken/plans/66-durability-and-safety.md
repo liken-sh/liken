@@ -505,8 +505,13 @@ The fix:
 
 * Commit a reviewed SHA-256 for the `lego` archive. Verify it before
   extraction, and execute only the verified contents. A mismatch must
-  fail before the step that uses the credential. Narrow the token that
-  `lego` gets to DNS.
+  fail before the step that uses the credential.
+* Split `RELEASES_CERT_TOKEN` into two tokens, both declared in
+  `liken.sh/terraform.tf`: one scoped to Domains, which only the `lego`
+  step receives, and one scoped to Object Storage, which only the step
+  that installs the certificate on the bucket receives. Each step then
+  holds only the access its own work needs. The maintainer chose the
+  split on 2026-10-04.
 * Pin each external action by its full commit SHA, and keep the
   human-readable version beside it for maintenance. Keep the local
   composite-action references local.
