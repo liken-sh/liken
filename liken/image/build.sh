@@ -459,6 +459,9 @@ mkdir -p "$root/usr/share/liken"
     for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware wireless-regdb microcode; do
         case "$component" in
             wireless-regdb) version="$regdb_version" ;;
+            # The trust store is its own component at the top of the
+            # repository, and $trust_version above holds its pin.
+            trust) version="$trust_version" ;;
             *) version="$(cat "$here/../$component/VERSION")" ;;
         esac
         echo "  - name: $component"
