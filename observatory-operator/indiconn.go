@@ -1,0 +1,152 @@
+package main
+
+// The operator holds one INDI client for each INDI server it runs, and
+// connects, configures, and reads every device through it. The client
+// dials the server's Service, and opens its connection when the
+// server's pod is Ready, which is when the Service has a ready
+// endpoint. Each new connection reads the whole state again (the indi
+// package), so a restart of the server or of the operator costs one
+// baseline and nothing else.
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/liken-sh/liken/observatory-operator/indi"
+)
+
+// The pause after a connection that ended while the server's pod stayed
+// Ready. It is a clock: no pod event follows such an end, as when
+// kube-proxy has not yet programmed the Service's new endpoint, or when
+// the connection broke while the server ran. It doubles to its limit,
+// and a connection that ran for the reset time starts it again.
+const (
+	redialFirst = time.Second
+	redialLimit = 30 * time.Second
+	redialReset = time.Minute
+)
+
+type indiServer struct {
+	name   string
+	client *indi.Client
+	cancel context.CancelFunc
+	done   chan struct{}
+	// mu serializes the operator's INDI work on the server, so two
+	// runners that share a site server do not interleave their changes
+	// to one device.
+	mu sync.Mutex
+}
+
+type servers struct {
+	o      *operator
+	mu     sync.Mutex
+	byName map[string]*indiServer
+}
+
+func newServers(o *operator) *servers {
+	return &servers{o: o, byName: map[string]*indiServer{}}
+}
+
+// get answers the client of one server, when its pod exists.
+func (s *servers) get(name string) (*indiServer, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	server, ok := s.byName[name]
+	return server, ok
+}
+
+// sync opens a client for each server pod, and closes the client of
+// each server whose pod is gone.
+func (s *servers) sync(ctx context.Context, t *tree) {
+	want := map[string]bool{}
+	for name, p := range t.pods {
+		if p.Metadata.Labels[labelRole] == roleServer {
+			want[name] = true
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name := range want {
+		if _, open := s.byName[name]; !open {
+			s.byName[name] = s.open(ctx, name)
+		}
+	}
+	for name, server := range s.byName {
+		if !want[name] {
+			server.cancel()
+			<-server.done
+			delete(s.byName, name)
+		}
+	}
+}
+
+func (s *servers) stopAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, server := range s.byName {
+		server.cancel()
+		<-server.done
+		delete(s.byName, name)
+	}
+}
+
+func (s *servers) open(parent context.Context, name string) *indiServer {
+	ctx, cancel := context.WithCancel(parent)
+	address := serviceHost(name, s.o.namespace) + ":" + strconv.Itoa(serverPort)
+	var options []indi.Option
+	if s.o.dialer != nil {
+		options = append(options, indi.WithDialer(s.o.dialer))
+	}
+	server := &indiServer{name: name, client: indi.NewClient(address, options...), cancel: cancel, done: make(chan struct{})}
+	events := server.client.Subscribe(ctx)
+	var group sync.WaitGroup
+	// Every INDI event wakes the operator, as a watch event does: a
+	// runner may wait for a property, and the status writer shows it.
+	group.Go(func() {
+		for range events {
+			s.o.changed.notify()
+		}
+	})
+	group.Go(func() { s.keep(ctx, server) })
+	go func() {
+		group.Wait()
+		close(server.done)
+	}()
+	return server
+}
+
+// keep runs the client's connection while the server's pod is Ready,
+// and opens it again after it ends.
+func (s *servers) keep(ctx context.Context, server *indiServer) {
+	pause := redialFirst
+	for {
+		err := s.o.waitFor(ctx, nil, func(t *tree) (bool, string, error) {
+			p, ok := t.pods[server.name]
+			return ok && p.ready(), "", nil
+		})
+		if err != nil {
+			return
+		}
+		began := time.Now()
+		err = server.client.Run(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "observatory-operator: the INDI connection to %s ended: %v\n", server.name, err)
+		if time.Since(began) >= redialReset {
+			pause = redialFirst
+		}
+		timer := time.NewTimer(pause)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		pause = min(2*pause, redialLimit)
+	}
+}

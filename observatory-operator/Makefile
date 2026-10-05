@@ -30,22 +30,9 @@ test-go:
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 	go tool go-test-coverage --config=.testcoverage.yml
 
-# The transcripts in indi/testdata/ come from the simulators in the
-# pinned indi-simulators image. Record them again after a bump of the
-# INDI images.
-.PHONY: record
-record:
-	go test ./indi -run TestRecordTranscripts -record -timeout 15m
-
-# The coverage report is the profile the gate already measured, drawn
-# as one HTML page. This module has no manual, so the site serves the
-# page at coverage/observatory-operator.html. `test` does not depend on
-# it: the gate decides whether a change passes, and the report only
-# shows a reader what the tests reached.
-#
-# coverage is brand's tool. This module has no docs module to pin it
-# as a tool, so the command runs it from brand's own module.
-.PHONY: coverage-report
-coverage-report: coverage.out
-	cd ../brand && go run ./coverage -title observatory-operator -root ../observatory-operator \
-		-label Go -out ../observatory-operator/coverage.html ../observatory-operator/coverage.out
+# drivers/generated.go maps each driver to the image that holds it, from
+# indi/images/ and the tag in indi/package.toml. A test fails when the
+# file is stale; this writes it again.
+.PHONY: drivers
+drivers:
+	go test ./drivers -run TestTheMapIsCurrent -update

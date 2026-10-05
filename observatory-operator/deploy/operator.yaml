@@ -1,0 +1,55 @@
+# The operator: one unprivileged Deployment in the observatory's
+# namespace. It reads the resources, runs each reserved telescope's
+# pods, and drives the devices through each INDI server's Service. It
+# keeps no state outside the API server: a reservation's status records
+# every step, and a new pod continues from it.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: observatory-operator
+  namespace: observatory
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: observatory-operator
+  # One copy, and Recreate, so two copies never run at once during a
+  # rollout. The operator records which reservation holds each
+  # telescope in its memory, from the reservations' status, and two
+  # copies would each run the same steps on the same devices.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: observatory-operator
+    spec:
+      serviceAccountName: observatory-operator
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/observatory-operator:latest
+          env:
+            # The operator watches its own namespace, where the
+            # resources and the pods are.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            # The watches hold every resource of the namespace, and each
+            # INDI connection holds every property of its server's
+            # devices: about 70 for a camera.
+            limits:
+              memory: 256Mi

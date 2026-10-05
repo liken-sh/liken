@@ -1,6 +1,6 @@
-# The kustomize base for observatory-operator: the namespace and the
-# resource definitions of the observatory.liken.sh group. Plan 07 adds
-# the operator and its RBAC.
+# The kustomize base for observatory-operator: the namespace, the
+# resource definitions of the observatory.liken.sh group, and the
+# operator with its RBAC.
 #
 # This base is for the cluster owner to take. `liken` does not apply it
 # and does not name it. Take it through your own GitOps with patches of
@@ -34,9 +34,16 @@ resources:
   # The guider, and the reservation that activates a telescope.
   - guiders-crd.yaml
   - reservations-crd.yaml
+  # The operator.
+  - rbac.yaml
+  - operator.yaml
 
 labels:
   - includeSelectors: false
     pairs:
       app.kubernetes.io/name: observatory-operator
       app.kubernetes.io/part-of: liken
+
+images:
+  - name: ghcr.io/liken-sh/observatory-operator
+    newTag: latest

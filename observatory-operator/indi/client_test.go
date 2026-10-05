@@ -3,6 +3,7 @@ package indi
 import (
 	"context"
 	"errors"
+	"net"
 	"regexp"
 	"slices"
 	"testing"
@@ -328,5 +329,26 @@ func TestSubscribersReceiveEveryEventInOrder(t *testing.T) {
 		if !slices.Equal(got, names) {
 			t.Errorf("Defined events = %v, want %v", got, names)
 		}
+	}
+}
+
+// A caller that names its own dialer reaches the server through it,
+// the way the operator's tests reach a server over an in-memory pipe.
+func TestADialerReplacesTheNetwork(t *testing.T) {
+	server := startReplay(t, "focus")
+	var dialed []string
+	dialer := DialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = append(dialed, address)
+		var d net.Dialer
+		return d.DialContext(ctx, network, server.address())
+	})
+	c := NewClient("telescope-east.observatory.svc:7624", WithDialer(dialer))
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	events := c.Subscribe(ctx)
+	run(t, c)
+	awaitDefinitions(t, events, 1)
+	if !slices.Equal(dialed, []string{"telescope-east.observatory.svc:7624"}) {
+		t.Errorf("the dialer received %v, want the client's address", dialed)
 	}
 }

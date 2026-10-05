@@ -1,0 +1,98 @@
+# The operator's identity. Every object it reads and writes is in its
+# own namespace, so a Role grants it all, and it holds no permission in
+# any other namespace.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: observatory-operator
+  namespace: observatory
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: observatory-operator
+  namespace: observatory
+rules:
+  # A watch of each kind reads the inventory and the reservations, and
+  # get reads one reservation again after a write that met a conflict.
+  - apiGroups: [observatory.liken.sh]
+    resources:
+      - observatories
+      - telescopes
+      - opticaltubes
+      - opticaltrains
+      - mounts
+      - cameras
+      - filterwheels
+      - focusers
+      - rotators
+      - dustcaps
+      - flatpanels
+      - polaraligners
+      - gpses
+      - domes
+      - weatherstations
+      - skyqualitymeters
+      - switches
+      - receivers
+      - guiders
+      - reservations
+    verbs: [get, list, watch]
+  # The operator writes every status with a PUT to the status
+  # subresource, which is the update verb, and never writes a spec.
+  - apiGroups: [observatory.liken.sh]
+    resources:
+      - observatories/status
+      - telescopes/status
+      - opticaltubes/status
+      - opticaltrains/status
+      - mounts/status
+      - cameras/status
+      - filterwheels/status
+      - focusers/status
+      - rotators/status
+      - dustcaps/status
+      - flatpanels/status
+      - polaraligners/status
+      - gpses/status
+      - domes/status
+      - weatherstations/status
+      - skyqualitymeters/status
+      - switches/status
+      - receivers/status
+      - guiders/status
+      - reservations/status
+    verbs: [update]
+  # A merge patch of a reservation's metadata adds and removes its
+  # finalizer, and removes the retry annotation.
+  - apiGroups: [observatory.liken.sh]
+    resources: [reservations]
+    verbs: [patch]
+  # The topology: a pod and a Service for each device and each INDI
+  # server. The watches select them by the operator's label.
+  - apiGroups: [""]
+    resources: [pods, services]
+    verbs: [get, list, watch, create, delete]
+  # The claim of a device on real hardware, made from its spec.claim.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [create, delete]
+  # The Events of each reservation's steps.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: observatory-operator
+  namespace: observatory
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: observatory-operator
+subjects:
+  - kind: ServiceAccount
+    name: observatory-operator
+    namespace: observatory

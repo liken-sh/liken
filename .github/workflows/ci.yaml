@@ -856,6 +856,22 @@ jobs:
       version: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  observatory-operator-publish:
+    needs: [plan, observatory-operator, indi, kubernetes, notices, trust]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-observatory-operator.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
     permissions:
       contents: read
       packages: write
@@ -1183,7 +1199,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, kubernetes, notices, trust, trust-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, observatory-operator, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, kubernetes, notices, trust, trust-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, observatory-operator, observatory-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

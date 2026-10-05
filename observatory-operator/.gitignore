@@ -4,3 +4,6 @@
 
 # The coverage report that `make coverage-report` draws for the site.
 /coverage.html
+
+# The binary that `go build` writes here.
+/observatory-operator

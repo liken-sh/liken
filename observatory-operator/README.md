@@ -1,15 +1,18 @@
 # observatory-operator
 
-`observatory-operator` will be the hardware control layer of an
-observatory on a [`liken`](https://liken.sh/) cluster, under the API
-group `observatory.liken.sh`. It will run each INDI device in its own
-pod with its own DRA claim, serve every device on one INDI server, run
-the PHD2 guider, and configure each device when it appears. KStars, or
-`astrophotography-operator`, drives the observatory through that server.
+`observatory-operator` is the hardware control layer of an observatory
+on a [`liken`](https://liken.sh/) cluster, under the API group
+`observatory.liken.sh`. A person describes the observatory's hardware
+as resources, and a `Reservation` gives one holder the use of one
+`Telescope`. While a reservation is active, the operator runs each of
+the telescope's INDI devices in its own pod, serves them on one INDI
+server, and connects, configures, and prepares each device in a fixed
+order. At the end it secures each device and reports that the devices
+are safe to power off. KStars, or `astrophotography-operator`, drives
+the telescope through its server.
 
-The operator is not built yet. This directory holds the resources of
-the API group and the Go module
-`github.com/liken-sh/liken/observatory-operator`, with two packages:
+The Go module `github.com/liken-sh/liken/observatory-operator` holds
+the operator and three packages:
 
 - [`observatory/`](observatory/) holds the 20 kinds of
   `observatory.liken.sh/v1alpha1` as Go types. The operator reads and
@@ -18,25 +21,38 @@ the API group and the Go module
 - [`indi/`](indi/) is a client of the INDI protocol, version 1.7, in
   Go with no cgo. It keeps every device and property that a server
   defines, follows each update, sends changes that follow each
-  property's definition, and waits for a device to answer. The
-  operator uses it to connect and configure the devices on each
-  server, and `astrophotography-operator` will import it to drive a
-  session.
+  property's definition, and waits for a device to answer.
+- [`drivers/`](drivers/) maps each INDI driver to the image of the
+  `indi` build that holds it.
 
-[`deploy/`](deploy/) holds the namespace and the CRDs, and
-[`examples/simulators.yaml`](examples/simulators.yaml) is an
-observatory of simulators with a device of every kind.
+[`deploy/`](deploy/) holds the namespace, the CRDs, the RBAC, and the
+operator, and [`examples/simulators.yaml`](examples/simulators.yaml)
+is an observatory of simulators with a device of every kind.
 [`plans/00-design.md`](plans/00-design.md) is the design, and [root
 plan 74](../plans/74-astrophotography.md) holds the architecture and
 the tests behind it. `make test` runs every check CI runs.
 
-## The resources
+## Running the operator
 
 ```sh
 kubectl apply -k deploy/
 kubectl apply -n observatory -f examples/simulators.yaml
 kubectl get astro -n observatory
 ```
+
+`deploy/` creates the namespace `observatory`, the CRDs, and the
+operator: one `Deployment` with one replica, which watches the
+resources of its own namespace. Every resource of the observatory
+goes in that namespace. CI publishes the image
+`ghcr.io/liken-sh/observatory-operator` and the kustomize base as the
+OCI artifact `observatory-operator-deploy`, with the image's tag set
+to the release.
+
+The operator starts nothing for the inventory alone. The example ends
+with the `Reservation` `east-tonight`, which starts the `east`
+telescope at once and holds it until it is deleted.
+
+## The resources
 
 Every kind is namespaced, and every kind is in the category `astro`,
 so `kubectl get astro` lists the whole observatory. Each resource names
@@ -143,28 +159,84 @@ and the worst verdict of its weather stations.
 A `Reservation` moves through the phases `Scheduled`, `Activating`,
 `Ready`, `Deactivating`, and `Released`, or `Failed`. `status.steps`
 lists every step in order, with its state, start and finish times, and
-a message that names the device a step waits for:
-
-| Activation | Deactivation |
-|---|---|
-| `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Prepare` | `Abort`, `Secure`, `Disconnect`, `StopDevices`, `PowerOff`, `StopSite` |
-
-Each step's state is `Pending`, `Running`, `Done`, `Failed`, or
-`Skipped`, and `status.step` names the one that runs now. Plan 07
-states what each step does.
+a message that names the device a step waits for. Each step's state is
+`Pending`, `Running`, `Done`, `Failed`, or `Skipped`, and
+`status.step` names the one that runs now. "How a reservation runs"
+below states what each step does.
 
 ```sh
 kubectl get rsv -n observatory -w
-kubectl wait --for=condition=Ready reservation/east-tonight -n observatory
+kubectl wait --for=condition=Ready reservation/east-tonight -n observatory --timeout=10m
+kubectl describe reservation east-tonight -n observatory
 kubectl get rsv east-tonight -n observatory \
   -o jsonpath='{.status.steps[?(@.name=="Connect")].message}'
+kubectl get cam,mnt,sw -n observatory
 ```
 
-The `Ready` condition is `True` while the phase is `Ready`, and
-`status.endpoint` then holds the host and port for KStars.
+`kubectl get rsv -w` prints a line for each change of the phase or
+the step. `kubectl describe` lists each step, and the reservation's
+Events: one for each step that ends, one for each phase, and a
+`Warning` for a step that fails. The `Ready` condition is `True` while
+the phase is `Ready`, and `status.endpoint` then holds the host and
+port for KStars, such as `telescope-east.observatory.svc:7624`.
 `SafeToPowerOff` is `True` when the deactivation steps are done. The
 `Guider` kind has its CRD, but its pod is [plan 09](plans/09-the-guider.md):
 its `Ready` condition is `False` with the reason `NotImplemented`.
+
+## How a reservation runs
+
+The operator runs one step at a time, in a fixed order, and a step
+starts only when the step before it is `Done` or `Skipped`. Each step
+reads what the cluster and the devices report before it changes
+anything, and records what it did in its message. A step with nothing
+to do is `Skipped`, and a device whose driver lacks a property, such as
+a guide camera with no cooler, is named in the message, and the step
+goes on.
+
+| Step | What it does | Deadline |
+|---|---|---|
+| `Wait` | Waits for `spec.start`, and for no other reservation to hold the telescope. | none |
+| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's shutter policies. Another reservation in the observatory may have started them already. | 10 min |
+| `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. | 10 min |
+| `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
+| `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the sky quality meters, the receivers, and the cameras, in that order. | 2 min |
+| `Configure` | Writes the observatory's location to the mount and the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. | 2 min |
+| `Prepare` | Opens the dust caps, cools each camera to `spec.temperature` within 0.5 °C, and unparks the mount. | 20 min |
+| `Abort` | Ends each exposure and stops the mount if it moves. | 2 min |
+| `Secure` | Switches the flat panels off, closes the dust caps, parks the mount, and warms each cooled camera to 5 °C for up to 10 minutes before it switches the cooler off. | 20 min |
+| `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
+| `StopDevices` | Deletes the device pods. | 2 min |
+| `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. | 5 min |
+| `StopSite` | Parks the dome, disconnects the observatory's devices, and stops its server, unless a reservation of another telescope in the observatory is active. | 10 min |
+
+Deactivation begins at `spec.end`, or when a person deletes the
+reservation. The finalizer `observatory.liken.sh/deactivate` holds a
+deleted reservation until deactivation is done. A reservation that
+reaches `spec.end` stays, `Released`, until a person deletes it.
+
+A step that passes its deadline, or a device that answers a change with
+Alert, fails the step, and the reservation is `Failed`. The `Ready`
+condition names the step and the device. After a failed activation
+step, the telescope stays as the steps left it, so a person can look;
+deleting the reservation runs deactivation from `Abort`. After a failed
+deactivation step, the finalizer stays, because the devices may not be
+safe to power off. In both cases, this runs the failed step again:
+
+```sh
+kubectl annotate reservation east-tonight -n observatory observatory.liken.sh/retry=1
+```
+
+One telescope serves one reservation at a time. A second reservation
+of the telescope waits in `Wait`, and its message names the reservation
+it waits for. Waiting reservations take the telescope in the order of
+their `spec.start`, and of their creation when they have none.
+
+While a reservation is `Ready`, the operator creates again each pod
+that is deleted. When a device's driver comes back on the server
+disconnected, after its pod or the server restarted, the operator
+connects it and writes its settings again. A device that a person
+disconnects in KStars stays disconnected. A device added to the
+telescope's inventory restarts the server, which then links to it.
 
 ## The INDI client
 

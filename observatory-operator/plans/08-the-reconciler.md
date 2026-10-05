@@ -1,6 +1,9 @@
 # 08, The reconciler
 
-Proposed on 2026-10-05. Not built.
+Proposed on 2026-10-05. Partly built on 2026-10-05, with plan 07, in
+the operator and not in each server's pod. "What was built" names the
+parts that are built and the part that is not. The restart drills on a
+test cluster have not run.
 
 ## The problem
 
@@ -41,3 +44,44 @@ pod restarts.
   every driver defines, and `DefaultDevice::saveConfigItems` in
   `libs/indibase/defaultdevice.cpp`
 - [Root plan 74](../../plans/74-astrophotography.md), "The reconciler"
+
+## What was built
+
+Plan 07 put the reconciler in the operator. The operator holds one
+INDI client for each server, through the server's `Service`, and the
+work below runs there.
+
+- **Built: a device that appears is set up.** While a reservation is
+  `Ready`, the operator connects each device whose driver defines
+  `CONNECTION` and reports it disconnected, and writes its settings
+  from its resource: the location, `ACTIVE_DEVICES`, the gain, the
+  offset, `SCOPE_INFO`, the filter names, the cooler's setpoint, and a
+  `Switch`'s outputs. It acts only when the driver defines `CONNECTION`,
+  which a driver does when it starts and on each new connection of the
+  operator. A device that KStars disconnects defines nothing, and stays
+  disconnected. A failure is shown in the device's status, and the
+  reservation stays `Ready`.
+- **Built: each camera's `ACTIVE_DEVICES` from its train.** The camera
+  snoops the mount, and the focuser, the filter wheel, and the rotator
+  of its own train. A member with no device is written empty.
+- **Built: status from the INDI updates.** The operator reads every
+  update on its one connection to each server, and writes each
+  device's phase, readings, and properties at most once a second.
+- **Settled: no configuration files on a volume.** The operator writes
+  the settings from the resource each time a device appears. The pod's
+  `/tmp` is an `emptyDir`, and `HOME` is `/tmp` in the images, so a
+  driver's own `~/.indi/*_config.xml` survives a restart of its
+  container and is lost with its pod.
+- **Not built: the policies between the dome and the mounts.**
+  `DOME_POLICY` and `MOUNT_POLICY` rely on a snoop between the dome and
+  the mount, and the dome runs on the observatory's server and each
+  mount on its telescope's. The shutter policies need no snoop, and the
+  operator writes them. Enforcing the lock policies across servers is
+  work for the operator.
+
+The unit tests restart a device's pod and the server's pod while a
+reservation is `Ready`, and each device came back connected with its
+settings. A harness on a workstation, not kept in the repository,
+restarted the CCD simulator's container behind a real `indiserver`,
+and the camera was connected with its gain written again 1.9 seconds
+later.

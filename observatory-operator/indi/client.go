@@ -58,6 +58,7 @@ var (
 // from several goroutines.
 type Client struct {
 	address string
+	dialer  Dialer
 
 	// mutex guards every field below it. The reader applies each
 	// element and publishes its event under the mutex, so a reader of
@@ -79,12 +80,43 @@ type Client struct {
 
 // NewClient returns a client of the server at address, such as
 // "indiserver.observatory:7624". It opens no connection until Run.
-func NewClient(address string) *Client {
-	return &Client{
+func NewClient(address string, options ...Option) *Client {
+	// The dialer's TCP keep-alive, on by default, ends a connection to
+	// a server that vanished with no close, so a silent socket cannot
+	// hold Run forever. INDI has no heartbeat of its own.
+	c := &Client{
 		address:     address,
+		dialer:      &net.Dialer{Timeout: DialTimeout},
 		subscribers: map[*subscriber]struct{}{},
 		changed:     make(chan struct{}),
 	}
+	for _, option := range options {
+		option(c)
+	}
+	return c
+}
+
+// Dialer opens the connection of each Run. *net.Dialer is one.
+type Dialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// DialerFunc is a function that is a Dialer.
+type DialerFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+func (f DialerFunc) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return f(ctx, network, address)
+}
+
+// Option changes a Client that NewClient returns.
+type Option func(*Client)
+
+// WithDialer makes each Run open its connection through dialer. A test
+// passes a dialer that answers with one end of an in-memory pipe, so it
+// can run on the fake clock of testing/synctest, which a real socket
+// stops.
+func WithDialer(dialer Dialer) Option {
+	return func(c *Client) { c.dialer = dialer }
 }
 
 // Run dials the server, sends getProperties, and reads the server's
@@ -112,11 +144,7 @@ func (c *Client) Run(ctx context.Context) error {
 		c.mutex.Unlock()
 	}()
 
-	// The dialer's TCP keep-alive, on by default, ends a connection to
-	// a server that vanished with no close, so a silent socket cannot
-	// hold Run forever. INDI has no heartbeat of its own.
-	dialer := net.Dialer{Timeout: DialTimeout}
-	conn, err := dialer.DialContext(ctx, "tcp", c.address)
+	conn, err := c.dialer.DialContext(ctx, "tcp", c.address)
 	if err != nil {
 		return err
 	}

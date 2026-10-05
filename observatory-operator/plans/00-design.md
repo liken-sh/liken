@@ -13,8 +13,8 @@ Each INDI device runs in its own pod, with its own DRA claim, as
 `Telescope` has one `indiserver` pod, which reaches each of its
 devices through `indi-shim`, one symbolic link for each device. The
 `Observatory` has one more server for the devices that no telescope
-owns. A reconciler in each server's pod connects each device and
-applies its settings when the device appears. PHD2 guides each
+owns. The operator holds one INDI client for each server, and connects
+each device and applies its settings when the device appears. PHD2 guides each
 telescope from its own pod, as a client of the telescope's server.
 Plan 03 tested this topology on a cluster.
 
@@ -64,7 +64,7 @@ must hold.
 | [04](completed/04-the-indi-client-in-go.md) | Built: the INDI client in Go, the package `indi` |
 | [05](05-the-property-schema.md) | Typed fields generated from the simulators and INDI's documentation |
 | [06](completed/06-the-resources.md) | Built: the resources, as CRDs and the package `observatory` |
-| [07](07-the-operator-runs-the-topology.md) | The operator creates the topology from the resources |
-| [08](08-the-reconciler.md) | The reconciler |
+| [07](07-the-operator-runs-the-topology.md) | Built, with the drill on a test cluster still to run: the operator creates the topology from the resources |
+| [08](08-the-reconciler.md) | Partly built: the reconciler, in the operator |
 | [09](09-the-guider.md) | The guider |
 | [10](10-access-from-a-desktop.md) | KStars on a desktop, which completes mode 1 |

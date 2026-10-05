@@ -1,10 +1,11 @@
 # Working on observatory-operator
 
-This directory will hold the operator that controls an observatory's
-hardware through INDI, and the manifests that run it. So far it holds
-the Go module with the resources' Go types in `observatory/` and the
-INDI client in `indi/`, the CRDs in `deploy/`, the example in
-`examples/`, and the plans.
+This directory holds the operator that controls an observatory's
+hardware through INDI, and the manifests that run it: the operator's
+`package main` at the top, the resources' Go types in `observatory/`,
+the INDI client in `indi/`, the map of driver images in `drivers/`,
+the CRDs, the RBAC, and the operator's `Deployment` in `deploy/`, the
+example in `examples/`, and the plans.
 
 `plans/00-design.md` is the design, and the `plans/` directory holds the
 plans that build it. Code exists only where a plan calls for it. [Root
@@ -13,7 +14,8 @@ this component and `astrophotography-operator` share, and the
 simulator tests that support it.
 
 `make test` runs every check CI runs. The `topology/` manifests are
-plan 03's, and no code reads them.
+plan 03's: the operator builds no manifest from them, and
+`pods_test.go` holds the operator's pods to their shape.
 
 ## The resources
 
@@ -70,14 +72,46 @@ The transcripts in `indi/testdata/` are the bytes that a real
 simulators that plan 06 gives a kind. Each directory has `baseline.xml`,
 `connect.xml`, and `disconnect.xml`, and the focuser and the dome have
 more steps. `replay_test.go` serves them from a real listener, so a
-client that sends a wrong message gets no reply. `make record` records
-them again from the pinned `indi-simulators` image; do it after each
-bump of the INDI images.
+client that sends a wrong message gets no reply. They were captured
+from the simulators of the pinned `indi-simulators` tag, and need
+capturing again after a bump of the INDI images.
 
-`integration_test.go` runs a real `indiserver` and the focuser
-simulator in Docker, in the topology of plan 03, and restarts the
-driver's container and the server's container. It skips itself in
-`-short` mode, and when Docker or the image is missing.
-`INDI_SIMULATORS_IMAGE` names another image, such as one built on a
-workstation. The CI runner has Docker, so CI runs it once the pinned
-tag is published.
+## The operator
+
+The operator's files are flat in `package main`, one domain to a file.
+`operator.go` starts the three kinds of goroutine: the supervisor, one
+runner for each `Reservation` (`reservation.go`, `activation.go`,
+`configure.go`, `deactivation.go`, `steady.go`, `finish.go`), and the
+status writer (`status.go`, `statustree.go`, `readings.go`). Each of
+them waits on one bell that every watch event and every INDI event
+rings, and reads the watches' stores again.
+
+- A reservation's `status.steps` is the runner's record. A step that
+  runs again after a restart must read what the cluster and the devices
+  report before it changes anything, so a change goes out only when it
+  is still needed (`indidevice.go`).
+- A timer is a clock and its comment says so: `spec.start`,
+  `spec.end`, a step's deadline, the status window, the pause after a
+  refused write, and the pause before the INDI connection is opened
+  again.
+- `drivers/generated.go` comes from `indi/images/` and
+  `indi/package.toml`. `make drivers` writes it again, and a test fails
+  when it is stale.
+
+### Tests of the operator
+
+The tests run the operator in a `testing/synctest` bubble against two
+fakes, so a step's deadline of 20 minutes takes no real time:
+
+- `fakeapi_test.go` is an API server on `kubernetes/apiservertest`
+  that holds every collection, and plays the kubelet: a pod it creates
+  is Ready at once unless a test holds it Pending.
+- `fakeindi_test.go` serves INDI from the transcripts above. Each
+  server runs a driver for each device pod that its server pod links
+  to and that is Ready, defines what the baseline transcript defines,
+  adds what the connect transcript defines, and answers every other
+  change with the values sent. A test can hold a property, so its
+  driver never answers, or refuse it, so its driver answers Alert.
+
+`examples/simulators.yaml` is the inventory of most tests, so a change
+to the example is a change to them.

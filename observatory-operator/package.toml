@@ -1,22 +1,21 @@
-# The operator that runs an observatory's hardware through INDI. So far
-# it holds the Go INDI client in indi/, and the resources: their Go
-# types in observatory/ and their CRDs in deploy/. The operator and its
-# image come with plan 07.
+# The operator that runs an observatory's hardware through INDI: the
+# resources' CRDs and Go types, the INDI client, and the operator that
+# runs each reserved telescope's pods and devices.
 [package]
 name = "observatory-operator"
 license = "MIT"
 
-# The integration test in indi/ runs the indi-simulators image at the
-# tag that indi/package.toml pins, so a bump of the INDI images runs
-# these tests again.
+# The operator's map of driver images is generated from indi/images/
+# at the tag that indi/package.toml pins, so a bump of the INDI images
+# runs these tests again. The image builds against the shared
+# kubernetes module, and ships the license notices that notices/
+# collects.
 [depends]
-components = ["indi"]
+components = ["indi", "kubernetes", "notices"]
 
 # gofmt, vet, a tidy check of go.mod, and one run of the tests that
 # checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor. The runner
-# has Docker, so the integration test runs when the pinned
-# indi-simulators image pulls, and skips itself when it does not.
+# gate on that profile. .testcoverage.yml holds the floor.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -32,3 +31,15 @@ name = "prek"
 toolchain = "prek"
 # The go job runs the same checks as these hooks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]
+
+[outputs]
+deploy = "deploy"
+
+# The image builds from this module's go.mod, which replaces the shared
+# kubernetes module with ../kubernetes, so it takes that directory as a
+# build context. The notices context holds the script that copies the
+# license files of the modules the binary links.
+[[outputs.images]]
+name = "observatory-operator"
+file = "Dockerfile"
+contexts = { kubernetes = "kubernetes", notices = "notices" }
