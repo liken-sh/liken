@@ -1,0 +1,3 @@
+# ghcr.io/liken-sh/indi-sbig: SBIG cameras.
+sdk libsbig
+driver indi_sbig_ccd

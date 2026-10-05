@@ -125,12 +125,15 @@ the jobs and the images that run for each component, and why.
 
 ## Pinned components
 
-The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
-pinned components. A pinned component's `package.toml` states a
+The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, and
+the INDI images of `indi`, are pinned components. A pinned component's `package.toml` states a
 `version` and a `revision`, and it publishes under its own tag,
 `<version>-<revision>`, such as `20260928-1`. That tag never looks
-like a release version. The version of a base is the date of the Debian
-snapshot it installs from.
+like a release version. The version of a base is the date of the
+snapshot it installs from. Each image also carries a label
+`sh.liken.upstream.<name>` for each entry of `[package.upstream]` in
+its `package.toml`, such as `sh.liken.upstream.indi`, so the registry
+shows which upstream release a dated tag holds.
 
 A pinned component publishes when its tag is not on ghcr yet: on the
 first push to `main` or the first release tag that carries the new

@@ -1,0 +1,9 @@
+# ghcr.io/liken-sh/indi-simulators: the GSC star catalog and the gsc
+# program, which the CCD and guide simulators read to draw the stars at
+# the mount's position. This is test equipment.
+seed /usr/bin/gsc
+data /usr/share/GSC
+# The simulators run gsc through popen(), which starts /bin/sh. This
+# is the only image with a shell.
+seed /usr/bin/dash
+link /bin/sh /usr/bin/dash

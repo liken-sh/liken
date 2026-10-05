@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,12 @@ type Component struct {
 		License  string `toml:"license"`
 		Version  string `toml:"version"`
 		Revision int    `toml:"revision"`
+		// Upstream names the release of each upstream project that a
+		// pinned component's images hold, such as indi = "2.2.5". A
+		// pinned version is a snapshot date, which says nothing about
+		// the software in it, so each entry becomes the image label
+		// sh.liken.upstream.<name> when the image publishes.
+		Upstream map[string]string `toml:"upstream"`
 	} `toml:"package"`
 
 	Depends struct {
@@ -294,6 +301,9 @@ var pinnedVersion = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._]*$`)
 // calendarDate is the start of a release version, yyyy.mm.dd.
 var calendarDate = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}`)
 
+// upstreamName is the shape of a name in [package.upstream].
+var upstreamName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
 // validatePin checks the version and the revision together. Either one
 // alone is a mistake: a revision with no version would read as a
 // tracked component, and a version with no revision has no tag.
@@ -306,6 +316,16 @@ var calendarDate = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}`)
 // a label of its image, and the plan reads it from there.
 func (c *Component) validatePin(path string) error {
 	version, revision := c.Package.Version, c.Package.Revision
+	for _, name := range slices.Sorted(maps.Keys(c.Package.Upstream)) {
+		switch {
+		case version == "":
+			return fmt.Errorf("%s: only a pinned component states upstream versions; a tracked component's version is the release", path)
+		case !upstreamName.MatchString(name):
+			return fmt.Errorf("%s: an upstream name may hold only lowercase letters, digits, and hyphens, because it ends the label sh.liken.upstream.<name>, and %q does not", path, name)
+		case c.Package.Upstream[name] == "":
+			return fmt.Errorf("%s: the upstream %q has no version", path, name)
+		}
+	}
 	switch {
 	case version == "" && revision == 0:
 		return nil

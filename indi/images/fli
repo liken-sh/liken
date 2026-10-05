@@ -1,0 +1,9 @@
+# ghcr.io/liken-sh/indi-fli: Finger Lakes Instrumentation cameras,
+# focusers, and filter wheels, and the Kepler cameras.
+sdk libfli
+sdk libflipro
+sdk libflialgo
+driver indi_fli_ccd
+driver indi_fli_focus
+driver indi_fli_wheel
+driver indi_kepler_ccd

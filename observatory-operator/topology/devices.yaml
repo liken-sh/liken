@@ -1,0 +1,161 @@
+# The mount simulator's driver, served over TCP to the INDI server's
+# shim. socat starts the driver when the shim connects and exits when
+# the connection closes, and the kubelet starts it again.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mount
+  labels: {app.kubernetes.io/part-of: observatory, observatory.liken.sh/role: device}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: mount}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: mount, app.kubernetes.io/part-of: observatory, observatory.liken.sh/role: device}
+    spec:
+      affinity:
+        # A device runs on another node than the server, so its frames
+        # cross the pod network the way they do at a real pier.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {observatory.liken.sh/role: server}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: driver
+          image: ghcr.io/liken-sh/indi:20261005-1
+          command: [/usr/bin/socat]
+          # pipes gives the driver a pipe for stdout. On a Unix socket,
+          # a driver sends each BLOB as a file descriptor, which socat
+          # cannot carry, and the driver crashes on its first frame.
+          args: ["TCP-LISTEN:7625,reuseaddr", "EXEC:indi_simulator_telescope,pipes"]
+          ports: [{name: driver, containerPort: 7625}]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mount
+  labels: {app.kubernetes.io/part-of: observatory}
+spec:
+  selector: {app.kubernetes.io/name: mount}
+  ports: [{name: driver, port: 7625, targetPort: driver}]
+---
+# The ccd simulator's driver, served over TCP to the INDI server's
+# shim. socat starts the driver when the shim connects and exits when
+# the connection closes, and the kubelet starts it again.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccd
+  labels: {app.kubernetes.io/part-of: observatory, observatory.liken.sh/role: device}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: ccd}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ccd, app.kubernetes.io/part-of: observatory, observatory.liken.sh/role: device}
+    spec:
+      affinity:
+        # A device runs on another node than the server, so its frames
+        # cross the pod network the way they do at a real pier.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {observatory.liken.sh/role: server}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: driver
+          image: ghcr.io/liken-sh/indi-simulators:20261005-1
+          command: [/usr/bin/socat]
+          # pipes gives the driver a pipe for stdout. On a Unix socket,
+          # a driver sends each BLOB as a file descriptor, which socat
+          # cannot carry, and the driver crashes on its first frame.
+          args: ["TCP-LISTEN:7625,reuseaddr", "EXEC:indi_simulator_ccd,pipes"]
+          ports: [{name: driver, containerPort: 7625}]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ccd
+  labels: {app.kubernetes.io/part-of: observatory}
+spec:
+  selector: {app.kubernetes.io/name: ccd}
+  ports: [{name: driver, port: 7625, targetPort: driver}]
+---
+# The focuser simulator's driver, served over TCP to the INDI server's
+# shim. socat starts the driver when the shim connects and exits when
+# the connection closes, and the kubelet starts it again.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: focuser
+  labels: {app.kubernetes.io/part-of: observatory, observatory.liken.sh/role: device}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: focuser}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: focuser, app.kubernetes.io/part-of: observatory, observatory.liken.sh/role: device}
+    spec:
+      affinity:
+        # A device runs on another node than the server, so its frames
+        # cross the pod network the way they do at a real pier.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {observatory.liken.sh/role: server}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: driver
+          image: ghcr.io/liken-sh/indi:20261005-1
+          command: [/usr/bin/socat]
+          # pipes gives the driver a pipe for stdout. On a Unix socket,
+          # a driver sends each BLOB as a file descriptor, which socat
+          # cannot carry, and the driver crashes on its first frame.
+          args: ["TCP-LISTEN:7625,reuseaddr", "EXEC:indi_simulator_focus,pipes"]
+          ports: [{name: driver, containerPort: 7625}]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: focuser
+  labels: {app.kubernetes.io/part-of: observatory}
+spec:
+  selector: {app.kubernetes.io/name: focuser}
+  ports: [{name: driver, port: 7625, targetPort: driver}]

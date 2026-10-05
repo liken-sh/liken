@@ -215,6 +215,31 @@ func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) 
 	}
 }
 
+// A pinned image carries a label for each upstream version that its
+// package.toml states, so a person reads from the registry which
+// release of the upstream project a dated tag holds.
+func TestAPinnedImageCarriesItsUpstreamVersionsAsLabels(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20261004\"\nrevision = 1\n" +
+			"[package.upstream]\nindi = \"2.2.5\"\nphd2 = \"2.6.14\"\n[[outputs.images]]\nname = \"base\"\n",
+		"base/Dockerfile": "FROM debian@sha256:abc\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	p := Publisher{Root: root, Registry: (&fakeRegistry{}).serve(t), Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components}
+	if err := p.Publish(components["base"], "20261004-1", publishDev); err != nil {
+		t.Fatal(err)
+	}
+	for _, label := range []string{" --set base.labels.sh.liken.upstream.indi=2.2.5 ", " --set base.labels.sh.liken.upstream.phd2=2.6.14 "} {
+		if !strings.Contains(rec.commands[0], label) {
+			t.Errorf("the build has no%s:\n%s", label, rec.commands[0])
+		}
+	}
+}
+
 // A pin that is already published still moves :latest, so a run
 // again after a failed move sets it.
 func TestAPublishedPinStillMovesLatest(t *testing.T) {

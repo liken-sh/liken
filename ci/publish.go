@@ -114,13 +114,21 @@ func (p Publisher) pinned(c *Component, version, mode string) error {
 	if err != nil {
 		return err
 	}
+	labels := map[string]string{recipeLabel: recipe}
+	for name, upstream := range c.Package.Upstream {
+		labels[upstreamLabel+name] = upstream
+	}
 	for _, image := range c.Outputs.Images {
-		if err := p.image(c, image, version, mode, map[string]string{recipeLabel: recipe}); err != nil {
+		if err := p.image(c, image, version, mode, labels); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+// upstreamLabel prefixes the label that holds one upstream version of a
+// pinned image, from [package.upstream] in its package.toml.
+const upstreamLabel = "sh.liken.upstream."
 
 func ref(name, tag string) string { return "ghcr.io/liken-sh/" + name + ":" + tag }
 

@@ -1,0 +1,9 @@
+# ghcr.io/liken-sh/indi-mi: Moravian Instruments cameras and filter
+# wheels.
+sdk libgxccd
+driver indi_mi_ccd
+driver indi_mi_ccd_eth
+driver indi_mi_ccd_usb
+driver indi_mi_sfw
+driver indi_mi_sfw_eth
+driver indi_mi_sfw_usb

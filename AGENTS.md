@@ -139,7 +139,11 @@ pinned components: each states a version, the date of the Debian
 snapshot it installs from, and a revision, and publishes under the tag
 `<version>-<revision>`. A change to a base's recipe needs a new
 revision, and so does each pinned component that builds on it. CI fails
-when a recipe changed with no new revision. The `bump-components`
+when a recipe changed with no new revision. Each base lists the
+upstream releases it holds under `[package.upstream]`, and each entry
+becomes the image label `sh.liken.upstream.<name>`. `indi` is pinned
+the same way, on dated snapshots of Ubuntu and the INDI PPA, and CI
+builds its 16 images only when its tag is new. The `bump-components`
 skill under `.agents/skills` holds the procedure.
 
 The `releases` skill under `.agents/skills` holds the calendar scheme,

@@ -1,0 +1,48 @@
+# ghcr.io/liken-sh/indi-touptek: The eleven brands on the ToupTek SDK:
+# ToupTek, Altair, Bresser, Mallincam, Meade, NNCam, Ogma, Omegon,
+# StarShoot, SVBony, and TS. Each brand has its own drivers and its own
+# 20 to 64 MB build of the SDK.
+sdk libtoupcam
+sdk libaltaircam
+sdk libbressercam
+sdk libmallincam
+sdk libmeadecam
+sdk libnncam
+sdk libogmacam
+sdk libomegonprocam
+sdk libstarshootg
+sdk libsvbonycam
+sdk libtscam
+driver indi_altaircam_ccd
+driver indi_altaircam_focuser
+driver indi_altaircam_wheel
+driver indi_bressercam_ccd
+driver indi_bressercam_focuser
+driver indi_bressercam_wheel
+driver indi_mallincam_ccd
+driver indi_mallincam_focuser
+driver indi_mallincam_wheel
+driver indi_meadecam_ccd
+driver indi_meadecam_focuser
+driver indi_meadecam_wheel
+driver indi_nncam_ccd
+driver indi_nncam_focuser
+driver indi_nncam_wheel
+driver indi_ogmacam_ccd
+driver indi_ogmacam_focuser
+driver indi_ogmacam_wheel
+driver indi_omegonprocam_ccd
+driver indi_omegonprocam_focuser
+driver indi_omegonprocam_wheel
+driver indi_starshootg_ccd
+driver indi_starshootg_focuser
+driver indi_starshootg_wheel
+driver indi_svbonycam_ccd
+driver indi_svbonycam_focuser
+driver indi_svbonycam_wheel
+driver indi_toupcam_ccd
+driver indi_toupcam_focuser
+driver indi_toupcam_wheel
+driver indi_tscam_ccd
+driver indi_tscam_focuser
+driver indi_tscam_wheel

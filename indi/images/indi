@@ -1,0 +1,13 @@
+# ghcr.io/liken-sh/indi: indiserver, socat, and every program in
+# indi-bin, the core drivers, simulators, and tools. Every other image
+# builds on this one.
+seed /usr/bin/indiserver
+# Each device pod serves its driver over TCP with
+# socat TCP-LISTEN:7625,reuseaddr EXEC:<driver>,pipes.
+seed /usr/bin/socat
+package indi-bin
+# The alignment subsystem loads its math plugins with dlopen, so ldd
+# does not list them. Mounts use them for pointing models.
+seed /usr/lib/x86_64-linux-gnu/indi/MathPlugins
+# The driver catalog and the drivers' skeleton files.
+data /usr/share/indi

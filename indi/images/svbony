@@ -1,0 +1,4 @@
+# ghcr.io/liken-sh/indi-svbony: SVBony cameras on SVBony's own SDK. The
+# SVBony cameras on the ToupTek SDK are in indi-touptek.
+sdk libSVBCameraSDK
+driver indi_svbony_ccd

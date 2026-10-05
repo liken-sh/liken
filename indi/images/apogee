@@ -1,0 +1,4 @@
+# ghcr.io/liken-sh/indi-apogee: Apogee cameras and filter wheels.
+sdk libapogee
+driver indi_apogee_ccd
+driver indi_apogee_wheel

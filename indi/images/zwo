@@ -1,0 +1,13 @@
+# ghcr.io/liken-sh/indi-zwo: ZWO cameras, EFW filter wheels, EAF
+# focusers, the CAA rotator, and the USB-to-ST4 adapter.
+sdk libASICamera2
+sdk libEFWFilter
+sdk libEAFFocuser
+sdk libCAARotator
+sdk libUSB2ST4Conv
+driver indi_asi_ccd
+driver indi_asi_focuser
+driver indi_asi_rotator
+driver indi_asi_single_ccd
+driver indi_asi_st4
+driver indi_asi_wheel

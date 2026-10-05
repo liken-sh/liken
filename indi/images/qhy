@@ -1,0 +1,5 @@
+# ghcr.io/liken-sh/indi-qhy: QHY cameras. QHY firmware loads on the host
+# through udev, not in a pod. The QHY focuser needs no SDK, so it is in
+# indi-open.
+sdk libqhyccd
+driver indi_qhy_ccd

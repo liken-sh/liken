@@ -20,6 +20,10 @@ Each top-level directory is one component, named for what it ships:
   the operators' screens, players, and compositor build on. Each one
   is a library closure on `scratch`, built from the Debian packages of
   one snapshot date.
+- [`indi/`](indi/) holds the INDI images that `observatory-operator`
+  runs: a library closure on `scratch` of `indiserver` and every core
+  driver, and one image on it for each vendor SDK family, built from
+  dated snapshots of Ubuntu and the INDI PPA.
 - [`equipment-operator/`](equipment-operator/) drives the A/V equipment
   at the far end of a machine's cable: receivers over the network, and
   televisions over CEC.

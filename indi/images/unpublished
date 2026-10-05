@@ -1,0 +1,8 @@
+# The third-party drivers that no image holds. Each needs a decision
+# before it gets an image: Fishcamp and iNova PLx cameras, whose vendors
+# no longer sell them, and the LimeSDR radio receiver, which is not
+# observatory equipment. The build refuses a third-party driver that is
+# in no list, so a driver that a new INDI release adds is a decision.
+driver indi_fishcamp_ccd
+driver indi_inovaplx_ccd
+driver indi_limesdr_receiver

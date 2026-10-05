@@ -1,0 +1,15 @@
+# The build reads the Dockerfile and the files it copies. Everything
+# else here is documentation, checks, and configuration, and Docker
+# leaves it out of the build context. The recipe hash covers the build
+# context, so a change to one of these files needs no new revision,
+# except package.toml: the recipe hashes it on its own.
+README.md
+AGENTS.md
+LICENSE
+package.toml
+.pre-commit-config.yaml
+smoke/
+# The shim's tests and the target that runs them are checks, not
+# inputs of the binary.
+shim/*_test.go
+shim/Makefile

@@ -1,0 +1,43 @@
+# These checks run before every commit, through pre-commit or prek,
+# its drop-in replacement.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+  # shellcheck-py wraps a prebuilt shellcheck binary, so the hook
+  # works on a machine with no shellcheck installed.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        # -x follows the source line of each script into closure.sh
+        # and smoke/lib.sh.
+        args: [-x]
+  # The shim is the only Go here, in its own module under shim/.
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'cd shim && test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
+        language: system
+        files: ^shim/.*\.go$
+        pass_filenames: false
+      - id: go-vet
+        name: go vet
+        entry: bash -c 'cd shim && go vet ./...'
+        language: system
+        files: ^shim/(.*\.go|go\.(mod|sum))$
+        pass_filenames: false
+      - id: go-mod-tidy
+        name: go mod tidy
+        # -diff reports what a tidy would change, without changing
+        # it, so a stale go.mod fails the commit instead of changing
+        # under it.
+        entry: bash -c 'cd shim && go mod tidy -diff'
+        language: system
+        files: ^shim/(.*\.go|go\.(mod|sum))$
+        pass_filenames: false

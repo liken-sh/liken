@@ -1,0 +1,54 @@
+# ghcr.io/liken-sh/indi-open: The third-party drivers that link no
+# vendor SDK. Their libraries are open source: libcurl, ZeroMQ, libftdi,
+# libdc1394, gpsd, Pololu Tic, and INDI's own LX200 library. The weather
+# drivers fetch over HTTPS, so the image carries a CA bundle.
+data /etc/ssl/certs/ca-certificates.crt
+driver indi_aagcloudwatcher_ng
+driver indi_armadillo_focus
+driver indi_astarbox
+driver indi_atik_efw
+driver indi_avalonud_aux
+driver indi_avalonud_focuser
+driver indi_avalonud_telescope
+driver indi_azgti_telescope
+driver indi_beaver_dome
+driver indi_beefocus
+driver indi_bresserexos2
+driver indi_celestron_aux
+driver indi_dragonfly
+driver indi_dragonfly_dome
+driver indi_dsi_ccd
+driver indi_duino
+driver indi_duino_powerbox
+driver indi_eqmod_telescope
+driver indi_ffmv_ccd
+driver indi_gpsd
+driver indi_gpsnmea
+driver indi_lx200aok
+driver indi_lx200stargo
+driver indi_maxdomeii
+driver indi_mgenautoguider
+driver indi_nexdome
+driver indi_nightscape_ccd
+driver indi_ocs
+driver indi_openogma
+driver indi_orion_ssg3_ccd
+driver indi_platypus_focus
+driver indi_qhy_focuser
+driver indi_rolloffino
+driver indi_rtklib
+driver indi_scopelink
+driver indi_seletek_rotator
+driver indi_shelyakeshel_spectrograph
+driver indi_shelyakspox_spectrograph
+driver indi_staradventurer2i_telescope
+driver indi_staradventurergti_telescope
+driver indi_starbook_telescope
+driver indi_starbook_ten
+driver indi_sx_ao
+driver indi_sx_ccd
+driver indi_sx_wheel
+driver indi_talon6
+driver indi_ticfocuser-ng
+driver indi_weatherradio
+driver indi_weewx_json

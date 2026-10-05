@@ -1,0 +1,5 @@
+# ghcr.io/liken-sh/indi-atik: Atik cameras and filter wheels. The EFW
+# wheel on its own needs no SDK, so it is in indi-open.
+sdk libatikcameras
+driver indi_atik_ccd
+driver indi_atik_wheel

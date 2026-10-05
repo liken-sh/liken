@@ -283,6 +283,12 @@ container in the pod restarts.
 
 ## Images
 
+observatory-operator plans [01](../observatory-operator/plans/01-the-indi-base-image.md)
+and [02](../observatory-operator/plans/02-driver-and-simulator-images.md)
+replace the layers below with library closures on `scratch`, measured
+on 2026-10-05: a 71 MB base with every core driver, and one image for
+each vendor SDK family.
+
 The images build on Ubuntu with the INDI PPA (`ppa:mutlaqja/ppa`), not
 on the Debian snapshot that the other bases use. Debian packages INDI
 1.9.9 in sid and forky, and 2.2.5 only in experimental. It packages

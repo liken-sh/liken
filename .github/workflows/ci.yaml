@@ -251,6 +251,7 @@ jobs:
             --skip display-operator/
             --skip equipment-operator/
             --skip git-csi-driver/
+            --skip indi/
             --skip media-screen/
             --skip library-operator/
             --skip liken/
@@ -634,6 +635,36 @@ jobs:
       contents: read
       packages: write
 
+  indi:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].check }}
+    uses: ./.github/workflows/component-indi.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['indi'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['indi'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  indi-publish:
+    needs: [plan, indi]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].publish != 'none' }}
+    uses: ./.github/workflows/component-indi.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['indi'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   media-screen:
     needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-screen'].check }}
@@ -847,7 +878,7 @@ jobs:
   # check jobs. So it waits for the plan and each component's checks,
   # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, kubernetes, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, indi, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -1085,7 +1116,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, kubernetes, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, kubernetes, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

@@ -1,0 +1,15 @@
+# ghcr.io/liken-sh/indi-gphoto: Canon, Nikon, Sony, Fuji, and Pentax
+# cameras through gphoto2, and the Pentax driver on Ricoh's SDK. gphoto2
+# loads its camera and port plugins with dlopen, so ldd does not list
+# them, and each plugin directory is a seed.
+seed /usr/lib/x86_64-linux-gnu/libgphoto2
+seed /usr/lib/x86_64-linux-gnu/libgphoto2_port
+sdk libRicohCameraSDKCpp
+sdk libmtpricoh
+driver indi_canon_ccd
+driver indi_fuji_ccd
+driver indi_gphoto_ccd
+driver indi_nikon_ccd
+driver indi_pentax
+driver indi_pentax_ccd
+driver indi_sony_ccd

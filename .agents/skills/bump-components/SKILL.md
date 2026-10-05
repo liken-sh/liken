@@ -133,6 +133,14 @@ in every `FROM debian:trixie-slim` line, run `make workflows`, run
 `make images`, and run each image's smoke check. Compare the package
 versions with the old snapshot and report the ones that moved.
 
+Each base's `package.toml` also lists, under `[package.upstream]`, the
+upstream releases that matter in it, such as `mesa` and `ffmpeg`. A
+pinned version is a date, so these entries are how a reader of the
+registry learns what a tag holds: each one becomes the image label
+`sh.liken.upstream.<name>`. A new snapshot updates every entry to the
+version that the snapshot installs. Read the versions from the
+snapshot's `Packages` indexes, or with `dpkg-query -W` in the builder.
+
 **A new revision.** CI hashes each base's recipe: its `package.toml`,
 its `Dockerfile`, every file in its build context, the digest of each
 image outside the repository that it starts from, and the tag of each
@@ -156,6 +164,25 @@ revision", the message names each component to raise.
 The files that a base's `.dockerignore` leaves out, such as its
 `README.md` and its `smoke/` check, are not in the recipe, and a
 change to them needs no revision.
+
+## 5a. The INDI images
+
+`indi` is a pinned component too, with the 16 images that
+observatory-operator runs. It is not one of the five bases above: it
+installs from Ubuntu 26.04 and the INDI PPA, through dated snapshots of
+both, and it moves on its own schedule. Its `version` is the date of
+those snapshots, and `[package.upstream]` states the `indi-bin`,
+`indi-3rdparty-drivers`, and `gsc` package versions that the date
+installs. Its smoke checks fail when the image holds other versions.
+
+Bump it only when asked, or for a security fix in `indiserver`. Set the
+date and revision 1, update `[package.upstream]` from the snapshot's
+`Packages` index, and run `make workflows`. Build every target in
+`indi/package.toml` and run each smoke check. The build fails when a
+new release adds a third-party driver that no list in `indi/images/`
+names; add it to an image's list or to `indi/images/unpublished`, and
+say which in the report. CI builds the 16 images only when this tag is
+new.
 
 ## 6. Report
 

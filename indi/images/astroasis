@@ -1,0 +1,6 @@
+# ghcr.io/liken-sh/indi-astroasis: The Astroasis Oasis focuser and
+# filter wheel.
+sdk liboasisfocuser
+sdk liboasisfilterwheel
+driver indi_oasis_filter_wheel
+driver indi_oasis_focuser
