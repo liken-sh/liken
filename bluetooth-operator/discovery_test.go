@@ -376,7 +376,7 @@ func TestKernelBatteriesKeysByAddress(t *testing.T) {
 		dualSense("0003", "b4:8c:9d:11:22:33", "input/event7"),
 	)
 
-	batteries := kernelBatteries(root, bonds.Address{})
+	batteries := kernelBatteries(discoverHIDDevices(root, bonds.Address{}))
 	if len(batteries) != 1 {
 		t.Fatalf("got %d batteries, want 1: %+v", len(batteries), batteries)
 	}

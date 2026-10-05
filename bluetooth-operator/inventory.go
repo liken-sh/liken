@@ -76,6 +76,10 @@ type inventory struct {
 	// and holds the backoff each device carries between passes.
 	connects *connector
 
+	// inputs reconnects a controller whose link is up with no HID device
+	// behind it (inputrecovery.go).
+	inputs *inputRecovery
+
 	// relays holds each bonded controller's virtual input devices. A
 	// teardown stops one, in the step that takes the device out of the
 	// published inventory.
@@ -115,6 +119,7 @@ func newInventory(client *apiclient.Client, radio radio, held *relays, nodeName,
 	// inventory's clock is a field a test replaces after construction,
 	// and both must run on the same time.
 	i.connects = newConnector(radio, func() time.Time { return i.now() })
+	i.inputs = newInputRecovery(radio, held, func() time.Time { return i.now() })
 	return i
 }
 
@@ -212,16 +217,19 @@ func (i *inventory) reconcile() inventoryPass {
 
 	// One walk of sysfs answers the battery of every device this pass
 	// writes, before any status write, so each Peripheral reads the level
-	// the kernel reports now. claimedDevices answers from the same CDI
-	// read the unpair teardown already makes, so the Peripheral phase
+	// the kernel reports now. The same walk says which connected
+	// controllers have a HID device. claimedDevices answers from the same
+	// CDI read the unpair teardown already makes, so the Peripheral phase
 	// costs no second read of its own for the claimed gauge.
 	peripheralStart, wasOK := i.now(), pass.ok
-	i.reconcilePeripherals(adapter, snapshot, kernelBatteries(draSysfsRoot, snapshot.Adapter.Address), claimedDevices(), &pass)
-	// The connects run after the Peripherals, because the Peripheral pass
-	// marks the bonds a teardown works through, and a device under
-	// teardown must not be paged. Both act on Peripherals, so both fall
-	// under one phase.
+	kernel := discoverHIDDevices(draSysfsRoot, snapshot.Adapter.Address)
+	i.reconcilePeripherals(adapter, snapshot, kernelBatteries(kernel), claimedDevices(), &pass)
+	// The connects and the reconnects run after the Peripherals, because
+	// the Peripheral pass marks the bonds a teardown works through, and a
+	// device under teardown must not be paged. All three act on
+	// Peripherals, so all three fall under one phase.
 	i.connects.reconcile(snapshot, &pass)
+	i.inputs.reconcile(snapshot, kernel, &pass)
 	i.metrics.timeReconcile(peripheralKind, peripheralStart, i.now())
 	if wasOK && !pass.ok {
 		i.metrics.countReconcileError(peripheralKind)

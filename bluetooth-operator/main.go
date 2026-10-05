@@ -223,10 +223,12 @@ func main() {
 		}
 	}
 	wakeSoon := func(after time.Duration) { time.AfterFunc(after, wake) }
-	// The connector pages a device from its own goroutine, and the
-	// pass that reads the result is the loop's, so a finished call is
-	// a wake like the kernel's and the bus's.
+	// The connector pages a device and the input recovery reconnects
+	// one from their own goroutines, and the pass that reads the result
+	// is the loop's, so a finished call is a wake like the kernel's and
+	// the bus's.
 	objects.connects.wake = wake
+	objects.inputs.wake = wake
 	// The pass reads the radio's address, and the edit watcher needs
 	// it to select the Peripherals of that radio.
 	objects.follow = edits.follow

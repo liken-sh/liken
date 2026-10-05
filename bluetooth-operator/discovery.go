@@ -174,12 +174,12 @@ func nodesByMAC(devices []hidDevice) map[string][]string {
 	return nodes
 }
 
-// kernelBatteries reads the level of every Bluetooth HID device on the
-// adapter, keyed by the peer address, so the Peripheral pass looks each
-// device up in one map.
-func kernelBatteries(sysRoot string, adapter bonds.Address) map[bonds.Address]*hidBattery {
+// kernelBatteries keys the level of each Bluetooth HID device from one
+// walk by the peer address, so the Peripheral pass looks each device up
+// in one map.
+func kernelBatteries(devices []hidDevice) map[bonds.Address]*hidBattery {
 	batteries := map[bonds.Address]*hidBattery{}
-	for _, device := range discoverHIDDevices(sysRoot, adapter) {
+	for _, device := range devices {
 		if device.Battery == nil {
 			continue
 		}
