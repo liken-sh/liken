@@ -109,6 +109,20 @@ age of a certificate. A timer that reads state again to find a change
 is a defect. If a component needs a long resync as a backstop, a
 comment at the timer gives the failure it covers.
 
+## Tests run on the Go toolchain alone
+
+CI runs each component's tests on every push, so a test that waits on
+the wall clock, pulls an image, or reaches the network makes every push
+slow and fragile. A test waits on the fake clock of a `synctest`
+bubble, never on real time. A test starts no container and no cluster,
+and reaches no host outside the process. A test of an operator talks to
+a fake API server through `kubernetes/apiservertest`, whose in-memory
+connections keep the bubble's clock moving where a real socket stops
+it. Proof against real machines happens by hand on the `lab` fleet and
+on a physical test cluster. The `testing` skill under `.agents/skills`
+holds the fakes for each peer and device, the coverage gate, and the
+gotchas. Load it before you write or review a test.
+
 ## Branch names
 
 This repository works on `main`. `corrosion`, outside this repository,
