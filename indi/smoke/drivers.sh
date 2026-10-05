@@ -6,6 +6,7 @@
 #
 # Usage: drivers.sh <image>, such as ghcr.io/liken-sh/indi-zwo:20261005-1
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 image=$1
 list=${image##*/}
@@ -13,8 +14,8 @@ list=${list%%:*}
 list=${list#indi-}
 
 expect_upstream "$image"
-drivers=$(drivers_of "$list")
-name=$(serve "$image" $drivers)
+mapfile -t drivers < <(drivers_of "$list")
+name=$(serve "$image" "${drivers[@]}")
 trap 'stop "$name"' EXIT
 expect_clean_log "$name"
-echo "$(wc -w <<<"$drivers") drivers of $list loaded"
+echo "${#drivers[@]} drivers of $list loaded"

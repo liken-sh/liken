@@ -7,6 +7,7 @@
 #
 # Usage: indi.sh <image>
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 image=$1
 
@@ -17,12 +18,12 @@ expect_upstream "$image"
 id=$(docker create "$image")
 files=$(docker export "$id" | tar -t)
 docker rm "$id" >/dev/null
-drivers=$(sed -n 's|^usr/bin/\(indi_[^/]*\)$|\1|p' <<<"$files" |
+mapfile -t drivers < <(sed -n 's|^usr/bin/\(indi_[^/]*\)$|\1|p' <<<"$files" |
 	grep -vE '^indi_(getprop|setprop|eval|getdevice|hid_test)$')
-name=$(serve "$image" $drivers)
+name=$(serve "$image" "${drivers[@]}")
 trap 'stop "$name"' EXIT
 expect_clean_log "$name"
-echo "$(wc -w <<<"$drivers") drivers loaded"
+echo "${#drivers[@]} drivers loaded"
 
 stop "$name"
 name=$(serve "$image" indi_simulator_telescope)

@@ -6,6 +6,7 @@
 #
 # Usage: simulators.sh <image>
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 image=$1
 
