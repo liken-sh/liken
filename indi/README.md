@@ -66,6 +66,12 @@ images build when someone bumps them, and at no other time.
    targets of `package.toml`, and run each image's smoke check with
    its tag.
 
+A new snapshot can carry a new SDK, or an SDK whose license file
+changed. Compare each SDK directory of indi-3rdparty at the commit the
+PPA built from with `sdk-licenses/`, copy each changed or new license
+file, add a `license` entry to the image's list, and update the commit
+under "The notices" below.
+
 The build fails when the new release installs a third-party driver
 that no list in `images/` names, or when a list names one that it no
 longer installs. Add a new driver to an image's list or to
@@ -87,3 +93,34 @@ Each file in `images/` lists the seeds of one image, one per line:
 - `sdk <name>`: every file of a vendor SDK in `indi-3rdparty-libs`.
 - `data <path>`: a file or a directory, copied as it is.
 - `link <path> <target>`: a symbolic link.
+- `license <path>`: a vendor SDK's license file, from `sdk-licenses/`.
+
+## The notices
+
+Each image holds the notices that the licenses of its files ask to
+travel with them. A closure copies only what the loader resolves, so
+`closure.sh` also copies the copyright file of each Ubuntu and PPA
+package that the closure took a file from, to
+`/usr/share/doc/<package>/copyright`, and the license texts of
+`/usr/share/common-licenses`. It writes
+`/usr/share/doc/liken/<image>.packages`, which names each package, its
+version, and its source package, with the snapshots as `deb-src`
+entries, so `apt-get source` fetches the source of each one. The shim
+links the Go standard library, so `indi` holds the Go license at
+`/usr/share/doc/go/LICENSE`.
+
+The copyright file of the PPA's `indi-3rdparty-libs` states one
+license for the whole package and names none of the vendor SDKs in
+it. `sdk-licenses/` mirrors the license file of each SDK directory in
+the [indi-3rdparty](https://github.com/indilib/indi-3rdparty)
+repository at commit `9d8aff3711efa824137123b007b97978aeac2688`, the
+newest commit of its master branch when the PPA built the packages of
+2026-10-04 that the snapshot installs. The `license` entries of
+a list copy them to `/usr/share/doc/indi-3rdparty-libs/<directory>/`.
+The directories of the QHY, Atik, Astroasis, and SVBONY SDKs, and of
+`libflipro`, hold no license file, so their images carry none for
+those SDKs.
+
+Each smoke check runs `notices/check.sh` at the top of the repository,
+which fails when a package that a list names has no copyright file in
+the image, or when a `license` entry's file is missing.

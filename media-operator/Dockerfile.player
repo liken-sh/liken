@@ -42,6 +42,10 @@ COPY edl/ ./edl/
 # serves both images. The build tag pod leaves out client-go's leader
 # election, which only the operator needs.
 RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /media-operator-pod .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
 
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
 # Korean, so a CJK title or subtitle track name renders instead of a blank box.
@@ -66,8 +70,10 @@ RUN apt-get update \
 FROM mpv
 
 COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
+COPY --from=fonts /usr/share/doc/fonts-droid-fallback/copyright /usr/share/doc/fonts-droid-fallback/copyright
 
 COPY --from=build /media-operator-pod /media-operator-pod
+COPY --from=build /notices /
 
 # The test patterns that a pattern:// URI plays. The files are committed
 # in patterns/, and the Makefile's patterns target makes them, so the

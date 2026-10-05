@@ -1,5 +1,9 @@
 # These checks run before every commit, through pre-commit or prek,
 # its drop-in replacement.
+#
+# sdk-licenses/ mirrors the vendors' license files byte for byte, so no
+# hook rewrites them.
+exclude: ^sdk-licenses/
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

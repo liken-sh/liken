@@ -68,22 +68,32 @@ COPY --from=brand fonts/ /brand/fonts/
 FROM deps AS build-idle
 COPY --from=media-screen src/ /media-screen/src/
 COPY idle/src/ idle/src/
+COPY --from=notices cargo.sh /
 # The touch marks all three crates' own sources newer than the stub build, so
-# cargo compiles them again and leaves the dependencies as they are.
+# cargo compiles them again and leaves the dependencies as they are. Then
+# cargo.sh copies the license files of the standard library and of each crate
+# that the binary links, which notices/cargo.sh says the image needs. It runs
+# here because the crate sources are in the registry cache, which only this
+# RUN mounts.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch idle/src/main.rs idle/src/lib.rs /media-screen/src/lib.rs \
         /brand/iced/src/*.rs \
-    && cargo build --release --locked --no-default-features -p idle-screen
+    && cargo build --release --locked --no-default-features -p idle-screen \
+    && sh /cargo.sh /notices --no-default-features -p idle-screen
 
 FROM deps AS build-display
 COPY display/src/ display/src/
+COPY --from=notices cargo.sh /
 # The touch marks both crates' own sources newer than the stub build, so
-# cargo compiles them again and leaves the dependencies as they are.
+# cargo compiles them again and leaves the dependencies as they are. Then
+# cargo.sh copies the license files of the crates the binary links, as in
+# build-idle.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch display/src/main.rs display/src/lib.rs /brand/iced/src/*.rs \
-    && cargo build --release --locked -p media-display
+    && cargo build --release --locked -p media-display \
+    && sh /cargo.sh /notices -p media-display
 
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
 # Korean, for the reason the player image installs it: the text on both screens
@@ -125,8 +135,13 @@ RUN apt-get update \
 FROM vulkan AS idle
 
 COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
+COPY --from=fonts /usr/share/doc/fonts-droid-fallback/copyright /usr/share/doc/fonts-droid-fallback/copyright
 
 COPY --from=build-idle /src/target/release/idle-screen /idle-screen
+COPY --from=build-idle /notices /
+# The binary embeds the brand's two faces, and their license, the SIL Open
+# Font License, asks that it travel with them.
+COPY --from=brand fonts/LICENSE.md /usr/share/doc/source-sans-3/LICENSE.md
 
 # The binary runs here, in the image that ships it. --help opens no window
 # and reaches no compositor, and the toolkit opens its Wayland and Vulkan
@@ -165,6 +180,7 @@ ENTRYPOINT ["/idle-screen"]
 FROM vulkan AS display
 
 COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
+COPY --from=fonts /usr/share/doc/fonts-droid-fallback/copyright /usr/share/doc/fonts-droid-fallback/copyright
 
 # The brand's upright and italic faces, as files the toolkit finds when it
 # scans /usr/share/fonts. The binary carries the same two faces and loads them
@@ -175,6 +191,7 @@ COPY --from=brand fonts/SourceSans3-Regular.otf \
      /usr/share/fonts/opentype/source-sans-3/
 
 COPY --from=build-display /src/target/release/media-display /media-display
+COPY --from=build-display /notices /
 
 # The closure gate on the display binary. The binary takes no flag that
 # prints and exits, so the loader in --list mode resolves the whole

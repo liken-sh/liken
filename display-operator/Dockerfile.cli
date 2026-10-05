@@ -39,14 +39,19 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-X main.version=${VERSION}" \
     -o /kubectl-liken-display ./cli
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} sh /go.sh /notices ./cli
 
 # Distroless static carries a CA bundle and nonroot user and no
 # shell, which is all a static Go binary that calls an HTTPS API needs.
 FROM gcr.io/distroless/static:nonroot
 # distroless carries its own Debian CA bundle. The one that the trust
-# component pins for every image of liken replaces it.
-COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# component pins for every image of liken replaces it, with its notice.
+COPY --from=trust / /
 COPY --from=build /kubectl-liken-display /usr/local/bin/kubectl-liken-display
+COPY --from=build /notices /
 # The binary is the entrypoint, so docker run passes the verbs
 # straight to it and a Job in the cluster runs it the same way.
 ENTRYPOINT ["/usr/local/bin/kubectl-liken-display"]

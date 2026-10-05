@@ -1,0 +1,13 @@
+# The scripts that put the license notices of the third-party software
+# in an image into that image: the Go modules and the Rust crates that
+# a binary links, and the Debian packages that a closure takes files
+# from. The images of the operators take this directory as the build
+# context notices. It publishes nothing of its own.
+[package]
+name = "notices"
+license = "MIT"
+
+# shellcheck and the whitespace checks, from .pre-commit-config.yaml.
+[[jobs]]
+name = "prek"
+toolchain = "prek"

@@ -6,7 +6,8 @@ ships. `liken/` is the OS. The operators claim a machine's hardware
 and serve its interfaces. The CSI drivers attach storage, and `brand/`
 holds the theme, the voice rules, and the site tools. `kubernetes/`
 is the Go module that the operators import to read, write, and watch
-Kubernetes objects. `ci/` reads each
+Kubernetes objects. `notices/` holds the scripts that copy the license
+notices of the third-party software in an image into that image. `ci/` reads each
 component's `package.toml` and writes the CI workflows. `liken.sh/`
 declares the domain, the release channel, and the organization's
 repositories in Terraform. `plans/` holds the plans that cover more

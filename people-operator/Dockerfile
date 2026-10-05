@@ -31,11 +31,16 @@ COPY *.go ./
 # static binary with no paths from the build machine in it. It runs
 # from scratch, where there is no loader to need.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /people-operator .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /people-operator /people-operator
+COPY --from=build /notices /
 # A scratch image carries no trust store, and every HTTPS fetch of a
 # picture fails without one. The bundle is the one that the trust
-# component pins for every image of liken.
-COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# component pins for every image of liken, with its notice.
+COPY --from=trust / /
 ENTRYPOINT ["/people-operator"]

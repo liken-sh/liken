@@ -15,9 +15,9 @@ FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a
 ARG VERSION
 # The snapshot services answer only over HTTPS, and the Ubuntu image
 # has no CA bundle. The bundle is the one that the trust component pins
-# for every image of liken. It stays in the builder; only indi-open
-# ships it, for its weather drivers.
-COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# for every image of liken, with its notice. It stays in the builder;
+# only indi-open ships it, for its weather drivers.
+COPY --from=trust / /
 COPY mutlaqja.asc /etc/apt/trusted.gpg.d/mutlaqja.asc
 COPY snapshot.sh /snapshot.sh
 RUN sh /snapshot.sh "$VERSION" \
@@ -33,6 +33,7 @@ RUN sh /snapshot.sh "$VERSION" \
     && rm -rf /var/lib/apt/lists/*
 COPY closure.sh indi-closure.sh family.sh check-lists.sh /
 COPY images /images
+COPY sdk-licenses /sdk-licenses
 RUN sh /check-lists.sh /images
 
 # The shim that stands in for a driver in another pod. It is static, so
@@ -51,6 +52,9 @@ RUN sh /indi-closure.sh /out /images/indi \
     && dpkg-query -W indi-bin indi-3rdparty-drivers gsc > /out/etc/indi-versions \
     && mkdir -p -m 1777 /out/tmp
 COPY --from=shim /indi-shim /out/usr/bin/indi-shim
+# The shim links the Go standard library and no other module, and the
+# Go license asks that its notice travel with the binary.
+COPY --from=shim /usr/local/go/LICENSE /out/usr/share/doc/go/LICENSE
 
 FROM scratch AS indi
 COPY --from=indi-tree /out /

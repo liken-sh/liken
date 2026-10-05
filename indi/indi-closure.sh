@@ -16,6 +16,9 @@
 #   data <path>      a file or a directory, copied as it is
 #   link <path> <target>
 #                    a symbolic link
+#   license <path>   a vendor SDK's license file, at its path under
+#                    sdk-licenses/, which mirrors the SDK's directory
+#                    in the indi-3rdparty repository
 #
 # Run it in the builder, which has every package installed.
 set -eu
@@ -27,9 +30,17 @@ out=$1
 list=$2
 shift 2
 
+# The image's name: indi for the list named indi, and indi-<list> for
+# every other list.
+image=$(basename "$list")
+if [ "$image" != indi ]; then
+	image=indi-$image
+fi
+
 seeds=""
 data=""
 links=""
+licenses=""
 while read -r kind name target; do
 	case $kind in
 	'' | '#'*) continue ;;
@@ -52,6 +63,7 @@ while read -r kind name target; do
 		;;
 	data) data="$data $name" ;;
 	link) links="$links $name=$target" ;;
+	license) licenses="$licenses $name" ;;
 	*)
 		echo "$list: an entry of an unknown kind: $kind $name" >&2
 		exit 1
@@ -70,6 +82,15 @@ collect "$out" "$seeds" "$data"
 for entry in $links; do
 	mkdir -p "$out$(dirname "${entry%%=*}")"
 	ln -s "${entry#*=}" "$out${entry%%=*}"
+done
+
+# The copyright file of indi-3rdparty-libs states one license for the
+# whole package and names none of the vendor SDKs in it, so each SDK's
+# own license file goes beside it.
+notices "$out" "$image"
+for path in $licenses; do
+	mkdir -p "$out/usr/share/doc/indi-3rdparty-libs/$(dirname "$path")"
+	cp "/sdk-licenses/$path" "$out/usr/share/doc/indi-3rdparty-libs/$path"
 done
 
 for base in "$@"; do

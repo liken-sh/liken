@@ -48,3 +48,4 @@ data="
 "
 
 collect "$out" "$seeds" "$data"
+notices "$out" vulkan

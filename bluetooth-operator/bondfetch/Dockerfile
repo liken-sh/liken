@@ -40,7 +40,12 @@ COPY bondfetch/ ./bondfetch/
 # the symbol table and the DWARF sections, and Go reads panic traces
 # from its own pclntab, which stays.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /bondfetch ./bondfetch
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices ./bondfetch
 
 FROM scratch
 COPY --from=build /bondfetch /bondfetch
+COPY --from=build /notices /
 ENTRYPOINT ["/bondfetch"]

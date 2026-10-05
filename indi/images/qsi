@@ -1,3 +1,5 @@
 # ghcr.io/liken-sh/indi-qsi: Quantum Scientific Imaging cameras.
 sdk libqsiapi
+license libqsi/COPYING
+license libqsi/qsicopyright.txt
 driver indi_qsi_ccd

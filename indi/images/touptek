@@ -13,6 +13,17 @@ sdk libomegonprocam
 sdk libstarshootg
 sdk libsvbonycam
 sdk libtscam
+license libtoupcam/COPYING.LGPL
+license libaltaircam/COPYING.LGPL
+license libbressercam/COPYING.LGPL
+license libmallincam/COPYING.LGPL
+license libmeadecam/COPYING.LGPL
+license libnncam/COPYING.LGPL
+license libogmacam/COPYING.LGPL
+license libomegonprocam/COPYING.LGPL
+license libstarshootg/COPYING.LGPL
+license libsvbonycam/COPYING.LGPL
+license libtscam/COPYING.LGPL
 driver indi_altaircam_ccd
 driver indi_altaircam_focuser
 driver indi_altaircam_wheel

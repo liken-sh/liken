@@ -11,6 +11,7 @@ set -euo pipefail
 image=$1
 
 expect_upstream "$image"
+expect_notices "$image" simulators
 name=$(serve "$image" indi_simulator_telescope indi_simulator_ccd)
 trap 'stop "$name"' EXIT
 sleep 2

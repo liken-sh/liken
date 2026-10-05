@@ -19,6 +19,14 @@ set -euo pipefail
 
 image=$1
 
+# The image must hold the notices of the third-party software in it,
+# as notices/check.sh describes.
+"$(dirname "$0")/../../notices/check.sh" "$image" \
+  usr/share/doc/go/LICENSE \
+  usr/share/doc/rust/COPYRIGHT-library.html \
+  usr/share/doc/openvino/EULA.txt \
+  usr/share/doc/intel-graphics-compiler/NOTICES.txt
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 

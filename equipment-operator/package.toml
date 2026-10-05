@@ -5,7 +5,7 @@ name = "equipment-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes"]
+components = ["kubernetes", "notices"]
 
 [docs]
 prefix = "equipment"
@@ -45,4 +45,4 @@ deploy = "deploy"
 [[outputs.images]]
 name = "equipment-operator"
 file = "Dockerfile"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }

@@ -3,6 +3,10 @@
 name = "per-node-csi-driver"
 license = "MIT"
 
+# The scripts that put the license notices in the image.
+[depends]
+components = ["notices"]
+
 [docs]
 prefix = "per-node"
 
@@ -38,4 +42,5 @@ deploy = "deploy"
 [[outputs.images]]
 name = "per-node-csi-driver"
 file = "Dockerfile"
+contexts = { notices = "notices" }
 smoke = "per-node-csi-driver/smoke/per-node-csi-driver.sh"

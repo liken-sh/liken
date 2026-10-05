@@ -18,6 +18,16 @@ files that the seeds read by name: the ICD files, Mesa's `drirc`, the
 keymap data under `/usr/share/X11/xkb`, and the time zone database.
 The image holds no shell and no package manager.
 
+The image also holds the notices that the licenses of its files ask to
+travel with them. A closure copies only what the loader resolves, so
+`closure.sh` also copies the copyright file of each Debian package that
+the closure took a file from, to `/usr/share/doc/<package>/copyright`,
+and the license texts of `/usr/share/common-licenses`. It writes
+`/usr/share/doc/liken/vulkan.packages`, which names each package, its
+version, and its source package. snapshot.debian.org serves the source
+of every version that Debian published. Each base above this one
+writes its own list beside it, such as `ffmpeg.packages`.
+
 Debian puts every Vulkan driver in one package, and two of the seven,
 lavapipe and the AMD driver, link LLVM. The tree keeps the Intel and
 AMD drivers and leaves out the other five, so LLVM is in the image for
@@ -27,9 +37,10 @@ This directory also holds the files that every base on Debian uses.
 The other bases take this directory as the build context named
 `builder` for them:
 
-- `closure.sh` holds the functions that collect a closure, and the
-  function that removes from a tree every file that the base under it
-  already holds.
+- `closure.sh` holds the functions that collect a closure, the
+  function that copies the notices of the packages a closure took files
+  from, and the function that removes from a tree every file that the
+  base under it already holds.
 - `snapshot.sh` points apt at one day of
   [snapshot.debian.org](https://snapshot.debian.org/), reads the
   package lists, and checks each `InRelease` file against its sha256

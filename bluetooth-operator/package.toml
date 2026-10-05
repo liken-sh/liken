@@ -4,7 +4,7 @@ name = "bluetooth-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes", "trust"]
+components = ["kubernetes", "notices", "trust"]
 
 [docs]
 prefix = "bluetooth"
@@ -44,17 +44,17 @@ deploy = "deploy"
 [[outputs.images]]
 name = "bluetooth-operator"
 file = "Dockerfile"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "bluetooth-bondfetch"
 file = "bondfetch/Dockerfile"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "bluetoothd"
 file = "bluetoothd/Dockerfile"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is
@@ -62,4 +62,4 @@ contexts = { kubernetes = "kubernetes" }
 [[outputs.images]]
 name = "bluetooth-operator-cli"
 file = "Dockerfile.cli"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }

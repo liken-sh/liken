@@ -1,6 +1,7 @@
 # ghcr.io/liken-sh/indi-playerone: Player One cameras and filter wheel.
 sdk libPlayerOneCamera
 sdk libPlayerOnePW
+license libplayerone/license.txt
 driver indi_playerone_ccd
 driver indi_playerone_single_ccd
 driver indi_playerone_wheel

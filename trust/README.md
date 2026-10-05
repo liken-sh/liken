@@ -9,10 +9,11 @@ part of the system:
   snapshot against the sha256 that curl.se publishes beside it, and
   installs it as the machine's trust store.
 - The `trust` image on `ghcr.io/liken-sh` holds the same file at
-  `/etc/ssl/certs/ca-certificates.crt`, fetched by that checksum. Every
-  image that verifies TLS copies it with
-  `COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt`
-  and names `trust` in its `[depends]`.
+  `/etc/ssl/certs/ca-certificates.crt`, fetched by that checksum, and
+  its notice at `/usr/share/doc/mozilla-ca/copyright`. Mozilla's
+  certificate data is under the MPL 2.0, which requires that each copy
+  state the license. Every image that verifies TLS copies both with
+  `COPY --from=trust / /` and names `trust` in its `[depends]`.
 
 `trust` is a pinned component. Its version is the snapshot's date as
 `YYYYMMDD`, and the label `sh.liken.upstream.mozilla-ca` carries the

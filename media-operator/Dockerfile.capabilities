@@ -30,6 +30,10 @@ COPY capabilities/ ./capabilities/
 # headers. The binary names the system's dynamic loader, which the base
 # carries for libva itself.
 RUN CGO_ENABLED=0 go build -trimpath -o /media-capabilities ./capabilities
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices ./capabilities
 
 # purego's build with no cgo names libdl.so.2 and libpthread.so.0 as
 # well as libc.so.6. Since glibc 2.34 both are empty stubs whose symbols
@@ -46,4 +50,5 @@ COPY --from=glibc /usr/lib/x86_64-linux-gnu/libdl.so.2 \
      /usr/lib/x86_64-linux-gnu/libpthread.so.0 \
      /usr/lib/x86_64-linux-gnu/
 COPY --from=build /media-capabilities /media-capabilities
+COPY --from=build /notices /
 ENTRYPOINT ["/media-capabilities"]

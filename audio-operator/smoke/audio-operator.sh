@@ -44,6 +44,11 @@ set -euo pipefail
 export LC_ALL=C
 
 image=$1
+
+# The image must hold the notices of the third-party software in it,
+# as notices/check.sh describes.
+"$(dirname "$0")/../../notices/check.sh" "$image" \
+  usr/share/doc/go/LICENSE
 runtime=/var/run/audio.liken.sh
 
 # Every container and the volume carry this run's name, so a run on a

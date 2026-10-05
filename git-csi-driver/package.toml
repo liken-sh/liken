@@ -11,7 +11,7 @@ prefix = "git"
 # gate on that profile. .testcoverage.yml holds the floor.
 # The CA bundle that the image copies.
 [depends]
-components = ["trust"]
+components = ["notices", "trust"]
 
 [[jobs]]
 name = "go"
@@ -42,4 +42,5 @@ deploy = "deploy"
 [[outputs.images]]
 name = "git-csi-driver"
 file = "Dockerfile"
+contexts = { notices = "notices" }
 smoke = "git-csi-driver/smoke/git-csi-driver.sh"

@@ -5,7 +5,7 @@ name = "library-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "kubernetes", "media-screen", "trust", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "media-screen", "notices", "trust", "vulkan"]
 
 [docs]
 prefix = "library"
@@ -69,19 +69,19 @@ deploy = "deploy"
 [[outputs.images]]
 name = "library-operator"
 file = "Dockerfile"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "library-operator-ffmpeg"
 file = "Dockerfile.ffmpeg"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "library-operator/smoke/library-operator-ffmpeg.sh"
 
 [[outputs.images]]
 name = "library-operator-media-browser"
 context = "media-browser"
 file = "media-browser/Dockerfile"
-contexts = { brand = "brand", media-screen = "media-screen" }
+contexts = { brand = "brand", media-screen = "media-screen", notices = "notices" }
 smoke = "library-operator/smoke/library-operator-media-browser.sh"
 
 # The image of `appearances` builds on the ffmpeg base and pulls the face
@@ -91,7 +91,7 @@ smoke = "library-operator/smoke/library-operator-media-browser.sh"
 [[outputs.images]]
 name = "library-operator-appearances"
 file = "Dockerfile.appearances"
-contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances" }
+contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances", notices = "notices" }
 smoke = "library-operator/smoke/library-operator-appearances.sh"
 
 [[outputs.images]]
@@ -106,4 +106,4 @@ smoke = "library-operator/smoke/library-operator-corrosion.sh"
 [[outputs.images]]
 name = "library-operator-cli"
 file = "Dockerfile.cli"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }

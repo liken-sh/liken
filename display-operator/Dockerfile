@@ -52,6 +52,10 @@ ARG VERSION=dev
 # is the whole of the operator image, so it also has to run with no
 # loader and no libc under it.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /display-operator .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM weston AS display-operator
 # The operator's binary is the entrypoint of every container of the
@@ -59,6 +63,7 @@ FROM weston AS display-operator
 # write, the compositor it execs, the capture server, or, with no
 # argument, the DRA driver.
 COPY --from=build /display-operator /usr/local/bin/display-operator
+COPY --from=build /notices /
 
 ENTRYPOINT ["/usr/local/bin/display-operator"]
 
@@ -68,6 +73,7 @@ ENTRYPOINT ["/usr/local/bin/display-operator"]
 # beside it.
 FROM ffmpeg AS display-capture
 COPY --from=build /display-operator /usr/local/bin/display-operator
+COPY --from=build /notices /
 
 ENTRYPOINT ["/usr/local/bin/display-operator"]
 
@@ -76,5 +82,6 @@ ENTRYPOINT ["/usr/local/bin/display-operator"]
 # and there is nothing else in it to patch.
 FROM scratch AS display-api
 COPY --from=build /display-operator /usr/local/bin/display-operator
+COPY --from=build /notices /
 
 ENTRYPOINT ["/usr/local/bin/display-operator"]

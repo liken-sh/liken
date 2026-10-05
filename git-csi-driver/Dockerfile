@@ -29,6 +29,10 @@ ARG VERSION=dev
 # its log, and a panic's stack trace keeps its function names without
 # the symbol table, so nothing this project reads is lost.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /git-csi-driver .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM debian:trixie-slim AS closure
 # git is the program the driver runs. openssh-client is the transport a
@@ -40,13 +44,19 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY git-closure.sh /
 RUN sh /git-closure.sh /out
+# The copyright file of each Debian package that the closure took files
+# from, and the list of those packages and their sources.
+# notices/debian.sh says why the image needs them.
+COPY --from=notices debian.sh /
+RUN sh /debian.sh /out git-csi-driver
 
 FROM scratch
 COPY --from=closure /out /
 # The CA bundle that verifies an HTTPS forge is the one that the trust
-# component pins for every image of liken.
-COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# component pins for every image of liken, with its notice.
+COPY --from=trust / /
 
 COPY --from=build /git-csi-driver /usr/local/bin/git-csi-driver
+COPY --from=build /notices /
 
 ENTRYPOINT ["/usr/local/bin/git-csi-driver"]

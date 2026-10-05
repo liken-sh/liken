@@ -31,6 +31,10 @@ COPY *.go ./
 # from scratch, where there is no loader to need. The tag pod builds the
 # program without the operator, which no container of this image runs.
 RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
 
 # The bake file at the top of the repository gives this build the ffmpeg
 # image of the same commit as the named context ffmpeg. display-operator's
@@ -38,10 +42,11 @@ RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
 # one copy of the drivers.
 FROM ffmpeg
 COPY --from=build /library-operator-pod /library-operator-pod
+COPY --from=build /notices /
 # A scratch image carries no trust store, and every TLS call fails without
 # one. The bundle is the one that the trust component pins for every
-# image of liken.
-COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# image of liken, with its notice.
+COPY --from=trust / /
 # A scratch image carries no PATH, and the two file facts find their tools by
 # name.
 ENV PATH=/usr/bin

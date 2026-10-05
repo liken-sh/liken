@@ -5,7 +5,7 @@ name = "people-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes", "trust"]
+components = ["kubernetes", "notices", "trust"]
 
 [docs]
 prefix = "people"
@@ -41,8 +41,9 @@ deploy = "deploy"
 
 # The image builds from this module's go.mod, which replaces the shared
 # kubernetes module with ../kubernetes, so it takes that directory as a
-# build context.
+# build context. The notices context holds the script that copies the
+# license files of the modules the binary links.
 [[outputs.images]]
 name = "people-operator"
 file = "Dockerfile"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }

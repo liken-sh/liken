@@ -32,6 +32,10 @@ RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
 RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
 
 FROM rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS build
 WORKDIR /src
@@ -55,12 +59,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 COPY --from=appearances src/ ./src/
 COPY --from=appearances dev/ ./dev/
 
+COPY --from=notices cargo.sh /
 # The touch marks the crate's own sources newer than the stub build, so
 # cargo compiles them again and leaves the dependencies as they are.
+# Then cargo.sh copies the license files of the standard library and of
+# each crate that the binary links, which notices/cargo.sh says the image
+# needs. It runs here because the crate sources are in the registry
+# cache, which only this RUN mounts.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch src/main.rs src/lib.rs \
-    && cargo build --release --locked
+    && cargo build --release --locked \
+    && sh /cargo.sh /notices
 
 # The inference runtime. The binary opens libopenvino_c.so when it
 # starts, so the build above needs no OpenVINO, and this stage collects
@@ -120,9 +130,11 @@ COPY --from=runtime /out /
 # The license files and the notice travel with the weights.
 COPY --from=models /models /usr/share/appearances/models
 COPY --from=build /src/target/release/appearances /appearances
+COPY --from=build /notices /
 # The worker makes one kind of request, the rescan, over plain HTTP to the
 # operator's service inside the cluster, so the image needs no trust store.
 COPY --from=pod /library-operator-pod /library-operator-pod
+COPY --from=pod /notices /
 
 # The OpenVINO runtime and Intel's graphics compiler are outside the
 # directories that the loader searches, and the binary searches

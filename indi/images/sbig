@@ -1,3 +1,4 @@
 # ghcr.io/liken-sh/indi-sbig: SBIG cameras.
 sdk libsbig
+license libsbig/LICENSE.firmware
 driver indi_sbig_ccd

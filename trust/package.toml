@@ -10,7 +10,7 @@ name = "trust"
 # its checksum. latest.sh --bump writes all three, and the smoke check
 # fails when they disagree.
 version = "20260925"
-revision = 1
+revision = 2
 license = "MIT"
 
 [package.upstream]

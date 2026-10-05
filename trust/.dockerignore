@@ -1,5 +1,7 @@
-# The build reads only the Dockerfile and the file it fetches. The
-# OS build's fetch caches, the scripts, and the checks stay out of the
-# build context, so a change to them needs no new revision.
+# The build reads only the Dockerfile, the notice it copies, and the
+# file it fetches. The OS build's fetch caches, the scripts, and the
+# checks stay out of the build context, so a change to them needs no
+# new revision.
 *
 !Dockerfile
+!copyright

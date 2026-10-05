@@ -41,6 +41,10 @@ COPY edl/ ./edl/
 # even though this image has a libc, because the same build then serves
 # every image that holds it.
 RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /media-operator-pod .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
 
 # The ffmpeg image carries ffmpeg with its demuxers and muxers. The
 # mux uses -c copy alone, so it reads two containers and writes one
@@ -51,6 +55,7 @@ RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /media-operator-pod .
 FROM ffmpeg
 
 COPY --from=build /media-operator-pod /media-operator-pod
+COPY --from=build /notices /
 
 # The entrypoint is the binary in its api role, so the Deployment
 # names no arguments of its own. ffmpeg is a child process the api

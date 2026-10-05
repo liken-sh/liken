@@ -1,0 +1,7 @@
+# A build reads only the three scripts that run in a build stage. The
+# smoke check and the documentation stay out of the build context, so a
+# change to them rebuilds no image.
+*
+!go.sh
+!cargo.sh
+!debian.sh

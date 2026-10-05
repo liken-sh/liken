@@ -45,7 +45,12 @@ ARG VERSION=dev
 # binary and costs nothing a reader of this program uses: Go reads
 # panic traces from its own pclntab, which stays.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /bluetooth-operator .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /bluetooth-operator /bluetooth-operator
+COPY --from=build /notices /
 ENTRYPOINT ["/bluetooth-operator"]

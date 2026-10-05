@@ -3,6 +3,8 @@
 # libdc1394, gpsd, Pololu Tic, and INDI's own LX200 library. The weather
 # drivers fetch over HTTPS, so the image carries a CA bundle.
 data /etc/ssl/certs/ca-certificates.crt
+# The bundle's notice, from the trust image.
+data /usr/share/doc/mozilla-ca/copyright
 driver indi_aagcloudwatcher_ng
 driver indi_armadillo_focus
 driver indi_astarbox

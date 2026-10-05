@@ -48,8 +48,14 @@ ARG VERSION=dev
 # from scratch, where there is no loader to need.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /equipment-operator . \
     && CGO_ENABLED=0 go build -trimpath -tags node -ldflags "-s -w -X main.version=${VERSION}" -o /equipment-operator-node .
+# The license files of the Go standard library and of each module that
+# the two binaries link. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices . \
+    && CGO_ENABLED=0 GOFLAGS=-tags=node sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /equipment-operator /equipment-operator
 COPY --from=build /equipment-operator-node /equipment-operator-node
+COPY --from=build /notices /
 ENTRYPOINT ["/equipment-operator"]

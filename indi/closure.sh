@@ -1,7 +1,8 @@
 #!/bin/sh
 # The functions that collect a program, everything it loads, and its
 # data files into one directory tree, so that an image ships that tree
-# and nothing else. indi-closure.sh sources this file.
+# and nothing else, with the notices of the packages it came from.
+# indi-closure.sh sources this file.
 #
 # This is the same method as vulkan/closure.sh, in a copy of its own.
 # Reading that file through a build context would put every file of
@@ -88,6 +89,70 @@ collect() {
 	mkdir -p "$out/etc"
 	printf '%s\n' "$lib" >"$out/etc/ld.so.conf"
 	ldconfig -r "$out"
+}
+
+# notices writes into $out the notices that the licenses of its files
+# ask to travel with them. Each Ubuntu and PPA package states its
+# copyright and its license in /usr/share/doc/<package>/copyright, and
+# a closure copies only what the loader resolves, which leaves those
+# files behind. So for each package that a file of $out came from,
+# notices copies the package's copyright file, and it copies the
+# license texts in /usr/share/common-licenses that the copyright files
+# name by path.
+#
+# The GPL and the LGPL also require that the source be available. The
+# list /usr/share/doc/liken/<image>.packages names each package with its
+# version and its source package, and the snapshots that the builder
+# installs from serve the sources of the same date. The list states
+# those snapshots as deb-src entries.
+#
+# Debian policy requires a copyright file in every package, so a
+# package without one fails the build here.
+notices() {
+	out=$1
+	image=$2
+	packages=$out/usr/share/doc/liken/$image.packages
+
+	mkdir -p "$out/usr/share/doc/liken"
+	cat >"$packages" <<EOF
+ghcr.io/liken-sh/$image holds files of the Ubuntu and INDI PPA
+packages below, unmodified. /usr/share/doc/<package>/copyright states
+the copyright and the license of each package, and
+/usr/share/common-licenses holds the license texts that those files
+name. The copyright file of indi-3rdparty-libs does not name the
+vendor SDKs in that package. So when this image holds an SDK whose
+directory in the indi-3rdparty repository holds a license file,
+/usr/share/doc/indi-3rdparty-libs/<directory>/ holds that file.
+
+The snapshots that the image installs from serve the source of each
+package. With these sources, apt-get source <source>=<source version>
+fetches it:
+
+$(sed 's/^Types: deb$/Types: deb-src/' /etc/apt/sources.list.d/snapshot.sources)
+
+<package> <version> <source> <source version>
+EOF
+	for package in $(dpkg-query -W -f '${Package}\n'); do
+		if ! holds "$out" "$package"; then
+			continue
+		fi
+		mkdir -p "$out/usr/share/doc/$package"
+		cp -L "/usr/share/doc/$package/copyright" "$out/usr/share/doc/$package/copyright"
+		dpkg-query -W -f '${Package} ${Version} ${source:Package} ${source:Version}\n' "$package" >>"$packages"
+	done
+	cp -a --parents /usr/share/common-licenses "$out"
+}
+
+# holds succeeds when the tree $1 holds a file of the package $2. A
+# directory does not count, because many packages own the same
+# directories, such as /usr/lib.
+holds() {
+	dpkg -L "$2" | while read -r path; do
+		if [ ! -d "$1$path" ] && { [ -e "$1$path" ] || [ -L "$1$path" ]; }; then
+			echo "$path"
+			break
+		fi
+	done | grep -q .
 }
 
 # subtract removes from $out every file that $base already holds with

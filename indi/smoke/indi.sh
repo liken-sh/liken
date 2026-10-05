@@ -3,7 +3,8 @@
 # load in the image and stay up, the packages must be the releases
 # that package.toml states, and the simulators must serve a mount that
 # a client connects and slews. The shim must refuse a name with no
-# address, which proves it runs in the image.
+# address, which proves it runs in the image. The image must hold the
+# notices of the packages it took files from.
 #
 # Usage: indi.sh <image>
 set -euo pipefail
@@ -12,6 +13,7 @@ set -euo pipefail
 image=$1
 
 expect_upstream "$image"
+expect_notices "$image" indi
 
 # indi-bin also installs its tools, such as indi_getprop, which are not
 # drivers.

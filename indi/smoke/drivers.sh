@@ -2,7 +2,8 @@
 # Starts every driver of one image on the indi image under indiserver,
 # with no hardware attached. Each must load and stay up. A camera
 # driver defines no device until it finds a camera, so this proves the
-# closure and not the camera code.
+# closure and not the camera code. The image must hold the notices of
+# the packages and the vendor SDKs it took files from.
 #
 # Usage: drivers.sh <image>, such as ghcr.io/liken-sh/indi-zwo:20261005-1
 set -euo pipefail
@@ -14,6 +15,7 @@ list=${list%%:*}
 list=${list#indi-}
 
 expect_upstream "$image"
+expect_notices "$image" "$list"
 mapfile -t drivers < <(drivers_of "$list")
 name=$(serve "$image" "${drivers[@]}")
 trap 'stop "$name"' EXIT

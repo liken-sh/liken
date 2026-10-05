@@ -148,6 +148,31 @@ RUN set -eux; \
     install -D -m 0644 /staging/usr/share/dbus-1/system.conf /out/usr/share/dbus-1/system.conf; \
     install -D -m 0644 /staging/usr/share/dbus-1/system.d/bluetooth.conf /out/usr/share/dbus-1/system.d/bluetooth.conf
 
+# The licenses of BlueZ and dbus ask that their notices travel with the
+# programs, and the GPL that BlueZ uses also requires that the source of
+# a static program be available, the libraries it links included. So
+# the image carries the license files and the authors of the two
+# projects, and a list of the Alpine packages whose static libraries
+# the build installed, with the license that Alpine states for each.
+# Alpine's packages carry no license files of their own.
+RUN set -eux; \
+    mkdir -p /out/usr/share/doc/bluez /out/usr/share/doc/dbus /out/usr/share/doc/liken; \
+    cp "/build/bluez-${BLUEZ_VERSION}/COPYING" "/build/bluez-${BLUEZ_VERSION}/COPYING.LIB" \
+        "/build/bluez-${BLUEZ_VERSION}/AUTHORS" /out/usr/share/doc/bluez/; \
+    cp "/build/dbus-${DBUS_VERSION}/COPYING" "/build/dbus-${DBUS_VERSION}/AUTHORS" /out/usr/share/doc/dbus/; \
+    { \
+        echo "ghcr.io/liken-sh/bluetoothd holds static programs built from BlueZ ${BLUEZ_VERSION},"; \
+        echo "https://mirrors.edge.kernel.org/pub/linux/bluetooth/bluez-${BLUEZ_VERSION}.tar.xz,"; \
+        echo "and dbus ${DBUS_VERSION},"; \
+        echo "https://dbus.freedesktop.org/releases/dbus/dbus-${DBUS_VERSION}.tar.xz,"; \
+        echo "unmodified. They link the static libraries of the Alpine $(cut -d. -f1,2 /etc/alpine-release)"; \
+        echo "packages below. Alpine serves the recipe of each package at"; \
+        echo "https://gitlab.alpinelinux.org/alpine/aports and the source it builds from"; \
+        echo "at https://distfiles.alpinelinux.org/distfiles/."; \
+        echo; \
+        apk list --installed 2>/dev/null | grep -E '^(expat|glib|pcre2|libffi|zlib|eudev|json-c|readline|ncurses|musl)-' | sort; \
+    } > /out/usr/share/doc/liken/bluetoothd.alpine
+
 # dbus-daemon drops to its messagebus user as soon as it has bound the
 # socket, and it looks the name up in /etc/passwd. musl resolves users
 # from those files directly, with no NSS modules to load, so these two
@@ -179,10 +204,15 @@ COPY --from=kubernetes go.mod /kubernetes/
 RUN go mod download
 COPY bluetoothd/*.go ./bluetoothd/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-bluetoothd ./bluetoothd
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd
 
 FROM scratch
 COPY --from=daemons /out/ /
 COPY --from=entrypoint /start-bluetoothd /usr/local/bin/start-bluetoothd
+COPY --from=entrypoint /notices /
 
 # AutoEnable is baked in, because an adapter that this operator holds
 # must power itself on, and no deployment has a reason to say

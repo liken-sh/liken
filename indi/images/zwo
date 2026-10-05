@@ -5,6 +5,7 @@ sdk libEFWFilter
 sdk libEAFFocuser
 sdk libCAARotator
 sdk libUSB2ST4Conv
+license libasi/license.txt
 driver indi_asi_ccd
 driver indi_asi_focuser
 driver indi_asi_rotator

@@ -192,7 +192,10 @@ installs. Its smoke checks fail when the image holds other versions.
 
 Bump it only when asked, or for a security fix in `indiserver`. Set the
 date and revision 1, update `[package.upstream]` from the snapshot's
-`Packages` index, and run `make workflows`. Build every target in
+`Packages` index, and run `make workflows`. Compare the license file of
+each SDK directory in indi-3rdparty, at the commit that the PPA built
+from, with `indi/sdk-licenses/`, and copy each new or changed one; the
+section "The notices" in `indi/README.md` holds the steps. Build every target in
 `indi/package.toml` and run each smoke check. The build fails when a
 new release adds a third-party driver that no list in `indi/images/`
 names; add it to an image's list or to `indi/images/unpublished`, and

@@ -1,0 +1,81 @@
+# This file is generated from notices/package.toml. Do not edit it:
+# edit that file or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository.
+#
+# ci.yaml calls this workflow when a change reaches notices. Each
+# check below is a job from package.toml, and it runs the same command
+# that a workstation runs.
+#
+# The plan names the jobs that read the change, and
+# only those run, in a run that publishes too.
+#
+# The name carries the component- prefix because the ci component would
+# otherwise share the name ci with the root workflow, and a lookup by
+# name could not tell the two apart.
+name: component-notices
+
+on:
+  workflow_call:
+    inputs:
+      # check runs the jobs that the plan names. publish
+      # runs the publish job alone: ci.yaml calls this workflow a second
+      # time for it, after the checks of every component in this one's
+      # closure pass.
+      stage:
+        type: string
+        required: true
+      # true when the check stage also runs the publish job in its dry
+      # mode, because the code of the publish changed: it builds what a
+      # publish would push, and it pushes nothing.
+      dryrun:
+        type: boolean
+        required: true
+      # The version the outputs get: the release tag, a development
+      # version, a pinned component's own tag, or empty when the run
+      # publishes nothing.
+      version:
+        type: string
+        required: true
+      # none, dev, or release.
+      publish:
+        type: string
+        required: true
+      # The names of the jobs that run, as a JSON list.
+      jobs:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the job.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the runner's git. `GOSUMDB` keeps its default, so the
+# checksum database still verifies a module that `go` fetched from its
+# origin. The value covers the Go of every job here, and of the
+# build-setup action, which takes the env of the job that uses it.
+# The images set the same value in their own build stages.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  prek:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: notices
+    steps:
+      - uses: actions/checkout@v7
+
+      # prek runs the hooks of this component only, with
+      # --show-diff-on-failure, so a hook that changes a file fails
+      # with the change it would make.
+      - uses: j178/prek-action@v2
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files notices/

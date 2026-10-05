@@ -23,6 +23,9 @@ Each top-level directory is one component, named for what it ships:
 - [`trust/`](trust/) pins the CA bundle that the OS and every image
   that verifies TLS trust: Mozilla's roots, as curl.se publishes them
   by date.
+- [`notices/`](notices/) holds the scripts that copy the license
+  notices of the Go modules, the Rust crates, and the Debian packages
+  in an image into that image.
 - [`indi/`](indi/) holds the INDI images that `observatory-operator`
   runs: a library closure on `scratch` of `indiserver` and every core
   driver, and one image on it for each vendor SDK family, built from

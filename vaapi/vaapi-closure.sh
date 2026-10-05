@@ -35,4 +35,5 @@ $lib/dri/iHD_drv_video.so
 data=""
 
 collect "$out" "$seeds" "$data"
+notices "$out" vaapi
 subtract "$out" "$base"

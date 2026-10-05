@@ -27,8 +27,13 @@ ARG VERSION=dev
 # its log, and a panic's stack trace keeps its function names without
 # the symbol table, so nothing this project reads is lost.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /per-node-csi-driver .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /per-node-csi-driver /usr/local/bin/per-node-csi-driver
+COPY --from=build /notices /
 
 ENTRYPOINT ["/usr/local/bin/per-node-csi-driver"]

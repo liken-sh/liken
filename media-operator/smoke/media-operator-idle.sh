@@ -16,4 +16,11 @@ set -euo pipefail
 
 image=$1
 
+# The image must hold the notices of the third-party software in it,
+# as notices/check.sh describes.
+"$(dirname "$0")/../../notices/check.sh" "$image" \
+  usr/share/doc/rust/COPYRIGHT-library.html \
+  usr/share/doc/fonts-droid-fallback/copyright \
+  usr/share/doc/source-sans-3/LICENSE.md
+
 docker run --rm "$image" --help > /dev/null

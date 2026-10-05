@@ -72,6 +72,22 @@ for path in \
 	cp -a "$work/intel$path" "$out$path"
 done
 
+# Each license of the files above asks that its notice travel with
+# them, and the copies above leave the notices behind. The archive's
+# docs/licensing/ holds Intel's distribution license, which covers the
+# OpenVINO runtime's libraries, and the notices of the third-party code
+# in them. TBB carries its own license file. Intel's two Debian packages
+# each carry a copyright file, and the graphics compiler carries one
+# NOTICES.txt that covers both of its packages.
+mkdir -p "$out/usr/share/doc/openvino" "$out/usr/share/doc/intel-graphics-compiler"
+cp -a "$work/openvino/docs/licensing/." "$out/usr/share/doc/openvino/"
+cp "$work/openvino/runtime/3rdparty/tbb/TBB-LICENSE" "$out/usr/share/doc/openvino/"
+for package in intel-opencl-icd libigdgmm12; do
+	mkdir -p "$out/usr/share/doc/$package"
+	cp "$work/intel/usr/share/doc/$package/copyright" "$out/usr/share/doc/$package/"
+done
+cp "$work/intel/usr/local/lib/igc2/NOTICES.txt" "$out/usr/share/doc/intel-graphics-compiler/"
+
 # oneTBB names libdl.so.2 and libpthread.so.0, which glibc keeps as
 # empty files for old programs, and no program in the base names
 # either. They must come from the same glibc as the base's libc.so.6,

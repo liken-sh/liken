@@ -51,8 +51,14 @@ COPY edl/ ./edl/
 # from scratch, where there is no loader to need.
 RUN CGO_ENABLED=0 go build -trimpath -o /media-operator . \
     && CGO_ENABLED=0 go build -trimpath -tags pod -o /media-operator-pod .
+# The license files of the Go standard library and of each module that
+# the two binaries link. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices . \
+    && CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /media-operator /media-operator
 COPY --from=build /media-operator-pod /media-operator-pod
+COPY --from=build /notices /
 ENTRYPOINT ["/media-operator"]

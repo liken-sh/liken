@@ -1,0 +1,9 @@
+The CA bundle at /etc/ssl/certs/ca-certificates.crt holds the root
+certificates of the Mozilla CA program. The curl project extracts them
+from Mozilla's certdata.txt and publishes them at
+https://curl.se/docs/caextract.html. The header of the bundle names
+the date of the certificate data.
+
+Mozilla's certdata.txt is subject to the Mozilla Public License,
+version 2.0. The bundle is a PEM file, which is its own source form.
+A copy of the license is at https://mozilla.org/MPL/2.0/.

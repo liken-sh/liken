@@ -70,3 +70,13 @@ expect_upstream() {
 		fi
 	done
 }
+
+# expect_notices checks that the image holds the copyright file of each
+# package it took files from, the Go license of the shim, and the
+# license file of each vendor SDK that its list in images/ names.
+expect_notices() {
+	local image=$1 list=$2
+	local licenses
+	mapfile -t licenses < <(awk '$1 == "license" {print "usr/share/doc/indi-3rdparty-libs/" $2}' "$indi/images/$list")
+	"$indi/../notices/check.sh" "$image" usr/share/doc/go/LICENSE "${licenses[@]}"
+}

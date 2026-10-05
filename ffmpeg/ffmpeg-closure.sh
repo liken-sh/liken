@@ -26,6 +26,7 @@ seeds="
 data=""
 
 collect "$out" "$seeds" "$data"
+notices "$out" ffmpeg
 
 # The image is FROM vaapi, which is FROM vulkan, so the layer carries
 # neither tree.

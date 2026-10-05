@@ -43,12 +43,18 @@ COPY *.go ./
 # build is 30.8 MB. operate_pod.go says why.
 RUN CGO_ENABLED=0 go build -trimpath -o /library-operator . \
     && CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
+# The license files of the Go standard library and of each module that
+# the two binaries link. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices . \
+    && CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /library-operator /library-operator
 COPY --from=build /library-operator-pod /library-operator-pod
+COPY --from=build /notices /
 # A scratch image carries no trust store, and every TLS call fails without
 # one. The bundle is the one that the trust component pins for every
-# image of liken.
-COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# image of liken, with its notice.
+COPY --from=trust / /
 ENTRYPOINT ["/library-operator"]

@@ -34,6 +34,10 @@ ARG VERSION=dev
 # runs beside a closure that holds a loader and a libc, and it needs
 # neither.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /audio-operator .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 # The suite is pinned because the closure script names pipewire 0.3,
 # spa 0.2, and wireplumber 0.5. A Debian that moves one of them fails
@@ -67,6 +71,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY audio-closure.sh /
 RUN sh /audio-closure.sh /out
+# The copyright file of each Debian package that the closure took files
+# from, and the list of those packages and their sources.
+# notices/debian.sh says why the image needs them.
+COPY --from=notices debian.sh /
+RUN sh /debian.sh /out audio-operator
 
 FROM scratch
 COPY --from=closure /out /
@@ -106,6 +115,7 @@ COPY config/50-pipewire-access.conf /usr/share/pipewire/pipewire.conf.d/
 # delivered a Bluetooth media bus.
 
 COPY --from=build /audio-operator /usr/local/bin/audio-operator
+COPY --from=build /notices /
 
 # The operator is the default entrypoint, and the three other
 # containers name their own program. The image holds no shell, so

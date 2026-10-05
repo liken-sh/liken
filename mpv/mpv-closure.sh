@@ -61,6 +61,7 @@ data="
 "
 
 collect "$out" "$seeds" "$data"
+notices "$out" mpv
 
 # The image is FROM ffmpeg, which is FROM vaapi, which is FROM vulkan, so
 # the layer carries none of the three trees.

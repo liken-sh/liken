@@ -14,6 +14,11 @@ set -euo pipefail
 
 image=$1
 
+# The image must hold the notices of the third-party software in it,
+# as notices/check.sh describes.
+"$(dirname "$0")/../../notices/check.sh" "$image" \
+  usr/share/doc/go/LICENSE
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 

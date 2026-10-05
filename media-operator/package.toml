@@ -4,7 +4,7 @@ name = "media-operator"
 license = "MIT"
 
 [depends]
-components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "trust", "vaapi", "vulkan"]
+components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "notices", "trust", "vaapi", "vulkan"]
 
 [docs]
 prefix = "media"
@@ -65,32 +65,32 @@ deploy = "deploy"
 name = "media-operator"
 file = "Dockerfile"
 aliases = ["media-operator-sidecar"]
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "media-operator-player"
 file = "Dockerfile.player"
-contexts = { brand = "brand", kubernetes = "kubernetes" }
+contexts = { brand = "brand", kubernetes = "kubernetes", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-player.sh"
 
 [[outputs.images]]
 name = "media-operator-idle"
 file = "Dockerfile.screen"
 target = "idle"
-contexts = { brand = "brand", media-screen = "media-screen" }
+contexts = { brand = "brand", media-screen = "media-screen", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-idle.sh"
 
 [[outputs.images]]
 name = "media-operator-display"
 file = "Dockerfile.screen"
 target = "display"
-contexts = { brand = "brand", media-screen = "media-screen" }
+contexts = { brand = "brand", media-screen = "media-screen", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-display.sh"
 
 [[outputs.images]]
 name = "media-operator-api"
 file = "Dockerfile.api"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-api.sh"
 
 # The capabilities agent's image builds on the vaapi base, because its
@@ -99,7 +99,7 @@ smoke = "media-operator/smoke/media-operator-api.sh"
 [[outputs.images]]
 name = "media-operator-capabilities"
 file = "Dockerfile.capabilities"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-capabilities.sh"
 
 # The CLI image carries the same version as the operator, so the base
@@ -108,4 +108,4 @@ smoke = "media-operator/smoke/media-operator-capabilities.sh"
 [[outputs.images]]
 name = "media-operator-cli"
 file = "Dockerfile.cli"
-contexts = { kubernetes = "kubernetes" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }

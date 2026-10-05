@@ -3,6 +3,7 @@
 sdk libfli
 sdk libflipro
 sdk libflialgo
+license libfli/LICENSE.BSD
 driver indi_fli_ccd
 driver indi_fli_focus
 driver indi_fli_wheel

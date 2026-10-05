@@ -6,6 +6,10 @@ seed /usr/lib/x86_64-linux-gnu/libgphoto2
 seed /usr/lib/x86_64-linux-gnu/libgphoto2_port
 sdk libRicohCameraSDKCpp
 sdk libmtpricoh
+license libricohcamerasdk/LICENSE
+# indi_pentax_ccd links libpktriggercord, whose license file is in its
+# src/ directory.
+license libpktriggercord/src/COPYING
 driver indi_canon_ccd
 driver indi_fuji_ccd
 driver indi_gphoto_ccd

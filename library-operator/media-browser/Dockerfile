@@ -69,13 +69,19 @@ COPY --from=media-screen src/ /media-screen/src/
 # change regardless.
 ARG VERSION=dev
 
+COPY --from=notices cargo.sh /
 # The touch marks the three crates' own sources newer than the stub build,
 # so cargo compiles them again and leaves the dependencies as they are.
+# Then cargo.sh copies the license files of the standard library and of
+# each crate that the binary links, which notices/cargo.sh says the image
+# needs. It runs here because the crate sources are in the registry cache,
+# which only this RUN mounts.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch src/main.rs src/lib.rs /brand/iced/src/*.rs \
         /media-screen/src/lib.rs \
-    && MEDIA_BROWSER_VERSION="$VERSION" cargo build --release --locked
+    && MEDIA_BROWSER_VERSION="$VERSION" cargo build --release --locked \
+    && sh /cargo.sh /notices
 
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD
 # drivers, and the Wayland and keyboard libraries the toolkit opens by
@@ -89,6 +95,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM vulkan
 
 COPY --from=build /src/target/release/media-browser /media-browser
+COPY --from=build /notices /
+# The binary embeds the brand's two faces, and their license, the SIL Open
+# Font License, asks that it travel with them.
+COPY --from=brand fonts/LICENSE.md /usr/share/doc/source-sans-3/LICENSE.md
 
 # The binary is the container's own process, so the kubelet sends it the
 # signal and carries its exit code out as the pod's outcome.
