@@ -1,0 +1,58 @@
+<setSwitchVector device="Rotator Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:33">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="Rotator Simulator" name="ABS_ROTATOR_ANGLE" label="Goto" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:33">
+    <defNumber name="ANGLE" label="Angle" format="%.2f" min="0" max="360" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Rotator Simulator" name="ROTATOR_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:53:33">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Rotator Simulator" name="SYNC_ROTATOR_ANGLE" label="Sync" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:33">
+    <defNumber name="ANGLE" label="Angle" format="%.2f" min="0" max="360" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Rotator Simulator" name="ROTATOR_REVERSE" label="Reverse" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:33">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Rotator Simulator" name="ROTATOR_LIMITS" label="Limits" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:33">
+    <defNumber name="ROTATOR_LIMITS_VALUE" label="Safe Range (degrees)" format="%.f" min="0" max="360" step="30">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Rotator Simulator" name="Presets" label="Presets" group="Presets" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:33">
+    <defNumber name="PRESET_1" label="Preset 1" format="%.f" min="0" max="360" step="10">
+0
+    </defNumber>
+    <defNumber name="PRESET_2" label="Preset 2" format="%.f" min="0" max="360" step="10">
+0
+    </defNumber>
+    <defNumber name="PRESET_3" label="Preset 3" format="%.f" min="0" max="360" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Rotator Simulator" name="Goto" label="Goto" group="Presets" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:33">
+    <defSwitch name="Preset 1" label="Preset 1">
+Off
+    </defSwitch>
+    <defSwitch name="Preset 2" label="Preset 2">
+Off
+    </defSwitch>
+    <defSwitch name="Preset 3" label="Preset 3">
+Off
+    </defSwitch>
+</defSwitchVector>

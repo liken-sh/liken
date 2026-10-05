@@ -1,0 +1,275 @@
+<defSwitchVector device="Guide Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defSwitch name="CONNECT" label="Connect">
+Off
+    </defSwitch>
+    <defSwitch name="DISCONNECT" label="Disconnect">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Guide Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defText name="DRIVER_NAME" label="Name">
+Guide Simulator
+    </defText>
+    <defText name="DRIVER_EXEC" label="Exec">
+indi_simulator_guide
+    </defText>
+    <defText name="DRIVER_VERSION" label="Version">
+1.0
+    </defText>
+    <defText name="DRIVER_INTERFACE" label="Interface">
+6
+    </defText>
+</defTextVector>
+<defNumberVector device="Guide Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:12">
+    <defNumber name="PERIOD_MS" label="Period (ms)" format="%.f" min="10" max="600000" step="1000">
+1000
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:12">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Guide Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:53:12">
+    <defSwitch name="CONFIG_LOAD" label="Load">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_SAVE" label="Save">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_DEFAULT" label="Default">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_PURGE" label="Purge">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Guide Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defText name="ACTIVE_TELESCOPE" label="Telescope">
+Telescope Simulator
+    </defText>
+    <defText name="ACTIVE_ROTATOR" label="Rotator">
+Rotator Simulator
+    </defText>
+    <defText name="ACTIVE_FOCUSER" label="Focuser">
+Focuser Simulator
+    </defText>
+    <defText name="ACTIVE_FILTER" label="Filter">
+CCD Simulator
+    </defText>
+    <defText name="ACTIVE_SKYQUALITY" label="Sky Quality">
+SQM
+    </defText>
+</defTextVector>
+<defNumberVector device="Guide Simulator" name="SIMULATOR_SETTINGS" label="Config" group="Simulator Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defNumber name="SIM_XRES" label="X resolution" format="%4.0f" min="0" max="8192" step="0">
+1280
+    </defNumber>
+    <defNumber name="SIM_YRES" label="Y resolution" format="%4.0f" min="0" max="8192" step="0">
+1024
+    </defNumber>
+    <defNumber name="SIM_XSIZE" label="X Pixel Size" format="%4.2f" min="0" max="60" step="0">
+2.3999999999999999112
+    </defNumber>
+    <defNumber name="SIM_YSIZE" label="Y Pixel Size" format="%4.2f" min="0" max="60" step="0">
+2.3999999999999999112
+    </defNumber>
+    <defNumber name="SIM_MAXVAL" label="Maximum ADU" format="%4.0f" min="0" max="65000" step="0">
+65000
+    </defNumber>
+    <defNumber name="SIM_BIAS" label="Bias" format="%4.0f" min="0" max="6000" step="0">
+10
+    </defNumber>
+    <defNumber name="SIM_SATURATION" label="Saturation Mag" format="%4.1f" min="0" max="20" step="0">
+1
+    </defNumber>
+    <defNumber name="SIM_LIMITINGMAG" label="Limiting Mag" format="%4.1f" min="0" max="20" step="0">
+17
+    </defNumber>
+    <defNumber name="SIM_NOISE" label="Noise" format="%4.0f" min="0" max="6000" step="0">
+10
+    </defNumber>
+    <defNumber name="SIM_SKYGLOW" label="Sky Glow (magnitudes)" format="%4.1f" min="0" max="6000" step="0">
+19.5
+    </defNumber>
+    <defNumber name="SIM_OAGOFFSET" label="Oag Offset (arcminutes)" format="%4.1f" min="0" max="6000" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_POLAR" label="PAE (arcminutes)" format="%4.3f" min="-600" max="600" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_POLARDRIFT" label="PAE Drift (minutes)" format="%4.3f" min="0" max="6000" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_ROTATION" label="Rotation Offset" format="%4.1f" min="-180" max="180" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_KING_GAMMA" label="(CP,TCP), deg" format="%4.1f" min="0" max="10" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_KING_THETA" label="hour hangle, deg" format="%4.1f" min="0" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_TIME_FACTOR" label="Time Factor (x)" format="%.2f" min="0.010000000000000000208" max="100" step="0">
+1
+    </defNumber>
+    <defNumber name="SIM_SEEING" label="Seeing (a-s)" format="%4.1f" min="0" max="20" step="0">
+6
+    </defNumber>
+    <defNumber name="SIM_RA_DRIFT" label="RA drift (a-s/second)" format="%5.3f" min="-2" max="2" step="0">
+0.050000000000000002776
+    </defNumber>
+    <defNumber name="SIM_DEC_DRIFT" label="DEC drift (a-s/second)" format="%5.3f" min="-2" max="2" step="0">
+-0.050000000000000002776
+    </defNumber>
+    <defNumber name="SIM_RA_RAND" label="Max random RA add (a-s)" format="%5.3f" min="-2" max="2" step="0">
+0.2000000000000000111
+    </defNumber>
+    <defNumber name="SIM_DEC_RAND" label="Max random DEC add (a-s)" format="%5.3f" min="-2" max="2" step="0">
+0.2999999999999999889
+    </defNumber>
+    <defNumber name="SIM_PE_PERIOD" label="Periodic error period (secs)" format="%4.1f" min="0" max="1000" step="0">
+120
+    </defNumber>
+    <defNumber name="SIM_PE_MAX" label="Periodic error maxval (a-s)" format="%4.1f" min="0" max="100" step="0">
+3
+    </defNumber>
+    <defNumber name="SIM_TEMPERATURE" label="Temperature (°C)" format="%4.1f" min="-100" max="100" step="0">
+25
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="EQUATORIAL_PE" label="EQ PE" group="Simulator Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defNumber name="RA_PE" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC_PE" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="SIM_TESTS" label="Sim Tests" group="Simulator Settings" state="Idle" perm="rw" rule="AnyOfMany" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defSwitch name="RGB" label="RGB">
+Off
+    </defSwitch>
+    <defSwitch name="CRASH" label="Crash">
+Off
+    </defSwitch>
+    <defSwitch name="TIMEOUT" label="Timeout">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Guide Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defText name="ACTIVE_TELESCOPE" label="Telescope">
+Telescope Simulator
+    </defText>
+    <defText name="ACTIVE_ROTATOR" label="Rotator">
+Rotator Simulator
+    </defText>
+    <defText name="ACTIVE_FOCUSER" label="Focuser">
+Focuser Simulator
+    </defText>
+    <defText name="ACTIVE_FILTER" label="Filter">
+CCD Simulator
+    </defText>
+    <defText name="ACTIVE_SKYQUALITY" label="Sky Quality">
+SQM
+    </defText>
+</defTextVector>
+<defNumberVector device="Guide Simulator" name="SIMULATOR_SETTINGS" label="Config" group="Simulator Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defNumber name="SIM_XRES" label="X resolution" format="%4.0f" min="0" max="8192" step="0">
+1280
+    </defNumber>
+    <defNumber name="SIM_YRES" label="Y resolution" format="%4.0f" min="0" max="8192" step="0">
+1024
+    </defNumber>
+    <defNumber name="SIM_XSIZE" label="X Pixel Size" format="%4.2f" min="0" max="60" step="0">
+2.3999999999999999112
+    </defNumber>
+    <defNumber name="SIM_YSIZE" label="Y Pixel Size" format="%4.2f" min="0" max="60" step="0">
+2.3999999999999999112
+    </defNumber>
+    <defNumber name="SIM_MAXVAL" label="Maximum ADU" format="%4.0f" min="0" max="65000" step="0">
+65000
+    </defNumber>
+    <defNumber name="SIM_BIAS" label="Bias" format="%4.0f" min="0" max="6000" step="0">
+10
+    </defNumber>
+    <defNumber name="SIM_SATURATION" label="Saturation Mag" format="%4.1f" min="0" max="20" step="0">
+1
+    </defNumber>
+    <defNumber name="SIM_LIMITINGMAG" label="Limiting Mag" format="%4.1f" min="0" max="20" step="0">
+17
+    </defNumber>
+    <defNumber name="SIM_NOISE" label="Noise" format="%4.0f" min="0" max="6000" step="0">
+10
+    </defNumber>
+    <defNumber name="SIM_SKYGLOW" label="Sky Glow (magnitudes)" format="%4.1f" min="0" max="6000" step="0">
+19.5
+    </defNumber>
+    <defNumber name="SIM_OAGOFFSET" label="Oag Offset (arcminutes)" format="%4.1f" min="0" max="6000" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_POLAR" label="PAE (arcminutes)" format="%4.3f" min="-600" max="600" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_POLARDRIFT" label="PAE Drift (minutes)" format="%4.3f" min="0" max="6000" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_ROTATION" label="Rotation Offset" format="%4.1f" min="-180" max="180" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_KING_GAMMA" label="(CP,TCP), deg" format="%4.1f" min="0" max="10" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_KING_THETA" label="hour hangle, deg" format="%4.1f" min="0" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="SIM_TIME_FACTOR" label="Time Factor (x)" format="%.2f" min="0.010000000000000000208" max="100" step="0">
+1
+    </defNumber>
+    <defNumber name="SIM_SEEING" label="Seeing (a-s)" format="%4.1f" min="0" max="20" step="0">
+6
+    </defNumber>
+    <defNumber name="SIM_RA_DRIFT" label="RA drift (a-s/second)" format="%5.3f" min="-2" max="2" step="0">
+0.050000000000000002776
+    </defNumber>
+    <defNumber name="SIM_DEC_DRIFT" label="DEC drift (a-s/second)" format="%5.3f" min="-2" max="2" step="0">
+-0.050000000000000002776
+    </defNumber>
+    <defNumber name="SIM_RA_RAND" label="Max random RA add (a-s)" format="%5.3f" min="-2" max="2" step="0">
+0.2000000000000000111
+    </defNumber>
+    <defNumber name="SIM_DEC_RAND" label="Max random DEC add (a-s)" format="%5.3f" min="-2" max="2" step="0">
+0.2999999999999999889
+    </defNumber>
+    <defNumber name="SIM_PE_PERIOD" label="Periodic error period (secs)" format="%4.1f" min="0" max="1000" step="0">
+120
+    </defNumber>
+    <defNumber name="SIM_PE_MAX" label="Periodic error maxval (a-s)" format="%4.1f" min="0" max="100" step="0">
+3
+    </defNumber>
+    <defNumber name="SIM_TEMPERATURE" label="Temperature (°C)" format="%4.1f" min="-100" max="100" step="0">
+25
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="EQUATORIAL_PE" label="EQ PE" group="Simulator Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defNumber name="RA_PE" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC_PE" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="SIM_TESTS" label="Sim Tests" group="Simulator Settings" state="Idle" perm="rw" rule="AnyOfMany" timeout="60" timestamp="2026-10-05T19:53:12">
+    <defSwitch name="RGB" label="RGB">
+Off
+    </defSwitch>
+    <defSwitch name="CRASH" label="Crash">
+Off
+    </defSwitch>
+    <defSwitch name="TIMEOUT" label="Timeout">
+Off
+    </defSwitch>
+</defSwitchVector>

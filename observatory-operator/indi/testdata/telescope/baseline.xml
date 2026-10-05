@@ -1,0 +1,331 @@
+<defSwitchVector device="Telescope Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="CONNECT" label="Connect">
+Off
+    </defSwitch>
+    <defSwitch name="DISCONNECT" label="Disconnect">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Telescope Simulator" name="DRIVER_INFO" label="Driver Info" group="Connection" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defText name="DRIVER_NAME" label="Name">
+Telescope Simulator
+    </defText>
+    <defText name="DRIVER_EXEC" label="Exec">
+indi_simulator_telescope
+    </defText>
+    <defText name="DRIVER_VERSION" label="Version">
+1.0
+    </defText>
+    <defText name="DRIVER_INTERFACE" label="Interface">
+5
+    </defText>
+</defTextVector>
+<defNumberVector device="Telescope Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="PERIOD_MS" label="Period (ms)" format="%.f" min="10" max="600000" step="1000">
+250
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Telescope Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Telescope Simulator" name="ALIGNMENT_POINT_MANDATORY_NUMBERS" label="Mandatory sync point numeric fields" group="Alignment" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defNumber name="ALIGNMENT_POINT_ENTRY_OBSERVATION_JULIAN_DATE" label="Observation Julian date" format="%g" min="0" max="60000" step="0">
+0
+    </defNumber>
+    <defNumber name="ALIGNMENT_POINT_ENTRY_RA" label="Right Ascension (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="ALIGNMENT_POINT_ENTRY_DEC" label="Declination (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+    <defNumber name="ALIGNMENT_POINT_ENTRY_VECTOR_X" label="Telescope direction vector x" format="%g" min="-3.4028234663852885981e+38" max="3.4028234663852885981e+38" step="0">
+0
+    </defNumber>
+    <defNumber name="ALIGNMENT_POINT_ENTRY_VECTOR_Y" label="Telescope direction vector y" format="%g" min="-3.4028234663852885981e+38" max="3.4028234663852885981e+38" step="0">
+0
+    </defNumber>
+    <defNumber name="ALIGNMENT_POINT_ENTRY_VECTOR_Z" label="Telescope direction vector z" format="%g" min="-3.4028234663852885981e+38" max="3.4028234663852885981e+38" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defBLOBVector device="Telescope Simulator" name="ALIGNMENT_POINT_OPTIONAL_BINARY_BLOB" label="Optional sync point binary data" group="Alignment" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defBLOB name="ALIGNMENT_POINT_ENTRY_PRIVATE" label="Private binary data"/>
+</defBLOBVector>
+<defNumberVector device="Telescope Simulator" name="ALIGNMENT_POINTSET_SIZE" label="Current Set" group="Alignment" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defNumber name="ALIGNMENT_POINTSET_SIZE" label="Size" format="%g" min="0" max="100000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="ALIGNMENT_POINTSET_CURRENT_ENTRY" label="Current Set" group="Alignment" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defNumber name="ALIGNMENT_POINTSET_CURRENT_ENTRY" label="Pointer" format="%g" min="0" max="100000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Telescope Simulator" name="ALIGNMENT_POINTSET_ACTION" label="Action to take" group="Alignment" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="APPEND" label="Add entries at end of set">
+On
+    </defSwitch>
+    <defSwitch name="INSERT" label="Insert entries at current index">
+Off
+    </defSwitch>
+    <defSwitch name="EDIT" label="Overwrite entry at current index">
+Off
+    </defSwitch>
+    <defSwitch name="DELETE" label="Delete entry at current index">
+Off
+    </defSwitch>
+    <defSwitch name="CLEAR" label="Delete all the entries in the set">
+Off
+    </defSwitch>
+    <defSwitch name="READ" label="Read the entry at the current pointer">
+Off
+    </defSwitch>
+    <defSwitch name="READ INCREMENT" label="Increment the pointer before reading the entry">
+Off
+    </defSwitch>
+    <defSwitch name="LOAD DATABASE" label="Load the alignment database from local storage">
+Off
+    </defSwitch>
+    <defSwitch name="SAVE DATABASE" label="Save the alignment database to local storage">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="ALIGNMENT_POINTSET_COMMIT" label="Execute the action" group="Alignment" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="ALIGNMENT_POINTSET_COMMIT" label="OK">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="ALIGNMENT_SUBSYSTEM_MATH_PLUGINS" label="Math Plugins" group="Alignment" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="INBUILT_MATH_PLUGIN" label="Inbuilt Math Plugin">
+Off
+    </defSwitch>
+    <defSwitch name="Nearest Math Plugin" label="Nearest Math Plugin">
+On
+    </defSwitch>
+    <defSwitch name="SVD Math Plugin" label="SVD Math Plugin">
+Off
+    </defSwitch>
+    <defSwitch name="SPK Math Plugin" label="SPK Math Plugin">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="ALIGNMENT_SUBSYSTEM_MATH_PLUGIN_INITIALISE" label="(Re)Initialise Plugin" group="Alignment" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="ALIGNMENT_SUBSYSTEM_MATH_PLUGIN_INITIALISE" label="OK">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="ALIGNMENT_SUBSYSTEM_ACTIVE" label="Activate alignment subsystem" group="Alignment" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="ALIGNMENT SUBSYSTEM ACTIVE" label="Alignment Subsystem Active">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="CONFIG_LOAD" label="Load">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_SAVE" label="Save">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_DEFAULT" label="Default">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_PURGE" label="Purge">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="CONNECTION_MODE" label="Connection Mode" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="CONNECTION_SERIAL" label="Serial">
+On
+    </defSwitch>
+    <defSwitch name="CONNECTION_TCP" label="Network">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Telescope Simulator" name="DEVICE_PORT" label="Ports" group="Connection" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defText name="PORT" label="Port">
+/dev/ttyUSB0
+    </defText>
+</defTextVector>
+<defSwitchVector device="Telescope Simulator" name="DEVICE_BAUD_RATE" label="Baud Rate" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="9600" label="9600">
+On
+    </defSwitch>
+    <defSwitch name="19200" label="19200">
+Off
+    </defSwitch>
+    <defSwitch name="38400" label="38400">
+Off
+    </defSwitch>
+    <defSwitch name="57600" label="57600">
+Off
+    </defSwitch>
+    <defSwitch name="115200" label="115200">
+Off
+    </defSwitch>
+    <defSwitch name="230400" label="230400">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="DEVICE_AUTO_SEARCH" label="Auto Search" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+On
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="DEVICE_PORT_SCAN" label="Refresh" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="Scan Ports" label="Scan Ports">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Telescope Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defText name="ACTIVE_GPS" label="GPS">
+GPS Simulator
+    </defText>
+    <defText name="ACTIVE_DOME" label="DOME">
+Dome Simulator
+    </defText>
+</defTextVector>
+<defSwitchVector device="Telescope Simulator" name="DOME_POLICY" label="Dome Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="DOME_IGNORED" label="Dome ignored">
+On
+    </defSwitch>
+    <defSwitch name="DOME_LOCKS" label="Dome locks">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="SIM_PIER_SIDE" label="Sim Pier Side" group="Simulation" state="Idle" perm="wo" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="PS_OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="PS_ON" label="On">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Telescope Simulator" name="MOUNT_MODEL" label="Mount Model" group="Simulation" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="MM_IH" label="Ha Zero (IH) &apos;" format="%.1f" min="-10800" max="10800" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_ID" label="Dec Zero (ID) &apos;" format="%.1f" min="-10800" max="10800" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_CH" label="Cone (CH) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_NP" label="Ha/Dec (NP) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_MA" label="Pole Azm (MA) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_ME" label="Pole elev (ME) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="MOUNT_AXES" label="Mount Axes" group="Simulation" state="Idle" perm="ro" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="PRIMARY" label="Primary (Ha)" format="%g" min="-180" max="180" step="0.010000000000000000208">
+0
+    </defNumber>
+    <defNumber name="SECONDARY" label="Secondary (Dec)" format="%g" min="-180" max="180" step="0.010000000000000000208">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="FLIP_HA" label="Flip Posn." group="Simulation" state="Idle" perm="wo" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="FLIP_HA" label="Hour Angle (deg)" format="%g" min="-20" max="20" step="0.10000000000000000555">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="DEC_BACKLASH" label="DEC Backlash" group="Simulation" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="DEC_BACKLASH" label="DEC Backlash (ms)" format="%.0f" min="0" max="5000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defTextVector device="Telescope Simulator" name="ACTIVE_PAC" label="Polar Alignment Corrector" group="Simulation" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defText name="PAC_DEVICE" label="Alignment Corrector">
+Alignment Correction Simulator
+    </defText>
+</defTextVector>
+<defTextVector device="Telescope Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defText name="ACTIVE_GPS" label="GPS">
+GPS Simulator
+    </defText>
+    <defText name="ACTIVE_DOME" label="DOME">
+Dome Simulator
+    </defText>
+</defTextVector>
+<defSwitchVector device="Telescope Simulator" name="DOME_POLICY" label="Dome Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="DOME_IGNORED" label="Dome ignored">
+On
+    </defSwitch>
+    <defSwitch name="DOME_LOCKS" label="Dome locks">
+Off
+    </defSwitch>
+</defSwitchVector>
+<setSwitchVector device="Telescope Simulator" name="TELESCOPE_MOUNT_TYPE" state="Idle" timeout="60" timestamp="2026-10-05T19:52:33">
+    <oneSwitch name="ALTAZ">
+Off
+    </oneSwitch>
+    <oneSwitch name="EQ_FORK">
+Off
+    </oneSwitch>
+    <oneSwitch name="EQ_GEM">
+On
+    </oneSwitch>
+</setSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="SIM_PIER_SIDE" label="Sim Pier Side" group="Simulation" state="Idle" perm="wo" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defSwitch name="PS_OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="PS_ON" label="On">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Telescope Simulator" name="MOUNT_MODEL" label="Mount Model" group="Simulation" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="MM_IH" label="Ha Zero (IH) &apos;" format="%.1f" min="-10800" max="10800" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_ID" label="Dec Zero (ID) &apos;" format="%.1f" min="-10800" max="10800" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_CH" label="Cone (CH) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_NP" label="Ha/Dec (NP) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_MA" label="Pole Azm (MA) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MM_ME" label="Pole elev (ME) &apos;" format="%.1f" min="-300" max="300" step="0.10000000000000000555">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="MOUNT_AXES" label="Mount Axes" group="Simulation" state="Idle" perm="ro" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="PRIMARY" label="Primary (Ha)" format="%g" min="-180" max="180" step="0.010000000000000000208">
+0
+    </defNumber>
+    <defNumber name="SECONDARY" label="Secondary (Dec)" format="%g" min="-180" max="180" step="0.010000000000000000208">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="FLIP_HA" label="Flip Posn." group="Simulation" state="Idle" perm="wo" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="FLIP_HA" label="Hour Angle (deg)" format="%g" min="-20" max="20" step="0.10000000000000000555">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="DEC_BACKLASH" label="DEC Backlash" group="Simulation" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:52:33">
+    <defNumber name="DEC_BACKLASH" label="DEC Backlash (ms)" format="%.0f" min="0" max="5000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defTextVector device="Telescope Simulator" name="ACTIVE_PAC" label="Polar Alignment Corrector" group="Simulation" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:33">
+    <defText name="PAC_DEVICE" label="Alignment Corrector">
+Alignment Correction Simulator
+    </defText>
+</defTextVector>

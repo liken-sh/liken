@@ -1,0 +1,53 @@
+<message device="Dome Simulator" timestamp="2026-10-05T19:53:39" message="[INFO] Dome is moving to position 30.00 degrees azimuth..."/>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-05T19:53:39">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+0
+    </oneNumber>
+</setNumberVector>
+<setSwitchVector device="Dome Simulator" name="DOME_MOTION" state="Busy" timeout="60" timestamp="2026-10-05T19:53:39">
+    <oneSwitch name="DOME_CW">
+On
+    </oneSwitch>
+    <oneSwitch name="DOME_CCW">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-05T19:53:40">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+5
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-05T19:53:41">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+10
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-05T19:53:42">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+15
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-05T19:53:43">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+20
+    </oneNumber>
+</setNumberVector>
+<message device="Dome Simulator" timestamp="2026-10-05T19:53:44" message="[INFO] Dome reached requested azimuth angle."/>
+<setSwitchVector device="Dome Simulator" name="DOME_MOTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:44">
+    <oneSwitch name="DOME_CW">
+Off
+    </oneSwitch>
+    <oneSwitch name="DOME_CCW">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:44">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+30
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:44">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+30
+    </oneNumber>
+</setNumberVector>

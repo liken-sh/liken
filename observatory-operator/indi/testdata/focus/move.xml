@@ -1,0 +1,11 @@
+<setNumberVector device="Focuser Simulator" name="FWHM" state="Idle" timeout="60" timestamp="2026-10-05T19:53:26">
+    <oneNumber name="SIM_FWHM">
+8.7899999999999991473
+    </oneNumber>
+</setNumberVector>
+<message device="Focuser Simulator" timestamp="2026-10-05T19:53:26" message="[INFO] Focuser moved to position 52000"/>
+<setNumberVector device="Focuser Simulator" name="ABS_FOCUS_POSITION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:26">
+    <oneNumber name="FOCUS_ABSOLUTE_POSITION">
+52000
+    </oneNumber>
+</setNumberVector>

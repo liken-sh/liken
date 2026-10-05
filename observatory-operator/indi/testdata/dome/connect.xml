@@ -1,0 +1,184 @@
+<setSwitchVector device="Dome Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:38">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defSwitchVector device="Dome Simulator" name="DOME_SHUTTER" label="Shutter" group="Main Control" state="Ok" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="SHUTTER_OPEN" label="Open">
+Off
+    </defSwitch>
+    <defSwitch name="SHUTTER_CLOSE" label="Close">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Dome Simulator" name="DOME_SHUTTER_PARK_POLICY" label="Shutter" group="Options" state="Idle" perm="rw" rule="AnyOfMany" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="SHUTTER_CLOSE_ON_PARK" label="Close On Park">
+Off
+    </defSwitch>
+    <defSwitch name="SHUTTER_OPEN_ON_UNPARK" label="Open On UnPark">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Dome Simulator" name="DOME_MOTION" label="Motion" group="Main Control" state="Ok" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="DOME_CW" label="Dome CW">
+Off
+    </defSwitch>
+    <defSwitch name="DOME_CCW" label="Dome CCW">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Dome Simulator" name="REL_DOME_POSITION" label="Relative Position" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defNumber name="DOME_RELATIVE_POSITION" label="Degrees" format="%6.2f" min="-180" max="180" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" label="Absolute Position" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defNumber name="DOME_ABSOLUTE_POSITION" label="Degrees" format="%6.2f" min="0" max="360" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Dome Simulator" name="DOME_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Dome Simulator" name="Presets" label="Presets" group="Presets" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:38">
+    <defNumber name="Preset 1" label="Preset 1" format="%6.2f" min="0" max="360" step="1">
+0
+    </defNumber>
+    <defNumber name="Preset 2" label="Preset 2" format="%6.2f" min="0" max="360" step="1">
+0
+    </defNumber>
+    <defNumber name="Preset 3" label="Preset 3" format="%6.2f" min="0" max="360" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Dome Simulator" name="Goto" label="Goto" group="Presets" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="Preset 1" label="Preset 1">
+Off
+    </defSwitch>
+    <defSwitch name="Preset 2" label="Preset 2">
+Off
+    </defSwitch>
+    <defSwitch name="Preset 3" label="Preset 3">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Dome Simulator" name="DOME_AUTOSYNC" label="Slaving" group="Slaving" state="Ok" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="DOME_AUTOSYNC_ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DOME_AUTOSYNC_DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Dome Simulator" name="DM_OTA_SIDE" label="Meridian side" group="Slaving" state="Ok" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="DM_OTA_SIDE_EAST" label="East">
+Off
+    </defSwitch>
+    <defSwitch name="DM_OTA_SIDE_WEST" label="West">
+Off
+    </defSwitch>
+    <defSwitch name="DM_OTA_SIDE_MOUNT" label="Mount">
+On
+    </defSwitch>
+    <defSwitch name="DM_OTA_SIDE_HA" label="Hour Angle">
+Off
+    </defSwitch>
+    <defSwitch name="DM_OTA_SIDE_IGNORE" label="Ignore">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Dome Simulator" name="DOME_PARAMS" label="Params" group="Slaving" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defNumber name="AUTOSYNC_THRESHOLD" label="Autosync threshold (deg)" format="%6.2f" min="0" max="360" step="1">
+0.5
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Dome Simulator" name="DOME_MEASUREMENTS" label="Measurements" group="Slaving" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defNumber name="DM_DOME_RADIUS" label="Radius (m)" format="%6.2f" min="0" max="50" step="1">
+0
+    </defNumber>
+    <defNumber name="DM_SHUTTER_WIDTH" label="Shutter width (m)" format="%6.2f" min="0" max="10" step="1">
+0
+    </defNumber>
+    <defNumber name="DM_NORTH_DISPLACEMENT" label="N displacement (m)" format="%6.2f" min="-10" max="10" step="1">
+0
+    </defNumber>
+    <defNumber name="DM_EAST_DISPLACEMENT" label="E displacement (m)" format="%6.2f" min="-10" max="10" step="1">
+0
+    </defNumber>
+    <defNumber name="DM_UP_DISPLACEMENT" label="Up displacement (m)" format="%6.2f" min="-10" max="10" step="1">
+0
+    </defNumber>
+    <defNumber name="DM_OTA_OFFSET" label="OTA offset (m)" format="%6.2f" min="-10" max="10" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Dome Simulator" name="DOME_PARK" label="Parking" group="Main Control" state="Ok" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="PARK" label="Park(ed)">
+Off
+    </defSwitch>
+    <defSwitch name="UNPARK" label="UnPark(ed)">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Dome Simulator" name="DOME_PARK_POSITION" label="Park Position" group="Site Management" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defNumber name="PARK_AZ" label="AZ D:M:S" format="%10.6m" min="0" max="360" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Dome Simulator" name="DOME_PARK_OPTION" label="Park Options" group="Site Management" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="PARK_CURRENT" label="Current">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_DEFAULT" label="Default">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_WRITE_DATA" label="Write Data">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Dome Simulator" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:38">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Dome Simulator" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defText name="SNOOP_JOYSTICK_DEVICE" label="Device">
+Joystick
+    </defText>
+</defTextVector>
+<defNumberVector device="Dome Simulator" name="SPEEDS" label="Speeds" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:38">
+    <defNumber name="DOME" label="Dome (deg/s)" format="%.2f" min="0.10000000000000000555" max="10" step="1">
+5
+    </defNumber>
+    <defNumber name="SHUTTER" label="Shutter (m/s)" format="%.2f" min="0.010000000000000000208" max="1" step="0.10000000000000000555">
+0.10000000000000000555
+    </defNumber>
+</defNumberVector>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:38">
+    <oneNumber name="DOME_ABSOLUTE_POSITION">
+0
+    </oneNumber>
+</setNumberVector>
+<message device="Dome Simulator" timestamp="2026-10-05T19:53:38" message="[INFO] InitPark: No Park data in file /tmp/.indi/ParkData.xml: No such file or directory"/>
+<setSwitchVector device="Dome Simulator" name="DOME_PARK" state="Ok" timeout="60" timestamp="2026-10-05T19:53:38">
+    <oneSwitch name="PARK">
+Off
+    </oneSwitch>
+    <oneSwitch name="UNPARK">
+On
+    </oneSwitch>
+</setSwitchVector>
+<message device="Dome Simulator" timestamp="2026-10-05T19:53:38" message="[INFO] Dome is unparked."/>
+<setNumberVector device="Dome Simulator" name="DOME_PARK_POSITION" state="Idle" timeout="60" timestamp="2026-10-05T19:53:38">
+    <oneNumber name="PARK_AZ">
+90
+    </oneNumber>
+</setNumberVector>

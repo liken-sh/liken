@@ -1,0 +1,26 @@
+<setSwitchVector device="Dome Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-05T19:53:45">
+    <oneSwitch name="CONNECT">
+Off
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+On
+    </oneSwitch>
+</setSwitchVector>
+<delProperty device="Dome Simulator" name="DOME_SHUTTER" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_SHUTTER_PARK_POLICY" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_MOTION" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="REL_DOME_POSITION" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="ABS_DOME_POSITION" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_ABORT_MOTION" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="Presets" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="Goto" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_AUTOSYNC" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DM_OTA_SIDE" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_PARAMS" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_MEASUREMENTS" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_PARK" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_PARK_POSITION" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="DOME_PARK_OPTION" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="USEJOYSTICK" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="SNOOP_JOYSTICK" timestamp="2026-10-05T19:53:45"/>
+<delProperty device="Dome Simulator" name="SPEEDS" timestamp="2026-10-05T19:53:45"/>

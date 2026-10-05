@@ -44,9 +44,10 @@ Each top-level directory is one component, named for what it ships:
   both link it.
 - [`people-operator/`](people-operator/) defines the `Person` resource.
 - [`observatory-operator/`](observatory-operator/) will control an
-  observatory's hardware through INDI, and
+  observatory's hardware through INDI, and holds the Go INDI client so
+  far.
   [`astrophotography-operator/`](astrophotography-operator/) will run
-  imaging sessions on it. Both hold only plans so far.
+  imaging sessions on it, and holds only plans so far.
 - [`git-csi-driver/`](git-csi-driver/) mounts git repositories as
   volumes.
 - [`per-node-csi-driver/`](per-node-csi-driver/) gives a pod a

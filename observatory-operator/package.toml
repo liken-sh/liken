@@ -1,0 +1,33 @@
+# The operator that runs an observatory's hardware through INDI. So far
+# it holds the Go INDI client in indi/. The operator, its image, and its
+# manifests come with plans 06 and 07.
+[package]
+name = "observatory-operator"
+license = "MIT"
+
+# The integration test in indi/ runs the indi-simulators image at the
+# tag that indi/package.toml pins, so a bump of the INDI images runs
+# these tests again.
+[depends]
+components = ["indi"]
+
+# gofmt, vet, a tidy check of go.mod, and one run of the tests that
+# checks for races and writes the coverage profile, then the coverage
+# gate on that profile. .testcoverage.yml holds the floor. The runner
+# has Docker, so the integration test runs when the pinned
+# indi-simulators image pulls, and skips itself when it does not.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 15
+coverage = ["coverage.out"]
+
+# The hooks in .pre-commit-config.yaml: the formatters, the linters,
+# and the hygiene checks. The go job runs the tests and the coverage
+# gate.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+# The go job runs the same checks as these hooks.
+skip = ["gofmt", "go-vet", "go-mod-tidy"]

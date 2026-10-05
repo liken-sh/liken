@@ -1,0 +1,21 @@
+<setSwitchVector device="Dust Cover Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:54">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="Dust Cover Simulator" name="OPERATION_DURATION" label="Operation" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:54">
+    <defNumber name="DURATION" label="Duration (s)" format="%.1f" min="1" max="60" step="1">
+5
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Dust Cover Simulator" name="CAP_PARK" label="Dust Cover" group="Main Control" state="Ok" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:54">
+    <defSwitch name="PARK" label="Park">
+Off
+    </defSwitch>
+    <defSwitch name="UNPARK" label="Unpark">
+On
+    </defSwitch>
+</defSwitchVector>

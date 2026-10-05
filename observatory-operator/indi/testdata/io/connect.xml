@@ -1,0 +1,198 @@
+<setSwitchVector device="Simulator IO" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:54:20">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_INPUT_1" label="Input #1" group="Input" state="Idle" perm="ro" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_INPUT_2" label="Input #2" group="Input" state="Idle" perm="ro" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_INPUT_3" label="Input #3" group="Input" state="Idle" perm="ro" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_INPUT_4" label="Input #4" group="Input" state="Idle" perm="ro" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Simulator IO" name="DIGITAL_INPUT_LABELS" label="Digital Labels" group="Input" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defText name="DIGITAL_INPUT_1" label="Input #1">
+Input #1
+    </defText>
+    <defText name="DIGITAL_INPUT_2" label="Input #2">
+Input #2
+    </defText>
+    <defText name="DIGITAL_INPUT_3" label="Input #3">
+Input #3
+    </defText>
+    <defText name="DIGITAL_INPUT_4" label="Input #4">
+Input #4
+    </defText>
+</defTextVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_1" label="Output #1" group="Output" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_2" label="Output #2" group="Output" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_3" label="Output #3" group="Output" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_4" label="Output #4" group="Output" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Simulator IO" name="DIGITAL_OUTPUT_LABELS" label="Labels" group="Output" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defText name="DIGITAL_OUTPUT_1" label="Output #1">
+Output #1
+    </defText>
+    <defText name="DIGITAL_OUTPUT_2" label="Output #2">
+Output #2
+    </defText>
+    <defText name="DIGITAL_OUTPUT_3" label="Output #3">
+Output #3
+    </defText>
+    <defText name="DIGITAL_OUTPUT_4" label="Output #4">
+Output #4
+    </defText>
+</defTextVector>
+<defNumberVector device="Simulator IO" name="PULSE_0" label="Output #1" group="Pulse Mode" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defNumber name="DURATION" label="Duration (ms)" format="%.0f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Simulator IO" name="PULSE_1" label="Output #2" group="Pulse Mode" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defNumber name="DURATION" label="Duration (ms)" format="%.0f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Simulator IO" name="PULSE_2" label="Output #3" group="Pulse Mode" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defNumber name="DURATION" label="Duration (ms)" format="%.0f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Simulator IO" name="PULSE_3" label="Output #4" group="Pulse Mode" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defNumber name="DURATION" label="Duration (ms)" format="%.0f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Simulator IO" name="SIMULATOR_INPUT" label="Inputs" group="Simulation" state="Idle" perm="rw" rule="AnyOfMany" timeout="60" timestamp="2026-10-05T19:54:20">
+    <defSwitch name="SIM_INPUT_1" label="Input 1">
+Off
+    </defSwitch>
+    <defSwitch name="SIM_INPUT_2" label="Input 2">
+Off
+    </defSwitch>
+    <defSwitch name="SIM_INPUT_3" label="Input 3">
+Off
+    </defSwitch>
+    <defSwitch name="SIM_INPUT_4" label="Input 4">
+Off
+    </defSwitch>
+</defSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_INPUT_1" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_INPUT_2" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_INPUT_3" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_INPUT_4" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_1" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_2" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_3" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setSwitchVector device="Simulator IO" name="DIGITAL_OUTPUT_4" state="Ok" timeout="60" timestamp="2026-10-05T19:54:21">
+    <oneSwitch name="OFF">
+On
+    </oneSwitch>
+    <oneSwitch name="ON">
+Off
+    </oneSwitch>
+</setSwitchVector>

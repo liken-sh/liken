@@ -1,0 +1,57 @@
+<setSwitchVector device="Filter Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:19">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="Filter Simulator" name="FILTER_SLOT" label="Filter Slot" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:19">
+    <defNumber name="FILTER_SLOT_VALUE" label="Filter" format="%.f" min="1" max="8" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defTextVector device="Filter Simulator" name="FILTER_NAME" label="Filter" group="Filter Wheel" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:19">
+    <defText name="FILTER_SLOT_NAME_1" label="Filter#1">
+Red
+    </defText>
+    <defText name="FILTER_SLOT_NAME_2" label="Filter#2">
+Green
+    </defText>
+    <defText name="FILTER_SLOT_NAME_3" label="Filter#3">
+Blue
+    </defText>
+    <defText name="FILTER_SLOT_NAME_4" label="Filter#4">
+H_Alpha
+    </defText>
+    <defText name="FILTER_SLOT_NAME_5" label="Filter#5">
+SII
+    </defText>
+    <defText name="FILTER_SLOT_NAME_6" label="Filter#6">
+OIII
+    </defText>
+    <defText name="FILTER_SLOT_NAME_7" label="Filter#7">
+LPR
+    </defText>
+    <defText name="FILTER_SLOT_NAME_8" label="Filter#8">
+Luminance
+    </defText>
+</defTextVector>
+<defSwitchVector device="Filter Simulator" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:19">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Filter Simulator" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:19">
+    <defText name="SNOOP_JOYSTICK_DEVICE" label="Device">
+Joystick
+    </defText>
+</defTextVector>
+<defNumberVector device="Filter Simulator" name="DELAY" label="Filter Delay" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:19">
+    <defNumber name="VALUE" label="Seconds" format="%.f" min="-1" max="30" step="1">
+1
+    </defNumber>
+</defNumberVector>

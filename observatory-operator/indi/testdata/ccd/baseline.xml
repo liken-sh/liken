@@ -1,0 +1,365 @@
+<defSwitchVector device="CCD Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="CONNECT" label="Connect">
+Off
+    </defSwitch>
+    <defSwitch name="DISCONNECT" label="Disconnect">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="CCD Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defText name="DRIVER_NAME" label="Name">
+CCD Simulator
+    </defText>
+    <defText name="DRIVER_EXEC" label="Exec">
+indi_simulator_ccd
+    </defText>
+    <defText name="DRIVER_VERSION" label="Version">
+1.0
+    </defText>
+    <defText name="DRIVER_INTERFACE" label="Interface">
+22
+    </defText>
+</defTextVector>
+<defNumberVector device="CCD Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:07">
+    <defNumber name="PERIOD_MS" label="Period (ms)" format="%.f" min="10" max="600000" step="1000">
+1000
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="CCD Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="CCD Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="CONFIG_LOAD" label="Load">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_SAVE" label="Save">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_DEFAULT" label="Default">
+Off
+    </defSwitch>
+    <defSwitch name="CONFIG_PURGE" label="Purge">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="CCD Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defText name="ACTIVE_TELESCOPE" label="Telescope">
+Telescope Simulator
+    </defText>
+    <defText name="ACTIVE_ROTATOR" label="Rotator">
+Rotator Simulator
+    </defText>
+    <defText name="ACTIVE_FOCUSER" label="Focuser">
+Focuser Simulator
+    </defText>
+    <defText name="ACTIVE_FILTER" label="Filter">
+CCD Simulator
+    </defText>
+    <defText name="ACTIVE_SKYQUALITY" label="Sky Quality">
+SQM
+    </defText>
+</defTextVector>
+<defNumberVector device="CCD Simulator" name="SIMULATOR_SETTINGS" label="Settings" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="SIM_XRES" label="X resolution" format="%4.0f" min="512" max="8192" step="512">
+1280
+    </defNumber>
+    <defNumber name="SIM_YRES" label="Y resolution" format="%4.0f" min="512" max="8192" step="512">
+1024
+    </defNumber>
+    <defNumber name="SIM_XSIZE" label="X Pixel Size" format="%4.2f" min="1" max="30" step="5">
+5.2000000000000001776
+    </defNumber>
+    <defNumber name="SIM_YSIZE" label="Y Pixel Size" format="%4.2f" min="1" max="30" step="5">
+5.2000000000000001776
+    </defNumber>
+    <defNumber name="SIM_MAXVAL" label="Maximum ADU" format="%4.0f" min="255" max="65000" step="1000">
+65000
+    </defNumber>
+    <defNumber name="SIM_SATURATION" label="Saturation Mag" format="%4.1f" min="0" max="20" step="1">
+1
+    </defNumber>
+    <defNumber name="SIM_LIMITINGMAG" label="Limiting Mag" format="%4.1f" min="0" max="20" step="1">
+17
+    </defNumber>
+    <defNumber name="SIM_NOISE" label="Noise" format="%4.0f" min="0" max="6000" step="500">
+10
+    </defNumber>
+    <defNumber name="SIM_SKYGLOW" label="Sky Glow (magnitudes)" format="%4.1f" min="0" max="6000" step="500">
+19.5
+    </defNumber>
+    <defNumber name="SIM_OAGOFFSET" label="Oag Offset (arcminutes)" format="%4.1f" min="0" max="6000" step="500">
+0
+    </defNumber>
+    <defNumber name="SIM_POLAR" label="PAE (arcminutes)" format="%4.1f" min="-600" max="600" step="100">
+0
+    </defNumber>
+    <defNumber name="SIM_POLARDRIFT" label="PAE Drift (minutes)" format="%4.1f" min="0" max="60" step="5">
+0
+    </defNumber>
+    <defNumber name="SIM_PEPERIOD" label="PE Period (seconds)" format="%4.1f" min="0" max="60" step="5">
+0
+    </defNumber>
+    <defNumber name="SIM_PEMAX" label="PE Max (arcsec)" format="%4.1f" min="0" max="6000" step="500">
+0
+    </defNumber>
+    <defNumber name="SIM_TIME_FACTOR" label="Time Factor (x)" format="%.2f" min="0.010000000000000000208" max="100" step="10">
+1
+    </defNumber>
+    <defNumber name="SIM_ROTATION" label="Rotation Offset" format="%.2f" min="-180" max="180" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="CCD Simulator" name="EQUATORIAL_PE" label="EQ PE" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="RA_PE" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC_PE" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="CCD Simulator" name="SIM_FOCUSING" label="Focus Simulation" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="SIM_FOCUS_POSITION" label="Focus" format="%.f" min="0" max="100000" step="1">
+36700
+    </defNumber>
+    <defNumber name="SIM_FOCUS_MAX" label="Max. Position" format="%.f" min="0" max="100000" step="1">
+100000
+    </defNumber>
+    <defNumber name="SIM_SEEING" label="Seeing (arcsec)" format="%4.2f" min="0" max="60" step="0">
+3.5
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="CCD Simulator" name="SIM_TILT" label="Tilt Simulation" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="SIM_TILT_LR" label="Left-Right (arcsec)" format="%4.2f" min="0" max="20" step="0.5">
+0
+    </defNumber>
+    <defNumber name="SIM_TILT_TB" label="Top-Bottom (arcsec)" format="%4.2f" min="0" max="20" step="0.5">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="CCD Simulator" name="SIM_TESTS" label="Sim Tests" group="Simulator Config" state="Idle" perm="rw" rule="AnyOfMany" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="BAYER" label="Bayer">
+Off
+    </defSwitch>
+    <defSwitch name="CRASH" label="Crash">
+Off
+    </defSwitch>
+    <defSwitch name="TIMEOUT" label="Timeout">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="CCD Simulator" name="PLANET_MODE" label="Planet Mode" group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="PLANET_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="CCD Simulator" name="PLANET_SELECT" label="Planet" group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="PLANET_MERCURY" label="Mercury">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_VENUS" label="Venus">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_MARS" label="Mars">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_JUPITER" label="Jupiter">
+On
+    </defSwitch>
+    <defSwitch name="PLANET_SATURN" label="Saturn">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_URANUS" label="Uranus">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_NEPTUNE" label="Neptune">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_MOON" label="Moon">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_SUN" label="Sun">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="CCD Simulator" name="PLANET_SETTINGS" label="Planet Settings" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="PLANET_REFRESH" label="Refresh (min)" format="%4.0f" min="1" max="1440" step="10">
+60
+    </defNumber>
+    <defNumber name="PLANET_SIZE" label="Size (arcsec, 0=auto)" format="%4.1f" min="0" max="3600" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defTextVector device="CCD Simulator" name="PLANET_PATHS" label="xplanet Paths" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defText name="XPLANET_PATH" label="xplanet binary">
+xplanet
+    </defText>
+    <defText name="XPLANET_CONFIG" label="Config file">
+/usr/share/xplanet/config/default
+    </defText>
+</defTextVector>
+<defTextVector device="CCD Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defText name="ACTIVE_TELESCOPE" label="Telescope">
+Telescope Simulator
+    </defText>
+    <defText name="ACTIVE_ROTATOR" label="Rotator">
+Rotator Simulator
+    </defText>
+    <defText name="ACTIVE_FOCUSER" label="Focuser">
+Focuser Simulator
+    </defText>
+    <defText name="ACTIVE_FILTER" label="Filter">
+CCD Simulator
+    </defText>
+    <defText name="ACTIVE_SKYQUALITY" label="Sky Quality">
+SQM
+    </defText>
+</defTextVector>
+<defNumberVector device="CCD Simulator" name="SIMULATOR_SETTINGS" label="Settings" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="SIM_XRES" label="X resolution" format="%4.0f" min="512" max="8192" step="512">
+1280
+    </defNumber>
+    <defNumber name="SIM_YRES" label="Y resolution" format="%4.0f" min="512" max="8192" step="512">
+1024
+    </defNumber>
+    <defNumber name="SIM_XSIZE" label="X Pixel Size" format="%4.2f" min="1" max="30" step="5">
+5.2000000000000001776
+    </defNumber>
+    <defNumber name="SIM_YSIZE" label="Y Pixel Size" format="%4.2f" min="1" max="30" step="5">
+5.2000000000000001776
+    </defNumber>
+    <defNumber name="SIM_MAXVAL" label="Maximum ADU" format="%4.0f" min="255" max="65000" step="1000">
+65000
+    </defNumber>
+    <defNumber name="SIM_SATURATION" label="Saturation Mag" format="%4.1f" min="0" max="20" step="1">
+1
+    </defNumber>
+    <defNumber name="SIM_LIMITINGMAG" label="Limiting Mag" format="%4.1f" min="0" max="20" step="1">
+17
+    </defNumber>
+    <defNumber name="SIM_NOISE" label="Noise" format="%4.0f" min="0" max="6000" step="500">
+10
+    </defNumber>
+    <defNumber name="SIM_SKYGLOW" label="Sky Glow (magnitudes)" format="%4.1f" min="0" max="6000" step="500">
+19.5
+    </defNumber>
+    <defNumber name="SIM_OAGOFFSET" label="Oag Offset (arcminutes)" format="%4.1f" min="0" max="6000" step="500">
+0
+    </defNumber>
+    <defNumber name="SIM_POLAR" label="PAE (arcminutes)" format="%4.1f" min="-600" max="600" step="100">
+0
+    </defNumber>
+    <defNumber name="SIM_POLARDRIFT" label="PAE Drift (minutes)" format="%4.1f" min="0" max="60" step="5">
+0
+    </defNumber>
+    <defNumber name="SIM_PEPERIOD" label="PE Period (seconds)" format="%4.1f" min="0" max="60" step="5">
+0
+    </defNumber>
+    <defNumber name="SIM_PEMAX" label="PE Max (arcsec)" format="%4.1f" min="0" max="6000" step="500">
+0
+    </defNumber>
+    <defNumber name="SIM_TIME_FACTOR" label="Time Factor (x)" format="%.2f" min="0.010000000000000000208" max="100" step="10">
+1
+    </defNumber>
+    <defNumber name="SIM_ROTATION" label="Rotation Offset" format="%.2f" min="-180" max="180" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="CCD Simulator" name="EQUATORIAL_PE" label="EQ PE" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="RA_PE" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC_PE" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="CCD Simulator" name="SIM_FOCUSING" label="Focus Simulation" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="SIM_FOCUS_POSITION" label="Focus" format="%.f" min="0" max="100000" step="1">
+36700
+    </defNumber>
+    <defNumber name="SIM_FOCUS_MAX" label="Max. Position" format="%.f" min="0" max="100000" step="1">
+100000
+    </defNumber>
+    <defNumber name="SIM_SEEING" label="Seeing (arcsec)" format="%4.2f" min="0" max="60" step="0">
+3.5
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="CCD Simulator" name="SIM_TILT" label="Tilt Simulation" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="SIM_TILT_LR" label="Left-Right (arcsec)" format="%4.2f" min="0" max="20" step="0.5">
+0
+    </defNumber>
+    <defNumber name="SIM_TILT_TB" label="Top-Bottom (arcsec)" format="%4.2f" min="0" max="20" step="0.5">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="CCD Simulator" name="SIM_TESTS" label="Sim Tests" group="Simulator Config" state="Idle" perm="rw" rule="AnyOfMany" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="BAYER" label="Bayer">
+Off
+    </defSwitch>
+    <defSwitch name="CRASH" label="Crash">
+Off
+    </defSwitch>
+    <defSwitch name="TIMEOUT" label="Timeout">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="CCD Simulator" name="PLANET_MODE" label="Planet Mode" group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="PLANET_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="CCD Simulator" name="PLANET_SELECT" label="Planet" group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defSwitch name="PLANET_MERCURY" label="Mercury">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_VENUS" label="Venus">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_MARS" label="Mars">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_JUPITER" label="Jupiter">
+On
+    </defSwitch>
+    <defSwitch name="PLANET_SATURN" label="Saturn">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_URANUS" label="Uranus">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_NEPTUNE" label="Neptune">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_MOON" label="Moon">
+Off
+    </defSwitch>
+    <defSwitch name="PLANET_SUN" label="Sun">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="CCD Simulator" name="PLANET_SETTINGS" label="Planet Settings" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defNumber name="PLANET_REFRESH" label="Refresh (min)" format="%4.0f" min="1" max="1440" step="10">
+60
+    </defNumber>
+    <defNumber name="PLANET_SIZE" label="Size (arcsec, 0=auto)" format="%4.1f" min="0" max="3600" step="10">
+0
+    </defNumber>
+</defNumberVector>
+<defTextVector device="CCD Simulator" name="PLANET_PATHS" label="xplanet Paths" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:07">
+    <defText name="XPLANET_PATH" label="xplanet binary">
+xplanet
+    </defText>
+    <defText name="XPLANET_CONFIG" label="Config file">
+/usr/share/xplanet/config/default
+    </defText>
+</defTextVector>

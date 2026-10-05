@@ -259,6 +259,7 @@ jobs:
             --skip liken/
             --skip mpv/
             --skip media-operator/
+            --skip observatory-operator/
             --skip people-operator/
             --skip per-node-csi-driver/
 
@@ -845,6 +846,20 @@ jobs:
       contents: read
       packages: write
 
+  observatory-operator:
+    needs: [plan, indi]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].check }}
+    uses: ./.github/workflows/component-observatory-operator.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs) }}
+    permissions:
+      contents: read
+      packages: write
+
   people-operator:
     needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].check }}
@@ -924,7 +939,7 @@ jobs:
   # check jobs. So it waits for the plan and each component's checks,
   # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, kubernetes, notices, trust, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, indi, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, kubernetes, notices, trust, audio-operator, bluetooth-operator, brand, ci, vulkan, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, indi, media-screen, library-operator, liken, mpv, media-operator, observatory-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -1066,6 +1081,12 @@ jobs:
           path: media-operator
 
       - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].check && contains(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs, 'go') }}
+        with:
+          name: coverage-observatory-operator-go
+          path: observatory-operator
+
+      - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].check && contains(fromJSON(needs.plan.outputs.components)['people-operator'].jobs, 'go') }}
         with:
           name: coverage-people-operator-go
@@ -1162,7 +1183,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, kubernetes, notices, trust, trust-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, kubernetes, notices, trust, trust-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vulkan, vulkan-publish, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, observatory-operator, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

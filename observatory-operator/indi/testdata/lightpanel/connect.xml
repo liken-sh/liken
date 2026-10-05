@@ -1,0 +1,21 @@
+<setSwitchVector device="Light Panel Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:59">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defSwitchVector device="Light Panel Simulator" name="FLAT_LIGHT_CONTROL" label="Flat Light" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:59">
+    <defSwitch name="FLAT_LIGHT_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="FLAT_LIGHT_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Light Panel Simulator" name="FLAT_LIGHT_INTENSITY" label="Brightness" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:59">
+    <defNumber name="FLAT_LIGHT_INTENSITY_VALUE" label="Value" format="%.f" min="0" max="255" step="10">
+0
+    </defNumber>
+</defNumberVector>

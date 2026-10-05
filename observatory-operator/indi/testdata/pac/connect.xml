@@ -1,0 +1,47 @@
+<setSwitchVector device="Alignment Correction Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:54:10">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="Alignment Correction Simulator" name="CORRECTION_GAIN" label="Correction Gain" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:54:10">
+    <defNumber name="GAIN" label="Gain (%)" format="%.0f" min="0" max="100" step="10">
+100
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Alignment Correction Simulator" name="PAC_MANUAL_ADJUSTMENT" label="Manual Adjustment" group="Main Control" state="Idle" perm="wo" timeout="0" timestamp="2026-10-05T19:54:10">
+    <defNumber name="MANUAL_AZ_STEP" label="Azimuth Step (deg)" format="%.4f" min="-10" max="10" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MANUAL_ALT_STEP" label="Altitude Step (deg)" format="%.4f" min="-10" max="10" step="0.10000000000000000555">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Alignment Correction Simulator" name="PAC_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:54:10">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Alignment Correction Simulator" name="PAC_SPEED" label="Speed" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:54:10">
+    <defNumber name="PAC_SPEED_VALUE" label="Speed" format="%.0f" min="1" max="5" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Alignment Correction Simulator" name="PAC_AZ_REVERSE" label="Azimuth Reverse" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:10">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Alignment Correction Simulator" name="PAC_ALT_REVERSE" label="Altitude Reverse" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:10">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>

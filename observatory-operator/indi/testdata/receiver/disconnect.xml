@@ -1,0 +1,48 @@
+<message device="Receiver Simulator" timestamp="2026-10-05T19:54:28" message="[INFO] Simulator Receiver disconnected successfully!"/>
+<setSwitchVector device="Receiver Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-05T19:54:28">
+    <oneSwitch name="CONNECT">
+Off
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+On
+    </oneSwitch>
+</setSwitchVector>
+<setNumberVector device="" name="" state="Ok" timeout="0" timestamp="2026-10-05T19:54:28">
+    <oneNumber name="" min="0" max="34463" step="0">
+0
+    </oneNumber>
+    <oneNumber name="" min="0" max="0" step="0">
+0
+    </oneNumber>
+    <oneNumber name="" min="10" max="34464" step="0">
+34464
+    </oneNumber>
+    <oneNumber name="" min="10" max="1" step="0">
+1
+    </oneNumber>
+</setNumberVector>
+<delProperty device="Receiver Simulator" name="RECEIVER_SETTINGS" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="SENSOR_INTEGRATION" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="SENSOR_ABORT_INTEGRATION" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="SENSOR" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="FITS_HEADER" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="UPLOAD_MODE" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="UPLOAD_SETTINGS" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="CCD_VIDEO_STREAM" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="STREAM_DELAY" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="STREAMING_EXPOSURE" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="FPS" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="RECORD_FILE" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="RECORD_STREAM" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="RECORD_OPTIONS" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="CCD_STREAM_ENCODER" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="CCD_STREAM_RECORDER" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="LIMITS" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="STREAM_FULL_DEPTH" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="DSP_ACTIVATE_CONVOLUTION" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="DSP_ACTIVATE_DFT" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="DSP_ACTIVATE_IDFT" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="DSP_ACTIVATE_SPECTRUM" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="DSP_ACTIVATE_HISTOGRAM" timestamp="2026-10-05T19:54:28"/>
+<delProperty device="Receiver Simulator" name="DSP_ACTIVATE_WAVELETS" timestamp="2026-10-05T19:54:28"/>

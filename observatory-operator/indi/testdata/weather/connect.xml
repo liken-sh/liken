@@ -1,0 +1,189 @@
+<setSwitchVector device="Weather Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:49">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="Weather Simulator" name="WEATHER_UPDATE" label="Update" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:49">
+    <defNumber name="PERIOD" label="Period (s)" format="%.f" min="0" max="3600" step="60">
+60
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Weather Simulator" name="WEATHER_REFRESH" label="Weather" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:53:49">
+    <defSwitch name="REFRESH" label="Refresh">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Weather Simulator" name="WEATHER_OVERRIDE" label="Safety" group="Main Control" state="Idle" perm="rw" rule="AnyOfMany" timeout="0" timestamp="2026-10-05T19:53:49">
+    <defSwitch name="OVERRIDE" label="Override Status">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defLightVector device="Weather Simulator" name="WEATHER_STATUS" label="Status" group="Main Control" state="Idle" timestamp="2026-10-05T19:53:49">
+    <defLight name="WEATHER_FORECAST" label="Weather">
+Idle
+    </defLight>
+    <defLight name="WEATHER_TEMPERATURE" label="Temperature (C)">
+Idle
+    </defLight>
+    <defLight name="WEATHER_WIND_SPEED" label="Wind (kph)">
+Idle
+    </defLight>
+    <defLight name="WEATHER_RAIN_HOUR" label="Precip (mm)">
+Idle
+    </defLight>
+</defLightVector>
+<defLightVector device="Weather Simulator" name="SAFETY_STATUS" label="Safety" group="Main Control" state="Idle" timestamp="2026-10-05T19:53:49">
+    <defLight name="SAFETY" label="Safety">
+Idle
+    </defLight>
+</defLightVector>
+<defNumberVector device="Weather Simulator" name="WEATHER_PARAMETERS" label="Parameters" group="Parameters" state="Ok" perm="ro" timeout="60" timestamp="2026-10-05T19:53:49">
+    <defNumber name="WEATHER_FORECAST" label="Weather" format="%.2f" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="WEATHER_TEMPERATURE" label="Temperature (C)" format="%.2f" min="-10" max="30" step="0">
+0
+    </defNumber>
+    <defNumber name="WEATHER_HUMIDITY" label="Humidity (%)" format="%.2f" min="0" max="100" step="0">
+0
+    </defNumber>
+    <defNumber name="WEATHER_WIND_SPEED" label="Wind (kph)" format="%.2f" min="0" max="20" step="0">
+0
+    </defNumber>
+    <defNumber name="WEATHER_WIND_GUST" label="Gust (kph)" format="%.2f" min="0" max="20" step="0">
+0
+    </defNumber>
+    <defNumber name="WEATHER_RAIN_HOUR" label="Precip (mm)" format="%.2f" min="0" max="0" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Weather Simulator" name="WEATHER_TEMPERATURE" label="Temperature (C)" group="Parameters" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:49">
+    <defNumber name="MIN_OK" label="OK range min" format="%.2f" min="-1000000" max="1000000" step="0">
+-10
+    </defNumber>
+    <defNumber name="MAX_OK" label="OK range max" format="%.2f" min="-1000000" max="1000000" step="0">
+30
+    </defNumber>
+    <defNumber name="PERC_WARN" label="% for Warning" format="%.f" min="0" max="100" step="5">
+15
+    </defNumber>
+    <defNumber name="ALERT_TYPE" label="Flip alerting to in-bounds" format="%.f" min="0" max="1" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Weather Simulator" name="WEATHER_HUMIDITY" label="Humidity (%)" group="Parameters" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:49">
+    <defNumber name="MIN_OK" label="OK range min" format="%.2f" min="-1000000" max="1000000" step="0">
+0
+    </defNumber>
+    <defNumber name="MAX_OK" label="OK range max" format="%.2f" min="-1000000" max="1000000" step="0">
+100
+    </defNumber>
+    <defNumber name="PERC_WARN" label="% for Warning" format="%.f" min="0" max="100" step="5">
+15
+    </defNumber>
+    <defNumber name="ALERT_TYPE" label="Flip alerting to in-bounds" format="%.f" min="0" max="1" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Weather Simulator" name="WEATHER_WIND_SPEED" label="Wind (kph)" group="Parameters" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:49">
+    <defNumber name="MIN_OK" label="OK range min" format="%.2f" min="-1000000" max="1000000" step="0">
+0
+    </defNumber>
+    <defNumber name="MAX_OK" label="OK range max" format="%.2f" min="-1000000" max="1000000" step="0">
+20
+    </defNumber>
+    <defNumber name="PERC_WARN" label="% for Warning" format="%.f" min="0" max="100" step="5">
+15
+    </defNumber>
+    <defNumber name="ALERT_TYPE" label="Flip alerting to in-bounds" format="%.f" min="0" max="1" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Weather Simulator" name="WEATHER_WIND_GUST" label="Gust (kph)" group="Parameters" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:49">
+    <defNumber name="MIN_OK" label="OK range min" format="%.2f" min="-1000000" max="1000000" step="0">
+0
+    </defNumber>
+    <defNumber name="MAX_OK" label="OK range max" format="%.2f" min="-1000000" max="1000000" step="0">
+20
+    </defNumber>
+    <defNumber name="PERC_WARN" label="% for Warning" format="%.f" min="0" max="100" step="5">
+15
+    </defNumber>
+    <defNumber name="ALERT_TYPE" label="Flip alerting to in-bounds" format="%.f" min="0" max="1" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<setLightVector device="Weather Simulator" name="SAFETY_STATUS" state="Ok" timestamp="2026-10-05T19:53:49">
+    <oneLight name="SAFETY">
+Idle
+    </oneLight>
+</setLightVector>
+<setLightVector device="Weather Simulator" name="WEATHER_STATUS" state="Ok" timestamp="2026-10-05T19:53:49">
+    <oneLight name="WEATHER_FORECAST">
+Ok
+    </oneLight>
+    <oneLight name="WEATHER_TEMPERATURE">
+Ok
+    </oneLight>
+    <oneLight name="WEATHER_WIND_SPEED">
+Ok
+    </oneLight>
+    <oneLight name="WEATHER_RAIN_HOUR">
+Ok
+    </oneLight>
+</setLightVector>
+<setNumberVector device="Weather Simulator" name="WEATHER_PARAMETERS" state="Ok" timeout="60" timestamp="2026-10-05T19:53:49">
+    <oneNumber name="WEATHER_FORECAST">
+0
+    </oneNumber>
+    <oneNumber name="WEATHER_TEMPERATURE">
+15
+    </oneNumber>
+    <oneNumber name="WEATHER_HUMIDITY">
+0
+    </oneNumber>
+    <oneNumber name="WEATHER_WIND_SPEED">
+0
+    </oneNumber>
+    <oneNumber name="WEATHER_WIND_GUST">
+0
+    </oneNumber>
+    <oneNumber name="WEATHER_RAIN_HOUR">
+0
+    </oneNumber>
+</setNumberVector>
+<defNumberVector device="Weather Simulator" name="GEOGRAPHIC_COORD" label="Location" group="Site Management" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:49">
+    <defNumber name="LAT" label="Lat (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+    <defNumber name="LONG" label="Lon (dd:mm:ss)" format="%010.6m" min="0" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="ELEV" label="Elevation (m)" format="%g" min="-200" max="10000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<message device="Weather Simulator" timestamp="2026-10-05T19:53:49" message="[INFO] Weather update is in progress..."/>
+<defNumberVector device="Weather Simulator" name="WEATHER_CONTROL" label="Control" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:49">
+    <defNumber name="Weather" label="Weather" format="%.f" min="0" max="1" step="1">
+0
+    </defNumber>
+    <defNumber name="Temperature" label="Temperature" format="%.2f" min="-50" max="70" step="10">
+15
+    </defNumber>
+    <defNumber name="Humidity" label="Humidity" format="%.f" min="0" max="100" step="5">
+0
+    </defNumber>
+    <defNumber name="Wind" label="Wind" format="%.2f" min="0" max="100" step="5">
+0
+    </defNumber>
+    <defNumber name="Gust" label="Gust" format="%.2f" min="0" max="50" step="5">
+0
+    </defNumber>
+    <defNumber name="Precip" label="Precip" format="%.f" min="0" max="100" step="10">
+0
+    </defNumber>
+</defNumberVector>

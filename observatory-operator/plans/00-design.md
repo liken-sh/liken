@@ -58,7 +58,7 @@ must hold.
 | Plan | Subject |
 |---|---|
 | [01](completed/01-the-indi-base-image.md), [02](completed/02-driver-and-simulator-images.md), [03](completed/03-the-topology-by-hand.md) | Built: the images, and the topology from static manifests |
-| [04](04-the-indi-client-in-go.md) | The INDI client in Go |
+| [04](completed/04-the-indi-client-in-go.md) | Built: the INDI client in Go, the package `indi` |
 | [05](05-the-property-schema.md) | Typed fields generated from the simulators and INDI's documentation |
 | [06](06-the-resources.md) | The resources |
 | [07](07-the-operator-runs-the-topology.md) | The operator creates the topology from the resources |

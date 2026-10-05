@@ -1,0 +1,34 @@
+<message device="Telescope Simulator" timestamp="2026-10-05T19:53:05" message="[INFO] Telescope simulator is offline."/>
+<setSwitchVector device="Telescope Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-05T19:53:05">
+    <oneSwitch name="CONNECT">
+Off
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+On
+    </oneSwitch>
+</setSwitchVector>
+<delProperty device="Telescope Simulator" name="ON_COORD_SET" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_ABORT_MOTION" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_TRACK_MODE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_TRACK_RATE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_TRACK_STATE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_HOME" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_MOTION_NS" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_MOTION_WE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_REVERSE_MOTION" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_SLEW_RATE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TARGET_EOD_COORD" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_MOUNT_TYPE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TIME_UTC" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="GEOGRAPHIC_COORD" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_PARK" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_PARK_POSITION" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_PARK_OPTION" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_PIER_SIDE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="USEJOYSTICK" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="SNOOP_JOYSTICK" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="EQUATORIAL_PE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="GUIDE_RATE" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_TIMED_GUIDE_NS" timestamp="2026-10-05T19:53:05"/>
+<delProperty device="Telescope Simulator" name="TELESCOPE_TIMED_GUIDE_WE" timestamp="2026-10-05T19:53:05"/>

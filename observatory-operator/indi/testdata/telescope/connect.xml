@@ -1,0 +1,2204 @@
+<message device="Telescope Simulator" timestamp="2026-10-05T19:52:35" message="[INFO] Telescope simulator is online."/>
+<setSwitchVector device="Telescope Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="ON_COORD_SET" label="On Set" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="TRACK" label="Track">
+On
+    </defSwitch>
+    <defSwitch name="SLEW" label="Slew">
+Off
+    </defSwitch>
+    <defSwitch name="SYNC" label="Sync">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" label="Eq. Coordinates" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defNumber name="RA" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_TRACK_MODE" label="Track Mode" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="TRACK_SIDEREAL" label="Sidereal">
+On
+    </defSwitch>
+    <defSwitch name="TRACK_SOLAR" label="Solar">
+Off
+    </defSwitch>
+    <defSwitch name="TRACK_LUNAR" label="Lunar">
+Off
+    </defSwitch>
+    <defSwitch name="TRACK_CUSTOM" label="Custom">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_TRACK_STATE" label="Tracking" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="TRACK_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="TRACK_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Telescope Simulator" name="TELESCOPE_TRACK_RATE" label="Track Rates" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defNumber name="TRACK_RATE_RA" label="RA (arcsecs/s)" format="%.6f" min="-16384" max="16384" step="9.9999999999999995475e-07">
+15.04106717867020393
+    </defNumber>
+    <defNumber name="TRACK_RATE_DE" label="DE (arcsecs/s)" format="%.6f" min="-16384" max="16384" step="9.9999999999999995475e-07">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_HOME" label="Home" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="FIND" label="Find">
+Off
+    </defSwitch>
+    <defSwitch name="SET" label="Set">
+Off
+    </defSwitch>
+    <defSwitch name="GO" label="Go">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_MOTION_NS" label="Motion N/S" group="Motion Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="MOTION_NORTH" label="North">
+Off
+    </defSwitch>
+    <defSwitch name="MOTION_SOUTH" label="South">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_MOTION_WE" label="Motion W/E" group="Motion Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="MOTION_WEST" label="West">
+Off
+    </defSwitch>
+    <defSwitch name="MOTION_EAST" label="East">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_REVERSE_MOTION" label="Reverse" group="Motion Control" state="Idle" perm="rw" rule="AnyOfMany" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="REVERSE_NS" label="North/South">
+Off
+    </defSwitch>
+    <defSwitch name="REVERSE_WE" label="West/East">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_SLEW_RATE" label="Slew Rate" group="Motion Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="1x" label="Guide">
+Off
+    </defSwitch>
+    <defSwitch name="2x" label="Centering">
+Off
+    </defSwitch>
+    <defSwitch name="3x" label="Find">
+On
+    </defSwitch>
+    <defSwitch name="4x" label="Max">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Telescope Simulator" name="TARGET_EOD_COORD" label="Slew Target" group="Motion Control" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defNumber name="RA" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_MOUNT_TYPE" label="Mount Type" group="Motion Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="ALTAZ" label="ALTAZ">
+Off
+    </defSwitch>
+    <defSwitch name="EQ_FORK" label="Fork (Eq)">
+Off
+    </defSwitch>
+    <defSwitch name="EQ_GEM" label="GEM">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Telescope Simulator" name="TIME_UTC" label="UTC" group="Site Management" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defText name="UTC" label="UTC Time"/>
+    <defText name="OFFSET" label="UTC Offset"/>
+</defTextVector>
+<defNumberVector device="Telescope Simulator" name="GEOGRAPHIC_COORD" label="Scope Location" group="Site Management" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defNumber name="LAT" label="Lat (dd:mm:ss.s)" format="%012.8m" min="-90" max="90" step="0">
+0
+    </defNumber>
+    <defNumber name="LONG" label="Lon (dd:mm:ss.s)" format="%012.8m" min="0" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="ELEV" label="Elevation (m)" format="%g" min="-200" max="10000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_PARK" label="Parking" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="PARK" label="Park(ed)">
+Off
+    </defSwitch>
+    <defSwitch name="UNPARK" label="UnPark(ed)">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Telescope Simulator" name="TELESCOPE_PARK_POSITION" label="Park Position" group="Site Management" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defNumber name="PARK_HA" label="HA (hh:mm:ss)" format="%010.6m" min="-12" max="12" step="0">
+0
+    </defNumber>
+    <defNumber name="PARK_DEC" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_PARK_OPTION" label="Park Options" group="Site Management" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="PARK_CURRENT" label="Current">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_DEFAULT" label="Default">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_WRITE_DATA" label="Write Data">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_PURGE_DATA" label="Purge Data">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="TELESCOPE_PIER_SIDE" label="Pier Side" group="Main Control" state="Idle" perm="ro" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="PIER_WEST" label="West (pointing east)">
+Off
+    </defSwitch>
+    <defSwitch name="PIER_EAST" label="East (pointing west)">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Telescope Simulator" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:52:35">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Telescope Simulator" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defText name="SNOOP_JOYSTICK_DEVICE" label="Device">
+Joystick
+    </defText>
+</defTextVector>
+<defNumberVector device="Telescope Simulator" name="GUIDE_RATE" label="Guiding Rate" group="Motion Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:52:35">
+    <defNumber name="GUIDE_RATE_WE" label="W/E Rate" format="%g" min="0" max="1" step="0.10000000000000000555">
+0.5
+    </defNumber>
+    <defNumber name="GUIDE_RATE_NS" label="N/S Rate" format="%g" min="0" max="1" step="0.10000000000000000555">
+0.5
+    </defNumber>
+</defNumberVector>
+<message device="Telescope Simulator" timestamp="2026-10-05T19:52:35" message="[INFO] InitPark: No Park data in file /tmp/.indi/ParkData.xml: No such file or directory"/>
+<message device="Telescope Simulator" timestamp="2026-10-05T19:52:35" message="[INFO] Mount is unparked."/>
+<setSwitchVector device="Telescope Simulator" name="TELESCOPE_PARK" state="Ok" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneSwitch name="PARK">
+Off
+    </oneSwitch>
+    <oneSwitch name="UNPARK">
+On
+    </oneSwitch>
+</setSwitchVector>
+<setNumberVector device="Telescope Simulator" name="TELESCOPE_PARK_POSITION" state="Idle" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneNumber name="PARK_HA">
+-6
+    </oneNumber>
+    <oneNumber name="PARK_DEC">
+0
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="TELESCOPE_PARK_POSITION" state="Idle" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneNumber name="PARK_HA">
+-6
+    </oneNumber>
+    <oneNumber name="PARK_DEC">
+0
+    </oneNumber>
+</setNumberVector>
+<setTextVector device="Telescope Simulator" name="TIME_UTC" state="Ok" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneText name="UTC">
+2026-10-05T19:52:35
+    </oneText>
+    <oneText name="OFFSET">
+0.00
+    </oneText>
+</setTextVector>
+<defNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" label="True Pointing" group="Main Control" state="Idle" perm="ro" timeout="0" timestamp="2026-10-05T19:52:35">
+    <defNumber name="RA_PE" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC_PE" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<setSwitchVector device="Telescope Simulator" name="ALIGNMENT_SUBSYSTEM_ACTIVE" state="Ok" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneSwitch name="ALIGNMENT SUBSYSTEM ACTIVE">
+On
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="Telescope Simulator" name="TELESCOPE_TIMED_GUIDE_NS" label="Guide N/S" group="Motion Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defNumber name="TIMED_GUIDE_N" label="North (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+    <defNumber name="TIMED_GUIDE_S" label="South (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Telescope Simulator" name="TELESCOPE_TIMED_GUIDE_WE" label="Guide E/W" group="Motion Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:52:35">
+    <defNumber name="TIMED_GUIDE_W" label="West (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+    <defNumber name="TIMED_GUIDE_E" label="East (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:35">
+    <oneNumber name="RA_PE">
+12.000069648182639881
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setSwitchVector device="Telescope Simulator" name="TELESCOPE_PIER_SIDE" state="Ok" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneSwitch name="PIER_WEST">
+Off
+    </oneSwitch>
+    <oneSwitch name="PIER_EAST">
+On
+    </oneSwitch>
+</setSwitchVector>
+<setNumberVector device="Telescope Simulator" name="MOUNT_AXES" state="Idle" timeout="0" timestamp="2026-10-05T19:52:35">
+    <oneNumber name="PRIMARY">
+132.65104812504193887
+    </oneNumber>
+    <oneNumber name="SECONDARY">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneNumber name="RA">
+12.000069659389556165
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:35">
+    <oneNumber name="RA_PE">
+12.000139374844730256
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:35">
+    <oneNumber name="RA">
+12.000139386051644763
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA_PE">
+12.000209213575969258
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA">
+12.000209224782883766
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA_PE">
+12.000278951413928752
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA">
+12.000278951413928752
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA_PE">
+12.000348756524424232
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA">
+12.000348767731338739
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA_PE">
+12.000418494393427338
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:36">
+    <oneNumber name="RA">
+12.000418494393427338
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA_PE">
+12.0004882210244741
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA">
+12.000488232231388608
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA_PE">
+12.000557947686562699
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA">
+12.000557958893477206
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA_PE">
+12.000627674348653073
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA">
+12.000627685555567581
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA_PE">
+12.00069740097969806
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:37">
+    <oneNumber name="RA">
+12.000697412186612567
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA_PE">
+12.000767138848702942
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA">
+12.000767138848702942
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA_PE">
+12.000836876717706048
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA">
+12.000836887924622332
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA_PE">
+12.000906603348751034
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA">
+12.000906614555667318
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA_PE">
+12.000976341217755916
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:38">
+    <oneNumber name="RA">
+12.000976341217755916
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA_PE">
+12.001046067879846291
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA">
+12.001046079086760798
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA_PE">
+12.001115794541934889
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA">
+12.001115805748849397
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA_PE">
+12.001185532379896159
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA">
+12.001185543586810667
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA_PE">
+12.001255225421239459
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:39">
+    <oneNumber name="RA">
+12.001255236628155743
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA_PE">
+12.001324952083329833
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA">
+12.001324963290244341
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA_PE">
+12.001394689921289327
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA">
+12.001394701128203835
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA_PE">
+12.001464405376463418
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA">
+12.001464416583379702
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA_PE">
+12.001534132038553793
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:40">
+    <oneNumber name="RA">
+12.0015341432454683
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA_PE">
+12.001603869876513286
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA">
+12.00160388108342957
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA_PE">
+12.001673596538603661
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA">
+12.001673607745518169
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA_PE">
+12.001743323200692259
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA">
+12.001743334407608543
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA_PE">
+12.001813049862782634
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:41">
+    <oneNumber name="RA">
+12.001813061069697142
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA_PE">
+12.00188277649382762
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA">
+12.00188277649382762
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA_PE">
+12.001952503155916219
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA">
+12.001952514362832503
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA_PE">
+12.002022229818006593
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA">
+12.002022241024921101
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA_PE">
+12.00209195644905158
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:42">
+    <oneNumber name="RA">
+12.00209195644905158
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA_PE">
+12.002161683111141954
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA">
+12.002161683111141954
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA_PE">
+12.002231409773230553
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA">
+12.00223142098014506
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA_PE">
+12.002301136404275539
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA">
+12.002301147611190046
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA_PE">
+12.002370863066365914
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:43">
+    <oneNumber name="RA">
+12.002370874273280421
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA_PE">
+12.002440589728454512
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA">
+12.002440600935369019
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA_PE">
+12.002510316390544887
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA">
+12.002510327597459394
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA_PE">
+12.00258005422850438
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA">
+12.002580065435418888
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA_PE">
+12.002649769683678471
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:44">
+    <oneNumber name="RA">
+12.002649780890594755
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA_PE">
+12.002719507552683353
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA">
+12.002719507552683353
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA_PE">
+12.00278923418372834
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA">
+12.002789245390642847
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA_PE">
+12.002858972052733222
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA">
+12.002858972052733222
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA_PE">
+12.002928687507907313
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:45">
+    <oneNumber name="RA">
+12.002928687507907313
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA_PE">
+12.002998414138952299
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA">
+12.002998425345868583
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA_PE">
+12.003068140801042674
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA">
+12.003068152007957181
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA_PE">
+12.003137889876962063
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA">
+12.003137901083876571
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA_PE">
+12.003207683749497647
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:46">
+    <oneNumber name="RA">
+12.003207694956412155
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA_PE">
+12.003277410411586246
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA">
+12.003277421618500753
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA_PE">
+12.003347148280591128
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA">
+12.003347159487505635
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA_PE">
+12.003416874911636114
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA">
+12.003416886118550622
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA_PE">
+12.003486657608300803
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:47">
+    <oneNumber name="RA">
+12.00348666881521531
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA_PE">
+12.003556451511879999
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA">
+12.003556462718794506
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA_PE">
+12.003626189349839493
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA">
+12.003626200556755776
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA_PE">
+12.003695916011929867
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA">
+12.003695927218844375
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA_PE">
+12.00376565388093475
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:48">
+    <oneNumber name="RA">
+12.00376565388093475
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA_PE">
+12.003835335715363541
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA">
+12.003835346922278049
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA_PE">
+12.003905062346408528
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA">
+12.003905073553323035
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA_PE">
+12.003974822629242425
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA">
+12.003974833836158709
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA_PE">
+12.004044560498247307
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:49">
+    <oneNumber name="RA">
+12.004044571705161815
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA_PE">
+12.004114287129292293
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA">
+12.004114298336208577
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA_PE">
+12.004184013791382668
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA">
+12.004184024998297176
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA_PE">
+12.004253684418896952
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA">
+12.00425369562581146
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA_PE">
+12.004323422256856446
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:50">
+    <oneNumber name="RA">
+12.004323422256856446
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA_PE">
+12.004393148918946821
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA">
+12.004393160125861328
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA_PE">
+12.004462875581035419
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA">
+12.004462886787951703
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA_PE">
+12.004532613450040301
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA">
+12.004532635832825704
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA_PE">
+12.004602351288001572
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:51">
+    <oneNumber name="RA">
+12.004602362494916079
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA_PE">
+12.004672055536259379
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA">
+12.004672055536259379
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA_PE">
+12.004741782198349753
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA">
+12.004741782198349753
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA_PE">
+12.004811508829394739
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA">
+12.004811520036309247
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA_PE">
+12.004881246698399622
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:52">
+    <oneNumber name="RA">
+12.004881257905314129
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA_PE">
+12.00495097336048822
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA">
+12.004950984567404504
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA_PE">
+12.005020699991534983
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA">
+12.00502071119844949
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA_PE">
+12.005090437860538088
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA">
+12.005090449067454372
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA_PE">
+12.005160164522628463
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:53">
+    <oneNumber name="RA">
+12.005160175729542971
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA_PE">
+12.005229891153673449
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA">
+12.005229891153673449
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA_PE">
+12.00529960660884754
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA">
+12.00529960660884754
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA_PE">
+12.005369333270937915
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA">
+12.005369344477852422
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA_PE">
+12.005439059933026513
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:54">
+    <oneNumber name="RA">
+12.005439071139941021
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA_PE">
+12.005508853805562097
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA">
+12.005508865012476605
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA_PE">
+12.005578580467650696
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA">
+12.005578591674566979
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA_PE">
+12.005648318336655578
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA">
+12.005648318336655578
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA_PE">
+12.005718056174616848
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:55">
+    <oneNumber name="RA">
+12.005718067381531355
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA_PE">
+12.005787782836705446
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA">
+12.005787794043619954
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA_PE">
+12.005857576740284642
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA">
+12.005857576740284642
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA_PE">
+12.005927303371329629
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA">
+12.005927303371329629
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA_PE">
+12.005997018826503719
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:56">
+    <oneNumber name="RA">
+12.005997030033420003
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA_PE">
+12.006066823936999199
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA">
+12.006066823936999199
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA_PE">
+12.006136572981874977
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA">
+12.006136572981874977
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA_PE">
+12.006206299643963575
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA">
+12.006206310850878083
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA_PE">
+12.006276037512968458
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:57">
+    <oneNumber name="RA">
+12.006276037512968458
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA_PE">
+12.006345831385504042
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA">
+12.006345831385504042
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA_PE">
+12.00641555804759264
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA">
+12.006415569254507147
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA_PE">
+12.006485295916597522
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA">
+12.006485295916597522
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA_PE">
+12.006555022547642508
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:58">
+    <oneNumber name="RA">
+12.006555033754557016
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA_PE">
+12.006624749209731107
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA">
+12.006624760416647391
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA_PE">
+12.006694487078735989
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA">
+12.006694487078735989
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA_PE">
+12.00676419129595196
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA">
+12.00676419129595196
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA_PE">
+12.006833985199531156
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:52:59">
+    <oneNumber name="RA">
+12.006833996406445664
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA_PE">
+12.006903711861619755
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA">
+12.006903723068536038
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA_PE">
+12.006973438492666517
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA">
+12.006973449699581025
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA_PE">
+12.007043165154755116
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA">
+12.007043176361669623
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA_PE">
+12.007112903023759998
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:00">
+    <oneNumber name="RA">
+12.007112903023759998
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA_PE">
+12.007182629685848596
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA">
+12.007182640861719491
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA_PE">
+12.007252434765298688
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA">
+12.007252445972214971
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA_PE">
+12.007322239875794168
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA">
+12.007322251082708675
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA_PE">
+12.007392044955244259
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:01">
+    <oneNumber name="RA">
+12.007392044955244259
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA_PE">
+12.007461771617332857
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA">
+12.007461782824247365
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA_PE">
+12.007531498279423232
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA">
+12.00753150948633774
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA_PE">
+12.007601224910468218
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA">
+12.007601236117382726
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA_PE">
+12.007670929158727802
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:02">
+    <oneNumber name="RA">
+12.007670940365642309
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA_PE">
+12.0077406558208164
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA">
+12.007740667027730908
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA_PE">
+12.007810348862161476
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA">
+12.007810348862161476
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA_PE">
+12.007880075493206462
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA">
+12.00788008670012097
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA_PE">
+12.007949802155296837
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:03">
+    <oneNumber name="RA">
+12.007949813362211344
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA_PE">
+12.008019528817385435
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA">
+12.008019540024299943
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA_PE">
+12.008089255448430421
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA">
+12.008089266655344929
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA_PE">
+12.008158982110520796
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA">
+12.008158993317435304
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA_PE">
+12.0082287872210145
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:04">
+    <oneNumber name="RA">
+12.008228798427929007
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:05">
+    <oneNumber name="RA_PE">
+12.008298525058973993
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:05">
+    <oneNumber name="RA">
+12.008298525058973993
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_PE" state="Ok" timeout="0" timestamp="2026-10-05T19:53:05">
+    <oneNumber name="RA_PE">
+12.008368274134893383
+    </oneNumber>
+    <oneNumber name="DEC_PE">
+90
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Telescope Simulator" name="EQUATORIAL_EOD_COORD" state="Idle" timeout="60" timestamp="2026-10-05T19:53:05">
+    <oneNumber name="RA">
+12.008368285341809667
+    </oneNumber>
+    <oneNumber name="DEC">
+90
+    </oneNumber>
+</setNumberVector>

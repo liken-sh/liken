@@ -1,0 +1,109 @@
+<setSwitchVector device="Focuser Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:24">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defSwitchVector device="Focuser Simulator" name="FOCUS_MOTION" label="Direction" group="Main Control" state="Ok" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defSwitch name="FOCUS_INWARD" label="Focus In">
+On
+    </defSwitch>
+    <defSwitch name="FOCUS_OUTWARD" label="Focus Out">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Focuser Simulator" name="FOCUS_SPEED" label="Speed" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="FOCUS_SPEED_VALUE" label="Focus Speed" format="%3.0f" min="1" max="5" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="REL_FOCUS_POSITION" label="Relative Position" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="FOCUS_RELATIVE_POSITION" label="Steps" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="ABS_FOCUS_POSITION" label="Absolute Position" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="FOCUS_ABSOLUTE_POSITION" label="Steps" format="%.f" min="0" max="100000" step="1000">
+50000
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="FOCUS_MAX" label="Max. Position" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="FOCUS_MAX_VALUE" label="Steps" format="%.f" min="1000" max="1000000" step="10000">
+100000
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="FOCUS_SYNC" label="Sync" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="FOCUS_SYNC_VALUE" label="Steps" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Focuser Simulator" name="FOCUS_BACKLASH_TOGGLE" label="Backlash" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Focuser Simulator" name="FOCUS_BACKLASH_STEPS" label="Backlash" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="FOCUS_BACKLASH_VALUE" label="Steps" format="%.f" min="0" max="1000000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="Presets" label="Presets" group="Presets" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:24">
+    <defNumber name="PRESET_1" label="Preset 1" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+    <defNumber name="PRESET_2" label="Preset 2" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+    <defNumber name="PRESET_3" label="Preset 3" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Focuser Simulator" name="Goto" label="Goto" group="Presets" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:24">
+    <defSwitch name="Preset 1" label="Preset 1">
+Off
+    </defSwitch>
+    <defSwitch name="Preset 2" label="Preset 2">
+Off
+    </defSwitch>
+    <defSwitch name="Preset 3" label="Preset 3">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Focuser Simulator" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:24">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Focuser Simulator" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defText name="SNOOP_JOYSTICK_DEVICE" label="Device">
+Joystick
+    </defText>
+</defTextVector>
+<defNumberVector device="Focuser Simulator" name="SEEING_SETTINGS" label="Seeing" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="SIM_SEEING" label="arcseconds" format="%4.2f" min="0" max="60" step="0">
+3.5
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="FWHM" label="FWHM" group="Main Control" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="SIM_FWHM" label="arcseconds" format="%4.2f" min="0" max="60" step="0">
+7.5
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="FOCUS_TEMPERATURE" label="Temperature" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:24">
+    <defNumber name="TEMPERATURE" label="Celsius" format="%6.2f" min="-50" max="70" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Focuser Simulator" name="DELAY" label="Delay" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:24">
+    <defNumber name="DELAY_VALUE" label="Value (uS)" format="%.f" min="0" max="60000" step="100">
+100
+    </defNumber>
+</defNumberVector>

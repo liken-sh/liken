@@ -1,0 +1,20 @@
+<setSwitchVector device="Weather Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-05T19:53:51">
+    <oneSwitch name="CONNECT">
+Off
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+On
+    </oneSwitch>
+</setSwitchVector>
+<delProperty device="Weather Simulator" name="WEATHER_UPDATE" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_REFRESH" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_OVERRIDE" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_STATUS" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="SAFETY_STATUS" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_PARAMETERS" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_TEMPERATURE" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_HUMIDITY" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_WIND_SPEED" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_WIND_GUST" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="GEOGRAPHIC_COORD" timestamp="2026-10-05T19:53:51"/>
+<delProperty device="Weather Simulator" name="WEATHER_CONTROL" timestamp="2026-10-05T19:53:51"/>

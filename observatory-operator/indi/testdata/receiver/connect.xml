@@ -1,0 +1,338 @@
+<message device="Receiver Simulator" timestamp="2026-10-05T19:54:27" message="[INFO] Simulator Receiver connected successfully!"/>
+<setSwitchVector device="Receiver Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:54:27">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<setNumberVector device="Receiver Simulator" name="RECEIVER_SETTINGS" state="Idle" timeout="60" timestamp="2026-10-05T19:54:27">
+    <oneNumber name="RECEIVER_GAIN">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_FREQUENCY">
+1420000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_BANDWIDTH">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_BITSPERSAMPLE">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_SAMPLERATE">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_ANTENNA">
+1
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Receiver Simulator" name="RECEIVER_SETTINGS" state="Idle" timeout="60" timestamp="2026-10-05T19:54:27">
+    <oneNumber name="RECEIVER_GAIN">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_FREQUENCY">
+1420000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_BANDWIDTH">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_BITSPERSAMPLE">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_SAMPLERATE">
+1000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_ANTENNA">
+1
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Receiver Simulator" name="RECEIVER_SETTINGS" state="Idle" timeout="60" timestamp="2026-10-05T19:54:27">
+    <oneNumber name="RECEIVER_GAIN">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_FREQUENCY">
+1420000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_BANDWIDTH">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_BITSPERSAMPLE">
+16
+    </oneNumber>
+    <oneNumber name="RECEIVER_SAMPLERATE">
+1000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_ANTENNA">
+1
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="" name="" state="Ok" timeout="0" timestamp="2026-10-05T19:54:27">
+    <oneNumber name="" min="0" max="-1" step="0">
+0
+    </oneNumber>
+    <oneNumber name="" min="0" max="0" step="0">
+0
+    </oneNumber>
+    <oneNumber name="" min="10" max="0" step="0">
+0
+    </oneNumber>
+    <oneNumber name="" min="10" max="1" step="0">
+1
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Receiver Simulator" name="RECEIVER_SETTINGS" state="Idle" timeout="60" timestamp="2026-10-05T19:54:27">
+    <oneNumber name="RECEIVER_GAIN">
+1
+    </oneNumber>
+    <oneNumber name="RECEIVER_FREQUENCY">
+1420000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_BANDWIDTH">
+10000
+    </oneNumber>
+    <oneNumber name="RECEIVER_BITSPERSAMPLE">
+16
+    </oneNumber>
+    <oneNumber name="RECEIVER_SAMPLERATE">
+1000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_ANTENNA">
+1
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Receiver Simulator" name="RECEIVER_SETTINGS" state="Idle" timeout="60" timestamp="2026-10-05T19:54:27">
+    <oneNumber name="RECEIVER_GAIN">
+10
+    </oneNumber>
+    <oneNumber name="RECEIVER_FREQUENCY">
+1420000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_BANDWIDTH">
+10000
+    </oneNumber>
+    <oneNumber name="RECEIVER_BITSPERSAMPLE">
+16
+    </oneNumber>
+    <oneNumber name="RECEIVER_SAMPLERATE">
+1000000
+    </oneNumber>
+    <oneNumber name="RECEIVER_ANTENNA">
+1
+    </oneNumber>
+</setNumberVector>
+<defNumberVector device="Receiver Simulator" name="RECEIVER_SETTINGS" label="Receiver Settings" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defNumber name="RECEIVER_GAIN" label="Gain" format="%16.2f" min="0" max="25" step="0.10000000000000000555">
+10
+    </defNumber>
+    <defNumber name="RECEIVER_FREQUENCY" label="Frequency" format="%16.2f" min="24000000" max="2000000000" step="1">
+1420000000
+    </defNumber>
+    <defNumber name="RECEIVER_BANDWIDTH" label="Bandwidth" format="%16.2f" min="0" max="0" step="0">
+10000
+    </defNumber>
+    <defNumber name="RECEIVER_BITSPERSAMPLE" label="Bits per sample" format="%16.2f" min="16" max="16" step="0">
+16
+    </defNumber>
+    <defNumber name="RECEIVER_SAMPLERATE" label="Sampling rate" format="%16.2f" min="1000000" max="2000000" step="1">
+1000000
+    </defNumber>
+    <defNumber name="RECEIVER_ANTENNA" label="Antenna" format="%16.2f" min="1" max="4" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Receiver Simulator" name="SENSOR_INTEGRATION" label="Integration" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defNumber name="SENSOR_INTEGRATION_VALUE" label="Time (s)" format="%5.2f" min="0.0010000000000000000208" max="86164.092000000004191" step="0.0010000000000000000208">
+1
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Receiver Simulator" name="SENSOR_ABORT_INTEGRATION" label="Integration Abort" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Receiver Simulator" name="FITS_HEADER" label="FITS Header" group="General Info" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defText name="FITS_OBSERVER" label="Observer">
+Unknown
+    </defText>
+    <defText name="FITS_OBJECT" label="Object">
+Unknown
+    </defText>
+</defTextVector>
+<defBLOBVector device="Receiver Simulator" name="SENSOR" label="Integration Data" group="Main Control" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defBLOB name="Continuum" label="Sensor Continuum Blob"/>
+    <defBLOB name="Real" label="Sensor Data Real"/>
+    <defBLOB name="Imaginary" label="Sensor Imaginary Blob"/>
+    <defBLOB name="Magnitude" label="Sensor Magnitude Blob"/>
+    <defBLOB name="Phase" label="Sensor Phase Blob"/>
+</defBLOBVector>
+<defSwitchVector device="" name="" label="" group="" state="Idle" perm="ro" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:54:27"/>
+<defSwitchVector device="Receiver Simulator" name="UPLOAD_MODE" label="Upload" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="UPLOAD_CLIENT" label="Client">
+On
+    </defSwitch>
+    <defSwitch name="UPLOAD_LOCAL" label="Local">
+Off
+    </defSwitch>
+    <defSwitch name="UPLOAD_BOTH" label="Both">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Receiver Simulator" name="UPLOAD_SETTINGS" label="Upload Settings" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defText name="UPLOAD_DIR" label="Dir">
+/tmp
+    </defText>
+    <defText name="UPLOAD_PREFIX" label="Prefix">
+INTEGRATION_XXX
+    </defText>
+</defTextVector>
+<defSwitchVector device="Receiver Simulator" name="CCD_VIDEO_STREAM" label="Video Stream" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="STREAM_ON" label="Stream On">
+Off
+    </defSwitch>
+    <defSwitch name="STREAM_OFF" label="Stream Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Receiver Simulator" name="STREAM_FULL_DEPTH" label="Stream Depth" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="FULL_DEPTH_8BIT" label="8-bit">
+On
+    </defSwitch>
+    <defSwitch name="FULL_DEPTH_16BIT" label="16-bit">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Receiver Simulator" name="STREAM_DELAY" label="Video Stream Delay" group="Streaming" state="Idle" perm="ro" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defNumber name="STREAM_DELAY_TIME" label="Delay (s)" format="%.3f" min="0" max="60" step="0.0010000000000000000208">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Receiver Simulator" name="STREAMING_EXPOSURE" label="Expose" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defNumber name="STREAMING_EXPOSURE_VALUE" label="Duration (s)" format="%.6f" min="9.9999999999999995475e-07" max="60" step="0.10000000000000000555">
+0.10000000000000000555
+    </defNumber>
+    <defNumber name="STREAMING_DIVISOR_VALUE" label="Divisor" format="%.f" min="1" max="15" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Receiver Simulator" name="FPS" label="FPS" group="Streaming" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defNumber name="EST_FPS" label="Instant." format="%.2f" min="0" max="999" step="0">
+30
+    </defNumber>
+    <defNumber name="AVG_FPS" label="Average (1 sec.)" format="%.2f" min="0" max="999" step="0">
+30
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Receiver Simulator" name="RECORD_STREAM" label="Video Record" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="RECORD_ON" label="Record On">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_DURATION_ON" label="Record (Duration)">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_FRAME_ON" label="Record (Frames)">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_OFF" label="Record Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Receiver Simulator" name="RECORD_FILE" label="Record File" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defText name="RECORD_FILE_DIR" label="Dir.">
+/tmp/Videos/indi__D_
+    </defText>
+    <defText name="RECORD_FILE_NAME" label="Name">
+indi_record__T_
+    </defText>
+</defTextVector>
+<defNumberVector device="Receiver Simulator" name="RECORD_OPTIONS" label="Record Options" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defNumber name="RECORD_DURATION" label="Duration (sec)" format="%.3f" min="0.0010000000000000000208" max="999999" step="0">
+1
+    </defNumber>
+    <defNumber name="RECORD_FRAME_TOTAL" label="Frames" format="%.f" min="1" max="999999999" step="1">
+30
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="" name="" label="" group="" state="Ok" perm="ro" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defNumber name="" label="" format="" min="0" max="-1" step="0">
+0
+    </defNumber>
+    <defNumber name="" label="" format="" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="" label="" format="" min="10" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="" label="" format="" min="10" max="1" step="0">
+1
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Receiver Simulator" name="CCD_STREAM_ENCODER" label="Encoder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="RAW" label="RAW">
+On
+    </defSwitch>
+    <defSwitch name="MJPEG" label="MJPEG">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Receiver Simulator" name="CCD_STREAM_RECORDER" label="Recorder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="SER" label="SER">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Receiver Simulator" name="LIMITS" label="Limits" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:54:27">
+    <defNumber name="LIMITS_BUFFER_MAX" label="Maximum Buffer Size (MB)" format="%.0f" min="1" max="65536" step="1">
+512
+    </defNumber>
+    <defNumber name="LIMITS_PREVIEW_FPS" label="Maximum Preview FPS" format="%.0f" min="1" max="120" step="1">
+10
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Receiver Simulator" name="DSP_ACTIVATE_CONVOLUTION" label="Convolution" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Receiver Simulator" name="DSP_ACTIVATE_DFT" label="DFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Receiver Simulator" name="DSP_ACTIVATE_IDFT" label="IDFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Receiver Simulator" name="DSP_ACTIVATE_SPECTRUM" label="Spectrum" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Receiver Simulator" name="DSP_ACTIVATE_HISTOGRAM" label="Histogram" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Receiver Simulator" name="DSP_ACTIVATE_WAVELETS" label="Wavelets" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:27">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>

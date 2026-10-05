@@ -1,0 +1,64 @@
+<setSwitchVector device="CCD Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-05T19:53:10">
+    <oneSwitch name="CONNECT">
+Off
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+On
+    </oneSwitch>
+</setSwitchVector>
+<delProperty device="CCD Simulator" name="CCD_FRAME" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_FRAME_RESET" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_INFO" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_CAPTURE_FORMAT" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_TRANSFER_FORMAT" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_BINNING" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_EXPOSURE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_ABORT_EXPOSURE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD1" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_COMPRESSION" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="FITS_HEADER" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="GUIDER_EXPOSURE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="GUIDER_ABORT_EXPOSURE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="GUIDER_FRAME" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="GUIDER_INFO" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD2" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="GUIDER_BINNING" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="GUIDER_COMPRESSION" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="GUIDER_FRAME_TYPE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_TEMPERATURE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_TEMP_RAMP" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="TELESCOPE_TIMED_GUIDE_NS" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="TELESCOPE_TIMED_GUIDE_WE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_FRAME_TYPE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="SCOPE_INFO" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="WCS_CONTROL" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="UPLOAD_MODE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="UPLOAD_SETTINGS" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_FAST_TOGGLE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_FAST_COUNT" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_VIDEO_STREAM" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="STREAM_DELAY" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="STREAMING_EXPOSURE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="FPS" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="RECORD_FILE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="RECORD_STREAM" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="RECORD_OPTIONS" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_STREAM_FRAME" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_STREAM_ENCODER" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_STREAM_RECORDER" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="LIMITS" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="STREAM_FULL_DEPTH" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="DSP_ACTIVATE_CONVOLUTION" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="DSP_ACTIVATE_DFT" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="DSP_ACTIVATE_IDFT" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="DSP_ACTIVATE_SPECTRUM" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="DSP_ACTIVATE_HISTOGRAM" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="DSP_ACTIVATE_WAVELETS" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_COOLER" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_GAIN" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_OFFSET" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_DIRECTORY_LOCATION" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_DIRECTORY_TOGGLE" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="CCD_RESOLUTION" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="FILTER_SLOT" timestamp="2026-10-05T19:53:10"/>
+<delProperty device="CCD Simulator" name="FILTER_NAME" timestamp="2026-10-05T19:53:10"/>

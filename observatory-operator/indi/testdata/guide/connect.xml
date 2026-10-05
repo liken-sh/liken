@@ -1,0 +1,397 @@
+<setSwitchVector device="Guide Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="Guide Simulator" name="CCD_EXPOSURE" label="Expose" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="CCD_EXPOSURE_VALUE" label="Duration (s)" format="%5.2f" min="0.010000000000000000208" max="3600" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="CCD_ABORT_EXPOSURE" label="Abort" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Guide Simulator" name="CCD_FRAME" label="Frame" group="Image Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="X" label="Left " format="%4.0f" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="Y" label="Top" format="%4.0f" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="WIDTH" label="Width" format="%4.0f" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="HEIGHT" label="Height" format="%4.0f" min="0" max="0" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="CCD_FRAME_RESET" label="Frame Values" group="Image Settings" state="Idle" perm="wo" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="RESET" label="Reset">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Guide Simulator" name="CCD_BINNING" label="Binning" group="Image Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="HOR_BIN" label="X" format="%2.0f" min="1" max="4" step="1">
+1
+    </defNumber>
+    <defNumber name="VER_BIN" label="Y" format="%2.0f" min="1" max="4" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defTextVector device="Guide Simulator" name="FITS_HEADER" label="FITS Header" group="General Info" state="Idle" perm="wo" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defText name="KEYWORD_NAME" label="Name"/>
+    <defText name="KEYWORD_VALUE" label="Value"/>
+    <defText name="KEYWORD_COMMENT" label="Comment"/>
+</defTextVector>
+<defSwitchVector device="Guide Simulator" name="CCD_CAPTURE_FORMAT" label="Format" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="INDI_MONO" label="Mono">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Guide Simulator" name="CCD_TRANSFER_FORMAT" label="Encode" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="FORMAT_FITS" label="FITS">
+On
+    </defSwitch>
+    <defSwitch name="FORMAT_NATIVE" label="Native">
+Off
+    </defSwitch>
+    <defSwitch name="FORMAT_XISF" label="XISF">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Guide Simulator" name="CCD_INFO" label="CCD Information" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="CCD_MAX_X" label="Max. Width" format="%.f" min="1" max="16000" step="0">
+0
+    </defNumber>
+    <defNumber name="CCD_MAX_Y" label="Max. Height" format="%.f" min="1" max="16000" step="0">
+0
+    </defNumber>
+    <defNumber name="CCD_PIXEL_SIZE" label="Pixel size (um)" format="%.2f" min="1" max="40" step="0">
+0
+    </defNumber>
+    <defNumber name="CCD_PIXEL_SIZE_X" label="Pixel size X" format="%.2f" min="1" max="40" step="0">
+0
+    </defNumber>
+    <defNumber name="CCD_PIXEL_SIZE_Y" label="Pixel size Y" format="%.2f" min="1" max="40" step="0">
+0
+    </defNumber>
+    <defNumber name="CCD_BITSPERPIXEL" label="Bits per pixel" format="%.f" min="8" max="64" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="CCD_COMPRESSION" label="Compression" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defBLOBVector device="Guide Simulator" name="CCD1" label="Image Data" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defBLOB name="CCD1" label="Image"/>
+</defBLOBVector>
+<defNumberVector device="Guide Simulator" name="TELESCOPE_TIMED_GUIDE_NS" label="Guide N/S" group="Guider Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="TIMED_GUIDE_N" label="North (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+    <defNumber name="TIMED_GUIDE_S" label="South (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="TELESCOPE_TIMED_GUIDE_WE" label="Guide E/W" group="Guider Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="TIMED_GUIDE_W" label="West (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+    <defNumber name="TIMED_GUIDE_E" label="East (ms)" format="%.f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="CCD_FRAME_TYPE" label="Type" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="FRAME_LIGHT" label="Light">
+On
+    </defSwitch>
+    <defSwitch name="FRAME_BIAS" label="Bias">
+Off
+    </defSwitch>
+    <defSwitch name="FRAME_DARK" label="Dark">
+Off
+    </defSwitch>
+    <defSwitch name="FRAME_FLAT" label="Flat">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Guide Simulator" name="SCOPE_INFO" label="Scope" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="FOCAL_LENGTH" label="Focal Length (mm)" format="%g" min="0" max="10000" step="1">
+0
+    </defNumber>
+    <defNumber name="APERTURE" label="Aperture (mm)" format="%g" min="0" max="3000" step="1">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="WCS_CONTROL" label="WCS" group="WCS" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="WCS_ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="WCS_DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Guide Simulator" name="UPLOAD_MODE" label="Upload" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="UPLOAD_CLIENT" label="Client">
+On
+    </defSwitch>
+    <defSwitch name="UPLOAD_LOCAL" label="Local">
+Off
+    </defSwitch>
+    <defSwitch name="UPLOAD_BOTH" label="Both">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Guide Simulator" name="UPLOAD_SETTINGS" label="Upload Settings" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defText name="UPLOAD_DIR" label="Dir">
+/tmp
+    </defText>
+    <defText name="UPLOAD_PREFIX" label="Prefix">
+IMAGE_XXX
+    </defText>
+</defTextVector>
+<defSwitchVector device="Guide Simulator" name="CCD_FAST_TOGGLE" label="Fast Exposure" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Guide Simulator" name="CCD_FAST_COUNT" label="Fast Count" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defNumber name="FRAMES" label="Frames" format="%.f" min="0" max="100000" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="CCD_VIDEO_STREAM" label="Video Stream" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="STREAM_ON" label="Stream On">
+Off
+    </defSwitch>
+    <defSwitch name="STREAM_OFF" label="Stream Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Guide Simulator" name="STREAM_FULL_DEPTH" label="Stream Depth" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="FULL_DEPTH_8BIT" label="8-bit">
+On
+    </defSwitch>
+    <defSwitch name="FULL_DEPTH_16BIT" label="16-bit">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Guide Simulator" name="STREAM_DELAY" label="Video Stream Delay" group="Streaming" state="Idle" perm="ro" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defNumber name="STREAM_DELAY_TIME" label="Delay (s)" format="%.3f" min="0" max="60" step="0.0010000000000000000208">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="STREAMING_EXPOSURE" label="Expose" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="STREAMING_EXPOSURE_VALUE" label="Duration (s)" format="%.6f" min="9.9999999999999995475e-07" max="60" step="0.10000000000000000555">
+0.10000000000000000555
+    </defNumber>
+    <defNumber name="STREAMING_DIVISOR_VALUE" label="Divisor" format="%.f" min="1" max="15" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="FPS" label="FPS" group="Streaming" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="EST_FPS" label="Instant." format="%.2f" min="0" max="999" step="0">
+30
+    </defNumber>
+    <defNumber name="AVG_FPS" label="Average (1 sec.)" format="%.2f" min="0" max="999" step="0">
+30
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="RECORD_STREAM" label="Video Record" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="RECORD_ON" label="Record On">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_DURATION_ON" label="Record (Duration)">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_FRAME_ON" label="Record (Frames)">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_OFF" label="Record Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Guide Simulator" name="RECORD_FILE" label="Record File" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defText name="RECORD_FILE_DIR" label="Dir.">
+/tmp/Videos/indi__D_
+    </defText>
+    <defText name="RECORD_FILE_NAME" label="Name">
+indi_record__T_
+    </defText>
+</defTextVector>
+<defNumberVector device="Guide Simulator" name="RECORD_OPTIONS" label="Record Options" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="RECORD_DURATION" label="Duration (sec)" format="%.3f" min="0.0010000000000000000208" max="999999" step="0">
+1
+    </defNumber>
+    <defNumber name="RECORD_FRAME_TOTAL" label="Frames" format="%.f" min="1" max="999999999" step="1">
+30
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="CCD_STREAM_FRAME" label="Frame" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="X" label="Left" format="%.f" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="Y" label="Top" format="%.f" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="WIDTH" label="Width" format="%.f" min="0" max="0" step="0">
+0
+    </defNumber>
+    <defNumber name="HEIGHT" label="Height" format="%.f" min="0" max="0" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Guide Simulator" name="CCD_STREAM_ENCODER" label="Encoder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="RAW" label="RAW">
+On
+    </defSwitch>
+    <defSwitch name="MJPEG" label="MJPEG">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Guide Simulator" name="CCD_STREAM_RECORDER" label="Recorder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defSwitch name="SER" label="SER">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Guide Simulator" name="LIMITS" label="Limits" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:14">
+    <defNumber name="LIMITS_BUFFER_MAX" label="Maximum Buffer Size (MB)" format="%.0f" min="1" max="65536" step="1">
+512
+    </defNumber>
+    <defNumber name="LIMITS_PREVIEW_FPS" label="Maximum Preview FPS" format="%.0f" min="1" max="120" step="1">
+10
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="CCD_TEMPERATURE" label="Temperature" group="Main Control" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="CCD_TEMPERATURE_VALUE" label="Temperature (C)" format="%5.2f" min="-50" max="50" step="0">
+25
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Guide Simulator" name="CCD_GAIN" label="Gain" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:14">
+    <defNumber name="GAIN" label="Gain" format="%.f" min="0" max="100" step="10">
+50
+    </defNumber>
+</defNumberVector>
+<setNumberVector device="Guide Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneNumber name="CCD_MAX_X">
+1280
+    </oneNumber>
+    <oneNumber name="CCD_MAX_Y">
+1024
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE">
+0
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE_X">
+0
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE_Y">
+0
+    </oneNumber>
+    <oneNumber name="CCD_BITSPERPIXEL">
+0
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Guide Simulator" name="CCD_FRAME" state="Idle" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneNumber name="X" min="0" max="1279" step="0">
+0
+    </oneNumber>
+    <oneNumber name="Y" min="0" max="1023" step="0">
+0
+    </oneNumber>
+    <oneNumber name="WIDTH" min="1" max="1280" step="0">
+0
+    </oneNumber>
+    <oneNumber name="HEIGHT" min="1" max="1024" step="0">
+0
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Guide Simulator" name="CCD_FRAME" state="Idle" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneNumber name="X">
+0
+    </oneNumber>
+    <oneNumber name="Y">
+0
+    </oneNumber>
+    <oneNumber name="WIDTH">
+1280
+    </oneNumber>
+    <oneNumber name="HEIGHT">
+1024
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Guide Simulator" name="CCD_BINNING" state="Idle" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneNumber name="HOR_BIN">
+1
+    </oneNumber>
+    <oneNumber name="VER_BIN">
+1
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Guide Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneNumber name="CCD_MAX_X">
+1280
+    </oneNumber>
+    <oneNumber name="CCD_MAX_Y">
+1024
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE">
+2.4000000953674316406
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE_X">
+2.4000000953674316406
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE_Y">
+2.4000000953674316406
+    </oneNumber>
+    <oneNumber name="CCD_BITSPERPIXEL">
+0
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Guide Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneNumber name="CCD_MAX_X">
+1280
+    </oneNumber>
+    <oneNumber name="CCD_MAX_Y">
+1024
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE">
+2.4000000953674316406
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE_X">
+2.4000000953674316406
+    </oneNumber>
+    <oneNumber name="CCD_PIXEL_SIZE_Y">
+2.4000000953674316406
+    </oneNumber>
+    <oneNumber name="CCD_BITSPERPIXEL">
+16
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="Guide Simulator" name="CCD_STREAM_FRAME" state="Ok" timeout="60" timestamp="2026-10-05T19:53:14">
+    <oneNumber name="X" min="0" max="1279" step="0">
+0
+    </oneNumber>
+    <oneNumber name="Y" min="0" max="1023" step="0">
+0
+    </oneNumber>
+    <oneNumber name="WIDTH" min="10" max="1280" step="0">
+1280
+    </oneNumber>
+    <oneNumber name="HEIGHT" min="10" max="1024" step="0">
+1024
+    </oneNumber>
+</setNumberVector>

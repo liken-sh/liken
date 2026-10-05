@@ -1,0 +1,49 @@
+<setSwitchVector device="GPS Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:54:05">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="GPS Simulator" name="GEOGRAPHIC_COORD" label="Location" group="Main Control" state="Ok" perm="rw" timeout="60" timestamp="2026-10-05T19:54:05">
+    <defNumber name="LAT" label="Lat (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+51
+    </defNumber>
+    <defNumber name="LONG" label="Lon (dd:mm:ss)" format="%010.6m" min="0" max="360" step="0">
+357.69999999999998863
+    </defNumber>
+    <defNumber name="ELEV" label="Elevation (m)" format="%g" min="-200" max="10000" step="0">
+72
+    </defNumber>
+</defNumberVector>
+<defTextVector device="GPS Simulator" name="TIME_UTC" label="UTC" group="Main Control" state="Ok" perm="ro" timeout="60" timestamp="2026-10-05T19:54:05">
+    <defText name="UTC" label="UTC Time">
+2026-10-05T19:54:05
+    </defText>
+    <defText name="OFFSET" label="UTC Offset">
+0.00
+    </defText>
+</defTextVector>
+<defSwitchVector device="GPS Simulator" name="GPS_REFRESH" label="Refresh" group="Main Control" state="Ok" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:54:05">
+    <defSwitch name="REFRESH" label="GPS">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="GPS Simulator" name="GPS_REFRESH_PERIOD" label="Refresh" group="Main Control" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:54:05">
+    <defNumber name="PERIOD" label="Period (s)" format="%.f" min="0" max="3600" step="60">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="GPS Simulator" name="SYSTEM_TIME_UPDATE" label="System Time" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:54:05">
+    <defSwitch name="UPDATE_NEVER" label="Never">
+Off
+    </defSwitch>
+    <defSwitch name="UPDATE_ON_STARTUP" label="On Startup">
+On
+    </defSwitch>
+    <defSwitch name="UPDATE_ON_REFRESH" label="On Refresh">
+Off
+    </defSwitch>
+</defSwitchVector>
+<message device="GPS Simulator" timestamp="2026-10-05T19:54:05" message="[INFO] NTP already inactive; GPS will not re-enable it on disconnect."/>

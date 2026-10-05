@@ -1,0 +1,70 @@
+<setNumberVector device="SQM Simulator" name="SKY_QUALITY" state="Ok" timeout="0" timestamp="2026-10-05T19:54:15">
+    <oneNumber name="SKY_BRIGHTNESS">
+16.899999999999998579
+    </oneNumber>
+    <oneNumber name="SENSOR_FREQUENCY">
+15
+    </oneNumber>
+    <oneNumber name="SENSOR_COUNTS">
+28856
+    </oneNumber>
+    <oneNumber name="SENSOR_PERIOD">
+0.063000000000000000444
+    </oneNumber>
+    <oneNumber name="SKY_TEMPERATURE">
+21.5
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="SQM Simulator" name="Unit Info" state="Ok" timeout="0" timestamp="2026-10-05T19:54:15">
+    <oneNumber name="Protocol">
+4
+    </oneNumber>
+    <oneNumber name="Model">
+3
+    </oneNumber>
+    <oneNumber name="Feature">
+49
+    </oneNumber>
+    <oneNumber name="Serial">
+1234
+    </oneNumber>
+</setNumberVector>
+<setSwitchVector device="SQM Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:54:15">
+    <oneSwitch name="CONNECT">
+On
+    </oneSwitch>
+    <oneSwitch name="DISCONNECT">
+Off
+    </oneSwitch>
+</setSwitchVector>
+<defNumberVector device="SQM Simulator" name="SKY_QUALITY" label="Readings" group="Main Control" state="Ok" perm="rw" timeout="0" timestamp="2026-10-05T19:54:15">
+    <defNumber name="SKY_BRIGHTNESS" label="Quality (mag/arcsec^2)" format="%6.2f" min="-20" max="30" step="0">
+16.899999999999998579
+    </defNumber>
+    <defNumber name="SENSOR_FREQUENCY" label="Freq (Hz)" format="%6.2f" min="0" max="1000000" step="0">
+15
+    </defNumber>
+    <defNumber name="SENSOR_COUNTS" label="Period (counts)" format="%6.2f" min="0" max="1000000" step="0">
+28856
+    </defNumber>
+    <defNumber name="SENSOR_PERIOD" label="Period (s)" format="%6.2f" min="0" max="1000000" step="0">
+0.063000000000000000444
+    </defNumber>
+    <defNumber name="SKY_TEMPERATURE" label="Temperature (C)" format="%6.2f" min="-50" max="80" step="0">
+21.5
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="SQM Simulator" name="Unit Info" label="Unit Info" group="Unit" state="Ok" perm="rw" timeout="0" timestamp="2026-10-05T19:54:15">
+    <defNumber name="Protocol" label="Protocol" format="%.f" min="0" max="1000000" step="0">
+4
+    </defNumber>
+    <defNumber name="Model" label="Model" format="%.f" min="0" max="1000000" step="0">
+3
+    </defNumber>
+    <defNumber name="Feature" label="Feature" format="%.f" min="0" max="1000000" step="0">
+49
+    </defNumber>
+    <defNumber name="Serial" label="Serial" format="%.f" min="0" max="1000000" step="0">
+1234
+    </defNumber>
+</defNumberVector>

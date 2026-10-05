@@ -1,0 +1,6 @@
+<setNumberVector device="Focuser Simulator" name="ABS_FOCUS_POSITION" state="Alert" timeout="60" timestamp="2026-10-05T19:53:27">
+    <oneNumber name="FOCUS_ABSOLUTE_POSITION">
+52000
+    </oneNumber>
+</setNumberVector>
+<message device="Focuser Simulator" timestamp="2026-10-05T19:53:27" message="[ERROR] Requested position out of bound. Focus maximum position is 100000"/>
