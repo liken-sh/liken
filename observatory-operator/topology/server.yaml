@@ -20,6 +20,12 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: indiserver, app.kubernetes.io/part-of: observatory, observatory.liken.sh/role: server}
     spec:
+      # indiserver runs as process 1 and installs no handler for SIGTERM,
+      # and the kernel ignores a signal that process 1 does not handle. So
+      # a stop would wait out the whole grace period before the kubelet
+      # kills it, 31 s on a test cluster, with every device offline. The
+      # server holds no state that a graceful stop would save.
+      terminationGracePeriodSeconds: 1
       initContainers:
         - name: links
           image: ghcr.io/liken-sh/indi:20261005-2

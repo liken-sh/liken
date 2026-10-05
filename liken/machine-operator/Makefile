@@ -32,7 +32,7 @@ $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
 # base layer to supply root certificates. So the machine's own
 # vendored trust bundle travels in the image (oci.sh explains where
 # it lands).
-CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
+CA_BUNDLE := ../../trust/dist/$(strip $(file <../../trust/VERSION))/cacert.pem
 
 # The PCI naming database, for the device inventory's
 # human-readable names (dra.go). oci.sh explains why it travels in

@@ -146,8 +146,8 @@ runs:
         key: xtables-${{ hashFiles('liken/xtables/VERSION', 'liken/xtables/fetch.sh') }}
     - uses: actions/cache@v6
       with:
-        path: liken/trust/dist
-        key: trust-${{ hashFiles('liken/trust/VERSION', 'liken/trust/fetch.sh') }}
+        path: trust/dist
+        key: trust-${{ hashFiles('trust/VERSION', 'trust/fetch.sh') }}
     - uses: actions/cache@v6
       with:
         path: liken/e2fsprogs/dist
@@ -214,7 +214,7 @@ runs:
       shell: bash
       run: |
         cd liken
-        for dist in kernel/dist k3s/dist xtables/dist trust/dist \
+        for dist in kernel/dist k3s/dist xtables/dist ../trust/dist \
                     e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
                     wpa-supplicant/dist \
                     systemd-boot/dist grub/dist linux-firmware/dist \

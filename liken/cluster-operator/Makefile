@@ -38,7 +38,7 @@ $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 # base layer to supply root certificates, so the machine's own
 # vendored trust bundle ships in the image. oci.sh explains where the
 # bundle lands.
-CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
+CA_BUNDLE := ../../trust/dist/$(strip $(file <../../trust/VERSION))/cacert.pem
 
 $(DIST)/liken-cluster-operator-image.tar: $(DIST)/liken-cluster-operator ../image/oci.sh $(CA_BUNDLE)
 	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) ../image/oci.sh liken-cluster-operator liken.sh/cluster-operator
