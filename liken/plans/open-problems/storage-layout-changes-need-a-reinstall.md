@@ -54,3 +54,9 @@ the machine does its own `wipe and reinstall` from the cluster, then
 rejoins under the same name. The design questions are what that
 reinstall boots from, and how the machine shows that it has the new
 layout before it takes workloads again.
+
+[Milestone 50](../50-netboot-for-a-declared-machine.md) proposes an
+answer to the first question. A reinstall requested on the `Machine`
+spec returns the machine to the installer state, and the netboot
+controller serves the installer over the network, with no stick. The
+second question stays open.

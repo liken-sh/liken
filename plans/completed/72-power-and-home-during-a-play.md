@@ -1,11 +1,31 @@
 # 72, Power and home during a Play
 
-Built on 2026-09-29, except the drill, which is still owed. Power is
+Built on 2026-09-29 in 7c27c319, and closed on 2026-10-04. Power is
 built in media-operator's playback sidecar, the `media-screen` crate,
 and the stock idle screen. library-operator's browser needed no change:
 it already lowers the shade on the three power names. During a `Play`,
 the power button stops the `Play` and then does what power does on an
 idle `Player`.
+
+The drill in "How it will be proved" was not run, and no record of
+it exists. The browser's `KEY_WWW` gap, set aside below, is the open
+problem [The browser does not bind
+`KEY_WWW`](../../library-operator/plans/open-problems/the-browser-does-not-bind-key-www.md).
+
+Two later changes alter the design below:
+
+- [Plan 77](77-the-media-bus-stops-at-media-operator.md) took
+  equipment-operator off the bus on 2026-10-04. `media-screen` still
+  publishes the toggle on the `Player`'s power topic. media-operator
+  reads it there and writes it into the `Receiver`'s
+  `status.session.powerAsk` (`media-operator/roompower.go`), and
+  equipment-operator acts on that field. equipment-operator reads no
+  topic.
+- Equipment-operator plan 09's commit 3c425c3f, made after this plan
+  on 2026-09-29, made `KEY_SLEEP` the name of a TV remote's Power Off
+  Function. `KEY_SLEEP` now asks the room for off and never toggles,
+  and `KEY_WAKEUP` asks for on (`media-operator/ensure.go`,
+  `media-screen/src/screen/keys.rs`).
 
 Home is not part of the build. The maintainer confirmed that home
 during a `Play` works on their remote, so the base key table, the

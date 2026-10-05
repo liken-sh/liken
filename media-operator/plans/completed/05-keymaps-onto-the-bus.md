@@ -39,7 +39,7 @@ terms.
 
 Nothing checks that a command came from a bound controller. The trust
 boundary is the whole cluster, and that is
-`open-problems/the-bus-authorizes-nothing.md`. Broker access control
+[`open-problems/the-broker-is-not-ready-to-share.md`](../open-problems/the-broker-is-not-ready-to-share.md). Broker access control
 is the answer when a cluster runs a workload its owner does not trust,
 and this plan does not build it.
 
@@ -118,7 +118,7 @@ operator publishes the compiled table there once.
   subscribes to.
 * **Broker access control.** Any client may publish a command or a
   keymap or an event. That is
-  `open-problems/the-bus-authorizes-nothing.md`.
+  [`open-problems/the-broker-is-not-ready-to-share.md`](../open-problems/the-broker-is-not-ready-to-share.md).
 * **Home Assistant discovery.** The command topic is the surface a
   Home Assistant integration would publish a `media_player`'s commands
   to, and this plan publishes no discovery configs. That is

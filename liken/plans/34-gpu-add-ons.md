@@ -35,6 +35,13 @@ turn the stack on, the k3s restart tier (milestone 20) picks up the
 container runtime that k3s detects automatically, and the machine operator's DRA
 driver (milestone 11) publishes the devices.
 
+One part does not exist yet: a release that carries an artifact for
+one machine. The fetcher writes every artifact in the release document
+to every slot, and the bundle sums all artifacts against one
+fleet-wide slot size. [Milestone 33](33-firmware-updates.md) needs the
+same artifact for fwupd, and its prerequisites section gives the
+proposed design. Both plans wait on this one prerequisite.
+
 ## What the NVIDIA add-on would hold
 
 Four layers:

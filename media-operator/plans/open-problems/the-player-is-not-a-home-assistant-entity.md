@@ -15,12 +15,12 @@ devices appear with no manual configuration.
 Home Assistant's built-in MQTT integration has no `media_player`
 component to discover, so the player is built from the components it
 does have: a `sensor` for the phase and the position, `button`s for
-pause and seek and the rest, and a `number` for volume. The other
+pause and seek and the rest, and a `number` for the unit's volume. The other
 option is a single custom component that reads these topics, the way
 the `mqtt_media_player` component fills one entity from a set of
-topics. With either option, the action vocabulary a `Keymap` already
-defines maps onto the commands, and a `Play`'s status maps onto the
-state.
+topics. With either option, the action words that a `Play`'s commands
+topic accepts (`media-operator/input.go`) map onto the commands, and a
+`Play`'s status maps onto the state.
 
 One part is missing before that entity exists: the discovery config
 itself, which the operator would publish retained when a resource is
@@ -41,7 +41,7 @@ Nothing here is designed yet. Plan 03 leaves the option open: the base
 topic is configurable, the data topics stay outside `homeassistant/`,
 the reports are retained, and the sidecar's Last Will already
 publishes the availability topic that Home Assistant needs. One
-prerequisite is outside this repository. Home Assistant sees these
-entities only on the broker it already reads, so a tight integration
-needs `liken` to publish onto that broker. That is
-`the-broker-is-not-configurable.md`.
+prerequisite is a shared broker. Home Assistant sees these entities
+only on the broker it already reads, so a tight integration needs
+`liken` to publish onto that broker, with a credential. That is
+[the broker is not ready to share](the-broker-is-not-ready-to-share.md).

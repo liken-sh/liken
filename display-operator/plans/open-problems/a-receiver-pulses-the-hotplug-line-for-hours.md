@@ -48,7 +48,12 @@ weston started, 136 ms after another source on the receiver sent
   is not the only cause.
 - What the receiver's own settings do. Receivers pass a signal through
   in standby, and some let a person turn that off. That setting was
-  not read.
+  not read during the spells. A Denon `Receiver` reports it:
+  equipment-operator reads the `SSHOS` family on each connect and
+  reports Pass Through as `status.denon.hdmi.passThrough`, and a
+  person can set it in `spec.denon.settings.hdmi.passThrough`
+  ([equipment-operator plan 13](../../../equipment-operator/plans/13-every-setting-a-receiver-exposes.md#denon)
+  covers the `hdmi` family).
 - Whether the pulses reach anything a person sees or hears. The TV was
   off during the second spell.
 
@@ -56,14 +61,18 @@ weston started, 136 ms after another source on the receiver sent
 
 1. Accept the spells. The operator writes nothing during them, and
    the cost is log lines and mode sets on a screen nobody watches.
-2. Find out whether weston's mode set feeds the loop. On a lab
-   machine into a receiver in standby, stop the compositor during a
-   spell and count the pulses with nothing driving the port. If the
-   pulses stop, the loop needs a way to leave the port undriven while
-   the receiver is in standby. Weston has no setting for that, and the
-   project does not patch weston, so the operator would stop or
-   restart the compositor, which a claim on the screen forbids.
+2. Leave the port undriven while the receiver is in standby, if
+   weston's mode set feeds the loop. Weston has no setting for that,
+   and the project does not patch weston, so the operator would stop
+   or restart the compositor, which a claim on the screen forbids.
+   This fix fits only if the pulses stop when nothing drives the port,
+   and nobody has stopped the compositor during a spell to see.
 3. Cut the log volume. Weston's mode list on each enable is weston's
    own output. The operator could filter the `weston` container's
    repeated mode lists before they reach the log, at the cost of a
    filter between weston and the kubelet.
+4. Turn Pass Through off in the `Receiver`'s
+   `spec.denon.settings.hdmi.passThrough`, if the receiver's pass
+   through in standby feeds the loop. This changes the receiver, not
+   `liken`, and it stops the receiver from passing a source to the TV
+   while it is in standby.

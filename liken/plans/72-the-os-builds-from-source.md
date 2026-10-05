@@ -255,8 +255,8 @@ The jobs keep the secrets small:
   attestation.
 - A separate publish job holds the channel key and the registry
   token. It takes the build job's output and uploads it.
-- Every third-party action is pinned by commit SHA. The open problem
-  [Pin CI executable inputs](../../plans/open-problems/ci-executables-need-immutable-pins.md)
+- Every third-party action is pinned by commit SHA. Part six of
+  [milestone 66](66-durability-and-safety.md#part-six-ci-runs-only-pinned-executables)
   covers the actions that the other workflows use.
 
 CI uses GitHub's standard runners, which are free for public

@@ -101,7 +101,10 @@ controller resolves them from the Machine list, with no other input.
   first still boots from its own slots on every ordinary boot.
 
 A reinstall requested on the Machine spec returns the machine to the
-installer state, with the same erase rules milestone 37 defined.
+installer state, with the same erase rules milestone 37 defined. This
+answers what a reinstall boots from in the open problem
+[storage-layout-changes-need-a-reinstall](open-problems/storage-layout-changes-need-a-reinstall.md),
+where a changed storage layout needs a reinstall with no stick.
 
 **Verify the installed signal before building this.** The controller
 reads it from the Machine's status. Name the exact field when the

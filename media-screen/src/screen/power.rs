@@ -1,11 +1,16 @@
 //! The power topic's asks for the screen. A unit whose screen is wired
 //! through a Receiver publishes the room's power on the power topic, and
-//! the equipment operator publishes two asks back on the same topic when
-//! the TV speaks for the room over HDMI-CEC: wake when a person picks this
-//! unit's input in the TV's source menu while the screen sleeps, and sleep
-//! when the TV goes to standby while the screen is awake. The screen
-//! answers each the way a press or the quiet window would, so the panel
-//! desire, and the Receiver session that follows it, move with the TV.
+//! `media-operator` writes each of those asks into the Receiver's
+//! `status.session.powerAsk` (`roompower.go`). Two asks come back on the
+//! same topic when the TV speaks for the room over HDMI-CEC: wake when a
+//! person picks this unit's input in the TV's source menu while the screen
+//! sleeps, and sleep when the TV goes to standby while the screen is awake.
+//! The equipment operator's CEC node workload holds no broker connection,
+//! so it writes each ask in the Television's `status.screenAsk`, and
+//! `media-operator` publishes it on the power topic (`screenask.go`). The
+//! screen answers each the way a press or the quiet window would, so the
+//! panel desire, and the Receiver session that follows it, move with the
+//! TV.
 //!
 //! The operator relays the two asks only to a unit with a `Receiver`. A
 //! client in the screen mode still ignores them, so an ask that was in flight
@@ -34,8 +39,8 @@ struct Ask {
 
 impl Screen {
     /// Fold one message off the power topic. Every action but wake and
-    /// sleep is an ask for the equipment operator, such as this screen's own
-    /// toggle coming back, and changes nothing here.
+    /// sleep is a room power ask for `media-operator`, such as this screen's
+    /// own toggle coming back, and changes nothing here.
     pub(super) fn on_power(&mut self, payload: &[u8], now: Instant) -> Vec<Effect> {
         let Some(ask) = crate::object::<Ask>(payload) else {
             return Vec::new();

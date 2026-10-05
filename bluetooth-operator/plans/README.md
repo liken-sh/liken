@@ -14,8 +14,9 @@ source readings and names where each measurement ran.
 A plan closes in the commit that builds it. That commit moves the
 document to `completed/`, dates its header, and states what the lab
 measured if a drill ran. A drill that has not run yet is not a reason
-to leave a plan open. The built part closes, and the part still owed
-becomes a new plan or an open problem.
+to leave a plan open, and it does not become an open problem. The
+header states which drills have not run. The built part closes, and
+any work still unbuilt becomes a new plan or an open problem.
 
 The pattern these documents follow is documented in the top-level
 `plans/` of the repository:

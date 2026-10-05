@@ -292,8 +292,8 @@ accepts that mode and publishes the volume as it does for
 - A webhook chain of three or four `Job`s, which becomes one `Job`.
 
 It also makes three open problems smaller, and it does not close
-them. [A fresh agent's first version arrives
-late](../open-problems/a-fresh-agents-first-version-arrives-late.md) and
+them. A fresh agent's first version arrives late (an open problem that
+the `confirmer` closed on 2026-09-16) and
 [slow agent shutdown](69-an-agents-exit-inside-its-grace-period.md) happen
 less often, because a `Library` starts fewer agents. [Copies never give
 space back](../open-problems/copies-never-give-space-back.md) affects three

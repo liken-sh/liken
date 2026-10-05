@@ -94,7 +94,7 @@ device operator, the same kind as `audio-operator`, but it connects to
 the media bus and writes into the media topic tree. `audio-operator`
 does not, so a unit with a receiver and a unit with sinks set their
 level in two unrelated ways. The broker authorizes nothing
-(`media-operator/plans/open-problems/the-bus-authorizes-nothing.md`),
+(`media-operator/plans/open-problems/the-broker-is-not-ready-to-share.md`),
 so every program on the bus can also drive the receiver.
 
 ## How other systems split commands from state
@@ -647,7 +647,7 @@ Proof: the suites pass, nothing names the owner topic, the seed, or
   PipeWire's gain is linear, so two devices at the same `level` do
   not sound equally loud.
 * Access control on the bus
-  (`media-operator/plans/open-problems/the-bus-authorizes-nothing.md`).
+  (`media-operator/plans/open-problems/the-broker-is-not-ready-to-share.md`).
   After this plan, a program on the bus can still ask for a step, a
   mute, or a power change through `media-operator`, but it can no
   longer drive a receiver's settings or send it a level directly.

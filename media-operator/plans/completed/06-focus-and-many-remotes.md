@@ -131,7 +131,7 @@ control plane.
   command that a program publishes.
 * **Broker access control.** A translator publishes only its own
   commands by convention, not by an ACL. That is
-  `open-problems/the-bus-authorizes-nothing.md`.
+  [`open-problems/the-broker-is-not-ready-to-share.md`](../open-problems/the-broker-is-not-ready-to-share.md).
 
 ## How it will be proved
 

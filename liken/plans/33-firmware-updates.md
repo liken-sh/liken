@@ -172,9 +172,9 @@ and no new trust relationship.
 the release document to every slot, and `releases/bundle.go` sums all
 artifacts against one fleet-wide slot size. fwupd, its plugins, and
 its LVFS metadata cannot ship in every image; they are the kind of
-payload that one machine needs and the fleet does not. Milestone 34's
-GPU add-on has the same need, and neither plan names it today. The
-proposed design is an artifact that the release document marks as
+payload that one machine needs and the fleet does not.
+[Milestone 34](34-gpu-add-ons.md)'s GPU add-on has the same need, and
+both plans wait on this one prerequisite. The proposed design is an artifact that the release document marks as
 optional, that a Machine selects by name, and that the fetcher writes
 only to the machine that selected it.
 

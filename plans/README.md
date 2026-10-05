@@ -22,8 +22,9 @@ directory states its status:
 A plan closes in the commit that builds it. That commit moves the
 plan to `completed/`, dates its header, and states what the lab
 measured if a drill ran. A drill that has not run yet is not a reason
-to leave a plan open. The built part closes, and the part still owed
-becomes a new plan or an open problem.
+to leave a plan open, and it does not become an open problem. The
+header states which drills have not run. The built part closes, and
+any work still unbuilt becomes a new plan or an open problem.
 
 Each `plans/` directory numbers its own plans. A new plan takes the
 next number after the highest one in that directory and its

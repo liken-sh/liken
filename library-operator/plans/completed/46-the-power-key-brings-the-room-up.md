@@ -7,10 +7,12 @@ raises the panel desire, the session carries an `awake` flag beside
 `active`, and either flag turning on powers the receiver on and
 selects the input.
 
-The browser half is not built, and it is an [open
-problem](../open-problems/the-power-keys-browser-half-is-not-proved.md),
-not a plan, because plan 54 retired the re-present path this plan's
-third contract bullet names.
+The browser half was not built as this plan states it, because plan
+54 retired the re-present path this plan's third contract bullet
+names. The browser reacts to the press itself: a press while the
+screen sleeps sets the `media-screen` crate's `Moment::Wake`, and the
+browser lifts its shade and reads its home page again. Neither case
+below was drilled, and no record of a drill exists.
 
 One press of the remote's power key turns the receiver on,
 selects the input the machine is on, and puts the media browser on

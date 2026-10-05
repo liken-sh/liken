@@ -181,9 +181,11 @@ The screen shows that some pieces of the media stack serve more than
 media. Each needs its own plan, and this plan does not depend on them.
 
 - **The bus.** `media-operator/deploy/bus.yaml` installs the Mosquitto
-  broker at `bus.liken-system.svc:1883`, and equipment-operator and
-  library-operator already connect to it. An astronomy operator would be
-  the fourth client. The broker could become its own component.
+  broker at `bus.liken-system.svc:1883`. media-operator, the pods it
+  starts, and library-operator's screens connect to it. Root plan 77
+  took equipment-operator off it, so the bus carries only the media
+  domain today, and an astronomy operator would be its first client
+  outside that domain. The broker could become its own component.
 - **Input.** `Remote`, `Keymap`, and the reader pod in media-operator
   turn a controller's events into presses, and none of that is specific
   to media. They could move to an input operator. The focus mark in

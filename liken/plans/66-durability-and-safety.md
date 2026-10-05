@@ -1,17 +1,39 @@
 # Durability and safety in the boot chain, the operators, and CI
 
-Milestone 66. Proposed. A survey of the tree on 2026-09-11 found a set
-of places where `liken`'s own durability and safety rules do not hold
-under a power cut, a failed read, or a build that stopped early. None
-of them has failed in the lab yet. Each one is small. This milestone
-fixes them as one round, because the firmware work in plan 33 depends
-on exactly these code paths, and a firmware trial must not be the
-first test that finds these defects.
+Milestone 66. Proposed, and partly built. A survey of the tree on
+2026-09-11 found a set of places where `liken`'s own durability and
+safety rules do not hold under a power cut, a failed read, or a build
+that stopped early. None of them has failed in the lab yet. Each one is
+small. This milestone fixes them as one round, because the firmware
+work in plan 33 depends on exactly these code paths, and a firmware
+trial must not be the first test that finds these defects.
 
-The round has four parts: the boot chain's writes, init's process
-supervision, the operators' failure paths, and the CRD schema and CI
-workflows. Dependency bumps are not part of it. The stale pins the
-survey listed move on their own schedule.
+This is the one plan for durability and safety in the OS and its CI.
+It holds four open problems in full, with their evidence, safeguards,
+and tests: system disks offered when the facts are missing, and the
+drain skipped on a failed `Node` read (part three), release downloads
+with no bound (part five), and CI executables with no immutable pin
+(part six). Those four documents are deleted.
+
+Status on 2026-10-04:
+
+* Built: init no longer keeps the exit status of every orphan
+  (cadb76f2). The reaper parks a status only for a child that init
+  started and has not yet awaited.
+* Built: every request of the operators' API client has a deadline
+  (3c594a1c, be5dcace, d57451fa). The exception is the release
+  fetchers: `machine-operator/fetch.go` and `releases/fetch.go` still
+  call a bare `http.Get`. Part five covers them.
+* No longer applies: the pipefail item in part four. The release
+  workflow it names was removed (7faa174e). The bucket listing moved
+  into `releases/publish.sh` (ab96344a), which sets `pipefail`.
+* Every other item is not built.
+
+The round has six parts: the boot chain's writes, init's process
+supervision, the operators' failure paths, the CRD schema and CI
+workflows, the release downloads, and the pins on CI executables.
+Dependency bumps are not part of it. The stale pins the survey listed
+move on their own schedule.
 
 ## The rule this milestone enforces
 
@@ -80,7 +102,7 @@ partitioner. Fix the function and the test together.
 
 ## Part two: init supervises processes safely
 
-**Exit statuses of orphans are kept forever.** init is PID 1, so it
+**Exit statuses of orphans are kept forever.** Built in cadb76f2. init is PID 1, so it
 reaps every orphan on the machine. `deathRegistry.record`
 (`init/supervisor.go`) stores each unmatched exit status in a map, and
 only `await` removes an entry. Almost no orphan has a waiter, so the
@@ -137,13 +159,70 @@ the symlink, so the fix runs `mintNodePassword` first.
 ## Part three: the operators refuse instead of guessing
 
 **A facts-read error publishes the machine's own disks as devices.**
-`reconcile.go` publishes the device inventory whenever the Node read
-succeeded, with `facts` nil when the facts read failed.
-`platformBlocks` (`machine-operator/dra.go`) then protects nothing,
-and a claim can allocate the machine's system disk. This is the open
-problem [missing-facts-expose-system-disks](open-problems/missing-facts-expose-system-disks.md).
-The fix is the one that document proposes: with no facts, publish no
-inventory, and say so in status.
+This is a bug of high priority. `reconcile` (`machine-operator/reconcile.go`)
+reads `factsTree.Read()`. An error leaves `facts` nil and sets
+`FactsPublished` to False. The same pass still calls
+`publishDeviceInventory` when the Node read succeeded.
+`platformBlocks(nil)` (`machine-operator/dra.go`) then returns an empty
+protection set, and `inventoryDevices` applies no storage-role
+exclusions. A driven disk with deliverable device nodes can appear in
+the `ResourceSlice` even when it holds system or state partitions, and
+a claim can allocate it.
+
+Claim preparation does not check protection again.
+`prepareClaim` (`machine-operator/draplugin.go`) resolves the
+allocation against current sysfs data and writes the device nodes into
+a CDI spec. `refreshCDISpecs` (`machine-operator/cdi.go`) rewrites
+those specs. Neither one checks whether the nodes back a storage role.
+So the API reports the facts failure, and the device-access path still
+delivers the device.
+
+An attack needs two things: facts that cannot be read, and a workload
+that is authorized to claim a matching `DeviceClass`. Raw disk access
+could expose stored credentials or let the workload corrupt host
+storage. The finding does not show that an ordinary pod can cause the
+facts failure, or claim a disk without permission to claim it.
+
+A temporary fixture with a fake sysfs and API reproduced the path. With
+a protection set of `sda: true`, the inventory excluded the disk. With
+missing facts, the same inventory functions offered it, and preparation
+wrote `/dev/sda` into the CDI spec. The fixture used no live cluster and
+no physical device. The device reference
+(`docs/content/docs/reference/devices.md`) states the intended
+exclusion: system disks are never delivered to workloads.
+
+The fix makes that statement true again:
+
+* Treat storage protection as unknown until the operator knows that
+  its protection set is complete. A non-nil facts object, or a readable
+  subset of roles, does not show that the remaining disks are safe to
+  offer.
+* With no facts, publish no inventory, and say so in status. Skipping
+  publication alone is not enough, because an unsafe earlier offer can
+  stay active, so the operator withdraws the node's inventory. In
+  general, the operator withholds each offer that it cannot show is
+  safe.
+* Check protection again in `prepareClaim` and in the CDI refresh.
+  Publication can lag, API writes can fail, and an allocation may
+  already exist. Unknown protection must not become permission to
+  deliver a device.
+* Keep a memory-backed machine distinct from a failed read. A complete
+  record with no disk-backed roles is different from an incomplete
+  record whose exclusions are unknown.
+
+A possible improvement reads the storage facts apart from the other
+facts. That is safe only if the read produces the complete
+storage-protection set. Keeping only the roles it could read is not
+safe. The fix needs no new `DeviceClass` and no new claim format. A
+facts failure may prevent new device use until protection is known.
+That refusal is better than raw access to an unidentified disk.
+
+The tests cover unreadable facts, incomplete facts, a complete
+memory-backed machine, and a previously published unsafe slice.
+Preparation and refresh must refuse a protected or uncertain device
+even after an allocation succeeded. One test makes the API fail while
+the operator withdraws the offer: the local delivery checks must still
+refuse the device when publication cannot be repaired.
 
 **An empty device walk deletes the ResourceSlice.**
 `EnsureResourceSlice` (`kubernetes/resourceslices.go`) deletes the
@@ -154,14 +233,53 @@ not be read are the same input. The fix is a type change:
 `DiscoverDevices` returns an error, and the slice writer refuses to
 delete on an error.
 
-**The drain is skipped on any failed Node read.** `disruptions.gate`
-(`machine-operator/reconcile.go`) skips the drain whenever the Node
-read failed. The comment gives demotion as the reason, when there is
-no Node to cordon. A 500 or a timeout on one pass has the same effect: an
-approved reboot skips eviction. No test covers the gate. This is the
-open problem [node-read-errors-bypass-draining](open-problems/node-read-errors-bypass-draining.md).
-The fix distinguishes the two: a 404 during a demotion skips the
-drain, and any other error stops the reboot and reports why.
+**The drain is skipped on any failed Node read.** This is a bug of
+medium priority. `disruptions.gate` (`machine-operator/reconcile.go`)
+calls `gateThroughDrain` only when a reboot is requested, the conductor
+granted a turn, and the Node read succeeded. On a timeout, a server
+error, or any other read failure, it leaves `requestReboot` set. The
+comment gives demotion as the reason, when there is no Node to cordon.
+The condition does not distinguish that lifecycle state from an API
+error on a node that still runs workloads.
+
+A 500 or a timeout on one pass has the same effect: an approved reboot
+skips eviction. The machine then follows its shutdown sequence without
+the Eviction API, so no `PodDisruptionBudget` protects its workloads.
+The convergence still reports the normal reboot-requested result, and
+it reports no drain-read failure. No test covers the gate.
+
+A temporary fixture called the gate with a read error, a granted turn,
+and a convergence that requested a reboot. The result still requested
+the reboot, and the gate made no call to the drain client. This
+verifies only the gate's behavior. No live eviction or reboot drill
+ran. The defect is the decision to skip the drain, not the eviction
+step in `machine-operator/drain.go`.
+
+The fix holds the reboot when the Node read fails, unless an explicit,
+expected lifecycle state allows the bypass. A 404 during a demotion
+skips the drain. A bare 404 does not show that demotion caused the
+absence. Any other error stops the reboot, retries the read, and
+reports why through the convergence condition and `NodeObserved`
+below.
+
+The demotion path keeps its order. `carryOutDemotion`
+(`machine-operator/demotion.go`) writes its reboot intent before it
+deletes the Node, because the deletion can terminate its own pod. That
+intent uses the runtime channel on tmpfs, so it does not survive a
+power loss. The fix must not strand a machine whose Node was removed
+on purpose.
+
+The fix needs no new user-facing disruption policy. The five-minute
+`drainDeadline` allows a reboot on purpose when workloads do not leave
+in time. The fix does not change that limit, `rebootPolicy`, or the
+conductor's grant rules. Whether a `PodDisruptionBudget` should block
+a reboot with no limit is a separate policy question.
+
+The tests cover a timeout, a `500`, an unrelated `404`, and the
+explicit demotion path. An unexpected read failure must hold the
+reboot and show in status. A successful retry must resume the drain,
+the existing deadline must still apply, and a demoted machine must
+still reboot and register again after its Node is deleted.
 
 **Conditions this pass did not check get stamped as current.** The
 status writer sets `observedGeneration` on every condition at the end
@@ -174,17 +292,19 @@ the Node. When it is False, the three conditions that depend on the
 Node are written as `Unknown`, with a message that names the read
 error. The drain fix above reports through the same condition.
 
-**No request has a deadline.** `kubernetes/apiclient.go` sets a dial
+**No request has a deadline.** Built in 3c594a1c, be5dcace, and
+d57451fa, as a fifteen-second limit on each request rather than a
+context per pass. The release fetchers remain, in part five.
+`kubernetes/apiclient.go` sets a dial
 timeout, a response-header timeout, and an idle timeout, and no
 timeout on the client or the body read. A server that stalls mid-body
 hangs the reconcile pass, and the heartbeat with it. The comment says
 every wait ends inside the forty-second heartbeat window, and the body
 read is not covered. The fix threads one `context.Context` per pass,
 with a deadline under `HeartbeatRenewAfter`, through every request.
-This is also the cancellation that
-[release-downloads-can-block-upgrades](open-problems/release-downloads-can-block-upgrades.md)
-asks for, and the two bare `http.Get` calls in `fetch.go` move to the
-same client.
+This is also the cancellation that the release downloads in part five
+need, and the two bare `http.Get` calls in `fetch.go` move to the same
+client.
 
 **Two smaller cases of the same rule.** `daemonSetVersion`
 (`cluster-operator/steward.go`) returns an empty string on any error,
@@ -240,7 +360,8 @@ They pass on a workstation because the seed happens to be there. The
 checks workflow fetches the flux domain before the tests, and the
 tests fail instead of skipping when the seed is absent under CI.
 
-**No workflow sets pipefail.** GitHub's default shell for a `run` step
+**No workflow sets pipefail.** No longer applies: see the status
+above. GitHub's default shell for a `run` step
 is `bash -e` without `pipefail`. The release workflow pipes `s3cmd ls`
 through `awk` and `sed` into the file that `liken index` reads. A
 failed listing writes an empty file, and the workflow publishes an
@@ -255,14 +376,6 @@ commit, not a green build run. A commit whose BIOS drill failed can
 be tagged and published, and releases are immutable. The release
 workflow runs both drills.
 
-**The certificate workflow runs an unverified tool with the wider token.** The
-certificate workflow downloads `lego` by version with no digest and
-runs it with the account-wide Linode token, which can write the
-releases bucket. The release upload key is scoped to that bucket
-alone. This is the open problem [ci-executables-need-immutable-pins](../../plans/open-problems/ci-executables-need-immutable-pins.md).
-This milestone commits a SHA-256 for the archive and verifies it
-before extraction, and narrows the token to DNS.
-
 **Two Make gaps ship stale files.** `image/Makefile` lists the
 programs the image copies from each vendored domain, and the comment
 says the list mirrors the root Makefile's. It omits `mke2fs`, so an
@@ -272,9 +385,155 @@ during `mksquashfs` or the licensing render leaves a truncated file
 that is newer than its inputs, which Make then treats as current. Add
 the prerequisite and the declaration.
 
+## Part five: release downloads finish or stop
+
+This is a bug of medium priority. The release fetcher in
+`machine-operator/fetch.go` has one writer. A stalled HTTP download can
+hold that writer indefinitely. A change to the release target or source
+does not cancel the request, so later upgrades cannot start.
+
+**The download has no deadline.** `fetchBytes` and `fetchArtifact`
+call `http.Get` with no deadline for the whole request and no
+cancellation context. The default transport has some connection
+timeouts, but it does not bound the whole response. A server can stop
+sending headers or body bytes and keep the connection open. The
+document and artifact readers limit the number of bytes they consume.
+Those limits stop an oversized download from consuming unlimited
+memory or slot space. They do not limit the time spent waiting for
+bytes. `releases/fetch.go` makes the same two bare calls.
+
+**An obsolete download keeps `busy` set.** `Ensure` permits one active
+download. A changed request resets its snapshot to `Idle`, but `busy`
+stays true until the old goroutine returns. `run` then discards the
+obsolete result, but no code cancels that goroutine. A stalled request
+can therefore block a new version or a corrected source URL
+indefinitely. A retarget does not always cause an indefinite stall. If
+the old download finishes, a later reconcile pass can start the new
+one. Even then, the missing cancellation causes unnecessary waiting
+and writes.
+
+**The stall shows only as a long update.** The download runs apart
+from the reconcile pass, so this fault does not stop the heartbeat.
+The conditions show it: `versionCondition`
+(`machine-operator/release.go`) reports `VersionConverged=False` with
+reason `Downloading`, which `machine-operator/phase.go` maps to
+`Updating`. That state has no time limit, and nothing recovers
+automatically from a permanently stalled request. A restart of the
+operator ends the stuck request, but an upgrade must not depend on a
+person who restarts it.
+
+A temporary local HTTP fixture stalled the response body and then
+changed the target. The new request stayed `Idle` behind the busy
+fetcher. The fixture used no live release service and no cluster.
+
+The fix:
+
+* Bound the waits for response headers and for the body. Use
+  cancellation, and a whole-transfer deadline, a progress deadline, or
+  both. A transfer that makes valid progress over a slow link needs
+  enough time.
+* Cancel an obsolete download when its target or source changes. The
+  reconcile pass does not block while it waits for the writer to stop.
+* Start the next writer only after the previous one has stopped.
+  Remove partial files on cancellation, and retry through the existing
+  re-verification path for completed files.
+* Keep transport failures retryable, keep the corruption hold, and keep
+  streaming artifacts with bounded memory.
+
+The API, the heartbeat behavior, and digest verification stay the
+same. Timeout values need engineering judgment and tests on slow
+transfers. A user-configurable timeout or retry policy is a separate
+interface decision, and the fix for the unbounded wait needs none.
+
+The fix must agree with the open problem
+[staged-slot consistency](open-problems/retargeting-overwrites-staged-releases.md).
+A stopped writer can leave a partially updated slot. Stopping the
+writer does not by itself make that slot safe to boot.
+
+The tests use local servers that stall before the headers and during
+the body. They verify cancellation, retry, and recovery after a changed
+source with no process restart. They assert that the reconcile pass
+stays responsive and that two writers never overlap. They cover the
+removal of partial files, reuse of verified artifacts, slow transfers
+that make progress, and unchanged behavior on a digest mismatch.
+
+## Part six: CI runs only pinned executables
+
+This is supply-chain hardening of medium priority. Two kinds of
+executable input in CI can change at their origin with no reviewed
+change in this repository.
+
+**The certificate workflow runs an unverified tool with the wider
+token.** `.github/workflows/releases-cert.yaml` downloads
+`lego_v5.2.2_linux_amd64.tar.gz` from the `go-acme/lego` GitHub
+release, by version and with no digest. It extracts the binary and runs
+it with `LINODE_TOKEN` set from the `RELEASES_CERT_TOKEN` secret. The
+workflow and `liken.sh/terraform.tf` describe that token as scoped to
+Domains and Object Storage read/write, so it can write the releases
+bucket. The release upload key is scoped to that bucket alone. The
+workflow uses the token for the DNS-01 challenge, and its next step
+uses it again to install the bucket's TLS certificate. Nothing in the
+repository limits the token to one zone. The review did not inspect
+the live credential.
+
+**External actions use mutable tags.** The workflows and
+`.github/actions/build-setup/action.yaml` use tags such as
+`actions/checkout@v7`, `actions/setup-go@v6`, and `actions/cache@v6`.
+`j178/prek-action@v2` is in `ci.yaml` and in each `component-*.yaml`
+workflow. `ci/` writes those workflows from `ci/templates/`, so a pin
+changes in the template, and `make workflows` writes it out. A local
+`uses: ./...` reference comes from the checked-out repository, so it
+needs no upstream SHA.
+
+HTTPS authenticates GitHub and protects the download in transit. It
+does not stop someone from replacing a release asset or moving an
+action tag at its origin. A later run can then execute different code
+with no reviewed pin change in this repository. A replaced `lego`
+asset could expose the cloud token. A replaced action gets the
+permissions and credentials of its job. The review read the workflow
+files and found the missing checks and the mutable references. It
+observed no compromise, and it ran no workflow with live credentials.
+The risk is a compromise at the origin that no review in this
+repository catches. It is not evidence of a TLS bypass.
+
+A checksum fetched beside the executable at run time does not help
+when an attacker can replace both files. A reviewed digest committed
+here, or a signature checked against an independently trusted key,
+gives an integrity check that does not come from that download.
+
+The fix:
+
+* Commit a reviewed SHA-256 for the `lego` archive. Verify it before
+  extraction, and execute only the verified contents. A mismatch must
+  fail before the step that uses the credential. Narrow the token that
+  `lego` gets to DNS.
+* Pin each external action by its full commit SHA, and keep the
+  human-readable version beside it for maintenance. Keep the local
+  composite-action references local.
+* Add a reviewable update process for both kinds of pin. Version
+  reporting can follow
+  [milestone 48](completed/48-check-and-update-dependency-pins.md), but
+  action pins are outside the table that milestone watches.
+
+A pin fixes which upstream bytes run. It does not make them
+trustworthy. The selected bytes and each later pin update still need
+review. Certificate renewal keeps its schedule, and a successful run
+behaves as it does now. The fix does not change the OS release API, and
+it needs no release-signing design. A new trust root for signed OS
+releases is a separate design from the pins on the code these jobs
+execute.
+
+The tests verify that a modified archive fails before extraction and
+before the token is used, and that matching bytes proceed. A check
+confirms that every external action reference has a full commit SHA
+and that the local references stay valid. A rehearsal in an authorized
+workflow run covers a pin update and the certificate handshake check.
+That rehearsal has not run.
+
 ## What this milestone does not do
 
-It does not move any pin. It does not change the CLI's credential
+It does not move any pin to a new version. Part six changes how the
+pins are written and checked, not which versions they name. It does not change the CLI's credential
 handling, the four fetch scripts that take their checksum from the
 same origin, or the reproducibility of the squashfs. Those are real
 problems, and each is a separate round. It does not resolve the open problems it
@@ -304,5 +563,8 @@ Every drill runs under QEMU, and none needs metal.
   must succeed and `unclaimed` must hold one entry.
 * CI: the checks run must show the two seed tests as run, not skipped.
   A release run must show both smoke drills.
+
+The unit tests that parts three, five, and six name run in CI, and
+need no drill.
 
 Both smoke drills stay green, and every existing test stays green.

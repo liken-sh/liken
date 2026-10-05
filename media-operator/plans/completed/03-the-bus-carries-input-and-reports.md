@@ -51,7 +51,7 @@ Many homes
 already run one MQTT broker for Home Assistant and its devices, and a
 second broker beside it is waste. Pointing the operator at an existing
 broker is a mode this plan does not build. It is an open problem,
-`open-problems/the-broker-is-not-configurable.md`, and the topic and
+[`open-problems/the-broker-is-not-ready-to-share.md`](../open-problems/the-broker-is-not-ready-to-share.md), and the topic and
 auth choices below are made so that mode stays reachable.
 
 MQTT is the choice over the one real alternative, NATS, for a reason
@@ -82,7 +82,7 @@ base, and Home Assistant's own discovery topics stay under
 `homeassistant/`, so neither tree constrains the other. A base that
 includes a cluster's name, so several clusters can share one broker
 without collision, is a later refinement the string already allows.
-That refinement is `open-problems/the-broker-is-not-configurable.md`.
+That refinement is [`open-problems/the-broker-is-not-ready-to-share.md`](../open-problems/the-broker-is-not-ready-to-share.md).
 
 * `liken/media/remotes/<namespace>/<name>/events` carries one
   `Remote`'s raw button and axis events. The standing remote pod
@@ -243,7 +243,7 @@ position keeps advancing across the restart.
   points every pod at it, and roots every topic under one fixed base.
   A broker a home already runs, and the cluster name in the base that
   keeps two clusters on that broker apart, are
-  `open-problems/the-broker-is-not-configurable.md`.
+  [`open-problems/the-broker-is-not-ready-to-share.md`](../open-problems/the-broker-is-not-ready-to-share.md).
 * **TLS on the bus.** The in-cluster network is the boundary, and the
   playback pod holds no credential a TLS session would protect.
 * **Home Assistant discovery.** The topic tree and the availability

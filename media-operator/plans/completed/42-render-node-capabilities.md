@@ -6,10 +6,17 @@ and publishes the answer as one `media.liken.sh` device for each
 render node. A claim pairs that device with the `liken.sh` render node
 of the same GPU through `resource.kubernetes.io/pciBusID`, which
 `liken`'s machine operator now publishes. The query ran on a
-workstation's Meteor Lake GPU; the result is at the end. The proof on
-a fleet is still owed, and
-[an open problem](../open-problems/render-node-capabilities-are-unproven-on-a-fleet.md)
-holds it.
+workstation's Meteor Lake GPU; the result is at the end. No cluster
+ran the `media-capabilities` `DaemonSet` for this plan, and no record
+of a fleet drill exists. Four facts were not drilled: that the
+scheduler allocates the agent's `allocationMode: All` claim on render
+nodes that other claims hold; that the kubelet starts a pod whose
+`media.liken.sh` claim prepares no device; that a claim for
+`decodeHEVCMain10` and `scale10bit`, paired by
+`resource.kubernetes.io/pciBusID`, schedules only on a GPU that states
+`scale10bit` and receives its render node; and which value the Coffee
+Lake GPU that failed `scale_vaapi` on 10-bit frames states for
+`scale10bit`.
 
 It follows a failure in library-operator plan 75, where a worker that
 decodes every frame of a film landed on a GPU that could decode the

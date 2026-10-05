@@ -67,7 +67,8 @@ may not boot the complete release that its staged record names.
   from an incomplete download, including after process crashes and power
   loss.
 
-This overlaps with [download cancellation](release-downloads-can-block-upgrades.md).
+This overlaps with [download cancellation](../66-durability-and-safety.md#part-five-release-downloads-finish-or-stop)
+in milestone 66.
 Cancellation does not invalidate a staged record, and it does not make
 files that were already replaced consistent.
 

@@ -103,23 +103,38 @@ Debian's build needs LLVM. `-Dglx=disabled` and
 
 ## What building mesa costs
 
-The `Dockerfile` installs three packages today. A narrow mesa turns the
-closure stage into a source build, and four costs follow from that.
+Today `weston/Dockerfile` builds the closure from Debian packages at
+the snapshot date that `weston/package.toml` states: `weston`,
+`libgl1-mesa-dri`, `wayland-utils`, and `ddcutil`, on the `vulkan`
+base, which installs `mesa-vulkan-drivers` and its own
+`libgl1-mesa-dri`. A narrow mesa turns the closure stage into a source
+build, and four costs follow from that.
 
-* **CI time.** The release workflow spends its time on
-  `apt-get install` and one `go build` today. A mesa build replaces the
-  first of those, and neither its duration nor a cache strategy for it
+LLVM is in the `vulkan` base since plan 16, because the AMD Vulkan
+driver links it. A narrow mesa in the `weston` image alone therefore
+leaves LLVM in the image. The `vulkan` base needs the same decision.
+
+[Plan 72](../../../liken/plans/72-the-os-builds-from-source.md) moves
+the OS's vendored binaries to builds from source, with stagex images
+for the build tools. It leaves the operator images out until their
+builds use that toolchain. A narrow mesa would be a build of the same
+kind, and it could use the same toolchain.
+
+* **CI time.** The `weston` build spends its time on
+  `apt-get install` today, plus two small `gcc` builds of `liken`'s own
+  modules. A mesa build replaces the `apt-get install`, and neither its duration nor a cache strategy for it
   has been measured.
-* **A mesa version to maintain.** Debian's suite pin already fixes
-  weston at 14 and mesa at 25.0.7. A source build replaces the mesa half of that
-  pin with a tag this repository chooses, and this repository then
+* **A mesa version to maintain.** The snapshot date already fixes
+  weston at 14 and mesa at the version in that snapshot. A source
+  build replaces the mesa half of that pin with a tag this repository
+  chooses, and this repository then
   has to follow mesa's security updates itself. Debian issued
   25.0.7-2+deb13u1 as an update. With a source build, this repository
   would not receive the next such update.
 * **The dependency set.** Mesa needs libdrm, wayland-protocols,
   libxkbcommon and more at their build versions, and it needs Rust for
   some options. The build stage needs a list of build dependencies
-  that the three `apt-get install` lines do not install today.
+  that the `apt-get install` lines do not install today.
 * **Libraries from two sources in the tree.** The closure would ship
   mesa from source and weston from Debian, and weston links against Debian's libdrm and
   libwayland. Whether mesa built from source loads correctly beside
@@ -128,8 +143,10 @@ closure stage into a source build, and four costs follow from that.
 ## The release check runs on llvmpipe
 
 The release starts the compositor headless on an ordinary runner with
-no graphics card, and requires `Using GL renderer` and `kiosk-shell.so`
-in the log.
+no graphics card. `weston/smoke/weston.sh` requires three lines in the
+log: `Using GL renderer`, the registration of `ivi_layout_api_v1` that
+`ivi-shell` prints, and the control socket that `liken-layout`
+reports.
 Plan 01 records what that run printed: `GL renderer: llvmpipe (LLVM
 19.1.7)`. llvmpipe is what makes the check possible. A mesa without
 llvmpipe fails that check on the first line it reads.
@@ -150,7 +167,7 @@ There are three options, and none is chosen:
   with_gallium_softpipe or with_gallium_llvmpipe`. Whether weston's
   headless backend starts its GL renderer on softpipe, and how long one
   frame takes, is unverified. Softpipe is slower than llvmpipe by
-  design. But the check starts the compositor and reads two lines from
+  design. But the check starts the compositor and reads three lines from
   the log, so a slower rasterizer costs seconds of runner time and
   does not block the check.
 * **Move the check to hardware.** The
@@ -159,6 +176,8 @@ There are three options, and none is chosen:
   opens the DRI driver for a real card, so a missing `iris_dri.so`
   passes every check the build runs. One machine with an Intel card
   would cover both problems. The release workflow has no such machine.
+  Both open problems end at the same requirement: a release check on a
+  machine with a card.
 
 ## What a narrow driver list costs in coverage
 

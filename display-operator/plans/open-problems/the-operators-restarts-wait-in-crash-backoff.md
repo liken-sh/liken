@@ -109,8 +109,9 @@ part of the 30 s.
 [A stuck mode prepare restarts the compositor without bound](a-stuck-mode-prepare-restarts-the-compositor-without-bound.md)
 is the same backoff at its limit: there, repeated restarts put the
 compositor in minutes of backoff. That problem is about a mode that
-never syncs, and the backoff is the only bound on its loop. This
-problem is about restarts that succeed.
+never syncs. The prepare's restart budget did not stop its loop in the
+drill, so the backoff is the only bound that held. This problem is
+about restarts that succeed.
 
 ## The options
 
@@ -130,7 +131,7 @@ None is chosen.
      namespace
      and must still see each new weston as a new process;
    - a fix for the stuck mode prepare first, because this option
-     removes the only bound that loop has.
+     removes the only bound that held that loop in the drill.
 2. **A supervisor in the sidecar.** A general process supervisor in
    the compositor image restarts weston after every exit, a crash
    included, with its own crash policy. The kubelet's restart count

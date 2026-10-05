@@ -101,10 +101,15 @@ bitstream plays.
 ### Volume
 
 PipeWire cannot scale a bitstream, so mpv's volume and the sink's volume
-do nothing during passthrough. The receiver's own volume does. A
-`Player` whose `Receiver` (equipment-operator) holds its session already
-sends the Player's volume to the receiver over the session's volume
-topic. Passthrough is allowed only for such a `Player`, so a remote's
+do nothing during passthrough. The receiver's own volume does. For a
+`Player` whose `Receiver` (equipment-operator) holds its session,
+media-operator already turns each volume press into an ask in the
+`Receiver`'s `status.session.volumeAsk`, and equipment-operator applies
+the ask to the receiver (`media-operator/volumeengine.go`). For a
+`Player` with no `Receiver`, the same press becomes an ask on its
+`Sink`, which audio-operator applies in PipeWire and a bitstream
+ignores. Passthrough
+will be allowed only for a `Player` with a `Receiver`, so a remote's
 volume buttons keep working. A `Player` with no `Receiver` keeps
 decoding.
 

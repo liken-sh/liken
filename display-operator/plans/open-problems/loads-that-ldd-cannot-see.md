@@ -85,3 +85,7 @@ use both:
 * Start the compositor on a machine with a card. That covers the DRI
   driver and the DRM backend, and it needs hardware the release
   workflow does not have.
+  [LLVM is two thirds of the image](llvm-is-two-thirds-of-the-image.md#the-release-check-runs-on-llvmpipe)
+  can end at the same requirement: a mesa built without llvmpipe
+  fails the headless check, and one of its options moves that check to
+  a machine with a card.

@@ -6,6 +6,20 @@ before any of them is built. It makes no design decision. Each section
 gives the problem, what the spec requires, what `liken` does now, and
 the options with their trade-offs.
 
+The plan was written on 2026-09-29, and the text below is current to
+2026-10-04. Two later changes moved its ground. Commit 3c425c3f, made
+under equipment-operator
+[plan 09](../equipment-operator/plans/completed/09-cec.md), fixed
+gap 1 and gap 5 of the conformance review. A wake's guard now yields
+to a person's routing change, and the deterministic remote functions
+set the state they name. The same commit gave the playback sidecar the
+`play`, `hold`, and `stop` actions that Deck Control needs.
+[Plan 77](completed/77-the-media-bus-stops-at-media-operator.md) took
+equipment-operator off the media bus. The node workload holds no
+broker connection, so any route from it to a `Play` or a `Player` goes
+through `Television` or `Receiver` status, which media-operator
+watches.
+
 The maintainer's standard for CEC is a fully conforming device that is
 a good citizen of the bus and claims the input only when a person asks.
 Each feature below is optional or narrow in the spec, so none is a
@@ -52,26 +66,34 @@ declares no opcode for `<Play>` (0x41) or `<Deck Control>` (0x42), and
 it has no builder for any of the messages this plan sends.
 
 The node workload records one active-source address. `noteSource`
-(`equipment-operator/cecnode_source.go:21`) sets it when the adapter
-hears an `<Active Source>` (`cecnode_adapter.go:542-545`) and when the
-adapter claims the input (`cecnode_source.go:65`). `claimInput`
-(`cecnode_source.go:50`) is the one place that sends `<Active Source>`
+(`equipment-operator/cecnode_source.go:25`) sets it when the adapter
+hears an `<Active Source>` (`cecnode_adapter.go:548-551`) and when the
+adapter sends one itself (`announceSource`, `cecnode_source.go:73`).
+`noteSource` also records the route, and an `<Active Source>` for
+`0.0.0.0` is a route that a person chose. `claimInput`
+(`cecnode_source.go:58`) is the one place that sends `<Active Source>`
 for a person's request.
 
 On the media side, the `Play` status holds a phase, and
 `playActivity` folds the phase and the paused flag into `Starting`,
-`Playing`, `Paused`, `Finished`, or `Failed` (`media-operator/api.go:628-648`).
+`Playing`, `Paused`, `Finished`, or `Failed` (`media-operator/api.go:626-643`).
 The `Player` status reads `Idle` between films
 (`media-operator/playerstatus.go`). The playback sidecar maps key names
 to commands in `playbackKeys` (`media-operator/keybindings.go`). Its
-`actionPause` toggles: `KEY_PLAYPAUSE`, `KEY_PLAY`, `KEY_PAUSE`, and
-`KEY_PLAYCD` all bind to it (`keybindings.go:43-46`). The sidecar has
-no stop action that leaves the `Play` in place. The commands it has
-for ending a run are the home and power presses
+`actionPause` toggles, and `KEY_PLAYPAUSE`, `KEY_PLAY`, and
+`KEY_PAUSE` bind to it (`keybindings.go:58-60`). `KEY_PLAYCD`,
+`KEY_PAUSECD`, and `KEY_STOPCD`, the names `rc-cec` gives a TV
+remote's Play Function, Pause, and Stop Function, bind to `actionPlay`,
+`actionHold`, and `actionStop` (`keybindings.go:62-64`). Play and hold
+set the state they name, so a second press changes nothing
+(`media-operator/input.go`). Stop ends the run and asks the screen
+under it nothing (`media-operator/stop.go`). Home and power also end a
+run, and each sends an ask to the screen under it
 (`media-operator/home.go`, `media-operator/power.go`).
 
-`MediaPreferences` holds `audioLanguages`, `subtitleLanguages`, and
-`timeZone` (`media-operator/api.go:686-694`). The first two select
+`MediaPreferences` holds `audioLanguages`, `subtitleLanguages`,
+`subtitles`, and `timeZone`, with the idle screen policy
+(`media-operator/api.go:681-692`). The first two select
 tracks inside a film. They are not the language of a menu. I found no
 string table or translation code in `library-operator/media-browser`,
 `media-operator/idle`, or `media-screen`, so the screens draw one
@@ -149,9 +171,12 @@ Nothing sends `<Menu Status>`.
      It stays event-driven, with no timer, if it watches the
      `Player`. It adds a second watch to a component that watches
      `Television` and `Receiver` today.
-   - The media operator publishes the menu state on the bus, and the
-     node workload subscribes. This puts the fact next to its owner.
-     It adds a topic that both components must agree on.
+   - The media operator writes the menu state into the `Receiver`'s
+     `status.session`, and the equipment operator's `Deployment` copies
+     it into the `Television`'s session, the path the `Player`'s name
+     already takes. This puts the fact next to its owner. It adds a
+     field that both components must agree on. The node workload cannot
+     subscribe to a topic, because plan 77 took it off the media bus.
    - The node workload derives the state from what it already has:
      `session.Awake` and the active-source address. It adds no
      input, and it cannot tell a menu from a film.
@@ -229,38 +254,42 @@ opcodes `<Play>` and `<Deck Control>` are not declared in
 
 1. Where does each message map in `media-operator`'s commands? The
    commands the sidecar accepts are the actions in
-   `media-operator/input.go:22-39` (`pause`, `mute`, `seek`, `volume`,
-   `chapter`, `subtitles`, `audio`, `info`, and the navigation
-   actions). The candidates:
+   `media-operator/input.go:31-50` (`pause`, `play`, `hold`, `seek`,
+   `chapter`, `subtitles`, `audio`, `info`, `cycle-focus`, and the
+   navigation actions), with `stop`, `home`, and `power`. The
+   candidates:
 
    | Deck message | Candidate command | Gap |
    |---|---|---|
-   | `<Play>` "Play Forward" | resume | `actionPause` toggles. A resume must not pause a playing film, so the sidecar needs a separate resume and pause, or the sender must read the paused flag first. |
-   | `<Play>` "Play Still" | pause | Same gap. |
+   | `<Play>` "Play Forward" | `play` | None. `actionPlay` resumes and never pauses. |
+   | `<Play>` "Play Still" | `hold` | None. `actionHold` pauses and never resumes. |
    | `<Play>` fast modes | `seek` with a step | The sidecar seeks by a fixed step. A speed has no equivalent, and a device "should select the closest match" (CEC Table 13 note). |
-   | `<Deck Control>` "Skip Forward" and "Skip Reverse" | `chapter` +1 and -1 | Fits `actionChapter` (`keybindings.go:51-52`). |
-   | `<Deck Control>` "Stop" | end the `Play` | No stop action exists. Home and power end the run and also send an ask to the screen under it. A plain stop needs a new action. |
+   | `<Deck Control>` "Skip Forward" and "Skip Reverse" | `chapter` +1 and -1 | Fits `actionChapter` (`keybindings.go:69-70`). |
+   | `<Deck Control>` "Stop" | `stop` | None. `actionStop` ends the run and sends no ask to the screen under it (`stop.go`). |
    | `<Deck Control>` "Eject" | none | `liken` has no media tray. |
 
-   The deterministic remote functions of `<User Control Pressed>`
-   (0x60 Play Function, 0x61 Pause-Play Function in CEC Table 6) need the same split between a
-   toggle and an explicit resume or pause. Explicit actions serve both,
-   so the two pieces of work share one decision.
+   Commit 3c425c3f built the split between a toggle and an explicit
+   play or pause for the deterministic remote functions of
+   `<User Control Pressed>`. Deck Control maps onto the same actions,
+   so it needs no new sidecar action.
 2. How does the message reach the `Play`? The equipment operator does
-   not talk to a `Play`. Options:
+   not talk to a `Play`, and since plan 77 it holds no broker
+   connection. So the route passes through `Television` or `Receiver`
+   status, and media-operator relays it. The `Television`'s
+   `status.screenAsk` already carries a screen ask this way: the node
+   workload writes it, and media-operator publishes it on the
+   `Player`'s power topic (`media-operator/screenask.go`). Options:
    - Reuse the path of `<User Control Pressed>`: the kernel turns the
      key into an input event, and `media-operator` reads the device.
      `<Play>` and `<Deck Control>` are not keys, so the kernel does
      not turn them into events, and the follower would have to
      synthesize one. That gives the sidecar no new interface, but it
      invents a key that no remote sends.
-   - Publish a command on the `Player`'s commands topic from the node
-     workload, the way `media-screen` publishes the power toggle. This
-     is direct. It makes the equipment operator a producer on a topic
-     that only the screens and sidecars publish to today.
-   - Write a field the media operator watches, such as a request on
-     `Receiver` status. This fits the cluster's own resources and
-     adds latency.
+   - Write a deck ask in `Television` status beside `screenAsk`, and
+     let media-operator publish it on the `Play`'s commands topic as
+     `play`, `hold`, `stop`, or `chapter`. This reuses the shape of
+     the screen ask relay, and adds one field and one relay. A status
+     write and a watch add latency over a direct publish.
 3. What does the deck report as `<Deck Status>`? The `Play` activity
    maps to Play (0x11, `Playing`), Still (0x14, `Paused`), and No
    Media (0x19, no `Play`). Nothing in the CEC set maps to `Starting`
@@ -392,9 +421,10 @@ No screen has a translation, as the section above states.
 - The rule for claiming the input. All three features send only replies
   to the TV and never `<Active Source>`. Two answers depend on being the
   active source (`<Menu Status>`, and by the standard, any wake from
-  `<Play>`). The active-source state is the state that gap 1 of the
-  conformance review says is wrong after a routing change. Menu Control
-  is only as right as that state, so the fix for gap 1 comes before it.
+  `<Play>`). Gap 1 of the conformance review said that the
+  active-source state was wrong after a routing change. Menu Control
+  is only as right as that state. Commit 3c425c3f fixed gap 1, so this
+  dependency is met.
 - A reason on every refusal. `<Feature Abort>` reasons other than
   "Unrecognized opcode" (`equipment-operator/cec/message.go`, the
   `AbortUnrecognizedOpcode` reason at the call in `follower.go:102`)
@@ -417,9 +447,11 @@ differ.
   the drawing half owed until a screen has a translation.
 - **Menu Control second.** It carries the most risk of a person's
   remote not working, and the smallest set of messages. Its correct
-  form depends on the active-source fix and on the reader question.
-- **Deck Control last.** It needs new sidecar actions (resume, pause,
-  and stop), a route from the node workload to a `Play`, and a
+  form depends on the reader question. The active-source fix is
+  built.
+- **Deck Control last.** It needs no new sidecar action, because
+  `play`, `hold`, and `stop` exist. It needs a route from the node
+  workload to a `Play` through `Television` or `Receiver` status, and a
   decision on waking. It has the most parts, and the least evidence
   of need, since the first drill's TV sent keys for navigation and no
   transport keys were tested.
@@ -438,10 +470,10 @@ differ.
 
 - System Audio Control, which equipment-operator plan 09 covers.
 - The deterministic remote functions of `<User Control Pressed>`
-  (gap 5 of the conformance review). Deck Control shares its sidecar
-  actions, but the key mapping is separate work.
+  (gap 5 of the conformance review). Commit 3c425c3f built them, and
+  Deck Control uses the sidecar actions they added.
 - The active-source state after a routing change (gap 1 of the
-  conformance review), except as a dependency of Menu Control.
+  conformance review). Commit 3c425c3f fixed it.
 - A menu in any language other than the one the screens draw now.
   Writing translations is a different plan.
 
@@ -461,8 +493,10 @@ rows there. The drill is owed for all three.
 - Node workload tests: the recorded language reaches its status field;
   a `<Play>` and a `<Deck Control>` reach the route that question 2 of
   Deck Control chooses.
-- Sidecar tests: each new action (resume, pause, stop) acts on a `Play`
-  and does not toggle.
+- Sidecar tests: the tests of `play`, `hold`, and `stop`
+  (`media-operator/input_test.go`, `media-operator/stop_test.go`)
+  already cover the actions a deck message reaches. A new test covers
+  the relay from `Television` status to the `Play`'s commands topic.
 - A drill on a `Player` with a `Receiver` and a TV:
   - The TV's menu language changes, and `kubectl` shows the new value.
   - With the browser on the screen, `<Menu Request>` "Query" from the

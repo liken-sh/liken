@@ -158,9 +158,9 @@ failed on the image bump (-006). A new `Library` got no walk until its
 departure cycled forever (-007). The first-walk rule read a `Job`'s
 pods and not its verdict, and started a second walk between a failed
 pod and its retry (-008). One finding stays open: a fresh agent's
-first version reaches the catalog pod minutes after the rest, the
-[open problem](../open-problems/a-fresh-agents-first-version-arrives-late.md)
-that costs a new `Library` one echo timeout on its first walk.
+first version reaches the catalog pod minutes after the rest, an open
+problem that costs a new `Library` one echo timeout on its first walk.
+The `confirmer` closed that open problem on 2026-09-16.
 
 ## What is set aside
 

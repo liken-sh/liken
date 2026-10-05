@@ -13,11 +13,16 @@ The export itself is simple. A pod with a `Corrosion` sidecar joins
 the progress cluster and syncs. Then `corrosion backup <path>` writes a
 `VACUUM INTO` copy with the per-actor tables cleared, ready for
 `corrosion restore`. The difficult part is knowing when that copy is
-current. A fresh agent's first version arrives late (see the [open
-problem](open-problems/a-fresh-agents-first-version-arrives-late.md)),
-sync fills gaps in no fixed order, and nothing in the file says "every
-row the cluster has is here". A backup taken a minute after the
-sidecar starts can be missing a week of rows.
+current. Sync fills gaps in no fixed order, and nothing in the file
+says "every row the cluster has is here". A backup taken a minute
+after the sidecar starts can be missing a week of rows.
+
+A scan `Job` has the same problem for one run, and `confirmer.go`
+solves it. The `confirmer` container in a catalog pod reads
+`crsql_db_versions` and `__corro_bookkeeping_gaps` on its own copy. It
+confirms a run only after that copy holds every version of the writing
+agent up to the version the run names. A backup needs the same test
+for every agent in the progress cluster, not for one agent.
 
 Restore has a similar problem. A restored file with a stale site id or
 a truncated clock table would gossip its state back into a live

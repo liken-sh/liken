@@ -80,7 +80,7 @@ authorization design.
 
 The design must cover issuance, rotation, revocation, and recovery before
 the machine operator starts. This overlaps with the credential requirements
-of the [static-pod candidate](system-image-versioning.md). A per-node
+of the [static-pod candidate](system-pods-lag-the-booted-release.md#the-static-pod-candidate). A per-node
 certificate with no other change fixes neither permissions nor
 scheduling.
 

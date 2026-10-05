@@ -139,6 +139,9 @@ Assistant `denonavr` library and other community code send.
 `denon/AGENTS.md` records that the X1700H reads and sets the `SSHOS`
 family, including HDMI Control, ARC, and Pow.Off Control. The first
 draft of this plan said those had no read, which was wrong.
+display-operator's open problem
+[a receiver pulses the hotplug line for hours](../../display-operator/plans/open-problems/a-receiver-pulses-the-hotplug-line-for-hours.md)
+needs the `hdmi.passThrough` value that `SSHOSPAS` reads.
 
 The control port is the primary path. The HTTP interface is used for a
 field the control port cannot reach. Its remote-key codes are presses,

@@ -545,3 +545,27 @@ costs.
   cache entry is the larger of the two: it holds whole SDP records
   hex-encoded, and for a BLE device it holds the GATT database as
   well.
+
+## An LE restore, observed on 2026-10-02
+
+The drill used one DualSense over BR/EDR, so it tested neither of the
+two LE claims above: the settle window before the snapshot, which keeps
+`[General] AddressType` with the key, and the `cache` entry, which
+holds an LE device's GATT database under `[Attributes]`.
+
+One restore on a home cluster covers part of them, outside a drill. A
+T6 remote, an LE remote that sends its keys over HID-over-GATT, was
+bonded to the machine. Its address has the form of a static random
+address. A restart of the operator pod stopped bluetoothd, which runs
+as a sidecar, so the whole pod ended. The new pod's init container
+wrote the bond tree from the `Secret` objects into a new `emptyDir`.
+The next press reconnected the remote 27 s after the restart, and the
+kernel created its HID devices, the same as on a good reconnect
+([a-connected-controller-can-have-no-input.md](../open-problems/a-connected-controller-can-have-no-input.md)).
+So the snapshot of that bond held a correct `AddressType` and its key.
+
+This is one success on one device. The remote had reconnected on that
+bond more than ten hours before, so the restore says nothing about a
+snapshot taken soon after a pairing. The logs do not show whether
+bluetoothd used the restored GATT database or ran GATT discovery
+again.
