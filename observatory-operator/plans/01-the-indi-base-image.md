@@ -81,10 +81,12 @@ the version that `indiserver` reports about itself, which
 [indi#2335](https://github.com/indilib/indi/issues/2335) found
 disagreeing once.
 
-The Ubuntu image has no CA bundle, and the snapshot services redirect
-to HTTPS. The builder stage needs a CA bundle and
-`Acquire::https::CAInfo` before its first `apt-get update`. The final
-image carries neither.
+The Ubuntu image has no CA bundle, and the snapshot services answer
+only over HTTPS. The builder fetches Mozilla's bundle from curl.se with
+`ADD --checksum`, so the build reads the same file every time, and
+`indi/snapshot.sh` points apt at it and at both snapshots before the
+first `apt-get`. CI refuses a pinned stage that runs apt before a
+`snapshot.sh`. The final images carry no bundle, except `indi-open`.
 
 ## Measurements
 

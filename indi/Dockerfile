@@ -14,18 +14,14 @@
 FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7 AS builder
 ARG VERSION
 # The snapshot services answer only over HTTPS, and the Ubuntu image
-# has no CA bundle. apt installs one from the archive the image names,
-# over HTTP, and verifies it by the archive's signature like any other
-# package. The bundle stays in the builder; no image ships it except
-# indi-open, which copies it for its weather drivers.
+# has no CA bundle. Mozilla's bundle, as curl.se publishes it, comes in
+# by its checksum, so the build fetches the same file every time. It
+# stays in the builder; only indi-open ships it, for its weather drivers.
+ADD --chmod=644 --checksum=sha256:a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505 \
+    https://curl.se/ca/cacert-2026-09-25.pem /etc/apt/cacert.pem
 COPY mutlaqja.asc /etc/apt/trusted.gpg.d/mutlaqja.asc
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && snapshot="$VERSION"T000000Z \
-    && sed -i "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/$snapshot/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/$snapshot/|" \
-        /etc/apt/sources.list.d/ubuntu.sources \
-    && printf 'Types: deb\nURIs: https://snapshot.ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/%s\nSuites: resolute\nComponents: main\nSigned-By: /etc/apt/trusted.gpg.d/mutlaqja.asc\n' "$snapshot" \
-        > /etc/apt/sources.list.d/mutlaqja.sources \
+COPY snapshot.sh /snapshot.sh
+RUN sh /snapshot.sh "$VERSION" \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         indi-bin \
