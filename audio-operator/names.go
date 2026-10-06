@@ -46,6 +46,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -210,6 +212,23 @@ func (i *endpointInventory) publish(outputs []alsaEndpoint) {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	i.endpoints = endpoints
+}
+
+// sinkNames answers the device name of each playback endpoint the
+// inventory holds, in order. A nil inventory holds none.
+func (i *endpointInventory) sinkNames() []string {
+	if i == nil {
+		return nil
+	}
+	i.mutex.RLock()
+	defer i.mutex.RUnlock()
+	var names []string
+	for _, name := range slices.Sorted(maps.Keys(i.endpoints)) {
+		if !i.endpoints[name].Capture {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // lookup resolves one device name to the endpoint it names. A name

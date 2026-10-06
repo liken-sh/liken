@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -153,22 +154,24 @@ func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 }
 
 func TestTheCapturedEventNamesTheCertificatesUser(t *testing.T) {
-	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	authority := newClientAuthority(t)
+	synctest.Test(t, func(t *testing.T) {
+		harness := newAPIHarness(t)
+		harness.holds("kitchen", "node-1", drillPipeWireNode)
+		authority := newClientAuthority(t)
 
-	answer := harness.callOver(t, tapRoute,
-		authority.verified(t, "admin", []string{"system:masters"}), http.Header{})
-	_, _ = io.Copy(io.Discard, answer.Body)
+		answer := harness.callOver(t, tapRoute,
+			authority.verified(t, "admin", []string{"system:masters"}), http.Header{})
+		_, _ = io.Copy(io.Discard, answer.Body)
 
-	written := harness.cluster.recorded()
-	if len(written) != 1 {
-		t.Fatalf("%d events were written", len(written))
-	}
-	want := "admin captured the audio of this Sink as wav"
-	if written[0].Message != want {
-		t.Errorf("the event reads %q, want %q", written[0].Message, want)
-	}
+		written := harness.cluster.recorded()
+		if len(written) != 1 {
+			t.Fatalf("%d events were written", len(written))
+		}
+		want := "admin captured the audio of this Sink as wav"
+		if written[0].Message != want {
+			t.Errorf("the event reads %q, want %q", written[0].Message, want)
+		}
+	})
 }
 
 func TestTheCertificateComesBeforeTheToken(t *testing.T) {

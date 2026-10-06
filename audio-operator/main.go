@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -278,6 +279,10 @@ func operate() {
 		asks:      asks,
 		poke:      wake,
 	}
+	// The one recorder of the operator container. It posts the Events
+	// about this machine's Sinks and Sources, with the pod's name as
+	// reportingInstance.
+	operator.control.recorder = events.New(ctx, client, operatorComponent, events.Options{})
 
 	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {
 		fatal("waiting for PipeWire: %v", err)

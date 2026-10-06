@@ -16,7 +16,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,6 +115,10 @@ type reconciler struct {
 
 	// layoutReport keeps a failure of the layout step to one line.
 	layoutReport string
+
+	// layoutWriteFailure keeps a declaration that did not write to one
+	// line and one Event on each Sink for each run of passes.
+	layoutWriteFailure string
 
 	// endpoints is what the last pass read from the hardware, keyed by
 	// device name. The DRA plugin resolves a prepare call's device
@@ -243,10 +249,22 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 		r.sinkFailures++
 		r.readings.observationFailed(sourcePipeWire)
 		fmt.Fprintf(os.Stderr, "reading PipeWire's graph, %d in a row: %v\n", r.sinkFailures, err)
+		// The first failure of a run posts the Event, not the last:
+		// the last one ends the process, and a queued Event does not
+		// outlive it.
+		if r.sinkFailures == 1 {
+			r.control.warnSinks(r.sinkNames(), reasonPipeWireLost, fmt.Sprintf(
+				"PipeWire did not answer a graph read: %v; after %d failed reads in a row, the operator taints every output and restarts",
+				err, maxSinkFailures))
+		}
 		if r.sinkFailures >= maxSinkFailures {
 			return fmt.Errorf("PipeWire has not answered %d graph reads in a row: %w", r.sinkFailures, err)
 		}
 		return nil
+	}
+	if r.sinkFailures > 0 {
+		r.control.noteSinks(r.sinkNames(), reasonPipeWireRecovered, fmt.Sprintf(
+			"PipeWire answers a graph read again, after %d that failed", r.sinkFailures))
 	}
 	r.sinkFailures = 0
 	r.readings.observationSucceeded(sourcePipeWire)
@@ -314,6 +332,8 @@ func (r *reconciler) pairedSpeakers() map[string]speaker {
 			r.speakerFailure = true
 			fmt.Fprintf(os.Stderr, "reading bluetoothd's paired set: %v; "+
 				"the %d speaker(s) it last reported publish tainted\n", err, len(r.lastSpeakers))
+			r.control.warnSinks(speakerSinks(r.lastSpeakers), reasonBluetoothUnavailable, fmt.Sprintf(
+				"bluetoothd did not answer a read of the paired speakers: %v; the speaker publishes tainted until it answers", err))
 		}
 		return r.lastSpeakers
 	}
@@ -321,9 +341,29 @@ func (r *reconciler) pairedSpeakers() map[string]speaker {
 	if r.speakerFailure {
 		r.speakerFailure = false
 		fmt.Fprintf(os.Stderr, "bluetoothd answers again with %d speaker(s)\n", len(speakers))
+		r.control.noteSinks(speakerSinks(speakers), reasonBluetoothAvailable,
+			"bluetoothd answers a read of the paired speakers again")
 	}
 	r.lastSpeakers = speakers
 	return speakers
+}
+
+// sinkNames answers the Sinks this machine publishes: each playback
+// endpoint of the card, from the last pass's inventory, and each
+// speaker bluetoothd last reported. PipeWire carries the sound of
+// every one of them.
+func (r *reconciler) sinkNames() []string {
+	names := r.endpoints.sinkNames()
+	return append(names, speakerSinks(r.lastSpeakers)...)
+}
+
+// speakerSinks answers the Sink name of each speaker, in order.
+func speakerSinks(speakers map[string]speaker) []string {
+	names := make([]string, 0, len(speakers))
+	for _, address := range slices.Sorted(maps.Keys(speakers)) {
+		names = append(names, speakerName(address))
+	}
+	return names
 }
 
 // taintEverything publishes the card's outputs with every one of them

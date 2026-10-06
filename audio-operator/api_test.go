@@ -10,10 +10,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 // clusterFake stands in for the API server: the two reviews, the two
@@ -31,8 +34,10 @@ type clusterFake struct {
 
 	sinks    map[string]Sink
 	sources  map[string]Source
-	events   []event
 	accesses []accessReview
+
+	// events holds the Events the API posted.
+	events *eventstest.Events
 
 	server *apiservertest.Server
 }
@@ -50,8 +55,9 @@ func newClusterFake(t *testing.T) *clusterFake {
 		allowed: true,
 		sinks:   map[string]Sink{},
 		sources: map[string]Source{},
+		events:  &eventstest.Events{},
 	}
-	fake.server = apiservertest.Start(t, http.HandlerFunc(fake.serve))
+	fake.server = apiservertest.Start(t, fake.events.Around(http.HandlerFunc(fake.serve)))
 	return fake
 }
 
@@ -92,21 +98,18 @@ func (f *clusterFake) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(&held)
-	case strings.HasSuffix(r.URL.Path, "/events"):
-		var written event
-		_ = json.NewDecoder(r.Body).Decode(&written)
-		f.events = append(f.events, written)
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(&written)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
 }
 
-func (f *clusterFake) recorded() []event {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]event(nil), f.events...)
+// recorded answers the Events the API posted, once the recorder has
+// written every one it queued. The caller runs in a synctest bubble,
+// where synctest.Wait returns when the recorder's goroutine waits on
+// an empty queue.
+func (f *clusterFake) recorded() []events.Event {
+	synctest.Wait()
+	return f.events.List()
 }
 
 // reviewed is every SubjectAccessReview the API sent. A test reads
@@ -264,9 +267,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	server.relay.client = container.server.Client()
 	server.relay.scheme = "http"
 	server.relay.address = strings.TrimPrefix(apiservertest.Host, "http://")
-	server.event = func(kind, name, uid, aspect, format, who string, at time.Time) error {
-		return recordCapture(client, kind, name, uid, aspect, format, who, at)
-	}
+	server.recorder = events.New(t.Context(), client, apiComponent, events.Options{Log: io.Discard})
 	harnessLines := &loggedLines{}
 	server.log = harnessLines.add
 	server.pods.put(samplePod("node-1"))

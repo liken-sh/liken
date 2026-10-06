@@ -27,6 +27,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // levelWrite is one write of a level: the volume as a percent of
@@ -105,10 +107,15 @@ type nodeRecord struct {
 }
 
 // actuate writes what the declaration and the endpoint disagree on.
-func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading endpoint) error {
+// A spec it refuses posts one SpecRefused Warning on the resource for
+// each run of passes that refuses the same values, because a person
+// wrote the spec and the endpoint does not take it.
+func (e *endpointControl) actuate(ctx context.Context, object events.ObjectReference, spec declaration, reading endpoint) error {
 	name := reading.facts.Name
 	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts))
-	e.report(name, refusals)
+	if said := e.report(name, refusals); said != "" {
+		e.recorder.Warning(object, reasonSpecRefused, said)
+	}
 	err := e.apply(ctx, reading, writes)
 	record, seen := e.nodes[name]
 	switch {

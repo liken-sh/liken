@@ -44,9 +44,13 @@ rules:
   - apiGroups: [audio.liken.sh]
     resources: [sinks, sources]
     verbs: [get]
+  # One Captured Event for each tap, in the default namespace, because
+  # a Sink and a Source are cluster-scoped. The recorder patches the
+  # count when the same caller taps the same aspect again within 10
+  # minutes.
   - apiGroups: [""]
     resources: [events]
-    verbs: [create]
+    verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

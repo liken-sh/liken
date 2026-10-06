@@ -5,16 +5,12 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 )
 
-// sinkServer is an API server that holds some Sinks and records the
-// Events it receives.
+// sinkServer is an API server that holds some Sinks.
 type sinkServer struct {
-	sinks  map[string]Sink
-	mutex  sync.Mutex
-	events []event
+	sinks map[string]Sink
 }
 
 func (s *sinkServer) handler() http.Handler {
@@ -27,14 +23,6 @@ func (s *sinkServer) handler() http.Handler {
 				return
 			}
 			_ = json.NewEncoder(w).Encode(sink)
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/events"):
-			var posted event
-			_ = json.NewDecoder(r.Body).Decode(&posted)
-			s.mutex.Lock()
-			s.events = append(s.events, posted)
-			s.mutex.Unlock()
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte("{}"))
 		default:
 			http.Error(w, "unexpected", http.StatusBadRequest)
 		}
@@ -73,31 +61,5 @@ func TestTheDeclareContainerFallsBackWhenTheSinksDoNotRead(t *testing.T) {
 	}
 	if specs := apiSpecs(testClient(t, failingAPI()), "liken-1", outputs); specs != nil {
 		t.Errorf("specs = %v from an API server that refused", specs)
-	}
-}
-
-// A spec.layout that a person writes reaches the declaration, and the
-// change is recorded as one Event on the Sink.
-func TestASpecLayoutRewritesTheDeclarationAndRecordsAnEvent(t *testing.T) {
-	operator, endpoints := layoutReconciler(t)
-	analog := endpoints[1]
-	quad := []string{"FL", "FR", "RL", "RR"}
-	server := &sinkServer{sinks: map[string]Sink{
-		analog.Name(): {Metadata: EndpointMeta{Name: analog.Name(), UID: "uid-1"}, Spec: SinkSpec{Layout: quad}},
-	}}
-	operator.control = &endpointControl{client: testClient(t, server.handler()), machine: "node-1"}
-
-	states := operator.reconcileLayouts(endpoints, pwGraph{})
-	want := channelLayout{Source: layoutFromSpec, Positions: quad}
-	if state := states[analog.Name()]; !state.Layout.equal(want) {
-		t.Errorf("the analog sink reports %s, want %s", state.Layout, want)
-	}
-	if len(server.events) != 1 {
-		t.Fatalf("events = %+v, want one", server.events)
-	}
-	recorded := server.events[0]
-	if recorded.Reason != layoutChangedReason || recorded.InvolvedObject.UID != "uid-1" ||
-		!strings.Contains(recorded.Message, "from no positions to FL,FR,RL,RR from Spec") {
-		t.Errorf("the event is %+v", recorded)
 	}
 }

@@ -115,51 +115,55 @@ func TestATapAddsTheFourHeadersTheAPIOwns(t *testing.T) {
 }
 
 func TestATapThatProducedBytesWritesACapturedEvent(t *testing.T) {
-	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac", nil)
-	_, _ = io.Copy(io.Discard, answer.Body)
+	synctest.Test(t, func(t *testing.T) {
+		harness := newAPIHarness(t)
+		harness.holds("kitchen", "node-1", drillPipeWireNode)
+		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac", nil)
+		_, _ = io.Copy(io.Discard, answer.Body)
 
-	written := harness.cluster.recorded()
-	if len(written) != 1 {
-		t.Fatalf("%d events were written", len(written))
-	}
-	if written[0].Reason != capturedReason || written[0].Type != "Normal" {
-		t.Errorf("the event is %s/%s", written[0].Reason, written[0].Type)
-	}
-	if written[0].InvolvedObject.Kind != SinkKind || written[0].InvolvedObject.Name != "kitchen" {
-		t.Errorf("the event is about %+v", written[0].InvolvedObject)
-	}
-	if !strings.Contains(written[0].Message, "listener") ||
-		!strings.Contains(written[0].Message, "audio") {
-		t.Errorf("the message is %q, and it must name the subject and the aspect",
-			written[0].Message)
-	}
+		written := harness.cluster.recorded()
+		if len(written) != 1 {
+			t.Fatalf("%d events were written", len(written))
+		}
+		if written[0].Reason != reasonCaptured || written[0].Type != "Normal" {
+			t.Errorf("the event is %s/%s", written[0].Reason, written[0].Type)
+		}
+		if written[0].InvolvedObject.Kind != SinkKind || written[0].InvolvedObject.Name != "kitchen" {
+			t.Errorf("the event is about %+v", written[0].InvolvedObject)
+		}
+		if !strings.Contains(written[0].Message, "listener") ||
+			!strings.Contains(written[0].Message, "audio") {
+			t.Errorf("the message is %q, and it must name the subject and the aspect",
+				written[0].Message)
+		}
+	})
 }
 
 func TestAHeadTakesNoSampleAndMakesNoPrivateCall(t *testing.T) {
-	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	answer := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the HEAD answered %s", answer.Status)
-	}
-	if got := answer.Header.Get("Content-Type"); got != "audio/wav" {
-		t.Errorf("the HEAD says Content-Type: %q", got)
-	}
-	if got := answer.Header.Get("Content-Disposition"); got == "" {
-		t.Error("the HEAD carries no Content-Disposition")
-	}
-	body, _ := io.ReadAll(answer.Body)
-	if len(body) != 0 {
-		t.Errorf("the HEAD carried %d bytes", len(body))
-	}
-	if called := harness.container.called(); len(called) != 0 {
-		t.Errorf("the HEAD called the container %d times", len(called))
-	}
-	if written := harness.cluster.recorded(); len(written) != 0 {
-		t.Errorf("the HEAD wrote %d events", len(written))
-	}
+	synctest.Test(t, func(t *testing.T) {
+		harness := newAPIHarness(t)
+		harness.holds("kitchen", "node-1", drillPipeWireNode)
+		answer := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		if answer.StatusCode != http.StatusOK {
+			t.Fatalf("the HEAD answered %s", answer.Status)
+		}
+		if got := answer.Header.Get("Content-Type"); got != "audio/wav" {
+			t.Errorf("the HEAD says Content-Type: %q", got)
+		}
+		if got := answer.Header.Get("Content-Disposition"); got == "" {
+			t.Error("the HEAD carries no Content-Disposition")
+		}
+		body, _ := io.ReadAll(answer.Body)
+		if len(body) != 0 {
+			t.Errorf("the HEAD carried %d bytes", len(body))
+		}
+		if called := harness.container.called(); len(called) != 0 {
+			t.Errorf("the HEAD called the container %d times", len(called))
+		}
+		if written := harness.cluster.recorded(); len(written) != 0 {
+			t.Errorf("the HEAD wrote %d events", len(written))
+		}
+	})
 }
 
 func TestAHeadOnAnErrorCarriesNoBody(t *testing.T) {

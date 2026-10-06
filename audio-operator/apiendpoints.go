@@ -211,14 +211,11 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	body := newIdleReader(answer.Body, idleTimeout, started.Add(knobs.Span.Begin))
 	body.watch(stop)
 	defer body.stopWatching()
-	// The event is written on the first block, not at the end: an
-	// open-ended tap runs for hours, and kubectl describe has to
+	// The Event is posted on the first block, not at the end: an
+	// open-ended tap runs for hours, and `kubectl describe` has to
 	// answer who is listening while they still are.
 	sent, copyErr := copyFlushing(w, body, func() {
-		if err := s.event(held.Kind, held.Name, held.UID, route.Aspect,
-			form.Extension, who.Username, at); err != nil {
-			fmt.Fprintf(os.Stderr, "writing the Captured event for %s: %v\n", held.Name, err)
-		}
+		s.recordCapture(held.Kind, held.Name, held.UID, route.Aspect, form.Extension, who.Username)
 	})
 	streamed := s.now().Sub(started)
 

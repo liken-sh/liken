@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -72,6 +73,11 @@ type endpointControl struct {
 	// registry takes every call here and drops it, which is what the
 	// tests that build a controller by hand run with.
 	readings *metrics
+
+	// recorder posts the Events about this machine's Sinks and
+	// Sources. A nil recorder posts nothing, which is what the tests
+	// that assert no Event run with.
+	recorder *events.Recorder
 
 	// nodes is what this operator remembers about each endpoint's
 	// node: the PipeWire object id it had when the operator last
@@ -351,7 +357,7 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 		return err
 	}
 	e.noteAsk(sink)
-	actuated := e.actuate(ctx, sink.Spec.declaration(), reading)
+	actuated := e.actuate(ctx, endpointReference(SinkKind, sink.Metadata.Name, sink.Metadata.UID), sink.Spec.declaration(), reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
 	e.latest[reading.facts.Name] = reading.facts
 	e.recordEndpoint(reading)
@@ -377,7 +383,7 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 	if err != nil {
 		return err
 	}
-	actuated := e.actuate(ctx, source.Spec.declaration(), reading)
+	actuated := e.actuate(ctx, endpointReference(SourceKind, source.Metadata.Name, source.Metadata.UID), source.Spec.declaration(), reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
 	e.recordEndpoint(reading)
 	now := e.now()
@@ -406,18 +412,20 @@ func (e *endpointControl) recordEndpoint(reading endpoint) {
 
 // report prints one line for each run of passes that finds the same
 // trouble with one endpoint, and clears the record when the trouble
-// is gone.
-func (e *endpointControl) report(name string, failures []string) {
+// is gone. It answers the line when it printed one, and "" when the
+// trouble is gone or was reported already.
+func (e *endpointControl) report(name string, failures []string) string {
 	if len(failures) == 0 {
 		delete(e.refusals, name)
-		return
+		return ""
 	}
 	said := strings.Join(failures, "; ")
 	if e.refusals[name] == said {
-		return
+		return ""
 	}
 	e.refusals[name] = said
 	fmt.Fprintf(os.Stderr, "%s: %s\n", name, said)
+	return said
 }
 
 // sameStatus reports whether the published status already says what

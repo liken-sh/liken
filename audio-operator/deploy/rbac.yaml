@@ -61,13 +61,15 @@ rules:
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]
-  # One Event on a Sink for each channel layout change the operator
-  # applies (layoutdrift.go), so kubectl describe sink shows when
-  # PipeWire restarted and why. Events about a cluster-scoped object
-  # go in the default namespace, and the operator never reads them.
+  # The Events on the Sinks and the Sources: each condition
+  # transition, each channel layout change, and each fault that
+  # changes no condition (eventreasons.go). Events about a
+  # cluster-scoped object go in the default namespace. The recorder
+  # creates an Event and patches its count when the same Event repeats
+  # within 10 minutes, and it never reads one.
   - apiGroups: [""]
     resources: [events]
-    verbs: [create]
+    verbs: [create, patch]
   # The capture container answers audio-api and nothing else, and it
   # proves the caller with a TokenReview, which is a create on a
   # review object rather than a read. The audience on that token is

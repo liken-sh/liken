@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -20,8 +21,14 @@ import (
 // their capabilities and the pass is the same pass.
 func testEndpointControl(t *testing.T, api *endpointAPI, record *writeRecord) *endpointControl {
 	t.Helper()
+	return controlOver(t, api.handler(t), record)
+}
+
+// controlOver builds the same controller over any fake API server.
+func controlOver(t *testing.T, api http.Handler, record *writeRecord) *endpointControl {
+	t.Helper()
 	control := recordingControl(record)
-	control.client = testClient(t, api.handler(t))
+	control.client = testClient(t, api)
 	control.machine = "liken-1"
 	control.claims = &preparedClaims{}
 	control.now = func() time.Time { return factsTime }

@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
@@ -392,7 +393,7 @@ func TestTheSweepLeavesOutASinkTheAPIServerNoLongerHolds(t *testing.T) {
 }
 
 // conditionOf answers the status of one condition, or nothing.
-func conditionOf(status EndpointStatus, kind string) string {
+func conditionOf(status EndpointStatus, kind string) conditions.Status {
 	for _, held := range status.Conditions {
 		if held.Type == kind {
 			return held.Status

@@ -55,11 +55,21 @@ type compose func(published EndpointStatus) (EndpointStatus, bool)
 // again from what it holds, so a resource that another machine took in
 // the meantime is left alone. A Sink the API server no longer holds
 // answers apiclient.ErrNotFound.
+//
+// A write that lands posts one Event for each condition it changed
+// (endpointevents.go). The compose function runs again after a
+// conflict, so the Events come from the composition the API server
+// accepted.
 func (e *endpointControl) settleSinkStatus(sink *Sink, want compose) error {
-	_, err := patchSinkStatus(e.client, e.cache.sinks.Versions, sink, func(published EndpointStatus) (EndpointStatus, bool) {
-		status, ours := want(published)
-		return status, ours && !sameStatus(published, status)
+	var published, written EndpointStatus
+	wrote, err := patchSinkStatus(e.client, e.cache.sinks.Versions, sink, func(held EndpointStatus) (EndpointStatus, bool) {
+		status, ours := want(held)
+		published, written = held, status
+		return status, ours && !sameStatus(held, status)
 	})
+	if wrote && err == nil {
+		e.postTransitions(endpointReference(SinkKind, sink.Metadata.Name, sink.Metadata.UID), published, written)
+	}
 	return err
 }
 
@@ -67,13 +77,18 @@ func (e *endpointControl) settleSinkStatus(sink *Sink, want compose) error {
 // writes a Sink's. A Source has one writer, so the write replaces the
 // whole status.
 func (e *endpointControl) settleSourceStatus(source *Source, want compose) error {
-	_, err := informer.SettleStatus(e.client, e.cache.sources.Versions, sourcePath(source.Metadata.Name), source, func(held *Source) bool {
+	var published, written EndpointStatus
+	wrote, err := informer.SettleStatus(e.client, e.cache.sources.Versions, sourcePath(source.Metadata.Name), source, func(held *Source) bool {
 		status, ours := want(held.Status)
 		if !ours || sameStatus(held.Status, status) {
 			return false
 		}
+		published, written = held.Status, status
 		held.APIVersion, held.Kind, held.Status = EndpointAPIVersion, SourceKind, status
 		return true
 	})
+	if wrote && err == nil {
+		e.postTransitions(endpointReference(SourceKind, source.Metadata.Name, source.Metadata.UID), published, written)
+	}
 	return err
 }

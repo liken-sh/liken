@@ -33,6 +33,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -80,9 +81,8 @@ type apiServer struct {
 	// name instead of a moving one.
 	now func() time.Time
 
-	// event writes the Captured record. A field so a test reads what
-	// was written with no API server behind it.
-	event func(kind, name, uid, aspect, format, who string, at time.Time) error
+	// recorder posts the Captured Events.
+	recorder *events.Recorder
 
 	// log is where the one line per request goes. It is a field for
 	// the same reason.
@@ -100,6 +100,7 @@ func serveAPI() {
 	}
 	namespace := podNamespace()
 	server := newAPIServer(client, namespace)
+	server.recorder = events.New(ctx, client, apiComponent, events.Options{})
 
 	// The certificates come before the listener: the API serves the
 	// public leaf, and the container's leaf has to exist before the
@@ -177,9 +178,6 @@ func newAPIServer(client *apiclient.Client, namespace string) *apiServer {
 		readings:   newAPIMetrics(version),
 		publicBase: os.Getenv(publicBaseVariable),
 		now:        time.Now,
-		event: func(kind, name, uid, aspect, format, who string, at time.Time) error {
-			return recordCapture(client, kind, name, uid, aspect, format, who, at)
-		},
 	}
 }
 

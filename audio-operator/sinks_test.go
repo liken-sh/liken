@@ -274,13 +274,13 @@ func TestConditionsKeepTheirTimestampUntilTheyChange(t *testing.T) {
 
 	conditions := setCondition(nil, condition(ConnectedCondition, true, "MonitorPresent", "a monitor answers", first))
 	conditions = setCondition(conditions, condition(ConnectedCondition, true, "MonitorPresent", "a monitor answers", later))
-	if got := conditions[0].LastTransitionTime; got != first.Format(time.RFC3339) {
-		t.Errorf("an unchanged condition moved its timestamp to %q", got)
+	if got := conditions[0].LastTransitionTime; !got.Equal(first) {
+		t.Errorf("an unchanged condition moved its timestamp to %s", got)
 	}
 
 	conditions = setCondition(conditions, condition(ConnectedCondition, false, "NoMonitor", "no monitor answers", later))
-	if got := conditions[0].LastTransitionTime; got != later.Format(time.RFC3339) {
-		t.Errorf("a condition that changed kept the timestamp %q", got)
+	if got := conditions[0].LastTransitionTime; !got.Equal(later) {
+		t.Errorf("a condition that changed kept the timestamp %s", got)
 	}
 	if len(conditions) != 1 {
 		t.Errorf("conditions = %+v, want the one type", conditions)

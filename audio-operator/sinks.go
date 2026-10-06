@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // The API group is the driver's own name, so one domain names the
@@ -56,8 +58,8 @@ const (
 // The two states a condition takes here. Unknown is never written:
 // the operator either read the endpoint or it did not.
 const (
-	conditionTrue  = "True"
-	conditionFalse = "False"
+	conditionTrue  = conditions.True
+	conditionFalse = conditions.False
 )
 
 // Sink is one playback endpoint.
@@ -256,37 +258,21 @@ type EndpointClaim struct {
 	Name      string `json:"name,omitempty"`
 }
 
-// EndpointCondition is the standard condition shape, held here for
-// the reason the slice structs are held here: this program writes
-// these fields and no others.
-type EndpointCondition struct {
-	Type               string `json:"type"`
-	Status             string `json:"status"`
-	Reason             string `json:"reason"`
-	Message            string `json:"message,omitempty"`
-	LastTransitionTime string `json:"lastTransitionTime"`
-}
+// EndpointCondition is the condition type every liken component
+// reports. Its JSON matches the CRDs' schema: lastTransitionTime is an
+// RFC 3339 date-time, an empty message is a valid string, and the
+// schema prunes nothing, because this operator states no
+// observedGeneration and the field is omitted when it is zero.
+type EndpointCondition = conditions.Condition
 
-// setCondition replaces the condition of one type and keeps the
-// timestamp when nothing about it changed. A timestamp that moved on
-// every pass would make every pass a write.
-func setCondition(conditions []EndpointCondition, next EndpointCondition) []EndpointCondition {
-	for index, current := range conditions {
-		if current.Type != next.Type {
-			continue
-		}
-		if current.Status == next.Status && current.Reason == next.Reason && current.Message == next.Message {
-			return conditions
-		}
-		if current.Status == next.Status {
-			next.LastTransitionTime = current.LastTransitionTime
-		}
-		updated := make([]EndpointCondition, len(conditions))
-		copy(updated, conditions)
-		updated[index] = next
-		return updated
-	}
-	return append(conditions, next)
+// setCondition answers the list with next in place of the condition
+// of its type, and keeps the transition time while the status holds
+// (conditions.Set). It answers a copy, because the caller composes
+// from the published status, and sameStatus compares the two.
+func setCondition(list []EndpointCondition, next EndpointCondition) []EndpointCondition {
+	updated := slices.Clone(list)
+	conditions.Set(&updated, next)
+	return updated
 }
 
 // condition builds one condition from the fact it reports.
@@ -300,7 +286,7 @@ func condition(kind string, met bool, reason, message string, now time.Time) End
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
-		LastTransitionTime: now.UTC().Format(time.RFC3339),
+		LastTransitionTime: now.UTC().Truncate(time.Second),
 	}
 }
 

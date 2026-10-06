@@ -29,8 +29,6 @@ import (
 	"maps"
 	"os"
 	"time"
-
-	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
 // layoutRestartGrace is how long after writing a new declaration a
@@ -48,10 +46,6 @@ const (
 	layoutReasonAwaitingIdle = "AwaitingIdle"
 	layoutReasonRestarting   = "Restarting"
 )
-
-// layoutChangedReason is the reason of the Event each restart writes
-// on each Sink whose layout changes.
-const layoutChangedReason = "LayoutChanged"
 
 // layoutState is what one sink's status reports about its layout: the
 // layout the declaration holds, and whether PipeWire runs it.
@@ -119,12 +113,13 @@ func (r *reconciler) reconcileLayouts(endpoints []alsaEndpoint, graph pwGraph) m
 	default:
 		next, err := r.applyLayouts(nodes, declared, changes)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "writing the new layouts: %v\n", err)
+			r.reportLayoutWrite(changes, err)
 			for _, change := range changes {
 				waiting[change.Endpoint.Name()] = change
 			}
 			break
 		}
+		r.layoutWriteFailure = ""
 		declared = next
 	}
 	return r.layoutStates(endpoints, declared, waiting)
@@ -149,12 +144,7 @@ func (r *reconciler) applyLayouts(nodes []declaredNode, declared map[nodeAddress
 		message := fmt.Sprintf("the channel layout changes from %s to %s; "+
 			"the kubelet restarts the PipeWire container to apply it", change.From, change.To)
 		fmt.Printf("%s: %s\n", change.Endpoint.Name(), message)
-		if r.control == nil {
-			continue
-		}
-		if err := r.control.recordSinkEvent(change.Endpoint.Name(), layoutChangedReason, message); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: writing the %s event: %v\n", change.Endpoint.Name(), layoutChangedReason, err)
-		}
+		r.control.noteSinks([]string{change.Endpoint.Name()}, reasonLayoutChanged, message)
 	}
 	return next, nil
 }
@@ -221,16 +211,23 @@ func (r *reconciler) awaitingRestart() bool {
 	return !r.restartRequested.IsZero() && time.Since(r.restartRequested) < layoutRestartGrace
 }
 
-// recordSinkEvent writes one Event on a Sink, with the UID the watch
-// holds for it, because kubectl describe selects a resource's Events
-// by its UID. A Sink whose UID does not read still gets the Event,
-// with no UID.
-func (e *endpointControl) recordSinkEvent(name, reason, message string) error {
-	uid := ""
-	if sink, err := informer.ReadOne[Sink](e.client, e.cache.sinks, name, sinkPath(name)); err == nil {
-		uid = sink.Metadata.UID
+// reportLayoutWrite reports a declaration that did not write, once
+// for each run of passes that meets the same error: one line, and one
+// Warning on each Sink whose layout waits for the write. The next pass
+// tries the write again, and a write that lands clears the report.
+func (r *reconciler) reportLayoutWrite(changes []layoutChange, err error) {
+	line := fmt.Sprintf("writing the new layouts: %v", err)
+	if line == r.layoutWriteFailure {
+		return
 	}
-	return postEvent(e.client, SinkKind, name, uid, reason, message, operatorComponent, time.Now())
+	r.layoutWriteFailure = line
+	fmt.Fprintln(os.Stderr, line)
+	names := make([]string, 0, len(changes))
+	for _, change := range changes {
+		names = append(names, change.Endpoint.Name())
+	}
+	r.control.warnSinks(names, reasonLayoutWriteFailed,
+		fmt.Sprintf("the operator could not write the new channel layout, and the sink keeps its layout: %v", err))
 }
 
 // playing reports whether a link touches any node this operator

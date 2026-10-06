@@ -423,7 +423,7 @@ kubelet restarts the PipeWire container. The restart ends every
 stream on the machine, so the operator waits until no stream plays.
 `LayoutApplied` is `False` with the reason `AwaitingIdle` while it
 waits, and with the reason `Restarting` until the new PipeWire
-starts. Each change writes one `LayoutChanged` event on the `Sink`,
+starts. Each change posts one `LayoutChanged` `Event` on the `Sink`,
 which names the old layout, the new one, and the source.
 
 Two things the operator does not do:
@@ -437,3 +437,44 @@ Two things the operator does not do:
 * It does not pass a bitstream through. A receiver that plays height
   speakers from Dolby Atmos or DTS:X needs the compressed stream,
   and the operator sends PCM. Passthrough is a separate design.
+
+## Events
+
+The operator posts a Kubernetes `Event` on a `Sink` for each change
+of a condition and for each action it takes. A `Sink` is
+cluster-scoped, so its `Event`s are in the `default` namespace.
+`kubectl describe sink` shows them. `kubectl events --for` shows them
+only with `-n default` or `-A`:
+
+    kubectl events -n default --for sink/<name>
+
+The API server deletes an `Event` one hour after its last write, so
+the conditions and the operator's log hold the facts for longer. The
+operator patches the count of an `Event` that repeats within 10
+minutes, in place of a new `Event`.
+
+Each condition change posts one `Event` with the condition's own
+reason and message, such as `NoMonitor`, `JackEmpty`, or
+`AwaitingIdle`. The first status write posts one for each condition.
+A change of `Ready` to `False` is a `Warning` while `Connected` is
+`True`, because sound can leave the endpoint and PipeWire holds no
+node to send it through. Every other condition change is `Normal`: a
+television that turns off and a plug pulled from a jack are things a
+person does.
+
+The operator posts these reasons for the actions and faults that
+change no condition:
+
+| Reason | Type | When |
+|---|---|---|
+| `LayoutChanged` | `Normal` | The operator wrote a new channel layout, and the kubelet restarts the PipeWire container to apply it. |
+| `LayoutWriteFailed` | `Warning` | The operator could not write the declaration that holds a new layout. The sink keeps its layout, and each pass tries the write again. |
+| `SpecRefused` | `Warning` | The `spec` states a value the endpoint does not take, such as a codec the speaker does not offer. The message names each refused value. |
+| `PipeWireLost` | `Warning` | A read of PipeWire's graph failed. After 3 failed reads in a row, the operator taints every output and restarts. |
+| `PipeWireRecovered` | `Normal` | PipeWire answers a graph read again, after one or more that failed. |
+| `BluetoothUnavailable` | `Warning` | On a speaker's `Sink`: `bluetoothd` did not answer a read of the paired speakers. The speaker publishes with a taint until it answers. |
+| `BluetoothAvailable` | `Normal` | On a speaker's `Sink`: `bluetoothd` answers again. |
+| `Captured` | `Normal` | The capture API returned the audio of the `Sink` to a caller. The message names the caller and the format. |
+
+A fault posts once when the operator first meets it, not once for
+each pass that meets it again.

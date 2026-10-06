@@ -2,108 +2,37 @@ package main
 
 // The record a person reads with kubectl.
 //
-// Every request that produces bytes writes a Kubernetes Event on the
+// Every request that produces bytes posts a Kubernetes Event on the
 // Sink or the Source: reason Captured, type Normal, with the caller
-// and the aspect in the message, so kubectl describe sink answers who
+// and the aspect in the message, so `kubectl describe sink` answers who
 // listened and when. The log line is the detail record and never
-// carries the token. The operator container writes Events of its own
-// through the same function, one for each layout change.
-//
-// A Sink and a Source are cluster-scoped and an Event is namespaced,
-// so the Event goes in default, which is where Kubernetes puts the
-// Events of its own cluster-scoped objects, such as a Node, and where
-// kubectl describe finds them.
+// carries the token.
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"time"
 
-	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// capturedReason is the one reason this API writes.
-const capturedReason = "Captured"
-
-// eventNamespace is where an Event about a cluster-scoped object
-// lands.
-const eventNamespace = "default"
-
 // apiComponent is this process's name on liken_build_info and on every
-// Event it writes.
+// Event it posts.
 const apiComponent = "audio-api"
 
-// event is the part of a core/v1 Event this API writes.
-type event struct {
-	APIVersion     string         `json:"apiVersion"`
-	Kind           string         `json:"kind"`
-	Metadata       eventMeta      `json:"metadata"`
-	InvolvedObject involvedObject `json:"involvedObject"`
-	Reason         string         `json:"reason"`
-	Message        string         `json:"message"`
-	Type           string         `json:"type"`
-	Source         eventSource    `json:"source"`
-	FirstTimestamp string         `json:"firstTimestamp"`
-	LastTimestamp  string         `json:"lastTimestamp"`
-	Count          int            `json:"count"`
-}
-
-type eventMeta struct {
-	GenerateName string `json:"generateName"`
-	Namespace    string `json:"namespace"`
-}
-
-type involvedObject struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Name       string `json:"name"`
-	UID        string `json:"uid,omitempty"`
-}
-
-type eventSource struct {
-	Component string `json:"component"`
-}
-
-// recordCapture writes one Captured event. A failure here is reported
-// and never fails the request: the sound is already on the wire, and
-// the log line holds the same record.
-func recordCapture(client *apiclient.Client, kind, name, uid, aspect, format, who string, at time.Time) error {
-	return postEvent(client, kind, name, uid, capturedReason,
-		fmt.Sprintf("%s captured the %s of this %s as %s", who, aspect, kind, format), apiComponent, at)
-}
-
 // operatorComponent is the operator container's name on every Event it
-// writes, such as the LayoutChanged event in layoutdrift.go.
+// posts.
 const operatorComponent = "audio-operator"
 
-// postEvent writes one Normal Event about a Sink or a Source.
-func postEvent(client *apiclient.Client, kind, name, uid, reason, message, component string, at time.Time) error {
-	stamp := at.UTC().Format(time.RFC3339)
-	body, err := json.Marshal(&event{
-		APIVersion: "v1",
-		Kind:       "Event",
-		Metadata: eventMeta{
-			GenerateName: name + ".",
-			Namespace:    eventNamespace,
-		},
-		InvolvedObject: involvedObject{
-			APIVersion: EndpointAPIVersion,
-			Kind:       kind,
-			Name:       name,
-			UID:        uid,
-		},
-		Reason:         reason,
-		Message:        message,
-		Type:           "Normal",
-		Source:         eventSource{Component: component},
-		FirstTimestamp: stamp,
-		LastTimestamp:  stamp,
-		Count:          1,
-	})
-	if err != nil {
-		return err
-	}
-	return client.RequestJSON(http.MethodPost,
-		"/api/v1/namespaces/"+eventNamespace+"/events", body, nil)
+// endpointReference names a Sink or a Source for an Event. The UID is
+// what `kubectl describe` selects a resource's Events by, so an Event
+// with no UID reaches `kubectl get events` but not the describe output.
+func endpointReference(kind, name, uid string) events.ObjectReference {
+	return events.ObjectReference{APIVersion: EndpointAPIVersion, Kind: kind, Name: name, UID: uid}
+}
+
+// recordCapture posts one Captured Event. The recorder queues it and
+// never fails the request: the sound is already on the wire, and the
+// log line holds the same record.
+func (s *apiServer) recordCapture(kind, name, uid, aspect, format, who string) {
+	s.recorder.Normal(endpointReference(kind, name, uid), reasonCaptured,
+		fmt.Sprintf("%s captured the %s of this %s as %s", who, aspect, kind, format))
 }
