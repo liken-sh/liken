@@ -1,9 +1,9 @@
 # 13, Procedures on conditions
 
-Proposed on 2026-10-06. Steps 1 to 4 and step 6 built on 2026-10-06,
-and tested against the fake API server and the fake INDI servers.
-Step 5, `job`, is not built. The drill on the test cluster has not
-run.
+Proposed on 2026-10-06. Built on 2026-10-06, all six steps, and
+tested against the fake API server and the fake INDI servers. The
+drill on the test cluster has not run, so nothing here was measured
+on real machines.
 
 ## The problem
 
@@ -258,6 +258,35 @@ Step 4 settled these:
   transition. A trigger whose `when` names nothing records one failed
   run with no `since`.
 
+Step 5 settled these:
+
+- `job` is a field of `ActionBase`, so the action of every kind has
+  it, and the test of the procedure schema holds its schema equal in
+  every CRD. An action names exactly one of its kind's actions and
+  `job`, and a kind with no action of its own accepts only `job`.
+- The `Job`'s name is the resource, the trigger, and a hash of the
+  resource, the trigger, the transition time, and the action's index
+  in the run, because one run can hold two `job` actions. A `Job` of
+  that name that is older than the run belongs to an earlier run of
+  the same transition, such as a failed activation that the retry
+  annotation runs again. The operator deletes it, with the propagation
+  policy `Background` so its pod goes too, and creates a new one. An
+  operator that stops after it creates a `Job` and before the status
+  writer records the run starts a new run on restart, and that run
+  replaces the `Job`, so the job can run twice in that window.
+- The action's own variables come first in the environment, and a
+  variable that the operator sets replaces one of the same name.
+- `deploy/namespace.yaml` states no Pod Security level, so a
+  cluster's default applies. The `Job`'s container meets
+  `restricted`, the strictest: user 1000, no capabilities, no
+  privilege escalation, and the `RuntimeDefault` seccomp profile. Its
+  root filesystem is read-only with a writable `/tmp`, as every pod of
+  the operator's is. The pod carries no `managed-by` label, because
+  the operator's pod watch selects by it.
+- A deactivation that ends a trigger's run leaves its `Job` running
+  until the `Job` ends or its `activeDeadlineSeconds` passes, as it
+  leaves a park that a driver runs.
+
 ## What this removes
 
 - `Observatory.spec.policies`, all four fields.
@@ -321,7 +350,7 @@ lifecycle code:
 4. **`triggers` and `for`.** The example closes the dome when
    its weather station reports unsafe for any length of time, and
    opens it after 20 minutes of safe weather. Built on 2026-10-06.
-5. **`job`.**
+5. **`job`.** Built on 2026-10-06.
 6. **The defects** from the drills, under "Also in scope". All four
    were fixed on 2026-10-06.
 

@@ -1,9 +1,9 @@
 package main
 
 // The watches. One watch follows each of the 20 kinds of the group in
-// the operator's namespace, and three more follow the pods, the
-// Services, and the ConfigMaps the operator created, selected by its
-// label. All of them run
+// the operator's namespace, and four more follow the pods, the
+// Services, the ConfigMaps, and the Jobs the operator created,
+// selected by its label. All of them run
 // on client-go's reflector through the shared informer package. A
 // handler only wakes the operator, and each goroutine that waits reads
 // the stores again: the supervisor, the status writer, and each
@@ -61,6 +61,7 @@ var (
 	podsResource       = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 	servicesResource   = schema.GroupVersionResource{Version: "v1", Resource: "services"}
 	configMapsResource = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+	jobsResource       = schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}
 )
 
 // stores holds the copy of each watched collection.
@@ -69,6 +70,7 @@ type stores struct {
 	pods       *informer.Collection
 	services   *informer.Collection
 	configMaps *informer.Collection
+	jobs       *informer.Collection
 	// synced counts the watches whose first read is in their store.
 	synced atomic.Int32
 	// version counts the changes to the stores. It moves after a store
@@ -121,8 +123,8 @@ func listOf[T any](s *stores, collection *informer.Collection) []T {
 }
 
 // watchCount is the number of watches: the 20 kinds, the pods, the
-// Services, and the ConfigMaps.
-var watchCount = int32(len(observatory.Kinds) + 3)
+// Services, the ConfigMaps, and the Jobs.
+var watchCount = int32(len(observatory.Kinds) + 4)
 
 // startWatches opens every watch. Each change notifies changed, and so
 // does the end of each watch's first read.
@@ -146,10 +148,11 @@ func startWatches(ctx context.Context, client dynamic.Interface, namespace strin
 	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, Namespace: namespace, LabelSelector: own}, options)
 	s.services = informer.Start(ctx, client, informer.Source{Resource: servicesResource, Namespace: namespace, LabelSelector: own}, options)
 	s.configMaps = informer.Start(ctx, client, informer.Source{Resource: configMapsResource, Namespace: namespace, LabelSelector: own}, options)
+	s.jobs = informer.Start(ctx, client, informer.Source{Resource: jobsResource, Namespace: namespace, LabelSelector: own}, options)
 	for _, c := range s.kinds {
 		s.copies[c] = &copies{}
 	}
-	s.copies[s.pods], s.copies[s.services], s.copies[s.configMaps] = &copies{}, &copies{}, &copies{}
+	s.copies[s.pods], s.copies[s.services], s.copies[s.configMaps], s.copies[s.jobs] = &copies{}, &copies{}, &copies{}, &copies{}
 	return s
 }
 
@@ -164,6 +167,7 @@ func (s *stores) done() {
 	<-s.pods.Done()
 	<-s.services.Done()
 	<-s.configMaps.Done()
+	<-s.jobs.Done()
 }
 
 // wakeOnAnyChange wakes the operator for every add, update, and
@@ -194,6 +198,7 @@ func (s *stores) snapshot(namespace string) *tree {
 		pods:          map[string]*pod{},
 		services:      map[string]*service{},
 		configMaps:    map[string]*configMap{},
+		jobs:          map[string]*job{},
 	}
 	for _, kind := range observatory.DeviceKinds {
 		for _, object := range listOf[deviceObject](s, s.kinds[kind]) {
@@ -208,6 +213,9 @@ func (s *stores) snapshot(namespace string) *tree {
 	}
 	for _, files := range listOf[configMap](s, s.configMaps) {
 		t.configMaps[files.Metadata.Name] = &files
+	}
+	for _, j := range listOf[job](s, s.jobs) {
+		t.jobs[j.Metadata.Name] = &j
 	}
 	return t
 }

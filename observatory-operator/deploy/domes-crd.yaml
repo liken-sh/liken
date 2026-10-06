@@ -178,10 +178,11 @@ spec:
                   items:
                     type: object
                     description: >-
-                      One action, which names `state`.
+                      One action, which names exactly one of `state` and
+                      `job`.
                     x-kubernetes-validations:
-                      - rule: "has(self.state)"
-                        message: "an action of a Dome names state"
+                      - rule: "[has(self.state), has(self.job)].filter(x, x).size() == 1"
+                        message: "an action of a Dome names exactly one of state and job"
                     properties:
                       state:
                         type: string
@@ -191,6 +192,88 @@ spec:
                           written to `DOME_PARK`. A park that the driver
                           reports already is not sent again. The default
                           timeout is 10 minutes.
+                      job:
+                        type: object
+                        required: [image]
+                        description: >-
+                          A container that the operator runs once as a
+                          Kubernetes `Job` in the operator's namespace,
+                          for what no other action does, such as
+                          switching a dew heater's relay or posting to a
+                          webhook. The resource owns the `Job`. The
+                          action is `Done` when the `Job` succeeds, and
+                          `Failed` with the `Job`'s reason and message
+                          when it fails. The `Job` has no retry, and its
+                          `activeDeadlineSeconds` is the action's
+                          timeout. Kubernetes deletes it an hour after
+                          it ends. The environment adds
+                          `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE` for a
+                          resource of a telescope, `LIKEN_RESOURCE` such
+                          as `Dome/lab`, `LIKEN_TRIGGER` such as
+                          `activation` or `triggers[0]`, and `INDI_HOST`
+                          and `INDI_PORT` of the resource's INDI server.
+                          The container runs as user 1000 with no
+                          capabilities, on a read-only root filesystem
+                          with a writable `/tmp`. The default timeout is
+                          10 minutes.
+                        properties:
+                          image:
+                            type: string
+                            minLength: 1
+                            maxLength: 512
+                            description: >-
+                              The container image, used as written, such
+                              as `busybox:1.37`.
+                          command:
+                            type: array
+                            maxItems: 32
+                            description: >-
+                              The command that replaces the image's
+                              entrypoint, as a container's `command`
+                              does. Optional.
+                            items:
+                              type: string
+                              maxLength: 4096
+                          args:
+                            type: array
+                            maxItems: 64
+                            description: >-
+                              The arguments of the command, as a
+                              container's `args` are. Optional.
+                            items:
+                              type: string
+                              maxLength: 4096
+                          env:
+                            type: array
+                            maxItems: 32
+                            description: >-
+                              Variables that the operator adds to the
+                              container's environment before its own, as
+                              `{name, value}`. A variable that has the
+                              name of one of the operator's own is
+                              replaced by the operator's. Optional.
+                            x-kubernetes-list-type: map
+                            x-kubernetes-list-map-keys: [name]
+                            items:
+                              type: object
+                              required: [name, value]
+                              description: >-
+                                One variable.
+                              properties:
+                                name:
+                                  type: string
+                                  minLength: 1
+                                  maxLength: 256
+                                  pattern: "^[-._a-zA-Z][-._a-zA-Z0-9]*$"
+                                  description: >-
+                                    The variable's name, such as
+                                    `RELAY_URL`.
+                                value:
+                                  type: string
+                                  maxLength: 32768
+                                  description: >-
+                                    The variable's value. It can be
+                                    empty.
                       timeout:
                         type: string
                         maxLength: 32
@@ -299,10 +382,11 @@ spec:
                   items:
                     type: object
                     description: >-
-                      One action, which names `state`.
+                      One action, which names exactly one of `state` and
+                      `job`.
                     x-kubernetes-validations:
-                      - rule: "has(self.state)"
-                        message: "an action of a Dome names state"
+                      - rule: "[has(self.state), has(self.job)].filter(x, x).size() == 1"
+                        message: "an action of a Dome names exactly one of state and job"
                     properties:
                       state:
                         type: string
@@ -312,6 +396,88 @@ spec:
                           written to `DOME_PARK`. A park that the driver
                           reports already is not sent again. The default
                           timeout is 10 minutes.
+                      job:
+                        type: object
+                        required: [image]
+                        description: >-
+                          A container that the operator runs once as a
+                          Kubernetes `Job` in the operator's namespace,
+                          for what no other action does, such as
+                          switching a dew heater's relay or posting to a
+                          webhook. The resource owns the `Job`. The
+                          action is `Done` when the `Job` succeeds, and
+                          `Failed` with the `Job`'s reason and message
+                          when it fails. The `Job` has no retry, and its
+                          `activeDeadlineSeconds` is the action's
+                          timeout. Kubernetes deletes it an hour after
+                          it ends. The environment adds
+                          `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE` for a
+                          resource of a telescope, `LIKEN_RESOURCE` such
+                          as `Dome/lab`, `LIKEN_TRIGGER` such as
+                          `activation` or `triggers[0]`, and `INDI_HOST`
+                          and `INDI_PORT` of the resource's INDI server.
+                          The container runs as user 1000 with no
+                          capabilities, on a read-only root filesystem
+                          with a writable `/tmp`. The default timeout is
+                          10 minutes.
+                        properties:
+                          image:
+                            type: string
+                            minLength: 1
+                            maxLength: 512
+                            description: >-
+                              The container image, used as written, such
+                              as `busybox:1.37`.
+                          command:
+                            type: array
+                            maxItems: 32
+                            description: >-
+                              The command that replaces the image's
+                              entrypoint, as a container's `command`
+                              does. Optional.
+                            items:
+                              type: string
+                              maxLength: 4096
+                          args:
+                            type: array
+                            maxItems: 64
+                            description: >-
+                              The arguments of the command, as a
+                              container's `args` are. Optional.
+                            items:
+                              type: string
+                              maxLength: 4096
+                          env:
+                            type: array
+                            maxItems: 32
+                            description: >-
+                              Variables that the operator adds to the
+                              container's environment before its own, as
+                              `{name, value}`. A variable that has the
+                              name of one of the operator's own is
+                              replaced by the operator's. Optional.
+                            x-kubernetes-list-type: map
+                            x-kubernetes-list-map-keys: [name]
+                            items:
+                              type: object
+                              required: [name, value]
+                              description: >-
+                                One variable.
+                              properties:
+                                name:
+                                  type: string
+                                  minLength: 1
+                                  maxLength: 256
+                                  pattern: "^[-._a-zA-Z][-._a-zA-Z0-9]*$"
+                                  description: >-
+                                    The variable's name, such as
+                                    `RELAY_URL`.
+                                value:
+                                  type: string
+                                  maxLength: 32768
+                                  description: >-
+                                    The variable's value. It can be
+                                    empty.
                       timeout:
                         type: string
                         maxLength: 32
@@ -483,10 +649,11 @@ spec:
                         items:
                           type: object
                           description: >-
-                            One action, which names `state`.
+                            One action, which names exactly one of
+                            `state` and `job`.
                           x-kubernetes-validations:
-                            - rule: "has(self.state)"
-                              message: "an action of a Dome names state"
+                            - rule: "[has(self.state), has(self.job)].filter(x, x).size() == 1"
+                              message: "an action of a Dome names exactly one of state and job"
                           properties:
                             state:
                               type: string
@@ -497,6 +664,92 @@ spec:
                                 park that the driver reports already is
                                 not sent again. The default timeout is
                                 10 minutes.
+                            job:
+                              type: object
+                              required: [image]
+                              description: >-
+                                A container that the operator runs once
+                                as a Kubernetes `Job` in the operator's
+                                namespace, for what no other action
+                                does, such as switching a dew heater's
+                                relay or posting to a webhook. The
+                                resource owns the `Job`. The action is
+                                `Done` when the `Job` succeeds, and
+                                `Failed` with the `Job`'s reason and
+                                message when it fails. The `Job` has no
+                                retry, and its `activeDeadlineSeconds`
+                                is the action's timeout. Kubernetes
+                                deletes it an hour after it ends. The
+                                environment adds `LIKEN_OBSERVATORY`,
+                                `LIKEN_TELESCOPE` for a resource of a
+                                telescope, `LIKEN_RESOURCE` such as
+                                `Dome/lab`, `LIKEN_TRIGGER` such as
+                                `activation` or `triggers[0]`, and
+                                `INDI_HOST` and `INDI_PORT` of the
+                                resource's INDI server. The container
+                                runs as user 1000 with no capabilities,
+                                on a read-only root filesystem with a
+                                writable `/tmp`. The default timeout is
+                                10 minutes.
+                              properties:
+                                image:
+                                  type: string
+                                  minLength: 1
+                                  maxLength: 512
+                                  description: >-
+                                    The container image, used as
+                                    written, such as `busybox:1.37`.
+                                command:
+                                  type: array
+                                  maxItems: 32
+                                  description: >-
+                                    The command that replaces the
+                                    image's entrypoint, as a container's
+                                    `command` does. Optional.
+                                  items:
+                                    type: string
+                                    maxLength: 4096
+                                args:
+                                  type: array
+                                  maxItems: 64
+                                  description: >-
+                                    The arguments of the command, as a
+                                    container's `args` are. Optional.
+                                  items:
+                                    type: string
+                                    maxLength: 4096
+                                env:
+                                  type: array
+                                  maxItems: 32
+                                  description: >-
+                                    Variables that the operator adds to
+                                    the container's environment before
+                                    its own, as `{name, value}`. A
+                                    variable that has the name of one of
+                                    the operator's own is replaced by
+                                    the operator's. Optional.
+                                  x-kubernetes-list-type: map
+                                  x-kubernetes-list-map-keys: [name]
+                                  items:
+                                    type: object
+                                    required: [name, value]
+                                    description: >-
+                                      One variable.
+                                    properties:
+                                      name:
+                                        type: string
+                                        minLength: 1
+                                        maxLength: 256
+                                        pattern: "^[-._a-zA-Z][-._a-zA-Z0-9]*$"
+                                        description: >-
+                                          The variable's name, such as
+                                          `RELAY_URL`.
+                                      value:
+                                        type: string
+                                        maxLength: 32768
+                                        description: >-
+                                          The variable's value. It can
+                                          be empty.
                             timeout:
                               type: string
                               maxLength: 32

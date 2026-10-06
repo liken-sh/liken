@@ -86,6 +86,7 @@ type tree struct {
 	pods       map[string]*pod
 	services   map[string]*service
 	configMaps map[string]*configMap
+	jobs       map[string]*job
 	claims     map[string]bool
 
 	// taken is computed once from the devices (shareddrivers.go).

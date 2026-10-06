@@ -52,6 +52,8 @@ func (a action) String() string {
 		return "warm: " + temperatureText(*a.Warm)
 	case a.State != "":
 		return "state: " + a.State
+	case a.Job != nil:
+		return "job: " + a.Job.Image
 	}
 	return "no action"
 }
@@ -74,6 +76,8 @@ func (a action) timeout() (time.Duration, error) {
 		return observatory.CoolTimeout, nil
 	case a.Warm != nil:
 		return observatory.WarmTimeout, nil
+	case a.Job != nil:
+		return observatory.JobTimeout, nil
 	}
 	return observatory.StateTimeout, nil
 }

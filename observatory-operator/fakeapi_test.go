@@ -67,6 +67,8 @@ type fakeAPI struct {
 	// statusRefusals is how many status writes the server refuses
 	// next.
 	statusRefusals int
+	// jobs plays the Job controller (fakejobs_test.go).
+	jobs fakeJobController
 }
 
 // refuse makes the server refuse the next creates and deletes.
@@ -94,6 +96,7 @@ var fakeKinds = func() map[string][2]string {
 		"pods":           {"v1", "Pod"},
 		"services":       {"v1", "Service"},
 		"resourceclaims": {"resource.k8s.io/v1", "ResourceClaim"},
+		"jobs":           {"batch/v1", "Job"},
 	}
 	for _, kind := range observatory.Kinds {
 		out[kind.Plural] = [2]string{observatory.APIVersion, kind.Name}
@@ -358,6 +361,9 @@ func (a *fakeAPI) add(collection string, object map[string]any) map[string]any {
 	metadata["namespace"] = testNamespace
 	metadata["generation"] = 1
 	metadata["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
+	if plural(collection) == "jobs" {
+		object["status"] = a.jobs.started()
+	}
 	if plural(collection) == "pods" {
 		object["status"] = map[string]any{"phase": "Pending"}
 		if !a.pending[name] {

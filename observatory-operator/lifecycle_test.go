@@ -92,7 +92,8 @@ func TestTheActivationStepNotesACameraThatNothingCools(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
 		r := w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
-		want := "Ran the activation of Dome lab, Mount west; Camera west-main has a cooler and no cool action in spec.activation\n" +
+		want := "Ran the activation of Observatory lab, Dome lab, Mount west; Camera west-main has a cooler and no cool action in spec.activation\n" +
+			exampleJobDone + "\n" +
 			"Dome lab state: Unparked Done: Found Dome lab unparked\n" +
 			"Mount west state: Unparked Done: Found Mount west unparked"
 		if got := stepText(stepOf(r, observatory.StepActivation)); got != want {

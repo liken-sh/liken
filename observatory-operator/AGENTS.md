@@ -107,13 +107,12 @@ runner for each `Reservation` (`reservation.go`, `activation.go`,
 the status writer (`status.go`, `statustree.go`, `standing.go`,
 `readings.go`, `guiderstatus.go`), the lock relay (`locks.go`), and the
 trigger controller (`triggers.go`), which runs each resource's
-`spec.triggers` (plan 13). The runner's `Activation` and `Deactivation` steps run the
-lifecycle procedures (`procsteps.go`): `procedure.go` runs one
-trigger's actions,
-`action.go` and `cooler.go` carry out one action, `resources.go`
-resolves a procedure's references, `runs.go` holds the record of each
-run, and `activity.go` the `Active` condition. Each
-of them waits on a bell and reads the watches' stores again. `changed`
+`spec.triggers` (plan 13). The runner's `Activation` and
+`Deactivation` steps run the lifecycle procedures (`procsteps.go`):
+`procedure.go` runs one trigger's actions, `action.go`, `cooler.go`,
+and `jobs.go` carry out one action, `resources.go` resolves a
+procedure's references, `runs.go` holds the record of each run, and
+`activity.go` the `Active` condition. Each of them waits on a bell and reads the watches' stores again. `changed`
 rings on every watch event, every INDI event, and every change that a
 PHD2 reports, and `structure` on the same events except an INDI
 property's update or message, and except a PHD2 change other than its
@@ -145,7 +144,9 @@ fakes, so a step's deadline of 20 minutes takes no real time:
 
 - `fakeapi_test.go` is an API server on `kubernetes/apiservertest`
   that holds every collection, and plays the kubelet: a pod it creates
-  is Ready at once unless a test holds it Pending.
+  is Ready at once unless a test holds it Pending. It plays the Job
+  controller too (`fakejobs_test.go`): a `Job` it creates is Complete
+  at once unless a test holds it running or makes it fail.
 - `fakeindi_test.go` serves INDI from the transcripts above. Each
   server runs a driver for each device pod that its server pod links
   to and that is Ready, defines what the baseline transcript defines,

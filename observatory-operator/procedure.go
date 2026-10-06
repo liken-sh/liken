@@ -258,7 +258,7 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 	summary := ""
 	if err == nil {
 		wait, cancel := context.WithTimeout(ctx, limit)
-		summary, err = o.perform(ctx, wait, c, a, report)
+		summary, err = o.perform(ctx, wait, c, a, place{index: i, start: *run.StartTime, limit: limit}, report)
 		if err != nil && ctx.Err() == nil && errors.Is(wait.Err(), context.DeadlineExceeded) {
 			err = fmt.Errorf("%s after %s: %s", strings.ToLower(timedOut), duration(limit), lowerFirst(firstNonEmpty(last, err.Error())))
 		}
@@ -301,14 +301,27 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 	return nil
 }
 
+// place is where an action is in its run: its index, the start of
+// the run, and the action's timeout. A job's name and deadline come
+// from it.
+type place struct {
+	index int
+	start time.Time
+	limit time.Duration
+}
+
 // perform waits for what an action requires and for the runs it comes
 // after, and then carries it out. wait holds the action's deadline.
-func (o *operator) perform(ctx, wait context.Context, c procCall, a action, report func(string)) (string, error) {
+func (o *operator) perform(ctx, wait context.Context, c procCall, a action, at place, report func(string)) (string, error) {
 	if err := o.requirements(wait, c, a, report); err != nil {
 		return "", err
 	}
 	if err := o.predecessors(wait, c, a, report); err != nil {
 		return "", err
+	}
+	if a.Job != nil {
+		// A job needs no device, so any resource runs one.
+		return o.runJob(wait, c, *a.Job, at, report)
 	}
 	if c.res.device == nil {
 		return "", fmt.Errorf("a %s has no %s", c.res.kind.Name, a)

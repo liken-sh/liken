@@ -104,6 +104,10 @@ func TestTheRoleGrantsWhatTheOperatorSends(t *testing.T) {
 		need{"", "events", "patch"},
 		need{"resource.k8s.io", "resourceclaims", "create"},
 		need{"resource.k8s.io", "resourceclaims", "delete"},
+		need{"batch", "jobs", "list"},
+		need{"batch", "jobs", "watch"},
+		need{"batch", "jobs", "create"},
+		need{"batch", "jobs", "delete"},
 	)
 	for _, resource := range []string{"pods", "services"} {
 		for _, verb := range []string{"get", "list", "watch", "create", "delete"} {

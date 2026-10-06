@@ -63,8 +63,13 @@ type ConditionRef struct {
 	Status ConditionStatus `json:"status,omitempty"`
 }
 
-// ActionBase holds the fields that every action has, whatever it does.
+// ActionBase holds the fields that every kind's action has: the job
+// that any resource can run, and the bounds and the order of the
+// action.
 type ActionBase struct {
+	// Job runs a container as a Kubernetes Job, for what no other
+	// action does.
+	Job *Job `json:"job,omitempty"`
 	// Timeout bounds the action, its waits for Requires and After
 	// included, as a Go duration such as 20m. With no timeout, the
 	// action takes the default of what it does.
@@ -77,7 +82,43 @@ type ActionBase struct {
 	After []Ref `json:"after,omitempty"`
 }
 
-// Action is the action of a kind that has no action of its own.
+// Job is a container that the operator runs once as a batch/v1 Job in
+// its own namespace, such as a script that switches a dew heater's
+// relay or posts to a webhook. The vocabulary of target states cannot
+// hold what every site needs, and a Job can.
+type Job struct {
+	// Image is the container image, used as written.
+	Image string `json:"image"`
+	// Command replaces the image's entrypoint, as a container's
+	// command does.
+	Command []string `json:"command,omitempty"`
+	// Args are the arguments of the command, as a container's args
+	// are.
+	Args []string `json:"args,omitempty"`
+	// Env adds variables to the container's environment. The operator
+	// adds its own after them (JobEnvironment).
+	Env []EnvVar `json:"env,omitempty"`
+}
+
+// EnvVar is one variable of a Job's environment.
+type EnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// The variables that the operator adds to a Job's environment, so a
+// script knows what ran it and where the resource's INDI server
+// listens.
+const (
+	EnvObservatory = "LIKEN_OBSERVATORY"
+	EnvTelescope   = "LIKEN_TELESCOPE"
+	EnvResource    = "LIKEN_RESOURCE"
+	EnvTrigger     = "LIKEN_TRIGGER"
+	EnvINDIHost    = "INDI_HOST"
+	EnvINDIPort    = "INDI_PORT"
+)
+
+// Action is the action of a kind that has no action of its own: a job.
 type Action struct {
 	ActionBase
 }
@@ -154,6 +195,9 @@ const (
 	// A cooler cannot warm a sensor above the air around it, so a
 	// warm-up ends at its timeout wherever the sensor is.
 	WarmTimeout = 10 * time.Minute
+	// A job's script, such as a webhook or a relay, takes seconds,
+	// and the Job's pod may first pull its image.
+	JobTimeout = 10 * time.Minute
 )
 
 // DefaultWithin is how close to a setpoint a sensor must come, in

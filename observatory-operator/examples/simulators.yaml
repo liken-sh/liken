@@ -68,6 +68,17 @@
 # operator relays each park state that a lock needs between the
 # servers. The condition `LocksRelayed` on the `Observatory` reports
 # the relay.
+#
+# The observatory's activation runs a `job`: a container that the
+# operator runs once as a Kubernetes `Job`, for what no other action
+# does. This one prints the variables that the operator adds to its
+# environment: the observatory, the resource, the trigger, and the
+# address of the observatory's INDI server. Read them with
+# `kubectl logs -n observatory -l app.kubernetes.io/part-of=observatory,observatory.liken.sh/role=job`.
+# A real site would switch on a dew heater's relay here, or post to a
+# webhook that tells the people of the site that the roof opens. The
+# action ends when the `Job` succeeds, and fails the `Activation` step
+# when the `Job` fails.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Observatory
 metadata:
@@ -77,6 +88,10 @@ spec:
     latitude: -30.169
     longitude: -70.806
     elevation: 2207
+  activation:
+  - job:
+      image: busybox:1.37
+      command: [sh, -c, 'env | grep -E "^(LIKEN|INDI)_" | sort']
 ---
 # The devices that no telescope owns run on the observatory's own INDI
 # server. That server runs while at least one reservation here is

@@ -390,6 +390,7 @@ accepts only the actions it supports, and the CRD refuses the others:
 | `FlatPanel` | `state: Lit` or `state: Dark`, the light | 10 min |
 | `Camera` | `cool: {celsius, within}`: write the setpoint and wait until the sensor is within `within`, 0.5 °C by default | 20 min |
 | `Camera` | `warm: {celsius, within}`: warm the sensor, then switch the cooler off | 10 min |
+| every kind, `Telescope`, `Observatory` | `job: {image, command, args, env}`: run a container once as a Kubernetes `Job` | 10 min |
 
 A `warm` that does not reach its setpoint by its timeout still
 switches the cooler off, and notes where the sensor is, because a
@@ -399,6 +400,40 @@ sends again to a camera whose driver restarts, and the `Setpoint`
 column of `kubectl get cam`. The `Activation` step's summary names each
 camera whose driver has a cooler and whose activation does not cool
 it.
+
+A `job` is for what the other actions lack, such as a dew heater's
+relay or a webhook. The operator creates a `batch/v1` `Job` in its own
+namespace, owned by the resource, and the action ends when the `Job`
+ends: `Done` when it succeeds, and `Failed` with the `Job`'s reason and
+message when it fails. The `Job` runs its pod once, with no retry, and
+its `activeDeadlineSeconds` is the action's timeout. Kubernetes
+deletes it an hour after it ends, so its logs stay that long. The
+container runs as user 1000 with no capabilities and the
+`RuntimeDefault` seccomp profile, on a read-only root filesystem with
+a writable `/tmp`, so the pod meets the `restricted` Pod Security
+level. The operator adds these variables to its environment, after
+the action's own `env`, and its values replace a variable of the same
+name:
+
+| Variable | Value |
+|---|---|
+| `LIKEN_OBSERVATORY` | the resource's `Observatory`, such as `lab` |
+| `LIKEN_TELESCOPE` | the resource's `Telescope`, for a resource of a telescope |
+| `LIKEN_RESOURCE` | the resource, such as `Dome/lab` |
+| `LIKEN_TRIGGER` | the trigger, such as `activation` or `triggers[0]` |
+| `INDI_HOST`, `INDI_PORT` | the resource's INDI server, such as `lab-observatory.observatory.svc` and `7624` |
+
+The `Job`'s name holds the resource, the trigger, and a hash of the
+transition and of the action's place in the run, such as
+`observatory-lab-activation-a799431dd4`. An operator that restarts
+during a run finds the `Job` it created, and creates no second one. A
+run that runs again, such as a failed activation after the retry
+annotation, deletes the `Job` of the earlier run and creates a new
+one.
+
+```sh
+kubectl get jobs -n observatory -l observatory.liken.sh/role=job
+```
 
 Every action also takes these fields:
 
@@ -653,7 +688,9 @@ and the guide frames cross no link between nodes. A guide camera with a
 `spec.claim` gets no affinity, because the node of its device decides
 where it runs. A telescope with no `Guider` has no affinity on any
 pod. The guider's pod, `Service`, and `ConfigMap` take the name
-`<guider>-guider`, such as `east-guider`.
+`<guider>-guider`, such as `east-guider`. A `job` action's `Job` takes
+the kind, the resource, the trigger, and a hash, such as
+`observatory-lab-activation-a799431dd4` ("Procedures" above).
 
 ## The INDI client
 

@@ -101,7 +101,7 @@ guiding, and `StopGuider` deletes the guider's pod before `Disconnect`.
 Note added on 2026-10-06: plan 13 replaces `Prepare` with
 `Activation` and `Secure` with `Deactivation`, which run the
 procedures that each resource states, and `StopSite` no longer parks
-the dome. [Plan 13](../13-procedures-on-conditions.md) gives the
+the dome. [Plan 13](13-procedures-on-conditions.md) gives the
 reasons.
 
 The server stops in `PowerOff`, after the outputs switch off. The

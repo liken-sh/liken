@@ -59,7 +59,8 @@ func TestActivationRunsTheTreeFromTheTop(t *testing.T) {
 				t.Errorf("%q was not sent before %q: %v", pair[0], pair[1], w.indi.changes())
 			}
 		}
-		want := "Ran the activation of Dome lab, Mount east, Camera east-main, DustCap east\n" +
+		want := "Ran the activation of Observatory lab, Dome lab, Mount east, Camera east-main, DustCap east\n" +
+			exampleJobDone + "\n" +
 			"Dome lab state: Unparked Done: Unparked Dome lab\n" +
 			"Mount east state: Unparked Done: Unparked Mount east\n" +
 			"Camera east-main cool: -10 °C within 0.5 °C Done: Cooled Camera east-main to -10 °C\n" +
@@ -214,7 +215,7 @@ func TestRequiresWaitsForItsCondition(t *testing.T) {
 		want   string
 	}{
 		{"a condition that comes", true, observatory.ReservationReady,
-			"Ran the activation of Dome lab, Mount east, Camera east-main, DustCap east"},
+			"Ran the activation of Observatory lab, Dome lab, Mount east, Camera east-main, DustCap east"},
 		{"a condition that never comes", false, observatory.ReservationFailed,
 			"Failed: Mount east: state: Unparked: timed out after 10 min: waiting for WeatherStation lab Safe=False"},
 	}
@@ -256,7 +257,7 @@ func TestAfterWaitsForTheRunsOfTheSameStep(t *testing.T) {
 		want  string
 	}{
 		{"a resource with no procedure", map[string]any{"kind": "FilterWheel", "name": "east"}, observatory.ReservationReady,
-			"Ran the activation of Dome lab, Mount east, Camera east-main, DustCap east"},
+			"Ran the activation of Observatory lab, Dome lab, Mount east, Camera east-main, DustCap east"},
 		{"a resource in a later tier", map[string]any{"kind": "Mount", "name": "east"}, observatory.ReservationFailed,
 			"Failed: Dome lab: state: Unparked: timed out after 2 min: waiting for Mount east"},
 		{"every mount, which run in a later tier", map[string]any{"kind": "Mount"}, observatory.ReservationFailed,

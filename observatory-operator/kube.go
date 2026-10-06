@@ -77,12 +77,17 @@ type containerPort struct {
 }
 
 type securityContext struct {
-	RunAsNonRoot             bool          `json:"runAsNonRoot"`
-	RunAsUser                int64         `json:"runAsUser"`
-	RunAsGroup               int64         `json:"runAsGroup"`
-	AllowPrivilegeEscalation bool          `json:"allowPrivilegeEscalation"`
-	ReadOnlyRootFilesystem   bool          `json:"readOnlyRootFilesystem"`
-	Capabilities             *capabilities `json:"capabilities,omitempty"`
+	RunAsNonRoot             bool            `json:"runAsNonRoot"`
+	RunAsUser                int64           `json:"runAsUser"`
+	RunAsGroup               int64           `json:"runAsGroup"`
+	AllowPrivilegeEscalation bool            `json:"allowPrivilegeEscalation"`
+	ReadOnlyRootFilesystem   bool            `json:"readOnlyRootFilesystem"`
+	Capabilities             *capabilities   `json:"capabilities,omitempty"`
+	SeccompProfile           *seccompProfile `json:"seccompProfile,omitempty"`
+}
+
+type seccompProfile struct {
+	Type string `json:"type"`
 }
 
 type capabilities struct {
@@ -208,6 +213,47 @@ type configMap struct {
 	Kind       string            `json:"kind,omitempty"`
 	Metadata   meta              `json:"metadata"`
 	Data       map[string]string `json:"data"`
+}
+
+// job is a Job of batch/v1, which runs one action's container.
+type job struct {
+	APIVersion string    `json:"apiVersion,omitempty"`
+	Kind       string    `json:"kind,omitempty"`
+	Metadata   jobMeta   `json:"metadata"`
+	Spec       jobSpec   `json:"spec"`
+	Status     jobStatus `json:"status,omitzero"`
+}
+
+// jobMeta is the metadata of a Job, with the creation time that tells
+// a Job of the current run from one of an earlier run.
+type jobMeta struct {
+	meta
+	CreationTimestamp *time.Time `json:"creationTimestamp,omitempty"`
+}
+
+type jobSpec struct {
+	BackoffLimit            *int32      `json:"backoffLimit,omitempty"`
+	ActiveDeadlineSeconds   *int64      `json:"activeDeadlineSeconds,omitempty"`
+	TTLSecondsAfterFinished *int32      `json:"ttlSecondsAfterFinished,omitempty"`
+	Template                podTemplate `json:"template"`
+}
+
+type podTemplate struct {
+	Metadata meta    `json:"metadata,omitzero"`
+	Spec     podSpec `json:"spec"`
+}
+
+type jobStatus struct {
+	Conditions []jobCondition `json:"conditions,omitempty"`
+}
+
+// jobCondition is one condition of a Job. Complete or Failed with the
+// status True ends it.
+type jobCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // resourceClaim is a ResourceClaim of resource.k8s.io/v1. Its spec is

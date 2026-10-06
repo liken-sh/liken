@@ -88,6 +88,12 @@ rules:
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
     verbs: [create, delete]
+  # The Job of each job action. The watch selects the Jobs by the
+  # operator's label, and a run that runs again deletes the Job of the
+  # earlier run before it creates its own.
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [list, watch, create, delete]
   # The Events of each resource's transitions and each reservation's
   # steps. A repeat of an Event within 10 minutes patches its count.
   - apiGroups: [""]
