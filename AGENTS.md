@@ -109,6 +109,25 @@ age of a certificate. A timer that reads state again to find a change
 is a defect. If a component needs a long resync as a backstop, a
 comment at the timer gives the failure it covers.
 
+## Conditions, Events, and log lines
+
+A condition answers "what is true now", for `kubectl wait` and for a
+controller. An `Event` answers "what just happened to this object",
+for a person who runs `kubectl describe`, and the API server deletes
+it an hour after its last write. A log line holds every attempt and
+detail. So every component posts one `Event` for each condition
+transition, and one for each action it takes that changes no
+condition, such as a pod created again or a reboot requested. It never
+posts a reading, a key press, or each retry of a retry loop. A fact
+that must outlast the hour stays in status.
+
+Every component writes its `Event`s through `kubernetes/events` and
+declares its conditions with `kubernetes/conditions`. The setter
+`Recorder.SetCondition` posts the `Event` of each transition. A test
+reads the `Event`s from `kubernetes/events/eventstest` inside a
+`synctest` bubble. Root plan 78 holds the rule and the reasons, and
+the `operators` skill holds the detail.
+
 ## Tests run on the Go toolchain alone
 
 CI runs each component's tests on every push, so a test that waits on

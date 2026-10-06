@@ -1,6 +1,6 @@
 ---
 name: operators
-description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, timers, device traffic, the node label that keeps a device DaemonSet off a node, and the decision to watch through client-go with the shape of the reference port. Use when writing or reviewing an operator's watch, reconcile pass, backstop, timer, device polling, or device DaemonSet.
+description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, and the decision to watch through client-go with the shape of the reference port. Use when writing or reviewing an operator's watch, reconcile pass, status write, condition, Event, backstop, timer, device polling, or device DaemonSet.
 ---
 
 # Writing and reviewing operators
@@ -85,6 +85,54 @@ correct result.
 - **Read once per pass, not once per object.** A pass that GETs each
   claim or pod it stands costs one request per object on every pass.
   One list per pass answers the same questions.
+
+## Conditions and Events
+
+Root plan 78 holds the rule and the reasons. In short:
+
+| Channel | Holds | Question |
+|---|---|---|
+| Condition | what is true now, for `kubectl wait` and controllers | "What is true now?" |
+| `Event` | a transition or an action, for a person, deleted after an hour | "What happened recently?" |
+| Log line | every attempt, retry, and detail | "What did the program do?" |
+
+- **What posts an `Event`.** Each condition transition posts one, with
+  the condition's reason and message. A transition is a new condition,
+  a new status, or a new reason; a new message alone posts nothing.
+  Each action that changes no condition posts one: a pod created
+  again, a reboot requested, a key minted, a device that appears or
+  vanishes. Nothing else posts one: no reading, key press, guide step,
+  or retry of a retry loop. A retry loop posts its first failure and
+  its recovery.
+- **Warning or Normal.** Warning means a person may need to act.
+  Normal means an expected transition or an action the component
+  took.
+- **Reasons and messages.** A reason is UpperCamelCase and specific:
+  `ReleaseRolledBack`, not `Failed`. A reason on an object another
+  component owns, such as a `Pod`, takes the component's prefix. A
+  message holds the values, never a token, in the voice of
+  `brand/voice.md`. List a component's reasons in one file.
+- **The writer.** Build one `events.Recorder` in `main` with
+  `events.New(ctx, client, component, events.Options{})`, and post with
+  `Normal` and `Warning`. A write never blocks or fails a pass: the
+  recorder queues it, sends a failed write again twice, 10 seconds
+  apart, and patches the count of a repeat within 10 minutes. A nil
+  recorder posts nothing. An `Event` about a cluster-scoped object goes
+  in `default`. Grant `create` and `patch` on `events`.
+- **The condition type.** Declare conditions as `conditions.Condition`,
+  with an alias where a component names its own type. Set one with
+  `Recorder.SetCondition(object, &list, next, bad)`, where `bad` is the
+  status that needs a person. A pass that composes a whole status and
+  writes it later calls `conditions.Set` while it composes, and
+  `Recorder.Transition` for each transition after the write lands, so
+  a refused write posts nothing (`observatory-operator/status.go`).
+- **The test.** Mount `eventstest.Events` in front of the fake API
+  server with `Around`, run in a `synctest` bubble, and assert the
+  type, reason, and message of each `Event` an object received
+  (`About`). `Refuse` refuses the next writes, and `Expire` plays the
+  TTL. The recorder sends a refused `Event` again after 10 seconds of
+  the bubble's clock, so a test that refuses one sleeps past that
+  before it asserts.
 
 ## Timers and devices
 

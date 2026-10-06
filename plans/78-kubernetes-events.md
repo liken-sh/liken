@@ -276,3 +276,49 @@ The research of 2026-10-06 listed the moments to post for each
 component, and each Wave 2 change starts from that list. Each wave
 records here what it built and what it measured. The plan closes into
 `completed/` when every component is done.
+
+## Wave 1, built on 2026-10-06
+
+- **`kubernetes/`** gained `events`, `conditions`, and
+  `events/eventstest`, at 100% statement coverage each. The module's
+  coverage floor rose from 98% to 98.5% (measured 98.6%). The link
+  guard in its `Makefile` now holds `events` and `conditions` to no
+  import from `k8s.io`, as it holds `apiclient` and `memo`.
+- **The writer's tests** run in `synctest` bubbles: an Event's fields,
+  a cluster-scoped object in `default`, three repeats as one `Event`
+  with `count: 3` and a fourth after 11 minutes as a new one, a repeat
+  after the TTL, a refused create and a refused patch sent again, a
+  write that fails three times logged once, a full queue that drops
+  four of 261, a cut reason and message, the 4096-series limit, and a
+  context that ends during the retry wait. With the window set to zero,
+  three of them fail.
+- **`observatory-operator`** writes through the recorder, aliases its
+  `Condition` and `ConditionStatus` to the shared types, and posts each
+  condition transition of a device, a `Telescope`, an `Observatory`, a
+  `Guider`, an `OpticalTrain`, and an `OpticalTube` after the status
+  write lands. `ParentFound=False` and a `Ready` that fails are
+  Warnings. Its coverage measured 95.7% against a floor of 95%.
+- **Its defects.** A recreated INDI server pod posts `PodCreated` on its
+  `Telescope` or `Observatory` and logs a line. A device whose pod a
+  Ready reservation's runner creates again is `Starting`, which the CRD
+  describes as "the device's pod starts", in place of `Inventory`,
+  which the CRD describes as "no reservation needs the device". A
+  device whose pod is not created yet during activation is still
+  `Inventory`; changing that needs a decision on what `Inventory`
+  means before a reservation is Ready. The test of refused `Event`s
+  now refuses two and shows that every `Event` arrives.
+
+The build changed four points of the design above:
+
+- `events.New` takes the context that ends its goroutine, and an
+  `Options` value, in place of `New(client, component)`.
+- The fake of the `events` collection is in `events/eventstest`, not
+  in `apiservertest` (the section on tests gives the import cycle).
+- A new condition posts an `Event` too, so a resource's first status
+  write posts one `Event` for each condition it reports.
+- A `Reservation`'s conditions post nothing through the setter. Its
+  runner already posts one `Event` for each step's end and each phase,
+  with the step's summary, and each change of its `Ready` and
+  `SafeToPowerOff` conditions comes with one of those. A component
+  whose own `Event`s already cover each transition with more detail
+  may do the same, and says so where it writes the status.
