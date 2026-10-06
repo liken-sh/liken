@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -290,23 +291,20 @@ func TestRefreshReportsACheckoutItCannotMake(t *testing.T) {
 }
 
 func TestTheLoopFetchesOnItsOwn(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	url := fileURL(source)
-	following := publishedVolume(t, answering, "csi-1", url, map[string]string{"pull": "50ms"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		url := fileURL(source)
+		following := publishedVolume(t, answering, "csi-1", url, map[string]string{"pull": "50ms"})
 
-	want := commitFiles(t, source, map[string]string{"a.txt": "two"})
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if commit, _ := following.condition(); commit == want {
-			if got := readTree(t, following.tree); sameTree(got, map[string]string{"a.txt": "two"}) {
-				return
-			}
+		want := commitFiles(t, source, map[string]string{"a.txt": "two"})
+		// The loop fetches on its interval of 50ms.
+		time.Sleep(50 * time.Millisecond)
+		waitForCommit(t, following, want)
+		if got := readTree(t, following.tree); !sameTree(got, map[string]string{"a.txt": "two"}) {
+			t.Errorf("the tree holds %v, want the commit the loop fetched", got)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	commit, trouble := following.condition()
-	t.Fatalf("the loop did not reach %s within 30s: it is on %s (%q)", want, commit, trouble)
+	})
 }
 
 func TestRefreshReportsWhatTheFetchCannotDo(t *testing.T) {

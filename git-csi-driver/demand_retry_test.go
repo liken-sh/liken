@@ -4,59 +4,68 @@ import (
 	"io"
 	"os"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 )
 
 func TestAVolumeUnstagedWhileItsDemandWaitsLeavesNoSeries(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.demandMin = 300 * time.Millisecond
-	url := fileURL(repositoryWithACommit(t, map[string]string{"a.txt": "one"}))
-	// A second volume of the same URL keeps the loop running after the
-	// unstage.
-	keeper := demandedVolume(t, answering, "keeper", url, "on-demand")
-	claimedVolume(t, answering, "franchises")
-	staged, _ := stagedReadOnly(t, answering, "franchises", url, map[string]string{"pull": "on-demand"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		answering.demandMin = 300 * time.Millisecond
+		url := fileURL(repositoryWithACommit(t, map[string]string{"a.txt": "one"}))
+		// A second volume of the same URL keeps the loop running after the
+		// unstage.
+		keeper := demandedVolume(t, answering, "keeper", url, "on-demand")
+		claimedVolume(t, answering, "franchises")
+		staged, _ := stagedReadOnly(t, answering, "franchises", url, map[string]string{"pull": "on-demand"})
 
-	// The first demand pulls at once. The next ones wait out the
-	// interval, and the unstage comes while they wait.
-	answering.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(0)))
-	waitForCondition(t, keeper, ", pulled ")
-	answering.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(time.Second)))
-	answering.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(time.Second)))
-	if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
-		VolumeId: "franchises", StagingTargetPath: staged.StagingTargetPath,
-	}); err != nil {
-		t.Fatalf("NodeUnstageVolume: %v", err)
-	}
-	time.Sleep(600 * time.Millisecond)
+		// The first demand pulls at once. The next ones wait out the
+		// interval, and the unstage comes while they wait.
+		answering.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(0)))
+		waitForCondition(t, keeper, ", pulled ")
+		answering.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(time.Second)))
+		answering.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(time.Second)))
+		if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+			VolumeId: "franchises", StagingTargetPath: staged.StagingTargetPath,
+		}); err != nil {
+			t.Fatalf("NodeUnstageVolume: %v", err)
+		}
+		// Two intervals pass, so every demand that waited has had its
+		// pass.
+		time.Sleep(2 * answering.demandMin)
+		synctest.Wait()
 
-	if counted, found := demandedOf(t, answering.readings, "home", "franchises"); found {
-		t.Errorf("git_csi_demanded_pulls_total reads %v for the unstaged volume, want no series", counted)
-	}
-	if abnormal, found := abnormalOf(t, answering.readings, "home", "franchises"); found {
-		t.Errorf("git_csi_volume_abnormal reads %v for the unstaged volume, want no series", abnormal)
-	}
+		if counted, found := demandedOf(t, answering.readings, "home", "franchises"); found {
+			t.Errorf("git_csi_demanded_pulls_total reads %v for the unstaged volume, want no series", counted)
+		}
+		if abnormal, found := abnormalOf(t, answering.readings, "home", "franchises"); found {
+			t.Errorf("git_csi_volume_abnormal reads %v for the unstaged volume, want no series", abnormal)
+		}
+	})
 }
 
 func TestARetryIsNotCountedAsADemandedPull(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.demandMin = 20 * time.Millisecond
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
-	if err := os.Rename(source, source+".away"); err != nil {
-		t.Fatalf("moving the remote away: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		answering.demandMin = 20 * time.Millisecond
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+		if err := os.Rename(source, source+".away"); err != nil {
+			t.Fatalf("moving the remote away: %v", err)
+		}
 
-	answering.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(0)))
-	// The fetch fails, and the loop fetches again several times inside
-	// the pause.
-	time.Sleep(500 * time.Millisecond)
+		answering.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(0)))
+		// The fetch fails, and the loop fetches again several times inside
+		// the pause.
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
 
-	if counted, _ := demandedOf(t, answering.readings, "home", "franchises"); counted != 1 {
-		t.Errorf("one demand counted %v demanded pulls, want 1", counted)
-	}
+		if counted, _ := demandedOf(t, answering.readings, "home", "franchises"); counted != 1 {
+			t.Errorf("one demand counted %v demanded pulls, want 1", counted)
+		}
+	})
 }
 
 func TestTheRetryWaitIsSpreadAboveTheFloor(t *testing.T) {

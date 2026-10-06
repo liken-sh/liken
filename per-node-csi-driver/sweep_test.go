@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -41,24 +42,26 @@ func copiesIn(t *testing.T, answering *driver) []string {
 }
 
 func TestTheSweepRemovesTheCopyOfAVolumeNoOneNamesAndNoPodHolds(t *testing.T) {
-	answering := testDriver(t)
-	for _, handle := range []string{"example-store", "some-cache", "third-copy"} {
-		if err := answering.store.makeCopy(handle); err != nil {
-			t.Fatalf("makeCopy: %v", err)
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		for _, handle := range []string{"example-store", "some-cache", "third-copy"} {
+			if err := answering.store.makeCopy(handle); err != nil {
+				t.Fatalf("makeCopy: %v", err)
+			}
 		}
-	}
-	// A pod holds one of the two copies that no PersistentVolume names.
-	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("third-copy", filepath.Join(t.TempDir(), "mount"),
-			aPod("reader", "pod-uid-1"))); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
+		// A pod holds one of the two copies that no PersistentVolume names.
+		if _, err := answering.NodePublishVolume(t.Context(),
+			publishing("third-copy", filepath.Join(t.TempDir(), "mount"),
+				aPod("reader", "pod-uid-1"))); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
 
-	client := fake.NewClientset(aVolume("example-store"), aVolume("another-store"))
-	sweeper := newSweeping(answering.node, client, time.Hour, quietLogger())
-	go sweeper.follow(t.Context())
+		client := fake.NewClientset(aVolume("example-store"), aVolume("another-store"))
+		sweeper := newSweeping(answering.node, client, time.Hour, quietLogger())
+		go sweeper.follow(t.Context())
 
-	waitForCopies(t, answering, "example-store", "third-copy")
+		waitForCopies(t, answering, "example-store", "third-copy")
+	})
 }
 
 func TestTheSweepLeavesTheCopyOfAVolumeOfAnotherDriver(t *testing.T) {
@@ -93,63 +96,69 @@ func TestTheHandlesTheClusterNamesAreThisDriversOwn(t *testing.T) {
 }
 
 func TestADeletedVolumeLosesItsCopyBeforeTheNextTick(t *testing.T) {
-	answering := testDriver(t)
-	for _, handle := range []string{"example-store", "some-cache", "third-copy"} {
-		if err := answering.store.makeCopy(handle); err != nil {
-			t.Fatalf("makeCopy: %v", err)
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		for _, handle := range []string{"example-store", "some-cache", "third-copy"} {
+			if err := answering.store.makeCopy(handle); err != nil {
+				t.Fatalf("makeCopy: %v", err)
+			}
 		}
-	}
-	client := fake.NewClientset(aVolume("example-store"), aVolume("some-cache"))
-	sweeper := newSweeping(answering.node, client, time.Hour, quietLogger())
-	go sweeper.follow(t.Context())
-	// The third copy goes on the first pass, which is the proof that the
-	// informer has synced and that the pass below follows the delete.
-	waitForCopies(t, answering, "example-store", "some-cache")
+		client := fake.NewClientset(aVolume("example-store"), aVolume("some-cache"))
+		sweeper := newSweeping(answering.node, client, time.Hour, quietLogger())
+		go sweeper.follow(t.Context())
+		// The third copy goes on the first pass, which is the proof that the
+		// informer has synced and that the pass below follows the delete.
+		waitForCopies(t, answering, "example-store", "some-cache")
 
-	if err := client.CoreV1().PersistentVolumes().Delete(t.Context(),
-		"some-cache", metav1.DeleteOptions{}); err != nil {
-		t.Fatalf("deleting the volume: %v", err)
-	}
-	waitForCopies(t, answering, "example-store")
+		if err := client.CoreV1().PersistentVolumes().Delete(t.Context(),
+			"some-cache", metav1.DeleteOptions{}); err != nil {
+			t.Fatalf("deleting the volume: %v", err)
+		}
+		waitForCopies(t, answering, "example-store")
+	})
 }
 
 func TestTheSweepFindsAnOrphanOnItsTick(t *testing.T) {
-	answering := testDriver(t)
-	if err := answering.store.makeCopy("example-store"); err != nil {
-		t.Fatalf("makeCopy: %v", err)
-	}
-	sweeper := newSweeping(answering.node, fake.NewClientset(), 10*time.Millisecond, quietLogger())
-	go sweeper.follow(t.Context())
-	waitForCopies(t, answering)
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		if err := answering.store.makeCopy("example-store"); err != nil {
+			t.Fatalf("makeCopy: %v", err)
+		}
+		sweeper := newSweeping(answering.node, fake.NewClientset(), 10*time.Millisecond, quietLogger())
+		go sweeper.follow(t.Context())
+		waitForCopies(t, answering)
 
-	// Nothing is deleted from here on, so the tick is the only pass that
-	// can find this copy.
-	if err := answering.store.makeCopy("some-cache"); err != nil {
-		t.Fatalf("makeCopy: %v", err)
-	}
-	waitForCopies(t, answering)
+		// Nothing is deleted from here on, so the tick is the only pass that
+		// can find this copy.
+		if err := answering.store.makeCopy("some-cache"); err != nil {
+			t.Fatalf("makeCopy: %v", err)
+		}
+		waitForCopies(t, answering, "some-cache")
+		time.Sleep(10 * time.Millisecond)
+		waitForCopies(t, answering)
+	})
 }
 
 func TestTheSweepStopsWithTheDriversRun(t *testing.T) {
-	answering := testDriver(t)
-	if err := answering.store.makeCopy("example-store"); err != nil {
-		t.Fatalf("makeCopy: %v", err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	sweeper := newSweeping(answering.node, fake.NewClientset(), time.Hour, quietLogger())
-	stopped := make(chan struct{})
-	go func() {
-		sweeper.follow(ctx)
-		close(stopped)
-	}()
-	waitForCopies(t, answering)
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		if err := answering.store.makeCopy("example-store"); err != nil {
+			t.Fatalf("makeCopy: %v", err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		sweeper := newSweeping(answering.node, fake.NewClientset(), time.Hour, quietLogger())
+		stopped := make(chan struct{})
+		go func() {
+			sweeper.follow(ctx)
+			close(stopped)
+		}()
+		waitForCopies(t, answering)
 
-	cancel()
-	select {
-	case <-stopped:
-	case <-time.After(20 * time.Second):
-		t.Fatal("the sweep did not stop with the run")
-	}
+		// A sweep that outlives its context blocks the bubble for good, and
+		// synctest fails the test.
+		cancel()
+		<-stopped
+	})
 }
 
 func TestADriverThatReachedNoClusterSweepsNothing(t *testing.T) {
@@ -216,38 +225,36 @@ func TestACopyTheDriverCannotRemoveIsLoggedAndTheSweepGoesOn(t *testing.T) {
 }
 
 func TestARestartedWatchCountsOnPerNodeCSIWatchRestartsTotal(t *testing.T) {
-	answering := testDriver(t)
-	client := fake.NewClientset()
-	// Every watch the API server answers closes at once, so the sweep
-	// opens it again.
-	client.PrependWatchReactor("persistentvolumes",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			closed := watch.NewFake()
-			closed.Stop()
-			return true, closed, nil
-		})
-	ctx, stop := context.WithCancel(t.Context())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		newSweeping(answering.node, client, time.Hour, quietLogger()).follow(ctx)
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		client := fake.NewClientset()
+		// Every watch the API server answers closes at once, so the sweep
+		// opens it again.
+		client.PrependWatchReactor("persistentvolumes",
+			func(k8stesting.Action) (bool, watch.Interface, error) {
+				closed := watch.NewFake()
+				closed.Stop()
+				return true, closed, nil
+			})
+		ctx, stop := context.WithCancel(t.Context())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			newSweeping(answering.node, client, time.Hour, quietLogger()).follow(ctx)
+		}()
 
-	restarts := answering.readings.watchRestarts.WithLabelValues(watchedKind)
-	deadline := time.Now().Add(20 * time.Second)
-	for testutil.ToFloat64(restarts) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	stop()
-	select {
-	case <-stopped:
-	case <-time.After(20 * time.Second):
-		t.Fatal("the sweep did not stop with the run")
-	}
+		// The reflector waits out a backoff of less than a minute before it
+		// opens a watch again.
+		time.Sleep(time.Minute)
+		stop()
+		<-stopped
 
-	if got := testutil.ToFloat64(restarts); got == 0 {
-		t.Errorf("per_node_csi_watch_restarts_total reads %v, want at least one restart", got)
-	}
+		restarts := answering.readings.watchRestarts.WithLabelValues(watchedKind)
+
+		if got := testutil.ToFloat64(restarts); got == 0 {
+			t.Errorf("per_node_csi_watch_restarts_total reads %v, want at least one restart", got)
+		}
+	})
 }
 
 func TestTheInformerStoresNoManagedFields(t *testing.T) {
@@ -264,16 +271,13 @@ func TestTheInformerStoresNoManagedFields(t *testing.T) {
 	}
 }
 
-// waitForCopies waits until the store holds exactly the wanted handles,
-// because the sweep runs on a goroutine of its own.
+// waitForCopies waits until every goroutine in the bubble is blocked,
+// because the sweep runs on a goroutine of its own, and fails unless the
+// store then holds exactly the wanted handles.
 func waitForCopies(t *testing.T, answering *driver, want ...string) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Join(copiesIn(t, answering), " ") == strings.Join(want, " ") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	synctest.Wait()
+	if got := copiesIn(t, answering); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("the store holds %v, want %v", got, want)
 	}
-	t.Fatalf("the store holds %v, want %v", copiesIn(t, answering), want)
 }

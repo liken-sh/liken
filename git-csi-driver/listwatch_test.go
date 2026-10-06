@@ -8,6 +8,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,36 +43,38 @@ func TestTheInformerStoresNoManagedFields(t *testing.T) {
 }
 
 func TestADemandWrittenBetweenTheListAndTheWatchPullsTheTree(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
-	want := commitFiles(t, source, map[string]string{"a.txt": "two"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+		want := commitFiles(t, source, map[string]string{"a.txt": "two"})
 
-	// The list answers the state before the demand, and the demand is
-	// written before the watch opens. Only a watch that opens at the
-	// list's version sends it.
-	client := cluster(t, answering)
-	resource := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}
-	kind := schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolume"}
-	var once sync.Once
-	client.PrependReactor("list", "persistentvolumes",
-		func(k8stesting.Action) (bool, runtime.Object, error) {
-			handled := false
-			var listed runtime.Object
-			var err error
-			once.Do(func() {
-				handled = true
-				listed, err = client.Tracker().List(resource, kind, "")
-				if err != nil {
-					return
-				}
-				stored, _ := client.Tracker().Get(resource, "", "franchises")
-				demanded := annotated(stored.(*corev1.PersistentVolume).DeepCopy(), demandAt(0))
-				err = client.Tracker().Update(resource, demanded, "")
+		// The list answers the state before the demand, and the demand is
+		// written before the watch opens. Only a watch that opens at the
+		// list's version sends it.
+		client := cluster(t, answering)
+		resource := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}
+		kind := schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolume"}
+		var once sync.Once
+		client.PrependReactor("list", "persistentvolumes",
+			func(k8stesting.Action) (bool, runtime.Object, error) {
+				handled := false
+				var listed runtime.Object
+				var err error
+				once.Do(func() {
+					handled = true
+					listed, err = client.Tracker().List(resource, kind, "")
+					if err != nil {
+						return
+					}
+					stored, _ := client.Tracker().Get(resource, "", "franchises")
+					demanded := annotated(stored.(*corev1.PersistentVolume).DeepCopy(), demandAt(0))
+					err = client.Tracker().Update(resource, demanded, "")
+				})
+				return handled, listed, err
 			})
-			return handled, listed, err
-		})
-	watchDemands(t, answering)
+		watchDemands(t, answering)
 
-	waitForCommit(t, held, want)
+		waitForCommit(t, held, want)
+	})
 }

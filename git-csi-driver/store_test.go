@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // writeFiles writes every named file under dir, making the directories
@@ -233,31 +233,32 @@ func TestCheckoutReportsATreeItCannotMake(t *testing.T) {
 }
 
 func TestTheLockIsPerRepository(t *testing.T) {
-	holder := newStore(t.TempDir())
-	one := holder.repository("https://example.com/one.git")
-	two := holder.repository("https://example.com/two.git")
+	synctest.Test(t, func(t *testing.T) {
+		holder := newStore(t.TempDir())
+		one := holder.repository("https://example.com/one.git")
+		two := holder.repository("https://example.com/two.git")
 
-	release := one.lock()
-	// Another URL takes its own lock while the first is held.
-	holder.repository("https://example.com/two.git").lock()()
-	two.lock()()
+		release := one.lock()
+		// Another URL takes its own lock while the first is held.
+		holder.repository("https://example.com/two.git").lock()()
+		two.lock()()
 
-	taken := make(chan struct{})
-	go func() {
-		defer close(taken)
-		holder.repository("https://example.com/one.git").lock()()
-	}()
-	select {
-	case <-taken:
-		t.Fatal("the same repository was locked twice at once")
-	case <-time.After(50 * time.Millisecond):
-	}
-	release()
-	select {
-	case <-taken:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the lock was not taken after it was released")
-	}
+		taken := make(chan struct{})
+		go func() {
+			defer close(taken)
+			holder.repository("https://example.com/one.git").lock()()
+		}()
+		synctest.Wait()
+		select {
+		case <-taken:
+			t.Fatal("the same repository was locked twice at once")
+		default:
+		}
+		// A lock never taken blocks the bubble for good, and synctest
+		// fails the test.
+		release()
+		<-taken
+	})
 }
 
 func TestReplaceTreeMakesThePublishedTreeMatchTheFreshOne(t *testing.T) {

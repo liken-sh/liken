@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -333,18 +334,14 @@ func restartedQuiet(t *testing.T, answering *node) *node {
 	return again
 }
 
-// waitForFile waits until the tree holds the file, or fails on the
-// deadline.
+// waitForFile waits until the bubble is blocked, and fails unless the
+// tree holds the file.
 func waitForFile(t *testing.T, tree, name string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(tree, name)); err == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	synctest.Wait()
+	if _, err := os.Stat(filepath.Join(tree, name)); err != nil {
+		t.Fatalf("%s holds no %s: %v", tree, name, err)
 	}
-	t.Fatalf("%s holds no %s within 10s", tree, name)
 }
 
 func TestAResumedVolumeFetchesAtTheRepublishThatReturnsItsCredential(t *testing.T) {
@@ -357,89 +354,93 @@ func TestAResumedVolumeFetchesAtTheRepublishThatReturnsItsCredential(t *testing.
 		{name: "a read-only claim", kind: readOnlyClaim, pulls: map[string]string{"pull": "on-demand"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			answering, _ := testNode(t, io.Discard)
-			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-			var request *csi.NodePublishVolumeRequest
-			if c.kind == inlineVolume {
-				request = publishRequest(t, "csi-1", fileURL(source), c.pulls)
-				request.Secrets = secretA
-				if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-					t.Fatalf("NodePublishVolume: %v", err)
+			synctest.Test(t, func(t *testing.T) {
+				answering, _ := testNode(t, io.Discard)
+				source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+				var request *csi.NodePublishVolumeRequest
+				if c.kind == inlineVolume {
+					request = publishRequest(t, "csi-1", fileURL(source), c.pulls)
+					request.Secrets = secretA
+					if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+						t.Fatalf("NodePublishVolume: %v", err)
+					}
+				} else {
+					staged := readOnlyStage(t, "franchises", fileURL(source), c.pulls)
+					staged.Secrets = secretA
+					if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+						t.Fatalf("NodeStageVolume: %v", err)
+					}
+					request = readOnlyPublish(t, staged, "reader-a")
+					request.Secrets = secretA
+					if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+						t.Fatalf("NodePublishVolume: %v", err)
+					}
 				}
-			} else {
-				staged := readOnlyStage(t, "franchises", fileURL(source), c.pulls)
-				staged.Secrets = secretA
-				if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-					t.Fatalf("NodeStageVolume: %v", err)
-				}
-				request = readOnlyPublish(t, staged, "reader-a")
-				request.Secrets = secretA
-				if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-					t.Fatalf("NodePublishVolume: %v", err)
-				}
-			}
-			commitFiles(t, source, map[string]string{"b.txt": "two"})
+				commitFiles(t, source, map[string]string{"b.txt": "two"})
 
-			again := restartedQuiet(t, answering)
-			again.mu.Lock()
-			resumed := again.volumes[request.VolumeId]
-			again.mu.Unlock()
-			if abnormal, message := resumed.report(); !abnormal || !strings.Contains(message, "no credential") {
-				t.Errorf("the resumed volume reports %q, want the credential it waits for", message)
-			}
+				again := restartedQuiet(t, answering)
+				again.mu.Lock()
+				resumed := again.volumes[request.VolumeId]
+				again.mu.Unlock()
+				if abnormal, message := resumed.report(); !abnormal || !strings.Contains(message, "no credential") {
+					t.Errorf("the resumed volume reports %q, want the credential it waits for", message)
+				}
 
-			if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
-				t.Fatalf("the republish: %v", err)
-			}
-			waitForFile(t, resumed.tree, "b.txt")
-			waitForCondition(t, resumed, "main at")
-			if got := tokenOf(resumed); got != "token-a" {
-				t.Errorf("the resumed volume holds %q, want the republished token", got)
-			}
+				if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+					t.Fatalf("the republish: %v", err)
+				}
+				waitForFile(t, resumed.tree, "b.txt")
+				waitForCondition(t, resumed, "main at")
+				if got := tokenOf(resumed); got != "token-a" {
+					t.Errorf("the resumed volume holds %q, want the republished token", got)
+				}
+			})
 		})
 	}
 }
 
 func TestAResumedWriteableVolumePushesAtTheRepublish(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	boundVolume(t, answering, "config", "config-eager")
-	armingClass(t, answering, "config-eager", nil)
-	staged := stageRequest(t, "config", fileURL(remote), nil)
-	staged.Secrets = secretA
-	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
-	}
-	request := persistentPublish(t, staged)
-	request.Secrets = secretA
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
-	answering.mu.Lock()
-	held := answering.volumes["config"]
-	answering.mu.Unlock()
-	waitForArmed(t, held, true)
-	unwatched(t, answering, held)
-	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
-	answering.commit(t.Context(), held, held.policyNow())
-	committed := held.work.refCommit(t.Context(), "HEAD")
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		remote := bareRemote(t, map[string]string{"a.txt": "one"})
+		boundVolume(t, answering, "config", "config-eager")
+		armingClass(t, answering, "config-eager", nil)
+		staged := stageRequest(t, "config", fileURL(remote), nil)
+		staged.Secrets = secretA
+		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("NodeStageVolume: %v", err)
+		}
+		request := persistentPublish(t, staged)
+		request.Secrets = secretA
+		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
+		answering.mu.Lock()
+		held := answering.volumes["config"]
+		answering.mu.Unlock()
+		waitForArmed(t, held, true)
+		unwatched(t, answering, held)
+		writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+		answering.commit(t.Context(), held, held.policyNow())
+		committed := held.work.refCommit(t.Context(), "HEAD")
 
-	again := restartedQuiet(t, answering)
-	again.mu.Lock()
-	resumed := again.volumes["config"]
-	again.mu.Unlock()
-	if got := git(t, remote, "rev-parse", "main"); strings.TrimSpace(got) == committed {
-		t.Fatal("the remote holds the commit before the republish")
-	}
+		again := restartedQuiet(t, answering)
+		again.mu.Lock()
+		resumed := again.volumes["config"]
+		again.mu.Unlock()
+		if got := git(t, remote, "rev-parse", "main"); strings.TrimSpace(got) == committed {
+			t.Fatal("the remote holds the commit before the republish")
+		}
 
-	if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("the republish: %v", err)
-	}
-	waitForPushed(t, resumed, 10*time.Second)
-	if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != committed {
-		t.Errorf("the remote holds %s after the republish, want %s", got, committed)
-	}
-	waitForCondition(t, resumed, "main at")
+		if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("the republish: %v", err)
+		}
+		waitForPushed(t, resumed)
+		if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != committed {
+			t.Errorf("the remote holds %s after the republish, want %s", got, committed)
+		}
+		waitForCondition(t, resumed, "main at")
+	})
 }
 
 func TestAResumedVolumeWithNoPublishSecretSaysWhatItNeeds(t *testing.T) {
@@ -481,28 +482,32 @@ func TestAResumedVolumeWithNoPublishSecretSaysWhatItNeeds(t *testing.T) {
 }
 
 func TestAPrivateRepositoryFetchesAgainAtTheRepublishAfterARestart(t *testing.T) {
-	dir := t.TempDir()
-	port, holder := sshdOrSkip(t, dir)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	url := fmt.Sprintf("ssh://127.0.0.1:%d%s", port, source)
-	secrets := map[string]string{privateKeyKey: holder.privateKey, knownHostsKey: holder.knownHosts}
+	// sshd starts outside the bubble. The goroutine that reads its log
+	// waits on a pipe, which is not durably blocked, so inside the
+	// bubble it would stop the clock.
+	port, holder := sshdOrSkip(t, t.TempDir())
+	synctest.Test(t, func(t *testing.T) {
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		url := fmt.Sprintf("ssh://127.0.0.1:%d%s", port, source)
+		secrets := map[string]string{privateKeyKey: holder.privateKey, knownHostsKey: holder.knownHosts}
 
-	answering, _ := testNode(t, io.Discard)
-	request := publishRequest(t, "csi-1", url, map[string]string{"pull": "1h"})
-	request.Secrets = secrets
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
-	commitFiles(t, source, map[string]string{"b.txt": "two"})
+		answering, _ := testNode(t, io.Discard)
+		request := publishRequest(t, "csi-1", url, map[string]string{"pull": "1h"})
+		request.Secrets = secrets
+		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
+		commitFiles(t, source, map[string]string{"b.txt": "two"})
 
-	again := restartedQuiet(t, answering)
-	again.mu.Lock()
-	resumed := again.volumes["csi-1"]
-	again.mu.Unlock()
-	if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("the republish: %v", err)
-	}
-	waitForFile(t, resumed.tree, "b.txt")
+		again := restartedQuiet(t, answering)
+		again.mu.Lock()
+		resumed := again.volumes["csi-1"]
+		again.mu.Unlock()
+		if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("the republish: %v", err)
+		}
+		waitForFile(t, resumed.tree, "b.txt")
+	})
 }
 
 // BenchmarkARepeatPublish measures the call the kubelet makes for every

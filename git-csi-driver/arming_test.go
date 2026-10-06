@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -112,66 +113,62 @@ func armedVolume(
 	return held
 }
 
-// waitForArmed waits until the volume reports the armed state, or fails on
-// the deadline.
+// waitForArmed waits until every goroutine in the test's bubble is
+// blocked, and fails unless the volume then reports the armed state.
 func waitForArmed(t *testing.T, held *volume, want bool) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, armed, _ := held.reading(); armed == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	synctest.Wait()
+	if _, armed, _ := held.reading(); armed != want {
+		t.Fatalf("the volume is armed: %v, want %v", armed, want)
 	}
-	t.Fatalf("the volume is not armed: %v within 30s", want)
 }
 
 func TestAClassOfThisDriverArmsTheVolume(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "config-eager")
-	attributesClass(t, answering, "config-eager", driverName)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "config", "config-eager")
+		attributesClass(t, answering, "config-eager", driverName)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-	waitForArmed(t, published, true)
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+		waitForArmed(t, published, true)
 
-	claim, _, _ := published.reading()
-	if claim.namespace != "home" || claim.name != "config" {
-		t.Errorf("the volume names the claim %+v, want home/config", claim)
-	}
-	published.mu.Lock()
-	class := published.class
-	published.mu.Unlock()
-	if class != "config-eager" {
-		t.Errorf("the volume names the class %q, want config-eager", class)
-	}
+		claim, _, _ := published.reading()
+		if claim.namespace != "home" || claim.name != "config" {
+			t.Errorf("the volume names the claim %+v, want home/config", claim)
+		}
+		published.mu.Lock()
+		class := published.class
+		published.mu.Unlock()
+		if class != "config-eager" {
+			t.Errorf("the volume names the class %q, want config-eager", class)
+		}
+	})
 }
 
 func TestAClassOfAnotherDriverLeavesTheVolumeUnarmed(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "other-storage")
-	attributesClass(t, answering, "other-storage", "other.example.com")
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "config", "other-storage")
+		attributesClass(t, answering, "other-storage", "other.example.com")
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
-	waitForClaim(t, published)
-	if _, armed, _ := published.reading(); armed {
-		t.Error("a class of another driver armed the volume")
-	}
+		waitForClaim(t, published)
+		if _, armed, _ := published.reading(); armed {
+			t.Error("a class of another driver armed the volume")
+		}
+	})
 }
 
-// waitForClaim waits until the loop has found the claim, which is the
-// first thing a pass does.
+// waitForClaim waits until the bubble is blocked, and fails unless the
+// loop has found the claim, which is the first thing a pass does.
 func waitForClaim(t *testing.T, held *volume) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if claim, _, _ := held.reading(); claim.name != "" {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	synctest.Wait()
+	if claim, _, _ := held.reading(); claim.name == "" {
+		t.Fatal("the loop did not find the claim")
 	}
-	t.Fatal("the loop did not find the claim within 30s")
 }
 
 func TestTheClaimIsFoundThroughTheVolumeHandle(t *testing.T) {
@@ -357,112 +354,123 @@ func followArming(t *testing.T, answering *node, ctx context.Context, held *volu
 }
 
 func TestTheLoopReadsTheClaimAgainWhileThereIsNone(t *testing.T) {
-	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	ctx, stop := context.WithCancel(t.Context())
-	over := followArming(t, answering, ctx, volumeNamed("config"))
+	synctest.Test(t, func(t *testing.T) {
+		logs := &logbook{}
+		answering, _ := testNode(t, logs)
+		ctx, stop := context.WithCancel(t.Context())
+		over := followArming(t, answering, ctx, volumeNamed("config"))
 
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) && strings.Count(logs.String(), "the claim was not found") < 2 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	stop()
-	<-over
-	if got := strings.Count(logs.String(), "the claim was not found"); got < 2 {
-		t.Errorf("the log says the claim was not found %d times, want at least 2 (%q)", got, logs)
-	}
+		// The first read finds no claim at once, and the retry reads
+		// again.
+		time.Sleep(answering.arms.retry)
+		synctest.Wait()
+		stop()
+		<-over
+		if got := strings.Count(logs.String(), "the claim was not found"); got < 2 {
+			t.Errorf("the log says the claim was not found %d times, want at least 2 (%q)", got, logs)
+		}
+	})
 }
 
 func TestAClaimThatArrivesAfterTheVolumeArmsIt(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "config-eager")
-	attributesClass(t, answering, "config-eager", driverName)
-	claims := cluster(t, answering).CoreV1().PersistentVolumeClaims("home")
-	claim, err := claims.Get(t.Context(), "config", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("reading the claim: %v", err)
-	}
-	if err := claims.Delete(t.Context(), "config", metav1.DeleteOptions{}); err != nil {
-		t.Fatalf("deleting the claim: %v", err)
-	}
-	// The retry is long, so only the watch can carry the new claim.
-	answering.arms.retry = 30 * time.Second
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-	time.Sleep(100 * time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "config", "config-eager")
+		attributesClass(t, answering, "config-eager", driverName)
+		claims := cluster(t, answering).CoreV1().PersistentVolumeClaims("home")
+		claim, err := claims.Get(t.Context(), "config", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("reading the claim: %v", err)
+		}
+		if err := claims.Delete(t.Context(), "config", metav1.DeleteOptions{}); err != nil {
+			t.Fatalf("deleting the claim: %v", err)
+		}
+		// The retry is long, so only the watch can carry the new claim.
+		answering.arms.retry = 30 * time.Second
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+		// The loop reads the claim and finds none before the claim
+		// arrives.
+		synctest.Wait()
 
-	claim.ResourceVersion = ""
-	if _, err := claims.Create(t.Context(), claim, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("writing the claim: %v", err)
-	}
+		claim.ResourceVersion = ""
+		if _, err := claims.Create(t.Context(), claim, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("writing the claim: %v", err)
+		}
 
-	waitForArmed(t, published, true)
+		waitForArmed(t, published, true)
+	})
 }
 
 func TestAClassThatArrivesAfterTheClaimNamesItArmsTheVolume(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "config-eager")
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-	time.Sleep(100 * time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "config", "config-eager")
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+		// The loop reads the claim and finds no class before the class
+		// arrives.
+		synctest.Wait()
 
-	attributesClass(t, answering, "config-eager", driverName)
+		attributesClass(t, answering, "config-eager", driverName)
 
-	waitForArmed(t, published, true)
+		// The loop reads the class again after its retry.
+		time.Sleep(answering.arms.retry)
+		waitForArmed(t, published, true)
+	})
 }
 
 func TestTheArmingLoopEndsWithTheDriver(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "")
-	ctx, stop := context.WithCancel(t.Context())
-	over := followArming(t, answering, ctx, volumeNamed("config"))
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "config", "")
+		ctx, stop := context.WithCancel(t.Context())
+		over := followArming(t, answering, ctx, volumeNamed("config"))
 
-	stop()
-	select {
-	case <-over:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the loop did not end with the driver")
-	}
+		// A loop that outlives its context blocks the bubble for good,
+		// and synctest fails the test.
+		stop()
+		<-over
+	})
 }
 
 func TestADeletedClaimLeavesTheVolumeArmed(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	sent := watch.NewFake()
-	cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, sent, nil
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		sent := watch.NewFake()
+		cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
+			func(k8stesting.Action) (bool, watch.Interface, error) {
+				return true, sent, nil
+			})
+		held := armedVolume(t, answering, "config",
+			fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
+		armingClass(t, answering, "config-later", nil)
+
+		// The deleted claim names no class, so a read of it would unarm the
+		// volume and post an Event that says so. The claim after it names
+		// another class of this driver, and the informer hands the reads
+		// its events in order, so once that class is in force the delete
+		// has been through the handlers. The test catches a handler that
+		// arms from a delete only when the reads take the deleted copy
+		// before the next one replaces it in the slot, so it can pass
+		// where such a handler exists.
+		sent.Delete(&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
 		})
-	held := armedVolume(t, answering, "config",
-		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
-	armingClass(t, answering, "config-later", nil)
+		later := "config-later"
+		sent.Modify(&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
+			Spec:       corev1.PersistentVolumeClaimSpec{VolumeAttributesClassName: &later},
+		})
+		synctest.Wait()
 
-	// The deleted claim names no class, so a read of it would unarm the
-	// volume and post an Event that says so. The claim after it names
-	// another class of this driver, and the informer hands the reads
-	// its events in order, so once that class is in force the delete
-	// has been through the handlers. The test catches a handler that
-	// arms from a delete only when the reads take the deleted copy
-	// before the next one replaces it in the slot, so it can pass
-	// where such a handler exists.
-	sent.Delete(&corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
+		if class := classOf(held); class != later {
+			t.Fatalf("the volume is armed by %q, want %q", class, later)
+		}
+		if posted := eventsWithReason(t, answering, reasonUnarmed); len(posted) != 0 {
+			t.Errorf("a deleted claim unarmed the volume: %v", posted)
+		}
 	})
-	later := "config-later"
-	sent.Modify(&corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
-		Spec:       corev1.PersistentVolumeClaimSpec{VolumeAttributesClassName: &later},
-	})
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) && classOf(held) != later {
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	if class := classOf(held); class != later {
-		t.Fatalf("the volume is armed by %q, want %q", class, later)
-	}
-	if posted := eventsWithReason(t, answering, reasonUnarmed); len(posted) != 0 {
-		t.Errorf("a deleted claim unarmed the volume: %v", posted)
-	}
 }
 
 // classOf is the class the volume last read from its claim.
@@ -472,45 +480,41 @@ func classOf(held *volume) string {
 	return held.class
 }
 
-// waitForEvents waits until the node has posted the number of Events
-// for the reason, and returns what it posted by the deadline. The
-// volume reports its state before the node posts the Events, so a test
-// that reads the Events waits for them, not for the state.
-func waitForEvents(t *testing.T, answering *node, reason string, want int) []corev1.Event {
+// waitForEvents waits until the bubble is blocked, and returns what the
+// node has posted for the reason. The volume reports its state before
+// the node posts the Events, so a test that reads the Events waits for
+// the posts too.
+func waitForEvents(t *testing.T, answering *node, reason string) []corev1.Event {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if posted := eventsWithReason(t, answering, reason); len(posted) >= want {
-			return posted
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	synctest.Wait()
 	return eventsWithReason(t, answering, reason)
 }
 
 func TestTheLoopReadsTheClaimAgainWhenItChanges(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	// The retry is long, so the watch is what carries the change here.
-	answering.arms.retry = 30 * time.Second
-	boundVolume(t, answering, "config", "")
-	attributesClass(t, answering, "config-eager", driverName)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-	waitForClaim(t, published)
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		// The retry is long, so the watch is what carries the change here.
+		answering.arms.retry = 30 * time.Second
+		boundVolume(t, answering, "config", "")
+		attributesClass(t, answering, "config-eager", driverName)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+		waitForClaim(t, published)
 
-	nameClass(t, answering, "config-eager")
+		nameClass(t, answering, "config-eager")
 
-	armed := waitForEvents(t, answering, reasonArmed, 2)
-	if len(armed) != 2 {
-		t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", armed)
-	}
-	kinds := armed[0].InvolvedObject.Kind + " " + armed[1].InvolvedObject.Kind
-	if !strings.Contains(kinds, "Pod") || !strings.Contains(kinds, "PersistentVolumeClaim") {
-		t.Errorf("the events are on %q, want the pod and the claim", kinds)
-	}
-	if armed[0].Message != "armed by the class config-eager" {
-		t.Errorf("the event says %q", armed[0].Message)
-	}
+		armed := waitForEvents(t, answering, reasonArmed)
+		if len(armed) != 2 {
+			t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", armed)
+		}
+		kinds := armed[0].InvolvedObject.Kind + " " + armed[1].InvolvedObject.Kind
+		if !strings.Contains(kinds, "Pod") || !strings.Contains(kinds, "PersistentVolumeClaim") {
+			t.Errorf("the events are on %q, want the pod and the claim", kinds)
+		}
+		if armed[0].Message != "armed by the class config-eager" {
+			t.Errorf("the event says %q", armed[0].Message)
+		}
+	})
 }
 
 func TestTheVolumeThatLosesItsClassSaysSo(t *testing.T) {
@@ -548,41 +552,39 @@ func TestADriverOutsideAClusterArmsNothing(t *testing.T) {
 	}
 }
 
-// waitForCondition waits until the volume's condition carries the text.
+// waitForCondition waits until the bubble is blocked, and fails unless
+// the volume's condition carries the text.
 func waitForCondition(t *testing.T, held *volume, says string) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, message := held.report(); strings.Contains(message, says) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	synctest.Wait()
+	if _, message := held.report(); !strings.Contains(message, says) {
+		t.Fatalf("the condition is %q, want %q in it", message, says)
 	}
-	_, message := held.report()
-	t.Fatalf("the condition is %q within 30s, want %q in it", message, says)
 }
 
 func TestAClassTheDriverCannotReadArmsNothing(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	held := armedVolume(t, answering, "config",
-		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		held := armedVolume(t, answering, "config",
+			fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
 
-	// A class's parameters are immutable, so a claim takes new rules by
-	// naming another class.
-	armingClass(t, answering, "config-broken", map[string]string{quiesceParameter: "1s"})
-	nameClass(t, answering, "config-broken")
+		// A class's parameters are immutable, so a claim takes new rules by
+		// naming another class.
+		armingClass(t, answering, "config-broken", map[string]string{quiesceParameter: "1s"})
+		nameClass(t, answering, "config-broken")
 
-	waitForArmed(t, held, false)
-	want := "the class config-broken is not valid: push.quiesce: 1s is shorter than 5s"
-	waitForCondition(t, held, want)
-	if held.policyNow() != nil {
-		t.Error("a class the driver cannot read left the volume armed")
-	}
-	unarmed := waitForEvents(t, answering, reasonUnarmed, 2)
-	if len(unarmed) != 2 {
-		t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
-	}
-	if unarmed[0].Message != "unarmed: "+want {
-		t.Errorf("the event says %q, want %q", unarmed[0].Message, "unarmed: "+want)
-	}
+		waitForArmed(t, held, false)
+		want := "the class config-broken is not valid: push.quiesce: 1s is shorter than 5s"
+		waitForCondition(t, held, want)
+		if held.policyNow() != nil {
+			t.Error("a class the driver cannot read left the volume armed")
+		}
+		unarmed := waitForEvents(t, answering, reasonUnarmed)
+		if len(unarmed) != 2 {
+			t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
+		}
+		if unarmed[0].Message != "unarmed: "+want {
+			t.Errorf("the event says %q, want %q", unarmed[0].Message, "unarmed: "+want)
+		}
+	})
 }

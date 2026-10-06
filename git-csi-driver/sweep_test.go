@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -466,34 +467,29 @@ func TestADriverOutsideAClusterSweepsAndPostsNothing(t *testing.T) {
 }
 
 func TestTheSweepRunsOnItsIntervalUntilTheDriverStops(t *testing.T) {
-	answering, remote := sweepingNode(t, io.Discard)
-	answering.sweepEvery = 10 * time.Millisecond
-	unstagedVolume(t, answering, "config", fileURL(remote))
-	unstagedAgo(t, answering, "config", 2*time.Hour)
+	synctest.Test(t, func(t *testing.T) {
+		answering, remote := sweepingNode(t, io.Discard)
+		answering.sweepEvery = 10 * time.Millisecond
+		unstagedVolume(t, answering, "config", fileURL(remote))
+		unstagedAgo(t, answering, "config", 2*time.Hour)
 
-	ctx, stop := context.WithCancel(t.Context())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		answering.sweeping(ctx)
-	}()
+		ctx, stop := context.WithCancel(t.Context())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			answering.sweeping(ctx)
+		}()
 
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(answering.store.volumeDir("config")); err != nil {
-			break
+		time.Sleep(answering.sweepEvery)
+		synctest.Wait()
+		if _, err := os.Stat(answering.store.volumeDir("config")); err == nil {
+			t.Error("the loop swept nothing on its interval")
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if _, err := os.Stat(answering.store.volumeDir("config")); err == nil {
-		t.Error("the loop swept nothing within 30s")
-	}
-	stop()
-	select {
-	case <-stopped:
-	case <-time.After(30 * time.Second):
-		t.Error("the loop did not stop within 30s")
-	}
+		// A loop that outlives its context blocks the bubble for good,
+		// and synctest fails the test.
+		stop()
+		<-stopped
+	})
 }
 
 func TestTheAgeOfAWorkTreeIsWholeHours(t *testing.T) {

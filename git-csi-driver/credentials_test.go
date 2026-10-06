@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -285,24 +287,34 @@ func sshdOrSkip(t *testing.T, dir string) (int, *credentials) {
 		"ListenAddress 127.0.0.1",
 		"HostKey " + filepath.Join(dir, "host_key"),
 		"AuthorizedKeysFile " + filepath.Join(dir, "user_key.pub"),
-		"PidFile " + filepath.Join(dir, "sshd.pid"),
 		"StrictModes no",
 		"UsePAM no",
 		"PasswordAuthentication no",
 		"KbdInteractiveAuthentication no",
 		"AllowUsers " + who.Username,
-		"LogLevel ERROR",
+		// VERBOSE is the level of the line that says sshd listens.
+		"LogLevel VERBOSE",
 		"",
 	}, "\n")
 	writeFiles(t, dir, map[string]string{"sshd_config": config})
 
-	daemon := exec.Command(sshdPath, "-f", filepath.Join(dir, "sshd_config"),
-		"-E", filepath.Join(dir, "sshd.log"))
-	if out, err := daemon.CombinedOutput(); err != nil {
-		t.Skipf("the ssh path is not drilled here: sshd: %v: %s", err, out)
+	// sshd runs in the foreground and logs to its stderr, so the test
+	// holds the process itself and reads the line that says it listens.
+	daemon := exec.Command(sshdPath, "-D", "-e", "-f", filepath.Join(dir, "sshd_config"))
+	said, err := daemon.StderrPipe()
+	if err != nil {
+		t.Fatalf("taking sshd's stderr: %v", err)
 	}
-	t.Cleanup(func() { stopSSHD(t, filepath.Join(dir, "sshd.pid")) })
-	waitForPort(t, port)
+	if err := daemon.Start(); err != nil {
+		t.Skipf("the ssh path is not drilled here: sshd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = daemon.Process.Kill()
+		_ = daemon.Wait()
+	})
+	if out, listening := sshdListens(daemon, said); !listening {
+		t.Skipf("the ssh path is not drilled here: sshd: %s", out)
+	}
 
 	key, err := os.ReadFile(filepath.Join(dir, "user_key"))
 	if err != nil {
@@ -329,36 +341,26 @@ func freePort(t *testing.T) int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
-func waitForPort(t *testing.T, port int) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		connection, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
-		if err == nil {
-			connection.Close()
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("nothing answered on 127.0.0.1:%d within 10s", port)
-}
+// sshdTimeout bounds the wait for sshd to listen. It is not a wait:
+// the wait returns at the line that says sshd listens.
+const sshdTimeout = 30 * time.Second
 
-func stopSSHD(t *testing.T, pidFile string) {
-	t.Helper()
-	content, err := os.ReadFile(pidFile)
-	if err != nil {
-		return
+// sshdListens reads sshd's log until the line that says it listens,
+// and answers false with what sshd said when it ends first. The rest
+// of the log is read and dropped, so sshd never blocks on a full pipe.
+func sshdListens(daemon *exec.Cmd, said io.Reader) (string, bool) {
+	bound := time.AfterFunc(sshdTimeout, func() { _ = daemon.Process.Kill() })
+	defer bound.Stop()
+	lines := bufio.NewScanner(said)
+	out := []string{}
+	for lines.Scan() {
+		out = append(out, lines.Text())
+		if strings.Contains(lines.Text(), "Server listening on") {
+			go func() { _, _ = io.Copy(io.Discard, said) }()
+			return "", true
+		}
 	}
-	var pid int
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(content)), "%d", &pid); err != nil {
-		return
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-	_ = process.Kill()
-	_, _ = process.Wait()
+	return strings.Join(out, "\n"), false
 }
 
 func TestAPrivateKeyFetchesOverSSH(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -36,49 +37,47 @@ func startReads(
 	return latest, over
 }
 
-// waitForLog waits until the log holds the text, and fails at the
-// deadline.
+// waitForLog waits until the bubble is blocked, and fails unless the
+// log holds the text.
 func waitForLog(t *testing.T, logs *logbook, text string) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(logs.String(), text) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	synctest.Wait()
 	if !strings.Contains(logs.String(), text) {
 		t.Fatalf("the log is %q, want %q in it", logs, text)
 	}
 }
 
 func TestANewerClaimReplacesOneThatFailedToRead(t *testing.T) {
-	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	armingClass(t, answering, "config-eager", nil)
-	held := volumeNamed("config")
-	latest, _ := startReads(t.Context(), answering, held)
+	synctest.Test(t, func(t *testing.T) {
+		logs := &logbook{}
+		answering, _ := testNode(t, logs)
+		armingClass(t, answering, "config-eager", nil)
+		held := volumeNamed("config")
+		latest, _ := startReads(t.Context(), answering, held)
 
-	// The class the first copy names never arrives, so only the newer
-	// copy can arm the volume.
-	latest <- claimNaming("missing")
-	waitForLog(t, logs, `msg="the claim was not read"`)
-	latest <- claimNaming("config-eager")
+		// The class the first copy names never arrives, so only the newer
+		// copy can arm the volume.
+		latest <- claimNaming("missing")
+		waitForLog(t, logs, `msg="the claim was not read"`)
+		latest <- claimNaming("config-eager")
 
-	waitForArmed(t, held, true)
+		// The reads take the newer copy after the retry.
+		time.Sleep(answering.arms.retry)
+		waitForArmed(t, held, true)
+	})
 }
 
 func TestTheReadsEndWithTheDriverWhileAReadFails(t *testing.T) {
-	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	answering.arms.retry = 30 * time.Second
-	ctx, stop := context.WithCancel(t.Context())
-	latest, over := startReads(ctx, answering, volumeNamed("config"))
+	synctest.Test(t, func(t *testing.T) {
+		logs := &logbook{}
+		answering, _ := testNode(t, logs)
+		answering.arms.retry = 30 * time.Second
+		ctx, stop := context.WithCancel(t.Context())
+		latest, over := startReads(ctx, answering, volumeNamed("config"))
 
-	latest <- claimNaming("missing")
-	waitForLog(t, logs, `msg="the claim was not read"`)
-	stop()
-
-	select {
-	case <-over:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the reads did not end with the driver")
-	}
+		latest <- claimNaming("missing")
+		waitForLog(t, logs, `msg="the claim was not read"`)
+		stop()
+		<-over
+	})
 }

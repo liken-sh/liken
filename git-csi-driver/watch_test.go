@@ -5,11 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -34,117 +33,76 @@ func (l *logbook) String() string {
 	return l.written.String()
 }
 
-// waitForPending waits until the volume's pending set holds the count, or
-// fails on the deadline.
+// waitForPending waits until the bubble is blocked, and fails unless
+// the volume's pending set holds the count.
 func waitForPending(t *testing.T, held *volume, want int) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, _, count := held.reading(); count == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	_, _, count := held.reading()
-	t.Fatalf("the volume holds %d pending paths within 30s, want %d", count, want)
-}
-
-func TestTheWatchReadsTheTreeAfterTheQuiesce(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	// The sweep is long, so the inotify watch is what reads the tree here.
-	answering.sweep = 30 * time.Second
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-
-	writeFiles(t, published.tree, map[string]string{
-		"one.txt": "1", "two.txt": "22", "three.txt": "333",
-	})
-	waitForPending(t, published, 3)
-
-	abnormal, message := published.report()
-	if !abnormal {
-		t.Errorf("an unarmed volume with work pending reported %q", message)
-	}
-	want := "unarmed: 3 paths pending, no class on claim /"
-	if message != want {
-		t.Errorf("the condition says %q, want %q", message, want)
+	synctest.Wait()
+	if _, _, count := held.reading(); count != want {
+		t.Fatalf("the volume holds %d pending paths, want %d", count, want)
 	}
 }
 
 func TestTheSweepReadsATreeTheWatchMissed(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	// The quiesce is long, so the sweep is what reads the tree here.
-	answering.quiesce = 30 * time.Second
-	answering.sweep = 20 * time.Millisecond
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		// The quiesce is long, so the sweep is what reads the tree here.
+		answering.quiesce = 30 * time.Second
+		answering.sweep = 20 * time.Millisecond
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
-	writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
-	waitForPending(t, published, 1)
-}
-
-func TestTheWatchFollowsADirectoryThePodMade(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.sweep = 30 * time.Second
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-
-	// The write repeats, because the watch of a new directory is added
-	// after the create that made it.
-	writeFiles(t, published.tree, map[string]string{"sub/.keep": ""})
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			case <-time.After(50 * time.Millisecond):
-				writeFiles(t, published.tree, map[string]string{"sub/one.txt": "1"})
-			}
-		}
-	}()
-	waitForPending(t, published, 2)
+		writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
+		time.Sleep(answering.sweep)
+		waitForPending(t, published, 1)
+	})
 }
 
 func TestTheWatchPostsOneEventWhenTheTreeFirstHoldsWork(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.sweep = 20 * time.Millisecond
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		answering.sweep = 20 * time.Millisecond
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
-	writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
-	waitForPending(t, published, 1)
-	// The sweep runs again and again, and the Event is posted once.
-	time.Sleep(100 * time.Millisecond)
+		writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
+		time.Sleep(answering.sweep)
+		waitForPending(t, published, 1)
+		// The sweep runs again and again, and the Event is posted once.
+		time.Sleep(5 * answering.sweep)
+		synctest.Wait()
 
-	pending := []corev1.Event{}
-	for _, posted := range eventsOf(t, answering) {
-		if posted.Reason == reasonPending {
-			pending = append(pending, posted)
+		pending := []corev1.Event{}
+		for _, posted := range eventsOf(t, answering) {
+			if posted.Reason == reasonPending {
+				pending = append(pending, posted)
+			}
 		}
-	}
-	if len(pending) != 1 {
-		t.Fatalf("the watch posted %v, want one pending event", pending)
-	}
-	if pending[0].Message != "1 paths pending" || pending[0].InvolvedObject.Name != "writer" {
-		t.Errorf("the event is %q on %q", pending[0].Message, pending[0].InvolvedObject.Name)
-	}
+		if len(pending) != 1 {
+			t.Fatalf("the watch posted %v, want one pending event", pending)
+		}
+		if pending[0].Message != "1 paths pending" || pending[0].InvolvedObject.Name != "writer" {
+			t.Errorf("the event is %q on %q", pending[0].Message, pending[0].InvolvedObject.Name)
+		}
+	})
 }
 
 func TestTheWatchRunsWithNoInotify(t *testing.T) {
-	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	answering.inotify = func(int) (int, error) { return 0, errors.New("no inotify here") }
-	answering.sweep = 20 * time.Millisecond
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	synctest.Test(t, func(t *testing.T) {
+		logs := &logbook{}
+		answering, _ := testNode(t, logs)
+		answering.inotify = func(int) (int, error) { return 0, errors.New("no inotify here") }
+		answering.sweep = 20 * time.Millisecond
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
-	writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
-	waitForPending(t, published, 1)
-	if !strings.Contains(logs.String(), "the watch did not start") {
-		t.Errorf("the log is %q, want the refused watch in it", logs)
-	}
+		writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
+		time.Sleep(answering.sweep)
+		waitForPending(t, published, 1)
+		if !strings.Contains(logs.String(), "the watch did not start") {
+			t.Errorf("the log is %q, want the refused watch in it", logs)
+		}
+	})
 }
 
 func TestTheWatchReportsADirectoryItCannotAdd(t *testing.T) {
@@ -225,30 +183,28 @@ func TestUnwatchPassesOverAVolumeItNeverWatched(t *testing.T) {
 }
 
 func TestTheClassSetsTheQuiesceWithNoRemount(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	armedVolume(t, answering, "config",
-		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})),
-		map[string]string{quiesceParameter: "5s"})
-	answering.mu.Lock()
-	seeing := answering.watchers["config"]
-	answering.mu.Unlock()
-	if got := seeing.rest(); got != 5*time.Second {
-		t.Errorf("the watch rests for %s, want 5s", got)
-	}
-
-	// A class's parameters are immutable, so a claim takes a new
-	// quiesce by naming another class.
-	armingClass(t, answering, "config-calm", map[string]string{quiesceParameter: "10s"})
-	nameClass(t, answering, "config-calm")
-
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if seeing.rest() == 10*time.Second {
-			return
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		armedVolume(t, answering, "config",
+			fileURL(bareRemote(t, map[string]string{"a.txt": "one"})),
+			map[string]string{quiesceParameter: "5s"})
+		answering.mu.Lock()
+		seeing := answering.watchers["config"]
+		answering.mu.Unlock()
+		if got := seeing.rest(); got != 5*time.Second {
+			t.Errorf("the watch rests for %s, want 5s", got)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("the watch rests for %s within 30s, want the new quiesce of 10s", seeing.rest())
+
+		// A class's parameters are immutable, so a claim takes a new
+		// quiesce by naming another class.
+		armingClass(t, answering, "config-calm", map[string]string{quiesceParameter: "10s"})
+		nameClass(t, answering, "config-calm")
+
+		synctest.Wait()
+		if got := seeing.rest(); got != 10*time.Second {
+			t.Fatalf("the watch rests for %s, want the new quiesce of 10s", got)
+		}
+	})
 }
 
 func TestAnUnarmedVolumeRestsForTheDriversOwnQuiesce(t *testing.T) {
@@ -263,59 +219,20 @@ func TestAnUnarmedVolumeRestsForTheDriversOwnQuiesce(t *testing.T) {
 	}
 }
 
-// moveInto writes a file outside the tree and renames it into the tree.
-// The rename is one inotify event, so the watch reads the whole write
-// in one batch and restarts the quiesce once. A write in place sends a
-// create, a modify, and a close, and a batch that the watch reads after
-// the test advanced the clock would restart the quiesce at the new time.
-func moveInto(t *testing.T, tree, name, content string) {
-	t.Helper()
-	outside := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(outside, []byte(content), 0o644); err != nil {
-		t.Fatalf("writing %s: %v", outside, err)
-	}
-	if err := os.Rename(outside, filepath.Join(tree, name)); err != nil {
-		t.Fatalf("moving %s into the tree: %v", name, err)
-	}
-}
-
-// A write restarts the quiesce, so the driver commits and pushes the
-// tree when the class's quiesce has passed since the write, not since
-// the watch started.
-func TestTheTreeIsCommittedAndPushedOnTheTimer(t *testing.T) {
-	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	answering, _ := testNode(t, io.Discard)
-	clock := newManualClock()
-	answering.clock = clock
-	// The sweep is an hour, so only the quiesce can commit within the
-	// test.
-	answering.sweep = time.Hour
-	held := armedVolume(t, answering, "config", fileURL(remote),
-		map[string]string{quiesceParameter: "5s"})
-	clock.waitForTimer(t, 5*time.Second)
-
-	clock.advance(time.Second)
-	moveInto(t, held.tree, "one.yaml", "1")
-	clock.waitForTimer(t, 6*time.Second)
-	clock.advance(5 * time.Second)
-
-	waitForPushed(t, held, 30*time.Second)
-	if got := remoteSubject(t, remote); got != "Update 1 paths" {
-		t.Errorf("the remote's main is at %q, want the driver's commit", got)
-	}
-}
-
 func TestTheSweepCommitsNothingWhileTheTreeIsWritten(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	held := armedVolume(t, answering, "config",
-		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})),
-		map[string]string{quiesceParameter: "1h", maxLatencyParameter: neverLatency})
-	before := strings.TrimSpace(gitIn(t, held.work, "rev-parse", "HEAD"))
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		held := armedVolume(t, answering, "config",
+			fileURL(bareRemote(t, map[string]string{"a.txt": "one"})),
+			map[string]string{quiesceParameter: "1h", maxLatencyParameter: neverLatency})
+		before := strings.TrimSpace(gitIn(t, held.work, "rev-parse", "HEAD"))
 
-	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
-	waitForPending(t, held, 1)
+		writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+		time.Sleep(answering.sweep)
+		waitForPending(t, held, 1)
 
-	if after := strings.TrimSpace(gitIn(t, held.work, "rev-parse", "HEAD")); after != before {
-		t.Errorf("the tree moved to %s before it rested, want %s", after, before)
-	}
+		if after := strings.TrimSpace(gitIn(t, held.work, "rev-parse", "HEAD")); after != before {
+			t.Errorf("the tree moved to %s before it rested, want %s", after, before)
+		}
+	})
 }

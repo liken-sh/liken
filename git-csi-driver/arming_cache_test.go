@@ -5,35 +5,19 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // watchHolding starts the node's watch on PersistentVolumes and waits
-// until its store holds every PersistentVolume written before the
-// call. It writes a demand on a PersistentVolume no test stages, and
-// the informer hands the handlers events in order, so the node reads
-// that demand only after the store holds everything before it.
+// until the bubble is blocked. The informer has then listed every
+// PersistentVolume written before the call, and its store holds them.
 func watchHolding(t *testing.T, answering *node) {
 	t.Helper()
 	watchDemands(t, answering)
-	if _, err := cluster(t, answering).CoreV1().PersistentVolumes().Create(t.Context(),
-		annotated(csiVolume("sentinel", driverName), oldDemand), metav1.CreateOptions{}); err != nil {
-		t.Fatalf("writing the sentinel: %v", err)
-	}
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		answering.demands.mu.Lock()
-		_, read := answering.demands.seen["sentinel"]
-		answering.demands.mu.Unlock()
-		if read {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("the watch did not read the sentinel within 30s")
+	synctest.Wait()
 }
 
 // volumeLists counts the lists of PersistentVolumes the fake API server
@@ -141,22 +125,24 @@ func TestTheClaimComesFromTheWatchWhenItHoldsTheVolume(t *testing.T) {
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			answering, _ := testNode(t, io.Discard)
-			c.stand(t, answering)
-			c.watch(t, answering)
-			cluster(t, answering).ClearActions()
+			synctest.Test(t, func(t *testing.T) {
+				answering, _ := testNode(t, io.Discard)
+				c.stand(t, answering)
+				c.watch(t, answering)
+				cluster(t, answering).ClearActions()
 
-			found, err := answering.arms.claimOf(t.Context(), "config")
+				found, err := answering.arms.claimOf(t.Context(), "config")
 
-			if found != c.found {
-				t.Errorf("claimOf answered %+v, want %+v", found, c.found)
-			}
-			if said := fmt.Sprint(err); !strings.Contains(said, c.says) {
-				t.Errorf("claimOf said %q, want %q in it", said, c.says)
-			}
-			if lists := volumeLists(t, answering); lists != c.lists {
-				t.Errorf("claimOf sent %d lists of PersistentVolumes, want %d", lists, c.lists)
-			}
+				if found != c.found {
+					t.Errorf("claimOf answered %+v, want %+v", found, c.found)
+				}
+				if said := fmt.Sprint(err); !strings.Contains(said, c.says) {
+					t.Errorf("claimOf said %q, want %q in it", said, c.says)
+				}
+				if lists := volumeLists(t, answering); lists != c.lists {
+					t.Errorf("claimOf sent %d lists of PersistentVolumes, want %d", lists, c.lists)
+				}
+			})
 		})
 	}
 }

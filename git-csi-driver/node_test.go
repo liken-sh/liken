@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -21,7 +22,7 @@ import (
 // may not mount, and whose events go to a client-go fake.
 //
 // The quiesce and the sweep are short, so a test that writes in a tree
-// waits milliseconds for the driver to read it.
+// moves its bubble's clock by one sweep for the driver to read it.
 func testNode(t testing.TB, logs io.Writer) (*node, *recordedMounts) {
 	t.Helper()
 	calls := &recordedMounts{}
@@ -51,6 +52,12 @@ func testNode(t testing.TB, logs io.Writer) (*node, *recordedMounts) {
 			answering.unwatch(seeing.volume)
 		}
 	})
+	// The watch opens no inotify file, and the sweep reads the tree
+	// the way it does on a node whose kernel refuses the watch. A
+	// goroutine that reads the file is not durably blocked, so a
+	// synctest bubble's clock never moves while it runs.
+	// watch_inotify_test.go runs the kernel's watch outside a bubble.
+	answering.inotify = func(int) (int, error) { return 0, errors.New("no inotify in a test") }
 	answering.quiesce = 20 * time.Millisecond
 	answering.sweep = 100 * time.Millisecond
 	answering.arms.retry = 20 * time.Millisecond

@@ -337,12 +337,22 @@ func TestTheListenerRefusesABodyItCannotRead(t *testing.T) {
 				githubSignatureHeader: githubPrefix + signature(body, "s"),
 			}
 
-			code, answered := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
-
-			if code != http.StatusBadRequest {
-				t.Errorf("the listener answered %d, want 400", code)
+			// The handler answers on a recorder. Over a socket, net/http
+			// holds the connection open for 500ms after it refuses a body
+			// over the limit, so the client reads the answer before the
+			// reset.
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+				"/webhook/sites/x-webhook", strings.NewReader(body))
+			for key, value := range header {
+				request.Header.Set(key, value)
 			}
-			if answered != "" {
+			answer := httptest.NewRecorder()
+			hooks.handle(answer, request)
+
+			if answer.Code != http.StatusBadRequest {
+				t.Errorf("the listener answered %d, want 400", answer.Code)
+			}
+			if answered := answer.Body.String(); answered != "" {
 				t.Errorf("the listener answered %q, want an empty body", answered)
 			}
 		})

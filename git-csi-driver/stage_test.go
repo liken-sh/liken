@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
@@ -545,85 +546,91 @@ func TestNodeUnpublishVolumeKeepsAWriteableTree(t *testing.T) {
 }
 
 func TestTheUnpublishCommitsAndPushesTheLastOfTheWork(t *testing.T) {
-	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "config-eager")
-	armingClass(t, answering, "config-eager", nil)
-	staged := stageRequest(t, "config", fileURL(remote), nil)
-	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
-	}
-	request := persistentPublish(t, staged)
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
-	answering.mu.Lock()
-	published := answering.volumes["config"]
-	answering.mu.Unlock()
-	waitForArmed(t, published, true)
-	writeFiles(t, published.tree, map[string]string{"one.yaml": "1"})
+	synctest.Test(t, func(t *testing.T) {
+		remote := bareRemote(t, map[string]string{"a.txt": "one"})
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "config", "config-eager")
+		armingClass(t, answering, "config-eager", nil)
+		staged := stageRequest(t, "config", fileURL(remote), nil)
+		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("NodeStageVolume: %v", err)
+		}
+		request := persistentPublish(t, staged)
+		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
+		answering.mu.Lock()
+		published := answering.volumes["config"]
+		answering.mu.Unlock()
+		waitForArmed(t, published, true)
+		writeFiles(t, published.tree, map[string]string{"one.yaml": "1"})
 
-	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
-		VolumeId: "config", TargetPath: request.TargetPath,
-	}); err != nil {
-		t.Fatalf("NodeUnpublishVolume: %v", err)
-	}
-	if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
-		t.Errorf("the remote's main is at %q, want the last of the pod's work", got)
-	}
+		if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
+			VolumeId: "config", TargetPath: request.TargetPath,
+		}); err != nil {
+			t.Fatalf("NodeUnpublishVolume: %v", err)
+		}
+		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
+			t.Errorf("the remote's main is at %q, want the last of the pod's work", got)
+		}
+	})
 }
 
 func TestTheUnstagePushesWhatTheUnpublishCouldNot(t *testing.T) {
-	answering, held, remote := pushedVolume(t, io.Discard, nil)
-	if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
-		VolumeId: "config", StagingTargetPath: held.staging,
-	}); err != nil {
-		t.Fatalf("NodeUnstageVolume: %v", err)
-	}
-	if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
-		t.Errorf("the remote's main is at %q, want the driver's commit", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		answering, held, remote := pushedVolume(t, io.Discard, nil)
+		if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+			VolumeId: "config", StagingTargetPath: held.staging,
+		}); err != nil {
+			t.Fatalf("NodeUnstageVolume: %v", err)
+		}
+		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
+			t.Errorf("the remote's main is at %q, want the driver's commit", got)
+		}
+	})
 }
 
 func TestARestoreReplaysTheModesAndTheEmptyDirectories(t *testing.T) {
-	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	first, _ := testNode(t, io.Discard)
-	held := armedVolume(t, first, "config", fileURL(remote), nil)
-	unwatched(t, first, held)
-	writeFiles(t, held.tree, map[string]string{"secret.yaml": "1"})
-	if err := os.Chmod(filepath.Join(held.tree, "secret.yaml"), 0o600); err != nil {
-		t.Fatalf("chmod: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(held.tree, ".storage"), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	first.commit(t.Context(), held, held.policyNow())
-	first.push(t.Context(), held)
+	synctest.Test(t, func(t *testing.T) {
+		remote := bareRemote(t, map[string]string{"a.txt": "one"})
+		first, _ := testNode(t, io.Discard)
+		held := armedVolume(t, first, "config", fileURL(remote), nil)
+		unwatched(t, first, held)
+		writeFiles(t, held.tree, map[string]string{"secret.yaml": "1"})
+		if err := os.Chmod(filepath.Join(held.tree, "secret.yaml"), 0o600); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(held.tree, ".storage"), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		first.commit(t.Context(), held, held.policyNow())
+		first.push(t.Context(), held)
 
-	// A node that has never held the volume is a restore.
-	again, _ := testNode(t, io.Discard)
-	if _, err := again.NodeStageVolume(t.Context(),
-		stageRequest(t, "config", fileURL(remote), nil)); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
-	}
-	again.mu.Lock()
-	restored := again.staged["config"]
-	again.mu.Unlock()
+		// A node that has never held the volume is a restore.
+		again, _ := testNode(t, io.Discard)
+		if _, err := again.NodeStageVolume(t.Context(),
+			stageRequest(t, "config", fileURL(remote), nil)); err != nil {
+			t.Fatalf("NodeStageVolume: %v", err)
+		}
+		again.mu.Lock()
+		restored := again.staged["config"]
+		again.mu.Unlock()
 
-	secret, err := os.Stat(filepath.Join(restored.tree, "secret.yaml"))
-	if err != nil {
-		t.Fatalf("the restored tree holds no secret.yaml: %v", err)
-	}
-	if secret.Mode().Perm() != 0o600 {
-		t.Errorf("secret.yaml is %s, want -rw-------", secret.Mode())
-	}
-	storage, err := os.Stat(filepath.Join(restored.tree, ".storage"))
-	if err != nil {
-		t.Fatalf("the restored tree holds no empty directory: %v", err)
-	}
-	if !storage.IsDir() || storage.Mode().Perm() != 0o700 {
-		t.Errorf(".storage is %s, want drwx------", storage.Mode())
-	}
+		secret, err := os.Stat(filepath.Join(restored.tree, "secret.yaml"))
+		if err != nil {
+			t.Fatalf("the restored tree holds no secret.yaml: %v", err)
+		}
+		if secret.Mode().Perm() != 0o600 {
+			t.Errorf("secret.yaml is %s, want -rw-------", secret.Mode())
+		}
+		storage, err := os.Stat(filepath.Join(restored.tree, ".storage"))
+		if err != nil {
+			t.Fatalf("the restored tree holds no empty directory: %v", err)
+		}
+		if !storage.IsDir() || storage.Mode().Perm() != 0o700 {
+			t.Errorf(".storage is %s, want drwx------", storage.Mode())
+		}
+	})
 }
 
 func TestARestoreReportsAMetadataRefItCannotRead(t *testing.T) {
@@ -716,14 +723,16 @@ func lockTheMark(t *testing.T, answering *node, id string) {
 }
 
 func TestAStageThatFindsTheMarkLeavesItWhereItIs(t *testing.T) {
-	answering, held, _ := pushedVolume(t, io.Discard, nil)
-	before := held.work.refCommit(t.Context(), pushedRef)
-	if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
-		VolumeId: "config", StagingTargetPath: held.staging,
-	}); err != nil {
-		t.Fatalf("NodeUnstageVolume: %v", err)
-	}
-	if after := held.work.refCommit(t.Context(), pushedRef); after == before {
-		t.Error("the unstage pushed nothing, and the mark did not move")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		answering, held, _ := pushedVolume(t, io.Discard, nil)
+		before := held.work.refCommit(t.Context(), pushedRef)
+		if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+			VolumeId: "config", StagingTargetPath: held.staging,
+		}); err != nil {
+			t.Fatalf("NodeUnstageVolume: %v", err)
+		}
+		if after := held.work.refCommit(t.Context(), pushedRef); after == before {
+			t.Error("the unstage pushed nothing, and the mark did not move")
+		}
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -26,41 +27,43 @@ func passEnded(again *node, url string) {
 }
 
 func TestAVolumeThatWaitsForItsCredentialFetchesNothingWhenAnotherVolumeOfItsRepositoryFetches(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	url := fileURL(source)
-	requests := map[string]*csi.NodePublishVolumeRequest{}
-	for _, id := range []string{"csi-1", "csi-2"} {
-		requests[id] = publishRequest(t, id, url, map[string]string{"pull": "1h"})
-		requests[id].Secrets = secretA
-		if _, err := answering.NodePublishVolume(t.Context(), requests[id]); err != nil {
-			t.Fatalf("NodePublishVolume %s: %v", id, err)
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		url := fileURL(source)
+		requests := map[string]*csi.NodePublishVolumeRequest{}
+		for _, id := range []string{"csi-1", "csi-2"} {
+			requests[id] = publishRequest(t, id, url, map[string]string{"pull": "1h"})
+			requests[id].Secrets = secretA
+			if _, err := answering.NodePublishVolume(t.Context(), requests[id]); err != nil {
+				t.Fatalf("NodePublishVolume %s: %v", id, err)
+			}
 		}
-	}
-	commitFiles(t, source, map[string]string{"b.txt": "two"})
+		commitFiles(t, source, map[string]string{"b.txt": "two"})
 
-	again := restartedQuiet(t, answering)
-	returned, waiting := resumedVolume(again, "csi-1"), resumedVolume(again, "csi-2")
-	if _, err := again.NodePublishVolume(t.Context(), requests["csi-1"]); err != nil {
-		t.Fatalf("the republish of csi-1: %v", err)
-	}
-	waitForFile(t, returned.tree, "b.txt")
-	passEnded(again, url)
+		again := restartedQuiet(t, answering)
+		returned, waiting := resumedVolume(again, "csi-1"), resumedVolume(again, "csi-2")
+		if _, err := again.NodePublishVolume(t.Context(), requests["csi-1"]); err != nil {
+			t.Fatalf("the republish of csi-1: %v", err)
+		}
+		waitForFile(t, returned.tree, "b.txt")
+		passEnded(again, url)
 
-	if _, err := os.Stat(filepath.Join(waiting.tree, "b.txt")); err == nil {
-		t.Error("the volume that waits for its credential moved with the other volume's fetch")
-	}
-	if _, message := waiting.report(); !strings.Contains(message, "no credential") {
-		t.Errorf("the waiting volume reports %q, want the credential it waits for", message)
-	}
-	if _, trouble := waiting.condition(); trouble != "" {
-		t.Errorf("the waiting volume records the failure %q, want no fetch at all", trouble)
-	}
+		if _, err := os.Stat(filepath.Join(waiting.tree, "b.txt")); err == nil {
+			t.Error("the volume that waits for its credential moved with the other volume's fetch")
+		}
+		if _, message := waiting.report(); !strings.Contains(message, "no credential") {
+			t.Errorf("the waiting volume reports %q, want the credential it waits for", message)
+		}
+		if _, trouble := waiting.condition(); trouble != "" {
+			t.Errorf("the waiting volume records the failure %q, want no fetch at all", trouble)
+		}
 
-	if _, err := again.NodePublishVolume(t.Context(), requests["csi-2"]); err != nil {
-		t.Fatalf("the republish of csi-2: %v", err)
-	}
-	waitForFile(t, waiting.tree, "b.txt")
+		if _, err := again.NodePublishVolume(t.Context(), requests["csi-2"]); err != nil {
+			t.Fatalf("the republish of csi-2: %v", err)
+		}
+		waitForFile(t, waiting.tree, "b.txt")
+	})
 }
 
 func TestADemandForAVolumeThatWaitsForItsCredentialWakesNoPass(t *testing.T) {
@@ -79,44 +82,46 @@ func TestADemandForAVolumeThatWaitsForItsCredentialWakesNoPass(t *testing.T) {
 }
 
 func TestAWriteableVolumeThatWaitsForItsCredentialPushesNothing(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	boundVolume(t, answering, "config", "config-eager")
-	armingClass(t, answering, "config-eager", nil)
-	staged := stageRequest(t, "config", fileURL(remote), nil)
-	staged.Secrets = secretA
-	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
-	}
-	request := persistentPublish(t, staged)
-	request.Secrets = secretA
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
-	held := resumedVolume(answering, "config")
-	waitForArmed(t, held, true)
-	unwatched(t, answering, held)
-	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
-	answering.commit(t.Context(), held, held.policyNow())
-	before := strings.TrimSpace(git(t, remote, "rev-parse", "main"))
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		remote := bareRemote(t, map[string]string{"a.txt": "one"})
+		boundVolume(t, answering, "config", "config-eager")
+		armingClass(t, answering, "config-eager", nil)
+		staged := stageRequest(t, "config", fileURL(remote), nil)
+		staged.Secrets = secretA
+		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("NodeStageVolume: %v", err)
+		}
+		request := persistentPublish(t, staged)
+		request.Secrets = secretA
+		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
+		held := resumedVolume(answering, "config")
+		waitForArmed(t, held, true)
+		unwatched(t, answering, held)
+		writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+		answering.commit(t.Context(), held, held.policyNow())
+		before := strings.TrimSpace(git(t, remote, "rev-parse", "main"))
 
-	again := restartedQuiet(t, answering)
-	resumed := resumedVolume(again, "config")
-	waitForArmed(t, resumed, true)
-	again.pushIfDue(t.Context(), resumed, resumed.policyNow(), time.Hour)
-	if _, trouble := resumed.condition(); trouble != "" {
-		t.Errorf("a timed push records the failure %q, want no push at all", trouble)
-	}
-	// The unpublish push is the last one the pod gets, so its failure
-	// is posted.
-	again.push(t.Context(), resumed)
-	if len(eventsWithReason(t, again, reasonPushFailed)) == 0 {
-		t.Errorf("the unpublish push posted no %s Event", reasonPushFailed)
-	}
+		again := restartedQuiet(t, answering)
+		resumed := resumedVolume(again, "config")
+		waitForArmed(t, resumed, true)
+		again.pushIfDue(t.Context(), resumed, resumed.policyNow(), time.Hour)
+		if _, trouble := resumed.condition(); trouble != "" {
+			t.Errorf("a timed push records the failure %q, want no push at all", trouble)
+		}
+		// The unpublish push is the last one the pod gets, so its failure
+		// is posted.
+		again.push(t.Context(), resumed)
+		if len(eventsWithReason(t, again, reasonPushFailed)) == 0 {
+			t.Errorf("the unpublish push posted no %s Event", reasonPushFailed)
+		}
 
-	if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != before {
-		t.Errorf("the remote moved to %s with no credential, want it at %s", got, before)
-	}
+		if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != before {
+			t.Errorf("the remote moved to %s with no credential, want it at %s", got, before)
+		}
+	})
 }
 
 func TestAResumedReadOnlyVolumeReportsTheCommitItsTreeHolds(t *testing.T) {

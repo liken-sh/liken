@@ -21,15 +21,21 @@ const refPrefix = "refs/git-csi/"
 
 // store is the root directory and one lock per repository, made on
 // first use.
+//
+// Each repository's lock is a channel with one slot, not a
+// `sync.Mutex`. A goroutine that waits to send on a channel is durably
+// blocked in a synctest bubble, so a test's fake clock still moves
+// while a publish waits for a fetch of the same repository. A goroutine
+// that waits on a `sync.Mutex` stops the clock.
 type store struct {
 	root string
 
 	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	locks map[string]chan struct{}
 }
 
 func newStore(root string) *store {
-	return &store{root: root, locks: map[string]*sync.Mutex{}}
+	return &store{root: root, locks: map[string]chan struct{}{}}
 }
 
 // repositoryURLFile is the file a bare repository carries beside its
@@ -70,13 +76,13 @@ func (r *repository) lock() func() {
 	r.store.mu.Lock()
 	held, found := r.store.locks[r.name]
 	if !found {
-		held = &sync.Mutex{}
+		held = make(chan struct{}, 1)
 		r.store.locks[r.name] = held
 	}
 	r.store.mu.Unlock()
 
-	held.Lock()
-	return held.Unlock
+	held <- struct{}{}
+	return func() { <-held }
 }
 
 // exists reports whether the store already holds this repository.

@@ -2,11 +2,12 @@ package main
 
 // clock.go holds the time source of the watch on a work tree. The
 // watch measures the quiesce and the sweep against it. The driver
-// runs on the wall clock. A test drives the quiesce on a clock of its
-// own, so a class's quiesce of 5s, the floor that `shortestQuiesce`
-// sets, runs out when the test says and not 5 real seconds later.
-// `synctest` cannot give the watch a fake clock, because the watch
-// reads inotify and runs git, and neither blocks durably.
+// runs on the wall clock. A test that runs the kernel's inotify watch
+// drives the quiesce on a clock of its own, so a class's quiesce of
+// 5s, the floor that `shortestQuiesce` sets, runs out when the test
+// says and not 5 real seconds later. `synctest` cannot give that watch
+// a fake clock, because a goroutine that reads the inotify file is not
+// durably blocked.
 
 import "time"
 
