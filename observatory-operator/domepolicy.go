@@ -29,13 +29,26 @@ const policyWait = 30 * time.Second
 type mountPolicies struct {
 	tried map[string]string
 	group sync.WaitGroup
+	// seen holds the version of the stores and the INDI epoch that the
+	// last pass read. A reading changes neither, so a pass that finds
+	// both the same has nothing new to write, and a mount that reports
+	// its position several times a second costs nothing here.
+	seen [2]uint64
 }
 
 // keepDomePolicies writes DOME_POLICY to each connected mount of a held
 // telescope whose policy differs from what its observatory's domes ask
 // for. Each write runs on its own goroutine, so a slow driver does not
 // hold the lock relay.
-func (o *operator) keepDomePolicies(ctx context.Context, t *tree, p *mountPolicies) {
+func (o *operator) keepDomePolicies(ctx context.Context, p *mountPolicies) {
+	now := [2]uint64{o.stores.version.Load(), epochs.Load()}
+	if now == p.seen {
+		return
+	}
+	p.seen = now
+	// The snapshot comes after the versions, so a change after them
+	// starts another pass.
+	t := o.snapshot()
 	for _, site := range sortedNames(t.observatories) {
 		locked := len(domesOf(t, t.observatories[site])) > 0
 		want := "DOME_IGNORED"

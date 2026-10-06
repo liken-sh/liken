@@ -202,9 +202,8 @@ func (o *operator) keepLocks(ctx context.Context) {
 	for {
 		wake := o.changed.wait()
 		if o.stores.ready() {
-			t := o.snapshot()
-			o.relayLocks(t)
-			o.keepDomePolicies(ctx, t, policies)
+			o.relayLocks(o.snapshot())
+			o.keepDomePolicies(ctx, policies)
 		}
 		select {
 		case <-ctx.Done():
