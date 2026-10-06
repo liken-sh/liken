@@ -6,12 +6,11 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
-	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	kevents "github.com/liken-sh/liken/kubernetes/events"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -52,70 +51,75 @@ func podOf(context map[string]string) podReference {
 	}
 }
 
-// events posts Events through the cluster's API, or posts nothing when
-// the driver runs outside a cluster.
+// events holds the driver's two ways into the cluster: the typed
+// clientset that the sweep watches PersistentVolumes through, and the
+// recorder that posts Events. Both are nil when the driver runs
+// outside a cluster.
+//
+// The recorder is the shared writer of kubernetes/events. It folds a
+// repeat of the same Event into the Event already posted, so a pod
+// that the kubelet tries to mount again and again carries one line,
+// such as "(x37 over 1h)", and not one Event for each attempt.
 type events struct {
-	client kubernetes.Interface
-	node   string
-	logger *slog.Logger
-	now    func() time.Time
+	client   kubernetes.Interface
+	recorder *kevents.Recorder
 }
 
 // newEvents reads the driver's own credentials from the pod it runs in.
-func newEvents(nodeID string, logger *slog.Logger) *events {
-	return eventsFrom(nodeID, logger, rest.InClusterConfig)
+// The recorder writes until ctx ends.
+func newEvents(ctx context.Context, nodeID string, logger *slog.Logger) *events {
+	return eventsFrom(ctx, nodeID, logger, rest.InClusterConfig)
 }
 
-// eventsFrom builds the client from the configuration load returns. A
+// eventsFrom builds the clients from the configuration load returns. A
 // driver that finds no cluster still serves volumes and says so once,
 // because a mount is worth more than an Event.
-func eventsFrom(nodeID string, logger *slog.Logger, load func() (*rest.Config, error)) *events {
-	posting := &events{node: nodeID, logger: logger, now: time.Now}
+//
+// The clientset and the recorder share one HTTP client, so they share
+// its connections and its way of reading the ServiceAccount token.
+func eventsFrom(
+	ctx context.Context, nodeID string, logger *slog.Logger, load func() (*rest.Config, error),
+) *events {
 	config, err := load()
 	if err != nil {
 		logger.Warn("no events", "reason", err)
-		return posting
+		return &events{}
 	}
-	client, err := kubernetes.NewForConfig(config)
+	httpClient, err := rest.HTTPClientFor(config)
 	if err != nil {
 		logger.Warn("no events", "reason", err)
-		return posting
+		return &events{}
 	}
-	posting.client = client
-	return posting
+	client, err := kubernetes.NewForConfigAndClient(config, httpClient)
+	if err != nil {
+		logger.Warn("no events", "reason", err)
+		return &events{}
+	}
+	return &events{
+		client: client,
+		recorder: kevents.New(ctx, apiclient.New(config.Host, httpClient, ""), driverName,
+			kevents.Options{Instance: nodeID, Log: logTo(logger)}),
+	}
 }
 
-// post creates one Event on the pod. A failure to post is logged and
-// nothing more, because a mount must never fail on the API server.
-func (e *events) post(ctx context.Context, pod podReference, kind, reason, message string) {
-	if e.client == nil || pod.name == "" || pod.namespace == "" {
+// logTo answers a writer that logs each line the recorder writes, an
+// Event it could not post, as one warning of the driver's own log.
+func logTo(logger *slog.Logger) io.Writer {
+	return slog.NewLogLogger(logger.Handler(), slog.LevelWarn).Writer()
+}
+
+// refuse posts one Warning on the pod. The recorder queues it and
+// returns at once, so a mount never waits on the API server and never
+// fails because of it.
+func (e *events) refuse(pod podReference, reason, message string) {
+	if pod.name == "" || pod.namespace == "" {
 		return
 	}
-	involved := corev1.ObjectReference{
-		Kind:       "Pod",
+	e.recorder.Warning(kevents.ObjectReference{
 		APIVersion: "v1",
-		Name:       pod.name,
+		Kind:       "Pod",
 		Namespace:  pod.namespace,
-		UID:        types.UID(pod.uid),
-	}
-	now := metav1.NewTime(e.now())
-	event := &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: involved.Name + ".",
-			Namespace:    involved.Namespace,
-		},
-		InvolvedObject: involved,
-		Reason:         reason,
-		Message:        message,
-		Type:           kind,
-		Source:         corev1.EventSource{Component: driverName, Host: e.node},
-		FirstTimestamp: now,
-		LastTimestamp:  now,
-		Count:          1,
-	}
-	if _, err := e.client.CoreV1().Events(involved.Namespace).
-		Create(ctx, event, metav1.CreateOptions{}); err != nil {
-		e.logger.WarnContext(ctx, "the event was not posted",
-			"pod", involved.Namespace+"/"+involved.Name, "reason", reason, "error", err)
-	}
+		Name:       pod.name,
+		UID:        pod.uid,
+	}, reason, message)
 }

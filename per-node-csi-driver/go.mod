@@ -4,10 +4,16 @@ module github.com/liken-sh/per-node-csi-driver
 
 go 1.27.1
 
+replace github.com/liken-sh/liken/kubernetes => ../kubernetes
+
 tool github.com/vladopajic/go-test-coverage/v2
 
 require (
 	github.com/container-storage-interface/spec v1.13.0
+	// The Event writer that the components share. The module is in this
+	// repository, and the replace above builds against the copy in the
+	// tree, so no version of it is published.
+	github.com/liken-sh/liken/kubernetes v0.0.0
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.83.2

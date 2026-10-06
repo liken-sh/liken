@@ -922,7 +922,7 @@ jobs:
       packages: write
 
   per-node-csi-driver-publish:
-    needs: [plan, per-node-csi-driver, notices]
+    needs: [plan, per-node-csi-driver, kubernetes, notices]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-per-node-csi-driver.yaml
     with:

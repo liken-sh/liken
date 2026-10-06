@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	kevents "github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 )
 
 // quietLogger discards the driver's log, for a test that reads no log
@@ -24,12 +24,12 @@ func quietLogger() *slog.Logger {
 }
 
 // driver is the node service under test with the two fakes a test
-// reads: the mount calls the driver made, and the cluster its Events
-// land in.
+// reads: the mount calls the driver made, and the API server its
+// Events land in.
 type driver struct {
 	*node
 	mounts *recordedMounts
-	client *fake.Clientset
+	posted *eventstest.Events
 }
 
 // testDriver builds a node whose store is a directory of the test's own
@@ -43,11 +43,11 @@ func testDriver(t *testing.T) *driver {
 // the driver a store it cannot write.
 func driverIn(t *testing.T, root string) *driver {
 	t.Helper()
-	client := fake.NewClientset()
+	posting, posted := postingTo(t, quietLogger())
 	calls := &recordedMounts{}
 	answering := newNode(
 		&config{nodeID: "node-1", store: root},
-		&events{client: client, node: "node-1", logger: quietLogger(), now: time.Now},
+		posting,
 		newMetrics(),
 		quietLogger(),
 	)
@@ -55,7 +55,7 @@ func driverIn(t *testing.T, root string) *driver {
 	// A mount table that does not exist reads as empty, so a fresh driver
 	// finds none of its own targets still mounted.
 	answering.mountinfo = filepath.Join(t.TempDir(), "mountinfo")
-	return &driver{node: answering, mounts: calls, client: client}
+	return &driver{node: answering, mounts: calls, posted: posted}
 }
 
 // aPod is the pod the kubelet names in a volume context.
@@ -77,28 +77,16 @@ func publishing(handle, target string, pod podReference) *csi.NodePublishVolumeR
 	}
 }
 
-// eventReasons lists the reason of every Event in the fake cluster,
-// which is what a person reads on the pod.
-func eventReasons(t *testing.T, client *fake.Clientset) []string {
+// onlyReason fails the test unless the fake API server holds exactly
+// one Event, a Warning with the wanted reason. It waits for the
+// recorder to write its queue first, so the test runs in a synctest
+// bubble.
+func onlyReason(t *testing.T, posted *eventstest.Events, want string) {
 	t.Helper()
-	posted, err := client.CoreV1().Events("example").List(t.Context(), metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("listing the events: %v", err)
-	}
-	reasons := make([]string, 0, len(posted.Items))
-	for _, event := range posted.Items {
-		reasons = append(reasons, event.Reason)
-	}
-	return reasons
-}
-
-// onlyReason fails the test unless the fake cluster holds exactly one
-// Event, with the wanted reason.
-func onlyReason(t *testing.T, client *fake.Clientset, want string) {
-	t.Helper()
-	reasons := eventReasons(t, client)
-	if len(reasons) != 1 || reasons[0] != want {
-		t.Errorf("the pod carries %v, want %s alone", reasons, want)
+	synctest.Wait()
+	held := posted.List()
+	if len(held) != 1 || held[0].Reason != want || held[0].Type != kevents.TypeWarning {
+		t.Errorf("the pod carries %+v, want one Warning %s", held, want)
 	}
 }
 
@@ -175,13 +163,15 @@ func TestPublishKeepsWhatTheCopyAlreadyHolds(t *testing.T) {
 }
 
 func TestPublishRefusesAHandleTheDriverCannotPutUnderTheStore(t *testing.T) {
-	answering := testDriver(t)
-	_, err := answering.NodePublishVolume(t.Context(),
-		publishing("Bad/Handle", filepath.Join(t.TempDir(), "mount"), aPod("reader", "pod-uid-1")))
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("NodePublishVolume answered %v, want InvalidArgument", err)
-	}
-	onlyReason(t, answering.client, reasonRefused)
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		_, err := answering.NodePublishVolume(t.Context(),
+			publishing("Bad/Handle", filepath.Join(t.TempDir(), "mount"), aPod("reader", "pod-uid-1")))
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("NodePublishVolume answered %v, want InvalidArgument", err)
+		}
+		onlyReason(t, answering.posted, reasonRefused)
+	})
 }
 
 func TestPublishRefusesACallWithNoTargetPath(t *testing.T) {
@@ -194,22 +184,24 @@ func TestPublishRefusesACallWithNoTargetPath(t *testing.T) {
 }
 
 func TestPublishRefusesAHandleAnotherPodOnThisNodeHolds(t *testing.T) {
-	answering := testDriver(t)
-	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", filepath.Join(t.TempDir(), "first"),
-			aPod("first", "pod-uid-1"))); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
-	_, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", filepath.Join(t.TempDir(), "second"),
-			aPod("second", "pod-uid-2")))
-	if status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("NodePublishVolume answered %v, want FailedPrecondition", err)
-	}
-	if message := status.Convert(err).Message(); !strings.Contains(message, "first") {
-		t.Errorf("the refusal reads %q, want it to name the pod that holds the copy", message)
-	}
-	onlyReason(t, answering.client, reasonHeld)
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		if _, err := answering.NodePublishVolume(t.Context(),
+			publishing("example-store", filepath.Join(t.TempDir(), "first"),
+				aPod("first", "pod-uid-1"))); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
+		_, err := answering.NodePublishVolume(t.Context(),
+			publishing("example-store", filepath.Join(t.TempDir(), "second"),
+				aPod("second", "pod-uid-2")))
+		if status.Code(err) != codes.FailedPrecondition {
+			t.Fatalf("NodePublishVolume answered %v, want FailedPrecondition", err)
+		}
+		if message := status.Convert(err).Message(); !strings.Contains(message, "first") {
+			t.Errorf("the refusal reads %q, want it to name the pod that holds the copy", message)
+		}
+		onlyReason(t, answering.posted, reasonHeld)
+	})
 }
 
 func TestPublishRepeatedForTheSamePodAndTargetMountsOnce(t *testing.T) {
@@ -243,17 +235,19 @@ func TestPublishMovesTheHoldWhenTheSamePodTakesANewTarget(t *testing.T) {
 }
 
 func TestPublishReportsACopyItCannotMake(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "store")
-	if err := os.WriteFile(root, []byte("not a directory\n"), 0o600); err != nil {
-		t.Fatalf("writing the file: %v", err)
-	}
-	answering := driverIn(t, root)
-	_, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", filepath.Join(t.TempDir(), "mount"), aPod("reader", "pod-uid-1")))
-	if status.Code(err) != codes.Internal {
-		t.Fatalf("NodePublishVolume answered %v, want Internal", err)
-	}
-	onlyReason(t, answering.client, reasonMountFailed)
+	synctest.Test(t, func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "store")
+		if err := os.WriteFile(root, []byte("not a directory\n"), 0o600); err != nil {
+			t.Fatalf("writing the file: %v", err)
+		}
+		answering := driverIn(t, root)
+		_, err := answering.NodePublishVolume(t.Context(),
+			publishing("example-store", filepath.Join(t.TempDir(), "mount"), aPod("reader", "pod-uid-1")))
+		if status.Code(err) != codes.Internal {
+			t.Fatalf("NodePublishVolume answered %v, want Internal", err)
+		}
+		onlyReason(t, answering.posted, reasonMountFailed)
+	})
 }
 
 func TestPublishReportsATargetItCannotMake(t *testing.T) {
@@ -280,15 +274,17 @@ func TestPublishReportsAnOldMountItCannotTakeAway(t *testing.T) {
 }
 
 func TestPublishReportsABindThatFailed(t *testing.T) {
-	answering := testDriver(t)
-	answering.mounts.failAt = 1
-	answering.mounts.mountErr = unix.EPERM
-	_, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", filepath.Join(t.TempDir(), "mount"), aPod("reader", "pod-uid-1")))
-	if status.Code(err) != codes.Internal {
-		t.Fatalf("NodePublishVolume answered %v, want Internal", err)
-	}
-	onlyReason(t, answering.client, reasonMountFailed)
+	synctest.Test(t, func(t *testing.T) {
+		answering := testDriver(t)
+		answering.mounts.failAt = 1
+		answering.mounts.mountErr = unix.EPERM
+		_, err := answering.NodePublishVolume(t.Context(),
+			publishing("example-store", filepath.Join(t.TempDir(), "mount"), aPod("reader", "pod-uid-1")))
+		if status.Code(err) != codes.Internal {
+			t.Fatalf("NodePublishVolume answered %v, want Internal", err)
+		}
+		onlyReason(t, answering.posted, reasonMountFailed)
+	})
 }
 
 func TestUnpublishTakesTheMountAwayAndLeavesTheCopy(t *testing.T) {

@@ -3,9 +3,10 @@
 name = "per-node-csi-driver"
 license = "MIT"
 
-# The scripts that put the license notices in the image.
+# The Event writer of the shared kubernetes module, and the scripts
+# that put the license notices in the image.
 [depends]
-components = ["notices"]
+components = ["kubernetes", "notices"]
 
 [docs]
 prefix = "per-node"
@@ -39,8 +40,11 @@ skip = ["gofmt", "go-vet", "go-mod-tidy"]
 [outputs]
 deploy = "deploy"
 
+# The image builds from this module's go.mod, which replaces the shared
+# kubernetes module with ../kubernetes, so it takes that directory as a
+# build context.
 [[outputs.images]]
 name = "per-node-csi-driver"
 file = "Dockerfile"
-contexts = { notices = "notices" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "per-node-csi-driver/smoke/per-node-csi-driver.sh"

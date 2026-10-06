@@ -12,7 +12,6 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // node implements the Node service and records this node's published copies.
@@ -111,7 +110,7 @@ func (n *node) NodePublishVolume(
 	pod := podOf(request.GetVolumeContext())
 
 	if err := checkHandle(handle); err != nil {
-		n.events.post(ctx, pod, corev1.EventTypeWarning, reasonRefused,
+		n.events.refuse(pod, reasonRefused,
 			status.Convert(err).Message())
 		return nil, err
 	}
@@ -124,7 +123,7 @@ func (n *node) NodePublishVolume(
 		err := status.Errorf(codes.FailedPrecondition,
 			"volume_id: %s is held on %s by pod %s/%s",
 			handle, n.nodeID, standing.PodNamespace, standing.PodName)
-		n.events.post(ctx, pod, corev1.EventTypeWarning, reasonHeld,
+		n.events.refuse(pod, reasonHeld,
 			status.Convert(err).Message())
 		return nil, err
 	}
@@ -134,7 +133,7 @@ func (n *node) NodePublishVolume(
 
 	if err := n.mount(request, handle, target); err != nil {
 		n.readings.mountFailed()
-		n.events.post(ctx, pod, corev1.EventTypeWarning, reasonMountFailed,
+		n.events.refuse(pod, reasonMountFailed,
 			status.Convert(err).Message())
 		return nil, err
 	}

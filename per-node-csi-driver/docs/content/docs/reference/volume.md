@@ -96,8 +96,16 @@ nothing: the copy outlives its pod.
 
 ## Events
 
-The driver posts an event on the pod for every refusal, so `kubectl
-describe pod` says why a mount did not happen.
+The driver posts a Warning event on the pod for every refusal, so
+`kubectl describe pod` says why a mount did not happen.
+
+The kubelet retries a refused mount with a backoff that grows to about
+two minutes. Each retry that the driver refuses for the same reason,
+with the same message, within 10 minutes of the last one, increases the
+count of the event already posted and posts no new one. So a pod that
+waits an hour for a handle that another pod holds carries one line,
+such as `(x37 over 1h)`. The API server deletes an event one hour after
+its last change.
 
 | Reason | When |
 |---|---|

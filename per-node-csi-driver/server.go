@@ -64,7 +64,7 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 	}
 
 	readings := newMetrics()
-	posting := newEvents(cfg.nodeID, logger)
+	posting := newEvents(ctx, cfg.nodeID, logger)
 	answering := newNode(cfg, posting, readings, logger)
 	// The mounts outlive the driver, so a driver that starts takes back
 	// the holds the kernel still carries.

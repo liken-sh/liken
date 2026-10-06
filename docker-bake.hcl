@@ -987,6 +987,7 @@ target "per-node-csi-driver" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
+    "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
   args = {
