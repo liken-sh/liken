@@ -493,7 +493,10 @@ A `Telescope` and an `Observatory` report the condition `Active`. A
 telescope is `Active` from the start of its reservation's `Activation`
 step until the start of its `Deactivation` step. An observatory is
 `Active` from the `Activation` step of the first reservation in it
-until the `Deactivation` step of the last one. Each run records the
+until the `Deactivation` step of the last one. The `Observatory`'s
+`Active` message names the reservations that hold telescopes in it
+now, such as `Active for Reservation west-tonight`, and a change of
+holders keeps its `lastTransitionTime`. Each run records the
 `lastTransitionTime` of `Active` that it answers, in `since`, so a
 trigger runs once for each transition.
 

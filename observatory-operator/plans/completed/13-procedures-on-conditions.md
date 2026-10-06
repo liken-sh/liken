@@ -399,6 +399,12 @@ found these defects. Each fix lands with a test against the fakes.
   the exit code and the last 300 bytes of the termination message.
   The pod has no `managed-by` label, so no watch holds it, and the
   `Job`'s `Failed` condition is the event that starts the one read.
+- **The `Observatory`'s `Active` message names who holds it now.**
+  After `drill-east` ended while `drill-west` held the observatory, the
+  condition still said "Activated by Reservation drill-east". The
+  message now names the reservations that hold telescopes in the
+  observatory, as "Active for Reservation drill-west", and the
+  transition time stays when the holders change.
 
 ## How we test it
 

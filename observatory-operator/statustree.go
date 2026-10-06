@@ -216,7 +216,15 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		}
 	}
 	next.Weather = worstWeather(devices, composed)
-	conditions := []observatory.Condition{readyCondition(next.Phase, message), o.activity.condition(observatoryKey(name))}
+	active := o.activity.condition(observatoryKey(name))
+	if active.Status == observatory.ConditionTrue && len(next.Reservations) > 0 {
+		// The reservation that activated the observatory may have ended
+		// while others hold telescopes in it, so the message names the
+		// holders now. A new message alone is no transition, so the
+		// condition keeps its time.
+		active.Message = "Active for Reservation " + strings.Join(next.Reservations, ", ")
+	}
+	conditions := []observatory.Condition{readyCondition(next.Phase, message), active}
 	if locks := o.planLocks(t, site).condition; locks != nil {
 		conditions = append(conditions, *locks)
 	}
