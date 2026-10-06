@@ -136,6 +136,32 @@ titles again. `status.webhook` is the address that rescans one folder;
 [Webhooks](/docs/guides/webhooks/) gives it to Radarr, Sonarr, and
 Jellyfin.
 
+## The Events it posts
+
+A condition holds only its last verdict. The operator posts a
+Kubernetes `Event` on the `Library` for each change, so
+`kubectl -n media describe library movies` shows what happened in the
+last hour:
+
+* Each new condition, and each change of a condition's status or
+  reason, posts one `Event` with the condition's reason and message. A
+  new message with the same reason posts none. The reasons that ask a
+  person to act post a `Warning`: `ClaimNotFound`, `VolumeNotFound`,
+  `ManyCatalogs`, `ScheduleInvalid`, `JobNotStarted`, `JobFailed`,
+  `ProviderNotFound`, `ProviderNotReady`, `FactNotServed`,
+  `ClaimTemplateNotFound`, and the `Departing` reason `Blocked`. Every
+  other reason posts a `Normal` `Event`, so a `Ready` that returns to
+  `True` posts `Ready`.
+* `JobCreated` (`Normal`) names each `Job` the operator creates for the
+  library, what it runs, and why.
+* `ScanCompleted` (`Normal`) gives the titles and files of a walk that
+  finished, and `ScanFailed` (`Warning`) gives the failure of a walk that
+  did not. The operator posts each one when the reporter publishes the
+  run.
+
+The API server deletes an `Event` an hour after its last write, so the
+conditions and the operator's log keep the facts after that.
+
 ## The namespace is a boundary
 
 Every `Library` in a namespace writes into that namespace's one

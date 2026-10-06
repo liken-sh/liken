@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // The five image overrides. A variable that is set wins over the
@@ -88,7 +89,10 @@ const passTimeout = 30 * time.Second
 // are fields rather than globals so a test builds an operator around a
 // desk and a cluster it controls.
 type operator struct {
-	client         *apiclient.Client
+	client *apiclient.Client
+	// recorder posts the Events (eventposts.go). The operator binary builds
+	// it in operatorprocess.go, and a nil recorder posts nothing.
+	recorder       *events.Recorder
 	scannerImage   string
 	corrosionImage string
 	browserImage   string

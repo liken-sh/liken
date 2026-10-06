@@ -129,6 +129,7 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	if err == nil {
 		o.logf("library %s/%s: created the job %s, %s, because %s",
 			namespace, name, job.Metadata.Name, plan.described(), plan.cause)
+		postJobCreated(o.recorder, library, job.Metadata.Name, plan)
 	}
 	// A walk covers every folder the webhooks named before it, so each one
 	// the pass read is released. A folder named after the read stays for

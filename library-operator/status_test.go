@@ -381,10 +381,10 @@ func TestWriteLibraryStatusWritesOnlyAChange(t *testing.T) {
 	seen.report = &libraryReport{Titles: 12}
 	settled := deriveLibraryStatus(library, seen, testNow)
 
-	if err := writeLibraryStatus(t.Context(), client, nil, library, func(*Library) LibraryStatus { return settled }); err != nil {
+	if err := writeLibraryStatus(t.Context(), nil, client, nil, library, func(*Library) LibraryStatus { return settled }); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLibraryStatus(t.Context(), client, nil, library, func(*Library) LibraryStatus { return settled }); err != nil {
+	if err := writeLibraryStatus(t.Context(), nil, client, nil, library, func(*Library) LibraryStatus { return settled }); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "libraries"); got != 1 {
@@ -392,7 +392,7 @@ func TestWriteLibraryStatusWritesOnlyAChange(t *testing.T) {
 	}
 
 	settled.Titles = 13
-	if err := writeLibraryStatus(t.Context(), client, nil, library, func(*Library) LibraryStatus { return settled }); err != nil {
+	if err := writeLibraryStatus(t.Context(), nil, client, nil, library, func(*Library) LibraryStatus { return settled }); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "libraries"); got != 2 {
@@ -425,7 +425,7 @@ func TestWriteLibraryStatusSettlesAConflictAndReportsAFailure(t *testing.T) {
 			older := *cluster.heldLibrary("movies")
 			older.Metadata.ResourceVersion = "6"
 
-			err := writeLibraryStatus(t.Context(), client, nil, &older,
+			err := writeLibraryStatus(t.Context(), nil, client, nil, &older,
 				func(held *Library) LibraryStatus { return deriveLibraryStatus(held, scanning(), testNow) })
 
 			if (err != nil) != one.wantErr {
@@ -511,11 +511,11 @@ func TestWriteLibraryStatusWritesOnlyASourceThatChanged(t *testing.T) {
 	seen := scanning()
 	seen.resolved = resolveSources(library, checkedSources())
 
-	if err := writeLibraryStatus(t.Context(), client, nil, library,
+	if err := writeLibraryStatus(t.Context(), nil, client, nil, library,
 		func(held *Library) LibraryStatus { return deriveLibraryStatus(held, seen, testNow) }); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLibraryStatus(t.Context(), client, nil, library,
+	if err := writeLibraryStatus(t.Context(), nil, client, nil, library,
 		func(held *Library) LibraryStatus { return deriveLibraryStatus(held, seen, testNow) }); err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ func TestWriteLibraryStatusWritesOnlyASourceThatChanged(t *testing.T) {
 	refused := scanning()
 	refused.resolved = resolveSources(library, providerSet{
 		libraryKey("house", "tmdb"): checkedProvider("tmdb", []string{factIdentity}, reasonRefused)})
-	if err := writeLibraryStatus(t.Context(), client, nil, library,
+	if err := writeLibraryStatus(t.Context(), nil, client, nil, library,
 		func(held *Library) LibraryStatus { return deriveLibraryStatus(held, refused, testNow) }); err != nil {
 		t.Fatal(err)
 	}

@@ -59,7 +59,7 @@ func (o *operator) depart(ctx context.Context, library *Library, choice catalogC
 		return o.releaseLibrary(ctx, library, stage.why)
 	}
 	now := time.Now().UTC()
-	return writeLibraryStatus(ctx, o.client, o.versions.libraries, library,
+	return writeLibraryStatus(ctx, o.recorder, o.client, o.versions.libraries, library,
 		func(held *Library) LibraryStatus { return departingStatus(held, stage, now) })
 }
 

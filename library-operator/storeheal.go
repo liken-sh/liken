@@ -130,26 +130,51 @@ func (o *operator) healStoreReplica(ctx context.Context, pod *Pod) error {
 		return nil
 	}
 	o.forgetPod(namespace, name)
+	claimDeleted, err := o.deleteStoreClaim(ctx, pod)
+	healed := healedMessage(pod, claimDeleted)
+	o.logf("catalog %s: %s", namespace, healed)
+	postStoreCopyHealed(o.recorder, pod, healed)
+	return err
+}
+
+// deleteStoreClaim deletes the claim of one stranded copy whose pod the
+// heal deleted, and answers whether it did. The two guards above
+// healStoreReplica decide whether the claim goes.
+func (o *operator) deleteStoreClaim(ctx context.Context, pod *Pod) (bool, error) {
+	namespace := pod.Metadata.Namespace
 	mounted := storeClaimOf(pod)
 	if mounted == "" {
-		return nil
+		return false, nil
 	}
 	claim, err := GetPersistentVolumeClaim(ctx, o.client, namespace, mounted)
 	if errors.Is(err, apiclient.ErrNotFound) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if claim.Metadata.Labels[storeLabelKey] != pod.Metadata.Labels[storeLabelKey] {
-		return nil
+		return false, nil
 	}
 	perNode, err := o.classIsPerNode(ctx, claim.Spec.StorageClassName)
 	if err != nil || perNode {
-		return err
+		return false, err
 	}
 	o.forgetClaim(namespace, mounted)
-	return DeletePersistentVolumeClaim(ctx, o.client, namespace, mounted)
+	if err := DeletePersistentVolumeClaim(ctx, o.client, namespace, mounted); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// The sentence the log line and the Event of one heal carry.
+func healedMessage(pod *Pod, claimDeleted bool) string {
+	what := "the copy " + pod.Metadata.Name
+	if claimDeleted {
+		what += " and its claim"
+	}
+	return fmt.Sprintf("deleted %s, because its node %s has not been Ready for more than %s",
+		what, pod.Spec.NodeName, strandedNodeGrace)
 }
 
 // storeClaimOf names the claim one copy mounts, read off the pod, because

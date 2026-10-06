@@ -87,6 +87,15 @@ claims on other classes. If more than one replica is requested on a class
 whose provisioner is not `per-node.liken.sh`, the operator runs one
 replica and reports `Ready: False` with reason `ClassNotPerNode`.
 
+A durable replica on a node that has not been `Ready` for more than ten
+minutes cannot move, because its claim is bound to that node. The
+operator deletes the pod, and its claim on a class that binds a claim
+to a node, so the next pass creates the replica on another node. It
+posts a `StoreCopyHealed` `Warning` `Event` on the `Catalog` that names
+the replica and the node. Each change of the `Ready` condition posts an
+`Event` too, with the condition's reason and message. `ManyCatalogs`,
+`ClassNotPerNode`, and `PodFailed` are `Warning`s.
+
 The `Catalog` also creates a separate Corrosion cluster for playback
 progress. `spec.progress.replicas` controls its replica count. Progress
 has separate storage because a catalog rescan cannot recover it.

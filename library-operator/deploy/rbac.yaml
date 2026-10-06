@@ -208,14 +208,19 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
-  # The Warning events about a library Job's pod that has not started.
-  # A pod whose volume the kubelet cannot mount has no reason in its
-  # status, and the Library status copies the event's words. The
-  # operator lists the events of one pod by a field selector, and only
-  # while that pod stays Pending. It writes no event.
+  # The events, which the operator reads and writes. It lists the
+  # Warning events about a library Job's pod that has not started: a pod
+  # whose volume the kubelet cannot mount has no reason in its status,
+  # and the Library status copies the event's words. It lists the events
+  # of one pod by a field selector, and only while that pod stays
+  # Pending. It creates an event for each condition transition of a
+  # Library, a Catalog, or a MetadataProvider, and for each Job it
+  # creates, each walk that ends, and each stranded copy it deletes. It
+  # patches the count of an event that repeats within ten minutes. The
+  # grant is cluster-wide, because the objects are in any namespace.
   - apiGroups: [""]
     resources: [events]
-    verbs: [list]
+    verbs: [list, create, patch]
   # The workers. A Library runs one Job at a time: a walk on its
   # schedule, for a request, or for a webhook's folders, and a Job that
   # fills gaps between walks. A Job runs the sweep of a departing

@@ -20,6 +20,8 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 // FakeCluster holds the objects an API server would, and records every
@@ -55,8 +57,12 @@ type fakeCluster struct {
 	jobs     map[string]*Job
 	cronJobs map[string]bool
 	// The events the operator reads about a pod that has not started, which
-	// the operator reads and never writes.
+	// a test seeds and the operator lists.
 	events []Event
+	// The Events the operator's recorder posts. The list of a namespace's
+	// Events is the read above, so only a create or a patch reaches this
+	// fake.
+	recorded *eventstest.Events
 	// The ResourceClaimTemplates the cluster owner writes, and the ones an
 	// earlier release of the operator created, by namespace and name.
 	claimTemplates map[string]*ResourceClaimTemplate
@@ -123,6 +129,7 @@ func newFakeCluster() *fakeCluster {
 		people:         map[string]*Person{},
 		nodes:          map[string]*Node{},
 		broken:         map[string]int{},
+		recorded:       &eventstest.Events{},
 	}
 }
 
@@ -131,6 +138,10 @@ func newFakeCluster() *fakeCluster {
 // answers it. Every write sends its change to the open streams.
 func (f *fakeCluster) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && strings.Contains(r.URL.Path, "/events") {
+			f.recorded.ServeHTTP(w, r)
+			return
+		}
 		if f.leases != nil && strings.HasPrefix(r.URL.Path, "/apis/coordination.k8s.io/") {
 			f.leases.ServeHTTP(w, r)
 			return
@@ -1125,6 +1136,10 @@ func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 			ffmpeg: testFFmpegImage, appearances: testAppearancesImage},
 		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
 	operator.watched = listReads{client: operator.client}
+	// The recorder ends with the test. A test that reads the Events runs
+	// in a synctest bubble and waits for the queue to drain.
+	operator.recorder = events.New(t.Context(), operator.client, eventComponent,
+		events.Options{Instance: "library-operator-0", Log: io.Discard})
 	return operator
 }
 

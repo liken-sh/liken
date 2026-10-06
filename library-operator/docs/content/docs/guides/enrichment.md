@@ -95,6 +95,13 @@ pod stores it.
     omdb    omdb       False   Refused               3d
     imdb    imdb       True    Reachable   9h        3d
 
+Each change of the `Ready` reason posts one `Event` on the provider,
+which `kubectl -n media describe metadataprovider omdb` shows. A check
+that gives the same reason again posts none. `NoSecret`, `Refused`,
+`LimitReached`, `Unreachable`, `Unavailable`, and the `Cached` reason
+`ClaimFailed` post a `Warning`, and the other reasons post a `Normal`
+`Event`.
+
 `UPDATED` is for `imdb` alone: the oldest time IMDb replaced one of the
 files the provider reads.
 

@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // The group this operator serves, and the core group it writes
@@ -846,50 +848,40 @@ const (
 	phaseBlocked = "Blocked"
 )
 
-// ConditionStatus is a condition's verdict. It is a string rather than
-// a bool because there is a third state: an operator must be able to
-// say when it cannot tell yet.
-type ConditionStatus string
-
-const (
-	ConditionTrue    ConditionStatus = "True"
-	ConditionFalse   ConditionStatus = "False"
-	ConditionUnknown ConditionStatus = "Unknown"
+// ConditionStatus and Condition are the shared condition type of
+// every liken component, which has the JSON shape of metav1.Condition.
+// Anyone who reads kubectl describe output on a Pod already knows how
+// to read one. ObservedGeneration records which metadata.generation
+// the condition judged, so a reader can tell "Ready, for the spec as
+// it stands" from "Ready, but for a spec two edits ago".
+//
+// The shared type writes reason and message even when they are empty.
+// Every condition this operator writes carries a reason, which the
+// CRDs require to be at least one character, and the CRDs accept an
+// empty message.
+type (
+	ConditionStatus = conditions.Status
+	Condition       = conditions.Condition
 )
 
-// Condition mirrors metav1.Condition, the shape Kubernetes uses
-// everywhere, and liken's own. Anyone who reads kubectl describe
-// output on a Pod already knows how to read one of these.
-//
-// ObservedGeneration records which metadata.generation the condition
-// judged. Generation counts spec edits, so a reader can tell "Ready,
-// for the spec as it stands" from "Ready, but for a spec two edits
-// ago".
-type Condition struct {
-	Type               string          `json:"type"`
-	Status             ConditionStatus `json:"status"`
-	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
-	Reason             string          `json:"reason,omitempty"`
-	Message            string          `json:"message,omitempty"`
-	LastTransitionTime time.Time       `json:"lastTransitionTime"`
-}
+const (
+	ConditionTrue    = conditions.True
+	ConditionFalse   = conditions.False
+	ConditionUnknown = conditions.Unknown
+)
 
-// SetCondition adds or updates a condition by type. It keeps the
-// Kubernetes rule that makes lastTransitionTime meaningful: the time
-// moves only when Status flips, not on every write. That is what lets
-// kubectl get answer "how long has this library been Ready?" instead
-// of only "when did the operator last say so?".
-func SetCondition(conditions []Condition, condition Condition, now time.Time) []Condition {
+// SetCondition adds or updates a condition by type, with now as the
+// time of a transition. It keeps the Kubernetes rule that makes
+// lastTransitionTime meaningful: the time moves only when Status
+// flips, not on every write. That is what lets kubectl get answer "how
+// long has this library been Ready?" instead of only "when did the
+// operator last say so?".
+//
+// It posts no Event, because the status it builds is not written yet.
+// The writer of each status posts the transitions after the API server
+// takes the write (eventposts.go).
+func SetCondition(list []Condition, condition Condition, now time.Time) []Condition {
 	condition.LastTransitionTime = now
-	for i, existing := range conditions {
-		if existing.Type != condition.Type {
-			continue
-		}
-		if existing.Status == condition.Status {
-			condition.LastTransitionTime = existing.LastTransitionTime
-		}
-		conditions[i] = condition
-		return conditions
-	}
-	return append(conditions, condition)
+	conditions.Set(&list, condition)
+	return list
 }

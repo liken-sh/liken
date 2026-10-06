@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
@@ -342,17 +343,27 @@ func podFailureMessage(pod *Pod) string {
 // operator's own write. A write that another writer's change refused
 // with a 409 reads the Library again, composes the status from the fresh
 // copy, and writes once more (memo.SettleStatus).
-func writeLibraryStatus(ctx context.Context, c *apiclient.Client, versions *memo.Versions, library *Library,
-	compose func(*Library) LibraryStatus) error {
-	_, err := memo.SettleStatus(c.WithContext(ctx), versions, libraryPath(library.Metadata.Namespace, library.Metadata.Name), library,
+func writeLibraryStatus(ctx context.Context, recorder *events.Recorder, c *apiclient.Client, versions *memo.Versions,
+	library *Library, compose func(*Library) LibraryStatus) error {
+	// before is the status the last compose replaced, which is the status
+	// the API server held when it took the write, so the Events name what
+	// changed on the server.
+	var before LibraryStatus
+	written, err := memo.SettleStatus(c.WithContext(ctx), versions, libraryPath(library.Metadata.Namespace, library.Metadata.Name), library,
 		func(held *Library) bool {
 			desired := compose(held)
 			if same, err := sameStatus(held.Status, desired); err == nil && same {
 				return false
 			}
+			before = held.Status
 			held.Status = desired
 			return true
 		})
+	if written {
+		object := libraryReference(library)
+		postTransitions(recorder, object, before.Conditions, library.Status.Conditions)
+		postWalkEnd(recorder, object, before, library.Status)
+	}
 	// A Library deleted during the pass is the state its departure
 	// ends in, and has no status left to write.
 	if errors.Is(err, apiclient.ErrNotFound) {

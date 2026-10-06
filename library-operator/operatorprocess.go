@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/events"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 )
@@ -95,6 +96,9 @@ func operate() error {
 
 	library := newOperator(client, stamped, busAddress, topicBase, namespace, ":"+port)
 	library.mediaTopicBase = mediaTopicBase
+	// The recorder's queue ends with the stop signal. The instance is the
+	// pod's name, which os.Hostname answers in the pod.
+	library.recorder = events.New(stopped, client, eventComponent, events.Options{})
 
 	// The metrics listener's address, with no default: milestone 65
 	// says an empty address serves no metrics, so a cluster that wants

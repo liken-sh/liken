@@ -141,16 +141,21 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 	// A write that another writer's change refused with a 409 reads the
 	// provider again, derives the status from the fresh copy, and writes
 	// once more (memo.SettleStatus).
-	_, err = memo.SettleStatus(o.client.WithContext(ctx), o.versions.providers,
+	var before []Condition
+	written, err := memo.SettleStatus(o.client.WithContext(ctx), o.versions.providers,
 		metadataProviderPath(provider.Metadata.Namespace, provider.Metadata.Name), provider,
 		func(held *MetadataProvider) bool {
 			desired := deriveProviderStatus(held, verdict, at)
 			if same, err := sameStatus(held.Status, desired); err == nil && same {
 				return false
 			}
+			before = held.Status.Conditions
 			held.Status = desired
 			return true
 		})
+	if written {
+		postTransitions(o.recorder, metadataProviderReference(provider), before, provider.Status.Conditions)
+	}
 	// A provider deleted during the pass has no status left to write.
 	if errors.Is(err, apiclient.ErrNotFound) {
 		o.forgetProviderCall(provider)

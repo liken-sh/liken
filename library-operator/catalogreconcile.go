@@ -308,16 +308,21 @@ func catalogMembers(namespace string, pods []Pod) []string {
 // writes once more (memo.SettleStatus).
 func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCatalog,
 	compose func(*NamespaceCatalog) CatalogStatus) error {
-	_, err := memo.SettleStatus(o.client.WithContext(ctx), o.versions.catalogs,
+	var before []Condition
+	written, err := memo.SettleStatus(o.client.WithContext(ctx), o.versions.catalogs,
 		catalogPath(catalog.Metadata.Namespace, catalog.Metadata.Name), catalog,
 		func(held *NamespaceCatalog) bool {
 			desired := compose(held)
 			if same, err := sameCatalogStatus(held.Status, desired); err == nil && same {
 				return false
 			}
+			before = held.Status.Conditions
 			held.Status = desired
 			return true
 		})
+	if written {
+		postTransitions(o.recorder, catalogReference(catalog), before, catalog.Status.Conditions)
+	}
 	// A Catalog deleted during the pass has no status left to write.
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil

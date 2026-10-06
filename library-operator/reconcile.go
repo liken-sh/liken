@@ -110,7 +110,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		operatorNamespace: o.namespace,
 		fault:             o.observeJobFault(ctx, jobs, pods, report, namespace, name, now),
 	}
-	return writeLibraryStatus(ctx, o.client, o.versions.libraries, library,
+	return writeLibraryStatus(ctx, o.recorder, o.client, o.versions.libraries, library,
 		func(held *Library) LibraryStatus { return deriveLibraryStatus(held, observation, now) })
 }
 
