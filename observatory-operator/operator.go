@@ -12,8 +12,14 @@ package main
 //   - The status writer writes the status of every other resource
 //     (status.go).
 //
-// Each of them waits on one bell that every watch event and every
-// INDI event notifies.
+// They wait on two bells. changed rings on every watch event and every
+// INDI event. structure rings on the same events except an INDI
+// property's update and a device's message, which a mount that tracks
+// sends several times a second. The status writer and the steps that
+// wait for a property's value wait on changed. The supervisor, a
+// runner that keeps a Ready telescope, and a runner that waits for its
+// turn, its retry, or its end read only the stores and the devices
+// that each server defines, so they wait on structure.
 
 import (
 	"context"
@@ -33,6 +39,8 @@ type operator struct {
 	client    *apiclient.Client
 	stores    *stores
 	changed   *bell
+	// structure also rings changed.
+	structure *bell
 	// dialer opens each INDI connection. Nil dials the network.
 	dialer indi.Dialer
 
@@ -45,6 +53,8 @@ type operator struct {
 
 	mu      sync.Mutex
 	runners map[string]*runner
+	// running counts the runners' goroutines, so a stop waits for each.
+	running sync.WaitGroup
 	// faults holds the last failure of each device by its key, such as
 	// Camera/east-main, for the device's status.
 	faults map[string]string
@@ -52,18 +62,20 @@ type operator struct {
 	// the runners of several telescopes share.
 	sites map[string]lock
 
-	// snapshotMu guards last, the tree that snapshot built since the
-	// bell last rang, and lastBell, the bell's channel at that moment.
-	snapshotMu sync.Mutex
-	last       *tree
-	lastBell   <-chan struct{}
+	// snapshotMu guards last, the tree that snapshot built, and
+	// lastVersion, the version of the stores it read.
+	snapshotMu  sync.Mutex
+	last        *tree
+	lastVersion uint64
 }
 
 func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer) *operator {
+	changed := newBell(nil)
 	o := &operator{
 		namespace: namespace,
 		client:    client,
-		changed:   newBell(),
+		changed:   changed,
+		structure: newBell(changed),
 		dialer:    dialer,
 		claims:    newClaims(),
 		versions:  memo.New(),
@@ -75,18 +87,21 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 	return o
 }
 
-// snapshot reads the stores. A change to a store rings the bell after
-// the store holds it, so the stores are the same until the bell rings
-// again. Every goroutine wakes on each ring and reads the stores, so
-// they share one tree for each ring. A tree converts every object of 22
-// collections, and a tree for each reader would repeat that conversion
-// in every goroutine on every ring.
+// snapshot reads the stores. Every goroutine wakes on each ring of its
+// bell and reads the stores, but most rings come from INDI events,
+// which change no store. So the goroutines share one tree until a
+// store changes (stores.version). A tree reads every object of 22
+// collections, and a tree for each ring would repeat that work about
+// ten times a second while a mount tracks.
 func (o *operator) snapshot() *tree {
-	ring := o.changed.wait()
+	// The version is read before the stores. A change that lands
+	// between the two moves the version, so the next call reads the
+	// stores again.
+	version := o.stores.version.Load()
 	o.snapshotMu.Lock()
 	defer o.snapshotMu.Unlock()
-	if o.last == nil || o.lastBell != ring {
-		o.last, o.lastBell = o.stores.snapshot(o.namespace), ring
+	if o.last == nil || o.lastVersion != version {
+		o.last, o.lastVersion = o.stores.snapshot(o.namespace), version
 	}
 	return o.last
 }
@@ -127,12 +142,12 @@ func (o *operator) run(ctx context.Context, watches func(context.Context) *store
 	defer func() {
 		group.Wait()
 		o.servers.stopAll()
-		o.waitRunners()
+		o.running.Wait()
 		o.stores.done()
 	}()
 	seeded := false
 	for {
-		wake := o.changed.wait()
+		wake := o.structure.wait()
 		if o.stores.ready() {
 			t := o.snapshot()
 			if !seeded {
@@ -182,28 +197,15 @@ func (o *operator) startRunner(ctx context.Context, r *observatory.Reservation) 
 	}
 	run := newRunner(o, r)
 	o.runners[r.Metadata.UID] = run
-	go func() {
+	o.running.Go(func() {
 		run.run(ctx)
 		o.mu.Lock()
 		delete(o.runners, r.Metadata.UID)
 		o.mu.Unlock()
-		close(run.done)
 		// The next pass starts a runner again if the reservation still
 		// has work, such as after a retry.
-		o.changed.notify()
-	}()
-}
-
-func (o *operator) waitRunners() {
-	o.mu.Lock()
-	var done []chan struct{}
-	for _, r := range o.runners {
-		done = append(done, r.done)
-	}
-	o.mu.Unlock()
-	for _, d := range done {
-		<-d
-	}
+		o.structure.notify()
+	})
 }
 
 // sweep deletes the pods and Services of each server that no
@@ -295,7 +297,7 @@ func (o *operator) waitFor(ctx context.Context, report func(string), check func(
 // sleepUntil waits until a time, or until a change, or until ctx ends.
 // The timer is a clock: the moment that a reservation's spec names.
 func (o *operator) sleepUntil(ctx context.Context, when time.Time) {
-	wake := o.changed.wait()
+	wake := o.structure.wait()
 	timer := time.NewTimer(time.Until(when))
 	defer timer.Stop()
 	select {

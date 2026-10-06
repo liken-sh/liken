@@ -19,7 +19,7 @@ import (
 // Pending.
 func (r *runner) failed(ctx context.Context) {
 	for ctx.Err() == nil {
-		wake := r.o.changed.wait()
+		wake := r.o.structure.wait()
 		if !r.refresh() {
 			return
 		}
@@ -56,7 +56,7 @@ func (r *runner) failed(ctx context.Context) {
 // stays, Released, until a person deletes it.
 func (r *runner) released(ctx context.Context) {
 	r.o.claims.release(r.res)
-	r.o.changed.notify()
+	r.o.structure.notify()
 	_ = r.o.send(ctx, nil, "removing the finalizer of the Reservation "+r.name, func() error {
 		if !r.refresh() || !hasFinalizer(r.res) {
 			return nil

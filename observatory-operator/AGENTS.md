@@ -85,8 +85,14 @@ The operator's files are flat in `package main`, one domain to a file.
 runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `finish.go`), and the
 status writer (`status.go`, `statustree.go`, `readings.go`). Each of
-them waits on one bell that every watch event and every INDI event
-rings, and reads the watches' stores again.
+them waits on a bell and reads the watches' stores again. `changed`
+rings on every watch event and every INDI event, and `structure` on
+the same events except an INDI property's update or message. The
+status writer and the waits for a property's value use `changed`. The
+supervisor and a Ready telescope's runner use `structure`, so a mount
+that reports its position several times a second does not wake them.
+`cost_test.go` holds the cost of a reading, and measures the CPU time
+of a minute of readings when `OBSERVATORY_COST` names a profile file.
 
 - A reservation's `status.steps` is the runner's record. A step that
   runs again after a restart must read what the cluster and the devices

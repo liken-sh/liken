@@ -19,6 +19,8 @@ type statusMemo struct {
 	// kept collects the records of the current window. Each window
 	// starts it again, so the record of a deleted object goes.
 	kept map[string]statusSeen
+	// failed reports whether a write of the current window failed.
+	failed bool
 }
 
 type statusSeen struct {
@@ -28,7 +30,7 @@ type statusSeen struct {
 
 // begin starts a window with the records of the window before.
 func (m *statusMemo) begin() {
-	m.seen, m.kept = m.kept, map[string]statusSeen{}
+	m.seen, m.kept, m.failed = m.kept, map[string]statusSeen{}, false
 }
 
 // knows reports whether the memo records the status of an object at a

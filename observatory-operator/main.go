@@ -45,6 +45,6 @@ func operate() error {
 		return err
 	}
 	o := newOperator(namespace, client, nil)
-	o.run(ctx, func(ctx context.Context) *stores { return startWatches(ctx, watcher, namespace, o.changed) })
+	o.run(ctx, func(ctx context.Context) *stores { return startWatches(ctx, watcher, namespace, o.structure) })
 	return nil
 }

@@ -161,20 +161,29 @@ func TestADeviceAddedWhileReadyRestartsTheServer(t *testing.T) {
 	})
 }
 
+// claimsCollection is where the operator creates each device's
+// ResourceClaim.
+const claimsCollection = "/apis/resource.k8s.io/v1/namespaces/" + testNamespace + "/resourceclaims"
+
+// claimFocuser gives the east focuser a claim, as a focuser on real
+// hardware states one.
+func (w *world) claimFocuser() {
+	w.put(observatory.FocuserKind, "east", map[string]any{
+		"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_focus"},
+		"claim": map[string]any{"devices": map[string]any{"requests": []any{map[string]any{"name": "focuser", "exactly": map[string]any{"deviceClassName": "usb.liken.sh"}}}}},
+	})
+}
+
 // A device on real hardware states a claim, and its ResourceClaim lives
 // as long as its pod.
 func TestAClaimLivesAsLongAsItsDevicesPod(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		w.put(observatory.FocuserKind, "east", map[string]any{
-			"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_focus"},
-			"claim": map[string]any{"devices": map[string]any{"requests": []any{map[string]any{"name": "focuser", "exactly": map[string]any{"deviceClassName": "usb.liken.sh"}}}}},
-		})
+		w.claimFocuser()
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-		claims := "/apis/resource.k8s.io/v1/namespaces/" + testNamespace + "/resourceclaims"
-		if names := w.api.names(claims); !slices.Equal(names, []string{"east-focuser"}) {
+		if names := w.api.names(claimsCollection); !slices.Equal(names, []string{"east-focuser"}) {
 			t.Errorf("claims = %v", names)
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
@@ -182,7 +191,7 @@ func TestAClaimLivesAsLongAsItsDevicesPod(t *testing.T) {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
-		if names := w.api.names(claims); len(names) != 0 {
+		if names := w.api.names(claimsCollection); len(names) != 0 {
 			t.Errorf("claims after the release: %v", names)
 		}
 	})

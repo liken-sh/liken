@@ -75,7 +75,7 @@ func (r *runner) activate(ctx context.Context) {
 // deleted or reaches spec.end. The timer is a clock: spec.end.
 func (r *runner) cancelOnEnding(ctx context.Context, cancel context.CancelCauseFunc) {
 	for ctx.Err() == nil {
-		wake := r.o.changed.wait()
+		wake := r.o.structure.wait()
 		res, ok := r.o.snapshot().reservations[r.name]
 		if !ok || ending(res, time.Now()) {
 			cancel(errEnding)
@@ -112,7 +112,7 @@ func (r *runner) wait(ctx context.Context, w *stepWork) (outcome, error) {
 			r.o.sleepUntil(ctx, *res.Spec.Start)
 			continue
 		}
-		wake := r.o.changed.wait()
+		wake := r.o.structure.wait()
 		t := r.o.snapshot()
 		if _, ok := t.telescopes[res.Spec.Telescope]; !ok {
 			w.report("missing Telescope " + res.Spec.Telescope)

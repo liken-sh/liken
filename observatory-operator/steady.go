@@ -16,7 +16,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,8 +35,10 @@ func (r *runner) steady(ctx context.Context) {
 	defer cancel()
 	appeared := newAppearances()
 	subscribed := map[string]*indi.Client{}
+	// kept records the inputs of the last keepPods that succeeded.
+	kept := ""
 	for ctx.Err() == nil {
-		wake := r.o.changed.wait()
+		wake := r.o.structure.wait()
 		if !r.refresh() || ending(r.res, time.Now()) {
 			return
 		}
@@ -47,11 +52,15 @@ func (r *runner) steady(ctx context.Context) {
 		for _, s := range []serverRef{ref, site} {
 			if server, ok := r.o.servers.get(s.String()); ok && subscribed[s.String()] != server.client {
 				subscribed[s.String()] = server.client
-				appeared.subscribe(ctx, server, r.o.changed)
+				appeared.subscribe(ctx, server, r.o.structure)
 			}
 		}
-		if err := r.keepPods(ctx, t, ref, telescope, devices); err != nil {
-			fmt.Fprintf(os.Stderr, "observatory-operator: keeping the pods of %s: %v\n", ref, err)
+		if inputs := podInputs(t, ref, telescope); inputs != kept {
+			if err := r.keepPods(ctx, t, ref, telescope, devices); err != nil {
+				fmt.Fprintf(os.Stderr, "observatory-operator: keeping the pods of %s: %v\n", ref, err)
+			} else {
+				kept = inputs
+			}
 		}
 		r.reapply(ctx, t, ref, appeared)
 		if site, ok := t.observatories[telescope.Spec.Observatory]; ok {
@@ -104,6 +113,36 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 		return err
 	}
 	return r.o.startDevices(ctx, nil, siteRef, siteDevices)
+}
+
+// podInputs answers everything that keepPods reads from a tree, as one
+// string: the owners' UIDs, each device's identity, spec generation,
+// and guide camera placement, and the version of each pod and Service
+// that runs. The runner wakes on each status write of the operator's
+// own, and none of them changes this string. While it holds, the
+// pods that keepPods builds and the pods that run are the same as at
+// its last pass, so the runner skips the pass: the build of each pod
+// spec, and the create of each claim, which the API server answers
+// with 409.
+func podInputs(t *tree, ref serverRef, telescope *observatory.Telescope) string {
+	var b strings.Builder
+	devices := func(server serverRef, owner string) {
+		fmt.Fprintf(&b, "%s %s\n", server, owner)
+		for _, d := range t.devicesOn(server) {
+			fmt.Fprintf(&b, "%s %s %d %t\n", d.key(), d.object.Metadata.UID, d.object.Metadata.Generation, t.guides(server, d))
+		}
+	}
+	devices(ref, telescope.Metadata.UID)
+	if site, ok := t.observatories[telescope.Spec.Observatory]; ok {
+		devices(serverRef{observatory.ObservatoryKind, site.Metadata.Name}, site.Metadata.UID)
+	}
+	for _, name := range slices.Sorted(maps.Keys(t.pods)) {
+		fmt.Fprintf(&b, "pod %s %s\n", name, t.pods[name].Metadata.ResourceVersion)
+	}
+	for _, name := range slices.Sorted(maps.Keys(t.services)) {
+		fmt.Fprintf(&b, "service %s %s\n", name, t.services[name].Metadata.ResourceVersion)
+	}
+	return b.String()
 }
 
 // appearances records the INDI devices that defined CONNECTION on a

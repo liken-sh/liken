@@ -106,9 +106,15 @@ func (s *servers) open(parent context.Context, name string) *indiServer {
 	var group sync.WaitGroup
 	// Every INDI event wakes the operator, as a watch event does: a
 	// runner may wait for a property, and the status writer shows it.
+	// An update or a message changes no device that a server defines,
+	// so it rings changed alone (operator.go).
 	group.Go(func() {
-		for range events {
-			s.o.changed.notify()
+		for e := range events {
+			if e.Kind == indi.Updated || e.Kind == indi.Message {
+				s.o.changed.notify()
+			} else {
+				s.o.structure.notify()
+			}
 		}
 	})
 	group.Go(func() { s.keep(ctx, server) })

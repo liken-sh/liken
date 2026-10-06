@@ -219,6 +219,33 @@ func TestARefusedWriteIsTriedAgain(t *testing.T) {
 	})
 }
 
+// A stop ends a write that the API server refuses at once, and does not
+// wait out the pause before the next try. Here the runner of a Ready
+// telescope creates the focuser's pod again, and the API server refuses
+// its claim.
+func TestAStopEndsARefusedWriteAtOnce(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.claimFocuser()
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		w.api.refuse(1000)
+		tries := w.api.creates(claimsCollection)
+		w.api.deleteNamed(podsCollection, "east-focuser")
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		if w.api.creates(claimsCollection) == tries {
+			t.Fatal("the runner did not create the claim again")
+		}
+		stopped := time.Now()
+		w.halt()
+		if waited := time.Since(stopped); waited != 0 {
+			t.Errorf("the stop waited %v", waited)
+		}
+	})
+}
+
 // A device that answers a change with Alert fails the step that sent
 // the change, and the step's message names the device.
 func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
@@ -313,6 +340,18 @@ func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
 		synctest.Wait()
 		if camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main"); camera.Status.Phase != observatory.DeviceConnected {
 			t.Errorf("the camera is %q", camera.Status.Phase)
+		}
+		// The runner's own status writes can take every refusal above,
+		// so the status writer meets one here, while it alone writes.
+		w.api.mu.Lock()
+		w.api.statusRefusals = 1
+		w.api.mu.Unlock()
+		w.indi.report("CCD Simulator", "CCD_TEMPERATURE", "CCD_TEMPERATURE_VALUE", "-12")
+		time.Sleep(3 * statusWindow)
+		synctest.Wait()
+		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
+		if s := camera.Status.Readings.Temperature; s == nil || *s != -12 {
+			t.Errorf("temperature = %s after a refused write, want -12", mustJSON(s))
 		}
 	})
 }

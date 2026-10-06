@@ -30,6 +30,10 @@ func connectedDevice(t *testing.T, simulator string) (*Client, *replayServer) {
 		t.Fatal(err)
 	}
 	awaitDefinitions(t, events, len(definedNames(transcript(t, simulator, "connect"))))
+	// The updates after the last definition are still on their way.
+	// A test that sends a change reads its answer from the updates
+	// after the send, so each of these must arrive before it.
+	synctest.Wait()
 	return c, server
 }
 
@@ -56,6 +60,42 @@ func TestSettleWaitsUntilBusyEnds(t *testing.T) {
 		position, _ := p.Member("DOME_ABSOLUTE_POSITION")
 		if p.State != Ok || position.Number != 30 {
 			t.Errorf("ABS_DOME_POSITION settled at %s %v, want Ok at 30", p.State, position.Number)
+		}
+	})
+}
+
+// The dome simulator reports its position with the state Ok on each
+// poll, and a poll can arrive after a change was sent and before the
+// dome starts to turn. That report does not carry the position sent,
+// so it does not answer the change.
+func TestSettleWaitsPastAReportOfTheOldValue(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "dome")
+		server.mute()
+		sent, err := c.SetNumbers(server.device, "ABS_DOME_POSITION", map[string]float64{"DOME_ABSOLUTE_POSITION": 30})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := make(chan error, 1)
+		go func() {
+			_, err := settle(t, c, sent)
+			result <- err
+		}()
+		server.await("ABS_DOME_POSITION")
+		position := func(state, degrees string) string {
+			return `<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="` + state +
+				`"><oneNumber name="DOME_ABSOLUTE_POSITION">` + degrees + `</oneNumber></setNumberVector>`
+		}
+		server.send(position("Ok", "0"))
+		synctest.Wait()
+		select {
+		case err := <-result:
+			t.Fatalf("Settle ended on the report of the old position: %v", err)
+		default:
+		}
+		server.send(position("Ok", "30"))
+		if err := <-result; err != nil {
+			t.Errorf("Settle = %v, want the report of the new position", err)
 		}
 	})
 }

@@ -570,6 +570,27 @@ func (w *indiWorld) setState(server, device, property, state string) {
 	}
 }
 
+// report sets one member of a property and sends the update to every
+// client, as a driver reports a reading.
+func (w *indiWorld) report(device, property, member, value string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, s := range w.servers {
+		for _, d := range s.drivers {
+			p := d.find(property)
+			if d.device != device || p == nil {
+				continue
+			}
+			for i := range p.Members {
+				if p.Members[i].Name == member {
+					p.Members[i].Value = value
+				}
+			}
+			s.broadcast(p.set())
+		}
+	}
+}
+
 // refuse makes a driver answer every change to one property with
 // Alert.
 func (w *indiWorld) refuse(device, property string) {

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,7 +48,8 @@ type fakeAPI struct {
 
 	// pending holds the pods that the kubelet keeps Pending.
 	pending map[string]bool
-	// writes counts the status writes to each object, by its path.
+	// writes counts the status writes to each object, by its path, and
+	// the creates in each collection, by "POST " and its path.
 	writes map[string]int
 	// refusals is how many creates and deletes the server refuses next,
 	// the way an API server that restarts does.
@@ -66,10 +68,10 @@ func (a *fakeAPI) refuse(count int) {
 	a.refusals = count
 }
 
-// refused answers whether the server refuses this write to a pod or a
-// Service. The caller holds a.mu.
+// refused answers whether the server refuses this write to a pod, a
+// Service, or a ResourceClaim. The caller holds a.mu.
 func (a *fakeAPI) refused(w http.ResponseWriter, collection string) bool {
-	if a.refusals == 0 || (plural(collection) != "pods" && plural(collection) != "services") {
+	if a.refusals == 0 || !slices.Contains([]string{"pods", "services", "resourceclaims"}, plural(collection)) {
 		return false
 	}
 	a.refusals--
@@ -313,6 +315,7 @@ func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection stri
 	_ = json.NewDecoder(r.Body).Decode(&object)
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.writes["POST "+collection]++
 	if a.refused(w, collection) {
 		return
 	}
@@ -600,4 +603,12 @@ func (a *fakeAPI) statusWrites(collection, name string) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.writes[collection+"/"+name]
+}
+
+// creates answers how many creates one collection received, the ones
+// it refused included.
+func (a *fakeAPI) creates(collection string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.writes["POST "+collection]
 }

@@ -30,15 +30,20 @@ import (
 type bell struct {
 	mu sync.Mutex
 	ch chan struct{}
+	// also rings each time this bell rings, when it is not nil.
+	also *bell
 }
 
-func newBell() *bell { return &bell{ch: make(chan struct{})} }
+func newBell(also *bell) *bell { return &bell{ch: make(chan struct{}), also: also} }
 
 func (s *bell) notify() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	close(s.ch)
 	s.ch = make(chan struct{})
+	s.mu.Unlock()
+	if s.also != nil {
+		s.also.notify()
+	}
 }
 
 func (s *bell) wait() <-chan struct{} {
@@ -63,6 +68,9 @@ type stores struct {
 	services *informer.Collection
 	// synced counts the watches whose first read is in their store.
 	synced atomic.Int32
+	// version counts the changes to the stores. It moves after a store
+	// holds a change and before the bell rings.
+	version atomic.Uint64
 	// copies holds the typed copies of each collection's objects.
 	copies map[*informer.Collection]*copies
 }
@@ -118,9 +126,13 @@ var watchCount = int32(len(observatory.Kinds) + 2)
 func startWatches(ctx context.Context, client dynamic.Interface, namespace string, changed *bell) *stores {
 	s := &stores{kinds: map[observatory.Kind]*informer.Collection{}, copies: map[*informer.Collection]*copies{}}
 	options := informer.Options{
-		Handler: wakeOnAnyChange(changed),
+		Handler: wakeOnAnyChange(func() {
+			s.version.Add(1)
+			changed.notify()
+		}),
 		Synced: func() {
 			s.synced.Add(1)
+			s.version.Add(1)
 			changed.notify()
 		},
 	}
@@ -155,11 +167,11 @@ func (s *stores) done() {
 // its rate with a clock (status.go). A runner that waits for a pod to
 // become Ready, or for a reservation's deletion, needs the update that
 // carries it, and that update changes no generation.
-func wakeOnAnyChange(changed *bell) cache.ResourceEventHandler {
+func wakeOnAnyChange(changed func()) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(any) { changed.notify() },
-		UpdateFunc: func(any, any) { changed.notify() },
-		DeleteFunc: func(any) { changed.notify() },
+		AddFunc:    func(any) { changed() },
+		UpdateFunc: func(any, any) { changed() },
+		DeleteFunc: func(any) { changed() },
 	}
 }
 

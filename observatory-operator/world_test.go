@@ -93,7 +93,7 @@ func (w *world) start() {
 	done := w.done
 	go func() {
 		defer close(done)
-		o.run(ctx, func(ctx context.Context) *stores { return startWatches(ctx, watcher, testNamespace, o.changed) })
+		o.run(ctx, func(ctx context.Context) *stores { return startWatches(ctx, watcher, testNamespace, o.structure) })
 	}()
 }
 

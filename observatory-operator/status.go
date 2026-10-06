@@ -33,10 +33,15 @@ func (o *operator) writeStatuses(ctx context.Context) {
 		if o.stores.ready() {
 			o.writeAll(ctx, o.snapshot(), seen)
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-wake:
+		// After a failed write, the writer waits for the next window,
+		// not for the next change: no event follows a failure, and the
+		// status stays stale until the writer composes it again.
+		if !seen.failed {
+			select {
+			case <-ctx.Done():
+				return
+			case <-wake:
+			}
 		}
 		timer := time.NewTimer(statusWindow)
 		select {
@@ -128,6 +133,7 @@ func writeStatus[T any, P memo.Object[T]](client *apiclient.Client, seen *status
 		seen.note(key, P(object).GetObjectMeta().GetResourceVersion(), body)
 	}
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
+		seen.failed = true
 		fmt.Fprintf(os.Stderr, "observatory-operator: writing the status of the %s %s: %v\n", kind.Name, meta.GetName(), err)
 	}
 }

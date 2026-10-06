@@ -37,14 +37,13 @@ type runner struct {
 	// status holds what it wrote last.
 	res    *observatory.Reservation
 	status observatory.ReservationStatus
-	done   chan struct{}
 	// logged is the last phase that the log names, so each phase
 	// change writes one line.
 	logged observatory.ReservationPhase
 }
 
 func newRunner(o *operator, r *observatory.Reservation) *runner {
-	return &runner{o: o, uid: r.Metadata.UID, name: r.Metadata.Name, res: r, status: r.Status, done: make(chan struct{}), logged: r.Status.Phase}
+	return &runner{o: o, uid: r.Metadata.UID, name: r.Metadata.Name, res: r, status: r.Status, logged: r.Status.Phase}
 }
 
 // stage is what the record says the runner does next.
