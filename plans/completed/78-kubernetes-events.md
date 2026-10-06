@@ -1,9 +1,18 @@
 # 78, Kubernetes `Event`s across `liken`
 
-Proposed on 2026-10-06. Every component posts a Kubernetes `Event` for
-each condition transition and for each action it takes on its own,
-through one writer in the shared module `kubernetes/`. The work touches
-`kubernetes/` and every operator and CSI driver in the repository.
+Proposed on 2026-10-06, and completed on 2026-10-06. Every component
+posts a Kubernetes `Event` for each condition transition and for each
+action it takes on its own, through one writer in the shared module
+`kubernetes/`. The work touches `kubernetes/` and every operator and
+CSI driver in the repository.
+
+The writer, the shared condition type, and the fake `events`
+collection are built in `kubernetes/`. Every operator and CSI driver
+in the repository writes through the writer, and each Wave below names its
+commits and its measurements. The tests measured aggregation: 37
+refused mounts in an hour post one `Event` with `count: 37` in each CSI
+driver. No drill ran on a live cluster. The `Event` TTL stays one hour,
+and the section "What stays open" gives the reason.
 
 ## The problem
 
@@ -279,11 +288,14 @@ records here what it built and what it measured. The plan closes into
 
 ## Wave 1, built on 2026-10-06
 
-- **`kubernetes/`** gained `events`, `conditions`, and
+- **`kubernetes/`** (3fd67a45) gained `events`, `conditions`, and
   `events/eventstest`, at 100% statement coverage each. The module's
   coverage floor rose from 98% to 98.5% (measured 98.6%). The link
   guard in its `Makefile` now holds `events` and `conditions` to no
   import from `k8s.io`, as it holds `apiclient` and `memo`.
+- **The rule** (b9a7c917) is in the root `AGENTS.md` and in the
+  `operators` skill, which give the table of channels in short and name
+  this plan for the reasons.
 - **The writer's tests** run in `synctest` bubbles: an Event's fields,
   a cluster-scoped object in `default`, three repeats as one `Event`
   with `count: 3` and a fourth after 11 minutes as a new one, a repeat
@@ -292,7 +304,7 @@ records here what it built and what it measured. The plan closes into
   four of 261, a cut reason and message, the 4096-series limit, and a
   context that ends during the retry wait. With the window set to zero,
   three of them fail.
-- **`observatory-operator`** writes through the recorder, aliases its
+- **`observatory-operator`** (d5190b59) writes through the recorder, aliases its
   `Condition` and `ConditionStatus` to the shared types, and posts each
   condition transition of a device, a `Telescope`, an `Observatory`, a
   `Guider`, an `OpticalTrain`, and an `OpticalTube` after the status
@@ -325,7 +337,7 @@ The build changed four points of the design as it was first settled:
 
 ## Wave 2, built on 2026-10-06
 
-- **`liken/` (machine-operator and cluster-operator).** `liken/api`
+- **`liken/` (machine-operator and cluster-operator), aa42f0cf.** `liken/api`
   aliases `Condition` and `ConditionStatus` to the shared types. Both
   CRDs require a reason of at least one character and accept an empty
   message, so the JSON on the wire is the same. `init` reads these
@@ -351,7 +363,8 @@ The build changed four points of the design as it was first settled:
   operators hold `create` and `patch` on `events` in `default` only.
   Coverage measured 88.9% for machine-operator and 86.3% for
   cluster-operator, against floors of 86%.
-- **`git-csi-driver` and `per-node-csi-driver`.** Both keep the typed
+- **`git-csi-driver` and `per-node-csi-driver`, f6ecc8de and
+  c79243cd.** Both keep the typed
   clientset, because their watches need it: the arming, the demand
   watch, and the webhook in `git-csi-driver`, and the sweep in
   `per-node-csi-driver`. So `kubernetes/events` does not remove
@@ -374,7 +387,8 @@ The build changed four points of the design as it was first settled:
   found the claim, so the arming posts them on the claim when it finds
   it. Its node plugin gained `patch` on `events`. Coverage is 100% in
   both, against floors of 100%.
-- **`audio-operator`, `display-operator`, and `media-operator`.** Each
+- **`audio-operator`, `display-operator`, and `media-operator`,
+  bc8ee03f, dee75688, and 7048ef38.** Each
   container that posts builds one recorder, and each component
   aliases its condition type to `conditions.Condition`
   (`EndpointCondition`, `DisplayCondition`, and both of
@@ -416,8 +430,69 @@ The build changed four points of the design as it was first settled:
     `Unknown`, so `NoDisplay` is a Warning and `PanelAway` is Normal.
     The operator's `ClusterRole` gained `create` and `patch` on
     `events`. Coverage measured 87.4% against a floor of 87%. A
-    separate fix ends a race in the remote reader: it chose at random
+    separate fix (dd16767d) ends a race in the remote reader: it chose at random
     between a cancelled batch and the events still in its channel, and
     lost a press that a node read before it closed, about once in
     3,000 runs. The reader now reads the channel until it closes, and
     its six tests run in `synctest` bubbles.
+- **`equipment-operator`, 35980542.** Each condition transition of a
+  `Receiver`, a `CECBus`, or a `Television` posts one `Event` after the
+  API server accepts the status write. The component aliases its
+  `Condition` to `conditions.Condition`. The CRDs already require a
+  date-time and a reason that is not empty, so the JSON on the wire is
+  the same. The reason, not the status, decides Warning or Normal: 15
+  reasons such as `Unreachable`, `NotConfirmed`, `NoAnswer`, and
+  `Stale` are Warnings. `InputSelected` and `InCharge` follow a
+  person's choice, so their `Event`s are never Warnings. Discovery
+  posts `TelevisionCreated` and `TelevisionDeleted` on the `CECBus`,
+  because a deleted `Television` can hold no `Event`. Each kind is
+  cluster-scoped, so a `Role` in `default` grants `create` and `patch`
+  on `events` to both service accounts. Coverage measured 94.3% against
+  a floor of 94%.
+- **`people-operator`, cc745274.** Each change of a `Person`'s
+  `AvatarReady` status or reason posts one `Event` after the status
+  write lands. A transition to `False` (`FetchFailed`, `BakeFailed`,
+  `DecodeFailed`, `UnsupportedScheme`) is a Warning. A new picture that
+  leaves the condition as it was posts `AvatarUpdated`. The condition
+  is `conditions.Condition`, whose JSON the CRD already accepts, and a
+  `Role` in `default` grants the `Event`s about the cluster-scoped
+  `Person`. Coverage measured 95.9% against a floor of 95%.
+- **`library-operator`, 09a6a2c6.** Each condition transition of a
+  `Library`, a `Catalog`, or a `MetadataProvider` posts one `Event`
+  after the status write lands. Its `Condition` aliases the shared
+  type, because every condition it writes has a reason and the CRDs
+  accept an empty message. The reasons that need a person, such as
+  `JobFailed`, `ClaimNotFound`, and a provider's `Refused`, are
+  Warnings. The actions that change no condition post `JobCreated`,
+  `ScanCompleted`, `ScanFailed`, and `StoreCopyHealed`. Only the
+  operator binary builds a recorder, and the pod build keeps a nil one.
+  The read of a pod's Warning `Event`s, which names why a Job's pod has
+  not started, stays as it was. The cluster-wide grant on `events`
+  gained `create` and `patch` beside `list`. Coverage measured 95.1%
+  against a floor of 95%.
+- **`bluetooth-operator`, 4f783df5.** The operator posts
+  `PairingWindowOpened`, `PairingWindowExpired`, `PairingRefused`, and
+  `Paired` on a `PairingRequest`; `Paired`, `BondLost`, and
+  `InputRelayFailed` on a `Peripheral`; and `RadioClaimed` and
+  `RadioLost` on its `Node`. Each posts after the write that records
+  it lands. It aliases its `Condition` to `conditions.Condition`, and
+  the wire format stays the same: the status is the same string, the
+  time is RFC 3339 cut to the second, and the schema accepts an empty
+  message. The `Connected` condition posts no `Event`, because a Low
+  Energy remote changes it between presses. Only a bond that left
+  `bluetoothd` posts `BondLost`. The `ClusterRole` gained `create` and
+  `patch` on `events`. Coverage measured 76.6% against a floor of 74%.
+
+The coverage of these four was measured on 2026-10-06 with
+`go test -coverprofile` and each component's `.testcoverage.yml`.
+
+## What stays open
+
+- **The `Event` TTL.** The API server deletes an `Event` one hour after
+  its last write, and `liken` sets nothing. A longer TTL is a separate
+  decision about k3s's kube-apiserver flags, and this plan does not
+  make it. Until then, a condition and a log line carry each fact that
+  must outlast the hour.
+- **The recorder has no flush.** An `Event` queued before `os.Exit` is
+  lost, so `audio-operator` posts `PipeWireLost` on the first failed
+  read. A component that posts just before it exits must do the same.
