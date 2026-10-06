@@ -22,6 +22,13 @@ type DomeSpec struct {
 type DomeStatus struct {
 	DeviceStatus
 	Readings DomeReadings `json:"readings,omitzero"`
+	Display  DomeDisplay  `json:"display,omitzero"`
+}
+
+// DomeDisplay holds the azimuth with its unit, such as 123.4°, for the
+// printer columns.
+type DomeDisplay struct {
+	Azimuth string `json:"azimuth,omitempty"`
 }
 
 // DomeReadings come from ABS_DOME_POSITION, DOME_SHUTTER, and
@@ -70,8 +77,12 @@ type WeatherParameter struct {
 	Label string `json:"label,omitempty"`
 	// Value is in the unit that the label names, such as degrees
 	// Celsius or kilometers per hour.
-	Value  *float64 `json:"value,omitempty"`
-	Safety Safety   `json:"safety,omitempty"`
+	Value *float64 `json:"value,omitempty"`
+	// Text is the value with the unit that the label names, such as
+	// 12.5 °C or 20 km/h. A parameter whose label names no unit, such
+	// as WEATHER_FORECAST, shows the number alone.
+	Text   string `json:"text,omitempty"`
+	Safety Safety `json:"safety,omitempty"`
 }
 
 // SkyQualityMeterSpec describes a sky quality meter: a driver with
@@ -83,6 +94,13 @@ type SkyQualityMeterSpec struct {
 type SkyQualityMeterStatus struct {
 	DeviceStatus
 	Readings SkyQualityMeterReadings `json:"readings,omitzero"`
+	Display  SkyQualityMeterDisplay  `json:"display,omitzero"`
+}
+
+// SkyQualityMeterDisplay holds the brightness with its unit, such as
+// 21.3 mag/arcsec², for the printer columns.
+type SkyQualityMeterDisplay struct {
+	Brightness string `json:"brightness,omitempty"`
 }
 
 // SkyQualityMeterReadings come from SKY_QUALITY.
@@ -133,6 +151,13 @@ type ReceiverSpec struct {
 type ReceiverStatus struct {
 	DeviceStatus
 	Readings ReceiverReadings `json:"readings,omitzero"`
+	Display  ReceiverDisplay  `json:"display,omitzero"`
+}
+
+// ReceiverDisplay holds the frequency in megahertz, such as 1420.406
+// MHz, for the printer columns.
+type ReceiverDisplay struct {
+	Frequency string `json:"frequency,omitempty"`
 }
 
 // ReceiverReadings come from RECEIVER_SETTINGS.

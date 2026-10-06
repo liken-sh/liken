@@ -64,9 +64,11 @@ func (r *runner) activate(ctx context.Context) {
 			return
 		}
 	}
-	r.status.Phase = observatory.ReservationReady
+	r.status.Phase, r.status.Step = observatory.ReservationReady, ""
 	r.save(ctx)
-	r.o.record(r.res, eventNormal, string(observatory.ReservationReady), "the Telescope "+r.res.Spec.Telescope+" is ready")
+	endpoint := r.endpoint()
+	r.o.record(r.res, eventNormal, string(observatory.ReservationReady),
+		fmt.Sprintf("Ready in %s at %s:%d", duration(time.Since(r.began(observatory.ActivationSteps[1:]))), endpoint.Host, endpoint.Port))
 }
 
 // cancelOnEnding ends ctx with errEnding when the reservation is
@@ -106,18 +108,18 @@ func (r *runner) wait(ctx context.Context, w *stepWork) (outcome, error) {
 		r.refresh()
 		res, now := r.res, time.Now()
 		if res.Spec.Start != nil && now.Before(*res.Spec.Start) {
-			w.report("waiting for spec.start at " + res.Spec.Start.UTC().Format(time.RFC3339))
+			w.report("waiting until " + res.Spec.Start.UTC().Format(time.RFC3339))
 			r.o.sleepUntil(ctx, *res.Spec.Start)
 			continue
 		}
 		wake := r.o.changed.wait()
 		t := r.o.snapshot()
 		if _, ok := t.telescopes[res.Spec.Telescope]; !ok {
-			w.report("waiting for the Telescope " + res.Spec.Telescope + ", which does not exist")
+			w.report("missing Telescope " + res.Spec.Telescope)
 		} else if took, other := r.o.claims.take(t, res, now); took {
-			return done("took the Telescope %s", res.Spec.Telescope)
+			return done("took Telescope %s", res.Spec.Telescope)
 		} else {
-			w.report(fmt.Sprintf("waiting for the Reservation %s to release the Telescope %s", other, res.Spec.Telescope))
+			w.report("waiting for Reservation " + other)
 		}
 		select {
 		case <-ctx.Done():
@@ -130,11 +132,11 @@ func (r *runner) wait(ctx context.Context, w *stepWork) (outcome, error) {
 func (r *runner) siteOf(t *tree) (*observatory.Telescope, *observatory.Observatory, error) {
 	telescope, ok := t.telescopes[r.res.Spec.Telescope]
 	if !ok {
-		return nil, nil, fmt.Errorf("the Telescope %s does not exist", r.res.Spec.Telescope)
+		return nil, nil, fmt.Errorf("missing Telescope %s", r.res.Spec.Telescope)
 	}
 	site, ok := t.observatories[telescope.Spec.Observatory]
 	if !ok {
-		return nil, nil, fmt.Errorf("the Observatory %s of the Telescope %s does not exist", telescope.Spec.Observatory, telescope.Metadata.Name)
+		return nil, nil, fmt.Errorf("missing Observatory %s of Telescope %s", telescope.Spec.Observatory, telescope.Metadata.Name)
 	}
 	return telescope, site, nil
 }
@@ -152,7 +154,7 @@ func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
 	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
 	devices := t.devicesOn(ref)
 	if len(devices) == 0 {
-		return skipped("the Observatory %s has no devices of its own, so it runs no server", site.Metadata.Name)
+		return skipped("no devices on Observatory %s", site.Metadata.Name)
 	}
 	lock := r.o.siteLock(site.Metadata.Name)
 	if err := lock.acquire(ctx); err != nil {
@@ -177,7 +179,7 @@ func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	notes = append(notes, configured...)
-	return done("%s runs %s; %s", ref, names(devices), strings.Join(append(notes, fmt.Sprintf("connected %d devices", len(devices))), "; "))
+	return done("%s", strings.Join(append([]string{fmt.Sprintf("connected %s on %s", names(devices), ref)}, notes...), "; "))
 }
 
 // powerSwitches starts and connects the Switch devices of a server, and
@@ -218,7 +220,7 @@ func (r *runner) startAndConnect(ctx context.Context, w *stepWork, ref serverRef
 func (r *runner) telescope(t *tree) (serverRef, *observatory.Telescope, []*device, error) {
 	telescope, ok := t.telescopes[r.res.Spec.Telescope]
 	if !ok {
-		return serverRef{}, nil, nil, fmt.Errorf("the Telescope %s does not exist", r.res.Spec.Telescope)
+		return serverRef{}, nil, nil, fmt.Errorf("missing Telescope %s", r.res.Spec.Telescope)
 	}
 	ref := serverRef{observatory.TelescopeKind, telescope.Metadata.Name}
 	return ref, telescope, t.devicesOn(ref), nil
@@ -233,7 +235,7 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	if len(devices) == 0 {
-		return outcome{}, fmt.Errorf("the Telescope %s has no devices", telescope.Metadata.Name)
+		return outcome{}, fmt.Errorf("no devices on Telescope %s", telescope.Metadata.Name)
 	}
 	if err := r.o.startServer(ctx, w.report, ref, telescope.Metadata.UID, devices); err != nil {
 		return outcome{}, err
@@ -243,7 +245,7 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 	if err != nil {
 		return outcome{}, err
 	}
-	message := fmt.Sprintf("started %s with %d devices", ref, len(devices))
+	message := fmt.Sprintf("started %s for %d devices", ref, len(devices))
 	if len(switches) > 0 {
 		message += "; connected " + names(switches)
 	}
@@ -261,7 +263,7 @@ func (r *runner) startTelescopeDevices(ctx context.Context, w *stepWork) (outcom
 	}
 	_, others := partition(devices)
 	if len(others) == 0 {
-		return skipped("the Telescope has no devices besides its Switch devices")
+		return skipped("no devices besides Switches")
 	}
 	if err := r.o.startDevices(ctx, w.report, ref, others); err != nil {
 		return outcome{}, err
@@ -303,7 +305,7 @@ func (r *runner) connect(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	if len(handles) == 0 {
-		return skipped("the Telescope has no devices to connect besides its Switch devices")
+		return skipped("no devices besides Switches")
 	}
 	var connected []string
 	for _, h := range handles {
@@ -315,5 +317,5 @@ func (r *runner) connect(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 		connected = append(connected, h.String())
 	}
-	return done("connected %s, in that order", strings.Join(connected, ", "))
+	return done("connected in order: %s", strings.Join(connected, ", "))
 }

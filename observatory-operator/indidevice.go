@@ -28,7 +28,7 @@ const propertyWait = 3 * time.Second
 // errAmbiguous is the error of two devices on one server that run the
 // same driver. INDI names a device after its model, so both drivers
 // register one name, and the operator cannot tell them apart.
-var errAmbiguous = errors.New("another device on the same server runs the same driver, and INDI gives both one name")
+var errAmbiguous = errors.New("same driver as another device on this server: INDI gives both one name")
 
 // indiName answers the INDI device that a resource's driver defines on
 // its server, or "" while the driver has not defined it. Every driver
@@ -109,7 +109,7 @@ func (h handle) switchOn(ctx context.Context, property, member string) (bool, er
 func (h handle) setSwitches(ctx context.Context, property string, values map[string]bool) (bool, error) {
 	p, ok := h.property(ctx, property)
 	if !ok {
-		return false, fmt.Errorf("%s defines no %s", h, property)
+		return false, fmt.Errorf("no %s on %s", property, h)
 	}
 	same := p.State != indi.Alert
 	for name, on := range values {
@@ -135,7 +135,7 @@ func (h handle) setSwitches(ctx context.Context, property string, values map[str
 func (h handle) setNumbers(ctx context.Context, property string, values map[string]float64) (bool, error) {
 	p, ok := h.property(ctx, property)
 	if !ok {
-		return false, fmt.Errorf("%s defines no %s", h, property)
+		return false, fmt.Errorf("no %s on %s", property, h)
 	}
 	same := p.State != indi.Alert
 	for name, value := range values {
@@ -155,7 +155,7 @@ func (h handle) setNumbers(ctx context.Context, property string, values map[stri
 func (h handle) setTexts(ctx context.Context, property string, values map[string]string) (bool, error) {
 	p, ok := h.property(ctx, property)
 	if !ok {
-		return false, fmt.Errorf("%s defines no %s", h, property)
+		return false, fmt.Errorf("no %s on %s", property, h)
 	}
 	same := p.State != indi.Alert
 	for name, value := range values {

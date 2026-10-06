@@ -42,6 +42,7 @@ type deviceSpec struct {
 type deviceStatus struct {
 	observatory.DeviceStatus
 	Readings any `json:"readings,omitempty"`
+	Display  any `json:"display,omitempty"`
 }
 
 // device is one device resource and its kind.
@@ -163,7 +164,7 @@ func (t *tree) device(kind observatory.Kind, name string) (*device, bool) {
 }
 
 // missingParent answers the first resource up the tree from a device
-// that does not exist, as "the OpticalTrain east-imaging", or "" when
+// that does not exist, as "OpticalTrain east-imaging", or "" when
 // every parent up to the Observatory exists.
 func (t *tree) missingParent(d *device) string {
 	p := d.parent()
@@ -171,7 +172,7 @@ func (t *tree) missingParent(d *device) string {
 	case observatory.OpticalTrainKind:
 		train, ok := t.trains[p.Name]
 		if !ok {
-			return "the OpticalTrain " + p.Name
+			return "OpticalTrain " + p.Name
 		}
 		return t.missingTelescope(train.Spec.Telescope)
 	case observatory.TelescopeKind:
@@ -183,14 +184,14 @@ func (t *tree) missingParent(d *device) string {
 func (t *tree) missingTelescope(name string) string {
 	telescope, ok := t.telescopes[name]
 	if !ok {
-		return "the Telescope " + name
+		return "Telescope " + name
 	}
 	return t.missingObservatory(telescope.Spec.Observatory)
 }
 
 func (t *tree) missingObservatory(name string) string {
 	if _, ok := t.observatories[name]; !ok {
-		return "the Observatory " + name
+		return "Observatory " + name
 	}
 	return ""
 }

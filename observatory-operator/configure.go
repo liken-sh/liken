@@ -37,12 +37,13 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 	}
 	if site.Spec.Policies != nil && (site.Spec.Policies.DomeLocksMount || site.Spec.Policies.MountLocksDome) {
-		notes = append(notes, "the lock policies between the dome and the mounts are not written, because the dome runs on the observatory's server and a driver snoops only devices on its own server")
+		notes = append(notes, "skipped the lock policies: a driver snoops only its own server, but the dome is on the observatory's server")
 	}
 	if len(wrote) == 0 && len(notes) == 0 {
-		return skipped("every device has its settings")
+		return skipped("found every setting in place")
 	}
-	message := "wrote the settings of " + firstNonEmpty(strings.Join(wrote, ", "), "no device")
+	message := firstNonEmpty(strings.Join(wrote, ", "), "no device")
+	message = "wrote the settings of " + message
 	return done("%s", strings.Join(append([]string{message}, notes...), "; "))
 }
 
@@ -173,7 +174,7 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 		if changed {
 			did = append(did, "opened "+h.String())
 		} else {
-			already = append(already, h.String()+" was open already")
+			already = append(already, "found "+h.String()+" open")
 		}
 	}
 	var cameras []handle
@@ -184,11 +185,11 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 	}
 	for _, h := range coolable(ctx, cameras, &notes) {
 		target := *h.d.object.Spec.Temperature
-		w.report(fmt.Sprintf("cooling %s to %.1f °C", h, target))
+		w.report(fmt.Sprintf("cooling %s to %s", h, quantity(target, 1, "°C")))
 		if err := setTemperature(ctx, h, target, w.report); err != nil {
 			return outcome{}, err
 		}
-		did = append(did, fmt.Sprintf("cooled %s to %.1f °C", h.String(), target))
+		did = append(did, fmt.Sprintf("cooled %s to %s", h.String(), quantity(target, 1, "°C")))
 	}
 	for _, h := range ofKind(handles, observatory.MountKind) {
 		w.report("unparking " + h.String())
@@ -199,12 +200,12 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 		if changed {
 			did = append(did, "unparked "+h.String())
 		} else {
-			already = append(already, h.String()+" was unparked already")
+			already = append(already, "found "+h.String()+" unparked")
 		}
 	}
 	notes = append(already, notes...)
 	if len(did) == 0 {
-		return skipped("%s", firstNonEmpty(strings.Join(notes, "; "), "no dust cap to open, no camera to cool, and no mount to unpark"))
+		return skipped("%s", firstNonEmpty(strings.Join(notes, "; "), "found nothing to open, cool, or unpark"))
 	}
 	return done("%s", strings.Join(append(did, notes...), "; "))
 }

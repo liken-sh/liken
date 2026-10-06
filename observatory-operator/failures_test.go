@@ -42,7 +42,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.put(observatory.RotatorKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "nowhere", "output": 1}})
 			},
 			step:    observatory.StepPowerOn,
-			message: "a device names the Switch nowhere in spec.power, and no Switch of that name exists",
+			message: "missing Switch nowhere, which spec.power names",
 		},
 		{
 			name: "a Switch output that does not exist",
@@ -50,7 +50,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.put(observatory.RotatorKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "east", "output": 9}})
 			},
 			step:    observatory.StepPowerOn,
-			message: "Switch east defines no DIGITAL_OUTPUT_9",
+			message: "no DIGITAL_OUTPUT_9 on Switch east",
 		},
 		{
 			name: "two devices that INDI names alike on one server",
@@ -58,7 +58,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.put(observatory.CameraKind, "east-guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_ccd"}})
 			},
 			step:    observatory.StepStartDevices,
-			message: "another device on the same server runs the same driver",
+			message: "same driver as another device on this server",
 		},
 		{
 			name: "a telescope in an observatory that does not exist",
@@ -66,7 +66,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.put(observatory.TelescopeKind, "east", map[string]any{"observatory": "elsewhere"})
 			},
 			step:    observatory.StepStartSite,
-			message: "the Observatory elsewhere of the Telescope east does not exist",
+			message: "missing Observatory elsewhere of Telescope east",
 		},
 		{
 			name: "a name that is no Service name",
@@ -87,7 +87,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 				r := w.phase("east-tonight", observatory.ReservationFailed, 15*time.Minute)
 				step := stepOf(r, c.step)
-				if step.State != observatory.StepFailed || !strings.Contains(step.Message, c.message) {
+				if step.State != observatory.StepFailed || !strings.Contains(step.Summary, c.message) {
 					t.Errorf("%s = %+v, want Failed with %q", c.step, step, c.message)
 				}
 			})
@@ -103,7 +103,7 @@ func TestATelescopeWithNoDevicesFailsPowerOn(t *testing.T) {
 		w.put(observatory.TelescopeKind, "south", map[string]any{"observatory": "lab"})
 		w.reserve("south-tonight", map[string]any{"telescope": "south", "holder": "desktop"})
 		r := w.phase("south-tonight", observatory.ReservationFailed, 15*time.Minute)
-		if step := stepOf(r, observatory.StepPowerOn); step.Message != "the Telescope south has no devices" {
+		if step := stepOf(r, observatory.StepPowerOn); step.Summary != "Failed: no devices on Telescope south" {
 			t.Errorf("PowerOn = %+v", step)
 		}
 	})
@@ -120,12 +120,12 @@ func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 15*time.Minute)
 		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure: {"Camera east-guide defines no CCD_OFFSET", "FilterWheel east has 8 slots, so 1 filters have no slot"},
-			observatory.StepPrepare:   {"Camera east-guide has no cooler: its driver's CCD_TEMPERATURE is read-only"},
+			observatory.StepConfigure: {"no CCD_OFFSET on Camera east-guide", "no slot for 1 of the filters on FilterWheel east (8 slots)"},
+			observatory.StepPrepare:   {"no cooler on Camera east-guide: CCD_TEMPERATURE is read-only"},
 		}
 		for name, want := range notes {
 			for _, note := range want {
-				if message := stepOf(r, name).Message; !strings.Contains(message, note) {
+				if message := stepOf(r, name).Summary; !strings.Contains(message, note) {
 					t.Errorf("%s: %q does not note %q", name, message, note)
 				}
 			}
@@ -171,7 +171,7 @@ func TestTheObservatorysServerStopsAfterTheLastReservation(t *testing.T) {
 		end := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": end})
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
-		if step := stepOf(r, observatory.StepStopSite); step.State != observatory.StepSkipped || step.Message != "the server of the Observatory lab stays up for the Reservation west-tonight" {
+		if step := stepOf(r, observatory.StepStopSite); step.State != observatory.StepSkipped || step.Summary != "In use by Reservation west-tonight" {
 			t.Errorf("StopSite = %+v", step)
 		}
 		if _, ok := w.api.object(podsCollection, "lab-observatory"); !ok {
@@ -268,7 +268,7 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 				r := w.phase("east-tonight", observatory.ReservationFailed, 30*time.Minute)
 				step := stepOf(r, c.step)
 				want := c.device + "." + c.property + " is Alert"
-				if step.State != observatory.StepFailed || !strings.Contains(step.Message, want) {
+				if step.State != observatory.StepFailed || !strings.Contains(step.Summary, want) {
 					t.Errorf("%s = %+v, want Failed with %q", c.step, step, want)
 				}
 				if c.ready {
@@ -292,7 +292,7 @@ func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
 		synctest.Wait()
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		r := w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)
-		if step := stepOf(r, observatory.StepAbort); step.State != observatory.StepFailed || step.Message != "timed out after 2m0s: aborting Camera east-main" {
+		if step := stepOf(r, observatory.StepAbort); step.State != observatory.StepFailed || step.Summary != "Timed out after 2 min: aborting Camera east-main" {
 			t.Errorf("Abort = %+v", step)
 		}
 	})

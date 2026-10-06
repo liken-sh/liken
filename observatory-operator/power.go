@@ -30,7 +30,7 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 		sw, ok := t.device(observatory.SwitchKind, name)
 		if !ok {
 			if power {
-				return nil, fmt.Errorf("a device names the Switch %s in spec.power, and no Switch of that name exists", name)
+				return nil, fmt.Errorf("missing Switch %s, which spec.power names", name)
 			}
 			continue
 		}
@@ -40,9 +40,9 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 		handles, _ := o.connectedHandles(ctx, nil, t, ref, []*device{sw})
 		if len(handles) == 0 {
 			if power {
-				return nil, fmt.Errorf("the Switch %s is not connected on %s", name, ref)
+				return nil, fmt.Errorf("Switch %s not connected on %s", name, ref)
 			}
-			notes = append(notes, fmt.Sprintf("the Switch %s is not connected, so its outputs stay as they are", name))
+			notes = append(notes, fmt.Sprintf("left the outputs of Switch %s as they are: not connected", name))
 			continue
 		}
 		h := handles[0]
@@ -58,7 +58,7 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 			}
 		}
 		if len(changed) > 0 {
-			notes = append(notes, fmt.Sprintf("switched %s output %s of %s", verb, strings.Join(changed, ", "), name))
+			notes = append(notes, fmt.Sprintf("switched %s output %s of Switch %s", verb, strings.Join(changed, ", "), name))
 		}
 	}
 	return notes, nil

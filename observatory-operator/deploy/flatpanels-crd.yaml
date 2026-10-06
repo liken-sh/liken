@@ -40,8 +40,8 @@ spec:
           type: boolean
           jsonPath: .status.readings.light
         - name: Brightness
-          type: number
-          jsonPath: .status.readings.brightness
+          type: string
+          jsonPath: .status.display.brightness
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -344,6 +344,15 @@ spec:
                               description: >-
                                 For a number, the step between values.
                                 Zero means any step.
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    brightness:
+                      type: string
+                      description: "The brightness against the maximum of `FLAT_LIGHT_INTENSITY`, such as `128 of 255`. INDI gives the brightness no unit."
                 readings:
                   type: object
                   description: >-

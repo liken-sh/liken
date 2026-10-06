@@ -37,11 +37,11 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: RA
-          type: number
-          jsonPath: .status.readings.rightAscension
+          type: string
+          jsonPath: .status.display.rightAscension
         - name: Dec
-          type: number
-          jsonPath: .status.readings.declination
+          type: string
+          jsonPath: .status.display.declination
         - name: Parked
           type: boolean
           jsonPath: .status.readings.parked
@@ -354,6 +354,18 @@ spec:
                               description: >-
                                 For a number, the step between values.
                                 Zero means any step.
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    rightAscension:
+                      type: string
+                      description: "The right ascension in hours, minutes, and seconds, such as `19h17m21s`."
+                    declination:
+                      type: string
+                      description: "The declination in degrees, arcminutes, and arcseconds, such as `+12°34′56″`."
                 readings:
                   type: object
                   description: >-

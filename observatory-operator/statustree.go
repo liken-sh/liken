@@ -13,11 +13,11 @@ import (
 
 // The conditions of a resource with no parent of its own to look for.
 func found() observatory.Condition {
-	return condition(observatory.ConditionParentFound, observatory.ConditionTrue, "Found", "every resource up to the Observatory exists")
+	return condition(observatory.ConditionParentFound, observatory.ConditionTrue, "Found", "Found every parent")
 }
 
 func missing(what string) observatory.Condition {
-	return condition(observatory.ConditionParentFound, observatory.ConditionFalse, "ParentMissing", what+" does not exist")
+	return condition(observatory.ConditionParentFound, observatory.ConditionFalse, "ParentMissing", "Missing "+what)
 }
 
 func parentCondition(missingParent string) observatory.Condition {
@@ -108,10 +108,10 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 		Server:             o.serverStatus(t, serverRef{observatory.TelescopeKind, name}),
 		Devices:            refs(directDevices(t, observatory.TelescopeKind, name), composed),
 	}
-	message := "no reservation holds the telescope"
+	message := "Not reserved"
 	if holder != nil {
 		next.Reservation = &observatory.ReservationRef{Name: holder.Metadata.Name, Holder: holder.Spec.Holder}
-		message = fmt.Sprintf("the Reservation %s is %s", holder.Metadata.Name, holder.Status.Phase)
+		message = fmt.Sprintf("%s for Reservation %s", firstNonEmpty(string(holder.Status.Phase), string(observatory.ReservationScheduled)), holder.Metadata.Name)
 	}
 	for _, tube := range sortedNames(t.tubes) {
 		if t.tubes[tube].Spec.Telescope == name {
@@ -129,6 +129,7 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 	for _, guider := range sortedNames(t.guiders) {
 		if t.guiders[guider].Spec.Telescope == name {
 			next.Guider = &observatory.GuiderRef{Name: guider, Ready: false, Reason: observatory.ReasonNotImplemented}
+			next.Display.Guider = next.Guider.Reason
 			break
 		}
 	}
@@ -148,6 +149,10 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		Server:             o.serverStatus(t, ref),
 		Devices:            refs(devices, composed),
 		Weather:            observatory.SafetyUnknown,
+		Display: observatory.ObservatoryDisplay{
+			Latitude:  latitude(site.Spec.Location.Latitude),
+			Longitude: longitude(site.Spec.Location.Longitude),
+		},
 	}
 	for _, telescope := range sortedNames(t.telescopes) {
 		if t.telescopes[telescope].Spec.Observatory == name {
@@ -158,12 +163,12 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		}
 	}
 	next.Phase = observatory.PhaseInventory
-	message := "no reservation is active"
+	message := "Not reserved"
 	if len(next.Reservations) > 0 {
-		next.Phase, message = observatory.PhaseReady, "every device of the observatory is connected"
+		next.Phase, message = observatory.PhaseReady, "Connected every device"
 		for _, d := range devices {
 			if phase := composed[d.key()].Phase; phase != observatory.DeviceConnected {
-				next.Phase, message = observatory.PhaseActivating, fmt.Sprintf("the %s %s is %s", d.kind.Name, d.name(), phase)
+				next.Phase, message = observatory.PhaseActivating, fmt.Sprintf("Waiting for %s %s (%s)", d.kind.Name, d.name(), phase)
 				break
 			}
 		}
@@ -192,7 +197,7 @@ func worstWeather(devices []*device, composed map[string]deviceStatus) observato
 func trainStatus(t *tree, train *observatory.OpticalTrain, composed map[string]deviceStatus) observatory.OpticalTrainStatus {
 	missingParent := t.missingTelescope(train.Spec.Telescope)
 	if _, ok := t.tubes[train.Spec.OpticalTube]; !ok && missingParent == "" {
-		missingParent = "the OpticalTube " + train.Spec.OpticalTube
+		missingParent = "OpticalTube " + train.Spec.OpticalTube
 	}
 	return observatory.OpticalTrainStatus{
 		ObservedGeneration: train.Metadata.Generation,
@@ -202,7 +207,13 @@ func trainStatus(t *tree, train *observatory.OpticalTrain, composed map[string]d
 }
 
 func tubeStatus(t *tree, tube *observatory.OpticalTube) observatory.OpticalTubeStatus {
-	next := observatory.OpticalTubeStatus{ObservedGeneration: tube.Metadata.Generation}
+	next := observatory.OpticalTubeStatus{
+		ObservedGeneration: tube.Metadata.Generation,
+		Display: observatory.OpticalTubeDisplay{
+			Aperture:    quantity(tube.Spec.Aperture, 1, "mm"),
+			FocalLength: quantity(tube.Spec.FocalLength, 1, "mm"),
+		},
+	}
 	for _, train := range sortedNames(t.trains) {
 		if t.trains[train].Spec.OpticalTube == tube.Metadata.Name {
 			next.Trains = append(next.Trains, train)
@@ -217,7 +228,7 @@ func tubeStatus(t *tree, tube *observatory.OpticalTube) observatory.OpticalTubeS
 func guiderStatus(t *tree, guider *observatory.Guider) observatory.GuiderStatus {
 	missingParent := t.missingTelescope(guider.Spec.Telescope)
 	if _, ok := t.trains[guider.Spec.OpticalTrain]; !ok && missingParent == "" {
-		missingParent = "the OpticalTrain " + guider.Spec.OpticalTrain
+		missingParent = "OpticalTrain " + guider.Spec.OpticalTrain
 	}
 	return observatory.GuiderStatus{
 		ObservedGeneration: guider.Metadata.Generation,
@@ -225,7 +236,7 @@ func guiderStatus(t *tree, guider *observatory.Guider) observatory.GuiderStatus 
 		Conditions: withGeneration([]observatory.Condition{
 			parentCondition(missingParent),
 			condition(observatory.ConditionReady, observatory.ConditionFalse, observatory.ReasonNotImplemented,
-				"the guider's PHD2 pod is plan 09 of observatory-operator, which is not built yet"),
+				"Not built yet: plan 09 of observatory-operator builds the PHD2 pod"),
 		}, guider.Metadata.Generation),
 	}
 }

@@ -79,10 +79,10 @@ names and the tree.
 | `Telescope` | `tel` | `observatory` | the server's host and port |
 | `OpticalTube` | `ota` | `telescope` | `aperture`, `focalLength` in mm |
 | `OpticalTrain` | `train` | `telescope` | its camera |
-| `Mount` | `mnt` | `telescope` | RA, Dec, parked, tracking |
+| `Mount` | `mnt` | `telescope` | RA as `19h17m21s`, Dec as `+12°34′56″`, parked, tracking |
 | `GPS` | none | `telescope` | fix, time |
 | `PolarAligner` | `pac` | `telescope` | adjustment state |
-| `Camera` | `cam` | `opticalTrain` | temperature, setpoint, cooler, exposure |
+| `Camera` | `cam` | `opticalTrain` | temperature, setpoint, cooler `On` or `Off`, exposure |
 | `FilterWheel` | `fw` | `opticalTrain` | slot, filter |
 | `Focuser` | `foc` | `opticalTrain` | position |
 | `Rotator` | `rot` | `opticalTrain` | angle |
@@ -92,9 +92,9 @@ names and the tree.
 | `WeatherStation` | `weather` | `observatory` | safety |
 | `SkyQualityMeter` | `sqm` | `telescope` or `observatory` | brightness in mag/arcsec² |
 | `Switch` | `sw` | `telescope` or `observatory` | the outputs that are on |
-| `Receiver` | `rx` | `telescope` or `observatory` | frequency in Hz |
+| `Receiver` | `rx` | `telescope` or `observatory` | frequency in MHz |
 | `Guider` | none | `telescope` | its `Ready` reason |
-| `Reservation` | `rsv` | `telescope` | phase, step |
+| `Reservation` | `rsv` | `telescope` | phase, step, message |
 
 `GPS`, `Dome`, and `Guider` have no short name, because the singular
 is already short. `equipment-operator` also has a `Receiver` kind, so
@@ -144,7 +144,13 @@ A device's status has the same fields in every kind, and one
   where. `indiDevice` is the name that KStars shows.
 - `readings`: the typed values of the kind, such as
   `status.readings.temperature` of a `Camera`. A reading is absent
-  until the driver sends it.
+  until the driver sends it. Each number is in the unit that its
+  description in `kubectl explain` states.
+- `display`: the same values as text with their units, such as
+  `-9.8 °C`, for the printer columns. A program reads `readings`, and
+  `kubectl get` shows `display`. INDI gives a flat panel's brightness
+  no unit, so it shows against the driver's maximum, such as
+  `128 of 255`.
 - `properties`: every INDI property that the device defines, with its
   label, group, type, permission, state, switch rule, and the value and
   limits of each member. A vendor's own properties are here. The list
@@ -152,35 +158,52 @@ A device's status has the same fields in every kind, and one
 
 A `Telescope`'s status names its INDI server in `status.server`, its
 active reservation, its tubes, its trains with their devices, its own
-devices, and whether its guider is ready. An `Observatory`'s status
+devices, and whether its guider is ready. Its `Guider` column, in
+`-o wide`, shows the reason of the guider's `Ready` condition, and an
+empty cell for a telescope with no `Guider`. An `Observatory`'s status
 names its server, its telescopes, its devices, the active reservations,
 and the worst verdict of its weather stations.
 
 A `Reservation` moves through the phases `Scheduled`, `Activating`,
 `Ready`, `Deactivating`, and `Released`, or `Failed`. `status.steps`
-lists every step in order, with its state, start and finish times, and
-a message that names the device a step waits for. Each step's state is
-`Pending`, `Running`, `Done`, `Failed`, or `Skipped`, and
-`status.step` names the one that runs now. "How a reservation runs"
-below states what each step does.
+lists every step in order, with its state, start and stop times, and
+a summary that names the device a step waits for. Each step's state is
+`Pending`, `Running`, `Done`, `Failed`, or `Skipped`. `status.step`
+names the step that runs now, or the step that failed, and it is
+empty while the reservation is `Ready` or `Released`. "How a
+reservation runs" below states what each step does.
 
 ```sh
-kubectl get rsv -n observatory -o wide -w
+kubectl get rsv -n observatory -w
 kubectl wait --for=condition=Ready reservation/east-tonight -n observatory --timeout=10m
 kubectl describe reservation east-tonight -n observatory
 kubectl get rsv east-tonight -n observatory \
-  -o jsonpath='{.status.steps[?(@.name=="Connect")].message}'
+  -o jsonpath='{.status.steps[?(@.name=="Connect")].summary}'
 kubectl get cam,mnt,sw -n observatory
 ```
 
 `kubectl get rsv -w` prints a line for each change of the status: the
 phase, the step, and the message of the step that runs, such as the
-device it waits for. Without `-o wide`, the `Message` column is
-hidden, and many lines look the same. `kubectl describe` lists each
-step, and the reservation's Events: one for each step that ends, one
-for each phase, and a `Warning` for a step that fails. The `Ready` condition is `True` while
-the phase is `Ready`, and `status.endpoint` then holds the host and
-port for KStars, such as `east-telescope.observatory.svc:7624`.
+device it waits for. `-o wide` adds the start, the end, and the
+endpoint. The message is the `Ready` condition's: while a step runs,
+its reason is the step and its message is the step's summary.
+`kubectl describe` lists each step with its name first, and the
+reservation's Events: one for each step that ends, with the time it
+took, one for each phase, and a `Warning` for a step that fails. The
+`Ready` condition is `True` while the phase is `Ready`, and its
+message and `status.endpoint` then give the host and port for KStars,
+such as `east-telescope.observatory.svc:7624`.
+
+`kubectl logs` tells the same story as the status, one line for each
+phase change and for each step's start and end:
+
+```text
+observatory-operator: Reservation east-tonight: Activating
+observatory-operator: Reservation east-tonight: Prepare started
+observatory-operator: Reservation east-tonight: Prepare done in 19 s: cooled Camera east-main to -10 °C; found Mount east unparked
+observatory-operator: Reservation east-tonight: Ready at east-telescope.observatory.svc:7624
+```
+
 `SafeToPowerOff` is `True` when the deactivation steps are done. The
 `Guider` kind has its CRD, but its pod is [plan 09](plans/09-the-guider.md):
 its `Ready` condition is `False` with the reason `NotImplemented`.
@@ -190,9 +213,9 @@ its `Ready` condition is `False` with the reason `NotImplemented`.
 The operator runs one step at a time, in a fixed order, and a step
 starts only when the step before it is `Done` or `Skipped`. Each step
 reads what the cluster and the devices report before it changes
-anything, and records what it did in its message. A step with nothing
-to do is `Skipped`, and a device whose driver lacks a property, such as
-a guide camera with no cooler, is named in the message, and the step
+anything, and records what it did in its summary. A step with nothing
+to do is `Skipped`. A device whose driver lacks a property, such as a
+guide camera with no cooler, is named in the summary, and the step
 goes on.
 
 | Step | What it does | Deadline |
@@ -229,7 +252,7 @@ kubectl annotate reservation east-tonight -n observatory observatory.liken.sh/re
 ```
 
 One telescope serves one reservation at a time. A second reservation
-of the telescope waits in `Wait`, and its message names the reservation
+of the telescope waits in `Wait`, and its summary names the reservation
 it waits for. Waiting reservations take the telescope in the order of
 their `spec.start`, and of their creation when they have none.
 

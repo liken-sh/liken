@@ -96,7 +96,9 @@ const (
 type ReservationStatus struct {
 	ObservedGeneration int64            `json:"observedGeneration,omitempty"`
 	Phase              ReservationPhase `json:"phase,omitempty"`
-	// Step is the step that runs now, or the last one that ran.
+	// Step is the step that runs now, or the step that failed. It is
+	// empty while the phase is Ready or Released, so the printer
+	// column never shows a finished step as if it ran.
 	Step StepName `json:"step,omitempty"`
 	// Steps lists the activation steps from the start, and the
 	// deactivation steps from when deactivation begins.
@@ -110,13 +112,16 @@ type ReservationStatus struct {
 // Step is one step's record. An operator that restarts resumes from
 // this record and from what it observes, not from its memory.
 type Step struct {
-	Name       StepName   `json:"name"`
-	State      StepState  `json:"state"`
-	StartTime  *time.Time `json:"startTime,omitempty"`
-	FinishTime *time.Time `json:"finishTime,omitempty"`
-	// Message says what the step waits for or did, and names the
-	// device when one device holds the step up.
-	Message string `json:"message,omitempty"`
+	Name      StepName   `json:"name"`
+	State     StepState  `json:"state"`
+	StartTime *time.Time `json:"startTime,omitempty"`
+	StopTime  *time.Time `json:"stopTime,omitempty"`
+	// Summary says what the step waits for or did, and names the
+	// device when one device holds the step up. The JSON names of a
+	// step's fields sort as name, startTime, state, stopTime, summary,
+	// and `kubectl describe` prints a map's fields in that sorted
+	// order, so each step begins with its name.
+	Summary string `json:"summary,omitempty"`
 }
 
 const (

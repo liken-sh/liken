@@ -23,11 +23,11 @@ spec:
         status: {}
       additionalPrinterColumns:
         - name: Latitude
-          type: number
-          jsonPath: .spec.location.latitude
+          type: string
+          jsonPath: .status.display.latitude
         - name: Longitude
-          type: number
-          jsonPath: .spec.location.longitude
+          type: string
+          jsonPath: .status.display.longitude
         - name: Phase
           type: string
           jsonPath: .status.phase
@@ -98,11 +98,13 @@ spec:
                   type: object
                   description: >-
                     The rules between the dome and the mounts. Each one
-                    is off unless it is set here. With one mount, the
-                    operator writes them to the drivers, and the drivers
-                    enforce them while the operator is down. INDI's dome
-                    snoops one mount only, so with several mounts the
-                    operator enforces them across the servers. Optional.
+                    is off unless it is set here. The operator writes
+                    the shutter policies to the dome, and the dome
+                    enforces them while the operator is down. The
+                    operator does not write or enforce `domeLocksMount`
+                    or `mountLocksDome` yet: they need the dome to snoop
+                    a mount on another INDI server. The `Configure` step
+                    notes each one it skips. Optional.
                   properties:
                     domeLocksMount:
                       type: boolean
@@ -257,6 +259,18 @@ spec:
                   x-kubernetes-list-type: set
                   items:
                     type: string
+                display:
+                  type: object
+                  description: >-
+                    The spec as a person reads it, with its units, for the
+                    printer columns.
+                  properties:
+                    latitude:
+                      type: string
+                      description: "The latitude in degrees north or south, such as `51.4769° N`."
+                    longitude:
+                      type: string
+                      description: "The longitude in degrees east or west, such as `0.0005° W`."
                 weather:
                   type: string
                   enum: [Safe, Warning, Danger, Unknown]

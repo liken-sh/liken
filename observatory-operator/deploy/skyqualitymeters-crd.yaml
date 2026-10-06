@@ -41,8 +41,8 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Brightness
-          type: number
-          jsonPath: .status.readings.brightness
+          type: string
+          jsonPath: .status.display.brightness
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -358,6 +358,15 @@ spec:
                               description: >-
                                 For a number, the step between values.
                                 Zero means any step.
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    brightness:
+                      type: string
+                      description: "The sky's brightness, such as `21.3 mag/arcsec²`."
                 readings:
                   type: object
                   description: >-

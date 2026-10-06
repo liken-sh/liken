@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -24,7 +26,7 @@ import (
 
 // errEnding is the cause that ends an activation step when the
 // reservation is deleted or reaches spec.end.
-var errEnding = errors.New("the reservation ended before this step finished")
+var errEnding = errors.New("reservation ended")
 
 type runner struct {
 	o    *operator
@@ -36,10 +38,13 @@ type runner struct {
 	res    *observatory.Reservation
 	status observatory.ReservationStatus
 	done   chan struct{}
+	// logged is the last phase that the log names, so each phase
+	// change writes one line.
+	logged observatory.ReservationPhase
 }
 
 func newRunner(o *operator, r *observatory.Reservation) *runner {
-	return &runner{o: o, uid: r.Metadata.UID, name: r.Metadata.Name, res: r, status: r.Status, done: make(chan struct{})}
+	return &runner{o: o, uid: r.Metadata.UID, name: r.Metadata.Name, res: r, status: r.Status, done: make(chan struct{}), logged: r.Status.Phase}
 }
 
 // stage is what the record says the runner does next.
@@ -80,12 +85,14 @@ func (r *runner) run(ctx context.Context) {
 		case stageActivate:
 			r.activate(ctx)
 		case stageReady:
+			r.clearStep(ctx)
 			r.steady(ctx)
 		case stageDeactivate:
 			r.deactivate(ctx)
 		case stageFailed:
 			r.failed(ctx)
 		case stageReleased:
+			r.clearStep(ctx)
 			r.released(ctx)
 			return
 		}
@@ -198,11 +205,11 @@ type outcome struct {
 }
 
 func done(format string, args ...any) (outcome, error) {
-	return outcome{message: fmt.Sprintf(format, args...)}, nil
+	return outcome{message: sentence(fmt.Sprintf(format, args...))}, nil
 }
 
 func skipped(format string, args ...any) (outcome, error) {
-	return outcome{skipped: true, message: fmt.Sprintf(format, args...)}, nil
+	return outcome{skipped: true, message: sentence(fmt.Sprintf(format, args...))}, nil
 }
 
 type stepFunc func(ctx context.Context, w *stepWork) (outcome, error)
@@ -213,12 +220,15 @@ type stepFunc func(ctx context.Context, w *stepWork) (outcome, error)
 func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn stepFunc) error {
 	s := r.step(name)
 	now := stamp()
+	begins := "resumed"
 	if s.State == observatory.StepPending {
-		s.State, s.StartTime, s.FinishTime, s.Message = observatory.StepRunning, &now, nil, ""
+		s.State, s.StartTime, s.StopTime, s.Summary = observatory.StepRunning, &now, nil, ""
+		begins = "started"
 	}
 	r.status.Step = name
 	r.status.Phase = phaseOf(name)
 	r.save(ctx)
+	logf("Reservation %s: %s %s", r.name, name, begins)
 
 	limit := stepTimeouts[name]
 	stepCtx, cancel := ctx, context.CancelFunc(func() {})
@@ -228,9 +238,10 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	defer cancel()
 	work := &stepWork{r: r}
 	work.report = func(message string) {
+		message = sentence(message)
 		work.last = message
-		if r.step(name).Message != message {
-			r.step(name).Message = message
+		if r.step(name).Summary != message {
+			r.step(name).Summary = message
 			r.save(ctx)
 		}
 	}
@@ -238,33 +249,35 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 
 	s = r.step(name)
 	finish := stamp()
-	s.FinishTime = &finish
+	s.StopTime = &finish
 	switch {
 	case err != nil && errors.Is(context.Cause(ctx), errEnding):
-		s.State, s.Message = observatory.StepSkipped, errEnding.Error()
+		s.State, s.Summary = observatory.StepSkipped, sentence(errEnding.Error())
 		r.save(ctx)
+		logf("Reservation %s: %s", r.name, stepLine(s))
 		return errEnding
 	case err != nil && ctx.Err() != nil:
 		// The operator stops. The step stays Running, and the next
 		// copy of the operator continues it.
-		s.FinishTime = nil
+		s.StopTime = nil
 		return ctx.Err()
 	case err != nil && errors.Is(stepCtx.Err(), context.DeadlineExceeded):
 		s.State = observatory.StepFailed
-		s.Message = fmt.Sprintf("timed out after %v: %s", limit, firstNonEmpty(work.last, err.Error()))
-		r.failure(ctx, name, reasonTimedOut, s.Message)
+		s.Summary = fmt.Sprintf("%s after %s: %s", timedOut, duration(limit), lowerFirst(firstNonEmpty(work.last, err.Error())))
+		r.failure(ctx, s, reasonTimedOut)
 		return err
 	case err != nil:
-		s.State, s.Message = observatory.StepFailed, err.Error()
-		r.failure(ctx, name, reasonFailed, s.Message)
+		s.State, s.Summary = observatory.StepFailed, "Failed: "+err.Error()
+		r.failure(ctx, s, reasonFailed)
 		return err
 	case result.skipped:
-		s.State, s.Message = observatory.StepSkipped, result.message
+		s.State, s.Summary = observatory.StepSkipped, result.message
 	default:
-		s.State, s.Message = observatory.StepDone, result.message
+		s.State, s.Summary = observatory.StepDone, result.message
 	}
 	r.save(ctx)
-	r.o.record(r.res, eventNormal, string(name), fmt.Sprintf("%s %s: %s", name, s.State, s.Message))
+	logf("Reservation %s: %s", r.name, stepLine(s))
+	r.o.record(r.res, eventNormal, string(name), sentence(strings.TrimPrefix(stepLine(s), string(name)+" ")))
 	return nil
 }
 
@@ -283,10 +296,32 @@ const (
 	reasonTimedOut = "StepTimedOut"
 )
 
-func (r *runner) failure(ctx context.Context, name observatory.StepName, reason, message string) {
+func (r *runner) failure(ctx context.Context, s *observatory.Step, reason string) {
+	logf("Reservation %s: %s", r.name, stepLine(s))
 	r.status.Phase = observatory.ReservationFailed
 	r.save(ctx)
-	r.o.record(r.res, eventWarning, reason, fmt.Sprintf("%s: %s", name, message))
+	r.o.record(r.res, eventWarning, reason, failedMessage(s))
+}
+
+// clearStep empties status.step of a reservation that is Ready or
+// Released, so its printer column shows no step that ended.
+func (r *runner) clearStep(ctx context.Context) {
+	if r.status.Step != "" {
+		r.status.Step = ""
+		r.save(ctx)
+	}
+}
+
+// began answers when the first of some steps started, to give the
+// time that activation or deactivation took.
+func (r *runner) began(names []observatory.StepName) time.Time {
+	first := time.Now()
+	for _, s := range r.status.Steps {
+		if slices.Contains(names, s.Name) && s.StartTime != nil && s.StartTime.Before(first) {
+			first = *s.StartTime
+		}
+	}
+	return first
 }
 
 // phaseOf answers the phase while a step runs.
@@ -306,6 +341,10 @@ func phaseOf(name observatory.StepName) observatory.ReservationPhase {
 // in memory stays as it is.
 func (r *runner) save(ctx context.Context) {
 	r.compose()
+	if r.status.Phase != r.logged {
+		r.logged = r.status.Phase
+		logf("Reservation %s: %s", r.name, phaseLine(&r.status))
+	}
 	held := *r.res
 	_, err := informer.SettleStatus[observatory.Reservation](r.o.client.WithContext(ctx), r.o.versions,
 		objectPath(observatory.ReservationKind, held.Metadata.Namespace, held.Metadata.Name), &held,
@@ -331,25 +370,28 @@ func (r *runner) compose() {
 	s := &r.status
 	s.ObservedGeneration = r.res.Metadata.Generation
 	s.Endpoint = nil
-	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(s.Phase), phaseMessage(s))
-	safe := condition(observatory.ConditionSafeToPowerOff, observatory.ConditionFalse, string(s.Phase), "the deactivation steps have not finished")
+	reason, message := string(s.Phase), string(s.Phase)
+	if step := findStep(s.Steps, s.Step); step != nil {
+		reason, message = string(step.Name), firstNonEmpty(step.Summary, "Running")
+	}
+	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, reason, message)
+	safe := condition(observatory.ConditionSafeToPowerOff, observatory.ConditionFalse, string(s.Phase), "Not released")
 	switch s.Phase {
 	case observatory.ReservationReady:
 		endpoint := r.endpoint()
 		s.Endpoint = &endpoint
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, "Ready",
-			fmt.Sprintf("connect KStars to %s:%d", endpoint.Host, endpoint.Port))
+			fmt.Sprintf("Ready at %s:%d", endpoint.Host, endpoint.Port))
 	case observatory.ReservationReleased:
-		safe = condition(observatory.ConditionSafeToPowerOff, observatory.ConditionTrue, "Released",
-			"the deactivation steps are done, and the devices are safe to power off")
+		safe = condition(observatory.ConditionSafeToPowerOff, observatory.ConditionTrue, "Released", "Safe to power off")
 	case observatory.ReservationFailed:
-		for _, step := range s.Steps {
-			if step.State == observatory.StepFailed {
+		for i := range s.Steps {
+			if step := &s.Steps[i]; step.State == observatory.StepFailed {
 				reason := reasonFailed
-				if len(step.Message) > 9 && step.Message[:9] == "timed out" {
+				if strings.HasPrefix(step.Summary, timedOut) {
 					reason = reasonTimedOut
 				}
-				ready = condition(observatory.ConditionReady, observatory.ConditionFalse, reason, fmt.Sprintf("%s: %s", step.Name, step.Message))
+				ready = condition(observatory.ConditionReady, observatory.ConditionFalse, reason, failedMessage(step))
 				safe.Reason, safe.Message = reason, ready.Message
 			}
 		}
@@ -358,13 +400,6 @@ func (r *runner) compose() {
 	for i := range s.Conditions {
 		s.Conditions[i].ObservedGeneration = s.ObservedGeneration
 	}
-}
-
-func phaseMessage(s *observatory.ReservationStatus) string {
-	if step := findStep(s.Steps, s.Step); step != nil && step.Message != "" {
-		return fmt.Sprintf("%s: %s", step.Name, step.Message)
-	}
-	return string(s.Phase)
 }
 
 func findStep(steps []observatory.Step, name observatory.StepName) *observatory.Step {

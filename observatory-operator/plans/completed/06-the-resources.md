@@ -263,6 +263,13 @@ drivers enforce them while the operator is down. With several mounts,
 the dome snoops only one, so the operator enforces the policy across
 the servers. The fields are open.
 
+As built, the operator writes the shutter policies and not the lock
+policies. A driver snoops only devices on its own server, and the dome
+runs on the observatory's server, so the operator writes neither
+`DOME_POLICY` nor `MOUNT_POLICY`, and it enforces neither across the
+servers.
+[Plan 08](../08-the-reconciler.md) holds that work.
+
 ## Drivers and images
 
 A device names its driver, and the operator resolves the image:

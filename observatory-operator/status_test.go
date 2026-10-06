@@ -148,13 +148,13 @@ func TestAMissingParentIsReported(t *testing.T) {
 		spec    map[string]any
 		message string
 	}{
-		{observatory.FocuserKind, map[string]any{"opticalTrain": "nowhere", "driver": map[string]any{"name": "indi_simulator_focus"}}, "the OpticalTrain nowhere does not exist"},
-		{observatory.MountKind, map[string]any{"telescope": "nowhere", "driver": map[string]any{"name": "indi_simulator_telescope"}}, "the Telescope nowhere does not exist"},
-		{observatory.DomeKind, map[string]any{"observatory": "nowhere", "driver": map[string]any{"name": "indi_simulator_dome"}}, "the Observatory nowhere does not exist"},
-		{observatory.TelescopeKind, map[string]any{"observatory": "nowhere"}, "the Observatory nowhere does not exist"},
-		{observatory.OpticalTrainKind, map[string]any{"telescope": "east", "opticalTube": "nowhere"}, "the OpticalTube nowhere does not exist"},
-		{observatory.OpticalTubeKind, map[string]any{"telescope": "nowhere", "aperture": 1, "focalLength": 1}, "the Telescope nowhere does not exist"},
-		{observatory.GuiderKind, map[string]any{"telescope": "east", "opticalTrain": "nowhere", "pulses": "Mount"}, "the OpticalTrain nowhere does not exist"},
+		{observatory.FocuserKind, map[string]any{"opticalTrain": "nowhere", "driver": map[string]any{"name": "indi_simulator_focus"}}, "Missing OpticalTrain nowhere"},
+		{observatory.MountKind, map[string]any{"telescope": "nowhere", "driver": map[string]any{"name": "indi_simulator_telescope"}}, "Missing Telescope nowhere"},
+		{observatory.DomeKind, map[string]any{"observatory": "nowhere", "driver": map[string]any{"name": "indi_simulator_dome"}}, "Missing Observatory nowhere"},
+		{observatory.TelescopeKind, map[string]any{"observatory": "nowhere"}, "Missing Observatory nowhere"},
+		{observatory.OpticalTrainKind, map[string]any{"telescope": "east", "opticalTube": "nowhere"}, "Missing OpticalTube nowhere"},
+		{observatory.OpticalTubeKind, map[string]any{"telescope": "nowhere", "aperture": 1, "focalLength": 1}, "Missing Telescope nowhere"},
+		{observatory.GuiderKind, map[string]any{"telescope": "east", "opticalTrain": "nowhere", "pulses": "Mount"}, "Missing OpticalTrain nowhere"},
 	}
 	for _, c := range cases {
 		t.Run(c.kind.Name, func(t *testing.T) {

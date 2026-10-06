@@ -34,13 +34,13 @@ func (r *runner) deactivate(ctx context.Context) {
 		for i := range r.status.Steps {
 			s := &r.status.Steps[i]
 			if s.State == observatory.StepPending || s.State == observatory.StepRunning {
-				s.State, s.Message = observatory.StepSkipped, errEnding.Error()
+				s.State, s.Summary = observatory.StepSkipped, sentence(errEnding.Error())
 			}
 		}
 		r.status.Steps = append(r.status.Steps, pendingSteps(observatory.DeactivationSteps)...)
 		r.status.Phase = observatory.ReservationDeactivating
 		r.save(ctx)
-		r.o.record(r.res, eventNormal, string(observatory.ReservationDeactivating), "deactivating the Telescope "+r.res.Spec.Telescope)
+		r.o.record(r.res, eventNormal, string(observatory.ReservationDeactivating), "Deactivating Telescope "+r.res.Spec.Telescope)
 	}
 	steps := map[observatory.StepName]stepFunc{
 		observatory.StepAbort:       r.abort,
@@ -61,9 +61,10 @@ func (r *runner) deactivate(ctx context.Context) {
 			return
 		}
 	}
-	r.status.Phase = observatory.ReservationReleased
+	r.status.Phase, r.status.Step = observatory.ReservationReleased, ""
 	r.save(ctx)
-	r.o.record(r.res, eventNormal, string(observatory.ReservationReleased), "the devices of the Telescope "+r.res.Spec.Telescope+" are safe to power off")
+	r.o.record(r.res, eventNormal, string(observatory.ReservationReleased),
+		fmt.Sprintf("Released in %s: Telescope %s is safe to power off", duration(time.Since(r.began(observatory.DeactivationSteps))), r.res.Spec.Telescope))
 }
 
 // tookTelescope reports whether the reservation ever held its
@@ -80,12 +81,12 @@ func (r *runner) endUnstarted(ctx context.Context) {
 		s := &r.status.Steps[i]
 		if s.State != observatory.StepDone && s.State != observatory.StepSkipped {
 			now := stamp()
-			s.State, s.Message, s.FinishTime = observatory.StepSkipped, "the reservation ended before it took the telescope", &now
+			s.State, s.Summary, s.StopTime = observatory.StepSkipped, "Reservation ended before it took the Telescope", &now
 		}
 	}
-	r.status.Phase = observatory.ReservationReleased
+	r.status.Phase, r.status.Step = observatory.ReservationReleased, ""
 	r.save(ctx)
-	r.o.record(r.res, eventNormal, string(observatory.ReservationReleased), "the reservation ended before it took the Telescope "+r.res.Spec.Telescope)
+	r.o.record(r.res, eventNormal, string(observatory.ReservationReleased), "Released before it took Telescope "+r.res.Spec.Telescope)
 }
 
 // settleWait bounds how long a deactivation step waits for the
@@ -132,7 +133,7 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 	for _, d := range running {
 		h, found := byKey[d.key()]
 		if !found {
-			notes = append(notes, fmt.Sprintf("the driver of the %s %s did not define its device on %s", d.kind.Name, d.name(), ref))
+			notes = append(notes, fmt.Sprintf("missing the driver of %s %s on %s", d.kind.Name, d.name(), ref))
 			continue
 		}
 		if connection, ok := h.property(ctx, "CONNECTION"); ok && slices.Equal(connection.On(), []string{"CONNECT"}) {
@@ -148,7 +149,7 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 	handles, notes := r.liveHandles(ctx, w)
 	if len(handles) == 0 {
-		return skipped("%s", strings.Join(append([]string{"no device is connected"}, notes...), "; "))
+		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
 	}
 	var did []string
 	stop := func(h handle, watched, property string) error {
@@ -178,7 +179,7 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 	}
 	if len(did) == 0 {
-		return skipped("%s", strings.Join(append([]string{"no exposure ran and no mount moved"}, notes...), "; "))
+		return skipped("%s", strings.Join(append([]string{"found no exposure or slew to abort"}, notes...), "; "))
 	}
 	return done("%s", strings.Join(append(did, notes...), "; "))
 }
@@ -189,7 +190,7 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 func (r *runner) secure(ctx context.Context, w *stepWork) (outcome, error) {
 	handles, notes := r.liveHandles(ctx, w)
 	if len(handles) == 0 {
-		return skipped("%s", strings.Join(append([]string{"no device is connected"}, notes...), "; "))
+		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
 	}
 	var did []string
 	moves := []struct {
@@ -228,7 +229,7 @@ func (r *runner) secure(ctx context.Context, w *stepWork) (outcome, error) {
 		did = append(did, note)
 	}
 	if len(did) == 0 {
-		return skipped("%s", firstNonEmpty(strings.Join(notes, "; "), "every device was secure"))
+		return skipped("%s", firstNonEmpty(strings.Join(notes, "; "), "found every device secure"))
 	}
 	return done("%s", strings.Join(append(did, notes...), "; "))
 }
@@ -238,19 +239,19 @@ func (r *runner) secure(ctx context.Context, w *stepWork) (outcome, error) {
 func warm(ctx context.Context, h handle, report func(string)) (string, error) {
 	p, _ := h.client().Property(h.name, "CCD_TEMPERATURE")
 	now, _ := number(p, "CCD_TEMPERATURE_VALUE")
-	note := fmt.Sprintf("%s was at %.1f °C", h.String(), now)
+	note := fmt.Sprintf("found %s at %s", h.String(), quantity(now, 1, "°C"))
 	if now < warmTarget-coolTolerance {
-		report(fmt.Sprintf("warming %s from %.1f °C to %.1f °C", h, now, warmTarget))
+		report(fmt.Sprintf("warming %s from %s to %s", h, quantity(now, 1, "°C"), quantity(warmTarget, 1, "°C")))
 		wait, cancel := context.WithTimeout(ctx, warmLimit)
 		err := setTemperature(wait, h, warmTarget, report)
 		cancel()
 		switch {
 		case err == nil:
-			note = fmt.Sprintf("warmed %s to %.1f °C", h.String(), warmTarget)
+			note = fmt.Sprintf("warmed %s to %s", h.String(), quantity(warmTarget, 1, "°C"))
 		case ctx.Err() != nil:
 			return "", err
 		default:
-			note = fmt.Sprintf("warmed %s for %v: %v", h.String(), warmLimit, err)
+			note = fmt.Sprintf("warmed %s for %s: %v", h.String(), duration(warmLimit), err)
 		}
 	}
 	if _, ok := h.client().Property(h.name, "CCD_COOLER"); ok {
@@ -259,9 +260,9 @@ func warm(ctx context.Context, h handle, report func(string)) (string, error) {
 			return "", err
 		}
 		if changed {
-			note += ", and switched its cooler off"
+			note += "; switched off the cooler of " + h.String()
 		} else {
-			note += ", and its cooler was off"
+			note += "; found the cooler of " + h.String() + " off"
 		}
 	}
 	return note, nil
@@ -272,7 +273,7 @@ func warm(ctx context.Context, h handle, report func(string)) (string, error) {
 func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 	handles, notes := r.liveHandles(ctx, w)
 	if len(handles) == 0 {
-		return skipped("%s", strings.Join(append([]string{"no device is connected"}, notes...), "; "))
+		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
 	}
 	slices.Reverse(handles)
 	var disconnected []string
@@ -283,7 +284,7 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 		disconnected = append(disconnected, h.String())
 	}
-	return done("%s", strings.Join(append([]string{"disconnected " + strings.Join(disconnected, ", ") + ", in that order"}, notes...), "; "))
+	return done("%s", strings.Join(append([]string{"disconnected in order: " + strings.Join(disconnected, ", ")}, notes...), "; "))
 }
 
 // stopTelescopeDevices deletes the pods of the telescope's devices,
@@ -297,7 +298,7 @@ func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome
 		return outcome{}, err
 	}
 	if len(stopped) == 0 {
-		return skipped("no device pod ran")
+		return skipped("no device pod running")
 	}
 	return done("stopped %s", strings.Join(stopped, ", "))
 }
@@ -326,7 +327,7 @@ func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	if len(stopped) == 0 && len(notes) == 0 {
-		return skipped("no server or Switch ran")
+		return skipped("no server or Switch running")
 	}
 	if len(stopped) > 0 {
 		notes = append(notes, "stopped "+strings.Join(stopped, ", "))
@@ -342,7 +343,7 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	telescope, ok := t.telescopes[r.res.Spec.Telescope]
 	if !ok {
-		return skipped("the Telescope %s does not exist, so its observatory is not known", r.res.Spec.Telescope)
+		return skipped("missing Telescope %s: its Observatory is not known", r.res.Spec.Telescope)
 	}
 	site := telescope.Spec.Observatory
 	lock := r.o.siteLock(site)
@@ -353,12 +354,12 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	for other := range r.o.claims.held() {
 		if scope, ok := t.telescopes[other]; ok && other != telescope.Metadata.Name && scope.Spec.Observatory == site {
 			holder, _ := r.o.claims.holderOf(other)
-			return skipped("the server of the Observatory %s stays up for the Reservation %s", site, holder)
+			return skipped("in use by Reservation %s", holder)
 		}
 	}
 	ref := serverRef{observatory.ObservatoryKind, site}
 	if _, running := t.pods[ref.String()]; !running {
-		return skipped("the Observatory %s runs no server", site)
+		return skipped("no server running for Observatory %s", site)
 	}
 	devices := t.devicesOn(ref)
 	switches, others := partition(devices)

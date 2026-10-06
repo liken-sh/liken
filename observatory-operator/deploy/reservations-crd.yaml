@@ -36,15 +36,20 @@ spec:
         - name: Step
           type: string
           jsonPath: .status.step
-        - name: Start
+        - name: Message
           type: string
-          jsonPath: .spec.start
-        - name: End
-          type: string
-          jsonPath: .spec.end
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+        - name: Start
+          type: string
+          jsonPath: .spec.start
+          priority: 1
+        - name: End
+          type: string
+          jsonPath: .spec.end
+          priority: 1
         - name: Host
           type: string
           jsonPath: .status.endpoint.host
@@ -52,10 +57,6 @@ spec:
         - name: Port
           type: integer
           jsonPath: .status.endpoint.port
-          priority: 1
-        - name: Message
-          type: string
-          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
           priority: 1
       schema:
         openAPIV3Schema:
@@ -137,7 +138,9 @@ spec:
                   type: string
                   enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, Abort, Secure, Disconnect, StopDevices, PowerOff, StopSite]
                   description: >-
-                    The step that runs now, or the last step that ran.
+                    The step that runs now, or the step that failed.
+                    It is empty while the phase is `Ready` or
+                    `Released`.
                 steps:
                   type: array
                   description: >-
@@ -172,11 +175,11 @@ spec:
                         type: string
                         format: date-time
                         description: "When the step began to run."
-                      finishTime:
+                      stopTime:
                         type: string
                         format: date-time
                         description: "When the step ended."
-                      message:
+                      summary:
                         type: string
                         description: >-
                           What the step waits for or did. It names the

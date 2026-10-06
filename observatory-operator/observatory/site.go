@@ -25,10 +25,13 @@ type Location struct {
 }
 
 // Policies are the rules between the dome and the mounts. Each one is
-// off unless the spec sets it. With one mount, the operator writes
-// them to the drivers, and the drivers enforce them while the operator
-// is down. INDI's dome snoops one mount only, so with several mounts
-// the operator enforces them across the servers.
+// off unless the spec sets it. The operator writes the shutter
+// policies to the dome, and the dome enforces them while the operator
+// is down. The lock policies need the dome to snoop a mount, and a
+// driver snoops only devices on its own server, but the dome runs on
+// the observatory's server and each mount on its telescope's. So the
+// operator does not write or enforce the lock policies yet, and
+// Configure notes each one it skips. Plan 08 holds the work.
 type Policies struct {
 	// DomeLocksMount sets the mount's DOME_POLICY to DOME_LOCKS: the
 	// mount does not unpark while the dome is parked, and parks when
@@ -60,7 +63,15 @@ type ObservatoryStatus struct {
 	Reservations []string `json:"reservations,omitempty"`
 	// Weather is the verdict of the observatory's weather stations:
 	// the worst one, or Unknown when no station reports.
-	Weather Safety `json:"weather,omitempty"`
+	Weather Safety             `json:"weather,omitempty"`
+	Display ObservatoryDisplay `json:"display,omitzero"`
+}
+
+// ObservatoryDisplay holds the spec's location as a person reads it,
+// such as 51.4769° N and 0.0005° W, for the printer columns.
+type ObservatoryDisplay struct {
+	Latitude  string `json:"latitude,omitempty"`
+	Longitude string `json:"longitude,omitempty"`
 }
 
 // Phase is the state in one word of a resource that runs while a

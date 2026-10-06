@@ -28,7 +28,16 @@ type TelescopeStatus struct {
 	// Devices lists the devices whose parent is this Telescope.
 	Devices []DeviceRef `json:"devices,omitempty"`
 	// Guider is the telescope's Guider, and whether it is ready.
-	Guider *GuiderRef `json:"guider,omitempty"`
+	Guider  *GuiderRef       `json:"guider,omitempty"`
+	Display TelescopeDisplay `json:"display"`
+}
+
+// TelescopeDisplay holds what the printer columns show.
+type TelescopeDisplay struct {
+	// Guider is the reason of the Guider's Ready condition, such as
+	// Ready or NotImplemented. It is an empty string for a telescope
+	// with no Guider, so the column shows an empty cell, not <none>.
+	Guider string `json:"guider"`
 }
 
 // ReservationRef names the reservation that holds a telescope, and

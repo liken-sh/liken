@@ -28,11 +28,11 @@ spec:
           type: string
           jsonPath: .spec.telescope
         - name: Aperture
-          type: number
-          jsonPath: .spec.aperture
+          type: string
+          jsonPath: .status.display.aperture
         - name: "Focal Length"
-          type: number
-          jsonPath: .spec.focalLength
+          type: string
+          jsonPath: .status.display.focalLength
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -136,6 +136,18 @@ spec:
                         description: >-
                           When `status` last changed. A write with the
                           same status keeps this time.
+                display:
+                  type: object
+                  description: >-
+                    The spec as a person reads it, with its units, for the
+                    printer columns.
+                  properties:
+                    aperture:
+                      type: string
+                      description: "The aperture, such as `80 mm`."
+                    focalLength:
+                      type: string
+                      description: "The focal length, such as `480 mm`."
                 trains:
                   type: array
                   description: "Each `OpticalTrain` that names this tube."

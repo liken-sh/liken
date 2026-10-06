@@ -47,8 +47,8 @@ spec:
           type: date
           jsonPath: .metadata.creationTimestamp
         - name: Guider
-          type: boolean
-          jsonPath: .status.guider.ready
+          type: string
+          jsonPath: .status.display.guider
           priority: 1
         - name: Node
           type: string
@@ -253,6 +253,17 @@ spec:
                         type: string
                         enum: [Inventory, Starting, Connecting, Connected, Disconnecting, Error]
                         description: "The device's `status.phase`."
+                display:
+                  type: object
+                  required: [guider]
+                  description: "What the printer columns show."
+                  properties:
+                    guider:
+                      type: string
+                      description: >-
+                        The reason of the `Guider`'s `Ready` condition,
+                        such as `Ready` or `NotImplemented`. It is an
+                        empty string for a telescope with no `Guider`.
                 guider:
                   type: object
                   required: [name, ready]

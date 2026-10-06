@@ -72,9 +72,9 @@ func coolable(ctx context.Context, cameras []handle, notes *[]string) []handle {
 		p, ok := h.property(ctx, "CCD_TEMPERATURE")
 		switch {
 		case !ok:
-			*notes = append(*notes, fmt.Sprintf("%s has no cooler: its driver defines no CCD_TEMPERATURE", h))
+			*notes = append(*notes, fmt.Sprintf("no cooler on %s: no CCD_TEMPERATURE", h))
 		case p.Perm == indi.ReadOnly:
-			*notes = append(*notes, fmt.Sprintf("%s has no cooler: its driver's CCD_TEMPERATURE is read-only", h))
+			*notes = append(*notes, fmt.Sprintf("no cooler on %s: CCD_TEMPERATURE is read-only", h))
 		default:
 			out = append(out, h)
 		}
@@ -103,12 +103,12 @@ func setTemperature(ctx context.Context, h handle, target float64, report func(s
 		return math.Abs(now-target) <= coolTolerance
 	})
 	if err != nil {
-		return fmt.Errorf("%s reached %.1f °C of %.1f °C: %w", h, last, target, err)
+		return fmt.Errorf("%s reached %s of %s: %w", h, quantity(last, 1, "°C"), quantity(target, 1, "°C"), err)
 	}
 	if p, _ := h.client().Property(h.name, "CCD_TEMPERATURE"); p.State == indi.Alert {
 		return fmt.Errorf("%s: indi: %s.CCD_TEMPERATURE is Alert", h, h.name)
 	}
-	report(fmt.Sprintf("%s is at %.1f °C", h, target))
+	report(fmt.Sprintf("reached %s on %s", quantity(target, 1, "°C"), h))
 	return nil
 }
 
@@ -148,14 +148,14 @@ func activeDevices(ctx context.Context, h handle, want map[string]string) (bool,
 func filterNames(ctx context.Context, h handle, filters []string, notes *[]string) (bool, error) {
 	p, ok := h.property(ctx, "FILTER_NAME")
 	if !ok {
-		*notes = append(*notes, fmt.Sprintf("%s defines no FILTER_NAME", h))
+		*notes = append(*notes, fmt.Sprintf("no FILTER_NAME on %s", h))
 		return false, nil
 	}
 	values := map[string]string{}
 	for i, name := range filters {
 		member := "FILTER_SLOT_NAME_" + strconv.Itoa(i+1)
 		if _, has := p.Member(member); !has {
-			*notes = append(*notes, fmt.Sprintf("%s has %d slots, so %d filters have no slot", h, len(p.Members), len(filters)-i))
+			*notes = append(*notes, fmt.Sprintf("no slot for %d of the filters on %s (%d slots)", len(filters)-i, h, len(p.Members)))
 			break
 		}
 		values[member] = name
@@ -167,7 +167,7 @@ func filterNames(ctx context.Context, h handle, filters []string, notes *[]strin
 // the driver may not define, and notes a property the driver lacks.
 func optional(ctx context.Context, h handle, property string, values map[string]float64, notes *[]string) (bool, error) {
 	if _, ok := h.property(ctx, property); !ok {
-		*notes = append(*notes, fmt.Sprintf("%s defines no %s", h, property))
+		*notes = append(*notes, fmt.Sprintf("no %s on %s", property, h))
 		return false, nil
 	}
 	return h.setNumbers(ctx, property, values)

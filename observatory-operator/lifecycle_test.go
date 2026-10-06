@@ -33,7 +33,7 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 			t.Errorf("steps = %v, want %v", got, want)
 		}
 		for _, s := range r.Status.Steps {
-			t.Logf("%s: %s", s.Name, s.Message)
+			t.Logf("%s: %s", s.Name, s.Summary)
 		}
 		if r.Status.Endpoint == nil || r.Status.Endpoint.Host != "east-telescope.observatory.svc" || r.Status.Endpoint.Port != 7624 {
 			t.Errorf("endpoint = %+v", r.Status.Endpoint)
@@ -83,8 +83,8 @@ func TestPrepareNamesTheDevicesThatWereReadyAlready(t *testing.T) {
 		w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
 		r := w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
 		step := stepOf(r, observatory.StepPrepare)
-		if step.State != observatory.StepSkipped || step.Message != "Mount west was unparked already" {
-			t.Errorf("Prepare = %s %q", step.State, step.Message)
+		if step.State != observatory.StepSkipped || step.Summary != "Found Mount west unparked" {
+			t.Errorf("Prepare = %s %q", step.State, step.Summary)
 		}
 	})
 }
@@ -126,7 +126,7 @@ func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
 			t.Errorf("steps = %v, want %v", got, want)
 		}
 		for _, s := range r.Status.Steps {
-			t.Logf("%s: %s", s.Name, s.Message)
+			t.Logf("%s: %s", s.Name, s.Summary)
 		}
 		if c := conditionOf(r.Status.Conditions, observatory.ConditionSafeToPowerOff); c.Status != observatory.ConditionTrue {
 			t.Errorf("SafeToPowerOff = %+v", c)

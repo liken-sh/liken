@@ -252,7 +252,7 @@ func (o *operator) send(ctx context.Context, report func(string), what string, w
 		if err == nil {
 			return nil
 		}
-		message := fmt.Sprintf("%s: %v; sending it again in %v", what, err, pause)
+		message := fmt.Sprintf("retrying in %s: %s: %v", duration(pause), what, err)
 		fmt.Fprintf(os.Stderr, "observatory-operator: %s\n", message)
 		if report != nil {
 			report(message)

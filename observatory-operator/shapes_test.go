@@ -79,12 +79,12 @@ func TestDriversThatLackTheirKindsPropertiesAreNoted(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure: {"Camera east-odd defines no CCD_GAIN", "Camera east-odd defines no SCOPE_INFO", "FilterWheel east-odd defines no FILTER_NAME"},
-			observatory.StepPrepare:   {"Camera east-odd has no cooler: its driver defines no CCD_TEMPERATURE"},
+			observatory.StepConfigure: {"no CCD_GAIN on Camera east-odd", "no SCOPE_INFO on Camera east-odd", "no FILTER_NAME on FilterWheel east-odd"},
+			observatory.StepPrepare:   {"no cooler on Camera east-odd: no CCD_TEMPERATURE"},
 		}
 		for name, want := range notes {
 			for _, note := range want {
-				if message := stepOf(r, name).Message; !strings.Contains(message, note) {
+				if message := stepOf(r, name).Summary; !strings.Contains(message, note) {
 					t.Errorf("%s: %q does not note %q", name, message, note)
 				}
 			}
@@ -102,7 +102,7 @@ func TestAReservationThatEndsDuringActivationDeactivates(t *testing.T) {
 		end := time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": end})
 		r := w.phase("east-tonight", observatory.ReservationReleased, 20*time.Minute)
-		if step := stepOf(r, observatory.StepPrepare); step.State != observatory.StepSkipped || step.Message != errEnding.Error() {
+		if step := stepOf(r, observatory.StepPrepare); step.State != observatory.StepSkipped || step.Summary != "Reservation ended" {
 			t.Errorf("Prepare = %+v", step)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {

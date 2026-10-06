@@ -149,6 +149,7 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	}
 	var connection indi.Property
 	defined := false
+	maximum := func(string, string) (float64, bool) { return 0, false }
 	ref, placed := t.server(d)
 	if server, open := o.servers.get(ref.String()); placed && hasPod && open && server.client.Connected() {
 		indiDevice, err := indiName(server.client, t.devicesOn(ref), d)
@@ -161,13 +162,12 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 			next.Properties = properties(r)
 			next.Readings = readings(d.kind, r)
 			connection, defined = r.property("CONNECTION")
+			maximum = r.maximum
 		}
 	}
+	next.Display = deviceDisplay(d, next.Readings, maximum)
 	next.Phase = devicePhase(hasPod && p.Metadata.DeletionTimestamp != nil, hasPod, defined, connection, fault)
-	parent := condition(observatory.ConditionParentFound, observatory.ConditionTrue, "Found", "every resource up to the Observatory exists")
-	if missing := t.missingParent(d); missing != "" {
-		parent = condition(observatory.ConditionParentFound, observatory.ConditionFalse, "ParentMissing", missing+" does not exist")
-	}
+	parent := parentCondition(t.missingParent(d))
 	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), deviceMessage(next, ref, fault))
 	if next.Phase == observatory.DeviceConnected {
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, ref, ""))
@@ -202,11 +202,11 @@ func devicePhase(stopping, hasPod, defined bool, connection indi.Property, fault
 func deviceMessage(s deviceStatus, ref serverRef, fault string) string {
 	switch {
 	case fault != "":
-		return fault
+		return "Failed: " + fault
 	case s.Phase == observatory.DeviceInventory:
-		return "no reservation needs the device, and it has no pod"
+		return "Not reserved"
 	case s.IndiDevice == "":
-		return fmt.Sprintf("the pod %s runs, and its driver has not defined its device on %s", s.Pod, ref)
+		return "Waiting for its driver on " + ref.String()
 	}
-	return fmt.Sprintf("%s is %s on %s", s.IndiDevice, s.Phase, ref)
+	return fmt.Sprintf("%s on %s", s.Phase, ref)
 }

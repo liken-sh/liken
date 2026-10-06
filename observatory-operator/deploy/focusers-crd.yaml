@@ -37,8 +37,8 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Position
-          type: integer
-          jsonPath: .status.readings.position
+          type: string
+          jsonPath: .status.display.position
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -340,6 +340,15 @@ spec:
                               description: >-
                                 For a number, the step between values.
                                 Zero means any step.
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    position:
+                      type: string
+                      description: "The position in steps, such as `52000 steps`."
                 readings:
                   type: object
                   description: >-

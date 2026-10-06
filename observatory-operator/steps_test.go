@@ -27,14 +27,14 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 		began := time.Now()
 		r := w.phase("east-tonight", observatory.ReservationFailed, 15*time.Minute)
 		step := stepOf(r, observatory.StepStartDevices)
-		if step.State != observatory.StepFailed || !strings.Contains(step.Message, "timed out after 10m0s") || !strings.Contains(step.Message, "east-main-camera") {
+		if step.State != observatory.StepFailed || !strings.Contains(step.Summary, "Timed out after 10 min: ") || !strings.Contains(step.Summary, "east-main-camera") {
 			t.Errorf("StartDevices = %+v", step)
 		}
 		if waited := time.Since(began); waited < 10*time.Minute-time.Second || waited > 11*time.Minute {
 			t.Errorf("the step failed after %v, want its 10-minute deadline", waited)
 		}
 		ready := conditionOf(r.Status.Conditions, observatory.ConditionReady)
-		if ready.Reason != reasonTimedOut || !strings.HasPrefix(ready.Message, "StartDevices: ") || !strings.Contains(ready.Message, "Camera east-main") {
+		if ready.Reason != reasonTimedOut || !strings.HasPrefix(ready.Message, "StartDevices timed out after 10 min: ") || !strings.Contains(ready.Message, "Camera east-main") {
 			t.Errorf("Ready = %+v", ready)
 		}
 		if got := stepStates(r); !slices.Equal(got[5:], []string{"Configure=Pending", "Prepare=Pending"}) {
@@ -75,7 +75,7 @@ func TestACoolerThatNeverReachesItsSetpointFailsPrepare(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationFailed, 30*time.Minute)
 		step := stepOf(r, observatory.StepPrepare)
-		if step.State != observatory.StepFailed || !strings.Contains(step.Message, "timed out after 20m0s") || !strings.Contains(step.Message, "Camera east-main") {
+		if step.State != observatory.StepFailed || !strings.Contains(step.Summary, "Timed out after 20 min: ") || !strings.Contains(step.Summary, "Camera east-main") {
 			t.Errorf("Prepare = %+v", step)
 		}
 	})
@@ -164,7 +164,7 @@ func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
 		})
 		synctest.Wait()
 		r, _ := w.reservation("east-tonight")
-		if message := stepOf(r, observatory.StepSecure).Message; message != "parking Mount east" {
+		if message := stepOf(r, observatory.StepSecure).Summary; message != "Parking Mount east" {
 			t.Errorf("Secure's message during the park = %q", message)
 		}
 
@@ -194,7 +194,7 @@ func TestASecondReservationWaitsForTheFirst(t *testing.T) {
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		r, _ = w.reservation("east-later")
-		if wait := stepOf(r, observatory.StepWait); wait.State != observatory.StepRunning || wait.Message != "waiting for the Reservation east-tonight to release the Telescope east" {
+		if wait := stepOf(r, observatory.StepWait); wait.State != observatory.StepRunning || wait.Summary != "Waiting for Reservation east-tonight" {
 			t.Errorf("Wait = %+v", wait)
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
@@ -230,7 +230,7 @@ func TestAReservationWaitsForItsStart(t *testing.T) {
 		start := time.Now().Add(2 * time.Hour).UTC()
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "start": start.Format(time.RFC3339)})
 		r := w.phase("east-tonight", observatory.ReservationScheduled, time.Minute)
-		if wait := stepOf(r, observatory.StepWait); wait.Message != "waiting for spec.start at "+start.Format(time.RFC3339) {
+		if wait := stepOf(r, observatory.StepWait); wait.Summary != "Waiting until "+start.Format(time.RFC3339) {
 			t.Errorf("Wait = %+v", wait)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
@@ -241,7 +241,7 @@ func TestAReservationWaitsForItsStart(t *testing.T) {
 			t.Errorf("a minute before its start the reservation is %s", r.Status.Phase)
 		}
 		r = w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-		if took := stepOf(r, observatory.StepWait).FinishTime; took == nil || took.Before(start) {
+		if took := stepOf(r, observatory.StepWait).StopTime; took == nil || took.Before(start) {
 			t.Errorf("Wait finished at %v, before the start at %v", took, start)
 		}
 	})
@@ -302,7 +302,7 @@ func TestAReservationWaitsForItsTelescope(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("north-tonight", map[string]any{"telescope": "north", "holder": "desktop"})
 		r := w.phase("north-tonight", observatory.ReservationScheduled, time.Minute)
-		if wait := stepOf(r, observatory.StepWait); wait.Message != "waiting for the Telescope north, which does not exist" {
+		if wait := stepOf(r, observatory.StepWait); wait.Summary != "Missing Telescope north" {
 			t.Errorf("Wait = %+v", wait)
 		}
 	})

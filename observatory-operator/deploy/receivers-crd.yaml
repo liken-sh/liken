@@ -45,8 +45,8 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Frequency
-          type: number
-          jsonPath: .status.readings.frequency
+          type: string
+          jsonPath: .status.display.frequency
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -362,6 +362,15 @@ spec:
                               description: >-
                                 For a number, the step between values.
                                 Zero means any step.
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    frequency:
+                      type: string
+                      description: "The center frequency in megahertz, such as `1420.406 MHz`."
                 readings:
                   type: object
                   description: >-

@@ -387,6 +387,13 @@ spec:
                             description: >-
                               The value, in the unit that the label
                               names.
+                          text:
+                            type: string
+                            description: >-
+                              The value with the unit that the label
+                              names, such as `12.5 °C` or `20 km/h`. A
+                              label that names no unit gives the number
+                              alone.
                           safety:
                             type: string
                             enum: [Safe, Warning, Danger, Unknown]

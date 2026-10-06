@@ -37,20 +37,24 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Temp
-          type: number
-          jsonPath: .status.readings.temperature
+          type: string
+          jsonPath: .status.display.temperature
         - name: Setpoint
-          type: number
-          jsonPath: .spec.temperature
+          type: string
+          jsonPath: .status.display.setpoint
         - name: Cooler
-          type: number
-          jsonPath: .status.readings.coolerPower
+          type: string
+          jsonPath: .status.display.cooler
         - name: Exposure
           type: string
-          jsonPath: .status.readings.exposureState
+          jsonPath: .status.display.exposure
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+        - name: Cooler Power
+          type: string
+          jsonPath: .status.display.coolerPower
+          priority: 1
         - name: Driver
           type: string
           jsonPath: .spec.driver.name
@@ -377,17 +381,44 @@ spec:
                               description: >-
                                 For a number, the step between values.
                                 Zero means any step.
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    temperature:
+                      type: string
+                      description: "The sensor's temperature, such as `-9.8 °C`."
+                    setpoint:
+                      type: string
+                      description: "The setpoint that `spec.temperature` states, such as `-10 °C`."
+                    cooler:
+                      type: string
+                      description: "`On` or `Off`, from `CCD_COOLER`."
+                    coolerPower:
+                      type: string
+                      description: "The cooler's power, such as `42 %`."
+                    exposure:
+                      type: string
+                      description: "The time left, such as `12 s`, while an exposure runs, and the state of `CCD_EXPOSURE` otherwise."
                 readings:
                   type: object
                   description: >-
                     What the camera reports, from `CCD_TEMPERATURE`,
-                    `CCD_COOLER_POWER`, and `CCD_EXPOSURE`. A field is
-                    absent until the driver sends it.
+                    `CCD_COOLER`, `CCD_COOLER_POWER`, and
+                    `CCD_EXPOSURE`. A field is absent until the driver
+                    sends it.
                   properties:
                     temperature:
                       type: number
                       description: >-
                         The sensor's temperature, in degrees Celsius.
+                    cooler:
+                      type: boolean
+                      description: >-
+                        Whether the cooler is on: `true` while the
+                        `COOLER_ON` member of `CCD_COOLER` is on.
                     coolerPower:
                       type: number
                       minimum: 0

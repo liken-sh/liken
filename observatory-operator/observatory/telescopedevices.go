@@ -26,6 +26,16 @@ type MountSpec struct {
 type MountStatus struct {
 	DeviceStatus
 	Readings MountReadings `json:"readings,omitzero"`
+	Display  MountDisplay  `json:"display,omitzero"`
+}
+
+// MountDisplay holds the readings as a person reads them, for the
+// printer columns. RightAscension is in hours, minutes, and seconds,
+// such as 19h17m21s, and Declination in degrees, arcminutes, and
+// arcseconds, such as +12°34′56″.
+type MountDisplay struct {
+	RightAscension string `json:"rightAscension,omitempty"`
+	Declination    string `json:"declination,omitempty"`
 }
 
 // MountReadings come from EQUATORIAL_EOD_COORD, TELESCOPE_PARK, and

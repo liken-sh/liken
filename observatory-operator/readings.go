@@ -34,6 +34,17 @@ func (r reader) number(property, member string) *float64 {
 	return &v
 }
 
+// maximum answers the largest value that the driver defines for a
+// number.
+func (r reader) maximum(property, member string) (float64, bool) {
+	p, ok := r.property(property)
+	if !ok {
+		return 0, false
+	}
+	m, ok := p.Member(member)
+	return m.Max, ok
+}
+
 func (r reader) on(property, member string) *bool {
 	p, ok := r.property(property)
 	if !ok {
@@ -68,6 +79,7 @@ func readings(kind observatory.Kind, r reader) any {
 	case observatory.CameraKind:
 		out := observatory.CameraReadings{
 			Temperature:   r.number("CCD_TEMPERATURE", "CCD_TEMPERATURE_VALUE"),
+			Cooler:        r.on("CCD_COOLER", "COOLER_ON"),
 			CoolerPower:   r.number("CCD_COOLER_POWER", "CCD_COOLER_VALUE"),
 			ExposureState: r.state("CCD_EXPOSURE"),
 		}
@@ -206,7 +218,7 @@ func weatherReadings(r reader) observatory.WeatherStationReadings {
 	if p, ok := r.property("WEATHER_PARAMETERS"); ok {
 		for _, m := range p.Members {
 			value := m.Number
-			parameter := observatory.WeatherParameter{Name: m.Name, Label: m.Label, Value: &value}
+			parameter := observatory.WeatherParameter{Name: m.Name, Label: m.Label, Value: &value, Text: weatherText(m.Label, value)}
 			if light, ok := status.Member(m.Name); ok {
 				parameter.Safety = safety(light.Light)
 			}

@@ -24,7 +24,7 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 		if claim != nil {
 			// A claim's spec cannot change, and one that exists is the
 			// one the operator created. The create answers 409 then.
-			if err := o.send(ctx, report, fmt.Sprintf("creating the ResourceClaim %s", name), func() error {
+			if err := o.send(ctx, report, fmt.Sprintf("creating ResourceClaim %s", name), func() error {
 				return o.create("/apis/resource.k8s.io/v1/namespaces/"+o.namespace+"/resourceclaims", claim)
 			}); err != nil {
 				return false, "", err
@@ -33,21 +33,21 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 		// A Service's spec follows from its name alone, so a Service
 		// that exists is current.
 		if _, ok := t.services[svc.Metadata.Name]; !ok {
-			if err := o.send(ctx, report, fmt.Sprintf("creating the Service %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/services", svc) }); err != nil {
+			if err := o.send(ctx, report, fmt.Sprintf("creating Service %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/services", svc) }); err != nil {
 				return false, "", err
 			}
 		}
 		running, ok := t.pods[name]
 		switch {
 		case !ok:
-			if err := o.send(ctx, report, fmt.Sprintf("creating the pod %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/pods", built) }); err != nil {
+			if err := o.send(ctx, report, fmt.Sprintf("creating pod %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/pods", built) }); err != nil {
 				return false, "", err
 			}
 			return true, "", nil
 		case running.Metadata.DeletionTimestamp != nil:
 			return false, "waiting for the earlier pod " + name + " to stop", nil
 		case !current(running, built):
-			if err := o.send(ctx, report, fmt.Sprintf("deleting the pod %s, whose spec changed", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
+			if err := o.send(ctx, report, fmt.Sprintf("replacing pod %s: its spec changed", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
 				return false, "", err
 			}
 			return false, "replacing the pod " + name + ", whose spec changed", nil
@@ -102,7 +102,7 @@ func (o *operator) waitReady(ctx context.Context, report func(string), devices [
 				if ok {
 					phase = firstNonEmpty(p.Status.Phase, "Pending")
 				}
-				return false, fmt.Sprintf("waiting for the pod %s of the %s %s to be Ready (%s)", name, d.kind.Name, d.name(), phase), nil
+				return false, fmt.Sprintf("waiting for pod %s of %s %s (%s)", name, d.kind.Name, d.name(), phase), nil
 			}
 		}
 		return true, "", nil
@@ -145,7 +145,7 @@ func (o *operator) waitDefined(ctx context.Context, report func(string), ref ser
 				return false, "", err
 			}
 			if name == "" {
-				waiting = firstNonEmpty(waiting, fmt.Sprintf("waiting for the driver %s of the %s %s to define its device on %s", d.object.Spec.Driver.Name, d.kind.Name, d.name(), ref))
+				waiting = firstNonEmpty(waiting, fmt.Sprintf("waiting for driver %s of %s %s on %s", d.object.Spec.Driver.Name, d.kind.Name, d.name(), ref))
 				continue
 			}
 			handles[d.key()] = handle{d: d, server: server, name: name}
@@ -194,22 +194,22 @@ func (o *operator) stopPods(ctx context.Context, report func(string), selected f
 			if p.Metadata.DeletionTimestamp != nil {
 				continue
 			}
-			if err := o.send(ctx, report, fmt.Sprintf("deleting the pod %s", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
+			if err := o.send(ctx, report, fmt.Sprintf("deleting pod %s", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
 				return false, "", err
 			}
-			if err := o.send(ctx, report, fmt.Sprintf("deleting the ResourceClaim %s", name), func() error { return o.deleteObject(claimPath(o.namespace, name)) }); err != nil {
+			if err := o.send(ctx, report, fmt.Sprintf("deleting ResourceClaim %s", name), func() error { return o.deleteObject(claimPath(o.namespace, name)) }); err != nil {
 				return false, "", err
 			}
 		}
 		for name, svc := range t.services {
 			if selected(svc.Metadata.Labels) {
-				if err := o.send(ctx, report, fmt.Sprintf("deleting the Service %s", name), func() error { return o.deleteObject(servicePath(o.namespace, name)) }); err != nil {
+				if err := o.send(ctx, report, fmt.Sprintf("deleting Service %s", name), func() error { return o.deleteObject(servicePath(o.namespace, name)) }); err != nil {
 					return false, "", err
 				}
 			}
 		}
 		sort.Strings(left)
-		return len(left) == 0, "waiting for the pods " + strings.Join(left, ", ") + " to stop", nil
+		return len(left) == 0, "stopping pods " + strings.Join(left, ", "), nil
 	})
 	return stopped, err
 }

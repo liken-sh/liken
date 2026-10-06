@@ -38,8 +38,8 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Azimuth
-          type: number
-          jsonPath: .status.readings.azimuth
+          type: string
+          jsonPath: .status.display.azimuth
         - name: Shutter
           type: string
           jsonPath: .status.readings.shutter
@@ -351,6 +351,15 @@ spec:
                               description: >-
                                 For a number, the step between values.
                                 Zero means any step.
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    azimuth:
+                      type: string
+                      description: "The azimuth in degrees, such as `123.4°`."
                 readings:
                   type: object
                   description: >-

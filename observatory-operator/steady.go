@@ -249,6 +249,6 @@ func (r *runner) again(ctx context.Context, h handle, work func(context.Context)
 	}
 	r.o.fault(h.d, err)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "observatory-operator: %s came back, and setting it up again failed: %v\n", h, err)
+		fmt.Fprintf(os.Stderr, "observatory-operator: setting up %s again failed: %v\n", h, err)
 	}
 }

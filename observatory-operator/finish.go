@@ -32,12 +32,12 @@ func (r *runner) failed(ctx context.Context) {
 			}
 			for i := range r.status.Steps {
 				if s := &r.status.Steps[i]; s.State == observatory.StepFailed {
-					s.State, s.StartTime, s.FinishTime, s.Message = observatory.StepPending, nil, nil, ""
+					s.State, s.StartTime, s.StopTime, s.Summary = observatory.StepPending, nil, nil, ""
 				}
 			}
 			r.status.Phase = phaseOf(r.status.Step)
 			r.save(ctx)
-			r.o.record(r.res, eventNormal, "Retry", "running "+string(r.status.Step)+" again")
+			r.o.record(r.res, eventNormal, "Retry", "Retrying "+string(r.status.Step))
 			r.awaitStore(ctx, func(res *observatory.Reservation) bool {
 				_, still := res.Metadata.Annotations[annotationRetry]
 				return !still
