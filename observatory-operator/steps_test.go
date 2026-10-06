@@ -131,16 +131,52 @@ func TestANewOperatorContinuesDeactivation(t *testing.T) {
 		w.restart()
 		w.indi.release("Telescope Simulator", "TELESCOPE_PARK")
 		// The held park was sent and never answered, so the new copy
-		// sends it again, and the driver answers this time.
+		// sends it again, and the driver answers this time. The
+		// simulator starts unparked, so activation sent no unpark.
 		w.until(25*time.Minute, "the reservation stays", func() bool {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
-		if n := w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK"); n < 3 {
-			t.Errorf("the mount received TELESCOPE_PARK %d times; want the unpark, the park, and the park again", n)
+		if n := w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK"); n != 2 {
+			t.Errorf("the mount received TELESCOPE_PARK %d times; want the park and the park again", n)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
 			t.Errorf("pods after the release: %v", pods)
+		}
+	})
+}
+
+// A new operator that finds a park still running waits for it to end,
+// and sends no park of its own. libindi's telescope aborts a park when
+// a client sends TELESCOPE_PARK while the mount moves to its park
+// position, so a second park would fail Secure.
+func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		w.indi.move("Telescope Simulator", "TELESCOPE_PARK")
+		parks := w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK")
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.until(time.Minute, "the park is not sent", func() bool {
+			return w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK") == parks+1
+		})
+		synctest.Wait()
+		r, _ := w.reservation("east-tonight")
+		if message := stepOf(r, observatory.StepSecure).Message; message != "parking Mount east-mount" {
+			t.Errorf("Secure's message during the park = %q", message)
+		}
+
+		w.restart()
+		synctest.Wait()
+		w.indi.setState("telescope-east", "Telescope Simulator", "TELESCOPE_PARK", "Ok")
+		w.until(25*time.Minute, "the reservation stays", func() bool {
+			_, ok := w.reservation("east-tonight")
+			return !ok
+		})
+		if n := w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK"); n != parks+1 {
+			t.Errorf("the mount received TELESCOPE_PARK %d times after Ready, want once", n-parks)
 		}
 	})
 }

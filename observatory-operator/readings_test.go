@@ -24,6 +24,33 @@ func TestAWeatherLightIsAVerdict(t *testing.T) {
 	}
 }
 
+// A weather station's verdict is its SAFETY light. The weather
+// simulator leaves the light Idle and sets the state of SAFETY_STATUS,
+// as the transcript in indi/testdata/weather/connect.xml records, so
+// an Idle light reads the property's state.
+func TestAWeatherStationsVerdict(t *testing.T) {
+	t.Parallel()
+	status := func(state, light indi.State) indi.Property {
+		return indi.Property{Name: "SAFETY_STATUS", State: state, Members: []indi.Member{{Name: "SAFETY", Light: light}}}
+	}
+	cases := []struct {
+		name     string
+		property indi.Property
+		want     observatory.Safety
+	}{
+		{"the simulator after connect", status(indi.Ok, indi.Idle), observatory.SafetySafe},
+		{"a station before its first reading", status(indi.Idle, indi.Idle), observatory.SafetyUnknown},
+		{"a light that warns", status(indi.Ok, indi.Busy), observatory.SafetyWarning},
+		{"a light in danger", status(indi.Alert, indi.Alert), observatory.SafetyDanger},
+		{"no SAFETY member", indi.Property{Name: "SAFETY_STATUS", State: indi.Ok}, observatory.SafetySafe},
+	}
+	for _, c := range cases {
+		if got := stationSafety(c.property); got != c.want {
+			t.Errorf("%s: safety = %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
 // A device's phase follows from its pod and from its CONNECTION.
 func TestADevicesPhase(t *testing.T) {
 	t.Parallel()

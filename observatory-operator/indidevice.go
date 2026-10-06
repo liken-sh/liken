@@ -111,10 +111,16 @@ func (h handle) setSwitches(ctx context.Context, property string, values map[str
 	if !ok {
 		return false, fmt.Errorf("%s defines no %s", h, property)
 	}
-	same := p.State != indi.Alert && p.State != indi.Busy
+	same := p.State != indi.Alert
 	for name, on := range values {
 		m, has := p.Member(name)
 		same = same && has && m.Switch == on
+	}
+	if same && p.State == indi.Busy {
+		// The change runs already, sent by this step before an operator
+		// restart. Sending it again would stop it: libindi's telescope
+		// aborts a park when TELESCOPE_PARK arrives during the park.
+		return true, h.awaitBusy(ctx, property)
 	}
 	if same {
 		return false, nil
@@ -171,6 +177,26 @@ func (h handle) settle(ctx context.Context, send func() (indi.Sent, error)) erro
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", h, err)
+	}
+	return nil
+}
+
+// awaitBusy waits until a Busy property ends, and fails as settle does
+// when it ends in Alert or the device deletes it.
+func (h handle) awaitBusy(ctx context.Context, property string) error {
+	err := h.client().WaitFor(ctx, func(s *indi.Store) bool {
+		p, ok := s.Property(h.name, property)
+		return !ok || p.State != indi.Busy
+	})
+	if err != nil {
+		return fmt.Errorf("%s: waiting for %s: %w", h, property, err)
+	}
+	p, ok := h.client().Property(h.name, property)
+	switch {
+	case !ok:
+		return fmt.Errorf("%s: %w: waiting for %s", h, indi.ErrDeleted, property)
+	case p.State == indi.Alert:
+		return fmt.Errorf("%s: %w", h, &indi.AlertError{Property: p})
 	}
 	return nil
 }

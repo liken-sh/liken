@@ -243,7 +243,6 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 		{"CCD Simulator", "CCD_OFFSET", observatory.StepConfigure, false},
 		{"CCD Simulator", "SCOPE_INFO", observatory.StepConfigure, false},
 		{"CCD Simulator", "CCD_TEMPERATURE", observatory.StepPrepare, false},
-		{"Telescope Simulator", "TELESCOPE_PARK", observatory.StepPrepare, false},
 		{"Telescope Simulator", "TELESCOPE_PARK", observatory.StepSecure, true},
 		{"Dust Cover Simulator", "CAP_PARK", observatory.StepSecure, true},
 		{"CCD Simulator", "CONNECTION", observatory.StepDisconnect, true},

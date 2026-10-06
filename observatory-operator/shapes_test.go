@@ -27,7 +27,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 				w.put(observatory.MountKind, "solo-mount", map[string]any{"telescope": "solo", "driver": map[string]any{"name": "indi_simulator_telescope"}})
 			},
 			steps: []string{
-				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Prepare=Done",
+				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Prepare=Skipped",
 				"Abort=Skipped", "Secure=Done", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Skipped",
 			},
 		},

@@ -160,7 +160,10 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 	if err != nil {
 		return outcome{}, err
 	}
-	var did, notes []string
+	// already names each device that needed no change, so a Skipped
+	// Prepare tells a telescope with nothing to do from one whose
+	// devices were ready.
+	var did, already, notes []string
 	for _, h := range ofKind(handles, observatory.DustCapKind) {
 		w.report("opening " + h.String())
 		changed, err := h.switchOn(ctx, "CAP_PARK", "UNPARK")
@@ -169,6 +172,8 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 		if changed {
 			did = append(did, "opened "+h.d.name())
+		} else {
+			already = append(already, h.d.name()+" was open already")
 		}
 	}
 	var cameras []handle
@@ -193,8 +198,11 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 		if changed {
 			did = append(did, "unparked "+h.d.name())
+		} else {
+			already = append(already, h.d.name()+" was unparked already")
 		}
 	}
+	notes = append(already, notes...)
 	if len(did) == 0 {
 		return skipped("%s", firstNonEmpty(strings.Join(notes, "; "), "no dust cap to open, no camera to cool, and no mount to unpark"))
 	}

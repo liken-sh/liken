@@ -74,6 +74,22 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 	})
 }
 
+// A Prepare with nothing to change names each device that was ready
+// already. The west telescope has a mount that the simulator starts
+// unparked and a camera with no setpoint, so its Prepare is Skipped.
+func TestPrepareNamesTheDevicesThatWereReadyAlready(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
+		r := w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
+		step := stepOf(r, observatory.StepPrepare)
+		if step.State != observatory.StepSkipped || step.Message != "west-mount was unparked already" {
+			t.Errorf("Prepare = %s %q", step.State, step.Message)
+		}
+	})
+}
+
 func stepOf(r observatory.Reservation, name observatory.StepName) observatory.Step {
 	for _, s := range r.Status.Steps {
 		if s.Name == name {

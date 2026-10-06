@@ -108,7 +108,10 @@ type xmlVector struct {
 
 // definitions reads the def*Vector elements of one transcript, in
 // order, with a later definition of a property in place of an earlier
-// one.
+// one. Each set*Vector after a definition changes it, so a property
+// holds the state and the values that the driver reported last: the
+// telescope simulator defines TELESCOPE_PARK with both switches Off,
+// and then reports UNPARK On.
 func definitions(t *testing.T, path string) []*fakeProperty {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -135,6 +138,12 @@ func definitions(t *testing.T, path string) []*fakeProperty {
 			t.Fatalf("%s: %v", path, err)
 		}
 		tag := v.XMLName.Local
+		if strings.HasPrefix(tag, "set") && strings.HasSuffix(tag, "Vector") {
+			if i := slices.IndexFunc(out, func(o *fakeProperty) bool { return o.Name == v.Name }); i >= 0 {
+				out[i] = settled(out[i], v)
+			}
+			continue
+		}
 		if !strings.HasPrefix(tag, "def") || !strings.HasSuffix(tag, "Vector") || v.Name == "" {
 			continue
 		}
@@ -229,10 +238,13 @@ type indiWorld struct {
 	// with Alert and keeps its values, as a driver whose hardware
 	// fails does.
 	refused map[string]bool
+	// moving holds the properties whose driver answers a change with
+	// Busy, as a mount that slews does, until a test sets the state.
+	moving map[string]bool
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
-	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}}
+	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}}
 	go w.follow(t.Context())
 	return w
 }
@@ -444,6 +456,11 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		s.broadcast(p.set())
 		return
 	}
+	if w.moving[v.Device+"."+v.Name] && p.State == "Busy" {
+		interrupt(p)
+		s.broadcast(p.set())
+		return
+	}
 	for _, m := range v.Members {
 		for i := range p.Members {
 			if p.Members[i].Name == m.Name {
@@ -452,6 +469,9 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		}
 	}
 	p.State = "Ok"
+	if w.moving[v.Device+"."+v.Name] {
+		p.State = "Busy"
+	}
 	s.broadcast(p.set())
 	// An abort ends what moves, as the simulators' abort does.
 	if moving, ok := aborts[p.Name]; ok {

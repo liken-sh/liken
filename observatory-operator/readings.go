@@ -186,12 +186,21 @@ func safety(light indi.State) observatory.Safety {
 	return observatory.SafetyUnknown
 }
 
+// stationSafety reads a station's verdict from SAFETY_STATUS: the
+// SAFETY light, or the property's state when the light is Idle. The
+// weather simulator leaves the light Idle and sets the state alone, so
+// a station that reads only the light would stay Unknown.
+func stationSafety(p indi.Property) observatory.Safety {
+	if m, ok := p.Member("SAFETY"); ok && m.Light != indi.Idle {
+		return safety(m.Light)
+	}
+	return safety(p.State)
+}
+
 func weatherReadings(r reader) observatory.WeatherStationReadings {
 	var out observatory.WeatherStationReadings
 	if p, ok := r.property("SAFETY_STATUS"); ok {
-		if m, ok := p.Member("SAFETY"); ok {
-			out.Safety = safety(m.Light)
-		}
+		out.Safety = stationSafety(p)
 	}
 	status, _ := r.property("WEATHER_STATUS")
 	if p, ok := r.property("WEATHER_PARAMETERS"); ok {

@@ -195,15 +195,16 @@ func (r *runner) secure(ctx context.Context, w *stepWork) (outcome, error) {
 	moves := []struct {
 		kind             observatory.Kind
 		property, member string
-		verb             string
+		// doing names the change while it runs, and verb once it is done.
+		doing, verb string
 	}{
-		{observatory.FlatPanelKind, "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_OFF", "switched off"},
-		{observatory.DustCapKind, "CAP_PARK", "PARK", "closed"},
-		{observatory.MountKind, "TELESCOPE_PARK", "PARK", "parked"},
+		{observatory.FlatPanelKind, "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_OFF", "switching off", "switched off"},
+		{observatory.DustCapKind, "CAP_PARK", "PARK", "closing", "closed"},
+		{observatory.MountKind, "TELESCOPE_PARK", "PARK", "parking", "parked"},
 	}
 	for _, move := range moves {
 		for _, h := range ofKind(handles, move.kind) {
-			w.report(fmt.Sprintf("%s: %s", h, move.verb))
+			w.report(fmt.Sprintf("%s %s", move.doing, h))
 			changed, err := h.switchOn(ctx, move.property, move.member)
 			if err != nil {
 				return outcome{}, err
