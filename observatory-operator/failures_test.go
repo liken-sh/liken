@@ -63,14 +63,6 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 			message: "no DIGITAL_OUTPUT_9 on Switch east",
 		},
 		{
-			name: "two devices that INDI names alike on one server",
-			change: func(w *world) {
-				w.put(observatory.CameraKind, "east-guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_ccd"}})
-			},
-			step:    observatory.StepStartDevices,
-			message: "same driver as another device on this server",
-		},
-		{
 			name: "a telescope in an observatory that does not exist",
 			change: func(w *world) {
 				w.put(observatory.TelescopeKind, "east", map[string]any{"observatory": "elsewhere"})

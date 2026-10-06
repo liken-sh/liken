@@ -8,6 +8,7 @@ package main
 
 import (
 	"encoding/json"
+	"sync"
 
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
@@ -86,6 +87,10 @@ type tree struct {
 	services   map[string]*service
 	configMaps map[string]*configMap
 	claims     map[string]bool
+
+	// taken is computed once from the devices (shareddrivers.go).
+	takenOnce sync.Once
+	taken     map[*device]*device
 }
 
 // parent answers the resource above a device, from the parent field
@@ -126,8 +131,21 @@ func (t *tree) server(d *device) (serverRef, bool) {
 }
 
 // devicesOn answers the devices that one server runs, in the order of
-// t.devices.
+// t.devices. A device whose driver another device on the server runs
+// is left out (shareddrivers.go).
 func (t *tree) devicesOn(s serverRef) []*device {
+	var out []*device
+	for _, d := range t.placedOn(s) {
+		if _, taken := t.driverTakenBy(d); !taken {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// placedOn answers the devices whose parents place them on one server,
+// in the order of t.devices.
+func (t *tree) placedOn(s serverRef) []*device {
 	var out []*device
 	for _, d := range t.devices {
 		if on, ok := t.server(d); ok && on == s {

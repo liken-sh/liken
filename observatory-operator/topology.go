@@ -158,17 +158,17 @@ func (o *operator) waitDefined(ctx context.Context, report func(string), ref ser
 	}
 	handles := map[string]handle{}
 	err = o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
-		onServer := t.devicesOn(ref)
 		waiting := ""
 		for _, d := range devices {
 			if _, found := handles[d.key()]; found {
 				continue
 			}
-			name, err := indiName(server.client, onServer, d)
-			if err != nil {
+			if holder, taken := t.driverTakenBy(d); taken {
+				err := fmt.Errorf("%s %s: %s", d.kind.Name, d.name(), sharedDriver(holder, ref))
 				o.fault(d, err)
 				return false, "", err
 			}
+			name := indiName(server.client, d)
 			if name == "" {
 				waiting = firstNonEmpty(waiting, fmt.Sprintf("waiting for driver %s of %s %s on %s", d.object.Spec.Driver.Name, d.kind.Name, d.name(), ref))
 				continue
@@ -189,9 +189,13 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 		return nil
 	}
 	var out []handle
-	onServer := t.devicesOn(ref)
 	for _, d := range devices {
-		if name, err := indiName(server.client, onServer, d); err == nil && name != "" {
+		// A device whose driver another device runs would find that
+		// device's name.
+		if _, taken := t.driverTakenBy(d); taken {
+			continue
+		}
+		if name := indiName(server.client, d); name != "" {
 			out = append(out, handle{d: d, server: server, name: name})
 		}
 	}

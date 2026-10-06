@@ -332,7 +332,9 @@ spec:
 # even when its spec has a `claim`. To install it, set `opticalTrain`.
 # While the train's telescope is reserved, the operator starts the
 # focuser's driver on the running INDI server and connects it. The
-# other devices on that server stay connected.
+# other devices on that server stay connected. On a train of `east`,
+# the spare reports `Error` and does not start, because `Focuser east`
+# runs `indi_simulator_focus` on that server already.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Focuser
 metadata:

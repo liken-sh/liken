@@ -209,7 +209,7 @@ the fields go with no conversion.
 
 ## Also in scope
 
-Two defects from plan 11's drill on 2026-10-06 are in the same
+Defects from the drills of plans 11 and 12 on 2026-10-06 are in the same
 lifecycle code:
 
 - The operator deletes a leaving device's pod before its driver has
@@ -223,6 +223,13 @@ lifecycle code:
 - After the server's pod is replaced, PHD2 stays disconnected and the
   `Guider` stays `Activating`. The guider's connection follows the
   server's, as every device's does.
+- A second device with the same driver on one server breaks the
+  first: both report `Error`, and the first stays `Starting` for 52 s
+  after the second leaves. **Fixed on 2026-10-06.** A server runs one
+  device for each driver. The device that runs is the one the server
+  runs now, else the older resource, else the first by kind and name.
+  The other never starts, and reports `Error` with the name of the
+  device that runs the driver.
 
 ## The order of the work
 

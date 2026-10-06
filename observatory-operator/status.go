@@ -177,12 +177,14 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	var device *reader
 	maximum := func(string, string) (float64, bool) { return 0, false }
 	ref, placed := t.server(d)
-	if server, open := o.servers.get(ref.String()); placed && hasPod && open && server.client.Connected() {
-		indiDevice, err := indiName(server.client, t.devicesOn(ref), d)
-		if err != nil {
-			fault = err.Error()
-		}
-		if indiDevice != "" {
+	// A device whose driver another device runs has no device of its
+	// own on the server. The device of that name is the other one's.
+	holder, taken := t.driverTakenBy(d)
+	if taken {
+		fault = sharedDriver(holder, ref)
+	}
+	if server, open := o.servers.get(ref.String()); placed && !taken && hasPod && open && server.client.Connected() {
+		if indiDevice := indiName(server.client, d); indiDevice != "" {
 			r := reader{c: server.client, name: indiDevice}
 			next.IndiDevice = indiDevice
 			next.Properties = properties(r)
@@ -198,6 +200,9 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	// runner deletes (moves.go), or one that deactivation deletes.
 	stray := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String())
 	next.Phase = devicePhase(hasPod && (stray || p.Metadata.DeletionTimestamp != nil), hasPod, defined, standing, connection, fault)
+	if taken {
+		next.Phase = observatory.DeviceError
+	}
 	parent := parentCondition(t.missingParent(d))
 	if standing == onShelf {
 		parent = shelved()

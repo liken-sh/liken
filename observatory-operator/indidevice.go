@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -25,24 +24,14 @@ import (
 // that and goes on.
 const propertyWait = 3 * time.Second
 
-// errAmbiguous is the error of two devices on one server that run the
-// same driver. INDI names a device after its model, so both drivers
-// register one name, and the operator cannot tell them apart.
-var errAmbiguous = errors.New("same driver as another device on this server: INDI gives both one name")
-
 // indiName answers the INDI device that a resource's driver defines on
 // its server, or "" while the driver has not defined it. Every driver
 // defines DRIVER_INFO, whose DRIVER_EXEC is the program's name, which
 // is the resource's spec.driver.name because socat starts the driver by
-// that name.
-func indiName(c *indi.Client, onServer []*device, d *device) (string, error) {
-	driver := d.object.Spec.Driver.Name
-	for _, other := range onServer {
-		if other.key() != d.key() && other.object.Spec.Driver.Name == driver {
-			return "", fmt.Errorf("%s %s: %w (%s)", d.kind.Name, d.name(), errAmbiguous, driver)
-		}
-	}
-	return definedBy(c, driver), nil
+// that name. A server runs one device for each driver
+// (shareddrivers.go), so the program's name finds one device.
+func indiName(c *indi.Client, d *device) string {
+	return definedBy(c, d.object.Spec.Driver.Name)
 }
 
 // handle is one device on its server.
