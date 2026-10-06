@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"k8s.io/client-go/dynamic"
 )
@@ -82,6 +83,9 @@ type apiServer struct {
 	auth     *authorizer
 	upstream *upstreamClient
 	metrics  *apiMetrics
+	// recorder posts the Captured Event on a Player. A nil recorder
+	// posts nothing.
+	recorder *events.Recorder
 
 	display    string
 	audio      string
@@ -308,9 +312,10 @@ func runAPI() {
 
 	auth := newAuthorizer(client)
 	server := &apiServer{
-		client:  client,
-		auth:    auth,
-		metrics: metrics,
+		client:   client,
+		auth:     auth,
+		metrics:  metrics,
+		recorder: events.New(context.Background(), client, apiComponent, events.Options{}),
 		upstream: &upstreamClient{
 			http:    siblingClient(trust),
 			token:   siblingToken,

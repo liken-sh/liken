@@ -7,6 +7,9 @@ package main
 
 import (
 	"testing"
+	"time"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // The monitor id the display-operator publishes for the
@@ -86,14 +89,17 @@ func rememberedScreen() *PlayerScreenStatus {
 
 // The Screen condition the theater unit held from an earlier pass,
 // stamped at a time no pass under test writes.
-func heldScreenCondition(status, reason string) PlayerCondition {
+func heldScreenCondition(status conditions.Status, reason string) PlayerCondition {
 	return PlayerCondition{
 		Type:               screenConditionType,
 		Status:             status,
 		Reason:             reason,
-		LastTransitionTime: "2020-01-01T00:00:00Z",
+		LastTransitionTime: heldScreenStamp,
 	}
 }
+
+// heldScreenStamp is the time no pass under test writes.
+var heldScreenStamp = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // screenCondition answers the one Screen condition the written
 // Player carries, and fails the test when it carries none or more.
@@ -346,7 +352,7 @@ func TestTheScreenConditionFollowsTheDisplay(t *testing.T) {
 			mustMatch(t, condition.Status, each.want.Status)
 			mustMatch(t, condition.Reason, each.want.Reason)
 			mustMatch(t, condition.Message, each.want.Message)
-			if condition.LastTransitionTime == "" {
+			if condition.LastTransitionTime.IsZero() {
 				t.Error("the condition carries no transition time")
 			}
 		})
@@ -378,7 +384,7 @@ func TestTheTransitionTimeMovesOnlyWhenTheStatusFlips(t *testing.T) {
 			media.reconcilePlayers([]Player{*player}, nil, "", nil)
 
 			condition := screenCondition(t, cluster.players["theater"])
-			mustMatch(t, condition.LastTransitionTime != "2020-01-01T00:00:00Z", each.moves)
+			mustMatch(t, !condition.LastTransitionTime.Equal(heldScreenStamp), each.moves)
 		})
 	}
 }

@@ -318,7 +318,7 @@ func busDisplayAlive(play *Play) *playerBusCondition {
 			continue
 		}
 		return &playerBusCondition{
-			Status:  condition.Status,
+			Status:  string(condition.Status),
 			Reason:  condition.Reason,
 			Message: condition.Message,
 		}
@@ -463,8 +463,18 @@ func playTitle(play *Play) string {
 // remembered screen and Sinks from a copy at least as new as this write.
 // A nil memo notes nothing.
 func writePlayerStatus(c *apiclient.Client, versions *memo.Versions, player *Player, desired PlayerStatus) error {
+	_, err := writePlayerStatusFrom(c, versions, player, desired)
+	return err
+}
+
+// writePlayerStatusFrom is writePlayerStatus that also answers the
+// conditions that transitioned from the copy the API server held, so
+// the caller posts one Event for each, and posts none for a write that
+// the API server refused or that changed nothing.
+func writePlayerStatusFrom(c *apiclient.Client, versions *memo.Versions, player *Player, desired PlayerStatus) ([]PlayerCondition, error) {
 	var compared error
-	_, err := informer.SettleStatus(c, versions, playerPath(player.Metadata.Namespace, player.Metadata.Name), player,
+	var moved []PlayerCondition
+	wrote, err := informer.SettleStatus(c, versions, playerPath(player.Metadata.Namespace, player.Metadata.Name), player,
 		func(held *Player) bool {
 			same, err := samePlayerStatus(held.Status, desired)
 			if err != nil {
@@ -474,13 +484,17 @@ func writePlayerStatus(c *apiclient.Client, versions *memo.Versions, player *Pla
 			if same {
 				return false
 			}
+			moved = transitions(held.Status.Conditions, desired.Conditions)
 			held.Status = desired
 			return true
 		})
 	if compared != nil {
-		return compared
+		return nil, compared
 	}
-	return err
+	if err != nil || !wrote {
+		return nil, err
+	}
+	return moved, nil
 }
 
 // samePlayerStatus compares the marshaled form, because that is what

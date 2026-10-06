@@ -385,12 +385,12 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 		// be released and later dropped from the schema. The equipment
 		// operator reads a session that moves unchanged from spec to status
 		// as the same session, so the move sends the receiver nothing.
-		if !o.writeSession(key, receiver, session, held, tracked) {
+		if !o.writeSession(player, receiver, session, held, tracked) {
 			return
 		}
 		statusHolds = true
 	default:
-		if !o.writeSession(key, receiver, session, held, tracked) {
+		if !o.writeSession(player, receiver, session, held, tracked) {
 			return
 		}
 		statusHolds = true
@@ -410,7 +410,8 @@ func sameSession(standing *ReceiverSession, session ReceiverSession) bool {
 
 // writeSession lifts the session a moved unit left on its old Receiver,
 // then applies the new one. It answers whether the new session landed.
-func (o *operator) writeSession(key string, receiver *Receiver, session ReceiverSession, held receiverSession, tracked bool) bool {
+func (o *operator) writeSession(player *Player, receiver *Receiver, session ReceiverSession, held receiverSession, tracked bool) bool {
+	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	if tracked && held.receiver != receiver.Metadata.Name {
 		if !o.liftSession(held.receiver) {
 			return false
@@ -422,7 +423,20 @@ func (o *operator) writeSession(key string, receiver *Receiver, session Receiver
 	if err := o.sessions.apply(o.client, receiver.Metadata.Name, session); err != nil {
 		fmt.Fprintf(os.Stderr, "applying the session on receiver %s: %v\n",
 			receiver.Metadata.Name, err)
+		if !o.receiverFaults[key] {
+			if o.receiverFaults == nil {
+				o.receiverFaults = map[string]bool{}
+			}
+			o.receiverFaults[key] = true
+			o.recorder.Warning(playerRef(player), reasonReceiverWriteFailed,
+				fmt.Sprintf("writing the session on receiver %s failed, and each pass writes it again: %v", receiver.Metadata.Name, err))
+		}
 		return false
+	}
+	if o.receiverFaults[key] {
+		delete(o.receiverFaults, key)
+		o.recorder.Normal(playerRef(player), reasonReceiverWriteRecovered,
+			fmt.Sprintf("wrote the session on receiver %s: input %s", receiver.Metadata.Name, session.Input))
 	}
 	o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
 	logLine(o.log, "player %s: applied the session on receiver %s: input %s, active %t, awake %t",

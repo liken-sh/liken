@@ -128,18 +128,20 @@ func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 // kubectl describe player answers with the Captured Event, so the
 // Event names the certificate's user.
 func TestTheCapturedEventNamesTheCertificateUser(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.now = time.Now
-	fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
-	authority := newClientAuthority(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
+		authority := newClientAuthority(t)
 
-	recorder := fixture.callOver(playerPathFor("media.mp4"),
-		authority.verified(t, "admin", []string{"system:masters"}), nil)
+		recorder := fixture.callOver(playerPathFor("media.mp4"),
+			authority.verified(t, "admin", []string{"system:masters"}), nil)
+		synctest.Wait()
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, len(fixture.plane.events), 1)
-	mustMatch(t, fixture.plane.events[0].Message,
-		"admin took the media of "+testAPIPlayer+" as video/mp4")
+		mustMatch(t, recorder.Code, http.StatusOK)
+		posted := fixture.events.About("Player", testAPIPlayer)
+		mustMatch(t, len(posted), 1)
+		mustMatch(t, posted[0].Message, "admin took the media of "+testAPIPlayer+" as video/mp4")
+	})
 }
 
 // A certificate that named a caller is the caller, and the token beside

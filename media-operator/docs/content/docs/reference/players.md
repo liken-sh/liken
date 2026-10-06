@@ -225,6 +225,22 @@ The unit's controllers, one entry each, in spec.remotes order. That position is 
 | <span id="statusidlebusremotes--events"></span>`events` | string | no | The topic this controller's key events arrive on, each under the kernel's name for the key. The client gates every press on the mark below. |
 | <span id="statusidlebusremotes--focus"></span>`focus` | string | no | The retained topic that carries this controller's focus mark, the name of the Player it drives now. The client acts on a press only while the mark names this Player. The cycle topic is this one plus /cycle. |
 
+## Events
+
+The operator and `media-api` post Kubernetes `Event`s on the `Player`.
+`kubectl describe player` prints them. The API server deletes an
+`Event` one hour after its last write, so the conditions and the logs
+hold the facts after that.
+
+| Reason | Type | When |
+|---|---|---|
+| `Present`, `PanelAway`, a `Display`'s own reason | Normal | The `Screen` condition changed. The message is the `Display`'s. |
+| `NoDisplay`, `NotReported` | Warning | The `Screen` condition became `Unknown`: no `Display` names the remembered monitor, or the `Display` reports no `Connected` condition. |
+| `Superseded`, `Retired` | Normal | The operator deleted one of the unit's `Play`s. The message names the `Play`, and the [Plays](/docs/reference/plays/) page gives each reason. |
+| `ReceiverWriteFailed` | Warning | Writing the session on the unit's `Receiver` failed. Each pass writes it again, and posts nothing more until it lands. |
+| `ReceiverWriteRecovered` | Normal | The session write landed after one or more failures. |
+| `Captured` | Normal | `media-api` returned bytes of the unit. The message names the caller, the aspect, and the media type. The same caller who takes the same capture again within ten minutes adds to the count of one `Event`. |
+
 ## On the bus
 
 The `players` tree describes the equipment, with or without a

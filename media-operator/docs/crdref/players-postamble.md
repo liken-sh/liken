@@ -1,3 +1,19 @@
+## Events
+
+The operator and `media-api` post Kubernetes `Event`s on the `Player`.
+`kubectl describe player` prints them. The API server deletes an
+`Event` one hour after its last write, so the conditions and the logs
+hold the facts after that.
+
+| Reason | Type | When |
+|---|---|---|
+| `Present`, `PanelAway`, a `Display`'s own reason | Normal | The `Screen` condition changed. The message is the `Display`'s. |
+| `NoDisplay`, `NotReported` | Warning | The `Screen` condition became `Unknown`: no `Display` names the remembered monitor, or the `Display` reports no `Connected` condition. |
+| `Superseded`, `Retired` | Normal | The operator deleted one of the unit's `Play`s. The message names the `Play`, and the [Plays](/docs/reference/plays/) page gives each reason. |
+| `ReceiverWriteFailed` | Warning | Writing the session on the unit's `Receiver` failed. Each pass writes it again, and posts nothing more until it lands. |
+| `ReceiverWriteRecovered` | Normal | The session write landed after one or more failures. |
+| `Captured` | Normal | `media-api` returned bytes of the unit. The message names the caller, the aspect, and the media type. The same caller who takes the same capture again within ten minutes adds to the count of one `Event`. |
+
 ## On the bus
 
 The `players` tree describes the equipment, with or without a

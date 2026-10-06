@@ -12,9 +12,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // The group the display-operator serves. A Display is
@@ -456,10 +456,9 @@ func (o *operator) screenCondition(player *Player, key string, lookup *screens, 
 		condition = screenFromDisplay(display)
 	}
 	condition.Type = screenConditionType
-	condition.LastTransitionTime = held.LastTransitionTime
-	if !holds || held.Status != condition.Status {
-		condition.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
-	}
+	list := append([]PlayerCondition(nil), player.Status.Conditions...)
+	conditions.Set(&list, condition)
+	condition, _ = conditions.Find(list, screenConditionType)
 	return condition, true
 }
 

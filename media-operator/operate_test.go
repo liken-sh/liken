@@ -17,11 +17,17 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 // The fake cluster: one map per kind, and the list of requests a pass
-// made.
+// made. The Events a pass posts go to events, in front of the cluster's
+// own handler, so requests holds no Event.
 type fakeCluster struct {
+	events *eventstest.Events
+
 	plays      map[string]*Play
 	players    map[string]*Player
 	remotes    map[string]*Remote
@@ -128,6 +134,7 @@ type receiverApplied struct {
 
 func newFakeCluster() *fakeCluster {
 	return &fakeCluster{
+		events:       &eventstest.Events{},
 		plays:        map[string]*Play{},
 		players:      map[string]*Player{},
 		remotes:      map[string]*Remote{},
@@ -457,8 +464,9 @@ func sortedNames[T any](objects map[string]*T) []string {
 
 func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *operator {
 	t.Helper()
+	client := testAPIClient(t, cluster.events.Around(cluster.handler(t)))
 	media := &operator{
-		client:       testAPIClient(t, cluster.handler(t)),
+		client:       client,
 		view:         cluster.view(),
 		image:        "registry.example/player:test",
 		idleImage:    testIdleImage,
@@ -484,9 +492,11 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		displayRestarts:  map[string]displayRestartMemo{},
 		keysPublished:    map[string]string{},
 		recreateBackoff:  map[string]backoffState{},
-		replacements:     map[string]string{},
+		replacements:     map[string]recreate{},
 		wake:             wake,
 		now:              time.Now,
+		recorder: events.New(t.Context(), client, operatorComponent,
+			events.Options{Instance: "media-operator-test", Log: io.Discard}),
 	}
 	media.levels = media.newVolumeEngine()
 	media.reports.readPodsFrom(media.view)

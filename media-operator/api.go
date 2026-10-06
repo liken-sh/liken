@@ -10,6 +10,8 @@ package main
 import (
 	"encoding/json"
 	"slices"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // The group this operator serves, and the two Kubernetes groups it
@@ -168,16 +170,12 @@ type PlayerScreenStatus struct {
 	Monitor string `json:"monitor,omitempty"`
 }
 
-// PlayerCondition is one condition in the standard Kubernetes shape.
-// The transition time moves only when the status does, so a reader
-// can tell how long the unit has waited.
-type PlayerCondition struct {
-	Type               string `json:"type"`
-	Status             string `json:"status"`
-	Reason             string `json:"reason,omitempty"`
-	Message            string `json:"message,omitempty"`
-	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
-}
+// PlayerCondition is one condition in the standard Kubernetes shape,
+// the shared type of every liken component. The transition time moves
+// only when the status does, so a reader can tell how long the unit has
+// waited. A Player's condition states no observedGeneration, so the
+// field is absent from its JSON.
+type PlayerCondition = conditions.Condition
 
 // PlayerReceiverStatus names the Receiver and the input matched from
 // the unit's machine and monitor id, and folds that Receiver's
@@ -586,17 +584,9 @@ type PlayStatus struct {
 }
 
 // PlayCondition is one condition on a run, in the same shape a Player's
-// conditions take.
-type PlayCondition struct {
-	Type               string `json:"type"`
-	Status             string `json:"status"`
-	Reason             string `json:"reason,omitempty"`
-	Message            string `json:"message,omitempty"`
-	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
-	// ObservedGeneration is the Play's metadata.generation the condition
-	// was derived from.
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-}
+// conditions take. Its observedGeneration is the Play's
+// metadata.generation the condition was derived from.
+type PlayCondition = conditions.Condition
 
 // The four phases, in the words Jobs and Pods use so nobody learns a
 // new vocabulary. Finished and Failed are terminal: a phase moves

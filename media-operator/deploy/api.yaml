@@ -202,7 +202,9 @@ rules:
     resources: [players]
     verbs: [get]
   # Every request that produces bytes writes a Captured Event on the
-  # Player, so kubectl describe player answers who looked and when.
+  # Player, so kubectl describe player answers who looked and when. The
+  # API patches the count and lastTimestamp of the same Event when the
+  # same caller takes the same capture again within ten minutes.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]

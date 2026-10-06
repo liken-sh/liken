@@ -223,19 +223,20 @@ func TestTheCompositionLimitAnswersCaptureBusy(t *testing.T) {
 // A capture that produces bytes leaves a Captured Event on the Player,
 // so kubectl describe player answers who looked and when.
 func TestACaptureWritesTheCapturedEvent(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
-	fixture.server.now = time.Now
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
 
-	fixture.get(playerPathFor("media.mp4"))
+		fixture.get(playerPathFor("media.mp4"))
+		synctest.Wait()
 
-	mustMatch(t, len(fixture.plane.events), 1)
-	event := fixture.plane.events[0]
-	mustMatch(t, event.Reason, capturedReason)
-	mustMatch(t, event.Type, normalEventType)
-	mustMatch(t, event.InvolvedObject.Name, testAPIPlayer)
-	mustMatch(t, event.Message,
-		testAPISubject+" took the media of "+testAPIPlayer+" as video/mp4")
+		posted := fixture.events.About("Player", testAPIPlayer)
+		mustMatch(t, len(posted), 1)
+		mustMatch(t, posted[0].Reason, reasonCaptured)
+		mustMatch(t, posted[0].Type, "Normal")
+		mustMatch(t, posted[0].Message,
+			testAPISubject+" took the media of "+testAPIPlayer+" as video/mp4")
+	})
 }
 
 // One real mux over a fixture video and two fixture audio streams,

@@ -105,7 +105,10 @@ handshake when `-L` changes the host.
 
 Every request that produces bytes writes a `Captured` `Event` on the
 `Player`. The message names the subject and the aspect, so `kubectl
-describe player` tells you who looked and when.
+describe player` tells you who looked and when. The same subject who
+takes the same capture again within ten minutes adds to the count of
+one `Event`, so `kubectl describe` prints one line for the repeats.
+The API's log has one line for each request.
 
 ## Routes
 

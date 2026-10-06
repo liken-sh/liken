@@ -12,9 +12,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
@@ -129,23 +129,17 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 	return status
 }
 
-// foldPlayCondition keeps the held stamp while the status is unchanged
-// and stamps the moment the status changed, so lastTransitionTime
-// answers how long the run has been in the state it reports.
+// foldPlayCondition puts the condition in a copy of the run's held
+// conditions with conditions.Set, which keeps the held stamp while the
+// status is unchanged and stamps the moment the status changed. So
+// lastTransitionTime answers how long the run has been in the state it
+// reports.
 func foldPlayCondition(held []PlayCondition, condition PlayCondition, generation int64) PlayCondition {
 	condition.ObservedGeneration = generation
-	for _, one := range held {
-		if one.Type != condition.Type {
-			continue
-		}
-		if one.Status == condition.Status {
-			condition.LastTransitionTime = one.LastTransitionTime
-			return condition
-		}
-		break
-	}
-	condition.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
-	return condition
+	list := append([]PlayCondition(nil), held...)
+	conditions.Set(&list, condition)
+	folded, _ := conditions.Find(list, condition.Type)
+	return folded
 }
 
 // podConditionMessage is the scheduler's word on a pod it cannot place:
@@ -226,19 +220,19 @@ func writePlayStatus(c *apiclient.Client, versions *memo.Versions, play *Play, d
 	return err
 }
 
-// writePlayStatusFrom is writePlayStatus that also answers the phase
+// writePlayStatusFrom is writePlayStatus that also answers the status
 // the API server held before the write, and whether it wrote. A pass
 // can hold a copy that another writer changed since, and the conflict
-// that follows reads the Play again, so the phase that read answers is
-// the one a line and a counter compare against. The copy the caller
+// that follows reads the Play again, so the status that read answers
+// is the one a line, a counter, and an Event compare against. The copy the caller
 // holds ends as the API server's answer, with its new resourceVersion,
 // so a later write in the same pass does not meet a conflict of its own.
-func writePlayStatusFrom(c *apiclient.Client, versions *memo.Versions, play *Play, desired PlayStatus) (string, bool, error) {
-	was := play.Status.Phase
+func writePlayStatusFrom(c *apiclient.Client, versions *memo.Versions, play *Play, desired PlayStatus) (PlayStatus, bool, error) {
+	was := play.Status
 	var compared error
 	wrote, err := informer.SettleStatus(c, versions, playPath(play.Metadata.Namespace, play.Metadata.Name), play,
 		func(held *Play) bool {
-			was = held.Status.Phase
+			was = held.Status
 			same, err := sameStatus(held.Status, desired)
 			if err != nil {
 				compared = err

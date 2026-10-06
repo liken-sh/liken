@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -231,6 +233,13 @@ type operator struct {
 	screenCache   *screens
 	receiverCache *receivers
 
+	// receiverFaults names each unit, by its key, whose last session
+	// write on its Receiver failed. A pass writes the session again until
+	// it lands, so the first failure and the write that lands after it
+	// each post one Event, and the writes between them post none. Only
+	// the pass goroutine touches it.
+	receiverFaults map[string]bool
+
 	// receiverSessions holds the session this operator last applied per
 	// unit, so a pass writes a Receiver only when the session changed, and
 	// a unit whose Play is gone still names a Receiver to lift the session
@@ -309,7 +318,7 @@ type operator struct {
 	// replacements holds, per run, the reason for a recreate whose delete
 	// went out and whose new pod is not created yet. replace.go says why
 	// the create waits. Only the pass goroutine touches it.
-	replacements map[string]string
+	replacements map[string]recreate
 
 	// wake is the loop's own wake channel. The operator schedules one wake at
 	// a backoff deadline, so a run waiting out its backoff resumes when the
@@ -335,6 +344,10 @@ type operator struct {
 	// Where the operator writes one line per operation a person caused.
 	// It is a field so a test reads what the operator would print.
 	log io.Writer
+
+	// recorder posts the Events on Plays, Players, and Remotes
+	// (events.go). A nil recorder posts nothing.
+	recorder *events.Recorder
 }
 
 func operate() {
@@ -422,11 +435,12 @@ func operate() {
 		displayRestarts:  map[string]displayRestartMemo{},
 		keysPublished:    map[string]string{},
 		recreateBackoff:  map[string]backoffState{},
-		replacements:     map[string]string{},
+		replacements:     map[string]recreate{},
 		wake:             wake,
 		now:              time.Now,
 		metrics:          metrics,
 		log:              os.Stdout,
+		recorder:         events.New(context.Background(), client, operatorComponent, events.Options{}),
 	}
 	media.levels = media.newVolumeEngine()
 
@@ -628,6 +642,7 @@ func (o *operator) pass() {
 			} else {
 				logLine(o.log, "play %s/%s: deleted, because a newer play on player %s replaces it",
 					namespace, name, playerName(play))
+				o.postEnded(play, reasonSuperseded, "deleted, because a newer play on player "+playerName(play)+" replaces it")
 			}
 			continue
 		}
@@ -914,6 +929,7 @@ func (o *operator) retire(play *Play) error {
 			return err
 		}
 		logLine(o.log, "play %s/%s: deleted, because %s passed after it finished", namespace, name, playTTL(play))
+		o.postEnded(play, reasonRetired, fmt.Sprintf("deleted, because %s passed after it finished", playTTL(play)))
 		return nil
 	}
 	if stamped {
@@ -1052,6 +1068,8 @@ func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, prese
 			o.keyTables[topic] = refusal
 			logLine(o.log, "remote %s/%s: key table not published, the last good table stays: compiling %s: %v",
 				remote.Metadata.Namespace, remote.Metadata.Name, keymapSource(remote), err)
+			o.recorder.Warning(remoteRef(remote), reasonKeymapRefused,
+				fmt.Sprintf("the key table was not published, and the last good table stays: compiling %s: %v", keymapSource(remote), err))
 		}
 		return nil
 	}
@@ -1188,9 +1206,17 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		published[topic] = true
 		desired.Activity, desired.Play = derived.Activity, derived.Play
 		playerCounts[[2]string{player.Spec.Zone, playerMetricState(player.Metadata.Namespace, desired, plays)}]++
-		if err := writePlayerStatus(o.client, o.view.players.Versions, player, desired); err != nil {
+		moved, err := writePlayerStatusFrom(o.client, o.view.players.Versions, player, desired)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
+		}
+		// Screen is the one condition. Unknown means no Display reports
+		// the remembered monitor, which a person fixes, so it is a
+		// Warning. False is a panel on another input or asleep, the park
+		// the CRD describes as by design, so it is Normal.
+		for _, condition := range moved {
+			o.recorder.Transition(playerRef(player), condition, conditions.Unknown)
 		}
 		if err := o.reconcileIdle(player, timeZone, defaultIdle); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling idle for player %s/%s: %v\n",
@@ -1428,7 +1454,7 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 		defaultSpec = &defaults.Spec
 	}
 	if playerName(play) == "" {
-		return o.writePlay(play, PlayStatus{
+		return o.refusePlay(play, PlayStatus{
 			Phase:   phaseFailed,
 			Message: "the Play names no Player",
 		})
@@ -1449,7 +1475,7 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 
 	resolved, resolveErr := resolvePlay(namespace, play.Spec.Items, play.Spec.Next, o.patternScreen(player))
 	if resolveErr != nil {
-		return o.writePlay(play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
+		return o.refusePlay(play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
 	}
 
 	// A missing Remote fails the Play only while there is still no pod.
@@ -1472,7 +1498,7 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 		} else {
 			_, err := GetPod(o.client, namespace, podName(name))
 			if errors.Is(err, apiclient.ErrNotFound) {
-				return o.writePlay(play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
+				return o.refusePlay(play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
 			}
 			if err != nil {
 				return err
@@ -1531,26 +1557,46 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 // write does not wake the operator's own watch a second later.
 //
 // A phase that moves is the answer to a person's play request, so the
-// write that moves it gets a line, with the message a failed phase
-// carries, and a count on the playback counters. The phase it moved
-// from is the one the API server held, which writePlayStatusFrom
-// answers, so a pass that read the Play one write behind neither logs
-// nor counts the move twice.
+// write that moves it gets a line, an Event, and a count on the playback
+// counters, with the message a failed phase carries. Each condition
+// that transitioned posts its Event too. The status it moved from is
+// the one the API server held, which writePlayStatusFrom answers, so a
+// pass that read the Play one write behind neither logs, posts, nor
+// counts the move twice, and a write the API server refused posts
+// nothing.
 func (o *operator) writePlay(play *Play, desired PlayStatus) error {
+	return o.writePlayAs(play, desired, reasonPlaybackFailed)
+}
+
+// refusePlay writes the Failed status of a Play whose own spec can
+// never run, so its Event reads InvalidSpec and not PlaybackFailed.
+func (o *operator) refusePlay(play *Play, desired PlayStatus) error {
+	return o.writePlayAs(play, desired, reasonInvalidSpec)
+}
+
+// writePlayAs is writePlay with the reason a move to Failed posts.
+func (o *operator) writePlayAs(play *Play, desired PlayStatus, failReason string) error {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	if onlyPositionChanged(play.Status, desired) &&
 		time.Since(o.positionWrites[key]) < positionWriteInterval {
 		return nil
 	}
-	was, wrote, err := writePlayStatusFrom(o.client, o.view.plays.Versions, play, desired)
+	held, wrote, err := writePlayStatusFrom(o.client, o.view.plays.Versions, play, desired)
 	if err != nil {
 		return err
 	}
 	o.positionWrites[key] = time.Now()
-	if wrote && desired.Phase != was {
-		logLine(o.log, "play %s: phase %s, was %s%s", key, desired.Phase, phaseName(was), messageOf(desired))
+	if !wrote {
+		return nil
+	}
+	for _, condition := range transitions(held.Conditions, desired.Conditions) {
+		o.recorder.Transition(playRef(play), condition, conditions.False)
+	}
+	if desired.Phase != held.Phase {
+		logLine(o.log, "play %s: phase %s, was %s%s", key, desired.Phase, phaseName(held.Phase), messageOf(desired))
+		o.postPhase(play, desired, failReason)
 		if o.metrics != nil {
-			o.metrics.notePlaybackPhase(was, desired)
+			o.metrics.notePlaybackPhase(held.Phase, desired)
 		}
 	}
 	return nil
@@ -1613,13 +1659,16 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		// its first frame.
 		o.applyReceiverSession(player)
 		pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)
-		if err == nil {
-			reason := "the play is new"
-			if resuming {
-				reason = "the run had no pod"
-			}
-			logLine(o.log, "play %s: created playback pod %s on player %s at %s, because %s",
-				key, pod.Metadata.Name, player.Metadata.Name, startName(o.stashedPosition(play)), reason)
+		switch {
+		case err != nil:
+		case resuming:
+			// A run with a saved place had a pod that is gone, which a
+			// person may need to look at, so the create is an Event too.
+			o.notePodRecreated(play, fmt.Sprintf("created playback pod %s on player %s at %s, because the run had no pod",
+				pod.Metadata.Name, player.Metadata.Name, startName(o.stashedPosition(play))), true)
+		default:
+			logLine(o.log, "play %s: created playback pod %s on player %s at %s, because the play is new",
+				key, pod.Metadata.Name, player.Metadata.Name, startName(o.stashedPosition(play)))
 		}
 		return pod, !resuming, err
 	}
@@ -1648,7 +1697,8 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		if !o.mayResume(key) {
 			return running, false, nil
 		}
-		pod, err := o.replace(play, running, claim, resolved, prefs, remotes, false, "the pod failed"+podMessage(running))
+		pod, err := o.replace(play, running, claim, resolved, prefs, remotes, false,
+			recreate{reason: "the pod failed" + podMessage(running), fault: true})
 		return pod, false, err
 	}
 
@@ -1664,7 +1714,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		changed = "its devices"
 	}
 	pod, err := o.replace(play, running, claim, resolved, prefs, remotes, claimChanged,
-		"a spec edit changed "+changed+" on player "+player.Metadata.Name)
+		recreate{reason: "a spec edit changed " + changed + " on player " + player.Metadata.Name})
 	return pod, false, err
 }
 

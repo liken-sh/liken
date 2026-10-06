@@ -5,6 +5,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -39,7 +40,7 @@ func playCondition(t *testing.T, status PlayStatus) (PlayCondition, bool) {
 		t.Fatalf("the status carries %+v, want one condition", status.Conditions)
 	}
 	condition := status.Conditions[0]
-	condition.LastTransitionTime = ""
+	condition.LastTransitionTime = time.Time{}
 	return condition, true
 }
 
@@ -188,7 +189,7 @@ func TestTheDisplayAliveConditionReportsTheGeneration(t *testing.T) {
 // The stamp moves only when the status changes.
 func TestTheDisplayAliveStampMovesOnlyOnAChange(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
-	stamped := "2026-01-01T00:00:00Z"
+	stamped := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	crash := &ContainerStateTerminated{ExitCode: 1, Reason: "Error"}
 
 	alive := PlayCondition{
@@ -221,7 +222,7 @@ func TestTheDisplayAliveStampMovesOnlyOnAChange(t *testing.T) {
 
 			status := derivePlayStatus(play, player, nil, one.pod, nil, resolvedPreferences{})
 
-			mustMatch(t, status.Conditions[0].LastTransitionTime == stamped, one.kept)
+			mustMatch(t, status.Conditions[0].LastTransitionTime.Equal(stamped), one.kept)
 		})
 	}
 }

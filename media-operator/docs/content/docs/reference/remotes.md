@@ -129,6 +129,14 @@ it drives, its `Peripheral`, and its age. A `Keymap` that does not
 compile is logged by the operator, and the `Remote` keeps its last
 good table.
 
+## Events
+
+The operator posts a `KeymapRefused` Warning on the `Remote` when its
+`Keymap` does not compile. The message gives the compiler's words, and
+the last good key table stays on the bus. The operator posts it once
+for as long as the same refusal stands. `kubectl describe remote`
+prints it.
+
 ## On the bus
 
 Each `Remote` owns one branch of the [bus](/docs/reference/bus/)

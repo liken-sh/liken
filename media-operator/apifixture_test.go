@@ -2,7 +2,7 @@ package main
 
 // This file is the fixture every API test builds on: the API server
 // under a stand-in control plane that answers the two reviews, one
-// Player, and the events this API writes, with two stand-in servers in
+// Player, and the Events this API posts, with two stand-in servers in
 // place of the display API and the audio API. The control plane and the
 // siblings answer over in-memory connections, so a test that composes
 // no stream through ffmpeg runs in a synctest bubble. The clock is
@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,8 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 // The Player every capture test asks about: its namespace and name,
@@ -53,8 +56,8 @@ var testAPIClock = time.Date(2026, 9, 16, 21, 2, 16, 0, time.UTC)
 
 // controlPlane stands in for the API server: it answers the
 // TokenReview and the SubjectAccessReview with the verdicts a test
-// sets, serves the Players a test placed, and keeps the Events this
-// API writes.
+// sets, and serves the Players a test placed. The Events this API
+// posts go to an eventstest.Events in front of it.
 type controlPlane struct {
 	mutex         sync.Mutex
 	players       map[string]*Player
@@ -62,12 +65,10 @@ type controlPlane struct {
 	audiences     []string
 	words         string
 	allowed       bool
-	refuseEvents  bool
 	// How many token reviews it answered, for a test that proves a
 	// credential never reached the token path.
 	tokenReviews int
 	reviews      []SubjectAccessReview
-	events       []Event
 }
 
 func newControlPlane() *controlPlane {
@@ -106,15 +107,6 @@ func (c *controlPlane) handler() http.Handler {
 			c.reviews = append(c.reviews, review)
 			review.Status = SubjectAccessReviewStatus{Allowed: c.allowed}
 			_ = json.NewEncoder(w).Encode(review)
-		case strings.HasSuffix(r.URL.Path, "/events"):
-			if c.refuseEvents {
-				w.WriteHeader(http.StatusForbidden)
-				return
-			}
-			var event Event
-			_ = json.NewDecoder(r.Body).Decode(&event)
-			c.events = append(c.events, event)
-			_ = json.NewEncoder(w).Encode(event)
 		case strings.Contains(r.URL.Path, "/players/"):
 			held, standing := c.players[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
 			if !standing {
@@ -258,8 +250,10 @@ func (s *sibling) sent() []string {
 // two siblings, and the log lines the server wrote, for a test that
 // reads the request id or the offset.
 type apiFixture struct {
-	server  *apiServer
-	plane   *controlPlane
+	server *apiServer
+	plane  *controlPlane
+	// events holds the Events the server posted.
+	events  *eventstest.Events
 	display *sibling
 	audio   *sibling
 	lines   []apiLogLine
@@ -271,13 +265,16 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	plane := newControlPlane()
 	display := newSibling(t, "http://display-api.test")
 	audio := newSibling(t, "http://audio-api.test")
-	client := apiclient.New(apiservertest.Host, apiservertest.Start(t, plane.handler()).Client(), "")
-	fixture := &apiFixture{plane: plane, display: display, audio: audio}
+	recorded := &eventstest.Events{}
+	client := apiclient.New(apiservertest.Host, apiservertest.Start(t, recorded.Around(plane.handler())).Client(), "")
+	fixture := &apiFixture{plane: plane, events: recorded, display: display, audio: audio}
 	instants := upstreamInstants()
 	fixture.server = &apiServer{
 		client:  client,
 		auth:    newAuthorizer(client),
 		metrics: newAPIMetrics("test"),
+		recorder: events.New(t.Context(), client, apiComponent,
+			events.Options{Instance: "media-api-test", Log: io.Discard}),
 		upstream: &upstreamClient{
 			http:  &http.Client{Transport: siblingRoutes{display, audio}},
 			token: siblingToken,

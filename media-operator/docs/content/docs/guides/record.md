@@ -141,7 +141,9 @@ capture, and so does `cluster-admin`.
 
 Every request that returned bytes writes a `Captured` `Event` on the
 `Player`, with the subject and the aspect in its message. A redirect
-and a 503 return no bytes, so they write none.
+and a 503 return no bytes, so they write none. The same subject who
+takes the same capture again within ten minutes adds to the count of
+one `Event`.
 
 ## 2. Reach the API
 

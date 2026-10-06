@@ -16,6 +16,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
@@ -28,7 +29,7 @@ import (
 // The report desk learns the old pod's UID before the delete goes out, so
 // the ending its sidecar reports on the SIGTERM is not read as the Play's.
 // runpod.go says what that ending would do.
-func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason string) (*Pod, error) {
+func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason recreate) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	o.reports.replacing(namespace, name, running.Metadata.UID)
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
@@ -51,7 +52,7 @@ func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resol
 // finishReplacement creates the pod a recreate owes, once the old pod is
 // gone. A claim that is still being deleted is not the claim the new pod
 // must hold, so the pod waits for the claim too.
-func (o *operator) finishReplacement(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, reason string) (*Pod, error) {
+func (o *operator) finishReplacement(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, reason recreate) (*Pod, error) {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	held, err := GetResourceClaim(o.client, claim.Metadata.Namespace, claim.Metadata.Name)
 	switch {
@@ -73,7 +74,15 @@ func (o *operator) finishReplacement(play *Play, claim *ResourceClaim, resolved 
 		return nil, err
 	}
 	delete(o.replacements, key)
-	logLine(o.log, "play %s: recreated playback pod %s at %s, because %s",
-		key, pod.Metadata.Name, startName(o.stashedPosition(play)), reason)
+	o.notePodRecreated(play, fmt.Sprintf("recreated playback pod %s at %s, because %s",
+		pod.Metadata.Name, startName(o.stashedPosition(play)), reason.reason), reason.fault)
 	return pod, nil
+}
+
+// recreate is why a run's pod is created again. fault marks a pod that
+// failed or vanished, which a person may need to look at, apart from a
+// spec edit that reshaped the pod.
+type recreate struct {
+	reason string
+	fault  bool
 }

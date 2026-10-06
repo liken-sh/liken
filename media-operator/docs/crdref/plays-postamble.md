@@ -51,6 +51,29 @@ matches no frame, or a `Player` whose screen is not known yet, plays
 creates the playback pod, so a `Display` that changes mode later does
 not change the run.
 
+## Events
+
+The operator posts a Kubernetes `Event` on the `Play` for each phase
+it moves to, for each playback pod it creates again, and for the delete
+that ends the `Play`. `kubectl describe play` prints them. The API
+server deletes an `Event` one hour after its last write, so the phase,
+the conditions, and the operator's log hold the facts after that.
+
+| Reason | Type | When |
+|---|---|---|
+| `PlaybackStarted` | Normal | The phase moved to `Running`. |
+| `PlaybackFinished` | Normal | The phase moved to `Finished`. The message gives the item and the position. |
+| `PlaybackFailed` | Warning | The phase moved to `Failed` because the playback pod failed. The message is the pod's own. |
+| `InvalidSpec` | Warning | The phase moved to `Failed` because the `Play` can never run as written: it names no `Player`, an item does not resolve, or a `Remote` the pod needs does not exist. |
+| `PodRecreated` | Warning or Normal | The operator created the playback pod again. A pod that failed or is gone is a Warning, and a spec edit that reshaped the pod is Normal. The message gives the position the new pod starts at. |
+| `ResumeBackoff` | Warning | The playback pod failed again soon after a recreate. The message gives the count and the wait before the next recreate. |
+| `Restarting`, `Running` | Warning, Normal | The `DisplayAlive` condition changed, with the condition's message. |
+| `Superseded` | Normal | The operator deleted the `Play`, because a newer `Play` on the same `Player` replaces it. |
+| `Retired` | Normal | The operator deleted the `Play`, because its `ttlSecondsAfterFinished` passed after it finished. |
+
+`Superseded` and `Retired` also go on the `Player`, because the
+`Play`'s own `Event`s leave `kubectl describe` with it.
+
 ## On the bus
 
 The `plays` tree contains one run's commands, report, and availability.
