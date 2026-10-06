@@ -23,6 +23,10 @@ const (
 	// kept: a Ready reservation's runner keeps the pods of the
 	// device's server, and creates a pod that is gone.
 	kept
+	// releasing: a reservation that needs the device's server
+	// deactivates, and no other one keeps or activates it, so the
+	// operator stops the device's driver, its pod, or its server.
+	releasing
 )
 
 // standingOf answers a device's standing. A device whose train is

@@ -77,6 +77,10 @@ func TestADevicesPhase(t *testing.T) {
 		{"a failed step", false, true, true, activating, connection(indi.Idle, false), "it broke", observatory.DeviceError},
 		{"connected", false, true, true, kept, connection(indi.Ok, true), "", observatory.DeviceConnected},
 		{"disconnected", false, true, true, kept, connection(indi.Idle, false), "", observatory.DeviceStarting},
+		{"connected while a release runs its deactivation", false, true, true, releasing, connection(indi.Ok, true), "", observatory.DeviceConnected},
+		{"disconnected by a release", false, true, true, releasing, connection(indi.Idle, false), "", observatory.DeviceDisconnecting},
+		{"a driver that a release stops", false, true, false, releasing, indi.Property{}, "", observatory.DeviceDisconnecting},
+		{"a pod that a release deleted", false, false, false, releasing, indi.Property{}, "", observatory.DeviceIdle},
 	}
 	for _, c := range cases {
 		if got := devicePhase(c.stopping, c.pod, c.def, c.standing, c.connection, c.fault); got != c.want {

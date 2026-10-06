@@ -159,7 +159,9 @@ A device's status has the same fields in every kind, and one
   installed and no reservation of its telescope or its observatory is
   active, with the message `Not reserved`. From the start of a
   reservation's activation, `Starting` until the pod exists, then
-  `Connecting`, `Connected`, and `Disconnecting`, or `Error`. A
+  `Connecting`, `Connected`, and `Disconnecting`, or `Error`. During
+  a release, a device is `Disconnecting` from its disconnect until its
+  pod is gone, while the operator stops its driver or its server. A
   `Telescope`, an `Observatory`, and a `Guider` are `Idle` with no
   active reservation, then `Activating`, `Ready`, and `Deactivating`,
   or `Error`.

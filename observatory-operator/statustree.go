@@ -123,6 +123,10 @@ func (o *operator) serverStanding(t *tree, ref serverRef) standing {
 			return kept
 		case observatory.PhaseActivating:
 			best = activating
+		case observatory.PhaseDeactivating:
+			if best == idle {
+				best = releasing
+			}
 		}
 	}
 	return best

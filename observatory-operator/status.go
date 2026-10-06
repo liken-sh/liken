@@ -224,15 +224,17 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 
 // devicePhase answers a device's phase from what the operator observes.
 // A device with no pod takes its phase from its standing: Inventory on
-// the shelf, Idle when no reservation needs it, and Starting from the
-// start of activation, and while a Ready reservation's runner creates a
-// pod that is gone.
+// the shelf, Idle when no reservation needs it or a release stopped it,
+// and Starting from the start of activation, and while a Ready
+// reservation's runner creates a pod that is gone. A device that a
+// release stops is Disconnecting from its disconnect until its pod is
+// gone, while the operator stops its driver or its server.
 func devicePhase(stopping, hasPod, defined bool, standing standing, connection indi.Property, fault string) observatory.DevicePhase {
 	connect, _ := connection.Member("CONNECT")
 	switch {
 	case !hasPod && standing == onShelf:
 		return observatory.DeviceInventory
-	case !hasPod && standing == idle:
+	case !hasPod && (standing == idle || standing == releasing):
 		return observatory.DeviceIdle
 	case !hasPod:
 		return observatory.DeviceStarting
@@ -246,6 +248,8 @@ func devicePhase(stopping, hasPod, defined bool, standing standing, connection i
 		return observatory.DeviceError
 	case defined && connect.Switch:
 		return observatory.DeviceConnected
+	case standing == releasing:
+		return observatory.DeviceDisconnecting
 	}
 	return observatory.DeviceStarting
 }

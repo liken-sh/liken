@@ -405,6 +405,13 @@ found these defects. Each fix lands with a test against the fakes.
   message now names the reservations that hold telescopes in the
   observatory, as "Active for Reservation drill-west", and the
   transition time stays when the holders change.
+- **A device being released reports `Disconnecting`, not
+  `Starting`.** During a release, devices posted `Starting` "Waiting
+  for its driver on east-telescope" between their disconnect and the
+  deletion of their pods, and the observatory's devices did the same
+  at `StopSite`. A device whose server only a deactivating reservation
+  needs is now `Disconnecting` while it is not connected, and `Idle`
+  once its pod is gone.
 
 ## How we test it
 
