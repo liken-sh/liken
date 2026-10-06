@@ -60,12 +60,26 @@ const (
 )
 
 func (r *runner) run(ctx context.Context) {
+	// The supervisor starts a runner from its snapshot, whose copy of
+	// the reservation can be older than the operator's own last write:
+	// a runner that released the reservation and removed its finalizer
+	// a moment ago. A new runner that took that record would add the
+	// finalizer again and release again, in a loop with no clock. So
+	// the record comes from the first read, which the memo keeps no
+	// older than the last write.
+	first := true
 	for ctx.Err() == nil {
 		if !r.refresh() {
 			// The reservation is gone. Its telescope goes back to the
 			// pool, and the supervisor's sweep stops any pod it left.
 			r.o.claims.release(r.res)
 			return
+		}
+		if first {
+			r.status, r.logged, first = r.res.Status, r.res.Status.Phase, false
+			if finished(r.res) {
+				return
+			}
 		}
 		if !hasFinalizer(r.res) && r.res.Metadata.DeletionTimestamp == nil && r.status.Phase != observatory.ReservationReleased {
 			if err := r.o.send(ctx, nil, "adding the finalizer of the Reservation "+r.name, func() error {
