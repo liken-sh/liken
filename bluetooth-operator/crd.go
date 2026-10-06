@@ -33,6 +33,7 @@ import (
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 const (
@@ -282,19 +283,14 @@ type BatteryStatus struct {
 	Charging   *bool  `json:"charging,omitempty"`
 }
 
-// Condition is the standard Kubernetes condition shape.
+// Condition is the standard Kubernetes condition shape, the one every
+// liken component reports (kubernetes/conditions).
 //
 // The shape is the standard one, so a reader treats these the way it
 // treats a Pod's conditions. LastTransitionTime marks when Status last
 // changed, not when the operator last wrote the object, so a reader
 // measures from it how long a controller has been asleep.
-type Condition struct {
-	Type               string `json:"type"`
-	Status             string `json:"status"`
-	Reason             string `json:"reason,omitempty"`
-	Message            string `json:"message,omitempty"`
-	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
-}
+type Condition = conditions.Condition
 
 // PairingRequest is the act of pairing, and it also runs the
 // discovery scan. The scan and the pairing window are one radio

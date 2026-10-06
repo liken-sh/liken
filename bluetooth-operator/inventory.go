@@ -35,6 +35,7 @@ import (
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // followUpDelay is how soon the loop runs again while the pass has
@@ -100,6 +101,20 @@ type inventory struct {
 	// records nothing, which is what every test that has no reason to
 	// check a metric gets by leaving the field unset.
 	metrics *metrics
+
+	// recorder posts the Events (events.go). A nil recorder posts
+	// nothing, which is what a test that checks no Event gets.
+	recorder *events.Recorder
+
+	// node is the Node this pod runs on. The radio's arrival and
+	// departure are posted on it, because the Adapter can be gone by
+	// the time the radio is.
+	node events.ObjectReference
+
+	// radioHeld is the radio the last valid read of bluetoothd
+	// reported, and the zero address when it reported none. A change
+	// of it posts RadioClaimed or RadioLost.
+	radioHeld bonds.Address
 }
 
 func newInventory(client *apiclient.Client, radio radio, held *relays, nodeName, namespace string, readings *metrics) *inventory {
@@ -149,6 +164,24 @@ type inventoryPass struct {
 	ok bool
 }
 
+// noteRadio posts the change of radio that one valid read of
+// bluetoothd shows. A read that reports no radio before any radio was
+// reported is the ordinary start of a pod, before bluetoothd publishes
+// its tree, and posts nothing.
+func (i *inventory) noteRadio(address bonds.Address) {
+	held := i.radioHeld
+	if address == held {
+		return
+	}
+	i.radioHeld = address
+	if held != (bonds.Address{}) {
+		i.recorder.Warning(i.node, reasonRadioLost, fmt.Sprintf("the radio at %s is gone from bluetoothd", held))
+	}
+	if address != (bonds.Address{}) {
+		i.recorder.Normal(i.node, reasonRadioClaimed, fmt.Sprintf("bluetoothd holds the radio at %s", address))
+	}
+}
+
 // reconcile runs one pass over the three objects.
 func (i *inventory) reconcile() inventoryPass {
 	pass := inventoryPass{
@@ -170,6 +203,7 @@ func (i *inventory) reconcile() inventoryPass {
 		// and the one thing it can still do is release an Adapter for a
 		// radio that this machine no longer has.
 		i.metrics.setAdapterPresent(false)
+		i.noteRadio(bonds.Address{})
 		i.releaseDepartedAdapters(bonds.Address{})
 		pass.ok = false
 		return pass
@@ -184,6 +218,7 @@ func (i *inventory) reconcile() inventoryPass {
 		return pass
 	}
 	i.metrics.setAdapterPresent(true)
+	i.noteRadio(snapshot.Adapter.Address)
 
 	i.releaseDepartedAdapters(snapshot.Adapter.Address)
 	i.follow(snapshot.Adapter.Address.Key())

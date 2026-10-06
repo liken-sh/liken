@@ -40,6 +40,7 @@ import (
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -205,12 +206,18 @@ func main() {
 	// starts with controllers already paired and possibly already
 	// connected, and a restart must republish what the previous pod
 	// published.
+	// recorder posts the Events (events.go). It writes from its own
+	// goroutine, which ends with ctx, so a pass never waits on it.
+	recorder := events.New(ctx, client, component, events.Options{})
 	held := newRelays(linuxInput{})
 	held.metrics = readings
+	held.recorder = recorder
 	publish := &publisher{client: client, nodeName: nodeName, owner: owner, relays: held}
 	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot(), relays: held,
 		watchSecrets: func(adapter bonds.Address) informer.View { return watchBondSecrets(ctx, watcher, namespace, adapter) }}
 	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace, readings)
+	objects.recorder = recorder
+	objects.node = nodeReference(owner)
 	// The pass reads the objects the watches hold from their stores
 	// (objectcache.go).
 	objects.cache = edits.cache(requestStore)

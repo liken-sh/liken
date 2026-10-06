@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -241,6 +243,8 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 	}
 	if replaced.Bond.Held && !status.Bond.Held {
 		fmt.Fprintf(os.Stderr, "peripheral: %s reports no bond in bluetoothd; the object stays until somebody deletes it\n", name)
+		i.recorder.Warning(peripheralReference(peripheral), reasonBondLost, fmt.Sprintf(
+			"bluetoothd holds no bond with %s; delete the Peripheral to unpair it, or pair the device again", address))
 	}
 }
 
@@ -303,8 +307,8 @@ func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapte
 const (
 	conditionConnected = "Connected"
 
-	conditionTrue  = "True"
-	conditionFalse = "False"
+	conditionTrue  = conditions.True
+	conditionFalse = conditions.False
 
 	reasonLinkUp       = "LinkUp"
 	reasonAsleep       = "Asleep"
@@ -329,13 +333,13 @@ func connectedCondition(held []Condition, device deviceState, present bool, now 
 	default:
 		condition.Reason = reasonNotConnected
 	}
-	condition.LastTransitionTime = timestamp(now)
-	for _, previous := range held {
-		if previous.Type == condition.Type && previous.Status == condition.Status &&
-			previous.LastTransitionTime != "" {
-			condition.LastTransitionTime = previous.LastTransitionTime
-		}
-	}
+	// The API server keeps a date-time to the second, so the time is
+	// cut to the second, and a status composed again compares equal to
+	// the one the object holds.
+	condition.LastTransitionTime = now.UTC().Truncate(time.Second)
+	list := slices.Clone(held)
+	conditions.Set(&list, condition)
+	condition, _ = conditions.Find(list, conditionConnected)
 	return condition
 }
 
@@ -343,7 +347,7 @@ func connectedCondition(held []Condition, device deviceState, present bool, now 
 // held before this pass carried the given status. A Peripheral with
 // no Connected condition yet, which is one this pass is adopting or
 // creating, answers false.
-func connectionWas(held []Condition, status string) bool {
+func connectionWas(held []Condition, status conditions.Status) bool {
 	for _, previous := range held {
 		if previous.Type == conditionConnected {
 			return previous.Status == status

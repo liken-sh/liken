@@ -80,7 +80,11 @@ itself, whenever the speaker is powered on and in range. It retries a
 failed attempt, and the wait between attempts doubles from 10 seconds
 up to two minutes.
 
-The request's `status.phase` goes to `Paired`. A request nobody
+The request's `status.phase` goes to `Paired`. When `bluetoothd`
+refuses the pairing, `status.message` gives its error, and
+`kubectl describe pairingrequest` shows a `PairingRefused` warning.
+The [install guide](https://liken.sh/bluetooth/docs/guides/install/#read-the-events) lists every
+`Event` the operator posts. A request nobody
 approves only scans. An empty `spec.device` never pairs anything, and
 the window expires on its own. The finished request is collected
 after `spec.ttlSecondsAfterFinished`, a day by default.

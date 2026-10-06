@@ -36,6 +36,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // relays holds every controller's relay. The reconcile loop calls
@@ -49,12 +51,21 @@ type relays struct {
 	// check a metric gets by leaving the field unset.
 	metrics *metrics
 
+	// recorder posts InputRelayFailed (events.go). A nil recorder posts
+	// nothing.
+	recorder *events.Recorder
+
 	mu   sync.Mutex
 	held map[string]*controllerRelay
+
+	// refused names the controllers whose last virtual device the
+	// kernel refused. Each pass tries the device again, so the refusal
+	// is posted when a controller enters this set and not on each try.
+	refused map[string]bool
 }
 
 func newRelays(kernel inputKernel) *relays {
-	return &relays{kernel: kernel, held: map[string]*controllerRelay{}}
+	return &relays{kernel: kernel, held: map[string]*controllerRelay{}, refused: map[string]bool{}}
 }
 
 // controllerRelay is one controller's virtual devices, keyed by the
@@ -279,6 +290,7 @@ func (r *relays) stop(mac string) {
 		return
 	}
 	delete(r.held, mac)
+	delete(r.refused, mac)
 	for _, relay := range held.nodes {
 		if relay.source != nil {
 			_ = relay.source.Close()
@@ -296,8 +308,14 @@ func (r *relays) create(mac string, relay *nodeRelay) bool {
 	device, err := r.kernel.createVirtual(relay.caps, relayPhys(mac))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "relay: creating a virtual device for controller %s: %v\n", publishedMAC(mac), err)
+		if !r.refused[mac] {
+			r.refused[mac] = true
+			r.recorder.Warning(controllerReference(mac), reasonInputRelayFailed,
+				fmt.Sprintf("creating a virtual input device for %s: %v", publishedMAC(mac), err))
+		}
 		return false
 	}
+	delete(r.refused, mac)
 	relay.device = device
 	if !withinDeliveredRange(device.node()) {
 		// liken's adapter claim creates event0 through event31 in this
@@ -307,6 +325,9 @@ func (r *relays) create(mac string, relay *nodeRelay) bool {
 		// can read.
 		fmt.Fprintf(os.Stderr, "relay: controller %s landed on %s, above the %d nodes this container holds; a claim on it cannot be prepared\n",
 			publishedMAC(mac), device.node(), deliveredInputNodes)
+		r.recorder.Warning(controllerReference(mac), reasonInputRelayFailed,
+			fmt.Sprintf("the virtual input device for %s is %s, above the %d nodes the pod holds, so a claim on it cannot be prepared",
+				publishedMAC(mac), device.node(), deliveredInputNodes))
 	}
 	fmt.Printf("relay: controller %s answers as %q on %s\n", publishedMAC(mac), relay.caps.Name, device.node())
 	return true

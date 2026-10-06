@@ -36,6 +36,10 @@ type fakeKernel struct {
 
 	// nextNode numbers the nodes this kernel hands out.
 	nextNode int
+
+	// createErr makes createVirtual fail, the way the kernel does when
+	// /dev/uinput refuses the container.
+	createErr error
 }
 
 func newFakeKernel() *fakeKernel {
@@ -179,6 +183,9 @@ func (n *fakeNode) writes() int {
 func (k *fakeKernel) createVirtual(caps evdevCapabilities, phys string) (virtualDevice, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if k.createErr != nil {
+		return nil, k.createErr
+	}
 	device := &fakeVirtual{path: fmt.Sprintf("/dev/input/event%d", k.nextNode), phys: phys, caps: caps}
 	k.nextNode++
 	k.virtual = append(k.virtual, device)

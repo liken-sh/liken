@@ -282,6 +282,34 @@ controllers appears when the first controller is paired:
 [Pair a controller and give it to a pod](https://liken.sh/bluetooth/docs/guides/pair-a-controller/) is
 the next step.
 
+## Read the Events
+
+The operator posts a Kubernetes `Event` when a window opens or
+closes, a device pairs, or a bond, a relay, or the radio fails. Read
+them with `kubectl describe` on the object. A `Peripheral` and a
+`Node` are cluster-scoped, so their `Event`s are in `default`, and
+`kubectl events --for` finds them only with `-n default` or `-A`:
+
+    kubectl describe pairingrequest new-gamepad -n liken-system
+    kubectl events -n default --for peripheral/a0-ab-51-33-b7-12
+
+| Reason | Type | Object | What happened |
+|---|---|---|---|
+| `PairingWindowOpened` | Normal | `PairingRequest` | The radio is discoverable and pairable until the window closes. |
+| `PairingWindowExpired` | Normal | `PairingRequest` | The window closed with no device paired. |
+| `PairingRefused` | Warning | `PairingRequest` | `bluetoothd` refused to pair the approved device. The window tries again, and the `Event` repeats only when the refusal changes. |
+| `Paired` | Normal | `PairingRequest`, `Peripheral` | The device holds a bond, and the operator created its `Peripheral`. |
+| `BondLost` | Warning | `Peripheral` | `bluetoothd` holds no bond with the device any more. The `Peripheral` stays until you delete it. |
+| `InputRelayFailed` | Warning | `Peripheral` | The operator could not make the virtual input device that a claim on the controller receives. |
+| `RadioClaimed` | Normal | `Node` | `bluetoothd` in the pod reports the radio. |
+| `RadioLost` | Warning | `Node` | The radio is gone from `bluetoothd`: the adapter was unplugged or reset. |
+
+A controller that connects or disconnects posts no `Event`. A Low
+Energy remote drops its link between presses, so the `Connected`
+condition and the `bluetooth_disconnects_total` metric hold those
+changes. The API server deletes an `Event` an hour after its last
+write. The status and the pod's log keep each fact longer.
+
 <a id="look-inside-the-stack"></a>
 
 ## Inspect the Bluetooth stack

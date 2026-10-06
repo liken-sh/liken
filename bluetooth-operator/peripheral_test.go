@@ -5,8 +5,12 @@ package main
 // state, and the spec that reconciles back into the device.
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // testPeripheralPath is the path of the test device's Peripheral.
@@ -277,7 +281,7 @@ func TestConnectedConditionReason(t *testing.T) {
 		name    string
 		present bool
 		device  func(*deviceState)
-		status  string
+		status  conditions.Status
 		reason  string
 	}{
 		{
@@ -352,8 +356,8 @@ func TestConnectedConditionKeepsTheTimeOfTheLastChange(t *testing.T) {
 	later := testNow.Add(time.Hour)
 	device.AddressType = "public"
 	same := connectedCondition([]Condition{asleep}, device, true, later)
-	if same.LastTransitionTime != asleep.LastTransitionTime {
-		t.Errorf("lastTransitionTime = %q, want the time of the last change %q",
+	if !same.LastTransitionTime.Equal(asleep.LastTransitionTime) {
+		t.Errorf("lastTransitionTime = %s, want the time of the last change %s",
 			same.LastTransitionTime, asleep.LastTransitionTime)
 	}
 	if same.Reason != reasonNotConnected {
@@ -362,8 +366,35 @@ func TestConnectedConditionKeepsTheTimeOfTheLastChange(t *testing.T) {
 
 	device.Connected = true
 	changed := connectedCondition([]Condition{asleep}, device, true, later)
-	if changed.LastTransitionTime != timestamp(later) {
-		t.Errorf("lastTransitionTime = %q, want the moment the link came up", changed.LastTransitionTime)
+	if !changed.LastTransitionTime.Equal(later) {
+		t.Errorf("lastTransitionTime = %s, want the moment the link came up", changed.LastTransitionTime)
+	}
+}
+
+// The Connected condition keeps the wire format the CRD declares: a
+// string status, a date-time to the second, and a message the schema
+// accepts empty. The time is cut to the second, so a status composed
+// again equals the one the API server returns.
+func TestConnectedConditionKeepsItsWireFormat(t *testing.T) {
+	device := pairedDevice(t, testDevice)
+	device.Connected, device.AddressType = false, "random"
+
+	condition := connectedCondition(nil, device, true, testNow.Add(400*time.Millisecond))
+
+	written, err := json.Marshal(condition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"Connected","status":"False","reason":"Asleep","message":"","lastTransitionTime":"2026-08-17T17:30:00Z"}`
+	if string(written) != want {
+		t.Errorf("condition = %s, want %s", written, want)
+	}
+	var read Condition
+	if err := json.Unmarshal(written, &read); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(read, condition) {
+		t.Errorf("read back %+v, want %+v", read, condition)
 	}
 }
 

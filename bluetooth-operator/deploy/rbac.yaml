@@ -3,7 +3,8 @@
 # Bluetooth stack has to be, and correspondingly narrow here: it
 # writes one ResourceSlice, reads the claims the kubelet asks it to
 # prepare, reads its own Node, keeps the three objects of the pairing
-# API, and reads and writes the Secrets that hold its adapter's bonds.
+# API, reads and writes the Secrets that hold its adapter's bonds, and
+# posts Events about its objects and its Node.
 #
 # One ServiceAccount serves the whole pod. A ServiceAccount is a
 # pod-level field, and the ServiceAccount admission controller mounts
@@ -72,6 +73,15 @@ rules:
   - apiGroups: [bluetooth.liken.sh]
     resources: [adapters/status, peripherals/status, pairingrequests/status]
     verbs: [get, update]
+  # The Events (events.go): a pairing window, a pairing, a lost bond, a
+  # refused relay, and the radio's arrival and departure. An Event about
+  # a Peripheral or the Node is in default, because both are
+  # cluster-scoped, and an Event about a PairingRequest is in the
+  # request's own namespace, which can be any namespace. patch updates
+  # the count of an Event that repeats within ten minutes.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
