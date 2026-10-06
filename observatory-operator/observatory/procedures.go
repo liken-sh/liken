@@ -23,9 +23,11 @@ type Procedures[A any] struct {
 	// Deactivation runs as the resource's Telescope or Observatory
 	// stops being Active, while every device is still connected.
 	Deactivation []A `json:"deactivation,omitempty"`
-	// On lists triggers on conditions, which run while the resource is
-	// active.
-	On []Trigger[A] `json:"on,omitempty"`
+	// Triggers lists triggers on conditions, which run while the
+	// resource is active. The field is not named on, because YAML 1.1,
+	// which kubectl reads through sigs.k8s.io/yaml, reads a bare on key
+	// as the boolean true.
+	Triggers []Trigger[A] `json:"triggers,omitempty"`
 }
 
 // Trigger runs its actions once for each transition of a condition to
@@ -108,12 +110,14 @@ type CoverAction struct {
 	State CoverState `json:"state,omitempty"`
 }
 
-// LightState is the target of a FlatPanel's light.
+// LightState is the target of a FlatPanel's light. The states are
+// not named On and Off, because YAML 1.1 reads a bare On or Off as a
+// boolean. Lit matches the panel's Lit condition.
 type LightState string
 
 const (
-	StateOn  LightState = "On"
-	StateOff LightState = "Off"
+	StateLit  LightState = "Lit"
+	StateDark LightState = "Dark"
 )
 
 // LightAction is the action of a FlatPanel.
@@ -171,8 +175,8 @@ const ConditionActive = "Active"
 
 // ProcedureRun is the record of one trigger's last run.
 type ProcedureRun struct {
-	// Trigger names the trigger: activation, deactivation, or on[0]
-	// and so on for each item of spec.on.
+	// Trigger names the trigger: activation, deactivation, or
+	// triggers[0] and so on for each item of spec.triggers.
 	Trigger string `json:"trigger"`
 	// Since is the transition time of the condition that the run
 	// answers.

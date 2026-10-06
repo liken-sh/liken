@@ -515,7 +515,7 @@ spec:
                                 resource of the kind in the observatory,
                                 or the resource's own `Observatory` or
                                 `Telescope`.
-                "on":
+                triggers:
                   type: array
                   maxItems: 16
                   description: >-
@@ -524,8 +524,7 @@ spec:
                     status it names, while the resource is active: from
                     when its activation is done until its deactivation
                     begins. A condition that holds when the activation
-                    ends runs then. YAML reads a bare on as a boolean,
-                    so quote the key, as in `"on":`. Optional.
+                    ends runs then. Optional.
                   items:
                     type: object
                     required: [when, run]
@@ -848,9 +847,9 @@ spec:
                   description: >-
                     The last run of each trigger of the resource's
                     procedures: `activation`, `deactivation`, and
-                    `on[0]` and so on for each item of `spec.on`. An
-                    operator that restarts resumes a run from this
-                    record.
+                    `triggers[0]` and so on for each item of
+                    `spec.triggers`. An operator that restarts resumes a
+                    run from this record.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [trigger]
                   items:
@@ -863,7 +862,8 @@ spec:
                         type: string
                         description: >-
                           The trigger: `activation`, `deactivation`, or
-                          `on[0]` for the first item of `spec.on`.
+                          `triggers[0]` for the first item of
+                          `spec.triggers`.
                       since:
                         type: string
                         format: date-time

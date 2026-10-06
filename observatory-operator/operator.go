@@ -14,8 +14,8 @@ package main
 //     (status.go).
 //   - The lock relay sends each park state that a lock policy needs to
 //     the other INDI servers (locks.go).
-//   - The trigger controller runs the procedures of every on trigger
-//     (triggers.go).
+//   - The trigger controller runs the procedures of every trigger in
+//     spec.triggers (triggers.go).
 //
 // They wait on two bells. changed rings on every watch event, every
 // INDI event, and every change a guider's PHD2 reports. structure rings

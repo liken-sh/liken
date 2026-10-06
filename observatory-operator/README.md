@@ -364,9 +364,8 @@ three fields of its spec. Every device kind, the `Telescope`, and the
   turns `Active`, in the reservation's `Activation` step.
 - `deactivation` runs as it stops being `Active`, in the
   `Deactivation` step, while every device is still connected.
-- `on` lists triggers. Each one names a condition in `when`, and runs
-  its actions in `run`, as "Triggers" below states. YAML reads a bare
-  `on` as a boolean, so quote the key: `"on":`.
+- `triggers` lists triggers. Each one names a condition in `when`,
+  and runs its actions in `run`, as "Triggers" below states.
 
 `activation`, `deactivation`, and each trigger's `run` are lists of
 actions that run in order. An action is a target
@@ -378,7 +377,7 @@ accepts only the actions it supports, and the CRD refuses the others:
 |---|---|---|
 | `Dome`, `Mount` | `state: Parked` or `state: Unparked` | 10 min |
 | `DustCap` | `state: Open` or `state: Closed` | 10 min |
-| `FlatPanel` | `state: "On"` or `state: "Off"`, the light, quoted because YAML reads a bare `On` as a boolean | 10 min |
+| `FlatPanel` | `state: Lit` or `state: Dark`, the light | 10 min |
 | `Camera` | `cool: {celsius, within}`: write the setpoint and wait until the sensor is within `within`, 0.5 °C by default | 20 min |
 | `Camera` | `warm: {celsius, within}`: warm the sensor, then switch the cooler off | 10 min |
 
@@ -478,7 +477,7 @@ no such trigger, or one that is not active, is not waited for.
 ```yaml
 kind: Dome
 spec:
-  "on":
+  triggers:
   - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
     run:
     - state: Parked

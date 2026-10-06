@@ -50,9 +50,9 @@
 # copies their actions.
 #
 # A resource can also react to a condition while it is active, in
-# `on`: each trigger names a condition and the status that fires it,
-# and runs its actions once for each transition to that status. YAML
-# reads a bare `on` as a boolean, so the key is quoted.
+# `triggers`: each trigger names a condition and the status that fires
+# it, and runs its actions once for each transition to that status.
+#
 # The Reservation at the end starts the `east` telescope, and `west`
 # stays down, because each telescope has its own INDI server. Each
 # device of `west` is `Idle`, and the focuser on the shelf is
@@ -109,7 +109,7 @@ spec:
     - {kind: WeatherStation, name: lab, type: Safe}
   deactivation:
   - state: Parked
-  "on":
+  triggers:
   - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
     run:
     - state: Parked
@@ -162,7 +162,7 @@ spec:
   - state: Unparked
   deactivation:
   - state: Parked
-  "on":
+  triggers:
   - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
     run:
     - state: Parked
@@ -312,8 +312,7 @@ spec:
   deactivation:
   - state: Closed
 ---
-# Deactivation switches the panel's light off. YAML reads a bare On or
-# Off as a boolean, so the value is quoted.
+# Deactivation switches the panel's light off: the panel goes `Dark`.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: FlatPanel
 metadata:
@@ -323,7 +322,7 @@ spec:
   driver: {name: indi_simulator_lightpanel}
   power: {switch: east, output: 3}
   deactivation:
-  - state: "Off"
+  - state: Dark
 ---
 # The guide camera, behind the guide scope. It has no power output, so
 # a person powers it by hand. The guide simulator draws 2.4 µm pixels
@@ -376,7 +375,7 @@ spec:
   - state: Unparked
   deactivation:
   - state: Parked
-  "on":
+  triggers:
   - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
     run:
     - state: Parked

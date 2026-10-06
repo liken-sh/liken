@@ -99,8 +99,8 @@ runner for each `Reservation` (`reservation.go`, `activation.go`,
 `finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),
 the status writer (`status.go`, `statustree.go`, `standing.go`,
 `readings.go`, `guiderstatus.go`), the lock relay (`locks.go`), and the
-trigger controller (`triggers.go`), which runs the `on` triggers of
-plan 13. The runner's `Activation` and `Deactivation` steps run the
+trigger controller (`triggers.go`), which runs each resource's
+`spec.triggers` (plan 13). The runner's `Activation` and `Deactivation` steps run the
 lifecycle procedures (`procsteps.go`): `procedure.go` runs one
 trigger's actions,
 `action.go` and `cooler.go` carry out one action, `resources.go`

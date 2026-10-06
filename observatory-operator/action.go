@@ -36,8 +36,8 @@ func procedures(in observatory.Procedures[observatory.Action]) observatory.Proce
 		return out
 	}
 	out := observatory.Procedures[action]{Activation: actions(in.Activation), Deactivation: actions(in.Deactivation)}
-	for _, trigger := range in.On {
-		out.On = append(out.On, observatory.Trigger[action]{When: trigger.When, Run: actions(trigger.Run)})
+	for _, trigger := range in.Triggers {
+		out.Triggers = append(out.Triggers, observatory.Trigger[action]{When: trigger.When, Run: actions(trigger.Run)})
 	}
 	return out
 }
@@ -108,8 +108,8 @@ var switchTargets = map[string]switchTarget{
 	"Mount/Unparked": {"TELESCOPE_PARK", "UNPARK", "unparking", "unparked", "unparked"},
 	"DustCap/Open":   {"CAP_PARK", "UNPARK", "opening", "opened", "open"},
 	"DustCap/Closed": {"CAP_PARK", "PARK", "closing", "closed", "closed"},
-	"FlatPanel/On":   {"FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON", "switching on the light of", "switched on the light of", "lit"},
-	"FlatPanel/Off":  {"FLAT_LIGHT_CONTROL", "FLAT_LIGHT_OFF", "switching off the light of", "switched off the light of", "dark"},
+	"FlatPanel/Lit":  {"FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON", "switching on the light of", "switched on the light of", "lit"},
+	"FlatPanel/Dark": {"FLAT_LIGHT_CONTROL", "FLAT_LIGHT_OFF", "switching off the light of", "switched off the light of", "dark"},
 }
 
 // act carries out one action on a connected device. wait holds the

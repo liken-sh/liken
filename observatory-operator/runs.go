@@ -79,7 +79,7 @@ func (r *runRecords) put(key string, run observatory.ProcedureRun) {
 }
 
 // list answers the runs of one resource, in the order of its triggers:
-// activation, deactivation, and then each item of spec.on.
+// activation, deactivation, and then each item of spec.triggers.
 func (r *runRecords) list(key string) []observatory.ProcedureRun {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -98,7 +98,7 @@ func triggerOrder(trigger string) int {
 	case observatory.TriggerDeactivation:
 		return 1
 	}
-	n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(trigger, "on["), "]"))
+	n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(trigger, "triggers["), "]"))
 	return 2 + n
 }
 

@@ -1,9 +1,9 @@
 package main
 
-// The on triggers of every resource. One controller reads every
-// trigger after each change of a store or of a run's record. A
-// trigger runs its actions once for each transition of its condition
-// to the status it names: the run records the condition's
+// The triggers of every resource, in spec.triggers. One controller
+// reads every trigger after each change of a store or of a run's
+// record. A trigger runs its actions once for each transition of its
+// condition to the status it names: the run records the condition's
 // lastTransitionTime from the stored status, and a condition that
 // keeps its status keeps that time. A trigger runs only while its
 // resource is active: from the end of its activation run, or from the
@@ -27,8 +27,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// onTrigger names the trigger of one item of spec.on, such as on[0].
-func onTrigger(i int) string { return fmt.Sprintf("on[%d]", i) }
+// triggerName names the trigger of one item of spec.triggers, such as
+// triggers[0].
+func triggerName(i int) string { return fmt.Sprintf("triggers[%d]", i) }
 
 // flight is one trigger's run that goes on now.
 type flight struct {
@@ -84,8 +85,8 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 	var due time.Time
 	for _, r := range t.withTriggers() {
 		period, active := o.activePeriod(r)
-		for i, trigger := range r.procedures.On {
-			name := onTrigger(i)
+		for i, trigger := range r.procedures.Triggers {
+			name := triggerName(i)
 			id := r.key() + "/" + name
 			f := flights[id]
 			if !active {
@@ -150,11 +151,12 @@ func (o *operator) fly(ctx context.Context, call procCall, group *sync.WaitGroup
 	return f
 }
 
-// withTriggers answers every resource that has an on trigger.
+// withTriggers answers every resource that has a trigger in
+// spec.triggers.
 func (t *tree) withTriggers() []resource {
 	var out []resource
 	add := func(r resource) {
-		if len(r.procedures.On) > 0 {
+		if len(r.procedures.Triggers) > 0 {
 			out = append(out, r)
 		}
 	}
@@ -222,13 +224,13 @@ func (o *operator) conditionEvent(g target, conditionType string, status observa
 		if !active {
 			return membership{}, false
 		}
-		for j, trigger := range x.procedures.On {
+		for j, trigger := range x.procedures.Triggers {
 			targets, err := t.resolve(x, "", trigger.When.Kind, trigger.When.Name, false)
 			if err != nil || targets[0] != g || trigger.When.Type != conditionType || conditionStatus(trigger.When.Status) != status {
 				continue
 			}
 			conditions, _ := t.conditionsOf(g.kind, g.name)
-			return membership{trigger: onTrigger(j), since: conditionOf(conditions, conditionType).LastTransitionTime, period: period}, true
+			return membership{trigger: triggerName(j), since: conditionOf(conditions, conditionType).LastTransitionTime, period: period}, true
 		}
 		return membership{}, false
 	}}

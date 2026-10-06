@@ -64,7 +64,7 @@ spec:
     requires:
     - {kind: WeatherStation, name: lab, type: Safe}
   deactivation: [state: Parked]
-  on:
+  triggers:
   - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
     run:
     - state: Parked
@@ -113,7 +113,7 @@ spec:
   |---|---|
   | `Dome`, `Mount` | `state: Parked` or `Unparked` |
   | `DustCap` | `state: Open` or `Closed` |
-  | `FlatPanel` | `state: On` or `Off`, the light |
+  | `FlatPanel` | `state: Lit` or `Dark`, the light |
   | `Camera` | `cool: {celsius, within}`, `warm: {celsius, within}` |
   | every kind, `Telescope`, `Observatory` | `job` |
 
@@ -159,8 +159,8 @@ spec:
   and the actions of one resource run in order. An action's `after`
   names other resources whose runs for the same event must finish
   first: the same lifecycle step, or the same transition of the same
-  condition for an `on` trigger. A named resource with no such run is
-  not waited for. The tree gives no order to an `on` trigger, so the
+  condition for a trigger in `triggers`. A named resource with no such run is
+  not waited for. The tree gives no order to such a trigger, so the
   example's dome parks in bad weather `after: [{kind: Mount}]`.
   Without it, the dome's lock refuses the park while a mount is
   unparked, and the run fails with the driver's refusal.
@@ -173,10 +173,11 @@ spec:
   by the safety rules that the drivers enforce.
 - **A trigger runs once for each transition, while its resource is
   active.** The record of a run holds the transition time of the
-  condition it answers. An `on` trigger whose condition holds when the
-  resource's activation finishes runs then, so a dome that unparks in
-  bad weather with no `requires` parks again at once. When the
-  resource's deactivation begins, its `on` triggers stop.
+  condition it answers. A trigger in `triggers` whose condition holds
+  when the resource's activation finishes runs then, so a dome that
+  unparks in bad weather with no `requires` parks again at once. When
+  the
+  resource's deactivation begins, its `triggers` stop.
 - **`job` is the escape hatch.** An action can run a container as a
   Kubernetes `Job`, for a dew heater relay, a webhook, or anything the
   vocabulary lacks: `job: {image, command, args, env}`. The `Job`'s
@@ -227,12 +228,11 @@ Step 3 settled these points, which the design above leaves open:
   an operator restart. A stored condition that the status writer had
   not written yet is replaced by the earliest activation of an active
   telescope in it.
-- YAML reads a bare `On` or `Off` as a boolean, so a `FlatPanel`'s
-  state is quoted: `state: "Off"`. kubectl's YAML reads a bare `on`
-  key as `true` too, so a manifest quotes the key: `"on":`. A
-  manifest that does not is refused, or loses its triggers, so a
-  name that YAML reads as a string, such as `triggers`, is worth a
-  thought before the API leaves `v1alpha1`.
+- The field of the triggers on conditions is `triggers`, not `on`,
+  and a `FlatPanel`'s states are `Lit` and `Dark`, not `On` and
+  `Off`, because YAML 1.1, which `kubectl` reads through
+  `sigs.k8s.io/yaml`, reads a bare `on`, `On`, or `Off` as a boolean.
+  `Lit` matches the panel's `Lit` condition.
 
 Step 4 settled these:
 
@@ -302,7 +302,7 @@ lifecycle code:
    barrier rule, `status.procedures`, and the steps' `actions`.
    `Prepare` and `Secure` go, and the example states their actions as
    procedures. Built on 2026-10-06.
-4. **`on` and `for`.** The example closes the dome when
+4. **`triggers` and `for`.** The example closes the dome when
    its weather station reports unsafe for any length of time, and
    opens it after 20 minutes of safe weather. Built on 2026-10-06.
 5. **`job`.**
