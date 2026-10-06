@@ -49,26 +49,29 @@ states its own procedures.
 
 ### What each resource states
 
-A device kind, and `Observatory` and `Telescope` where it fits, gets
-three fields:
+Every device kind, the `Telescope`, and the `Observatory` get three
+fields:
 
 ```yaml
 kind: Dome
 spec:
   observatory: lab
-  activation:   [state: Unparked]
+  activation:
+  - state: Unparked
+    requires:
+    - {kind: WeatherStation, name: lab, type: Safe}
   deactivation: [state: Parked]
   on:
-  - when: {weatherStation: lab-weather, type: Safe, status: "False"}
+  - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
     run: [state: Parked]
-  - when: {weatherStation: lab-weather, type: Safe, status: "True", for: 20m}
+  - when: {kind: WeatherStation, name: lab, type: Safe, for: 20m}
     run: [state: Unparked]
 ---
 kind: Camera
 spec:
   opticalTrain: east-imaging
-  activation:   [cool: {celsius: -10, within: 0.5, timeout: 20m}]
-  deactivation: [warm: {celsius: 5, timeout: 10m}]
+  activation:   [cool: {celsius: -10, within: 0.5}]
+  deactivation: [warm: {celsius: 5}]
 ---
 kind: DustCap
 spec:
@@ -76,73 +79,118 @@ spec:
   deactivation: [state: Closed]
 ```
 
-- **A trigger is a condition.** `when` names a condition on a resource
-  in the same observatory: its type, its status, and optionally `for`,
-  how long the status must hold. Conditions are level-triggered: an
-  operator that restarts reads the current status and acts on it, so a
-  missed transition loses nothing. `for` stops a flapping weather
-  station from opening and closing the roof each minute, as `for`
-  does in a Prometheus alert rule. Kubernetes `Event`s record each
-  transition for a person, and never trigger anything, because the
-  API calls them best effort and they expire after an hour.
-- **A trigger names its resource by its place in the tree, or by
-  name.** `telescope:` and `observatory:` with no name mean the
-  resource's own ancestors. A `Reservation` comes and goes, so no
+- **A trigger is a condition.** `when` names a condition: the
+  resource's `kind` and `name`, the condition's `type`, its `status`
+  (`"True"` unless the field says otherwise), and optionally `for`, how
+  long the status must hold. With no `kind`, the condition is the
+  resource's own. A `kind` of `Observatory` or `Telescope` with no
+  `name` means the resource's own observatory or telescope. A
+  reference names a resource with `kind` and `name`, as a
+  `scaleTargetRef` or a `roleRef` does, so one shape serves `when`,
+  `requires`, and `after`, and one schema serves every CRD.
+  Conditions are level-triggered: an operator that restarts reads the
+  current status and acts on it, so a missed transition loses nothing.
+  `for` stops a flapping weather station from opening and closing the
+  roof each minute, as `for` does in a Prometheus alert rule.
+  Kubernetes `Event`s record each transition for a person, and never
+  trigger anything, because the API calls them best effort and they
+  expire after an hour. A `Reservation` comes and goes, so no
   procedure names one.
 - **An action is a target state.** `state: Parked` is safe to run
   twice and safe to run again after an operator restart, which a
-  command such as "park" is not. `cool` and `warm` name a temperature
-  and a tolerance. Each action has a timeout, and the CRD schema
-  accepts only the actions a kind supports.
+  command such as "park" is not. Each action names exactly one of
+  `state`, `cool`, `warm`, or `job`, and the CRD of each kind accepts
+  only what the kind supports:
+
+  | Kind | Actions |
+  |---|---|
+  | `Dome`, `Mount` | `state: Parked` or `Unparked` |
+  | `DustCap` | `state: Open` or `Closed` |
+  | `FlatPanel` | `state: On` or `Off`, the light |
+  | `Camera` | `cool: {celsius, within}`, `warm: {celsius, within}` |
+  | every kind, `Telescope`, `Observatory` | `job` |
+
+  Each action takes an optional `timeout`, with a default for each
+  action. `warm` switches the cooler off at its target, or at its
+  timeout wherever the sensor is, because a cooler cannot warm a
+  sensor above the air around it, so a warm-up never fails on a cold
+  night. `cool` replaces `Camera.spec.temperature`, so one field holds
+  the setpoint.
 - **`activation` and `deactivation` are the names people write for two
-  triggers.** The `Telescope` gets an `Active` condition, `True` while
-  a reservation holds it, and the `Observatory` gets one that is
-  `True` while any of its telescopes is active. `activation` runs on
-  `Active=True`, and `deactivation` on `Active=False`.
+  triggers.** The `Telescope` and the `Observatory` get an `Active`
+  condition. A telescope is active from when its reservation has
+  connected and configured its devices until its deactivation begins.
+  An observatory is active from when the first reservation in it has
+  connected the observatory's devices until the last one ends.
+  `activation` runs as `Active` turns `True`, and `deactivation` as it
+  turns `False`, while every device is still connected.
 - **One rule makes a trigger a barrier.** The operator does not take
   the next lifecycle step until every procedure that the last
-  lifecycle transition triggered has finished. The telescope becomes
-  `Ready` only after its activation procedures finish, and
-  `Disconnect` starts only after its deactivation procedures finish.
-  A procedure on any other trigger, such as the weather, runs with no
-  step waiting on it.
+  lifecycle transition triggered has finished. `StartSite` waits for
+  the observatory's activation procedures, a new `Activation` step
+  after `Configure` waits for the telescope's, and the telescope
+  becomes `Ready` only after them. A new `Deactivation` step after
+  `Abort` waits for the telescope's deactivation procedures, and then,
+  when no other reservation holds a telescope in the observatory, for
+  the observatory's, before `Disconnect` starts. A procedure on any
+  other trigger, such as the weather, runs with no step waiting on it.
+  A step that finds a failed procedure of the same transition, such as
+  the observatory's activation that an earlier reservation started,
+  runs it again, because its actions are target states.
 - **The tree orders the procedures.** Activation runs top down: the
-  `Observatory`'s devices, then the `Telescope`'s, then each
-  `OpticalTrain`'s. Deactivation runs bottom up. So the dome unparks
-  before the mount, and the mount parks before the dome, with no edge
-  declared. Siblings run in parallel. `after:` names another
-  resource's procedure for an order the tree does not give.
+  `Observatory` and its devices, then the `Telescope` and its devices,
+  then the devices of each `OpticalTrain`. Deactivation runs bottom
+  up. So the dome unparks before the mount, and the mount parks
+  before the dome, with no edge declared. Siblings run in parallel,
+  and the actions of one resource run in order. An action's `after`
+  names other resources whose procedure of the same lifecycle
+  transition must finish first, for an order the tree does not give.
+  An `after` that names a resource in a later tier waits until the
+  action's timeout, and the failure names both resources.
 - **`requires` gates the operator's own actions.** An action can
-  require a condition before it runs:
-  ```yaml
-  activation:
-  - state: Unparked
-    requires: [{dome: lab-dome, type: Open, status: "True"}]
-  ```
-  The operator waits for the condition until the action's timeout.
-  `requires` binds only the actions the operator runs. A move that a
-  person makes in KStars is stopped only by the safety rules that the
-  drivers enforce.
+  require conditions before it runs, and the operator waits for them
+  until the action's timeout. `requires` binds only the actions the
+  operator runs. A move that a person makes in KStars is stopped only
+  by the safety rules that the drivers enforce.
+- **A trigger runs once for each transition, while its resource is
+  active.** The record of a run holds the transition time of the
+  condition it answers. An `on` trigger whose condition holds when the
+  resource's activation finishes runs then, so a dome that unparks in
+  bad weather with no `requires` parks again at once. When the
+  resource's deactivation begins, its `on` triggers stop.
 - **`job` is the escape hatch.** An action can run a container as a
   Kubernetes `Job`, for a dew heater relay, a webhook, or anything the
-  vocabulary lacks. The action finishes when the `Job` succeeds.
+  vocabulary lacks: `job: {image, command, args, env}`. The `Job`'s
+  environment names the observatory, the telescope, the resource, the
+  trigger, and the resource's INDI server. The action finishes when
+  the `Job` succeeds, and fails when it fails or passes the action's
+  timeout.
 
 ### What status shows
 
-`Reservation.status.steps` lists each procedure's actions under the
-lifecycle step that waits on them, with the resource, the action, its
-state, its times, and its message. A device kind gets the conditions
-that triggers read, such as `Dome` `Parked` and `Open`, `Mount`
-`Parked`, `DustCap` `Open`, `Camera` `AtTemperature`, and
-`WeatherStation` `Safe`. A resource with no activation procedure that
-usually has one, such as a cooled camera, says so in its status, so a
-missing procedure is not silent.
+Each resource with procedures reports its runs in `status.procedures`:
+for each trigger, its last run, the transition time it answers, its
+state, and each action with its state, its times, and its message. An
+operator that restarts resumes a run from that record, and runs again
+only the actions that are not `Done`. `Reservation.status.steps`
+copies the actions that a lifecycle step waited on into the step's
+`actions`, so `kubectl describe reservation` shows the whole
+activation in one place.
+
+A device kind gets the conditions that triggers read, while its device
+is connected: `Dome` `Parked` and `Open` (the shutter), `Mount`
+`Parked` and `Tracking`, `DustCap` `Open`, `FlatPanel` `Lit`, `Camera`
+`Cooling`, and `WeatherStation` `Safe`. A disconnected device has none
+of them, so a trigger never reads a stale state. A camera with a
+cooler and no activation procedure that cools it gets a note in the
+`Activation` step's message, so a missing procedure is not silent.
 
 ## What this removes
 
 - `Observatory.spec.policies`, all four fields.
 - The steps `Prepare` and `Secure`, and the dome part of `StopSite`.
   Their actions move into `examples/simulators.yaml` as procedures.
+- `Camera.spec.temperature`, which the `cool` action replaces.
 - The branch `dome-unpark-draft`, which this design replaces.
 
 The API is `v1alpha1` and no one outside the test cluster uses it, so
@@ -166,13 +214,13 @@ lifecycle code:
 1. **Remove the flags.** Delete `policies`. The park locks and the
    shutter rule hold whenever a dome exists. The behavior of the
    example does not change.
-2. **The conditions.** `Telescope` and `Observatory` `Active`, and the
-   device conditions that triggers read, each posting its transitions
-   as `Event`s through `kubernetes/events`.
-3. **The engine and the two lifecycle triggers.** `activation`,
-   `deactivation`, the target-state actions, the tree order, the
-   barrier rule, and `status.steps`. `Prepare` and `Secure` go, and
-   the example states their actions as procedures.
+2. **The device conditions** that triggers read, each posting its
+   transitions as `Event`s through `kubernetes/events`.
+3. **The engine and the two lifecycle triggers.** `Telescope` and
+   `Observatory` `Active`, `activation`, `deactivation`, the
+   target-state actions, `after`, the tree order, the barrier rule,
+   `status.procedures`, and the steps' `actions`. `Prepare` and
+   `Secure` go, and the example states their actions as procedures.
 4. **`on`, `for`, and `requires`.** The example closes the dome when
    its weather station reports unsafe for any length of time, and
    opens it after 20 minutes of safe weather.
