@@ -39,6 +39,9 @@ type runner struct {
 	// logged is the last phase that the log names, so each phase
 	// change writes one line.
 	logged observatory.ReservationPhase
+	// guiderPod is the UID of the guider's pod whose PHD2 the runner
+	// last saw with its equipment connected (guidersteady.go).
+	guiderPod string
 }
 
 func newRunner(o *operator, r *observatory.Reservation) *runner {

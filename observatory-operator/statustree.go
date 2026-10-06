@@ -99,7 +99,7 @@ func (o *operator) telescopePhase(t *tree, telescope string) (observatory.Phase,
 	return observatory.PhaseActivating, r
 }
 
-func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, composed map[string]deviceStatus) observatory.TelescopeStatus {
+func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, composed map[string]deviceStatus, guiders map[string]observatory.GuiderStatus) observatory.TelescopeStatus {
 	name := telescope.Metadata.Name
 	phase, holder := o.telescopePhase(t, name)
 	next := observatory.TelescopeStatus{
@@ -126,12 +126,9 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 			})
 		}
 	}
-	for _, guider := range sortedNames(t.guiders) {
-		if t.guiders[guider].Spec.Telescope == name {
-			next.Guider = &observatory.GuiderRef{Name: guider, Ready: false, Reason: observatory.ReasonNotImplemented}
-			next.Display.Guider = next.Guider.Reason
-			break
-		}
+	if guider := t.guiderOf(name); guider != nil {
+		next.Guider = guiderRef(guider.Metadata.Name, guiders[guider.Metadata.Name])
+		next.Display.Guider = guiderColumn(next.Guider)
 	}
 	next.Conditions = withGeneration([]observatory.Condition{
 		parentCondition(t.missingObservatory(telescope.Spec.Observatory)),
@@ -221,24 +218,6 @@ func tubeStatus(t *tree, tube *observatory.OpticalTube) observatory.OpticalTubeS
 	}
 	next.Conditions = withGeneration([]observatory.Condition{parentCondition(t.missingTelescope(tube.Spec.Telescope))}, next.ObservedGeneration)
 	return next
-}
-
-// guiderStatus says that the guider's pod is not built. Plan 09 builds
-// it.
-func guiderStatus(t *tree, guider *observatory.Guider) observatory.GuiderStatus {
-	missingParent := t.missingTelescope(guider.Spec.Telescope)
-	if _, ok := t.trains[guider.Spec.OpticalTrain]; !ok && missingParent == "" {
-		missingParent = "OpticalTrain " + guider.Spec.OpticalTrain
-	}
-	return observatory.GuiderStatus{
-		ObservedGeneration: guider.Metadata.Generation,
-		Phase:              observatory.PhaseInventory,
-		Conditions: withGeneration([]observatory.Condition{
-			parentCondition(missingParent),
-			condition(observatory.ConditionReady, observatory.ConditionFalse, observatory.ReasonNotImplemented,
-				"Not built yet: plan 09 of observatory-operator builds the PHD2 pod"),
-		}, guider.Metadata.Generation),
-	}
 }
 
 func sortedNames[T any](m map[string]*T) []string {

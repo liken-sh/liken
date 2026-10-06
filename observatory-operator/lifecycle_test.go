@@ -28,7 +28,7 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-		want := []string{"Wait=Done", "StartSite=Done", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Prepare=Done"}
+		want := []string{"Wait=Done", "StartSite=Done", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Prepare=Done", "StartGuider=Done"}
 		if got := stepStates(r); !slices.Equal(got, want) {
 			t.Errorf("steps = %v, want %v", got, want)
 		}
@@ -45,7 +45,7 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 		slices.Sort(pods)
 		wantPods := []string{
 			"east-dustcap", "east-filterwheel", "east-flatpanel", "east-focuser", "east-gps", "east-guide-camera",
-			"east-main-camera", "east-mount", "east-polaraligner", "east-receiver", "east-rotator", "east-switch",
+			"east-guider", "east-main-camera", "east-mount", "east-polaraligner", "east-receiver", "east-rotator", "east-switch",
 			"east-telescope", "lab-dome", "lab-observatory", "lab-skyqualitymeter", "lab-weatherstation",
 		}
 		if !slices.Equal(pods, wantPods) {
@@ -98,15 +98,6 @@ func stepOf(r observatory.Reservation, name observatory.StepName) observatory.St
 	return observatory.Step{}
 }
 
-func conditionOf(conditions []observatory.Condition, kind string) observatory.Condition {
-	for _, c := range conditions {
-		if c.Type == kind {
-			return c
-		}
-	}
-	return observatory.Condition{}
-}
-
 // At spec.end the reservation deactivates, and it stays, Released, with
 // every step in its record.
 func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
@@ -119,8 +110,8 @@ func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
 		time.Sleep(time.Hour)
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		want := []string{
-			"Wait=Done", "StartSite=Done", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Prepare=Done",
-			"Abort=Skipped", "Secure=Done", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Done",
+			"Wait=Done", "StartSite=Done", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Prepare=Done", "StartGuider=Done",
+			"Abort=Skipped", "Secure=Done", "StopGuider=Done", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Done",
 		}
 		if got := stepStates(r); !slices.Equal(got, want) {
 			t.Errorf("steps = %v, want %v", got, want)

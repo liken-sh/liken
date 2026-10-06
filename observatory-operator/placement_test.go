@@ -14,9 +14,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// besideServer is the pod affinity that holds a pod to the node of the
+// besideEast is the pod affinity that holds a pod to the node of the
 // east telescope's server.
-var besideServer = &affinity{PodAffinity: &podAffinity{Required: []podAffinityTerm{{
+var besideEast = &affinity{PodAffinity: &podAffinity{Required: []podAffinityTerm{{
 	LabelSelector: &labelSelector{MatchLabels: map[string]string{labelName: "east-telescope"}},
 	TopologyKey:   "kubernetes.io/hostname",
 }}}}
@@ -33,7 +33,7 @@ func TestOnlyAGuideCameraWithNoClaimFollowsTheServer(t *testing.T) {
 		guides bool
 		want   *affinity
 	}{
-		{"the guide camera", simulator(observatory.CameraKind, "east-guide", "indi_simulator_guide"), true, besideServer},
+		{"the guide camera", simulator(observatory.CameraKind, "east-guide", "indi_simulator_guide"), true, besideEast},
 		{"another camera", simulator(observatory.CameraKind, "east-main", "indi_simulator_ccd"), false, nil},
 		{"a guide camera with a claim", claimed, true, nil},
 	}
@@ -63,26 +63,26 @@ func affinities(w *world) map[string]*affinity {
 	return out
 }
 
-func TestTheGuiderPlacesItsCameraBesideTheServer(t *testing.T) {
+func TestTheGuiderAndItsCameraRunBesideTheServer(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		what   string
 		change func(w *world)
 		want   map[string]*affinity
 	}{
-		{"the example", func(w *world) {}, map[string]*affinity{"east-guide-camera": besideServer}},
+		{"the example", func(w *world) {}, map[string]*affinity{"east-guide-camera": besideEast, "east-guider": besideEast}},
 		{"no Guider", func(w *world) {
 			w.api.deleteNamed(kindCollection(observatory.GuiderKind), "east")
 		}, map[string]*affinity{}},
 		{"a Guider of another train", func(w *world) {
 			w.put(observatory.GuiderKind, "east", map[string]any{"telescope": "east", "opticalTrain": "east-imaging", "pulses": "Mount"})
-		}, map[string]*affinity{"east-main-camera": besideServer}},
+		}, map[string]*affinity{"east-main-camera": besideEast, "east-guider": besideEast}},
 		{"a guide camera with a claim", func(w *world) {
 			w.put(observatory.CameraKind, "east-guide", map[string]any{
 				"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_guide"},
 				"claim": map[string]any{"devices": map[string]any{"requests": []any{map[string]any{"name": "camera", "exactly": map[string]any{"deviceClassName": "usb.liken.sh"}}}}},
 			})
-		}, map[string]*affinity{}},
+		}, map[string]*affinity{"east-guider": besideEast}},
 	}
 	for _, c := range cases {
 		t.Run(c.what, func(t *testing.T) {

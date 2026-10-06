@@ -7,12 +7,14 @@ as resources, and a `Reservation` gives one holder the use of one
 `Telescope`. While a reservation is active, the operator runs each of
 the telescope's INDI devices in its own pod, serves them on one INDI
 server, and connects, configures, and prepares each device in a fixed
-order. At the end it secures each device and reports that the devices
-are safe to power off. KStars, or `astrophotography-operator`, drives
-the telescope through its server.
+order. It starts PHD2 for the telescope's `Guider` and connects it to
+the guide camera and the mount. At the end it secures each device and
+reports that the devices are safe to power off. KStars, or
+`astrophotography-operator`, drives the telescope through its server,
+and guides through PHD2's event server.
 
 The Go module `github.com/liken-sh/liken/observatory-operator` holds
-the operator and three packages:
+the operator and four packages:
 
 - [`observatory/`](observatory/) holds the 20 kinds of
   `observatory.liken.sh/v1alpha1` as Go types. The operator reads and
@@ -22,8 +24,12 @@ the operator and three packages:
   Go with no cgo. It keeps every device and property that a server
   defines, follows each update, sends changes that follow each
   property's definition, and waits for a device to answer.
+- [`phd2/`](phd2/) is a client of PHD2's event server. It reads
+  PHD2's state, calibration, equipment, pixel scale, and guide steps
+  from the event stream, and sends `set_connected` and `stop_capture`.
+  `phd2/phd2test` is a fake event server for tests.
 - [`drivers/`](drivers/) maps each INDI driver to the image of the
-  `indi` build that holds it.
+  `indi` build that holds it, and names the images of the guider's pod.
 
 [`deploy/`](deploy/) holds the namespace, the CRDs, the RBAC, and the
 operator, and [`examples/simulators.yaml`](examples/simulators.yaml)
@@ -93,7 +99,7 @@ names and the tree.
 | `SkyQualityMeter` | `sqm` | `telescope` or `observatory` | brightness in mag/arcsec² |
 | `Switch` | `sw` | `telescope` or `observatory` | the outputs that are on |
 | `Receiver` | `rx` | `telescope` or `observatory` | frequency in MHz |
-| `Guider` | none | `telescope` | its `Ready` reason |
+| `Guider` | none | `telescope` | phase, PHD2's state, RMS in arcsec |
 | `Reservation` | `rsv` | `telescope` | phase, step, message |
 
 `GPS`, `Dome`, and `Guider` have no short name, because the singular
@@ -158,9 +164,9 @@ A device's status has the same fields in every kind, and one
 
 A `Telescope`'s status names its INDI server in `status.server`, its
 active reservation, its tubes, its trains with their devices, its own
-devices, and whether its guider is ready. Its `Guider` column, in
-`-o wide`, shows the reason of the guider's `Ready` condition, and an
-empty cell for a telescope with no `Guider`. An `Observatory`'s status
+devices, and its guider's phase and PHD2's state. Its `Guider` column,
+in `-o wide`, shows both, such as `Ready, Guiding`, and an empty cell
+for a telescope with no `Guider`. An `Observatory`'s status
 names its server, its telescopes, its devices, the active reservations,
 and the worst verdict of its weather stations.
 
@@ -210,9 +216,8 @@ observatory-operator: Reservation east-tonight: Ready at east-telescope.observat
 
 `SafeToPowerOff` is `True` when the deactivation steps are done. Until
 then it is `False`, and its message says why, such as
-`In use by desktop` while the reservation is `Ready`. The
-`Guider` kind has its CRD, but its pod is [plan 09](plans/09-the-guider.md):
-its `Ready` condition is `False` with the reason `NotImplemented`.
+`In use by desktop` while the reservation is `Ready`. "The guider"
+below states what a `Guider`'s status holds.
 
 ## How a reservation runs
 
@@ -233,8 +238,10 @@ goes on.
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the sky quality meters, the receivers, and the cameras, in that order. | 2 min |
 | `Configure` | Writes the observatory's location to the mount and the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. | 2 min |
 | `Prepare` | Opens the dust caps, cools each camera to `spec.temperature` within 0.5 °C, and unparks the mount. It does not switch tracking on, because the holder, KStars in mode 1 or a `Session` in mode 2, aligns and calibrates the mount first. | 20 min |
-| `Abort` | Ends each exposure and stops the mount if it moves. | 2 min |
+| `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. A telescope with no `Guider` skips it. | 10 min |
+| `Abort` | Stops PHD2's exposures and guiding with `stop_capture`, then ends each exposure and stops the mount if it moves. | 2 min |
 | `Secure` | Switches the flat panels off, closes the dust caps, parks the mount, and warms each cooled camera to 5 °C for up to 10 minutes before it switches the cooler off. | 20 min |
+| `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
 | `StopDevices` | Deletes the device pods. | 2 min |
 | `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. | 5 min |
@@ -267,7 +274,68 @@ that is deleted. When a device's driver comes back on the server
 disconnected, after its pod or the server restarted, the operator
 connects it and writes its settings again. A device that a person
 disconnects in KStars stays disconnected. A device added to the
-telescope's inventory restarts the server, which then links to it.
+telescope's inventory restarts the server, which then links to it. The
+operator also creates the guider's pod again, and connects the camera
+and the mount of each new PHD2 once.
+
+## The guider
+
+A `Guider` runs PHD2 for its `Telescope`, with the camera of the
+`OpticalTrain` it names. `StartGuider` starts PHD2, connects it to the
+camera and the mount, and leaves it idle. The operator never loops,
+calibrates, or guides: tracking stays off after `Prepare` until the
+holder aligns the mount, so the holder drives PHD2 from then on. KStars
+or `astrophotography-operator` connects to PHD2's event server at the
+`Guider`'s `status.endpoint`, such as
+`east-guider.observatory.svc:4400`.
+
+The guider's pod runs two containers. PHD2 runs from
+`ghcr.io/liken-sh/indi-phd2`, which the `indi` build makes on the
+`indi` image, so PHD2 links the libindi of the server it talks to. PHD2
+has no headless mode, so it draws on a headless weston in a native
+sidecar, through a Wayland socket that the two containers share. The
+sidecar is the `weston` image that `display-operator` builds on, at the
+tag that `weston/package.toml` pins, so a node that runs
+`display-operator` pulls no new image for it, and one bump of `weston`
+moves both. The pod has no device claim, and it runs on the node of
+the telescope's server, because PHD2 reads a guide frame from the
+server about once a second.
+
+PHD2 writes its config while it runs, so the operator writes the whole
+profile into the `ConfigMap` `<guider>-guider`, and the image copies it
+into `$HOME` before each start. The profile names the INDI server, the
+guide camera and the mount as the server names them, the guide tube's
+focal length, and where the pulses go: `spec.pulses: Mount` sends them
+to the mount's driver, and `Camera` to the guide camera's ST-4 port. A
+change to the profile replaces the pod.
+
+`StopGuider` deletes the pod before `Disconnect`, so PHD2 never sees
+its devices drop. On a compositor with no seat, a modal dialog ends
+PHD2, and the kubelet starts it again: [plan
+09](plans/09-the-guider.md) lists the dialogs that PHD2 can open.
+
+A `Guider`'s status holds what PHD2 reports while the operator's
+connection to its event server is open:
+
+- `state`: PHD2's state, `Stopped`, `Selected`, `Looping`,
+  `Calibrating`, `Guiding`, `LostLock`, or `Paused`.
+- `calibrated`, and `pixelScale` in arc-seconds per pixel.
+- `rms`: the RMS of the star's distance from the lock position in
+  right ascension, declination, and total, in arc-seconds, over the
+  last 100 guide steps since guiding started.
+- `star`: the guide star's SNR and its HFD in pixels, and
+  `lastStepTime`, from the last guide step.
+- `alert`: the last alert PHD2 showed, or the last calibration that
+  failed.
+
+The `Ready` condition is `True` while PHD2 runs and reports its camera
+and mount connected. The status writer writes at most once a second,
+so a guide step a second costs one write a second.
+
+```sh
+kubectl get guider -n observatory
+kubectl port-forward -n observatory svc/east-guider 4400
+```
 
 ## The pods and their names
 
@@ -286,13 +354,14 @@ refuses a resource whose generated name breaks that rule, and the step
 that needs the name fails with a message that gives the longest
 resource name that fits.
 
-The scheduler places most pods. The camera of the `OpticalTrain` that
-the telescope's `Guider` names has a required pod affinity to the
-telescope's server, so it runs on the server's node and its guide
-frames cross no link between nodes. A guide camera with a
+The scheduler places most pods. The guider's pod, and the camera of the
+`OpticalTrain` that the telescope's `Guider` names, have a required pod
+affinity to the telescope's server, so they run on the server's node
+and the guide frames cross no link between nodes. A guide camera with a
 `spec.claim` gets no affinity, because the node of its device decides
 where it runs. A telescope with no `Guider` has no affinity on any
-pod.
+pod. The guider's pod, `Service`, and `ConfigMap` take the name
+`<guider>-guider`, such as `east-guider`.
 
 ## The INDI client
 

@@ -70,8 +70,14 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
 				return next
 			})
 	}
+	// A telescope's status names its guider's phase and state, so the
+	// guiders' statuses are composed first.
+	guiders := map[string]observatory.GuiderStatus{}
+	for name, guider := range t.guiders {
+		guiders[name] = o.guiderStatus(t, guider)
+	}
 	for _, telescope := range t.telescopes {
-		next := o.telescopeStatus(t, telescope, composed)
+		next := o.telescopeStatus(t, telescope, composed, guiders)
 		writeTyped(client, seen, observatory.TelescopeKind, telescope, next, func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions })
 	}
 	for _, site := range t.observatories {
@@ -86,8 +92,8 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
 		next := tubeStatus(t, tube)
 		writeTyped(client, seen, observatory.OpticalTubeKind, tube, next, func(s *observatory.OpticalTubeStatus) *[]observatory.Condition { return &s.Conditions })
 	}
-	for _, guider := range t.guiders {
-		next := guiderStatus(t, guider)
+	for name, guider := range t.guiders {
+		next := guiders[name]
 		writeTyped(client, seen, observatory.GuiderKind, guider, next, func(s *observatory.GuiderStatus) *[]observatory.Condition { return &s.Conditions })
 	}
 }

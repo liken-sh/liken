@@ -157,7 +157,7 @@ func TestTheStatusShowsEachValueWithItsUnit(t *testing.T) {
 			t.Errorf("observatory display = %+v", d)
 		}
 		east, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "east")
-		if east.Status.Display.Guider != observatory.ReasonNotImplemented {
+		if east.Status.Display.Guider != "Ready, Stopped" {
 			t.Errorf("east guider column = %q", east.Status.Display.Guider)
 		}
 		weather, _ := decode[observatory.WeatherStation](t, w.api, kindCollection(observatory.WeatherStationKind), "lab")

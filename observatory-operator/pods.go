@@ -201,9 +201,13 @@ func serviceFor(namespace, name string, objectLabels map[string]string, owners [
 // operator compares the digest of the pod it builds with the digest on
 // the pod that runs, and replaces a pod whose spec changed, because
 // Kubernetes refuses most changes to a running pod's spec.
-func stamped(p *pod) *pod {
+func stamped(p *pod) *pod { return stampedWith(p, "") }
+
+// stampedWith stamps a pod with a digest of its spec and of a file it
+// reads at start, so a change to the file replaces the pod too.
+func stampedWith(p *pod, file string) *pod {
 	body, _ := json.Marshal(p.Spec)
-	sum := sha256.Sum256(body)
+	sum := sha256.Sum256(append(body, file...))
 	p.Metadata.Annotations = map[string]string{annotationSpec: hex.EncodeToString(sum[:8])}
 	return p
 }

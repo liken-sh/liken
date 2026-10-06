@@ -59,9 +59,11 @@ const (
 	StepConnect      StepName = "Connect"
 	StepConfigure    StepName = "Configure"
 	StepPrepare      StepName = "Prepare"
+	StepStartGuider  StepName = "StartGuider"
 
 	StepAbort       StepName = "Abort"
 	StepSecure      StepName = "Secure"
+	StepStopGuider  StepName = "StopGuider"
 	StepDisconnect  StepName = "Disconnect"
 	StepStopDevices StepName = "StopDevices"
 	StepPowerOff    StepName = "PowerOff"
@@ -72,12 +74,12 @@ const (
 // does.
 var ActivationSteps = []StepName{
 	StepWait, StepStartSite, StepPowerOn, StepStartDevices,
-	StepConnect, StepConfigure, StepPrepare,
+	StepConnect, StepConfigure, StepPrepare, StepStartGuider,
 }
 
 // DeactivationSteps run in this order, after spec.end or a delete.
 var DeactivationSteps = []StepName{
-	StepAbort, StepSecure, StepDisconnect, StepStopDevices,
+	StepAbort, StepSecure, StepStopGuider, StepDisconnect, StepStopDevices,
 	StepPowerOff, StepStopSite,
 }
 

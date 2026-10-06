@@ -6,6 +6,7 @@ package main
 //   - It creates again each pod that is gone, such as one a node's
 //     eviction deleted, and replaces the server when the telescope's
 //     devices change, because the server's links name every device.
+//   - It keeps the telescope's guider (guidersteady.go).
 //   - It connects and configures again each device whose driver comes
 //     back on its server disconnected. A driver comes back that way
 //     after its pod restarts, and every driver does after the server
@@ -62,6 +63,7 @@ func (r *runner) steady(ctx context.Context) {
 			}
 		}
 		r.reapply(ctx, t, ref, appeared)
+		r.keepGuider(ctx, r.o.snapshot(), ref, telescope)
 		if site, ok := t.observatories[telescope.Spec.Observatory]; ok {
 			r.reapplySite(ctx, t, site, appeared)
 		}

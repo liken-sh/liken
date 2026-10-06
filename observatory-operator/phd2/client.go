@@ -70,17 +70,17 @@ type Option func(*Client)
 // stops.
 func WithDialer(dialer Dialer) Option { return func(c *Client) { c.dialer = dialer } }
 
-// WithNotify calls notify after each change to the state. It runs on
-// the client's reader, so it must not block and must not call the
+// WithNotify calls notify with the state after each change. It runs
+// on the client's reader, so it must not block and must not call the
 // Client.
-func WithNotify(notify func()) Option { return func(c *Client) { c.notify = notify } }
+func WithNotify(notify func(State)) Option { return func(c *Client) { c.notify = notify } }
 
 // Client is a client of one PHD2. Its methods are safe to call from
 // several goroutines.
 type Client struct {
 	address string
 	dialer  Dialer
-	notify  func()
+	notify  func(State)
 
 	// mu guards every field below it. The reader applies each message
 	// under it, so a reader of the state never reads half a message.
@@ -116,7 +116,7 @@ func NewClient(address string, options ...Option) *Client {
 	c := &Client{
 		address: address,
 		dialer:  &net.Dialer{Timeout: DialTimeout},
-		notify:  func() {},
+		notify:  func(State) {},
 		changed: make(chan struct{}),
 		reread:  map[string]bool{},
 		wake:    make(chan struct{}, 1),
@@ -254,7 +254,7 @@ func (c *Client) rereadLocked(methods ...string) {
 func (c *Client) changeLocked() {
 	close(c.changed)
 	c.changed = make(chan struct{})
-	c.notify()
+	c.notify(c.state.clone())
 }
 
 // send writes one request. A request with done waits for its answer

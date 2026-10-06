@@ -34,9 +34,10 @@ type TelescopeStatus struct {
 
 // TelescopeDisplay holds what the printer columns show.
 type TelescopeDisplay struct {
-	// Guider is the reason of the Guider's Ready condition, such as
-	// Ready or NotImplemented. It is an empty string for a telescope
-	// with no Guider, so the column shows an empty cell, not <none>.
+	// Guider is the Guider's phase, and PHD2's state while the
+	// operator reads it, such as "Ready, Guiding". It is an empty
+	// string for a telescope with no Guider, so the column shows an
+	// empty cell, not <none>.
 	Guider string `json:"guider"`
 }
 
@@ -55,9 +56,12 @@ type TrainRef struct {
 }
 
 // GuiderRef is the Guider in a Telescope's status. Reason is the
-// reason of the Guider's Ready condition.
+// reason of the Guider's Ready condition, and Phase and State copy the
+// Guider's own status.
 type GuiderRef struct {
-	Name   string `json:"name"`
-	Ready  bool   `json:"ready"`
-	Reason string `json:"reason,omitempty"`
+	Name   string      `json:"name"`
+	Ready  bool        `json:"ready"`
+	Reason string      `json:"reason,omitempty"`
+	Phase  Phase       `json:"phase,omitempty"`
+	State  GuiderState `json:"state,omitempty"`
 }

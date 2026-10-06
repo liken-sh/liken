@@ -89,6 +89,15 @@ Note added on 2026-10-05: `Prepare` does not switch tracking on,
 because the holder, KStars in mode 1 or a `Session` in mode 2, aligns
 and calibrates the mount first.
 
+Note added on 2026-10-06: plan 09 adds two steps for the guider.
+Activation now runs `Wait`, `StartSite`, `PowerOn`, `StartDevices`,
+`Connect`, `Configure`, `Prepare`, and `StartGuider`, which starts PHD2
+and connects it to the guide camera and the mount. Deactivation now
+runs `Abort`, `Secure`, `StopGuider`, `Disconnect`, `StopDevices`,
+`PowerOff`, and `StopSite`. `Abort` also stops PHD2's exposures and
+guiding, and `StopGuider` deletes the guider's pod before `Disconnect`.
+[Plan 09](../09-the-guider.md) gives the reasons.
+
 The server stops in `PowerOff`, after the outputs switch off. The
 operator reaches a `Switch` through the telescope's server, so a
 server that stopped in `StopDevices` would leave the outputs on. Each

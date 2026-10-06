@@ -37,7 +37,7 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 		if ready.Reason != reasonTimedOut || !strings.HasPrefix(ready.Message, "StartDevices timed out after 10 min: ") || !strings.Contains(ready.Message, "Camera east-main") {
 			t.Errorf("Ready = %+v", ready)
 		}
-		if got := stepStates(r); !slices.Equal(got[5:], []string{"Configure=Pending", "Prepare=Pending"}) {
+		if got := stepStates(r); !slices.Equal(got[5:], []string{"Configure=Pending", "Prepare=Pending", "StartGuider=Pending"}) {
 			t.Errorf("the steps after the failed one ran: %v", got)
 		}
 		if !slices.Contains(w.api.eventReasons(), reasonTimedOut) {

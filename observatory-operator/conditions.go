@@ -43,3 +43,13 @@ func equalJSON(a, b any) bool {
 // stamp answers the time a record holds: UTC, to the second, which is
 // what the API server keeps of a date-time.
 func stamp() time.Time { return time.Now().UTC().Truncate(time.Second) }
+
+// conditionOf answers the condition of one type, or the zero condition.
+func conditionOf(conditions []observatory.Condition, kind string) observatory.Condition {
+	for _, c := range conditions {
+		if c.Type == kind {
+			return c
+		}
+	}
+	return observatory.Condition{}
+}

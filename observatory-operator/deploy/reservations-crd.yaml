@@ -136,7 +136,7 @@ spec:
                     failed, and the `Ready` condition names it.
                 step:
                   type: string
-                  enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, Abort, Secure, Disconnect, StopDevices, PowerOff, StopSite]
+                  enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, StartGuider, Abort, Secure, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                   description: >-
                     The step that runs now, or the step that failed.
                     It is empty while the phase is `Ready` or
@@ -146,11 +146,12 @@ spec:
                   description: >-
                     Every step, in the order it runs. The activation
                     steps are `Wait`, `StartSite`, `PowerOn`,
-                    `StartDevices`, `Connect`, `Configure`, and
-                    `Prepare`, and the list holds them from the start.
-                    The deactivation steps are `Abort`, `Secure`,
-                    `Disconnect`, `StopDevices`, `PowerOff`, and
-                    `StopSite`, and the list holds them from when
+                    `StartDevices`, `Connect`, `Configure`, `Prepare`,
+                    and `StartGuider`, and the list holds them from the
+                    start. The deactivation steps are `Abort`,
+                    `Secure`, `StopGuider`, `Disconnect`,
+                    `StopDevices`, `PowerOff`, and `StopSite`, and the
+                    list holds them from when
                     deactivation begins. A step starts only when the
                     step before it is `Done` or `Skipped`.
                   x-kubernetes-list-type: map
@@ -162,7 +163,7 @@ spec:
                     properties:
                       name:
                         type: string
-                        enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, Abort, Secure, Disconnect, StopDevices, PowerOff, StopSite]
+                        enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, StartGuider, Abort, Secure, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                         description: "The step's name."
                       state:
                         type: string

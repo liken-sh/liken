@@ -15,7 +15,10 @@ devices through `indi-shim`, one symbolic link for each device. The
 `Observatory` has one more server for the devices that no telescope
 owns. The operator holds one INDI client for each server, and connects
 each device and applies its settings when the device appears. PHD2 guides each
-telescope from its own pod, as a client of the telescope's server.
+telescope from its own pod, as a client of the telescope's server. The
+operator starts PHD2, connects it to the guide camera and the mount,
+and reads its state from PHD2's event server. The holder calibrates and
+guides.
 Plan 03 tested this topology on a cluster.
 
 ## The resources
@@ -43,9 +46,9 @@ A device resource is inventory, and the operator starts nothing for it.
 A `Reservation` gives one holder the use of one `Telescope`: a
 person's KStars in mode 1, or a `Session` of `astrophotography-operator`
 in mode 2. Activation waits for the devices to be powered on, then
-starts the pods. Deactivation parks the mount and warms the camera
-before it stops the pods and reports that the devices are safe to
-power off.
+starts the pods, and starts the guider last. Deactivation stops the
+guider, parks the mount, and warms the camera before it stops the pods
+and reports that the devices are safe to power off.
 
 ## The images
 
@@ -66,5 +69,5 @@ must hold.
 | [06](completed/06-the-resources.md) | Built: the resources, as CRDs and the package `observatory` |
 | [07](completed/07-the-operator-runs-the-topology.md) | Built and drilled on a test cluster: the operator creates the topology from the resources |
 | [08](08-the-reconciler.md) | Partly built and drilled: the reconciler, in the operator; the lock policies between the dome and the mounts are not built |
-| [09](09-the-guider.md) | The guider |
+| [09](09-the-guider.md) | Built, not drilled: the guider, PHD2 in its own pod beside a headless weston |
 | [10](10-access-from-a-desktop.md) | KStars on a desktop, which completes mode 1 |

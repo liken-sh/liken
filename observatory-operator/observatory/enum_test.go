@@ -30,7 +30,9 @@ var (
 	safeties          = strs(SafetySafe, SafetyWarning, SafetyDanger, SafetyUnknown)
 	reservationPhases = strs(ReservationScheduled, ReservationActivating,
 		ReservationReady, ReservationDeactivating, ReservationReleased, ReservationFailed)
-	stepNames  = strs(append(slices.Clone(ActivationSteps), DeactivationSteps...)...)
+	stepNames    = strs(append(slices.Clone(ActivationSteps), DeactivationSteps...)...)
+	guiderStates = strs(GuiderStopped, GuiderSelected, GuiderCalibrating, GuiderGuiding,
+		GuiderLostLock, GuiderPaused, GuiderLooping)
 	stepStates = strs(StepPending, StepRunning, StepDone, StepFailed, StepSkipped)
 	covers     = []string{CoverOpen, CoverClosed, CoverMoving}
 	deviceKind = func() []string {
@@ -62,6 +64,9 @@ func TestEachEnumHoldsTheGoConstants(t *testing.T) {
 		{DustCapKind, "status.readings.cover", covers},
 		{DomeKind, "status.readings.shutter", covers},
 		{GuiderKind, "spec.pulses", strs(PulsesMount, PulsesCamera)},
+		{GuiderKind, "status.state", guiderStates},
+		{TelescopeKind, "status.guider.phase", phases},
+		{TelescopeKind, "status.guider.state", guiderStates},
 		{ReservationKind, "status.phase", reservationPhases},
 		{ReservationKind, "status.step", stepNames},
 		{ReservationKind, "status.steps[].name", stepNames},

@@ -6,12 +6,13 @@ name = "observatory-operator"
 license = "MIT"
 
 # The operator's map of driver images is generated from indi/images/
-# at the tag that indi/package.toml pins, so a bump of the INDI images
-# runs these tests again. The image builds against the shared
-# kubernetes module, and ships the license notices that notices/
+# at the tag that indi/package.toml pins, and the guider's compositor
+# is the weston image at the tag that weston/package.toml pins, so a
+# bump of either runs these tests again. The image builds against the
+# shared kubernetes module, and ships the license notices that notices/
 # collects.
 [depends]
-components = ["indi", "kubernetes", "notices"]
+components = ["indi", "kubernetes", "notices", "weston"]
 
 # gofmt, vet, a tidy check of go.mod, and one run of the tests that
 # checks for races and writes the coverage profile, then the coverage

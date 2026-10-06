@@ -117,7 +117,7 @@ func (s *servers) open(parent context.Context, name string) *indiServer {
 			}
 		}
 	})
-	group.Go(func() { s.keep(ctx, server) })
+	group.Go(func() { s.o.keepOpen(ctx, server.name, server.client.Run) })
 	go func() {
 		group.Wait()
 		close(server.done)
@@ -125,34 +125,34 @@ func (s *servers) open(parent context.Context, name string) *indiServer {
 	return server
 }
 
-// keep runs the client's connection while the server's pod is Ready,
-// and opens it again after it ends. A new indiserver opens its port a
-// moment after its pod is Ready, so the first dial to it is often
-// refused. That refusal is not a fault, and the reservation's status
-// already says that it waits for the connection, so keep logs only a
-// refusal that follows another refusal. A connection that ran makes
-// the next refusal the first again, because the server that ended it
-// may have restarted.
-func (s *servers) keep(ctx context.Context, server *indiServer) {
+// keepOpen runs a client's connection while the pod of that name is
+// Ready, and opens it again after it ends: an INDI server's connection,
+// or a guider's. A new server opens its port a moment after its pod is
+// Ready, so the first dial to it is often refused. That refusal is not
+// a fault, and the reservation's status already says that it waits for
+// the connection, so keepOpen logs only a refusal that follows another
+// refusal. A connection that ran makes the next refusal the first
+// again, because the server that ended it may have restarted.
+func (o *operator) keepOpen(ctx context.Context, name string, run func(context.Context) error) {
 	pause := redialFirst
 	refused := false
 	for {
-		err := s.o.waitFor(ctx, nil, func(t *tree) (bool, string, error) {
-			p, ok := t.pods[server.name]
+		err := o.waitFor(ctx, nil, func(t *tree) (bool, string, error) {
+			p, ok := t.pods[name]
 			return ok && p.ready(), "", nil
 		})
 		if err != nil {
 			return
 		}
 		began := time.Now()
-		err = server.client.Run(ctx)
+		err = run(ctx)
 		if ctx.Err() != nil {
 			return
 		}
 		wasRefused := refused
 		refused = errors.Is(err, syscall.ECONNREFUSED)
 		if !refused || wasRefused {
-			s.o.logf("the INDI connection to %s ended: %v", server.name, err)
+			o.logf("the connection to %s ended: %v", name, err)
 		}
 		if time.Since(began) >= redialReset {
 			pause = redialFirst

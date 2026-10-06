@@ -1,7 +1,7 @@
 package drivers
 
-// The map in generated.go comes from the lists in indi/images/ and the
-// tag in indi/package.toml. This test writes the map again from those
+// The map in generated.go comes from the lists in indi/images/, the
+// tag in indi/package.toml, and the tag in weston/package.toml. This test writes the map again from those
 // files and fails when the result differs from generated.go, so a bump
 // of the INDI images or a new driver in a list cannot leave the map
 // behind. `make drivers` (or `go generate ./drivers`) runs it with
@@ -14,11 +14,11 @@ import (
 	"testing"
 )
 
-var update = flag.Bool("update", false, "write generated.go from indi/images/ and indi/package.toml")
+var update = flag.Bool("update", false, "write generated.go from indi/images/, indi/package.toml, and weston/package.toml")
 
 func TestTheMapIsCurrent(t *testing.T) {
 	indi := filepath.Join("..", "..", "indi")
-	want, err := generate(filepath.Join(indi, "images"), filepath.Join(indi, "package.toml"))
+	want, err := generate(filepath.Join(indi, "images"), filepath.Join(indi, "package.toml"), filepath.Join("..", "..", "weston", "package.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestTheMapIsCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("generated.go is stale against indi/images/ and indi/package.toml; run make drivers")
+		t.Errorf("generated.go is stale against indi/images/, indi/package.toml, and weston/package.toml; run make drivers")
 	}
 }
 
@@ -55,7 +55,7 @@ func TestAListThatNamesADriverTwiceIsRefused(t *testing.T) {
 	if err := os.WriteFile(toml, []byte("version = \"20261005\"\nrevision = 3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := generate(images, toml); err == nil {
+	if _, err := generate(images, toml, toml); err == nil {
 		t.Error("generate accepted a driver in two lists")
 	}
 }
@@ -66,7 +66,7 @@ func TestAPackageWithNoTagIsRefused(t *testing.T) {
 	if err := os.WriteFile(toml, []byte("[package]\nname = \"indi\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := generate(dir, toml); err == nil {
+	if _, err := generate(dir, toml, toml); err == nil {
 		t.Error("generate accepted a package.toml with no version and revision")
 	}
 }

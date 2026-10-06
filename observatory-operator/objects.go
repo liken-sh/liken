@@ -1,7 +1,7 @@
 package main
 
 // The writes of objects other than a status: the creates and deletes of
-// pods, Services, and ResourceClaims, the finalizer of a Reservation,
+// pods, Services, ConfigMaps, and ResourceClaims, the finalizer of a Reservation,
 // and the annotation that asks for a retry.
 
 import (
@@ -25,6 +25,10 @@ func servicePath(namespace, name string) string {
 	return "/api/v1/namespaces/" + namespace + "/services/" + name
 }
 
+func configMapPath(namespace, name string) string {
+	return "/api/v1/namespaces/" + namespace + "/configmaps/" + name
+}
+
 func claimPath(namespace, name string) string {
 	return "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
 }
@@ -46,6 +50,16 @@ func (o *operator) create(collection string, object any) error {
 		return nil
 	}
 	return err
+}
+
+// writeJSON sends one object to a path with a method, such as the PUT
+// that replaces a ConfigMap.
+func (o *operator) writeJSON(method, path string, object any) error {
+	body, err := json.Marshal(object)
+	if err != nil {
+		return err
+	}
+	return o.client.RequestJSON(method, path, body, nil)
 }
 
 // deleteObject deletes one object. An object that is gone already is no

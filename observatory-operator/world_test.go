@@ -26,6 +26,8 @@ type world struct {
 	t    *testing.T
 	api  *fakeAPI
 	indi *indiWorld
+	// guiders runs a fake PHD2 in each guider pod.
+	guiders *guiderWorld
 	// o is the copy of the operator that runs now.
 	o    *operator
 	stop func()
@@ -95,7 +97,7 @@ func startWorld(t *testing.T) *world {
 	for _, object := range example(t) {
 		api.put(kindCollection(kindNamed(object["kind"].(string))), object)
 	}
-	w := &world{t: t, api: api, indi: startIndiWorld(t, api), logs: &logBuffer{}}
+	w := &world{t: t, api: api, indi: startIndiWorld(t, api), guiders: startGuiderWorld(t.Context(), api), logs: &logBuffer{}}
 	w.start()
 	t.Cleanup(w.halt)
 	t.Cleanup(func() {
@@ -114,7 +116,7 @@ func (w *world) start() {
 		w.t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(w.t.Context())
-	o := newOperator(testNamespace, client.WithContext(ctx), w.indi)
+	o := newOperator(testNamespace, client.WithContext(ctx), dialers{w.indi, w.guiders})
 	o.logs = w.logs
 	w.o = o
 	w.stop, w.done = cancel, make(chan struct{})

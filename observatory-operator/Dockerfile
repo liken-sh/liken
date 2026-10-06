@@ -25,10 +25,11 @@ COPY go.mod go.sum ./
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
-# The operator's package and the three packages it imports: the INDI
-# client, the resources' types, and the map of driver images.
+# The operator's package and the four packages it imports: the INDI
+# client, the PHD2 client, the resources' types, and the map of images.
 COPY *.go ./
 COPY indi/*.go ./indi/
+COPY phd2/*.go ./phd2/
 COPY observatory/*.go ./observatory/
 COPY drivers/*.go ./drivers/
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a

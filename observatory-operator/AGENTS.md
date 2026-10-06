@@ -3,7 +3,8 @@
 This directory holds the operator that controls an observatory's
 hardware through INDI, and the manifests that run it: the operator's
 `package main` at the top, the resources' Go types in `observatory/`,
-the INDI client in `indi/`, the map of driver images in `drivers/`,
+the INDI client in `indi/`, the client of PHD2's event server in
+`phd2/`, the map of driver images in `drivers/`,
 the CRDs, the RBAC, and the operator's `Deployment` in `deploy/`, the
 example in `examples/`, and the plans.
 
@@ -78,16 +79,30 @@ reply. They were captured
 from the simulators of the pinned `indi-simulators` tag, and need
 capturing again after a bump of the INDI images.
 
+## The PHD2 client
+
+`phd2/` speaks PHD2's event protocol, JSON-RPC 2.0 over TCP, one line
+of JSON for each message. The reference is the PHD2 wiki page
+<https://github.com/OpenPHDGuiding/phd2/wiki/EventMonitoring>, and
+where it is silent, `src/event_server.cpp` in `OpenPHDGuiding/phd2`.
+PHD2 sends `AppState` only to a new connection, so the client sets the
+state from the events that imply one, and reads it again after a stop.
+`phd2/phd2test` is a fake event server on `net.Pipe`, which the
+package's tests and the operator's tests share.
+
 ## The operator
 
 The operator's files are flat in `package main`, one domain to a file.
 `operator.go` starts the three kinds of goroutine: the supervisor, one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
-`configure.go`, `deactivation.go`, `steady.go`, `finish.go`), and the
-status writer (`status.go`, `statustree.go`, `readings.go`). Each of
-them waits on a bell and reads the watches' stores again. `changed`
-rings on every watch event and every INDI event, and `structure` on
-the same events except an INDI property's update or message. The
+`configure.go`, `deactivation.go`, `steady.go`, `finish.go`, and the
+guider's `guidersteps.go` and `guidersteady.go`), and the status writer
+(`status.go`, `statustree.go`, `readings.go`, `guiderstatus.go`). Each
+of them waits on a bell and reads the watches' stores again. `changed`
+rings on every watch event, every INDI event, and every change that a
+PHD2 reports, and `structure` on the same events except an INDI
+property's update or message, and except a PHD2 change other than its
+connection or its equipment. The
 status writer and the waits for a property's value use `changed`. The
 supervisor and a Ready telescope's runner use `structure`, so a mount
 that reports its position several times a second does not wake them.
@@ -108,7 +123,7 @@ of a minute of readings when `OBSERVATORY_COST` names a profile file.
 
 ### Tests of the operator
 
-The tests run the operator in a `testing/synctest` bubble against two
+The tests run the operator in a `testing/synctest` bubble against three
 fakes, so a step's deadline of 20 minutes takes no real time:
 
 - `fakeapi_test.go` is an API server on `kubernetes/apiservertest`
@@ -120,6 +135,9 @@ fakes, so a step's deadline of 20 minutes takes no real time:
   adds what the connect transcript defines, and answers every other
   change with the values sent. A test can hold a property, so its
   driver never answers, or refuse it, so its driver answers Alert.
+- `fakeguider_test.go` runs a fake PHD2 from `phd2/phd2test` in each
+  guider pod that is Ready, and starts a new one, with nothing
+  connected, for each new pod.
 
 `examples/simulators.yaml` is the inventory of most tests, so a change
 to the example is a change to them.

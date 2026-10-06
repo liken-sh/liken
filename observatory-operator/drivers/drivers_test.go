@@ -2,6 +2,7 @@ package drivers
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
@@ -67,5 +68,25 @@ func TestAnUnpublishedDriverHasNoImage(t *testing.T) {
 func TestTheServerRunsTheIndiImage(t *testing.T) {
 	if got := ServerImage(); got != "ghcr.io/liken-sh/indi:"+Tag {
 		t.Errorf("ServerImage() = %q", got)
+	}
+}
+
+func TestTheGuiderRunsTheIndiPHD2Image(t *testing.T) {
+	if got := GuiderImage(); got != "ghcr.io/liken-sh/indi-phd2:"+Tag {
+		t.Errorf("GuiderImage() = %q", got)
+	}
+}
+
+// The guider's compositor is the weston image that display-operator
+// builds on, at the tag weston/package.toml pins, so a node that runs
+// display-operator holds the guider's compositor already, and one bump
+// of weston moves both.
+func TestTheCompositorIsThePinnedWestonImage(t *testing.T) {
+	tag, err := pinnedTag(filepath.Join("..", "..", "weston", "package.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := CompositorImage(); got != "ghcr.io/liken-sh/weston:"+tag {
+		t.Errorf("CompositorImage() = %q, want the tag %s of weston/package.toml", got, tag)
 	}
 }

@@ -62,6 +62,12 @@ func placement(server serverRef, d *device, guides bool) *affinity {
 	if !guides || len(d.object.Spec.Claim) > 0 {
 		return nil
 	}
+	return besideServer(server)
+}
+
+// besideServer answers the affinity that places a pod on the node of a
+// server's pod.
+func besideServer(server serverRef) *affinity {
 	return &affinity{PodAffinity: &podAffinity{Required: []podAffinityTerm{{
 		LabelSelector: &labelSelector{MatchLabels: map[string]string{labelName: server.String()}},
 		TopologyKey:   hostnameKey,

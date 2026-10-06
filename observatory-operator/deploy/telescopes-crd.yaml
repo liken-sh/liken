@@ -261,9 +261,10 @@ spec:
                     guider:
                       type: string
                       description: >-
-                        The reason of the `Guider`'s `Ready` condition,
-                        such as `Ready` or `NotImplemented`. It is an
-                        empty string for a telescope with no `Guider`.
+                        The `Guider`'s phase, and PHD2's state while the
+                        operator reads it, such as `Ready, Guiding`. It
+                        is an empty string for a telescope with no
+                        `Guider`.
                 guider:
                   type: object
                   required: [name, ready]
@@ -282,3 +283,12 @@ spec:
                       type: string
                       description: >-
                         The reason of the guider's `Ready` condition.
+                    phase:
+                      type: string
+                      enum: [Inventory, Activating, Ready, Deactivating, Error]
+                      description: "The `Guider`'s `status.phase`."
+                    state:
+                      type: string
+                      enum: [Stopped, Selected, Calibrating, Guiding, LostLock, Paused, Looping]
+                      description: >-
+                        PHD2's state, the `Guider`'s `status.state`.

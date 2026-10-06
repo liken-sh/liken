@@ -45,6 +45,7 @@ func (r *runner) deactivate(ctx context.Context) {
 	steps := map[observatory.StepName]stepFunc{
 		observatory.StepAbort:       r.abort,
 		observatory.StepSecure:      r.secure,
+		observatory.StepStopGuider:  r.stopGuider,
 		observatory.StepDisconnect:  r.disconnect,
 		observatory.StepStopDevices: r.stopTelescopeDevices,
 		observatory.StepPowerOff:    r.powerOff,
@@ -143,15 +144,23 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 	return out, notes
 }
 
-// abort ends the exposures that run and stops the mount if it moves. A
-// device that is idle receives nothing: the simulators answer an abort
+// abort stops PHD2, ends the exposures that run, and stops the mount if
+// it moves. A device that is idle receives nothing: the simulators answer an abort
 // of nothing with no update at all.
 func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
-	handles, notes := r.liveHandles(ctx, w)
-	if len(handles) == 0 {
-		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
+	// PHD2 stops first, so no guide pulse follows the mount's stop.
+	stopped, err := r.stopCapture(ctx, w)
+	if err != nil {
+		return outcome{}, err
 	}
 	var did []string
+	if stopped != "" {
+		did = append(did, stopped)
+	}
+	handles, notes := r.liveHandles(ctx, w)
+	if len(handles) == 0 && len(did) == 0 {
+		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
+	}
 	stop := func(h handle, watched, property string) error {
 		if !busy(h, watched) {
 			return nil

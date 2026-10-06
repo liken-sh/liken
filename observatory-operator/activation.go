@@ -29,10 +29,14 @@ var stepTimeouts = map[observatory.StepName]time.Duration{
 	// A cooled camera takes minutes to reach its setpoint: the CCD
 	// simulator cools 0.5 °C a second, so 35 °C takes 70 seconds.
 	observatory.StepPrepare: 20 * time.Minute,
-	observatory.StepAbort:   2 * time.Minute,
+	// StartGuider pulls the PHD2 image and the weston image on a node's
+	// first start, and PHD2 then connects real hardware in seconds.
+	observatory.StepStartGuider: 10 * time.Minute,
+	observatory.StepAbort:       2 * time.Minute,
 	// Secure warms each cooled camera for up to warmLimit, and parks
 	// the mount.
 	observatory.StepSecure:      20 * time.Minute,
+	observatory.StepStopGuider:  2 * time.Minute,
 	observatory.StepDisconnect:  2 * time.Minute,
 	observatory.StepStopDevices: 2 * time.Minute,
 	observatory.StepPowerOff:    5 * time.Minute,
@@ -54,6 +58,7 @@ func (r *runner) activate(ctx context.Context) {
 		observatory.StepConnect:      r.connect,
 		observatory.StepConfigure:    r.configure,
 		observatory.StepPrepare:      r.prepare,
+		observatory.StepStartGuider:  r.startGuider,
 	}
 	for _, name := range observatory.ActivationSteps {
 		switch r.step(name).State {

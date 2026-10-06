@@ -74,6 +74,11 @@ rules:
   - apiGroups: [""]
     resources: [pods, services]
     verbs: [get, list, watch, create, delete]
+  # Each guider's ConfigMap holds PHD2's profile and weston's config.
+  # The operator replaces it with an update when the profile changes.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, delete]
   # The claim of a device on real hardware, made from its spec.claim.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]

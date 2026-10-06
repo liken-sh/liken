@@ -80,3 +80,99 @@ func TestALineThatIsNotJSONIsRecorded(t *testing.T) {
 		}
 	})
 }
+
+func TestEachReadAnswersTheServersState(t *testing.T) {
+	cases := []struct {
+		method string
+		set    func(*Server)
+		want   any
+	}{
+		{"get_app_state", func(s *Server) { s.AppState = "Guiding" }, "Guiding"},
+		{"get_calibrated", func(s *Server) { s.Calibrated = true }, true},
+		{"get_connected", func(s *Server) { s.Equipment = true }, true},
+		{"get_pixel_scale", func(s *Server) { s.Scale = Pointer(2.5) }, 2.5},
+		{"get_pixel_scale", func(s *Server) {}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.method, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := New()
+				s.Set(c.set)
+				got := exchange(t, s, `{"method":"`+c.method+`","id":1}`)
+				if got[2]["result"] != c.want {
+					t.Errorf("answer = %v, want %v", got[2], c.want)
+				}
+				if s.Received() != c.method {
+					t.Errorf("received %q", s.Received())
+				}
+			})
+		})
+	}
+}
+
+func TestSetConnectedSetsTheEquipmentOrRefuses(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := New()
+		got := exchange(t, s, `{"method":"set_connected","params":[true],"id":1}`)
+		if got[2]["result"] != 0.0 || !s.Equipment {
+			t.Errorf("answer = %v, equipment = %v", got[2], s.Equipment)
+		}
+		s.Set(func(s *Server) { s.Refuse = "equipment failed to connect: mount" })
+		got = exchange(t, s, `{"method":"set_connected","params":[false],"id":2}`)
+		failure, _ := got[2]["error"].(map[string]any)
+		if failure["message"] != "equipment failed to connect: mount" || !s.Equipment {
+			t.Errorf("answer = %v, equipment = %v", got[2], s.Equipment)
+		}
+	})
+}
+
+// stop_capture answers, then reports the end of the loop as PHD2 does.
+func TestStopCaptureEndsTheLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := New()
+		s.Set(func(s *Server) { s.AppState = "Looping" })
+		conn, _ := s.DialContext(t.Context(), "tcp", "phd2:4400")
+		defer conn.Close()
+		lines := bufio.NewScanner(conn)
+		lines.Scan()
+		lines.Scan()
+		_, _ = conn.Write([]byte(`{"method":"stop_capture","id":3}` + "\r\n"))
+		lines.Scan()
+		lines.Scan()
+		var e map[string]any
+		_ = json.Unmarshal(lines.Bytes(), &e)
+		if e["Event"] != "LoopingExposuresStopped" || s.AppState != "Stopped" {
+			t.Errorf("event = %v, state = %q", e, s.AppState)
+		}
+	})
+}
+
+// A held method gets no answer, and a broadcast reaches each open
+// connection until a cut ends them.
+func TestAHeldMethodWaitsAndABroadcastReachesTheClient(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := New()
+		s.Set(func(s *Server) { s.Hold = "stop_capture" })
+		conn, _ := s.DialContext(t.Context(), "tcp", "phd2:4400")
+		lines := bufio.NewScanner(conn)
+		lines.Scan()
+		lines.Scan()
+		_, _ = conn.Write([]byte(`{"method":"stop_capture","id":3}` + "\r\n"))
+		synctest.Wait()
+		go s.Broadcast(GuideStep(7, 0.5, -0.5))
+		lines.Scan()
+		var e map[string]any
+		_ = json.Unmarshal(lines.Bytes(), &e)
+		if e["Event"] != "GuideStep" || e["Frame"] != 7.0 || e["RADistanceRaw"] != 0.5 {
+			t.Errorf("event = %v", e)
+		}
+		s.Cut()
+		if lines.Scan() {
+			t.Errorf("read %q after the cut", lines.Text())
+		}
+		s.Clear()
+		if s.Received() != "" {
+			t.Errorf("received %q after clear", s.Received())
+		}
+	})
+}

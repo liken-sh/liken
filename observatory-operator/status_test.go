@@ -107,7 +107,7 @@ func TestTheTreeReportsDownward(t *testing.T) {
 				t.Errorf("%s %s is %s", d.Kind, d.Name, d.Phase)
 			}
 		}
-		if s.Guider == nil || s.Guider.Ready || s.Guider.Reason != observatory.ReasonNotImplemented {
+		if s.Guider == nil || !s.Guider.Ready || s.Guider.Phase != observatory.PhaseReady || s.Guider.State != observatory.GuiderStopped {
 			t.Errorf("guider = %+v", s.Guider)
 		}
 		west, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "west")
@@ -125,7 +125,7 @@ func TestTheTreeReportsDownward(t *testing.T) {
 		}
 
 		guider, _ := decode[observatory.Guider](t, w.api, kindCollection(observatory.GuiderKind), "east")
-		if c := conditionOf(guider.Status.Conditions, observatory.ConditionReady); c.Reason != observatory.ReasonNotImplemented || c.Status != observatory.ConditionFalse {
+		if c := conditionOf(guider.Status.Conditions, observatory.ConditionReady); c.Reason != string(observatory.PhaseReady) || c.Status != observatory.ConditionTrue {
 			t.Errorf("guider Ready = %+v", c)
 		}
 		train, _ := decode[observatory.OpticalTrain](t, w.api, kindCollection(observatory.OpticalTrainKind), "east-imaging")
@@ -300,7 +300,7 @@ func TestAServerThatListensLateLogsOnlyARepeatedRefusal(t *testing.T) {
 				w.indi.listenLate("west-telescope", c.dials)
 				w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
 				w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
-				refusals := strings.Count(w.logs.String(), "the INDI connection to west-telescope ended: dial tcp: connect: connection refused")
+				refusals := strings.Count(w.logs.String(), "the connection to west-telescope ended: dial tcp: connect: connection refused")
 				if refusals != c.want {
 					t.Errorf("%d refusals logged, want %d:\n%s", refusals, c.want, w.logs.String())
 				}

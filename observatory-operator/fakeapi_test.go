@@ -157,6 +157,8 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.create(w, r, collection)
 	case sub == "status" && r.Method == http.MethodPut:
 		a.writeStatus(w, r, collection, name)
+	case sub == "" && r.Method == http.MethodPut:
+		a.replace(w, r, collection, name)
 	case r.Method == http.MethodGet:
 		a.get(w, collection, name)
 	case r.Method == http.MethodPatch:
@@ -173,6 +175,7 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // a change stores a new copy, so the events share it.
 func (a *fakeAPI) store(collection, name string, object map[string]any, kind string) map[string]any {
 	a.version++
+
 	object = normalize(object)
 	metadata := object["metadata"].(map[string]any)
 	metadata["resourceVersion"] = strconv.Itoa(a.version)
@@ -399,6 +402,28 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 	_ = json.NewEncoder(w).Encode(a.store(collection, name, next, "MODIFIED"))
 }
 
+// replace stores a whole object in place of the one it names, such as
+// a ConfigMap with new data, and refuses one that states an older
+// resourceVersion.
+func (a *fakeAPI) replace(w http.ResponseWriter, r *http.Request, collection, name string) {
+	var written map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	held, exists := a.objects[collection][name]
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if written["metadata"].(map[string]any)["resourceVersion"] != held["metadata"].(map[string]any)["resourceVersion"] {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	next := clone(written)
+	next["metadata"].(map[string]any)["uid"] = held["metadata"].(map[string]any)["uid"]
+	_ = json.NewEncoder(w).Encode(a.store(collection, name, next, "MODIFIED"))
+}
+
 // patch applies a merge patch to the metadata, and refuses one that
 // states an older resourceVersion. An object that a person deleted
 // goes away when its last finalizer goes.
@@ -501,9 +526,10 @@ func (a *fakeAPI) delete(collection, name string) bool {
 func kindCollection(kind observatory.Kind) string { return kind.Path(testNamespace) }
 
 const (
-	podsCollection     = "/api/v1/namespaces/" + testNamespace + "/pods"
-	servicesCollection = "/api/v1/namespaces/" + testNamespace + "/services"
-	eventsCollection   = "/api/v1/namespaces/" + testNamespace + "/events"
+	podsCollection       = "/api/v1/namespaces/" + testNamespace + "/pods"
+	servicesCollection   = "/api/v1/namespaces/" + testNamespace + "/services"
+	eventsCollection     = "/api/v1/namespaces/" + testNamespace + "/events"
+	configMapsCollection = "/api/v1/namespaces/" + testNamespace + "/configmaps"
 )
 
 // put creates an object, or replaces its spec the way kubectl apply

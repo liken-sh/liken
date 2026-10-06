@@ -5,17 +5,20 @@ package main
 //
 //   - The supervisor below starts a runner for each Reservation that
 //     has work left, opens an INDI connection to each server pod
-//     (indiconn.go), and deletes the pods of a server that no
+//     (indiconn.go) and a connection to each guider's PHD2
+//     (guiderconn.go), and deletes the pods of a server that no
 //     reservation holds.
 //   - One runner for each Reservation runs its steps in order
 //     (reservation.go).
 //   - The status writer writes the status of every other resource
 //     (status.go).
 //
-// They wait on two bells. changed rings on every watch event and every
-// INDI event. structure rings on the same events except an INDI
-// property's update and a device's message, which a mount that tracks
-// sends several times a second. The status writer and the steps that
+// They wait on two bells. changed rings on every watch event, every
+// INDI event, and every change a guider's PHD2 reports. structure rings
+// on the same events except an INDI property's update and a device's
+// message, which a mount that tracks sends several times a second, and
+// except a PHD2 change other than its connection or its equipment, such
+// as a guide step each second. The status writer and the steps that
 // wait for a property's value wait on changed. The supervisor, a
 // runner that keeps a Ready telescope, and a runner that waits for its
 // turn, its retry, or its end read only the stores and the devices
@@ -42,14 +45,17 @@ type operator struct {
 	changed   *bell
 	// structure also rings changed.
 	structure *bell
-	// dialer opens each INDI connection. Nil dials the network.
+	// dialer opens each INDI connection and each connection to a
+	// guider's PHD2. Nil dials the network.
 	dialer indi.Dialer
 	// logs receives the operator's log (logs.go): standard error in a
 	// pod, and a buffer in a test that reads what the log says.
 	logs io.Writer
 
 	servers *servers
-	claims  *claims
+	// guiderConns holds the connection to each guider's PHD2.
+	guiderConns *guiderConns
+	claims      *claims
 	// versions records the version of each reservation that the
 	// operator wrote or read last, so a runner never acts on an older
 	// copy from a store (informer.ReadOne).
@@ -89,6 +95,7 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 		sites:     map[string]lock{},
 	}
 	o.servers = newServers(o)
+	o.guiderConns = newGuiderConns(o)
 	return o
 }
 
@@ -147,6 +154,7 @@ func (o *operator) run(ctx context.Context, watches func(context.Context) *store
 	defer func() {
 		group.Wait()
 		o.servers.stopAll()
+		o.guiderConns.stopAll()
 		o.running.Wait()
 		o.stores.done()
 	}()
@@ -182,6 +190,7 @@ func (o *operator) supervise(ctx context.Context, t *tree) {
 	}
 	o.claims.forgetGone(t)
 	o.servers.sync(ctx, t)
+	o.guiderConns.sync(ctx, t)
 	if err := o.sweep(t); err != nil {
 		o.logf("%v", err)
 	}
@@ -213,8 +222,8 @@ func (o *operator) startRunner(ctx context.Context, r *observatory.Reservation) 
 	})
 }
 
-// sweep deletes the pods and Services of each server that no
-// reservation holds. A runner deletes them itself at the end of
+// sweep deletes the pods, Services, and ConfigMaps of each server that
+// no reservation holds. A runner deletes them itself at the end of
 // deactivation, so the sweep finds them only when a reservation went
 // away without deactivation, such as one whose finalizer a person
 // removed.
@@ -235,6 +244,11 @@ func (o *operator) sweep(t *tree) error {
 	for name, s := range t.services {
 		if server := s.Metadata.Labels[labelServer]; !held[server] {
 			problems = append(problems, o.deleteObject(servicePath(o.namespace, name)))
+		}
+	}
+	for name, files := range t.configMaps {
+		if server := files.Metadata.Labels[labelServer]; !held[server] {
+			problems = append(problems, o.deleteObject(configMapPath(o.namespace, name)))
 		}
 	}
 	return joinErrors(problems)

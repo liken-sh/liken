@@ -2,7 +2,7 @@ package main
 
 // The Kubernetes objects that the operator creates and reads: the pods
 // and Services of the topology, the ResourceClaim of a device on real
-// hardware, and the Events of a Reservation. Each type holds only the
+// hardware, the ConfigMap of a guider, and the Events of a Reservation. Each type holds only the
 // fields the operator writes or reads, in the wire format of the
 // Kubernetes API, the way the other operators of the repository write
 // theirs. A generated client would bring k8s.io/api for a few structs.
@@ -55,14 +55,19 @@ type podSpec struct {
 }
 
 type container struct {
-	Name            string           `json:"name"`
-	Image           string           `json:"image"`
+	Name  string `json:"name"`
+	Image string `json:"image"`
+	// RestartPolicy Always on an init container makes it a native
+	// sidecar: it starts before the containers and runs beside them.
+	RestartPolicy   string           `json:"restartPolicy,omitempty"`
 	Command         []string         `json:"command,omitempty"`
 	Args            []string         `json:"args,omitempty"`
+	Env             []envVar         `json:"env,omitempty"`
 	Ports           []containerPort  `json:"ports,omitempty"`
 	SecurityContext *securityContext `json:"securityContext,omitempty"`
 	VolumeMounts    []volumeMount    `json:"volumeMounts,omitempty"`
 	ReadinessProbe  *probe           `json:"readinessProbe,omitempty"`
+	StartupProbe    *probe           `json:"startupProbe,omitempty"`
 	Resources       *resources       `json:"resources,omitempty"`
 }
 
@@ -84,21 +89,38 @@ type capabilities struct {
 	Drop []string `json:"drop"`
 }
 
+type envVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 type volumeMount struct {
 	Name      string `json:"name"`
 	MountPath string `json:"mountPath"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
 type volume struct {
-	Name     string    `json:"name"`
-	EmptyDir *emptyDir `json:"emptyDir,omitempty"`
+	Name      string           `json:"name"`
+	EmptyDir  *emptyDir        `json:"emptyDir,omitempty"`
+	ConfigMap *configMapSource `json:"configMap,omitempty"`
+}
+
+type configMapSource struct {
+	Name string `json:"name"`
 }
 
 type emptyDir struct{}
 
 type probe struct {
-	TCPSocket     *tcpSocket `json:"tcpSocket,omitempty"`
-	PeriodSeconds int32      `json:"periodSeconds,omitempty"`
+	TCPSocket        *tcpSocket  `json:"tcpSocket,omitempty"`
+	Exec             *execAction `json:"exec,omitempty"`
+	PeriodSeconds    int32       `json:"periodSeconds,omitempty"`
+	FailureThreshold int32       `json:"failureThreshold,omitempty"`
+}
+
+type execAction struct {
+	Command []string `json:"command"`
 }
 
 type tcpSocket struct {
@@ -162,6 +184,14 @@ type servicePort struct {
 	// TargetPort names the container's port. The operator always names
 	// it, so the text form is enough.
 	TargetPort string `json:"targetPort"`
+}
+
+// configMap is a ConfigMap of files that a pod mounts.
+type configMap struct {
+	APIVersion string            `json:"apiVersion,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	Metadata   meta              `json:"metadata"`
+	Data       map[string]string `json:"data"`
 }
 
 // resourceClaim is a ResourceClaim of resource.k8s.io/v1. Its spec is

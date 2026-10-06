@@ -31,8 +31,9 @@ test-go:
 	go tool go-test-coverage --config=.testcoverage.yml
 
 # drivers/generated.go maps each driver to the image that holds it, from
-# indi/images/ and the tag in indi/package.toml. A test fails when the
-# file is stale; this writes it again.
+# indi/images/ and the tag in indi/package.toml, and holds the tag of
+# the weston image from weston/package.toml. A test fails when the file
+# is stale; this writes it again.
 .PHONY: drivers
 drivers:
 	go test ./drivers -run TestTheMapIsCurrent -update

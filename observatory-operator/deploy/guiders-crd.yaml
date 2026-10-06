@@ -1,7 +1,7 @@
-# A `Guider` runs PHD2 for one `Telescope`. Plan 09 builds its pod, and
-# until then its `Ready` condition is `False` with the reason
-# `NotImplemented`. The singular, `guider`, is already short, so the
-# kind has no short name.
+# A `Guider` runs PHD2 for one `Telescope` while a `Reservation` holds
+# the telescope, and its status reports what PHD2 reports on its event
+# server. The singular, `guider`, is already short, so the kind has no
+# short name.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -27,21 +27,34 @@ spec:
         - name: Telescope
           type: string
           jsonPath: .spec.telescope
-        - name: Train
-          type: string
-          jsonPath: .spec.opticalTrain
-        - name: Pulses
-          type: string
-          jsonPath: .spec.pulses
         - name: Phase
           type: string
           jsonPath: .status.phase
-        - name: Ready
+        - name: State
           type: string
-          jsonPath: '.status.conditions[?(@.type=="Ready")].reason'
+          jsonPath: .status.state
+        - name: RMS
+          type: string
+          jsonPath: .status.display.rms
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+        - name: Train
+          type: string
+          jsonPath: .spec.opticalTrain
+          priority: 1
+        - name: Pulses
+          type: string
+          jsonPath: .spec.pulses
+          priority: 1
+        - name: Node
+          type: string
+          jsonPath: .status.node
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
       schema:
         openAPIV3Schema:
           type: object
@@ -50,8 +63,10 @@ spec:
             telescope's INDI server, and guides with the camera of one
             `OpticalTrain`. A guide scope is a train with its own small
             tube, and an off-axis guider is a train on the imaging
-            train's tube. The guider's pod is not built yet: its `Ready`
-            condition is `False` with the reason `NotImplemented`.
+            train's tube. While a `Reservation` holds the telescope,
+            the operator runs PHD2, connects it to the guide camera and
+            the mount, and leaves it idle. The holder calibrates and
+            guides through PHD2's event server at `status.endpoint`.
           required: [spec]
           properties:
             spec:
@@ -93,6 +108,115 @@ spec:
                   description: >-
                     The `metadata.generation` of the spec that the
                     operator last acted on.
+                endpoint:
+                  type: object
+                  required: [service, host, port]
+                  description: >-
+                    PHD2's event server, while the guider's pod exists.
+                    KStars and `astrophotography-operator` drive PHD2 at
+                    its `host` and `port`.
+                  properties:
+                    service:
+                      type: string
+                      description: "The name of the guider's `Service`."
+                    host:
+                      type: string
+                      description: "The `Service`'s DNS name in the cluster."
+                    port:
+                      type: integer
+                      format: int32
+                      description: "The port of PHD2's event server, 4400."
+                pod:
+                  type: string
+                  description: "The name of the guider's pod."
+                node:
+                  type: string
+                  description: "The node that runs the guider's pod."
+                state:
+                  type: string
+                  enum: [Stopped, Selected, Calibrating, Guiding, LostLock, Paused, Looping]
+                  description: >-
+                    PHD2's state, as its event server names it, while
+                    the operator's connection to that server is open.
+                    `Stopped`: no exposures run. `Selected`: a star is
+                    selected, and no exposures run. `Looping`: PHD2
+                    takes exposures and does not guide. `Calibrating`,
+                    `Guiding`, and `Paused` name what PHD2 does.
+                    `LostLock`: PHD2 guides and lost its star.
+                calibrated:
+                  type: boolean
+                  description: >-
+                    `true` while PHD2 holds a calibration of the mount.
+                pixelScale:
+                  type: number
+                  description: >-
+                    The guide camera's scale in arc-seconds per pixel,
+                    from the camera's pixel size and the guide tube's
+                    focal length. It is absent while PHD2 does not know
+                    one of them.
+                rms:
+                  type: object
+                  required: [ra, dec, total, steps]
+                  description: >-
+                    The root mean square of the star's distance from
+                    the lock position over the last guide steps, in
+                    arc-seconds, along the mount's axes and in total.
+                    It covers at most the last 100 steps since guiding
+                    started, and it is absent while PHD2's pixel scale
+                    is not known.
+                  properties:
+                    ra:
+                      type: number
+                      description: "The RMS in right ascension, in arc-seconds."
+                    dec:
+                      type: number
+                      description: "The RMS in declination, in arc-seconds."
+                    total:
+                      type: number
+                      description: "The RMS of both axes, in arc-seconds."
+                    steps:
+                      type: integer
+                      format: int32
+                      description: "The number of guide steps that the RMS covers."
+                star:
+                  type: object
+                  required: [snr, hfd]
+                  description: "The guide star, as PHD2 measured it in the last guide step."
+                  properties:
+                    snr:
+                      type: number
+                      description: "The star's signal-to-noise ratio."
+                    hfd:
+                      type: number
+                      description: "The star's half-flux diameter, in pixels."
+                lastStepTime:
+                  type: string
+                  format: date-time
+                  description: "When PHD2 sent the last guide step."
+                alert:
+                  type: object
+                  required: [message, type, time]
+                  description: >-
+                    The last alert that PHD2 showed, or the last
+                    calibration that failed.
+                  properties:
+                    message:
+                      type: string
+                      description: "PHD2's text."
+                    type:
+                      type: string
+                      description: "`info`, `question`, `warning`, or `error`."
+                    time:
+                      type: string
+                      format: date-time
+                      description: "When PHD2 sent the alert."
+                display:
+                  type: object
+                  description: "What the printer columns show."
+                  properties:
+                    rms:
+                      type: string
+                      description: "`rms.total` with its unit, such as `0.84 arcsec`."
                 phase:
                   type: string
                   enum: [Inventory, Activating, Ready, Deactivating, Error]
@@ -107,10 +231,10 @@ spec:
                 conditions:
                   type: array
                   description: >-
-                    `Ready` is `True` while PHD2 runs and is connected
-                    to the telescope's server. Until plan 09 builds the
-                    guider's pod, it is `False` with the reason
-                    `NotImplemented`.
+                    `Ready` is `True` while PHD2 runs and its camera
+                    and mount are connected. `ParentFound` is `False`
+                    when the `Telescope` or the `OpticalTrain` does not
+                    exist.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

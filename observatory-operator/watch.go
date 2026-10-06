@@ -1,8 +1,9 @@
 package main
 
 // The watches. One watch follows each of the 20 kinds of the group in
-// the operator's namespace, and two more follow the pods and the
-// Services the operator created, selected by its label. All of them run
+// the operator's namespace, and three more follow the pods, the
+// Services, and the ConfigMaps the operator created, selected by its
+// label. All of them run
 // on client-go's reflector through the shared informer package. A
 // handler only wakes the operator, and each goroutine that waits reads
 // the stores again: the supervisor, the status writer, and each
@@ -57,15 +58,17 @@ func kindResource(kind observatory.Kind) schema.GroupVersionResource {
 }
 
 var (
-	podsResource     = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
-	servicesResource = schema.GroupVersionResource{Version: "v1", Resource: "services"}
+	podsResource       = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	servicesResource   = schema.GroupVersionResource{Version: "v1", Resource: "services"}
+	configMapsResource = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 )
 
 // stores holds the copy of each watched collection.
 type stores struct {
-	kinds    map[observatory.Kind]*informer.Collection
-	pods     *informer.Collection
-	services *informer.Collection
+	kinds      map[observatory.Kind]*informer.Collection
+	pods       *informer.Collection
+	services   *informer.Collection
+	configMaps *informer.Collection
 	// synced counts the watches whose first read is in their store.
 	synced atomic.Int32
 	// version counts the changes to the stores. It moves after a store
@@ -117,9 +120,9 @@ func listOf[T any](s *stores, collection *informer.Collection) []T {
 	return items
 }
 
-// watchCount is the number of watches: the 20 kinds, the pods, and the
-// Services.
-var watchCount = int32(len(observatory.Kinds) + 2)
+// watchCount is the number of watches: the 20 kinds, the pods, the
+// Services, and the ConfigMaps.
+var watchCount = int32(len(observatory.Kinds) + 3)
 
 // startWatches opens every watch. Each change notifies changed, and so
 // does the end of each watch's first read.
@@ -142,10 +145,11 @@ func startWatches(ctx context.Context, client dynamic.Interface, namespace strin
 	own := labelManagedBy + "=" + managedBy
 	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, Namespace: namespace, LabelSelector: own}, options)
 	s.services = informer.Start(ctx, client, informer.Source{Resource: servicesResource, Namespace: namespace, LabelSelector: own}, options)
+	s.configMaps = informer.Start(ctx, client, informer.Source{Resource: configMapsResource, Namespace: namespace, LabelSelector: own}, options)
 	for _, c := range s.kinds {
 		s.copies[c] = &copies{}
 	}
-	s.copies[s.pods], s.copies[s.services] = &copies{}, &copies{}
+	s.copies[s.pods], s.copies[s.services], s.copies[s.configMaps] = &copies{}, &copies{}, &copies{}
 	return s
 }
 
@@ -159,6 +163,7 @@ func (s *stores) done() {
 	}
 	<-s.pods.Done()
 	<-s.services.Done()
+	<-s.configMaps.Done()
 }
 
 // wakeOnAnyChange wakes the operator for every add, update, and
@@ -188,6 +193,7 @@ func (s *stores) snapshot(namespace string) *tree {
 		reservations:  byName(listOf[observatory.Reservation](s, s.kinds[observatory.ReservationKind])),
 		pods:          map[string]*pod{},
 		services:      map[string]*service{},
+		configMaps:    map[string]*configMap{},
 	}
 	for _, kind := range observatory.DeviceKinds {
 		for _, object := range listOf[deviceObject](s, s.kinds[kind]) {
@@ -199,6 +205,9 @@ func (s *stores) snapshot(namespace string) *tree {
 	}
 	for _, svc := range listOf[service](s, s.services) {
 		t.services[svc.Metadata.Name] = &svc
+	}
+	for _, files := range listOf[configMap](s, s.configMaps) {
+		t.configMaps[files.Metadata.Name] = &files
 	}
 	return t
 }

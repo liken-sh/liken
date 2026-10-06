@@ -60,4 +60,18 @@ func Resolve(driver observatory.Driver) (string, error) {
 // ServerImage answers the image that runs indiserver and the shim.
 func ServerImage() string { return image("indi") }
 
+// GuiderImage answers the image that runs PHD2. The indi build makes
+// it on indi, so PHD2 links the libindi of the server it talks to, and
+// it carries indi's tag.
+func GuiderImage() string { return image("indi-phd2") }
+
+// CompositorImage answers the image of the guider's compositor: the
+// weston image at the tag that weston/package.toml pins, which
+// generated.go copies at build time. display-operator's image builds
+// FROM weston at the same commit, so a node that runs display-operator
+// already holds these layers, and the guider pulls no new image. Never
+// build weston into another image or name another tag here: one bump
+// of weston moves the guider and display-operator together.
+func CompositorImage() string { return Registry + "/weston:" + WestonTag }
+
 func image(name string) string { return Registry + "/" + name + ":" + Tag }

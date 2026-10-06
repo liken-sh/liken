@@ -309,7 +309,7 @@ func TestEachChangeCallsNotify(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := phd2test.New()
 		rings := make(chan struct{}, 100)
-		c := NewClient("east-guider.observatory.svc:4400", WithDialer(f), WithNotify(func() { rings <- struct{}{} }))
+		c := NewClient("east-guider.observatory.svc:4400", WithDialer(f), WithNotify(func(State) { rings <- struct{}{} }))
 		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan struct{})
 		go func() {

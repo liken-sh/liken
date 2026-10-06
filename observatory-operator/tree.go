@@ -81,10 +81,11 @@ type tree struct {
 	reservations  map[string]*observatory.Reservation
 	// devices are sorted by kind, in the order of
 	// observatory.DeviceKinds, and then by name.
-	devices  []*device
-	pods     map[string]*pod
-	services map[string]*service
-	claims   map[string]bool
+	devices    []*device
+	pods       map[string]*pod
+	services   map[string]*service
+	configMaps map[string]*configMap
+	claims     map[string]bool
 }
 
 // parent answers the resource above a device, from the parent field

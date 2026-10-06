@@ -173,8 +173,8 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 	return out
 }
 
-// stopPods deletes the pods, the Services, and the claims that select
-// returns true for, and waits until the pods are gone. A delete that
+// stopPods deletes the pods, the Services, the ConfigMaps, and the
+// claims that select returns true for, and waits until the pods are gone. A delete that
 // the API server refuses is sent again (send).
 func (o *operator) stopPods(ctx context.Context, report func(string), selected func(labels map[string]string) bool) ([]string, error) {
 	var stopped []string
@@ -204,6 +204,13 @@ func (o *operator) stopPods(ctx context.Context, report func(string), selected f
 		for name, svc := range t.services {
 			if selected(svc.Metadata.Labels) {
 				if err := o.send(ctx, report, fmt.Sprintf("deleting Service %s", name), func() error { return o.deleteObject(servicePath(o.namespace, name)) }); err != nil {
+					return false, "", err
+				}
+			}
+		}
+		for name, files := range t.configMaps {
+			if selected(files.Metadata.Labels) {
+				if err := o.send(ctx, report, fmt.Sprintf("deleting ConfigMap %s", name), func() error { return o.deleteObject(configMapPath(o.namespace, name)) }); err != nil {
 					return false, "", err
 				}
 			}

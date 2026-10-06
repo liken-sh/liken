@@ -847,7 +847,7 @@ jobs:
       packages: write
 
   observatory-operator:
-    needs: [plan, indi]
+    needs: [plan, indi, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].check }}
     uses: ./.github/workflows/component-observatory-operator.yaml
     with:
@@ -862,7 +862,7 @@ jobs:
       packages: write
 
   observatory-operator-publish:
-    needs: [plan, observatory-operator, indi, kubernetes, notices, trust]
+    needs: [plan, observatory-operator, indi, kubernetes, notices, trust, vulkan, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-observatory-operator.yaml
     with:

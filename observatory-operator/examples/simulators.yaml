@@ -249,7 +249,11 @@ spec:
   power: {switch: east, output: 3}
 ---
 # The guide camera, behind the guide scope. It has no power output, so
-# a person powers it by hand.
+# a person powers it by hand. The guide simulator draws 2.4 µm pixels
+# and 6 arc-seconds of seeing, so behind the 200 mm guide scope a star
+# spans about 2.4 pixels at 2.5 arc-seconds per pixel, which PHD2 can
+# find and follow. The CCD simulator's 5.2 µm pixels and 3.5
+# arc-seconds would draw stars smaller than a pixel there.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Camera
 metadata:
@@ -259,10 +263,12 @@ spec:
   driver: {name: indi_simulator_guide}
 ---
 # PHD2 guides the east telescope with the guide train's camera, and
-# sends its corrections to the mount. The operator runs the guide
-# camera's pod on the node of the telescope's server, so a guide frame
-# crosses no link between nodes. The guider's pod is not built yet, so
-# its Ready condition is False with the reason NotImplemented.
+# sends its corrections to the mount. The operator runs PHD2 in the pod
+# east-guider, connects it to the guide camera and the mount, and
+# leaves it idle: the holder calibrates and guides through PHD2's event
+# server at status.endpoint, east-guider.observatory.svc:4400. The
+# guider's pod and the guide camera's pod run on the node of the
+# telescope's server, so a guide frame crosses no link between nodes.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Guider
 metadata:
@@ -327,7 +333,8 @@ spec:
 #   kubectl get reservation east-tonight -n observatory -w
 #   kubectl wait --for=condition=Ready reservation/east-tonight -n observatory
 #
-# Then connect KStars to the host and port in status.endpoint.
+# Then connect KStars to the host and port in status.endpoint, and its
+# guiding to PHD2 at the Guider's status.endpoint.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Reservation
 metadata:
