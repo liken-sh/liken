@@ -65,6 +65,10 @@ type serverRef struct {
 
 func (s serverRef) String() string { return strings.ToLower(s.kind.Name) + "-" + s.name }
 
+// tree is one copy of every watched object. The goroutines that read
+// between two changes share one tree (operator.snapshot), so no code
+// changes a tree or an object in it. Code that changes an object
+// changes its own copy.
 type tree struct {
 	namespace     string
 	observatories map[string]*observatory.Observatory

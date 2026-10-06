@@ -18,6 +18,7 @@ import (
 // A device whose pod never becomes Ready fails StartDevices at its
 // deadline, and the Ready condition names the step and the pod.
 func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.holdPending("camera-east-main")
@@ -67,6 +68,7 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 // A device that never answers a change fails its step at the deadline,
 // and the message names the device.
 func TestACoolerThatNeverReachesItsSetpointFailsPrepare(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.indi.hold("CCD Simulator", "CCD_TEMPERATURE")
@@ -83,6 +85,7 @@ func TestACoolerThatNeverReachesItsSetpointFailsPrepare(t *testing.T) {
 // Running, and the next copy continues it with its first start time,
 // and sends no change that the steps before it sent.
 func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.indi.hold("CCD Simulator", "CCD_TEMPERATURE")
@@ -114,6 +117,7 @@ func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
 // A restart during deactivation continues it, and the finalizer holds
 // the reservation until the end.
 func TestANewOperatorContinuesDeactivation(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
@@ -144,6 +148,7 @@ func TestANewOperatorContinuesDeactivation(t *testing.T) {
 // A second reservation of a telescope waits in Wait until the first is
 // released, and its message names the first.
 func TestASecondReservationWaitsForTheFirst(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
@@ -164,6 +169,7 @@ func TestASecondReservationWaitsForTheFirst(t *testing.T) {
 // Two reservations that wait take the telescope in the order of their
 // starts, whatever order they were created in.
 func TestWaitingReservationsTakeTheTelescopeInOrderOfStart(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
@@ -182,6 +188,7 @@ func TestWaitingReservationsTakeTheTelescopeInOrderOfStart(t *testing.T) {
 
 // A reservation with a start waits for it.
 func TestAReservationWaitsForItsStart(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		start := time.Now().Add(2 * time.Hour).UTC()
@@ -207,6 +214,7 @@ func TestAReservationWaitsForItsStart(t *testing.T) {
 // A reservation deleted before it took its telescope started nothing,
 // and goes away with no deactivation.
 func TestAReservationDeletedWhileItWaitsGoesAtOnce(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		start := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
@@ -225,6 +233,7 @@ func TestAReservationDeletedWhileItWaitsGoesAtOnce(t *testing.T) {
 
 // The retry annotation runs a failed step again.
 func TestTheRetryAnnotationRunsTheFailedStepAgain(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.holdPending("camera-east-main")
@@ -252,6 +261,7 @@ func TestTheRetryAnnotationRunsTheFailedStepAgain(t *testing.T) {
 
 // A reservation of a telescope that does not exist waits for it.
 func TestAReservationWaitsForItsTelescope(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("north-tonight", map[string]any{"telescope": "north", "holder": "desktop"})

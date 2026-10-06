@@ -155,8 +155,10 @@ func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
 		return skipped("the Observatory %s has no devices of its own, so it runs no server", site.Metadata.Name)
 	}
 	lock := r.o.siteLock(site.Metadata.Name)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.acquire(ctx); err != nil {
+		return outcome{}, err
+	}
+	defer lock.release()
 	if err := r.o.startServer(ctx, w.report, ref, site.Metadata.UID, devices); err != nil {
 		return outcome{}, err
 	}

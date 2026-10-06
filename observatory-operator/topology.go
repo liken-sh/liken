@@ -16,37 +16,39 @@ import (
 // ensure creates a pod and its Service and claim, or replaces a
 // running pod whose spec differs from the one built now. A pod that
 // stops must be gone before the new one of the same name can be
-// created. A write that the API server refuses is tried again
-// (transient), and the step's deadline bounds the tries.
+// created. A write that the API server refuses is sent again (send),
+// and the step's deadline bounds the tries.
 func (o *operator) ensure(ctx context.Context, report func(string), built *pod, svc *service, claim *resourceClaim) error {
 	name := built.Metadata.Name
 	return o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
 		if claim != nil {
 			// A claim's spec cannot change, and one that exists is the
 			// one the operator created. The create answers 409 then.
-			if err := o.create("/apis/resource.k8s.io/v1/namespaces/"+o.namespace+"/resourceclaims", claim); err != nil {
-				return false, "", transient{fmt.Errorf("creating the ResourceClaim %s: %w", name, err)}
+			if err := o.send(ctx, report, fmt.Sprintf("creating the ResourceClaim %s", name), func() error {
+				return o.create("/apis/resource.k8s.io/v1/namespaces/"+o.namespace+"/resourceclaims", claim)
+			}); err != nil {
+				return false, "", err
 			}
 		}
 		// A Service's spec follows from its name alone, so a Service
 		// that exists is current.
 		if _, ok := t.services[svc.Metadata.Name]; !ok {
-			if err := o.create("/api/v1/namespaces/"+o.namespace+"/services", svc); err != nil {
-				return false, "", transient{fmt.Errorf("creating the Service %s: %w", name, err)}
+			if err := o.send(ctx, report, fmt.Sprintf("creating the Service %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/services", svc) }); err != nil {
+				return false, "", err
 			}
 		}
 		running, ok := t.pods[name]
 		switch {
 		case !ok:
-			if err := o.create("/api/v1/namespaces/"+o.namespace+"/pods", built); err != nil {
-				return false, "", transient{fmt.Errorf("creating the pod %s: %w", name, err)}
+			if err := o.send(ctx, report, fmt.Sprintf("creating the pod %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/pods", built) }); err != nil {
+				return false, "", err
 			}
 			return true, "", nil
 		case running.Metadata.DeletionTimestamp != nil:
 			return false, "waiting for the earlier pod " + name + " to stop", nil
 		case !current(running, built):
-			if err := o.deleteObject(podPath(o.namespace, name)); err != nil {
-				return false, "", transient{fmt.Errorf("deleting the pod %s, whose spec changed: %w", name, err)}
+			if err := o.send(ctx, report, fmt.Sprintf("deleting the pod %s, whose spec changed", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
+				return false, "", err
 			}
 			return false, "replacing the pod " + name + ", whose spec changed", nil
 		}
@@ -170,7 +172,7 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 
 // stopPods deletes the pods, the Services, and the claims that select
 // returns true for, and waits until the pods are gone. A delete that
-// the API server refuses is tried again (transient).
+// the API server refuses is sent again (send).
 func (o *operator) stopPods(ctx context.Context, report func(string), selected func(labels map[string]string) bool) ([]string, error) {
 	var stopped []string
 	for name, p := range o.snapshot().pods {
@@ -189,17 +191,17 @@ func (o *operator) stopPods(ctx context.Context, report func(string), selected f
 			if p.Metadata.DeletionTimestamp != nil {
 				continue
 			}
-			if err := o.deleteObject(podPath(o.namespace, name)); err != nil {
-				return false, "", transient{fmt.Errorf("deleting the pod %s: %w", name, err)}
+			if err := o.send(ctx, report, fmt.Sprintf("deleting the pod %s", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
+				return false, "", err
 			}
-			if err := o.deleteObject(claimPath(o.namespace, name)); err != nil {
-				return false, "", transient{fmt.Errorf("deleting the ResourceClaim %s: %w", name, err)}
+			if err := o.send(ctx, report, fmt.Sprintf("deleting the ResourceClaim %s", name), func() error { return o.deleteObject(claimPath(o.namespace, name)) }); err != nil {
+				return false, "", err
 			}
 		}
 		for name, svc := range t.services {
 			if selected(svc.Metadata.Labels) {
-				if err := o.deleteObject(servicePath(o.namespace, name)); err != nil {
-					return false, "", transient{fmt.Errorf("deleting the Service %s: %w", name, err)}
+				if err := o.send(ctx, report, fmt.Sprintf("deleting the Service %s", name), func() error { return o.deleteObject(servicePath(o.namespace, name)) }); err != nil {
+					return false, "", err
 				}
 			}
 		}

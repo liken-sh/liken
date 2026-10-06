@@ -24,8 +24,10 @@ func (r *runner) failed(ctx context.Context) {
 			return
 		}
 		if _, retry := r.res.Metadata.Annotations[annotationRetry]; retry {
-			if err := r.o.clearRetry(r.res); err != nil {
-				r.retryLater(ctx, "removing the retry annotation", err)
+			if err := r.o.send(ctx, nil, "removing the retry annotation of the Reservation "+r.name, func() error {
+				r.refresh()
+				return r.o.clearRetry(r.res)
+			}); err != nil {
 				continue
 			}
 			for i := range r.status.Steps {
@@ -55,13 +57,12 @@ func (r *runner) failed(ctx context.Context) {
 func (r *runner) released(ctx context.Context) {
 	r.o.claims.release(r.res)
 	r.o.changed.notify()
-	for ctx.Err() == nil && r.refresh() && hasFinalizer(r.res) {
-		err := r.o.setFinalizer(r.res, false)
-		if err == nil {
-			return
+	_ = r.o.send(ctx, nil, "removing the finalizer of the Reservation "+r.name, func() error {
+		if !r.refresh() || !hasFinalizer(r.res) {
+			return nil
 		}
-		r.retryLater(ctx, "removing the finalizer", err)
-	}
+		return r.o.setFinalizer(r.res, false)
+	})
 }
 
 // awaitStore waits until the store's copy of the reservation meets

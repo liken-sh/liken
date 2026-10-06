@@ -25,6 +25,8 @@ type world struct {
 	t    *testing.T
 	api  *fakeAPI
 	indi *indiWorld
+	// o is the copy of the operator that runs now.
+	o    *operator
 	stop func()
 	done chan struct{}
 }
@@ -86,6 +88,7 @@ func (w *world) start() {
 	}
 	ctx, cancel := context.WithCancel(w.t.Context())
 	o := newOperator(testNamespace, client.WithContext(ctx), w.indi)
+	w.o = o
 	w.stop, w.done = cancel, make(chan struct{})
 	done := w.done
 	go func() {
@@ -125,20 +128,35 @@ func (w *world) reservation(name string) (observatory.Reservation, bool) {
 	return decode[observatory.Reservation](w.t, w.api, kindCollection(observatory.ReservationKind), name)
 }
 
-// until advances the fake clock in small steps until check holds, and
-// fails the test after limit.
+// until waits until check holds, and fails the test after limit on the
+// fake clock. It checks again after each change of the fake API server
+// and each ring of the operator's bell, which every watch event and
+// every INDI event rings, so it observes each state the operator
+// passes through, and the clock moves only when the bubble waits for a
+// timer.
 func (w *world) until(limit time.Duration, what string, check func() bool) {
 	w.t.Helper()
-	for waited := time.Duration(0); waited < limit; waited += 100 * time.Millisecond {
+	deadline := time.NewTimer(limit)
+	defer deadline.Stop()
+	for {
+		ring := w.o.changed.wait()
+		w.api.mu.Lock()
+		changed := w.api.changed
+		w.api.mu.Unlock()
 		synctest.Wait()
 		if check() {
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	synctest.Wait()
-	if !check() {
-		w.t.Fatalf("after %v: %s", limit, what)
+		select {
+		case <-ring:
+		case <-changed:
+		case <-deadline.C:
+			synctest.Wait()
+			if !check() {
+				w.t.Fatalf("after %v: %s", limit, what)
+			}
+			return
+		}
 	}
 }
 

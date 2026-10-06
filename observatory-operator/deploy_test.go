@@ -16,6 +16,7 @@ import (
 // The operator reads its namespace from the environment that the
 // Deployment sets.
 func TestTheDeploymentGivesTheOperatorItsNamespace(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("deploy/operator.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +60,7 @@ func TestTheDeploymentGivesTheOperatorItsNamespace(t *testing.T) {
 
 // The Role grants every verb the operator sends, for every kind.
 func TestTheRoleGrantsWhatTheOperatorSends(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("deploy/rbac.yaml")
 	if err != nil {
 		t.Fatal(err)

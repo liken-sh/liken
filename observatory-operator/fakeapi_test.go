@@ -163,10 +163,11 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // store records an object at the next version and tells each watch.
-// The caller holds a.mu.
+// The caller holds a.mu. The stored object is never changed after this:
+// a change stores a new copy, so the events share it.
 func (a *fakeAPI) store(collection, name string, object map[string]any, kind string) map[string]any {
 	a.version++
-	object = clone(object)
+	object = normalize(object)
 	metadata := object["metadata"].(map[string]any)
 	metadata["resourceVersion"] = strconv.Itoa(a.version)
 	if a.objects[collection] == nil {
@@ -177,17 +178,45 @@ func (a *fakeAPI) store(collection, name string, object map[string]any, kind str
 	} else {
 		a.objects[collection][name] = object
 	}
-	a.events = append(a.events, fakeEvent{collection: collection, kind: kind, object: clone(object), version: a.version})
+	a.events = append(a.events, fakeEvent{collection: collection, kind: kind, object: object, version: a.version})
 	close(a.changed)
 	a.changed = make(chan struct{})
 	return object
 }
 
-func clone(object map[string]any) map[string]any {
+// normalize answers a copy of an object as JSON decodes it, so every
+// number is a float64, the way the API server's answer reads.
+func normalize(object map[string]any) map[string]any {
 	var out map[string]any
 	body, _ := json.Marshal(object)
 	_ = json.Unmarshal(body, &out)
 	return out
+}
+
+// clone answers a deep copy of a normalized object. It copies the
+// maps and slices directly, because a JSON round trip on every read
+// costs more than the rest of the fake.
+func clone(object map[string]any) map[string]any {
+	return copyValue(object).(map[string]any)
+}
+
+func copyValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = copyValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = copyValue(item)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // selects answers whether an object carries the label a selector of the
@@ -469,7 +498,7 @@ const (
 func (a *fakeAPI) put(collection string, object map[string]any) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	object = clone(object)
+	object = normalize(object)
 	name := object["metadata"].(map[string]any)["name"].(string)
 	held, exists := a.objects[collection][name]
 	if !exists {

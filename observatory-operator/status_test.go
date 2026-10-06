@@ -26,6 +26,7 @@ func readyWorld(t *testing.T) *world {
 }
 
 func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
@@ -87,6 +88,7 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 }
 
 func TestTheTreeReportsDownward(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		east, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "east")
@@ -140,6 +142,7 @@ func TestTheTreeReportsDownward(t *testing.T) {
 // A resource whose parent is missing stays, and says which parent is
 // missing.
 func TestAMissingParentIsReported(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind    observatory.Kind
 		spec    map[string]any
@@ -155,6 +158,7 @@ func TestAMissingParentIsReported(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.kind.Name, func(t *testing.T) {
+			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				w.put(c.kind, "stray", c.spec)
@@ -175,6 +179,7 @@ func TestAMissingParentIsReported(t *testing.T) {
 // A status is written once a window at most, however often the driver
 // updates.
 func TestStatusWritesAreCoalesced(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		before := w.api.statusWrites(kindCollection(observatory.FocuserKind), "east-focuser")
@@ -209,6 +214,7 @@ func TestStatusWritesAreCoalesced(t *testing.T) {
 // A device pod that restarts comes back disconnected, and the operator
 // connects it and writes its settings again.
 func TestADeviceThatComesBackIsSetUpAgain(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		gains := w.indi.count("telescope-east", "CCD Simulator.CCD_GAIN")
@@ -237,6 +243,7 @@ func TestADeviceThatComesBackIsSetUpAgain(t *testing.T) {
 // A server that restarts brings every driver back disconnected, and
 // the operator connects each one again.
 func TestAServerThatRestartsIsSetUpAgain(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		w.api.deleteNamed(podsCollection, "telescope-east")
@@ -252,6 +259,7 @@ func TestAServerThatRestartsIsSetUpAgain(t *testing.T) {
 // A device of the observatory that comes back is connected again, and
 // the dome's policy is written again.
 func TestASiteDeviceThatComesBackIsSetUpAgain(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		policies := w.indi.count("observatory-lab", "Dome Simulator.DOME_SHUTTER_PARK_POLICY")

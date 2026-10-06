@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // settle waits for the reply to one sent change, within testTimeout.
@@ -42,116 +43,130 @@ func values(r request) []string {
 }
 
 func TestSettleWaitsUntilBusyEnds(t *testing.T) {
-	c, server := connectedDevice(t, "dome")
-	sent, err := c.SetNumbers(server.device, "ABS_DOME_POSITION", map[string]float64{"DOME_ABSOLUTE_POSITION": 30})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := settle(t, c, sent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	position, _ := p.Member("DOME_ABSOLUTE_POSITION")
-	if p.State != Ok || position.Number != 30 {
-		t.Errorf("ABS_DOME_POSITION settled at %s %v, want Ok at 30", p.State, position.Number)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "dome")
+		sent, err := c.SetNumbers(server.device, "ABS_DOME_POSITION", map[string]float64{"DOME_ABSOLUTE_POSITION": 30})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := settle(t, c, sent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		position, _ := p.Member("DOME_ABSOLUTE_POSITION")
+		if p.State != Ok || position.Number != 30 {
+			t.Errorf("ABS_DOME_POSITION settled at %s %v, want Ok at 30", p.State, position.Number)
+		}
+	})
 }
 
 func TestSettleAfterAnImmediateOk(t *testing.T) {
-	c, server := connectedDevice(t, "focus")
-	sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 52000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := settle(t, c, sent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	position, _ := p.Member("FOCUS_ABSOLUTE_POSITION")
-	if p.State != Ok || position.Number != 52000 {
-		t.Errorf("ABS_FOCUS_POSITION settled at %s %v, want Ok at 52000", p.State, position.Number)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "focus")
+		sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 52000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := settle(t, c, sent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		position, _ := p.Member("FOCUS_ABSOLUTE_POSITION")
+		if p.State != Ok || position.Number != 52000 {
+			t.Errorf("ABS_FOCUS_POSITION settled at %s %v, want Ok at 52000", p.State, position.Number)
+		}
+	})
 }
 
 func TestSettleReportsAnAlert(t *testing.T) {
-	c, server := connectedDevice(t, "focus")
-	sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 200000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = settle(t, c, sent)
-	var alert *AlertError
-	if !errors.As(err, &alert) || alert.Property.State != Alert || err.Error() != "indi: Focuser Simulator.ABS_FOCUS_POSITION is Alert" {
-		t.Errorf("Settle = %v, want an AlertError for ABS_FOCUS_POSITION", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "focus")
+		sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 200000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = settle(t, c, sent)
+		var alert *AlertError
+		if !errors.As(err, &alert) || alert.Property.State != Alert || err.Error() != "indi: Focuser Simulator.ABS_FOCUS_POSITION is Alert" {
+			t.Errorf("Settle = %v, want an AlertError for ABS_FOCUS_POSITION", err)
+		}
+	})
 }
 
 func TestSettleFailsWhenTheConnectionEnds(t *testing.T) {
-	c, server := connectedDevice(t, "focus")
-	// No transcript answers this position, so the property stays as
-	// it was until the connection ends.
-	sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.drop()
-	if _, err := settle(t, c, sent); !errors.Is(err, ErrDisconnected) {
-		t.Errorf("Settle = %v, want ErrDisconnected", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "focus")
+		// No transcript answers this position, so the property stays as
+		// it was until the connection ends.
+		sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.drop()
+		if _, err := settle(t, c, sent); !errors.Is(err, ErrDisconnected) {
+			t.Errorf("Settle = %v, want ErrDisconnected", err)
+		}
+	})
 }
 
 func TestSettleFailsWhenThePropertyIsDeleted(t *testing.T) {
-	c, server := connectedDevice(t, "focus")
-	sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// indiserver sends this for every device of a driver that exits.
-	server.send(`<delProperty device="Focuser Simulator"/>`)
-	if _, err := settle(t, c, sent); !errors.Is(err, ErrDeleted) {
-		t.Errorf("Settle = %v, want ErrDeleted", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "focus")
+		sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// indiserver sends this for every device of a driver that exits.
+		server.send(`<delProperty device="Focuser Simulator"/>`)
+		if _, err := settle(t, c, sent); !errors.Is(err, ErrDeleted) {
+			t.Errorf("Settle = %v, want ErrDeleted", err)
+		}
+	})
 }
 
 func TestSetNumbersSendsEveryMember(t *testing.T) {
-	c, server := connectedBaseline(t, "telescope")
-	if _, err := c.SetNumbers(server.device, "ALIGNMENT_POINT_MANDATORY_NUMBERS", map[string]float64{
-		"ALIGNMENT_POINT_ENTRY_RA":  5.588,
-		"ALIGNMENT_POINT_ENTRY_DEC": -5.39,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got := values(server.await("ALIGNMENT_POINT_MANDATORY_NUMBERS"))
-	want := []string{
-		"ALIGNMENT_POINT_ENTRY_OBSERVATION_JULIAN_DATE=0",
-		"ALIGNMENT_POINT_ENTRY_RA=5.588",
-		"ALIGNMENT_POINT_ENTRY_DEC=-5.39",
-		"ALIGNMENT_POINT_ENTRY_VECTOR_X=0",
-		"ALIGNMENT_POINT_ENTRY_VECTOR_Y=0",
-		"ALIGNMENT_POINT_ENTRY_VECTOR_Z=0",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("sent %v, want %v", got, want)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedBaseline(t, "telescope")
+		if _, err := c.SetNumbers(server.device, "ALIGNMENT_POINT_MANDATORY_NUMBERS", map[string]float64{
+			"ALIGNMENT_POINT_ENTRY_RA":  5.588,
+			"ALIGNMENT_POINT_ENTRY_DEC": -5.39,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got := values(server.await("ALIGNMENT_POINT_MANDATORY_NUMBERS"))
+		want := []string{
+			"ALIGNMENT_POINT_ENTRY_OBSERVATION_JULIAN_DATE=0",
+			"ALIGNMENT_POINT_ENTRY_RA=5.588",
+			"ALIGNMENT_POINT_ENTRY_DEC=-5.39",
+			"ALIGNMENT_POINT_ENTRY_VECTOR_X=0",
+			"ALIGNMENT_POINT_ENTRY_VECTOR_Y=0",
+			"ALIGNMENT_POINT_ENTRY_VECTOR_Z=0",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("sent %v, want %v", got, want)
+		}
+	})
 }
 
 func TestSetTextsSendsEveryMember(t *testing.T) {
-	c, server := connectedBaseline(t, "ccd")
-	p, _ := c.Property(server.device, "ACTIVE_DEVICES")
-	if _, err := c.SetTexts(server.device, "ACTIVE_DEVICES", map[string]string{"ACTIVE_TELESCOPE": "Mount <east> & \"west\""}); err != nil {
-		t.Fatal(err)
-	}
-	var want []string
-	for _, m := range p.Members {
-		value := m.Text
-		if m.Name == "ACTIVE_TELESCOPE" {
-			value = "Mount <east> & \"west\""
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedBaseline(t, "ccd")
+		p, _ := c.Property(server.device, "ACTIVE_DEVICES")
+		if _, err := c.SetTexts(server.device, "ACTIVE_DEVICES", map[string]string{"ACTIVE_TELESCOPE": "Mount <east> & \"west\""}); err != nil {
+			t.Fatal(err)
 		}
-		want = append(want, m.Name+"="+value)
-	}
-	if got := values(server.await("ACTIVE_DEVICES")); !slices.Equal(got, want) {
-		t.Errorf("sent %v, want %v", got, want)
-	}
+		var want []string
+		for _, m := range p.Members {
+			value := m.Text
+			if m.Name == "ACTIVE_TELESCOPE" {
+				value = "Mount <east> & \"west\""
+			}
+			want = append(want, m.Name+"="+value)
+		}
+		if got := values(server.await("ACTIVE_DEVICES")); !slices.Equal(got, want) {
+			t.Errorf("sent %v, want %v", got, want)
+		}
+	})
 }
 
 func TestSetSwitchesFollowsTheRule(t *testing.T) {
@@ -168,56 +183,61 @@ func TestSetSwitchesFollowsTheRule(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c, server := connectedDevice(t, tc.simulator)
-			if _, err := c.SetSwitches(server.device, tc.property, tc.change); err != nil {
-				t.Fatal(err)
-			}
-			if got := values(server.await(tc.property)); !slices.Equal(got, tc.want) {
-				t.Errorf("sent %v, want %v", got, tc.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				c, server := connectedDevice(t, tc.simulator)
+				if _, err := c.SetSwitches(server.device, tc.property, tc.change); err != nil {
+					t.Fatal(err)
+				}
+				if got := values(server.await(tc.property)); !slices.Equal(got, tc.want) {
+					t.Errorf("sent %v, want %v", got, tc.want)
+				}
+			})
 		})
 	}
 }
 
 func TestSetRefusesWhatTheDefinitionForbids(t *testing.T) {
-	c, server := connectedBaseline(t, "telescope")
-	device := server.device
 	cases := []struct {
 		name string
-		send func() (Sent, error)
+		send func(c *Client, device string) (Sent, error)
 		want error
 	}{
-		{"two on in OneOfMany", func() (Sent, error) {
+		{"two on in OneOfMany", func(c *Client, device string) (Sent, error) {
 			return c.SetSwitches(device, "CONNECTION", map[string]bool{"CONNECT": true, "DISCONNECT": true})
 		}, ErrInvalid},
-		{"none on in OneOfMany", func() (Sent, error) {
+		{"none on in OneOfMany", func(c *Client, device string) (Sent, error) {
 			return c.SetSwitches(device, "CONNECTION", map[string]bool{"DISCONNECT": false})
 		}, ErrInvalid},
-		{"a read-only property", func() (Sent, error) {
+		{"a read-only property", func(c *Client, device string) (Sent, error) {
 			return c.SetTexts(device, "DRIVER_INFO", map[string]string{"DRIVER_NAME": "x"})
 		}, ErrInvalid},
-		{"the wrong type", func() (Sent, error) {
+		{"the wrong type", func(c *Client, device string) (Sent, error) {
 			return c.SetNumbers(device, "CONNECTION", map[string]float64{"CONNECT": 1})
 		}, ErrInvalid},
-		{"a member the property lacks", func() (Sent, error) {
+		{"a member the property lacks", func(c *Client, device string) (Sent, error) {
 			return c.SetNumbers(device, "POLLING_PERIOD", map[string]float64{"PERIOD_S": 1})
 		}, ErrInvalid},
-		{"a property the device lacks", func() (Sent, error) {
+		{"a property the device lacks", func(c *Client, device string) (Sent, error) {
 			return c.SetNumbers(device, "NO_SUCH_PROPERTY", map[string]float64{"X": 1})
 		}, ErrNotDefined},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := tc.send(); !errors.Is(err, tc.want) {
-				t.Errorf("err = %v, want %v", err, tc.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				c, server := connectedBaseline(t, "telescope")
+				if _, err := tc.send(c, server.device); !errors.Is(err, tc.want) {
+					t.Errorf("err = %v, want %v", err, tc.want)
+				}
+			})
 		})
 	}
 }
 
 func TestSetRefusesWithNoConnection(t *testing.T) {
-	c := NewClient("127.0.0.1:1")
-	if _, err := c.SetNumbers("Focuser Simulator", "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1}); !errors.Is(err, ErrNotConnected) {
-		t.Errorf("SetNumbers = %v, want ErrNotConnected", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c := NewClient("127.0.0.1:1")
+		if _, err := c.SetNumbers("Focuser Simulator", "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1}); !errors.Is(err, ErrNotConnected) {
+			t.Errorf("SetNumbers = %v, want ErrNotConnected", err)
+		}
+	})
 }

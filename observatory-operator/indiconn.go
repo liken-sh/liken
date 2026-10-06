@@ -35,10 +35,10 @@ type indiServer struct {
 	client *indi.Client
 	cancel context.CancelFunc
 	done   chan struct{}
-	// mu serializes the operator's INDI work on the server, so two
+	// lock serializes the operator's INDI work on the server, so two
 	// runners that share a site server do not interleave their changes
 	// to one device.
-	mu sync.Mutex
+	lock lock
 }
 
 type servers struct {
@@ -101,7 +101,7 @@ func (s *servers) open(parent context.Context, name string) *indiServer {
 	if s.o.dialer != nil {
 		options = append(options, indi.WithDialer(s.o.dialer))
 	}
-	server := &indiServer{name: name, client: indi.NewClient(address, options...), cancel: cancel, done: make(chan struct{})}
+	server := &indiServer{name: name, client: indi.NewClient(address, options...), lock: newLock(), cancel: cancel, done: make(chan struct{})}
 	events := server.client.Subscribe(ctx)
 	var group sync.WaitGroup
 	// Every INDI event wakes the operator, as a watch event does: a

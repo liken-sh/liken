@@ -15,6 +15,7 @@ import (
 )
 
 func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		devices func(w *world)
@@ -43,6 +44,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				w.put(observatory.ObservatoryKind, "bare", map[string]any{"location": map[string]any{"latitude": 1, "longitude": 2, "elevation": 3}})
@@ -64,6 +66,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 // A driver that lacks a property that a step writes is noted, and the
 // step goes on.
 func TestDriversThatLackTheirKindsPropertiesAreNoted(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		// A camera and a filter wheel that run drivers of other kinds:
@@ -92,6 +95,7 @@ func TestDriversThatLackTheirKindsPropertiesAreNoted(t *testing.T) {
 // A reservation that ends during activation stops the step that runs,
 // and deactivation stops what the steps before it started.
 func TestAReservationThatEndsDuringActivationDeactivates(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.indi.hold("CCD Simulator", "CCD_TEMPERATURE")
@@ -109,6 +113,7 @@ func TestAReservationThatEndsDuringActivationDeactivates(t *testing.T) {
 
 // A finalizer patch that the API server refuses is sent again.
 func TestARefusedFinalizerIsSentAgain(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.mu.Lock()
@@ -135,6 +140,7 @@ func TestARefusedFinalizerIsSentAgain(t *testing.T) {
 // drivers from its arguments. The devices come back on the new server,
 // and the operator connects each one again.
 func TestADeviceAddedWhileReadyRestartsTheServer(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		before, _ := w.api.object(podsCollection, "telescope-east")
@@ -158,6 +164,7 @@ func TestADeviceAddedWhileReadyRestartsTheServer(t *testing.T) {
 // A device on real hardware states a claim, and its ResourceClaim lives
 // as long as its pod.
 func TestAClaimLivesAsLongAsItsDevicesPod(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.put(observatory.FocuserKind, "east-focuser", map[string]any{

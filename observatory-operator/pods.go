@@ -4,8 +4,8 @@ package main
 // its own pod as `socat TCP-LISTEN:7625,reuseaddr EXEC:<driver>,pipes`,
 // behind a Service of its own. Each INDI server runs indiserver with
 // one link to indi-shim for each device it serves, and the shim dials
-// the device's Service. The manifests in topology/ are the same shape
-// written by hand, and pods_test.go holds the two together.
+// the device's Service. pods_test.go holds the properties that plan 03
+// measured with manifests written by hand.
 //
 // The pods are bare pods, as media-operator's are. The kubelet restarts
 // a container that exits, which is what a driver needs: socat exits

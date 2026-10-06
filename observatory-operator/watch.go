@@ -10,6 +10,8 @@ package main
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -61,6 +63,50 @@ type stores struct {
 	services *informer.Collection
 	// synced counts the watches whose first read is in their store.
 	synced atomic.Int32
+	// copies holds the typed copies of each collection's objects.
+	copies map[*informer.Collection]*copies
+}
+
+// copies holds the typed copy of each object that one store holds, by
+// the store's object. The store replaces an object on each change and
+// never changes one in place, so an object that the store still holds
+// has the same typed copy. A snapshot then converts only the objects
+// that changed since the last one, because the conversion goes through
+// reflection and costs more than the rest of a snapshot.
+type copies struct {
+	mu   sync.Mutex
+	held map[any]any
+}
+
+// listOf answers the typed copy of each object in a collection, in the
+// order of their keys. An object that does not convert is reported and
+// left out, as informer.CachedList does.
+func listOf[T any](s *stores, collection *informer.Collection) []T {
+	c := s.copies[collection]
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	objects := collection.View().Store.List()
+	keys := make(map[any]string, len(objects))
+	for _, object := range objects {
+		keys[object], _ = cache.MetaNamespaceKeyFunc(object)
+	}
+	slices.SortFunc(objects, func(a, b any) int { return strings.Compare(keys[a], keys[b]) })
+	held := make(map[any]any, len(objects))
+	var items []T
+	for _, object := range objects {
+		item, ok := c.held[object].(T)
+		if !ok {
+			var err error
+			if item, err = informer.Convert[T](object); err != nil {
+				informer.Report("the cached objects", err)
+				continue
+			}
+		}
+		held[object] = item
+		items = append(items, item)
+	}
+	c.held = held
+	return items
 }
 
 // watchCount is the number of watches: the 20 kinds, the pods, and the
@@ -70,7 +116,7 @@ var watchCount = int32(len(observatory.Kinds) + 2)
 // startWatches opens every watch. Each change notifies changed, and so
 // does the end of each watch's first read.
 func startWatches(ctx context.Context, client dynamic.Interface, namespace string, changed *bell) *stores {
-	s := &stores{kinds: map[observatory.Kind]*informer.Collection{}}
+	s := &stores{kinds: map[observatory.Kind]*informer.Collection{}, copies: map[*informer.Collection]*copies{}}
 	options := informer.Options{
 		Handler: wakeOnAnyChange(changed),
 		Synced: func() {
@@ -84,6 +130,10 @@ func startWatches(ctx context.Context, client dynamic.Interface, namespace strin
 	own := labelManagedBy + "=" + managedBy
 	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, Namespace: namespace, LabelSelector: own}, options)
 	s.services = informer.Start(ctx, client, informer.Source{Resource: servicesResource, Namespace: namespace, LabelSelector: own}, options)
+	for _, c := range s.kinds {
+		s.copies[c] = &copies{}
+	}
+	s.copies[s.pods], s.copies[s.services] = &copies{}, &copies{}
 	return s
 }
 
@@ -114,28 +164,28 @@ func wakeOnAnyChange(changed *bell) cache.ResourceEventHandler {
 }
 
 // snapshot reads every store into one tree. An object that does not
-// convert is reported and left out (informer.CachedList).
+// convert is reported and left out (listOf).
 func (s *stores) snapshot(namespace string) *tree {
 	t := &tree{
 		namespace:     namespace,
-		observatories: byName(informer.CachedList[observatory.Observatory](s.kinds[observatory.ObservatoryKind].View())),
-		telescopes:    byName(informer.CachedList[observatory.Telescope](s.kinds[observatory.TelescopeKind].View())),
-		tubes:         byName(informer.CachedList[observatory.OpticalTube](s.kinds[observatory.OpticalTubeKind].View())),
-		trains:        byName(informer.CachedList[observatory.OpticalTrain](s.kinds[observatory.OpticalTrainKind].View())),
-		guiders:       byName(informer.CachedList[observatory.Guider](s.kinds[observatory.GuiderKind].View())),
-		reservations:  byName(informer.CachedList[observatory.Reservation](s.kinds[observatory.ReservationKind].View())),
+		observatories: byName(listOf[observatory.Observatory](s, s.kinds[observatory.ObservatoryKind])),
+		telescopes:    byName(listOf[observatory.Telescope](s, s.kinds[observatory.TelescopeKind])),
+		tubes:         byName(listOf[observatory.OpticalTube](s, s.kinds[observatory.OpticalTubeKind])),
+		trains:        byName(listOf[observatory.OpticalTrain](s, s.kinds[observatory.OpticalTrainKind])),
+		guiders:       byName(listOf[observatory.Guider](s, s.kinds[observatory.GuiderKind])),
+		reservations:  byName(listOf[observatory.Reservation](s, s.kinds[observatory.ReservationKind])),
 		pods:          map[string]*pod{},
 		services:      map[string]*service{},
 	}
 	for _, kind := range observatory.DeviceKinds {
-		for _, object := range informer.CachedList[deviceObject](s.kinds[kind].View()) {
+		for _, object := range listOf[deviceObject](s, s.kinds[kind]) {
 			t.devices = append(t.devices, &device{kind: kind, object: object})
 		}
 	}
-	for _, p := range informer.CachedList[pod](s.pods.View()) {
+	for _, p := range listOf[pod](s, s.pods) {
 		t.pods[p.Metadata.Name] = &p
 	}
-	for _, svc := range informer.CachedList[service](s.services.View()) {
+	for _, svc := range listOf[service](s, s.services) {
 		t.services[svc.Metadata.Name] = &svc
 	}
 	return t

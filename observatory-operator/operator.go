@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -51,7 +50,13 @@ type operator struct {
 	faults map[string]string
 	// sites serializes the work on each observatory's server, which
 	// the runners of several telescopes share.
-	sites map[string]*sync.Mutex
+	sites map[string]lock
+
+	// snapshotMu guards last, the tree that snapshot built since the
+	// bell last rang, and lastBell, the bell's channel at that moment.
+	snapshotMu sync.Mutex
+	last       *tree
+	lastBell   <-chan struct{}
 }
 
 func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer) *operator {
@@ -64,25 +69,38 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 		versions:  memo.New(),
 		runners:   map[string]*runner{},
 		faults:    map[string]string{},
-		sites:     map[string]*sync.Mutex{},
+		sites:     map[string]lock{},
 	}
 	o.servers = newServers(o)
 	return o
 }
 
-// snapshot reads the stores.
-func (o *operator) snapshot() *tree { return o.stores.snapshot(o.namespace) }
+// snapshot reads the stores. A change to a store rings the bell after
+// the store holds it, so the stores are the same until the bell rings
+// again. Every goroutine wakes on each ring and reads the stores, so
+// they share one tree for each ring. A tree converts every object of 22
+// collections, and a tree for each reader would repeat that conversion
+// in every goroutine on every ring.
+func (o *operator) snapshot() *tree {
+	ring := o.changed.wait()
+	o.snapshotMu.Lock()
+	defer o.snapshotMu.Unlock()
+	if o.last == nil || o.lastBell != ring {
+		o.last, o.lastBell = o.stores.snapshot(o.namespace), ring
+	}
+	return o.last
+}
 
 // siteLock answers the lock of one observatory's server.
-func (o *operator) siteLock(name string) *sync.Mutex {
+func (o *operator) siteLock(name string) lock {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	lock, ok := o.sites[name]
+	l, ok := o.sites[name]
 	if !ok {
-		lock = &sync.Mutex{}
-		o.sites[name] = lock
+		l = newLock()
+		o.sites[name] = l
 	}
-	return lock
+	return l
 }
 
 func (o *operator) fault(d *device, err error) {
@@ -215,27 +233,50 @@ func (o *operator) sweep(t *tree) error {
 	return joinErrors(problems)
 }
 
-// transient is an error that check answers when a write failed and
-// may succeed later, such as a create while the API server restarts.
-type transient struct{ err error }
+// The pause before a refused write is sent again. It is a backoff
+// clock, the one timer around a write: it spaces the tries while the API
+// server refuses them, such as while it restarts, and it reads no state.
+// It doubles from writeFirst to writeLimit.
+const (
+	writeFirst = time.Second
+	writeLimit = 30 * time.Second
+)
 
-func (t transient) Error() string { return t.err.Error() + "; trying again" }
+// send sends one write until the API server takes it, or until ctx
+// ends. report receives each refusal, so the step's message names it,
+// and the step's deadline ends the tries.
+func (o *operator) send(ctx context.Context, report func(string), what string, write func() error) error {
+	pause := writeFirst
+	for {
+		err := write()
+		if err == nil {
+			return nil
+		}
+		message := fmt.Sprintf("%s: %v; sending it again in %v", what, err, pause)
+		fmt.Fprintf(os.Stderr, "observatory-operator: %s\n", message)
+		if report != nil {
+			report(message)
+		}
+		timer := time.NewTimer(pause)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("%s: %w", what, err)
+		case <-timer.C:
+		}
+		pause = min(2*pause, writeLimit)
+	}
+}
 
 // waitFor waits until check reports done, rereading the stores after
-// each change, or until ctx ends. report receives what check says it
-// waits for, each time that text changes. After a transient error,
-// waitFor reports it and checks again after retryPause, a clock that
-// spaces the writes while the API server refuses them. The caller's
-// deadline ends the tries, and the last report names the error.
+// each change of a watch or of an INDI server, or until ctx ends. It
+// holds no timer: each wait ends on an event. report receives what
+// check says it waits for, each time that text changes.
 func (o *operator) waitFor(ctx context.Context, report func(string), check func(*tree) (bool, string, error)) error {
 	last := ""
 	for {
 		wake := o.changed.wait()
 		done, waiting, err := check(o.snapshot())
-		var again transient
-		if errors.As(err, &again) {
-			waiting, err = again.Error(), nil
-		}
 		if done || err != nil {
 			return err
 		}
@@ -243,28 +284,12 @@ func (o *operator) waitFor(ctx context.Context, report func(string), check func(
 			report(waiting)
 			last = waiting
 		}
-		if err := o.pause(ctx, wake, again.err != nil); err != nil {
-			return err
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-wake:
 		}
 	}
-}
-
-// pause waits for a change, or for retryPause when retry is true, or
-// until ctx ends.
-func (o *operator) pause(ctx context.Context, wake <-chan struct{}, retry bool) error {
-	var after <-chan time.Time
-	if retry {
-		timer := time.NewTimer(retryPause)
-		defer timer.Stop()
-		after = timer.C
-	}
-	select {
-	case <-ctx.Done():
-		return context.Cause(ctx)
-	case <-wake:
-	case <-after:
-	}
-	return nil
 }
 
 // sleepUntil waits until a time, or until a change, or until ctx ends.

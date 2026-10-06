@@ -1,12 +1,15 @@
-// The replay server: a real TCP listener that answers each message of
-// a client with the bytes that indiserver sent in reply to the same
-// message, as the recorder captured them in testdata/. It parses what
-// the client sends with its own types, so a client that sends a wrong
-// message gets no reply, and its test fails.
+// The replay server answers each message of a client with the bytes
+// that indiserver sent in reply to the same message, as the recorder
+// captured them in testdata/. It parses what the client sends with its
+// own types, so a client that sends a wrong message gets no reply, and
+// its test fails. The client dials it through WithDialer, and each dial
+// is one end of a net.Pipe, so the tests run in a synctest bubble on
+// the fake clock. A real socket would stop that clock.
 
 package indi
 
 import (
+	"context"
 	"encoding/xml"
 	"net"
 	"os"
@@ -14,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -77,10 +81,11 @@ type replayServer struct {
 	simulator string
 	device    string
 	phases    []phase
-	listener  net.Listener
 
-	mutex    sync.Mutex
-	conns    []net.Conn
+	mutex sync.Mutex
+	// closed refuses every dial, as a closed port does.
+	closed   bool
+	conns    []*replayConn
 	requests []request
 	// arrived is closed and replaced each time a request arrives, so a
 	// test waits for a request with no timer.
@@ -95,19 +100,11 @@ func startReplay(t *testing.T, simulator string) *replayServer {
 	t.Helper()
 	baseline := transcript(t, simulator, "baseline")
 	device := firstDevice(t, baseline)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
 	s := &replayServer{
-		t: t, simulator: simulator, device: device, listener: listener,
+		t: t, simulator: simulator, device: device,
 		phases: phases(simulator, device), arrived: make(chan struct{}),
 	}
-	t.Cleanup(func() {
-		listener.Close()
-		s.drop()
-	})
-	go s.accept()
+	t.Cleanup(s.close)
 	return s
 }
 
@@ -120,23 +117,80 @@ func transcript(t *testing.T, simulator, name string) []byte {
 	return data
 }
 
-func (s *replayServer) address() string { return s.listener.Addr().String() }
+// replayAddress is the address every test client names. The replay
+// server answers each dial, whatever the address.
+const replayAddress = "indiserver.test:7624"
 
-func (s *replayServer) accept() {
-	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
-			return
+// newClient answers a client that dials the replay server.
+func (s *replayServer) newClient() *Client {
+	return NewClient(replayAddress, WithDialer(s))
+}
+
+// DialContext opens one connection to the server, and refuses it after
+// close, the way a closed port answers ECONNREFUSED.
+func (s *replayServer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.closed {
+		return nil, &net.OpError{Op: "dial", Net: network, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+	}
+	client, server := net.Pipe()
+	conn := newReplayConn(server)
+	s.conns = append(s.conns, conn)
+	go s.serve(conn)
+	return client, nil
+}
+
+// replayConn queues what the server writes, the way a socket's send
+// buffer does. A net.Pipe has no buffer: the server would block while
+// it writes a baseline, and the client would block while it writes the
+// next request, and neither would read.
+type replayConn struct {
+	conn net.Conn
+	out  chan []byte
+	done chan struct{}
+	once sync.Once
+}
+
+func newReplayConn(conn net.Conn) *replayConn {
+	c := &replayConn{conn: conn, out: make(chan []byte, 64), done: make(chan struct{})}
+	go func() {
+		for {
+			select {
+			case data := <-c.out:
+				_, _ = conn.Write(data)
+			case <-c.done:
+				return
+			}
 		}
-		s.mutex.Lock()
-		s.conns = append(s.conns, conn)
-		s.mutex.Unlock()
-		go s.serve(conn)
+	}()
+	return c
+}
+
+func (c *replayConn) write(data []byte) {
+	select {
+	case c.out <- data:
+	case <-c.done:
 	}
 }
 
-func (s *replayServer) serve(conn net.Conn) {
-	decoder := xml.NewDecoder(conn)
+func (c *replayConn) close() {
+	c.once.Do(func() { close(c.done) })
+	_ = c.conn.Close()
+}
+
+// close stops the server: it refuses every later dial and closes every
+// open connection.
+func (s *replayServer) close() {
+	s.mutex.Lock()
+	s.closed = true
+	s.mutex.Unlock()
+	s.drop()
+}
+
+func (s *replayServer) serve(conn *replayConn) {
+	defer conn.close()
+	decoder := xml.NewDecoder(conn.conn)
 	for {
 		token, err := decoder.Token()
 		if err != nil {
@@ -161,12 +215,12 @@ func (s *replayServer) serve(conn net.Conn) {
 				break
 			}
 			if r.answers(p) {
-				conn.Write(transcript(s.t, s.simulator, p.name))
+				conn.write(transcript(s.t, s.simulator, p.name))
 				break
 			}
 		}
 		if r.XMLName.Local == "pingRequest" {
-			conn.Write([]byte(`<pingReply uid="` + r.UID + `"/>`))
+			conn.write([]byte(`<pingReply uid="` + r.UID + `"/>`))
 		}
 	}
 }
@@ -184,7 +238,7 @@ func (s *replayServer) send(data string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	for _, conn := range s.conns {
-		conn.Write([]byte(data))
+		conn.write([]byte(data))
 	}
 }
 
@@ -193,7 +247,7 @@ func (s *replayServer) drop() {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	for _, conn := range s.conns {
-		conn.Close()
+		conn.close()
 	}
 	s.conns = nil
 }

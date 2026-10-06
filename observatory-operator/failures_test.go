@@ -21,6 +21,7 @@ func (w *world) put(kind observatory.Kind, name string, spec map[string]any) {
 }
 
 func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		change  func(w *world)
@@ -79,6 +80,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				c.change(w)
@@ -95,6 +97,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 
 // A telescope with no devices has nothing for a server to run.
 func TestATelescopeWithNoDevicesFailsPowerOn(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.put(observatory.TelescopeKind, "south", map[string]any{"observatory": "lab"})
@@ -108,6 +111,7 @@ func TestATelescopeWithNoDevicesFailsPowerOn(t *testing.T) {
 
 // The notes of a step name what a driver lacks, and the step goes on.
 func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.put(observatory.CameraKind, "east-guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_guide"}, "temperature": -5, "offset": 3})
@@ -132,6 +136,7 @@ func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 // Abort ends an exposure and a slew, and sends nothing to a device that
 // is idle.
 func TestAbortStopsWhatMoves(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		w.indi.setState("telescope-east", "CCD Simulator", "CCD_EXPOSURE", "Busy")
@@ -156,6 +161,7 @@ func TestAbortStopsWhatMoves(t *testing.T) {
 // Two telescopes in one observatory share its server, which stops
 // after the last reservation ends.
 func TestTheObservatorysServerStopsAfterTheLastReservation(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
@@ -182,6 +188,7 @@ func TestTheObservatorysServerStopsAfterTheLastReservation(t *testing.T) {
 // A reservation whose finalizer a person removed goes at once, and the
 // operator stops the pods that it left.
 func TestThePodsOfAReservationThatVanishedAreStopped(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		object, _ := w.api.object(kindCollection(observatory.ReservationKind), "east-tonight")
@@ -197,6 +204,7 @@ func TestThePodsOfAReservationThatVanishedAreStopped(t *testing.T) {
 // A create or a delete that the API server refuses is tried again, and
 // the step goes on when the API server answers.
 func TestARefusedWriteIsTriedAgain(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.refuse(5)
@@ -214,6 +222,7 @@ func TestARefusedWriteIsTriedAgain(t *testing.T) {
 // A device that answers a change with Alert fails the step that sent
 // the change, and the step's message names the device.
 func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		device, property string
 		step             observatory.StepName
@@ -245,6 +254,7 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(string(c.step)+"/"+c.device+"/"+c.property, func(t *testing.T) {
+			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				if !c.ready {
@@ -275,6 +285,7 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 // A camera whose exposure does not end when Abort asks fails Abort at
 // its deadline.
 func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		w.indi.setState("telescope-east", "CCD Simulator", "CCD_EXPOSURE", "Busy")
@@ -291,6 +302,7 @@ func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
 // A status write or an Event that the API server refuses costs nothing
 // but a log line: the next write carries the same facts.
 func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.mu.Lock()
@@ -309,6 +321,7 @@ func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
 // A device that comes back and refuses its settings keeps the
 // reservation Ready, and its status shows the failure.
 func TestADeviceThatComesBackAndRefusesItsSettingsShowsTheFault(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		w.indi.refuse("CCD Simulator", "CCD_GAIN")
@@ -327,6 +340,7 @@ func TestADeviceThatComesBackAndRefusesItsSettingsShowsTheFault(t *testing.T) {
 // A reservation whose end passed before it took its telescope ends at
 // once, and does not hold up the reservations that wait.
 func TestAReservationThatEndedBeforeItsStartGoesAtOnce(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})

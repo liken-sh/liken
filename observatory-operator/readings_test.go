@@ -10,6 +10,7 @@ import (
 // INDI's weather base class sets each light from its limits, and the
 // status reads the light as a verdict.
 func TestAWeatherLightIsAVerdict(t *testing.T) {
+	t.Parallel()
 	cases := map[indi.State]observatory.Safety{
 		indi.Ok:    observatory.SafetySafe,
 		indi.Busy:  observatory.SafetyWarning,
@@ -25,6 +26,7 @@ func TestAWeatherLightIsAVerdict(t *testing.T) {
 
 // A device's phase follows from its pod and from its CONNECTION.
 func TestADevicesPhase(t *testing.T) {
+	t.Parallel()
 	connection := func(state indi.State, connect bool) indi.Property {
 		return indi.Property{Name: "CONNECTION", State: state, Members: []indi.Member{{Name: "CONNECT", Switch: connect}, {Name: "DISCONNECT", Switch: !connect}}}
 	}

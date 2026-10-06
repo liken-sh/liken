@@ -30,7 +30,7 @@ const reapplyLimit = 2 * time.Minute
 func (r *runner) steady(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	appeared := &appearances{devices: map[string]bool{}, everything: map[string]bool{}}
+	appeared := newAppearances()
 	subscribed := map[string]*indi.Client{}
 	for ctx.Err() == nil {
 		wake := r.o.changed.wait()
@@ -61,7 +61,8 @@ func (r *runner) steady(ctx context.Context) {
 	}
 }
 
-// keepWaiting waits for a change, or for spec.end.
+// keepWaiting waits for a change, or for spec.end. The timer is a
+// clock: spec.end.
 func (r *runner) keepWaiting(ctx context.Context, wake <-chan struct{}) {
 	var end <-chan time.Time
 	if r.res.Spec.End != nil {
@@ -95,8 +96,10 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 		return nil
 	}
 	lock := r.o.siteLock(site.Metadata.Name)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.acquire(ctx); err != nil {
+		return err
+	}
+	defer lock.release()
 	if err := r.o.startServer(ctx, nil, siteRef, site.Metadata.UID, siteDevices); err != nil {
 		return err
 	}
@@ -108,18 +111,30 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 type appearances struct {
 	mu      sync.Mutex
 	devices map[string]bool
-	// everything holds each server whose client the runner subscribed
-	// to since its last look. A connection can define its devices
-	// before the subscription opens, so every device of such a server
-	// counts as come back once.
-	everything map[string]bool
+	// counted holds, for each server whose client the runner
+	// subscribed to, the devices that counted as come back since the
+	// subscription opened. A connection can define its devices before
+	// the subscription opens, so every device of such a server counts
+	// as come back once. The runner finds a device only after its
+	// driver defines DRIVER_INFO, which can be several looks later, so
+	// each device counts on its own first look.
+	counted map[string]map[string]bool
+}
+
+func newAppearances() *appearances {
+	return &appearances{devices: map[string]bool{}, counted: map[string]map[string]bool{}}
+}
+
+// opened starts the count of a server's devices for a new subscription.
+func (a *appearances) opened(server string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.counted[server] = map[string]bool{}
 }
 
 func (a *appearances) subscribe(ctx context.Context, server *indiServer, changed *bell) {
 	events := server.client.Subscribe(ctx)
-	a.mu.Lock()
-	a.everything[server.name] = true
-	a.mu.Unlock()
+	a.opened(server.name)
 	go func() {
 		for e := range events {
 			if e.Kind == indi.Defined && e.Property == "CONNECTION" {
@@ -137,16 +152,13 @@ func (a *appearances) take(server, device string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	key := server + "/" + device
-	appeared := a.devices[key] || a.everything[server]
+	appeared := a.devices[key]
 	delete(a.devices, key)
+	if counted, open := a.counted[server]; open && !counted[device] {
+		counted[device] = true
+		appeared = true
+	}
 	return appeared
-}
-
-// looked ends the runner's look at one server's devices.
-func (a *appearances) looked(server string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	delete(a.everything, server)
 }
 
 // reapply connects and configures each of the telescope's devices that
@@ -171,7 +183,6 @@ func (r *runner) reapply(ctx context.Context, t *tree, ref serverRef, appeared *
 			return err
 		})
 	}
-	defer appeared.looked(ref.String())
 	for _, h := range all {
 		if !appeared.take(ref.String(), h.name) || h.connected() {
 			continue
@@ -202,15 +213,16 @@ func (r *runner) reapplySite(ctx context.Context, t *tree, site *observatory.Obs
 	devices := t.devicesOn(ref)
 	switches, others := partition(devices)
 	ordered := append(switches, inOrder(others, siteOrder)...)
-	defer appeared.looked(ref.String())
 	for _, h := range r.o.handlesOf(t, ref, ordered) {
 		if !appeared.take(ref.String(), h.name) || h.connected() {
 			continue
 		}
 		r.again(ctx, h, func(ctx context.Context) error {
 			lock := r.o.siteLock(site.Metadata.Name)
-			lock.Lock()
-			defer lock.Unlock()
+			if err := lock.acquire(ctx); err != nil {
+				return err
+			}
+			defer lock.release()
 			if err := h.connect(ctx); err != nil {
 				return err
 			}
@@ -230,9 +242,11 @@ func (r *runner) reapplySite(ctx context.Context, t *tree, site *observatory.Obs
 func (r *runner) again(ctx context.Context, h handle, work func(context.Context) error) {
 	ctx, cancel := context.WithTimeout(ctx, reapplyLimit)
 	defer cancel()
-	h.server.mu.Lock()
-	defer h.server.mu.Unlock()
-	err := work(ctx)
+	err := h.server.lock.acquire(ctx)
+	if err == nil {
+		defer h.server.lock.release()
+		err = work(ctx)
+	}
 	r.o.fault(h.d, err)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "observatory-operator: %s came back, and setting it up again failed: %v\n", h, err)

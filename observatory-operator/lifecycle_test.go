@@ -23,6 +23,7 @@ func stepStates(r observatory.Reservation) []string {
 }
 
 func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
@@ -94,6 +95,7 @@ func conditionOf(conditions []observatory.Condition, kind string) observatory.Co
 // At spec.end the reservation deactivates, and it stays, Released, with
 // every step in its record.
 func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		end := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)

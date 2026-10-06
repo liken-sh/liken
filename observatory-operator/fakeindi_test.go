@@ -21,6 +21,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -237,17 +238,19 @@ func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
 }
 
 // follow brings each server's drivers in line with the pods after each
-// change of the fake API server.
+// change of the fake API server's pods. A stored object never changes
+// (fakeAPI.store), so follow reads the pods without a copy.
 func (w *indiWorld) follow(ctx context.Context) {
+	var last map[string]map[string]any
 	for {
 		w.api.mu.Lock()
 		changed := w.api.changed
-		pods := map[string]map[string]any{}
-		for name, p := range w.api.objects[podsCollection] {
-			pods[name] = clone(p)
-		}
+		pods := maps.Clone(w.api.objects[podsCollection])
 		w.api.mu.Unlock()
-		w.sync(pods)
+		if !samePods(pods, last) {
+			w.sync(pods)
+			last = pods
+		}
 		select {
 		case <-ctx.Done():
 			w.mu.Lock()
@@ -261,6 +264,14 @@ func (w *indiWorld) follow(ctx context.Context) {
 		case <-changed:
 		}
 	}
+}
+
+// samePods answers whether two reads of the pods hold the same stored
+// objects.
+func samePods(a, b map[string]map[string]any) bool {
+	return maps.EqualFunc(a, b, func(x, y map[string]any) bool {
+		return x["metadata"].(map[string]any)["resourceVersion"] == y["metadata"].(map[string]any)["resourceVersion"]
+	})
 }
 
 func podReady(p map[string]any) bool {

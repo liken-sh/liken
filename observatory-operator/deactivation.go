@@ -345,8 +345,10 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	}
 	site := telescope.Spec.Observatory
 	lock := r.o.siteLock(site)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.acquire(ctx); err != nil {
+		return outcome{}, err
+	}
+	defer lock.release()
 	for other := range r.o.claims.held() {
 		if scope, ok := t.telescopes[other]; ok && other != telescope.Metadata.Name && scope.Spec.Observatory == site {
 			holder, _ := r.o.claims.holderOf(other)

@@ -62,8 +62,10 @@ func (r *runner) run(ctx context.Context) {
 			return
 		}
 		if !hasFinalizer(r.res) && r.res.Metadata.DeletionTimestamp == nil && r.status.Phase != observatory.ReservationReleased {
-			if err := r.o.setFinalizer(r.res, true); err != nil {
-				r.retryLater(ctx, "adding the finalizer", err)
+			if err := r.o.send(ctx, nil, "adding the finalizer of the Reservation "+r.name, func() error {
+				r.refresh()
+				return r.o.setFinalizer(r.res, true)
+			}); err != nil {
 				continue
 			}
 			r.awaitStore(ctx, hasFinalizer)
@@ -297,22 +299,6 @@ func phaseOf(name observatory.StepName) observatory.ReservationPhase {
 	}
 	return observatory.ReservationActivating
 }
-
-// retryLater logs a failed write and waits before the runner reads the
-// reservation again. The wait is a clock that spaces the writes while
-// the API server refuses them.
-func (r *runner) retryLater(ctx context.Context, what string, err error) {
-	fmt.Fprintf(os.Stderr, "observatory-operator: the Reservation %s: %s: %v\n", r.name, what, err)
-	timer := time.NewTimer(retryPause)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
-}
-
-// retryPause is the wait after a write that the API server refused.
-const retryPause = 5 * time.Second
 
 // save writes the record to the reservation's status, with the phase's
 // conditions and endpoint, and writes nothing when the status holds it

@@ -13,9 +13,8 @@ plan 74](../plans/74-astrophotography.md) records the architecture that
 this component and `astrophotography-operator` share, and the
 simulator tests that support it.
 
-`make test` runs every check CI runs. The `topology/` manifests are
-plan 03's: the operator builds no manifest from them, and
-`pods_test.go` holds the operator's pods to their shape.
+`make test` runs every check CI runs. `pods_test.go` holds the
+operator's pods to the properties that plan 03 measured.
 
 ## The resources
 
@@ -71,8 +70,10 @@ The transcripts in `indi/testdata/` are the bytes that a real
 `indiserver` sent with one simulator behind it, for each of the 15
 simulators that plan 06 gives a kind. Each directory has `baseline.xml`,
 `connect.xml`, and `disconnect.xml`, and the focuser and the dome have
-more steps. `replay_test.go` serves them from a real listener, so a
-client that sends a wrong message gets no reply. They were captured
+more steps. `replay_test.go` serves them to a client that dials
+through `WithDialer`, over a `net.Pipe`, so the tests run in a
+`testing/synctest` bubble. A client that sends a wrong message gets no
+reply. They were captured
 from the simulators of the pinned `indi-simulators` tag, and need
 capturing again after a bump of the INDI images.
 
