@@ -12,7 +12,11 @@ that server restarts with it and comes back disconnected, and the
 operator connects it and writes its settings again. In plan 03, the
 restart took 3 seconds. On the test cluster, after the server's pod
 was deleted, the mount was connected again 7.2 seconds later. An
-exposure or a guide loop that runs during the restart is lost.
+exposure or a guide loop that runs during the restart is lost. The
+operator posts a `ServerReplaced` Warning on the `Telescope` or the
+`Observatory` when it replaces the server's pod for this reason. A
+device that leaves the telescope, to the shelf or to another
+telescope, restarts the server the same way.
 
 ## What could fix it
 

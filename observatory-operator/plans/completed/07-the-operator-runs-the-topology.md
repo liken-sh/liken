@@ -207,6 +207,18 @@ review.
   resolves to `indi-simulators`, and every other driver to `indi`,
   which holds libindi's whole `indi-bin`.
 
+Note added on 2026-10-06: the `Inventory` phase of the drill below is
+now named `Idle`, and `Inventory` names only a device on the shelf,
+with no parent (plan 06). A device is now `Starting` from the start
+of its reservation's activation, not only from when its pod is
+created. A change to the set of devices while a reservation is `Ready`
+still replaces the server's pod, and the runner now posts a
+`ServerReplaced` Warning on the `Telescope` or the `Observatory`,
+because the restart ends an exposure in progress. A device that leaves
+the server, to the shelf or to another telescope, now loses its pod,
+its `Service`, and its `ResourceClaim` at once. Before, they stayed
+until `StopDevices`, and the claim held the hardware.
+
 ## What the tests showed
 
 The tests run the operator in a `testing/synctest` bubble against a

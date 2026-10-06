@@ -35,8 +35,15 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 			continue
 		}
 		// A Switch belongs to a telescope or an observatory, never to a
-		// train, so its server is always known.
-		ref, _ := t.server(sw)
+		// train, so its server is known unless it is on the shelf.
+		ref, installed := t.server(sw)
+		if !installed {
+			if power {
+				return nil, fmt.Errorf("the Switch %s, which spec.power names, is on the shelf: set its spec.telescope or spec.observatory", name)
+			}
+			notes = append(notes, fmt.Sprintf("left the outputs of Switch %s as they are: it is on the shelf", name))
+			continue
+		}
 		handles, _ := o.connectedHandles(ctx, nil, t, ref, []*device{sw})
 		if len(handles) == 0 {
 			if power {

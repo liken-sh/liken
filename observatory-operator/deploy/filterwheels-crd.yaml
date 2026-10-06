@@ -71,7 +71,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [opticalTrain, driver]
+              required: [driver]
               description: "One filter wheel, with INDI's `FILTER_INTERFACE`."
               properties:
                 opticalTrain:
@@ -83,6 +83,8 @@ spec:
                     The name of the `OpticalTrain` that the device is
                     on. The train's members set what each camera on it
                     snoops.
+                    Optional. With no `opticalTrain`, the device is on
+                    the shelf, and the operator creates nothing for it.
                 driver:
                   type: object
                   required: [name]
@@ -177,11 +179,15 @@ spec:
                     operator last acted on.
                 phase:
                   type: string
-                  enum: [Inventory, Starting, Connecting, Connected, Disconnecting, Error]
+                  enum: [Inventory, Idle, Starting, Connecting, Connected, Disconnecting, Error]
                   description: >-
-                    The device's state in one word. `Inventory`: no
-                    reservation needs the device, and it has no pod.
-                    `Starting`: the device's pod starts. `Connecting`:
+                    The device's state in one word. `Inventory`: the
+                    device is on the shelf, with no parent, and the
+                    operator creates nothing for it. `Idle`: the device
+                    is installed, but no reservation of its telescope or
+                    its observatory is active, so it has no pod.
+                    `Starting`: a reservation's activation began, or the
+                    device's pod starts. `Connecting`:
                     the operator asked the driver to connect.
                     `Connected`: the driver reports the device
                     connected. `Disconnecting`: the operator asked the
@@ -194,7 +200,9 @@ spec:
                     `Ready` is `True` while the device is connected.
                     `ParentFound` is `False` when a resource that the
                     spec names, up to the `Observatory`, does not exist,
-                    and its message names the missing resource.
+                    and its message names the missing resource. A
+                    device on the shelf names no parent, and its
+                    `ParentFound` is `True` with the reason `NoParent`.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

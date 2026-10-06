@@ -43,6 +43,9 @@ package `observatory` holds the Go types. `examples/simulators.yaml` is
 an observatory of simulators with a device of every kind.
 
 A device resource is inventory, and the operator starts nothing for it.
+A device's parent field is optional: a device with no parent is on the
+shelf, and the operator creates no pod, `Service`, or `ResourceClaim`
+for it.
 A `Reservation` gives one holder the use of one `Telescope`: a
 person's KStars in mode 1, or a `Session` of `astrophotography-operator`
 in mode 2. Activation waits for the devices to be powered on, then

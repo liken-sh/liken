@@ -7,7 +7,8 @@ package main
 //     eviction deleted, and replaces the server when the telescope's
 //     devices change, because the server's links name every device.
 //     It records an Event for each device pod and guider pod that it
-//     creates (recordPod).
+//     creates (recordPod), and a Warning for each server it replaces.
+//     It deletes the pod of each device that left (moves.go).
 //   - It keeps the telescope's guider (guidersteady.go).
 //   - It connects and configures again each device whose driver comes
 //     back on its server disconnected. A driver comes back that way
@@ -91,10 +92,18 @@ func (r *runner) keepWaiting(ctx context.Context, wake <-chan struct{}) {
 }
 
 // keepPods creates each of the telescope's pods that is gone, and the
-// observatory's, and replaces each whose spec changed.
+// observatory's, replaces each whose spec changed, and deletes the pods
+// of the devices that left either server (moves.go).
 func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope *observatory.Telescope, devices []*device) error {
+	if err := r.removeStrays(ctx, t, ref); err != nil {
+		return err
+	}
+	replaced := r.o.devicesChanged(t, ref, telescope.Metadata.UID, devices)
 	server, err := r.o.startServer(ctx, nil, ref, telescope.Metadata.UID, devices)
 	if server {
+		if replaced {
+			r.recordServerReplaced(ref, telescope.Metadata)
+		}
 		r.recordServerPod(ref, telescope.Metadata)
 	}
 	if err != nil {
@@ -111,16 +120,23 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 	}
 	siteRef := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
 	siteDevices := t.devicesOn(siteRef)
-	if len(siteDevices) == 0 {
-		return nil
-	}
 	lock := r.o.siteLock(site.Metadata.Name)
 	if err := lock.acquire(ctx); err != nil {
 		return err
 	}
 	defer lock.release()
+	if err := r.removeStrays(ctx, t, siteRef); err != nil {
+		return err
+	}
+	if len(siteDevices) == 0 {
+		return nil
+	}
+	replaced = r.o.devicesChanged(t, siteRef, site.Metadata.UID, siteDevices)
 	server, err = r.o.startServer(ctx, nil, siteRef, site.Metadata.UID, siteDevices)
 	if server {
+		if replaced {
+			r.recordServerReplaced(siteRef, site.Metadata)
+		}
 		r.recordServerPod(siteRef, site.Metadata)
 	}
 	if err != nil {

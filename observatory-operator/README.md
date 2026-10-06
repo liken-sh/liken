@@ -79,6 +79,14 @@ the telescope's pods only while the reservation is active. [Plan
 06](plans/completed/06-the-resources.md) gives the reasons for the
 names and the tree.
 
+Each device's parent field is optional. A device with no parent is on
+the shelf: its spec describes it in full, with its driver, image,
+power, and claim, but it is installed nowhere. The operator creates
+no pod, no `Service`, and no `ResourceClaim` for it, because a claim
+would reserve the hardware. A `SkyQualityMeter`, a `Switch`, or a
+`Receiver` names at most one of `telescope` and `observatory`. To
+install a device, set its parent field.
+
 | Kind | Short name | Parent field | Key reading in `kubectl get` |
 |---|---|---|---|
 | `Observatory` | `obs` | none | `weather` |
@@ -139,13 +147,22 @@ The operator writes every status, and no person writes one. Each kind
 has `status.conditions` in the shape of `metav1.Condition`, and
 `status.observedGeneration`. `ParentFound` is `False` when a resource
 that the spec names does not exist; the resource stays in place, and
-the message names the missing parent.
+the message names the missing parent. A device on the shelf has no
+parent to find, so its `ParentFound` is `True` with the reason
+`NoParent`.
 
 A device's status has the same fields in every kind, and one
 `readings` block of its own:
 
-- `phase`: `Inventory` with no pod, then `Starting`, `Connecting`,
-  `Connected`, and `Disconnecting`, or `Error`.
+- `phase`: `Inventory` on the shelf, with a `Ready` message such as
+  `Not installed in an optical train`. `Idle` when the device is
+  installed and no reservation of its telescope or its observatory is
+  active, with the message `Not reserved`. From the start of a
+  reservation's activation, `Starting` until the pod exists, then
+  `Connecting`, `Connected`, and `Disconnecting`, or `Error`. A
+  `Telescope`, an `Observatory`, and a `Guider` are `Idle` with no
+  active reservation, then `Activating`, `Ready`, and `Deactivating`,
+  or `Error`.
 - `indiDevice`, `driver`, `image`, `pod`, and `node`: what runs, and
   where. `indiDevice` is the name that KStars shows.
 - `readings`: the typed values of the kind, such as
@@ -273,13 +290,28 @@ While a reservation is `Ready`, the operator creates again each pod
 that is deleted. When a device's driver comes back on the server
 disconnected, after its pod or the server restarted, the operator
 connects it and writes its settings again. A device that a person
-disconnects in KStars stays disconnected. A device added to the
-telescope's inventory restarts the server, which then links to it. The
-operator also creates the guider's pod again, and connects the camera
-and the mount of each new PHD2 once.
+disconnects in KStars stays disconnected. The operator also creates
+the guider's pod again, and connects the camera and the mount of each
+new PHD2 once.
+
+A device that joins or leaves a telescope during a reservation is an
+ordinary edit, and the operator refuses no change. While the
+reservation is `Ready`, the server's links must name every device on
+it, so the operator replaces the server's pod. Every device on the
+server disconnects for a few seconds, and an exposure in progress
+ends. The operator posts a `ServerReplaced` Warning on the `Telescope`
+or the `Observatory`, and connects each device again. A device that
+left, to the shelf or to another telescope, loses its pod, its
+`Service`, and its `ResourceClaim` at once, and the device gets a
+`PodDeleted` Event. A device that leaves during activation keeps its
+pod until the reservation is `Ready`, or until deactivation's
+`StopDevices`. A device on a telescope with no active reservation
+changes nothing that runs.
 
 While such a pod is gone, its device is `Starting`, and the `Ready`
 message of the device or its `Guider` reads `Creating pod <name>`.
+During activation, before the steps create the pod, the device's
+message reads `Waiting for activation to create pod <name>`.
 When the operator creates the pod, it records a `PodCreated` Event on
 the device, the `Guider`, or the `Telescope` or `Observatory` whose
 INDI server the pod runs, and writes one line to its log. A new PHD2

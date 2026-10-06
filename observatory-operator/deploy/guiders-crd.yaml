@@ -228,10 +228,10 @@ spec:
                       description: "`rms.total` with its unit, such as `0.84 arcsec`."
                 phase:
                   type: string
-                  enum: [Inventory, Activating, Ready, Deactivating, Error]
+                  enum: [Idle, Activating, Ready, Deactivating, Error]
                   description: >-
-                    The state in one word. `Inventory`: no reservation
-                    needs it, and nothing runs. `Activating`: a
+                    The state in one word. `Idle`: no reservation needs
+                    it, and nothing runs. `Activating`: a
                     reservation's activation steps run. `Ready`:
                     everything it needs runs and is connected.
                     `Deactivating`: a reservation's deactivation steps

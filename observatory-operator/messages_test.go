@@ -17,27 +17,37 @@ import (
 
 func TestADevicesMessageLeadsWithItsState(t *testing.T) {
 	ref := serverRef{observatory.TelescopeKind, "east"}
+	phase := func(p observatory.DevicePhase) deviceStatus {
+		return deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: p}}
+	}
 	cases := []struct {
-		name   string
-		status deviceStatus
-		fault  string
-		// kept is true while a Ready reservation's runner keeps the
-		// device's pod.
-		kept bool
-		want string
+		name     string
+		kind     observatory.Kind
+		status   deviceStatus
+		fault    string
+		standing standing
+		want     string
 	}{
-		{"a device with no pod", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceInventory}}, "", false, "Not reserved"},
-		{"a device whose pod a Ready reservation creates again", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceStarting}}, "", true,
+		{"a mount on the shelf", observatory.MountKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in a telescope"},
+		{"a camera on the shelf", observatory.CameraKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in an optical train"},
+		{"a dome on the shelf", observatory.DomeKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in an observatory"},
+		{"a switch on the shelf", observatory.SwitchKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in a telescope or an observatory"},
+		{"an installed device with no reservation", observatory.CameraKind, phase(observatory.DeviceIdle), "", idle, "Not reserved"},
+		{"a device whose reservation activates", observatory.CameraKind, phase(observatory.DeviceStarting), "", activating,
+			"Waiting for activation to create pod east-main-camera"},
+		{"a device whose pod a Ready reservation creates again", observatory.CameraKind, phase(observatory.DeviceStarting), "", kept,
 			"Creating pod east-main-camera"},
-		{"a pod whose driver has not defined its device", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceStarting, Pod: "camera-east-main"}}, "",
-			false, "Waiting for its driver on east-telescope"},
-		{"a connected device", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceConnected, IndiDevice: "CCD Simulator"}}, "", true, "Connected on east-telescope"},
-		{"a device that failed", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceError, IndiDevice: "CCD Simulator"}}, "indi: CCD Simulator.CCD_GAIN is Alert",
-			true, "Failed: indi: CCD Simulator.CCD_GAIN is Alert"},
+		{"a pod whose driver has not defined its device", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceStarting, Pod: "camera-east-main"}}, "",
+			activating, "Waiting for its driver on east-telescope"},
+		{"a pod that a device's server no longer runs", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceDisconnecting, Pod: "east-main-camera"}}, "",
+			onShelf, "Stopping pod east-main-camera"},
+		{"a connected device", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceConnected, IndiDevice: "CCD Simulator"}}, "", kept, "Connected on east-telescope"},
+		{"a device that failed", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceError, IndiDevice: "CCD Simulator"}}, "indi: CCD Simulator.CCD_GAIN is Alert",
+			kept, "Failed: indi: CCD Simulator.CCD_GAIN is Alert"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := deviceMessage(c.status, ref, "east-main-camera", c.fault, c.kept); got != c.want {
+			if got := deviceMessage(c.status, c.kind, ref, "east-main-camera", c.fault, c.standing); got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})

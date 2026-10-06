@@ -495,6 +495,21 @@ stated otherwise:
 - **The namespace.** `deploy/` creates the namespace `observatory`
   for the operator and the resources.
 
+Note added on 2026-10-06: each device's parent field is now
+optional. A device with no parent is on the shelf: its spec describes
+it in full, and the operator creates no pod, no `Service`, and no
+`ResourceClaim` for it, because a claim would reserve the hardware.
+The CEL rule of a `SkyQualityMeter`, a `Switch`, or a `Receiver` now
+admits at most one of `telescope` and `observatory`, with the message
+"set at most one parent: spec.telescope or spec.observatory". The
+phase names changed with it. A device on the shelf is `Inventory`. An
+installed device with no active reservation is `Idle`, the phase that
+was `Inventory` before. A `Telescope`, an `Observatory`, and a
+`Guider` with no active reservation are `Idle` too, and none of them is
+`Inventory` any more. The refusals below of a `Camera` with no
+`opticalTrain` and of a `Switch` with no parent no longer apply: the
+API server accepts both as devices on the shelf.
+
 ## What the API server showed
 
 In the local experiment, `kubectl apply -k deploy/` created the

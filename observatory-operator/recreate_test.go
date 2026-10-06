@@ -132,8 +132,8 @@ func TestARecreatedServerPodIsNamedInAnEvent(t *testing.T) {
 }
 
 // While a Ready reservation's runner creates a device's pod again, the
-// device is Starting, not Inventory: Inventory means that no
-// reservation needs the device.
+// device is Starting, not Idle: Idle means that no reservation needs
+// the device.
 func TestADeviceWhosePodIsGoneIsStarting(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -150,8 +150,8 @@ func TestADeviceWhosePodIsGoneIsStarting(t *testing.T) {
 		})
 
 		phases := devicePhases(w.api, observatory.CameraKind, "east-main", since)
-		if slices.Contains(phases, string(observatory.DeviceInventory)) || !slices.Contains(phases, string(observatory.DeviceStarting)) {
-			t.Errorf("the camera's phases were %q, want Starting and never Inventory", phases)
+		if slices.Contains(phases, string(observatory.DeviceIdle)) || !slices.Contains(phases, string(observatory.DeviceStarting)) {
+			t.Errorf("the camera's phases were %q, want Starting and never Idle", phases)
 		}
 	})
 }

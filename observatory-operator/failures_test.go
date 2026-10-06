@@ -46,6 +46,15 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 			message: "missing Switch nowhere, which spec.power names",
 		},
 		{
+			name: "a Switch on the shelf",
+			change: func(w *world) {
+				w.put(observatory.SwitchKind, "spare", map[string]any{"driver": map[string]any{"name": "indi_simulator_io"}})
+				w.put(observatory.RotatorKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "spare", "output": 1}})
+			},
+			step:    observatory.StepPowerOn,
+			message: "the Switch spare, which spec.power names, is on the shelf: set its spec.telescope or spec.observatory",
+		},
+		{
 			name: "a Switch output that does not exist",
 			change: func(w *world) {
 				w.put(observatory.RotatorKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "east", "output": 9}})

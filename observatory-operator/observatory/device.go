@@ -11,8 +11,11 @@ import (
 // Reservation needs it. Every device kind shares the fields below. The
 // parent field differs by kind, so each kind's spec embeds one of the
 // four structs below, such as TrainDevice. That struct holds the parent
-// field and embeds DeviceSpec. A device has one parent field, so it is
-// in one place in the tree.
+// field and embeds DeviceSpec. A device has at most one parent field
+// set, so it is in at most one place in the tree. A device with no
+// parent is on the shelf: it is described in full, and the operator
+// creates no pod, no Service, and no ResourceClaim for it, because a
+// claim would reserve the hardware.
 
 // DeviceSpec holds the fields that every device kind shares.
 type DeviceSpec struct {
@@ -44,7 +47,8 @@ type Power struct {
 	Output int32  `json:"output"`
 }
 
-// Parent names the resource above a device in the tree.
+// Parent names the resource above a device in the tree. The zero
+// Parent is the shelf: the device names no parent.
 type Parent struct {
 	Kind Kind
 	Name string
@@ -53,36 +57,36 @@ type Parent struct {
 // TelescopeDevice is a device that belongs to a Telescope: a Mount, a
 // GPS, or a PolarAligner.
 type TelescopeDevice struct {
-	Telescope string `json:"telescope"`
+	Telescope string `json:"telescope,omitempty"`
 	DeviceSpec
 }
 
-func (d TelescopeDevice) Parent() Parent { return Parent{TelescopeKind, d.Telescope} }
+func (d TelescopeDevice) Parent() Parent { return parent(TelescopeKind, d.Telescope) }
 
 // TrainDevice is a device on one light path: a Camera, a FilterWheel,
 // a Focuser, a Rotator, a DustCap, or a FlatPanel. The train's
 // membership sets what each camera snoops, and so which mount,
 // focuser, and filter wheel each frame's FITS header names.
 type TrainDevice struct {
-	OpticalTrain string `json:"opticalTrain"`
+	OpticalTrain string `json:"opticalTrain,omitempty"`
 	DeviceSpec
 }
 
-func (d TrainDevice) Parent() Parent { return Parent{OpticalTrainKind, d.OpticalTrain} }
+func (d TrainDevice) Parent() Parent { return parent(OpticalTrainKind, d.OpticalTrain) }
 
 // ObservatoryDevice is a device of the site that no telescope owns: a
 // Dome or a WeatherStation. It runs on the observatory's own INDI
 // server.
 type ObservatoryDevice struct {
-	Observatory string `json:"observatory"`
+	Observatory string `json:"observatory,omitempty"`
 	DeviceSpec
 }
 
-func (d ObservatoryDevice) Parent() Parent { return Parent{ObservatoryKind, d.Observatory} }
+func (d ObservatoryDevice) Parent() Parent { return parent(ObservatoryKind, d.Observatory) }
 
 // TelescopeOrObservatoryDevice is a device that can belong to either
-// level: a SkyQualityMeter, a Switch, or a Receiver. The CRD admits
-// exactly one of the two parent fields.
+// level: a SkyQualityMeter, a Switch, or a Receiver. The CRD admits at
+// most one of the two parent fields.
 type TelescopeOrObservatoryDevice struct {
 	Telescope   string `json:"telescope,omitempty"`
 	Observatory string `json:"observatory,omitempty"`
@@ -93,18 +97,31 @@ func (d TelescopeOrObservatoryDevice) Parent() Parent {
 	if d.Telescope != "" {
 		return Parent{TelescopeKind, d.Telescope}
 	}
-	return Parent{ObservatoryKind, d.Observatory}
+	return parent(ObservatoryKind, d.Observatory)
+}
+
+// parent answers the Parent that a parent field names, and the shelf
+// when the field is empty.
+func parent(kind Kind, name string) Parent {
+	if name == "" {
+		return Parent{}
+	}
+	return Parent{kind, name}
 }
 
 // DevicePhase is a device's state in one word.
 type DevicePhase string
 
 const (
-	// DeviceInventory: no reservation needs the device, and it has no
-	// pod.
+	// DeviceInventory: the device is on the shelf. It names no parent,
+	// and the operator creates nothing for it.
 	DeviceInventory DevicePhase = "Inventory"
-	// DeviceStarting: the operator created the device's pod, and waits
-	// for it to be ready and for the driver to define its properties.
+	// DeviceIdle: the device is installed, but no reservation of its
+	// telescope or its observatory is active, so it has no pod.
+	DeviceIdle DevicePhase = "Idle"
+	// DeviceStarting: a reservation's activation began, or the
+	// operator created the device's pod, and the operator waits for the
+	// pod to be ready and for the driver to define its properties.
 	DeviceStarting DevicePhase = "Starting"
 	// DeviceConnecting: the operator set CONNECTION to CONNECT, and
 	// waits for the driver to answer.

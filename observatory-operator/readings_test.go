@@ -60,26 +60,26 @@ func TestADevicesPhase(t *testing.T) {
 	cases := []struct {
 		name               string
 		stopping, pod, def bool
-		// kept is true while a Ready reservation's runner keeps the
-		// device's pod.
-		kept       bool
-		connection indi.Property
-		fault      string
-		want       observatory.DevicePhase
+		standing           standing
+		connection         indi.Property
+		fault              string
+		want               observatory.DevicePhase
 	}{
-		{"no pod", false, false, false, false, indi.Property{}, "", observatory.DeviceInventory},
-		{"no pod while a Ready reservation keeps it", false, false, false, true, indi.Property{}, "", observatory.DeviceStarting},
-		{"a pod that stops", true, true, true, false, connection(indi.Ok, true), "", observatory.DeviceDisconnecting},
-		{"a driver not yet on the server", false, true, false, false, indi.Property{}, "", observatory.DeviceStarting},
-		{"a connect in flight", false, true, true, false, connection(indi.Busy, true), "", observatory.DeviceConnecting},
-		{"a disconnect in flight", false, true, true, false, connection(indi.Busy, false), "", observatory.DeviceDisconnecting},
-		{"a refused connect", false, true, true, false, connection(indi.Alert, false), "", observatory.DeviceError},
-		{"a failed step", false, true, true, false, connection(indi.Idle, false), "it broke", observatory.DeviceError},
-		{"connected", false, true, true, false, connection(indi.Ok, true), "", observatory.DeviceConnected},
-		{"disconnected", false, true, true, false, connection(indi.Idle, false), "", observatory.DeviceStarting},
+		{"on the shelf", false, false, false, onShelf, indi.Property{}, "", observatory.DeviceInventory},
+		{"installed, with no active reservation", false, false, false, idle, indi.Property{}, "", observatory.DeviceIdle},
+		{"no pod yet while a reservation activates", false, false, false, activating, indi.Property{}, "", observatory.DeviceStarting},
+		{"no pod while a Ready reservation keeps it", false, false, false, kept, indi.Property{}, "", observatory.DeviceStarting},
+		{"a pod that stops", true, true, true, idle, connection(indi.Ok, true), "", observatory.DeviceDisconnecting},
+		{"a driver not yet on the server", false, true, false, activating, indi.Property{}, "", observatory.DeviceStarting},
+		{"a connect in flight", false, true, true, activating, connection(indi.Busy, true), "", observatory.DeviceConnecting},
+		{"a disconnect in flight", false, true, true, idle, connection(indi.Busy, false), "", observatory.DeviceDisconnecting},
+		{"a refused connect", false, true, true, activating, connection(indi.Alert, false), "", observatory.DeviceError},
+		{"a failed step", false, true, true, activating, connection(indi.Idle, false), "it broke", observatory.DeviceError},
+		{"connected", false, true, true, kept, connection(indi.Ok, true), "", observatory.DeviceConnected},
+		{"disconnected", false, true, true, kept, connection(indi.Idle, false), "", observatory.DeviceStarting},
 	}
 	for _, c := range cases {
-		if got := devicePhase(c.stopping, c.pod, c.def, c.kept, c.connection, c.fault); got != c.want {
+		if got := devicePhase(c.stopping, c.pod, c.def, c.standing, c.connection, c.fault); got != c.want {
 			t.Errorf("%s: phase = %s, want %s", c.name, got, c.want)
 		}
 	}

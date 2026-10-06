@@ -23,9 +23,9 @@ func strs[T ~string](values ...T) []string {
 }
 
 var (
-	devicePhases = strs(DeviceInventory, DeviceStarting, DeviceConnecting,
+	devicePhases = strs(DeviceInventory, DeviceIdle, DeviceStarting, DeviceConnecting,
 		DeviceConnected, DeviceDisconnecting, DeviceError)
-	phases = strs(PhaseInventory, PhaseActivating, PhaseReady,
+	phases = strs(PhaseIdle, PhaseActivating, PhaseReady,
 		PhaseDeactivating, PhaseError)
 	safeties          = strs(SafetySafe, SafetyWarning, SafetyDanger, SafetyUnknown)
 	reservationPhases = strs(ReservationScheduled, ReservationActivating,
@@ -59,6 +59,8 @@ func TestEachEnumHoldsTheGoConstants(t *testing.T) {
 		{ObservatoryKind, "status.devices[].phase", devicePhases},
 		{TelescopeKind, "status.devices[].phase", devicePhases},
 		{OpticalTrainKind, "status.devices[].kind", deviceKind},
+		{OpticalTrainKind, "status.devices[].phase", devicePhases},
+		{TelescopeKind, "status.trains[].devices[].phase", devicePhases},
 		{WeatherStationKind, "status.readings.safety", safeties},
 		{WeatherStationKind, "status.readings.parameters[].safety", safeties},
 		{DustCapKind, "status.readings.cover", covers},

@@ -52,6 +52,10 @@ func TestADeviceAnswersItsParent(t *testing.T) {
 			Parent{TelescopeKind, "east"}},
 		{"a switch on the observatory", SwitchSpec{TelescopeOrObservatoryDevice{Observatory: "lab"}},
 			Parent{ObservatoryKind, "lab"}},
+		{"a mount on the shelf", MountSpec{}, Parent{}},
+		{"a camera on the shelf", CameraSpec{}, Parent{}},
+		{"a dome on the shelf", DomeSpec{}, Parent{}},
+		{"a switch on the shelf", SwitchSpec{}, Parent{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

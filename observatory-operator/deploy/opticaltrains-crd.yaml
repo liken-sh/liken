@@ -147,5 +147,5 @@ spec:
                         description: "The device's name."
                       phase:
                         type: string
-                        enum: [Inventory, Starting, Connecting, Connected, Disconnecting, Error]
+                        enum: [Inventory, Idle, Starting, Connecting, Connected, Disconnecting, Error]
                         description: "The device's `status.phase`."

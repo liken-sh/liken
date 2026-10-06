@@ -70,7 +70,7 @@ func refs(devices []*device, composed map[string]deviceStatus) []observatory.Dev
 func directDevices(t *tree, kind observatory.Kind, name string) []*device {
 	var out []*device
 	for _, d := range t.devices {
-		if p := d.parent(); p.Kind == kind && p.Name == name {
+		if p, installed := d.parent(); installed && p.Kind == kind && p.Name == name {
 			out = append(out, d)
 		}
 	}
@@ -82,11 +82,11 @@ func directDevices(t *tree, kind observatory.Kind, name string) []*device {
 func (o *operator) telescopePhase(t *tree, telescope string) (observatory.Phase, *observatory.Reservation) {
 	holder, ok := o.claims.holderOf(telescope)
 	if !ok {
-		return observatory.PhaseInventory, nil
+		return observatory.PhaseIdle, nil
 	}
 	r, ok := t.reservations[holder]
 	if !ok {
-		return observatory.PhaseInventory, nil
+		return observatory.PhaseIdle, nil
 	}
 	switch r.Status.Phase {
 	case observatory.ReservationReady:
@@ -99,23 +99,32 @@ func (o *operator) telescopePhase(t *tree, telescope string) (observatory.Phase,
 	return observatory.PhaseActivating, r
 }
 
-// keeps reports whether a Ready reservation's runner keeps the pods of
-// a server. Each Ready runner of a telescope on an observatory also
-// keeps the observatory's pods (steady.go).
-func (o *operator) keeps(t *tree, ref serverRef) bool {
-	if ref.kind == observatory.TelescopeKind {
-		phase, _ := o.telescopePhase(t, ref.name)
-		return phase == observatory.PhaseReady
-	}
-	for _, name := range sortedNames(t.telescopes) {
-		if t.telescopes[name].Spec.Observatory != ref.name {
-			continue
+// serverStanding answers what the reservations ask of a server's
+// devices: kept while a Ready reservation's runner keeps the server's
+// pods, activating while a reservation's activation runs, and idle
+// otherwise. Each Ready runner of a telescope on an observatory also
+// keeps the observatory's pods (steady.go), and each activation of one
+// starts them (StartSite).
+func (o *operator) serverStanding(t *tree, ref serverRef) standing {
+	telescopes := []string{ref.name}
+	if ref.kind == observatory.ObservatoryKind {
+		telescopes = nil
+		for _, name := range sortedNames(t.telescopes) {
+			if t.telescopes[name].Spec.Observatory == ref.name {
+				telescopes = append(telescopes, name)
+			}
 		}
-		if phase, _ := o.telescopePhase(t, name); phase == observatory.PhaseReady {
-			return true
+	}
+	best := idle
+	for _, name := range telescopes {
+		switch phase, _ := o.telescopePhase(t, name); phase {
+		case observatory.PhaseReady:
+			return kept
+		case observatory.PhaseActivating:
+			best = activating
 		}
 	}
-	return false
+	return best
 }
 
 func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, composed map[string]deviceStatus, guiders map[string]observatory.GuiderStatus) observatory.TelescopeStatus {
@@ -178,7 +187,7 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 			}
 		}
 	}
-	next.Phase = observatory.PhaseInventory
+	next.Phase = observatory.PhaseIdle
 	message := "Not reserved"
 	if len(next.Reservations) > 0 {
 		next.Phase, message = observatory.PhaseReady, "Connected every device"

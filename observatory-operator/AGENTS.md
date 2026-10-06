@@ -95,9 +95,10 @@ package's tests and the operator's tests share.
 The operator's files are flat in `package main`, one domain to a file.
 `operator.go` starts the three kinds of goroutine: the supervisor, one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
-`configure.go`, `deactivation.go`, `steady.go`, `finish.go`, and the
-guider's `guidersteps.go` and `guidersteady.go`), and the status writer
-(`status.go`, `statustree.go`, `readings.go`, `guiderstatus.go`). Each
+`configure.go`, `deactivation.go`, `steady.go`, `moves.go`,
+`finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),
+and the status writer (`status.go`, `statustree.go`, `standing.go`,
+`readings.go`, `guiderstatus.go`). Each
 of them waits on a bell and reads the watches' stores again. `changed`
 rings on every watch event, every INDI event, and every change that a
 PHD2 reports, and `structure` on the same events except an INDI

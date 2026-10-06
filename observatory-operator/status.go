@@ -191,12 +191,18 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 		}
 	}
 	next.Display = deviceDisplay(d, next.Readings, maximum)
-	kept := placed && o.keeps(t, ref)
-	next.Phase = devicePhase(hasPod && p.Metadata.DeletionTimestamp != nil, hasPod, defined, kept, connection, fault)
+	standing := o.standingOf(t, d)
+	// A pod that a device's server no longer runs is one that a Ready
+	// runner deletes (moves.go), or one that deactivation deletes.
+	stray := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String())
+	next.Phase = devicePhase(hasPod && (stray || p.Metadata.DeletionTimestamp != nil), hasPod, defined, standing, connection, fault)
 	parent := parentCondition(t.missingParent(d))
-	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), deviceMessage(next, ref, name, fault, kept))
+	if standing == onShelf {
+		parent = shelved()
+	}
+	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), deviceMessage(next, d.kind, ref, name, fault, standing))
 	if next.Phase == observatory.DeviceConnected {
-		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, ref, name, "", kept))
+		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, ref, name, "", standing))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}
 	for i := range next.Conditions {
@@ -206,16 +212,19 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 }
 
 // devicePhase answers a device's phase from what the operator observes.
-// kept is true while a Ready reservation's runner keeps the pods of the
-// device's server, and so creates a pod that is gone: the device is
-// Starting then, because Inventory means that no reservation needs it.
-func devicePhase(stopping, hasPod, defined, kept bool, connection indi.Property, fault string) observatory.DevicePhase {
+// A device with no pod takes its phase from its standing: Inventory on
+// the shelf, Idle when no reservation needs it, and Starting from the
+// start of activation, and while a Ready reservation's runner creates a
+// pod that is gone.
+func devicePhase(stopping, hasPod, defined bool, standing standing, connection indi.Property, fault string) observatory.DevicePhase {
 	connect, _ := connection.Member("CONNECT")
 	switch {
-	case !hasPod && kept:
-		return observatory.DeviceStarting
-	case !hasPod:
+	case !hasPod && standing == onShelf:
 		return observatory.DeviceInventory
+	case !hasPod && standing == idle:
+		return observatory.DeviceIdle
+	case !hasPod:
+		return observatory.DeviceStarting
 	case stopping:
 		return observatory.DeviceDisconnecting
 	case defined && connection.State == indi.Busy && connect.Switch:
@@ -231,16 +240,21 @@ func devicePhase(stopping, hasPod, defined, kept bool, connection indi.Property,
 }
 
 // deviceMessage says what a device does, or waits for. pod names the
-// device's pod. kept is true while a Ready reservation's runner keeps
-// the pods of the device's server, and creates a pod that is gone.
-func deviceMessage(s deviceStatus, ref serverRef, pod, fault string, kept bool) string {
+// device's pod.
+func deviceMessage(s deviceStatus, kind observatory.Kind, ref serverRef, pod, fault string, standing standing) string {
 	switch {
 	case fault != "":
 		return "Failed: " + fault
-	case s.Phase == observatory.DeviceStarting && s.Pod == "" && kept:
-		return "Creating pod " + pod
 	case s.Phase == observatory.DeviceInventory:
+		return shelfMessage(kind)
+	case s.Phase == observatory.DeviceIdle:
 		return "Not reserved"
+	case s.Phase == observatory.DeviceStarting && s.Pod == "" && standing == kept:
+		return "Creating pod " + pod
+	case s.Phase == observatory.DeviceStarting && s.Pod == "":
+		return "Waiting for activation to create pod " + pod
+	case s.Phase == observatory.DeviceDisconnecting && s.IndiDevice == "":
+		return "Stopping pod " + pod
 	case s.IndiDevice == "":
 		return "Waiting for its driver on " + ref.String()
 	}

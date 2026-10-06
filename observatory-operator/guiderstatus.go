@@ -51,8 +51,8 @@ func (o *operator) guiderStatus(t *tree, guider *observatory.Guider) observatory
 	phase, holder := o.telescopePhase(t, guider.Spec.Telescope)
 	message := ""
 	switch {
-	case phase == observatory.PhaseInventory || holder == nil:
-		phase, message = observatory.PhaseInventory, "Not reserved"
+	case phase == observatory.PhaseIdle || holder == nil:
+		phase, message = observatory.PhaseIdle, "Not reserved"
 	case fault != "":
 		phase, message = observatory.PhaseError, "Failed: "+fault
 	case hasPod && p.ready() && s.Open && equipment(s):

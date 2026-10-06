@@ -144,10 +144,10 @@ spec:
                     operator last acted on.
                 phase:
                   type: string
-                  enum: [Inventory, Activating, Ready, Deactivating, Error]
+                  enum: [Idle, Activating, Ready, Deactivating, Error]
                   description: >-
-                    The state in one word. `Inventory`: no reservation
-                    needs it, and nothing runs. `Activating`: a
+                    The state in one word. `Idle`: no reservation needs
+                    it, and nothing runs. `Activating`: a
                     reservation's activation steps run. `Ready`:
                     everything it needs runs and is connected.
                     `Deactivating`: a reservation's deactivation steps
@@ -251,7 +251,7 @@ spec:
                         description: "The device's name."
                       phase:
                         type: string
-                        enum: [Inventory, Starting, Connecting, Connected, Disconnecting, Error]
+                        enum: [Inventory, Idle, Starting, Connecting, Connected, Disconnecting, Error]
                         description: "The device's `status.phase`."
                 reservations:
                   type: array

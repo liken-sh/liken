@@ -89,31 +89,37 @@ type tree struct {
 }
 
 // parent answers the resource above a device, from the parent field
-// its kind has.
-func (d *device) parent() observatory.Parent {
+// its kind has. The answer is false for a device on the shelf, which
+// names no parent.
+func (d *device) parent() (observatory.Parent, bool) {
 	s := d.object.Spec
 	switch {
 	case s.OpticalTrain != "":
-		return observatory.Parent{Kind: observatory.OpticalTrainKind, Name: s.OpticalTrain}
+		return observatory.Parent{Kind: observatory.OpticalTrainKind, Name: s.OpticalTrain}, true
 	case s.Telescope != "":
-		return observatory.Parent{Kind: observatory.TelescopeKind, Name: s.Telescope}
+		return observatory.Parent{Kind: observatory.TelescopeKind, Name: s.Telescope}, true
+	case s.Observatory != "":
+		return observatory.Parent{Kind: observatory.ObservatoryKind, Name: s.Observatory}, true
 	}
-	return observatory.Parent{Kind: observatory.ObservatoryKind, Name: s.Observatory}
+	return observatory.Parent{}, false
 }
 
 // server answers the INDI server that runs a device: its telescope's,
 // or its observatory's. A device on a train runs on the server of the
-// train's telescope. The answer is false while a parent is missing.
+// train's telescope. The answer is false for a device on the shelf,
+// and while a train that the device names is missing.
 func (t *tree) server(d *device) (serverRef, bool) {
-	p := d.parent()
-	switch p.Kind {
-	case observatory.OpticalTrainKind:
+	p, installed := d.parent()
+	switch {
+	case !installed:
+		return serverRef{}, false
+	case p.Kind == observatory.OpticalTrainKind:
 		train, ok := t.trains[p.Name]
 		if !ok {
 			return serverRef{}, false
 		}
 		return serverRef{observatory.TelescopeKind, train.Spec.Telescope}, true
-	case observatory.TelescopeKind:
+	case p.Kind == observatory.TelescopeKind:
 		return serverRef{observatory.TelescopeKind, p.Name}, true
 	}
 	return serverRef{observatory.ObservatoryKind, p.Name}, true
@@ -164,19 +170,32 @@ func (t *tree) device(kind observatory.Kind, name string) (*device, bool) {
 	return nil, false
 }
 
+// deviceByKey answers the device of a key, such as Camera/east-main.
+func (t *tree) deviceByKey(key string) (*device, bool) {
+	for _, d := range t.devices {
+		if d.key() == key {
+			return d, true
+		}
+	}
+	return nil, false
+}
+
 // missingParent answers the first resource up the tree from a device
 // that does not exist, as "OpticalTrain east-imaging", or "" when
-// every parent up to the Observatory exists.
+// every parent up to the Observatory exists, or when the device is on
+// the shelf.
 func (t *tree) missingParent(d *device) string {
-	p := d.parent()
-	switch p.Kind {
-	case observatory.OpticalTrainKind:
+	p, installed := d.parent()
+	switch {
+	case !installed:
+		return ""
+	case p.Kind == observatory.OpticalTrainKind:
 		train, ok := t.trains[p.Name]
 		if !ok {
 			return "OpticalTrain " + p.Name
 		}
 		return t.missingTelescope(train.Spec.Telescope)
-	case observatory.TelescopeKind:
+	case p.Kind == observatory.TelescopeKind:
 		return t.missingTelescope(p.Name)
 	}
 	return t.missingObservatory(p.Name)

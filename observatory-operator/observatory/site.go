@@ -79,8 +79,8 @@ type ObservatoryDisplay struct {
 type Phase string
 
 const (
-	// PhaseInventory: no reservation needs it, and nothing runs.
-	PhaseInventory Phase = "Inventory"
+	// PhaseIdle: no reservation needs it, and nothing runs.
+	PhaseIdle Phase = "Idle"
 	// PhaseActivating: a reservation's activation steps run.
 	PhaseActivating Phase = "Activating"
 	// PhaseReady: everything it needs runs and is connected.

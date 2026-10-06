@@ -18,6 +18,10 @@ package main
 //     Event on the device, the Guider, or the Telescope or
 //     Observatory whose INDI server the pod runs, because the status
 //     shows only the gap while the pod is gone (steady.go).
+//   - A server's pod that a Ready reservation's runner replaces,
+//     because its devices changed, is one Warning on its Telescope or
+//     Observatory, and the pod of a device that left the server is one
+//     Event on the device (moves.go).
 
 import (
 	"github.com/liken-sh/liken/kubernetes/conditions"

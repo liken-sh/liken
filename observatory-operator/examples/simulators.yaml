@@ -25,6 +25,8 @@
 #            └─ OpticalTrain west-imaging
 #                 Camera
 #
+#   the shelf                       Focuser spare
+#
 # Each resource names its parent in its spec. A device takes the name
 # of its telescope or its observatory, and a second device of one kind
 # adds a word, such as the cameras `east-main` and `east-guide`. The
@@ -34,7 +36,9 @@
 #
 # These resources are inventory: the operator starts nothing for them.
 # The Reservation at the end starts the `east` telescope, and `west`
-# stays down, because each telescope has its own INDI server.
+# stays down, because each telescope has its own INDI server. Each
+# device of `west` is `Idle`, and the focuser on the shelf is
+# `Inventory`.
 
 # The site. The location is Cerro Tololo Inter-American Observatory in
 # Chile, a public observatory. The operator writes it to each mount and
@@ -320,6 +324,22 @@ metadata:
 spec:
   opticalTrain: west-imaging
   driver: {name: indi_simulator_ccd}
+---
+# A spare focuser on the shelf. It names no optical train, so it is
+# installed nowhere: its phase is `Inventory`, and the operator creates
+# no pod, no `Service`, and no `ResourceClaim` for it, even while a
+# reservation is active. A `ResourceClaim` would reserve the real
+# hardware, so the operator creates none for a device on the shelf,
+# even when its spec has a `claim`. To install it, set `opticalTrain`.
+# While the train's telescope is reserved, that edit restarts the
+# telescope's INDI server, which disconnects every device on it for a
+# few seconds.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Focuser
+metadata:
+  name: spare
+spec:
+  driver: {name: indi_simulator_focus}
 ---
 # The reservation that starts the east telescope. With no spec.start,
 # activation begins when it is created. With no spec.end, it lasts

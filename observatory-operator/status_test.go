@@ -79,9 +79,9 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 		}
 
 		// The west telescope has no reservation, so its devices are
-		// inventory.
+		// Idle.
 		west, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "west-main")
-		if west.Status.Phase != observatory.DeviceInventory || west.Status.Pod != "" || west.Status.Properties != nil {
+		if west.Status.Phase != observatory.DeviceIdle || west.Status.Pod != "" || west.Status.Properties != nil {
 			t.Errorf("west camera = %+v", west.Status)
 		}
 	})
@@ -111,7 +111,7 @@ func TestTheTreeReportsDownward(t *testing.T) {
 			t.Errorf("guider = %+v", s.Guider)
 		}
 		west, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "west")
-		if west.Status.Phase != observatory.PhaseInventory || west.Status.Server != nil {
+		if west.Status.Phase != observatory.PhaseIdle || west.Status.Server != nil {
 			t.Errorf("west = %+v", west.Status)
 		}
 
