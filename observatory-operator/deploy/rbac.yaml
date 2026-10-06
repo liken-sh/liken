@@ -74,6 +74,11 @@ rules:
   - apiGroups: [""]
     resources: [pods, services]
     verbs: [get, list, watch, create, delete]
+  # A merge patch of a server pod's annotation changes the devices that
+  # its running server starts.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [patch]
   # Each guider's ConfigMap holds PHD2's profile and weston's config.
   # The operator replaces it with an update when the profile changes.
   - apiGroups: [""]

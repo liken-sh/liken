@@ -43,9 +43,13 @@ const (
 
 	// annotationSpec holds a digest of the pod the operator built. A
 	// pod whose digest differs from the pod the operator builds now,
-	// such as a server after a device joined its telescope, is
-	// replaced.
+	// such as one from an older image, is replaced.
 	annotationSpec = Group + "/spec"
+	// annotationDrivers lists the devices of a server, one address on
+	// each line, such as east-mount:7625. The server's pod reads it as
+	// a file, and its shim starts and stops each driver to match
+	// (drivers.go).
+	annotationDrivers = Group + "/drivers"
 )
 
 // Group is the API group of the observatory's resources.

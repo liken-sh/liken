@@ -93,42 +93,44 @@ func TestADevicePodServesItsDriverThroughSocat(t *testing.T) {
 	}
 }
 
-func TestTheServerPodLinksAShimToEachDevice(t *testing.T) {
+func TestTheServerPodListsEachDeviceForTheShim(t *testing.T) {
 	t.Parallel()
 	p, svc, err := serverPod("observatory", east, "uid-east", eastDevices())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Spec.InitContainers) != 1 || len(p.Spec.Containers) != 1 {
+	if len(p.Spec.InitContainers) != 0 || len(p.Spec.Containers) != 1 {
 		t.Fatalf("pod spec = %s", mustJSON(p.Spec))
 	}
-	links, server := p.Spec.InitContainers[0], p.Spec.Containers[0]
-	targets := []string{"east-mount:7625", "east-main-camera:7625", "east-focuser:7625"}
-	var paths []string
-	for _, target := range targets {
-		paths = append(paths, "/run/indi/drivers/"+target)
-	}
-	drivesMount := volumeMount{Name: "drivers", MountPath: "/run/indi/drivers"}
+	server := p.Spec.Containers[0]
 	cases := []struct {
 		what      string
 		got, want any
 	}{
-		{"link command", links.Command, append([]string{"/usr/bin/indi-shim", "link", "/run/indi/drivers"}, targets...)},
-		{"link security", links.SecurityContext, wantSecurity},
-		{"link mounts", links.VolumeMounts, []volumeMount{drivesMount}},
-		{"link image", links.Image, drivers.ServerImage()},
+		{"drivers", p.Metadata.Annotations[annotationDrivers], "east-mount:7625\neast-main-camera:7625\neast-focuser:7625\n"},
 		// -r is the largest restart count that indiserver's atoi holds,
 		// because the count never resets.
-		{"server args", server.Args, append([]string{"-v", "-r", "2147483647"}, paths...)},
-		{"server command", server.Command, []string(nil)},
+		{"server command", server.Command, []string{
+			"/usr/bin/indi-shim", "serve", "/etc/indi/devices/drivers", "/run/indi/drivers", "/tmp/indiserver.fifo",
+			"/usr/bin/indiserver", "-v", "-r", "2147483647",
+		}},
+		{"server args", server.Args, []string(nil)},
 		{"server image", server.Image, drivers.ServerImage()},
 		{"server ports", server.Ports, []containerPort{{Name: "indi", ContainerPort: 7624}}},
 		{"server security", server.SecurityContext, wantSecurity},
-		{"server mounts", server.VolumeMounts, []volumeMount{drivesMount, {Name: "tmp", MountPath: "/tmp"}}},
+		{"server mounts", server.VolumeMounts, []volumeMount{
+			{Name: "drivers", MountPath: "/run/indi/drivers"},
+			{Name: "devices", MountPath: "/etc/indi/devices", ReadOnly: true},
+			{Name: "tmp", MountPath: "/tmp"},
+		}},
 		{"server probe", server.ReadinessProbe, &probe{TCPSocket: &tcpSocket{Port: "indi"}, PeriodSeconds: 10}},
-		{"volumes", p.Spec.Volumes, []volume{{Name: "drivers", EmptyDir: &emptyDir{}}, {Name: "tmp", EmptyDir: &emptyDir{}}}},
-		// indiserver ignores SIGTERM as process 1, so a longer grace
-		// period left every device offline for 31 s on plan 03's cluster.
+		{"volumes", p.Spec.Volumes, []volume{
+			{Name: "drivers", EmptyDir: &emptyDir{}},
+			{Name: "devices", DownwardAPI: &downwardAPISource{Items: []downwardAPIFile{{
+				Path: "drivers", FieldRef: fieldSource{FieldPath: "metadata.annotations['observatory.liken.sh/drivers']"},
+			}}}},
+			{Name: "tmp", EmptyDir: &emptyDir{}},
+		}},
 		{"grace period", p.Spec.TerminationGracePeriodSeconds, int64Pointer(1)},
 		{"service name", svc.Metadata.Name, "east-telescope"},
 		{"service ports", svc.Spec.Ports, []servicePort{{Name: "indi", Port: 7624, TargetPort: "indi"}}},
@@ -274,18 +276,30 @@ func TestTheLongestNamesThatFitAreAccepted(t *testing.T) {
 	}
 }
 
-// A pod's digest changes with its spec, so the operator replaces a
-// server whose devices changed.
-func TestTheDigestFollowsTheSpec(t *testing.T) {
+// A pod's digest follows its spec, and a server's devices are not in
+// its spec, so the operator replaces no server whose devices changed.
+func TestTheDigestOfAServerLeavesOutItsDevices(t *testing.T) {
 	t.Parallel()
 	east := serverRef{observatory.TelescopeKind, "east"}
 	mount := simulator(observatory.MountKind, "east", "indi_simulator_telescope")
 	camera := simulator(observatory.CameraKind, "east-main", "indi_simulator_ccd")
 	one, _, _ := serverPod("observatory", east, "uid", []*device{mount})
-	same, _, _ := serverPod("observatory", east, "uid", []*device{mount})
 	two, _, _ := serverPod("observatory", east, "uid", []*device{mount, camera})
-	if !current(one, same) || current(one, two) {
-		t.Errorf("digests: %v %v %v", one.Metadata.Annotations, same.Metadata.Annotations, two.Metadata.Annotations)
+	if !current(one, two) {
+		t.Errorf("digests: %v %v", one.Metadata.Annotations, two.Metadata.Annotations)
+	}
+}
+
+// A device pod's digest follows its spec, so a device whose driver
+// changed gets a new pod.
+func TestTheDigestOfADevicePodFollowsItsDriver(t *testing.T) {
+	t.Parallel()
+	east := serverRef{observatory.TelescopeKind, "east"}
+	one, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_simulator_telescope"), false)
+	same, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_simulator_telescope"), false)
+	other, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_lx200generic"), false)
+	if !current(one, same) || current(one, other) {
+		t.Errorf("digests: %v %v %v", one.Metadata.Annotations, same.Metadata.Annotations, other.Metadata.Annotations)
 	}
 }
 

@@ -294,8 +294,8 @@ unparked already. Both are fixed in the build that the drill ran last.
   camera has a claim. Plan 09 gives the reasons.
 - Adding a device to a running server through the `-f` fifo. A change
   to the devices restarts the server, which costs 3 seconds.
-  [Adding a device restarts the server](../open-problems/adding-a-device-restarts-the-server.md)
-  holds it.
+  [Plan 11](11-devices-join-a-running-server.md) built it on
+  2026-10-06.
 
 ## Upstream issues
 

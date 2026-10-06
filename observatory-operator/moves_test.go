@@ -1,8 +1,9 @@
 package main
 
-// A device that leaves a telescope while a reservation of it is Ready:
-// its pod, its Service, and its claim go, the server restarts without
-// it, and the Telescope and the device each post an Event.
+// A device that leaves a telescope or an observatory: while a
+// reservation of it is Ready, its driver stops on the running server,
+// and its pod, its Service, and its claim go. The other devices on the
+// server stay connected.
 
 import (
 	"slices"
@@ -14,7 +15,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-func TestADeviceTakenOffAReadyTelescopeLeavesNoPodOrClaim(t *testing.T) {
+func TestADeviceTakenOffAReadyTelescopeStopsOnTheRunningServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -22,6 +23,7 @@ func TestADeviceTakenOffAReadyTelescopeLeavesNoPodOrClaim(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		before, _ := w.api.object(podsCollection, "east-telescope")
+		w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
 
 		w.put(observatory.FocuserKind, "east", map[string]any{"driver": map[string]any{"name": "indi_simulator_focus"}})
 		w.until(time.Minute, "the focuser's pod stays", func() bool {
@@ -34,8 +36,11 @@ func TestADeviceTakenOffAReadyTelescopeLeavesNoPodOrClaim(t *testing.T) {
 			t.Errorf("services %v, claims %v", w.api.names(servicesCollection), w.api.names(claimsCollection))
 		}
 		after, _ := w.api.object(podsCollection, "east-telescope")
-		if podUID(before) == podUID(after) || slices.Contains(links(after), "east-focuser") {
-			t.Errorf("the server was not replaced without the focuser: links %v", links(after))
+		if podUID(before) != podUID(after) || slices.Contains(links(after), "east-focuser") {
+			t.Errorf("the server pod was replaced, or still names the focuser: links %v", links(after))
+		}
+		if got := w.indi.state("east-telescope", "CCD Simulator", "CCD_EXPOSURE"); got != "Busy" {
+			t.Errorf("the camera's exposure is %q, want the Busy exposure that ran before", got)
 		}
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
 			t.Errorf("the reservation is %s", r.Status.Phase)
@@ -49,10 +54,39 @@ func TestADeviceTakenOffAReadyTelescopeLeavesNoPodOrClaim(t *testing.T) {
 		if got := typedEvents(w.api, observatory.FocuserKind, "east"); !slices.Contains(got, wantFocuser) {
 			t.Errorf("focuser Events = %q, want %q", got, wantFocuser)
 		}
-		wantTelescope := "Warning ServerReplaced: Replaced pod east-telescope while Reservation east-tonight is Ready, because its devices changed. " +
-			"Every device on it disconnected, and an exposure in progress ended. The runner connects each device again."
-		if got := typedEvents(w.api, observatory.TelescopeKind, "east"); !slices.Contains(got, wantTelescope) {
-			t.Errorf("telescope Events = %q, want %q", got, wantTelescope)
+		wantTelescope := "Normal DriverStopped: Stopped the driver of Focuser east on server east-telescope while Reservation east-tonight is Ready. The server did not restart."
+		got := typedEvents(w.api, observatory.TelescopeKind, "east")
+		if !slices.Contains(got, wantTelescope) || slices.ContainsFunc(got, func(e string) bool { return strings.HasPrefix(e, "Warning") }) {
+			t.Errorf("telescope Events = %q, want %q and no Warning", got, wantTelescope)
+		}
+	})
+}
+
+// A device that leaves the observatory stops on the observatory's
+// server, and the dome on that server stays connected.
+func TestADeviceTakenOffTheObservatoryStopsOnItsRunningServer(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		site := serverRef{observatory.ObservatoryKind, "lab"}.String()
+		before, _ := w.api.object(podsCollection, site)
+		connected := len(w.indi.connected(site))
+
+		w.put(observatory.SkyQualityMeterKind, "lab", map[string]any{"driver": map[string]any{"name": "indi_simulator_sqm"}})
+		w.until(time.Minute, "the meter stays on the observatory's server", func() bool {
+			return !slices.Contains(w.api.names(podsCollection), "lab-skyqualitymeter") && len(w.indi.connected(site)) == connected-1
+		})
+
+		after, _ := w.api.object(podsCollection, site)
+		if podUID(before) != podUID(after) {
+			t.Error("the observatory's server pod was replaced")
+		}
+		if !slices.Contains(w.indi.connected(site), "Dome Simulator") {
+			t.Errorf("connected = %q, want the dome", w.indi.connected(site))
+		}
+		want := "DriverStopped: Stopped the driver of SkyQualityMeter lab on server " + site + " while Reservation east-tonight is Ready. The server did not restart."
+		if got := eventsAbout(w.api, observatory.ObservatoryKind, "lab", reasonDriverStopped); !slices.Equal(got, []string{want}) {
+			t.Errorf("Events = %q, want %q", got, want)
 		}
 	})
 }

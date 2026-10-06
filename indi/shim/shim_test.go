@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -143,33 +141,5 @@ func TestTheShimEndsWhenTheServerCloses(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the shim kept running after the server closed its stdin")
-	}
-}
-
-// The server's pod has no shell to make the links, so the shim makes
-// them itself, in an init container.
-func TestLinkMakesOneLinkForEachDevice(t *testing.T) {
-	dir := t.TempDir()
-	self := filepath.Join(t.TempDir(), "indi-shim")
-	if err := os.WriteFile(self, nil, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := link(self, dir, []string{"mount.observatory:7625", "ccd.observatory:7625"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"mount.observatory:7625", "ccd.observatory:7625"} {
-		got, err := os.Readlink(filepath.Join(dir, name))
-		if err != nil || got != self {
-			t.Errorf("%s links to %q, %v; want %q", name, got, err, self)
-		}
-		if address, err := target(filepath.Join(dir, name)); err != nil || address != name {
-			t.Errorf("the link %s reads as %q, %v", name, address, err)
-		}
-	}
-}
-
-func TestLinkRefusesANameWithNoPort(t *testing.T) {
-	if err := link("/usr/bin/indi-shim", t.TempDir(), []string{"mount.observatory"}); err == nil {
-		t.Error("link made a link that the shim could not read an address from")
 	}
 }

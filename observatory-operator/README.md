@@ -294,15 +294,16 @@ disconnects in KStars stays disconnected. The operator also creates
 the guider's pod again, and connects the camera and the mount of each
 new PHD2 once.
 
-A device that joins or leaves a telescope during a reservation is an
-ordinary edit, and the operator refuses no change. While the
-reservation is `Ready`, the server's links must name every device on
-it, so the operator replaces the server's pod. Every device on the
-server disconnects for a few seconds, and an exposure in progress
-ends. The operator posts a `ServerReplaced` Warning on the `Telescope`
-or the `Observatory`, and connects each device again. A device that
-left, to the shelf or to another telescope, loses its pod, its
-`Service`, and its `ResourceClaim` at once, and the device gets a
+A device that joins or leaves a telescope or the observatory during a
+reservation is an ordinary edit, and the operator refuses no change.
+While the reservation is `Ready`, the server keeps running, and the
+other devices on it stay connected. A device that joins gets its pod,
+and then its driver starts on the running server, and the operator
+connects it and writes its settings. A device that leaves, to the
+shelf or to another telescope, has its driver stopped on the server,
+and then loses its pod, its `Service`, and its `ResourceClaim`. The
+operator posts a `DriverStarted` or a `DriverStopped` Event on the
+`Telescope` or the `Observatory`, and the device that left gets a
 `PodDeleted` Event. A device that leaves during activation keeps its
 pod until the reservation is `Ready`, or until deactivation's
 `StopDevices`. A device on a telescope with no active reservation

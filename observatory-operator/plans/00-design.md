@@ -13,7 +13,9 @@ Each INDI device runs in its own pod, with its own DRA claim, as
 `Telescope` has one `indiserver` pod, which reaches each of its
 devices through `indi-shim`, one symbolic link for each device. The
 `Observatory` has one more server for the devices that no telescope
-owns. The operator holds one INDI client for each server, and connects
+owns. A device joins or leaves a running server through `indiserver`'s
+fifo, with no restart of the server ([plan
+11](completed/11-devices-join-a-running-server.md)). The operator holds one INDI client for each server, and connects
 each device and applies its settings when the device appears. PHD2 guides each
 telescope from its own pod, as a client of the telescope's server. The
 operator starts PHD2, connects it to the guide camera and the mount,
@@ -74,3 +76,4 @@ must hold.
 | [08](completed/08-the-reconciler.md) | Built and drilled: the reconciler, in the operator; the lock policies between the dome and the mounts are not built |
 | [09](completed/09-the-guider.md) | Built and drilled on a test cluster: the guider, PHD2 in its own pod beside a headless weston |
 | [10](10-access-from-a-desktop.md) | KStars on a desktop, which completes mode 1 |
+| [11](completed/11-devices-join-a-running-server.md) | Built: a device joins or leaves a running server, with no restart of the server; the test-cluster drill has not run |

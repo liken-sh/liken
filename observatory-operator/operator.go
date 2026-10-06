@@ -63,6 +63,9 @@ type operator struct {
 	// operator wrote or read last, so a runner never acts on an older
 	// copy from a store (informer.ReadOne).
 	versions *memo.Versions
+	// serverDrivers records the devices that the operator wrote last on
+	// each server's pod (serverdrivers.go).
+	serverDrivers driversMemo
 
 	mu      sync.Mutex
 	runners map[string]*runner

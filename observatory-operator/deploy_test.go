@@ -99,6 +99,7 @@ func TestTheRoleGrantsWhatTheOperatorSends(t *testing.T) {
 	}
 	needs = append(needs,
 		need{observatory.Group, "reservations", "patch"},
+		need{"", "pods", "patch"},
 		need{"", "events", "create"},
 		need{"", "events", "patch"},
 		need{"resource.k8s.io", "resourceclaims", "create"},

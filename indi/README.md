@@ -36,6 +36,24 @@ either side closes. The device pod serves its driver with
 `observatory-operator/plans/completed/03-the-topology-by-hand.md` gives the
 design.
 
+In the server's pod, the shim also runs `indiserver`:
+
+```
+indi-shim serve <drivers file> <links dir> <fifo> /usr/bin/indiserver [arg...]
+```
+
+The drivers file lists one device address on each line. The shim
+makes the fifo, starts `indiserver` with `-f <fifo>`, and makes a link
+and writes `start <link>` to the fifo for each device of the file. It
+watches the file's directory with inotify, and when the file changes,
+it writes `stop <link>` for each device that left and `start <link>`
+for each device that joined. The running server keeps every other
+driver. The shim exits when `indiserver` exits, and ends `indiserver`
+on `SIGTERM`. `observatory-operator` writes the file through a
+downward API volume, and
+`observatory-operator/plans/completed/11-devices-join-a-running-server.md`
+gives the design.
+
 ## PHD2
 
 `indi-phd2` runs [PHD2](https://openphdguiding.org/) from the PHD2 PPA

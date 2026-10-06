@@ -4,7 +4,9 @@ package main
 // its own pod as `socat TCP-LISTEN:7625,reuseaddr EXEC:<driver>,pipes`,
 // behind a Service of its own. Each INDI server runs indiserver with
 // one link to indi-shim for each device it serves, and the shim dials
-// the device's Service. pods_test.go holds the properties that plan 03
+// the device's Service. The server's pod reads its devices from an
+// annotation, so the set of devices changes on a running server
+// (drivers.go). pods_test.go holds the properties that plan 03
 // measured with manifests written by hand.
 //
 // The pods are bare pods, as media-operator's are. The kubelet restarts
@@ -19,16 +21,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/liken-sh/liken/observatory-operator/drivers"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The paths inside a server's pod: the shim's links, and /tmp, where
-// INDI writes its configuration because HOME is /tmp in the images.
+// The paths inside a server's pod: the shim's links, the file that
+// holds the server's devices, the fifo that indiserver reads commands
+// from, and /tmp, where INDI writes its configuration because HOME is
+// /tmp in the images.
 const (
-	linksDir = "/run/indi/drivers"
-	tmpDir   = "/tmp"
+	linksDir    = "/run/indi/drivers"
+	devicesDir  = "/etc/indi/devices"
+	driversFile = devicesDir + "/drivers"
+	tmpDir      = "/tmp"
+	fifoPath    = tmpDir + "/indiserver.fifo"
 )
 
 // maxRestarts is the restart count of indiserver, the largest that its
@@ -122,57 +130,52 @@ func devicePod(namespace string, server serverRef, d *device, guides bool) (*pod
 	return stamped(p), serviceFor(namespace, name, podLabels, owners, "driver", devicePort), claim, nil
 }
 
-// serverPod answers the pod and the Service of one INDI server, with a
-// link to the shim for each device it serves.
+// serverPod answers the pod and the Service of one INDI server, with
+// its devices in the annotation that the shim reads.
 func serverPod(namespace string, server serverRef, ownerUID string, devices []*device) (*pod, *service, error) {
 	name, err := objectName(server.kind, server.name)
 	if err != nil {
 		return nil, nil, err
 	}
-	var targets, links []string
-	for _, d := range devices {
-		object, err := objectName(d.kind, d.name())
-		if err != nil {
-			return nil, nil, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
-		}
-		target := object + ":" + strconv.Itoa(devicePort)
-		targets = append(targets, target)
-		links = append(links, linksDir+"/"+target)
+	list, err := driverList(devices)
+	if err != nil {
+		return nil, nil, err
 	}
 	owners := []ownerReference{owner(observatory.APIVersion, server.kind, server.name, ownerUID)}
 	podLabels := labels(name, roleServer, name, server.kind, server.name)
-	image := drivers.ServerImage()
-	drivesMount := volumeMount{Name: "drivers", MountPath: linksDir}
 	p := &pod{
 		APIVersion: "v1", Kind: "Pod",
-		Metadata: meta{Name: name, Namespace: namespace, Labels: podLabels, OwnerReferences: owners},
+		Metadata: meta{
+			Name: name, Namespace: namespace, Labels: podLabels, OwnerReferences: owners,
+			Annotations: map[string]string{annotationDrivers: list},
+		},
 		Spec: podSpec{
 			RestartPolicy: "Always",
-			// indiserver runs as process 1 and installs no handler for
-			// SIGTERM, and the kernel ignores a signal that process 1
-			// does not handle. So a stop would wait out the whole grace
-			// period before the kubelet kills it, 31 s on a test
-			// cluster, with every device offline. The server holds no
-			// state that a graceful stop would save.
+			// The shim runs as process 1 and ends indiserver on
+			// SIGTERM, which took 84 ms in a local run. The short
+			// period bounds a stop that hangs, while every device is
+			// offline. The server holds no state that a graceful stop
+			// would save.
 			TerminationGracePeriodSeconds: int64Pointer(1),
 			EnableServiceLinks:            boolPointer(false),
 			AutomountServiceAccountToken:  boolPointer(false),
-			// The image has no shell to make the links, so the shim
-			// makes them in an init container.
-			InitContainers: []container{{
-				Name:            "links",
-				Image:           image,
-				Command:         append([]string{"/usr/bin/indi-shim", "link", linksDir}, targets...),
-				SecurityContext: restricted(),
-				VolumeMounts:    []volumeMount{drivesMount},
-			}},
 			Containers: []container{{
-				Name:            "indiserver",
-				Image:           image,
-				Args:            append([]string{"-v", "-r", maxRestarts}, links...),
+				Name:  "indiserver",
+				Image: drivers.ServerImage(),
+				// The shim starts indiserver with -f and the fifo, makes
+				// a link for each device of the file, and writes a start
+				// or a stop to the fifo when the file changes.
+				Command: []string{
+					"/usr/bin/indi-shim", "serve", driversFile, linksDir, fifoPath,
+					"/usr/bin/indiserver", "-v", "-r", maxRestarts,
+				},
 				Ports:           []containerPort{{Name: "indi", ContainerPort: serverPort}},
 				SecurityContext: restricted(),
-				VolumeMounts:    []volumeMount{drivesMount, {Name: "tmp", MountPath: tmpDir}},
+				VolumeMounts: []volumeMount{
+					{Name: "drivers", MountPath: linksDir},
+					{Name: "devices", MountPath: devicesDir, ReadOnly: true},
+					{Name: "tmp", MountPath: tmpDir},
+				},
 				// The operator opens its INDI connection when the pod is
 				// Ready, and a client that connects to indiserver and
 				// closes costs indiserver nothing. A device pod has no
@@ -180,10 +183,36 @@ func serverPod(namespace string, server serverRef, ownerUID string, devices []*d
 				// connection would start the driver and end it.
 				ReadinessProbe: &probe{TCPSocket: &tcpSocket{Port: "indi"}, PeriodSeconds: 10},
 			}},
-			Volumes: []volume{{Name: "drivers", EmptyDir: &emptyDir{}}, {Name: "tmp", EmptyDir: &emptyDir{}}},
+			Volumes: []volume{
+				{Name: "drivers", EmptyDir: &emptyDir{}},
+				// The kubelet writes the annotation again within about a
+				// second of a change, because it remounts a downward API
+				// volume on each update of its pod. A ConfigMap volume
+				// changes only at the kubelet's next sync of the pod, up
+				// to about a minute later (drivers.go).
+				{Name: "devices", DownwardAPI: &downwardAPISource{Items: []downwardAPIFile{{
+					Path: "drivers", FieldRef: fieldSource{FieldPath: "metadata.annotations['" + annotationDrivers + "']"},
+				}}}},
+				{Name: "tmp", EmptyDir: &emptyDir{}},
+			},
 		},
 	}
 	return stamped(p), serviceFor(namespace, name, podLabels, owners, "indi", serverPort), nil
+}
+
+// driverList answers the annotation of a server's devices: the address
+// of each device's Service, one on each line, in the order of the
+// devices.
+func driverList(devices []*device) (string, error) {
+	var b strings.Builder
+	for _, d := range devices {
+		object, err := objectName(d.kind, d.name())
+		if err != nil {
+			return "", fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
+		}
+		b.WriteString(object + ":" + strconv.Itoa(devicePort) + "\n")
+	}
+	return b.String(), nil
 }
 
 func serviceFor(namespace, name string, objectLabels map[string]string, owners []ownerReference, port string, number int32) *service {
@@ -204,11 +233,16 @@ func serviceFor(namespace, name string, objectLabels map[string]string, owners [
 func stamped(p *pod) *pod { return stampedWith(p, "") }
 
 // stampedWith stamps a pod with a digest of its spec and of a file it
-// reads at start, so a change to the file replaces the pod too.
+// reads at start, so a change to the file replaces the pod too. The
+// digest leaves out the metadata, so a change to an annotation such as
+// annotationDrivers replaces nothing.
 func stampedWith(p *pod, file string) *pod {
 	body, _ := json.Marshal(p.Spec)
 	sum := sha256.Sum256(append(body, file...))
-	p.Metadata.Annotations = map[string]string{annotationSpec: hex.EncodeToString(sum[:8])}
+	if p.Metadata.Annotations == nil {
+		p.Metadata.Annotations = map[string]string{}
+	}
+	p.Metadata.Annotations[annotationSpec] = hex.EncodeToString(sum[:8])
 	return p
 }
 

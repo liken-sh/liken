@@ -2,9 +2,9 @@ package main
 
 // Fake INDI servers for the operator's tests, built from the bytes that
 // the real simulators sent, which indi/testdata/ records. Each server
-// runs a driver for each device pod that its server pod links to and
-// that the fake API server holds Ready, as indiserver does through the
-// shims: a device pod that comes or goes defines or deletes its device
+// runs a driver for each device pod that its server pod's annotation
+// names and that the fake API server holds Ready, as indiserver does
+// through the shims: a device pod that comes or goes defines or deletes its device
 // on the server, and a new pod is a new driver, disconnected, with its
 // settings lost. A driver defines what its baseline transcript
 // defines, adds what its connect transcript defines when it connects,
@@ -357,14 +357,15 @@ func podReady(p map[string]any) bool {
 
 func podUID(p map[string]any) string { return p["metadata"].(map[string]any)["uid"].(string) }
 
-// links answers the device pods that a server pod's arguments name.
+// links answers the device pods that a server pod's annotation names.
+// The real server's shim reads the annotation within about a second;
+// the fake reads it at once.
 func links(p map[string]any) []string {
 	var out []string
-	container := p["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
-	for _, arg := range container["args"].([]any) {
-		if s := arg.(string); strings.HasPrefix(s, linksDir+"/") {
-			out = append(out, strings.TrimSuffix(strings.TrimPrefix(s, linksDir+"/"), ":7625"))
-		}
+	annotations, _ := p["metadata"].(map[string]any)["annotations"].(map[string]any)
+	list, _ := annotations[annotationDrivers].(string)
+	for _, address := range strings.Fields(list) {
+		out = append(out, strings.TrimSuffix(address, ":7625"))
 	}
 	return out
 }
@@ -628,6 +629,22 @@ func (w *indiWorld) setState(server, device, property, state string) {
 			w.servers[server].broadcast(p.set())
 		}
 	}
+}
+
+// state answers a property's state on one server, or "" when no
+// driver of the server defines it. A driver that restarts defines its
+// properties again as its transcript does.
+func (w *indiWorld) state(server, device, property string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if s, ok := w.servers[server]; ok {
+		for _, d := range s.drivers {
+			if p := d.find(property); d.device == device && p != nil {
+				return p.State
+			}
+		}
+	}
+	return ""
 }
 
 // report sets one member of a property and sends the update to every

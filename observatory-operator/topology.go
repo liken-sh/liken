@@ -62,10 +62,22 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 	return created, err
 }
 
-// startServer creates the pod and the Service of one INDI server, with
-// a link for each of the devices. created reports whether the API
-// server created the pod.
+// startServer creates the pod and the Service of one INDI server, and
+// sets the server's drivers to the devices. created reports whether the
+// API server created the pod.
 func (o *operator) startServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
+	created, err = o.ensureServer(ctx, report, ref, ownerUID, devices)
+	if err != nil {
+		return created, err
+	}
+	_, _, err = o.setDrivers(ctx, report, ref, devices)
+	return created, err
+}
+
+// ensureServer creates the pod and the Service of one INDI server, with
+// the devices in its annotation, when the pod is gone. A running
+// server's pod keeps its devices: setDrivers changes them.
+func (o *operator) ensureServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
 	built, svc, err := serverPod(o.namespace, ref, ownerUID, devices)
 	if err != nil {
 		return false, err

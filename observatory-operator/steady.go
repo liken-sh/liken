@@ -4,11 +4,11 @@ package main
 // steps left it, until the reservation ends:
 //
 //   - It creates again each pod that is gone, such as one a node's
-//     eviction deleted, and replaces the server when the telescope's
-//     devices change, because the server's links name every device.
-//     It records an Event for each device pod and guider pod that it
-//     creates (recordPod), and a Warning for each server it replaces.
-//     It deletes the pod of each device that left (moves.go).
+//     eviction deleted, and records an Event for each device pod and
+//     guider pod that it creates (recordPod). When the telescope's
+//     devices change, it starts and stops their drivers on the running
+//     server (serverdrivers.go), and deletes the pod of each device
+//     that left (moves.go).
 //   - It keeps the telescope's guider (guidersteady.go).
 //   - It connects and configures again each device whose driver comes
 //     back on its server disconnected. A driver comes back that way
@@ -91,27 +91,10 @@ func (r *runner) keepWaiting(ctx context.Context, wake <-chan struct{}) {
 	}
 }
 
-// keepPods creates each of the telescope's pods that is gone, and the
-// observatory's, replaces each whose spec changed, and deletes the pods
-// of the devices that left either server (moves.go).
+// keepPods keeps the pods of the telescope's server and of the
+// observatory's server (keepServer).
 func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope *observatory.Telescope, devices []*device) error {
-	if err := r.removeStrays(ctx, t, ref); err != nil {
-		return err
-	}
-	replaced := r.o.devicesChanged(t, ref, telescope.Metadata.UID, devices)
-	server, err := r.o.startServer(ctx, nil, ref, telescope.Metadata.UID, devices)
-	if server {
-		if replaced {
-			r.recordServerReplaced(ref, telescope.Metadata)
-		}
-		r.recordServerPod(ref, telescope.Metadata)
-	}
-	if err != nil {
-		return err
-	}
-	created, err := r.o.startDevices(ctx, nil, ref, devices)
-	r.recordDevicePods(created)
-	if err != nil {
+	if err := r.keepServer(ctx, t, ref, telescope.Metadata, devices); err != nil {
 		return err
 	}
 	site, ok := t.observatories[telescope.Spec.Observatory]
@@ -125,26 +108,37 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 		return err
 	}
 	defer lock.release()
-	if err := r.removeStrays(ctx, t, siteRef); err != nil {
-		return err
+	if _, running := t.pods[siteRef.String()]; len(siteDevices) == 0 && !running {
+		return r.removeStrays(ctx, t, siteRef)
 	}
-	if len(siteDevices) == 0 {
-		return nil
-	}
-	replaced = r.o.devicesChanged(t, siteRef, site.Metadata.UID, siteDevices)
-	server, err = r.o.startServer(ctx, nil, siteRef, site.Metadata.UID, siteDevices)
-	if server {
-		if replaced {
-			r.recordServerReplaced(siteRef, site.Metadata)
-		}
-		r.recordServerPod(siteRef, site.Metadata)
+	return r.keepServer(ctx, t, siteRef, site.Metadata, siteDevices)
+}
+
+// keepServer creates one server's pod when it is gone, creates the pod
+// of each of its devices that is gone, sets the server's drivers to the
+// devices, and deletes the pods of the devices that left. The order
+// gives a joining device its pod before its driver, and stops a leaving
+// device's driver before its pod goes (serverdrivers.go).
+func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner observatory.ObjectMeta, devices []*device) error {
+	about := reference(ref.kind, owner)
+	created, err := r.o.ensureServer(ctx, nil, ref, owner.UID, devices)
+	if created {
+		r.recordServerPod(ref, owner)
 	}
 	if err != nil {
 		return err
 	}
-	created, err = r.o.startDevices(ctx, nil, siteRef, siteDevices)
-	r.recordDevicePods(created)
-	return err
+	started, err := r.o.startDevices(ctx, nil, ref, devices)
+	r.recordDevicePods(started)
+	if err != nil {
+		return err
+	}
+	joined, left, err := r.o.setDrivers(ctx, nil, ref, devices)
+	r.recordDrivers(t, ref, about, joined, left)
+	if err != nil {
+		return err
+	}
+	return r.removeStrays(ctx, t, ref)
 }
 
 // recordDevicePods writes an Event and a log line for each device whose

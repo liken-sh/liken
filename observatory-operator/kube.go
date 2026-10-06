@@ -101,9 +101,25 @@ type volumeMount struct {
 }
 
 type volume struct {
-	Name      string           `json:"name"`
-	EmptyDir  *emptyDir        `json:"emptyDir,omitempty"`
-	ConfigMap *configMapSource `json:"configMap,omitempty"`
+	Name        string             `json:"name"`
+	EmptyDir    *emptyDir          `json:"emptyDir,omitempty"`
+	ConfigMap   *configMapSource   `json:"configMap,omitempty"`
+	DownwardAPI *downwardAPISource `json:"downwardAPI,omitempty"`
+}
+
+// downwardAPISource writes fields of the pod's own object as files.
+// The kubelet writes a file again when its field changes.
+type downwardAPISource struct {
+	Items []downwardAPIFile `json:"items"`
+}
+
+type downwardAPIFile struct {
+	Path     string      `json:"path"`
+	FieldRef fieldSource `json:"fieldRef"`
+}
+
+type fieldSource struct {
+	FieldPath string `json:"fieldPath"`
 }
 
 type configMapSource struct {

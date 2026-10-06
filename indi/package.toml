@@ -9,7 +9,7 @@ name = "indi"
 # that the build installs from, as YYYYMMDD. A new INDI is a new date:
 # CI builds these images only when this tag is not published yet.
 version = "20261005"
-revision = 4
+revision = 5
 license = "MIT"
 
 # The upstream releases that the snapshots hold, as the packages name

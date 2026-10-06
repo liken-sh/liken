@@ -159,36 +159,6 @@ func TestAFinalizerOfAGoneReservationIsRemoved(t *testing.T) {
 	})
 }
 
-// A device added while a reservation is Ready gets its pod, and the
-// server restarts with a link to it, because indiserver reads its
-// drivers from its arguments. The devices come back on the new server,
-// and the operator connects each one again. The restart ends an
-// exposure in progress, so the Telescope gets a Warning.
-func TestADeviceAddedWhileReadyRestartsTheServer(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		w := readyWorld(t)
-		before, _ := w.api.object(podsCollection, "east-telescope")
-		w.put(observatory.SkyQualityMeterKind, "east", map[string]any{"telescope": "east", "driver": map[string]any{"name": "indi_simulator_sqm"}})
-		w.until(time.Minute, "the new device is not connected", func() bool {
-			return slices.Contains(w.indi.connected("east-telescope"), "SQM Simulator") && len(w.indi.connected("east-telescope")) == 13
-		})
-		after, _ := w.api.object(podsCollection, "east-telescope")
-		if podUID(before) == podUID(after) {
-			t.Error("the server pod was not replaced")
-		}
-		if !slices.Contains(links(after), "east-skyqualitymeter") {
-			t.Errorf("the new server links %v", links(after))
-		}
-		if got := eventsAbout(w.api, observatory.TelescopeKind, "east", reasonServerReplaced); len(got) != 1 {
-			t.Errorf("ServerReplaced Events = %q, want one", got)
-		}
-		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
-			t.Errorf("the reservation is %s", r.Status.Phase)
-		}
-	})
-}
-
 // claimsCollection is where the operator creates each device's
 // ResourceClaim.
 const claimsCollection = "/apis/resource.k8s.io/v1/namespaces/" + testNamespace + "/resourceclaims"

@@ -10,9 +10,12 @@
 // starts the link. The shim reads the address from its own name,
 // connects, and copies bytes in both directions.
 //
-// The pod that runs indiserver has no shell, so the shim also makes the
-// links: indi-shim link <dir> <host:port>... writes one link in <dir>
-// for each device, and an init container runs it.
+// In the server's pod, the shim also runs indiserver, and makes the
+// links and starts and stops the drivers on the running server:
+//
+//	indi-shim serve <drivers file> <links dir> <fifo> <indiserver> [arg...]
+//
+// serve.go gives the design.
 //
 // The shim exits when either side closes, and indiserver restarts it.
 // indiserver then does what a restarted driver needs: it sends
@@ -22,11 +25,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -44,16 +50,28 @@ const (
 )
 
 func main() {
-	if len(os.Args) > 2 && os.Args[1] == "link" {
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		if len(os.Args) < 6 {
+			fmt.Fprintln(os.Stderr, "usage: indi-shim serve <drivers file> <links dir> <fifo> <indiserver> [arg...]")
+			os.Exit(2)
+		}
+		// The shim is process 1 of the server's container. The kernel
+		// ignores a signal that process 1 does not handle, so the shim
+		// handles SIGTERM, and the context's end kills indiserver.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+		defer stop()
 		self, err := os.Executable()
 		if err == nil {
-			err = link(self, os.Args[2], os.Args[3:])
+			err = serve(ctx, serveConfig{
+				self: self, drivers: os.Args[2], links: os.Args[3], fifo: os.Args[4],
+				server: os.Args[5:], output: os.Stderr,
+			})
 		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+		if ctx.Err() != nil {
+			return
 		}
-		return
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 	address, err := target(os.Args[0])
 	if err != nil {
@@ -77,19 +95,6 @@ func target(argv0 string) (string, error) {
 		return "", fmt.Errorf("indi-shim runs as a link named host:port for the device it connects to, not as %q", name)
 	}
 	return name, nil
-}
-
-// link writes one link to the shim in dir for each device address.
-func link(self, dir string, addresses []string) error {
-	for _, address := range addresses {
-		if _, err := target(address); err != nil {
-			return err
-		}
-		if err := os.Symlink(self, filepath.Join(dir, address)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // dial connects to the device, and tries again every interval until

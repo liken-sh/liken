@@ -5,18 +5,15 @@ package main
 // train, telescope, or observatory. The runner handles the change as
 // it handles a device that joins:
 //
-//   - The server's links name every device, so the runner replaces the
-//     server's pod (keepPods). Every device on the server disconnects
-//     for a few seconds, and a camera loses an exposure in progress,
-//     so the runner posts a Warning on the Telescope or the
-//     Observatory.
+//   - The runner stops the device's driver on the running server
+//     (serverdrivers.go), and posts an Event on the Telescope or the
+//     Observatory. The other devices on the server stay connected.
 //   - The device's own pod, Service, and claim carry the label of the
 //     server it left, so the runner deletes them here. Without the
 //     delete, the pod would run and the claim would hold the hardware
 //     until deactivation's StopDevices.
 //
-// The runner refuses no change. A person who moves a device during a
-// session reads the Warning in `kubectl describe`.
+// The runner refuses no change.
 
 import (
 	"context"
@@ -24,24 +21,16 @@ import (
 	"maps"
 	"slices"
 	"time"
-
-	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
 // strayLimit bounds the wait for the pods of the devices that left a
 // server to stop. It is a clock, the same deadline as StopDevices'.
 const strayLimit = 2 * time.Minute
 
-const (
-	// reasonPodDeleted is the reason of the Event on a device whose pod
-	// a Ready reservation's runner deleted, because the device left the
-	// server.
-	reasonPodDeleted = "PodDeleted"
-	// reasonServerReplaced is the reason of the Warning on a Telescope
-	// or an Observatory whose server's pod a Ready reservation's runner
-	// replaced, because the devices on it changed.
-	reasonServerReplaced = "ServerReplaced"
-)
+// reasonPodDeleted is the reason of the Event on a device whose pod a
+// Ready reservation's runner deleted, because the device left the
+// server.
+const reasonPodDeleted = "PodDeleted"
 
 // strays answers the device pods that carry a server's label but whose
 // device is no longer on the server, as the pod's name by the device's
@@ -89,34 +78,4 @@ func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error
 		r.o.logf("Reservation %s: deleted pod %s of %s, which left %s", r.name, left[key], key, ref)
 	}
 	return nil
-}
-
-// devicesChanged reports whether the running pod of a server links
-// other devices than the pod built now, so starting the server
-// replaces a running pod.
-func (o *operator) devicesChanged(t *tree, ref serverRef, ownerUID string, devices []*device) bool {
-	running, ok := t.pods[ref.String()]
-	if !ok || running.Metadata.DeletionTimestamp != nil {
-		return false
-	}
-	built, _, err := serverPod(o.namespace, ref, ownerUID, devices)
-	return err == nil && !slices.Equal(linkCommand(running), linkCommand(built))
-}
-
-// linkCommand answers the commands of a server pod's init containers.
-// The one that makes the links names each device's target.
-func linkCommand(p *pod) []string {
-	var out []string
-	for _, c := range p.Spec.InitContainers {
-		out = append(out, c.Command...)
-	}
-	return out
-}
-
-// recordServerReplaced posts the Warning for a server whose pod the
-// runner replaced because the devices on it changed.
-func (r *runner) recordServerReplaced(ref serverRef, meta observatory.ObjectMeta) {
-	r.o.recorder.Warning(reference(ref.kind, meta), reasonServerReplaced,
-		fmt.Sprintf("Replaced pod %s while Reservation %s is Ready, because its devices changed. "+
-			"Every device on it disconnected, and an exposure in progress ended. The runner connects each device again.", ref, r.name))
 }
