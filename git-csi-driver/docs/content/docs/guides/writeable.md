@@ -237,8 +237,9 @@ object it names, and a writeable volume takes no `depth`.
 The pod's events and the claim's events include `GitVolumeArmed`,
 `GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
 `GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeRebased`,
-`GitVolumeDiverged`, `GitVolumeHealed`, `GitVolumeSwept`, and
-`GitVolumeNoPublishSecret`. The node plugin's `/metrics`
+`GitVolumeDiverged`, `GitVolumeHealed`, `GitVolumeSwept`,
+`GitVolumeNoPublishSecret`, `GitVolumeUpstreamMoved`,
+`GitVolumeRefDeleted`, and `GitVolumeAbandonedWork`. The node plugin's `/metrics`
 listener exports `git_csi_volume_abnormal`, one while anything is wrong
 with a volume, and `git_csi_armed`, `git_csi_pending_paths`,
 `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,

@@ -425,32 +425,36 @@ func TestTheSweepPassesOverAGitDirectoryWithNoCommit(t *testing.T) {
 }
 
 func TestASweptVolumeWhoseClaimStandsPostsTheEvent(t *testing.T) {
-	answering, remote := sweepingNode(t, io.Discard)
-	unstagedVolume(t, answering, "config", fileURL(remote))
-	unstagedAgo(t, answering, "config", 2*time.Hour)
-	boundVolume(t, answering, "config", "")
+	synctest.Test(t, func(t *testing.T) {
+		answering, remote := sweepingNode(t, io.Discard)
+		unstagedVolume(t, answering, "config", fileURL(remote))
+		unstagedAgo(t, answering, "config", 2*time.Hour)
+		boundVolume(t, answering, "config", "")
 
-	answering.sweepStore(t.Context())
+		answering.sweepStore(t.Context())
 
-	if got := reasonsOf(t, answering); !strings.Contains(got, reasonSwept) {
-		t.Errorf("the events are %q, want %s in them", got, reasonSwept)
-	}
+		if got := reasonsOf(t, answering); !strings.Contains(got, reasonSwept) {
+			t.Errorf("the events are %q, want %s in them", got, reasonSwept)
+		}
+	})
 }
 
 func TestASweptVolumeWithNoClaimPostsNothing(t *testing.T) {
-	logs := &logbook{}
-	answering, remote := sweepingNode(t, logs)
-	unstagedVolume(t, answering, "config", fileURL(remote))
-	unstagedAgo(t, answering, "config", 2*time.Hour)
+	synctest.Test(t, func(t *testing.T) {
+		logs := &logbook{}
+		answering, remote := sweepingNode(t, logs)
+		unstagedVolume(t, answering, "config", fileURL(remote))
+		unstagedAgo(t, answering, "config", 2*time.Hour)
 
-	answering.sweepStore(t.Context())
+		answering.sweepStore(t.Context())
 
-	if got := reasonsOf(t, answering); strings.Contains(got, reasonSwept) {
-		t.Errorf("the events are %q, want no %s in them", got, reasonSwept)
-	}
-	if !strings.Contains(logs.String(), "the swept volume names no claim") {
-		t.Errorf("the log is %q, want the claim it could not find in it", logs)
-	}
+		if got := reasonsOf(t, answering); strings.Contains(got, reasonSwept) {
+			t.Errorf("the events are %q, want no %s in them", got, reasonSwept)
+		}
+		if !strings.Contains(logs.String(), "the swept volume names no claim") {
+			t.Errorf("the log is %q, want the claim it could not find in it", logs)
+		}
+	})
 }
 
 func TestADriverOutsideAClusterSweepsAndPostsNothing(t *testing.T) {

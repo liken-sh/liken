@@ -170,17 +170,17 @@ func (n *node) NodePublishVolume(
 
 	parsed, err := parseAttributes(request)
 	if err != nil {
-		n.refused(ctx, podOf(request.GetVolumeContext()), err)
+		n.refused(podOf(request.GetVolumeContext()), err)
 		return nil, err
 	}
 	holder, err := parseCredentials(request.GetSecrets())
 	if err != nil {
-		n.refused(ctx, parsed.pod, err)
+		n.refused(parsed.pod, err)
 		return nil, err
 	}
 	if !parsed.ephemeral {
 		if err := n.publishStaged(ctx, request, parsed, holder); err != nil {
-			n.refused(ctx, parsed.pod, err)
+			n.refused(parsed.pod, err)
 			return nil, err
 		}
 		return &csi.NodePublishVolumeResponse{}, nil
@@ -211,7 +211,7 @@ func (n *node) NodePublishVolume(
 		pod:         parsed.pod,
 	}
 	if err := n.publish(ctx, mounting); err != nil {
-		n.refused(ctx, parsed.pod, err)
+		n.refused(parsed.pod, err)
 		_ = os.RemoveAll(directory)
 		return nil, err
 	}
@@ -301,8 +301,8 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	}
 	mounting.reportCommit(commit)
 	if fetchErr != nil {
-		mounting.reportTrouble(fetchErr.Error())
-		n.tell(ctx, mounting, corev1.EventTypeWarning, reasonStale,
+		mounting.reportFetchFailed(fetchErr.Error())
+		n.tell(mounting, corev1.EventTypeWarning, reasonStale,
 			fmt.Sprintf("%s is published from the node's copy at %s: %s",
 				mounting.attributes.ref, short(commit), fetchErr))
 	}
@@ -453,8 +453,8 @@ func (n *node) volumesByRepo() map[string]float64 {
 
 // refused posts the refusal on the pod, so a person who describes the
 // pod sees why it stays in ContainerCreating.
-func (n *node) refused(ctx context.Context, pod podReference, err error) {
-	n.events.post(ctx, pod, corev1.EventTypeWarning, reasonRefused, status.Convert(err).Message())
+func (n *node) refused(pod podReference, err error) {
+	n.events.post(pod, corev1.EventTypeWarning, reasonRefused, status.Convert(err).Message())
 }
 
 // podOf reads the pod straight from the volume context, so a refused

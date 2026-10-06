@@ -33,6 +33,14 @@ first bad one.
 | `GitVolumeHealed` | Upstream took the side branch's work, and the volume is back on its ref. |
 | `GitVolumeSwept` | The sweep removed a work tree nothing had staged for `--sweep-after`. |
 | `GitVolumeNoPublishSecret` | The `PersistentVolume` names `nodeStageSecretRef` and no `nodePublishSecretRef`, so a restart of the driver loses the credential. Posted once for each stage and for each restart. |
+| `GitVolumeUpstreamMoved` | The stage found that upstream moved while the tree held uncommitted writes, so it left the tree as it was. Posted on the claim when the driver finds it after the stage. |
+| `GitVolumeRefDeleted` | The stage found that the remote no longer holds the ref, so the driver pushes nothing until the ref exists again. Posted on the claim when the driver finds it after the stage. |
+| `GitVolumeAbandonedWork` | The stage found the work tree of another volume of the same repository that holds commits nothing pushed. Posted on the claim when the driver finds it after the stage. |
+
+Each fault, a failed push, a failed fetch, and an upstream that moved,
+posts its event at the first failure after a success, and does not post
+it again until a success ends that fault. A fault of one kind does not
+hold back the event of a fault of another kind.
 
 ## The abnormal gauge
 

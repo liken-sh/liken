@@ -309,7 +309,7 @@ func (w *watcher) scan(ctx context.Context) {
 		claim, _, count := w.volume.reading()
 		w.node.logger.InfoContext(ctx, "the tree holds work",
 			"volume", w.volume.id, "paths", count)
-		w.node.report(ctx, w.volume, claim, corev1.EventTypeNormal, reasonPending,
+		w.node.report(w.volume, claim, corev1.EventTypeNormal, reasonPending,
 			pendingMessage(count))
 	}
 	w.node.pushIfDue(ctx, w.volume, rules, quiet)

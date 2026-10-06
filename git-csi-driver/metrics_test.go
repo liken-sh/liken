@@ -185,7 +185,7 @@ func TestTheLogSaysWhenAVolumeTurnsAbnormalAndWhenItIsWellAgain(t *testing.T) {
 		t.Errorf("the log is %q, want no line for a volume that was well all along", logs)
 	}
 
-	held.reportTrouble("the forge answered nothing")
+	held.reportFetchFailed("the forge answered nothing")
 	answering.noteHealth(t.Context(), held)
 	answering.noteHealth(t.Context(), held)
 	if got := strings.Count(logs.String(), "the volume is abnormal"); got != 1 {

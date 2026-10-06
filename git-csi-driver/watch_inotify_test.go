@@ -17,9 +17,8 @@ import (
 	"testing"
 	"time"
 
+	kevents "github.com/liken-sh/liken/kubernetes/events"
 	"golang.org/x/sys/unix"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // inotifyTimeout bounds each wait on the watch. It is not a wait: every
@@ -154,26 +153,23 @@ func (t *manualTimer) drain() {
 }
 
 // awaitPosted waits until the node has posted an Event for the reason,
-// and returns it. The watch on Events opens before the list, so an
-// Event posted during the list still arrives on the watch.
-func awaitPosted(t *testing.T, answering *node, reason string) corev1.Event {
+// and returns it. The fake API server signals each write it answers,
+// and the test reads what it holds after each signal, so it never
+// polls. The kernel's watch cannot run in a synctest bubble, so the
+// wait has a real limit.
+func awaitPosted(t *testing.T, answering *node, reason string) kevents.Event {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), inotifyTimeout)
 	defer cancel()
-	watching, err := answering.events.client.CoreV1().Events("").Watch(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("watching the events: %v", err)
-	}
-	defer watching.Stop()
-	if posted := eventsWithReason(t, answering, reason); len(posted) > 0 {
-		return posted[0]
-	}
+	target := recordingOf(t, answering.events)
 	for {
-		select {
-		case seen := <-watching.ResultChan():
-			if posted, isEvent := seen.Object.(*corev1.Event); isEvent && posted.Reason == reason {
-				return *posted
+		for _, posted := range target.held.List() {
+			if posted.Reason == reason {
+				return posted
 			}
+		}
+		select {
+		case <-target.arrived:
 		case <-ctx.Done():
 			t.Fatalf("the node posted no %s Event within %s", reason, inotifyTimeout)
 		}

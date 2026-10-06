@@ -91,7 +91,7 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 		}
 		webhookListener = hooks.listener
 	} else {
-		answering := newNode(ctx, cfg, newEvents(cfg.nodeID, logger), readings, logger)
+		answering := newNode(ctx, cfg, newEvents(ctx, cfg.nodeID, logger), readings, logger)
 		// The mounts outlive the driver, so a driver that starts takes back
 		// the volumes its store still records.
 		answering.resume(ctx)

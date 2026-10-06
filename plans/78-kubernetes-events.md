@@ -351,3 +351,26 @@ The build changed four points of the design as it was first settled:
   operators hold `create` and `patch` on `events` in `default` only.
   Coverage measured 88.9% for machine-operator and 86.3% for
   cluster-operator, against floors of 86%.
+- **`git-csi-driver` and `per-node-csi-driver`.** Both keep the typed
+  clientset, because their watches need it: the arming, the demand
+  watch, and the webhook in `git-csi-driver`, and the sweep in
+  `per-node-csi-driver`. So `kubernetes/events` does not remove
+  client-go from them, and the choice was between it and
+  `tools/record` on the clientset they already link. Measured with
+  `-s -w`, `kubernetes/events` adds 45 KB to `git-csi-driver` (48.89 MB
+  to 48.93 MB) and 36 KB to `per-node-csi-driver`, and `tools/record`
+  adds 172 KB to `git-csi-driver`. Neither driver has a link guard. The
+  drivers build the clientset and the recorder on one HTTP client from
+  `rest.HTTPClientFor`, so both read the token the same way. Both
+  drivers post on a `Pod` or a `PersistentVolumeClaim`, which have no
+  conditions of this project, so neither declares a `Condition`. A
+  test that the kubelet refuses a mount 37 times in an hour finds one
+  `Event` with `count: 37`, in each driver. `git-csi-driver` keeps a
+  field for each fault, so a push that fails after a stage found that
+  upstream moved posts `GitVolumePushFailed` (defect 1); a test with
+  the old shared field fails. It adds `GitFetchRecovered`, and
+  `GitVolumeUpstreamMoved`, `GitVolumeRefDeleted`, and
+  `GitVolumeAbandonedWork`, which a stage finds before the driver has
+  found the claim, so the arming posts them on the claim when it finds
+  it. Its node plugin gained `patch` on `events`. Coverage is 100% in
+  both, against floors of 100%.

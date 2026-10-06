@@ -668,7 +668,7 @@ jobs:
       packages: write
 
   git-csi-driver-publish:
-    needs: [plan, git-csi-driver, notices, trust]
+    needs: [plan, git-csi-driver, kubernetes, notices, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:

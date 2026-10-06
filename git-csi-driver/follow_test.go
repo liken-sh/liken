@@ -199,41 +199,43 @@ func TestRefreshLeavesATreeThatIsOnTheRefAlone(t *testing.T) {
 }
 
 func TestRefreshReportsAFetchThatFailsAfterOneThatWorked(t *testing.T) {
-	logs := &strings.Builder{}
-	answering, _ := testNode(t, logs)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	url := fileURL(source)
-	following := publishedVolume(t, answering, "csi-1", url, map[string]string{"pull": "1h"})
-	loop := followerOf(answering, url)
+	synctest.Test(t, func(t *testing.T) {
+		logs := &strings.Builder{}
+		answering, _ := testNode(t, logs)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		url := fileURL(source)
+		following := publishedVolume(t, answering, "csi-1", url, map[string]string{"pull": "1h"})
+		loop := followerOf(answering, url)
 
-	if err := os.RemoveAll(source); err != nil {
-		t.Fatalf("removing the forge: %v", err)
-	}
-	loop.refresh(t.Context(), following)
+		if err := os.RemoveAll(source); err != nil {
+			t.Fatalf("removing the forge: %v", err)
+		}
+		loop.refresh(t.Context(), following)
 
-	commit, trouble := following.condition()
-	if trouble == "" {
-		t.Error("a failed fetch left the condition normal")
-	}
-	if commit == "" {
-		t.Error("a failed fetch forgot the commit the tree is on")
-	}
-	if got := readTree(t, following.tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
-		t.Errorf("a failed fetch changed the tree to %v", got)
-	}
-	posted := eventsOf(t, answering)
-	if len(posted) != 1 || posted[0].Reason != reasonFailed {
-		t.Fatalf("a failed fetch posted %v, want one failure", posted)
-	}
+		commit, trouble := following.condition()
+		if trouble == "" {
+			t.Error("a failed fetch left the condition normal")
+		}
+		if commit == "" {
+			t.Error("a failed fetch forgot the commit the tree is on")
+		}
+		if got := readTree(t, following.tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
+			t.Errorf("a failed fetch changed the tree to %v", got)
+		}
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 || posted[0].Reason != reasonFailed {
+			t.Fatalf("a failed fetch posted %v, want one failure", posted)
+		}
 
-	// The Event is posted once, not on every fetch that keeps failing.
-	loop.refresh(t.Context(), following)
-	if got := len(eventsOf(t, answering)); got != 1 {
-		t.Errorf("two failed fetches posted %d events, want 1", got)
-	}
-	if !strings.Contains(logs.String(), "the fetch failed") {
-		t.Errorf("the log is %q, want the failure in it", logs)
-	}
+		// The Event is posted once, not on every fetch that keeps failing.
+		loop.refresh(t.Context(), following)
+		if got := len(eventsOf(t, answering)); got != 1 {
+			t.Errorf("two failed fetches posted %d events, want 1", got)
+		}
+		if !strings.Contains(logs.String(), "the fetch failed") {
+			t.Errorf("the log is %q, want the failure in it", logs)
+		}
+	})
 }
 
 func TestRefreshClearsTheConditionWhenTheForgeComesBack(t *testing.T) {
@@ -243,7 +245,7 @@ func TestRefreshClearsTheConditionWhenTheForgeComesBack(t *testing.T) {
 	following := publishedVolume(t, answering, "csi-1", url, map[string]string{"pull": "1h"})
 	loop := followerOf(answering, url)
 
-	following.reportTrouble("the forge was not there")
+	following.reportFetchFailed("the forge was not there")
 	loop.refresh(t.Context(), following)
 	if _, trouble := following.condition(); trouble != "" {
 		t.Errorf("the condition says %q after a fetch that worked, want nothing", trouble)

@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	kevents "github.com/liken-sh/liken/kubernetes/events"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,7 +19,8 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// cluster is the fake API server the node's events and arming share.
+// cluster is the fake API server the node's arming and demand watch
+// read.
 func cluster(t *testing.T, answering *node) *fake.Clientset {
 	t.Helper()
 	return answering.events.client.(*fake.Clientset)
@@ -484,7 +486,7 @@ func classOf(held *volume) string {
 // node has posted for the reason. The volume reports its state before
 // the node posts the Events, so a test that reads the Events waits for
 // the posts too.
-func waitForEvents(t *testing.T, answering *node, reason string) []corev1.Event {
+func waitForEvents(t *testing.T, answering *node, reason string) []kevents.Event {
 	t.Helper()
 	synctest.Wait()
 	return eventsWithReason(t, answering, reason)
@@ -518,25 +520,27 @@ func TestTheLoopReadsTheClaimAgainWhenItChanges(t *testing.T) {
 }
 
 func TestTheVolumeThatLosesItsClassSaysSo(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	held := volumeNamed("config")
-	claim := claimReference{namespace: "home", name: "config"}
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		held := volumeNamed("config")
+		claim := claimReference{namespace: "home", name: "config"}
 
-	answering.armed(t.Context(), held, claim, "config-eager", &policy{}, "")
-	answering.armed(t.Context(), held, claim, "", nil, "")
+		answering.armed(t.Context(), held, claim, "config-eager", &policy{}, "")
+		answering.armed(t.Context(), held, claim, "", nil, "")
 
-	unarmed := []corev1.Event{}
-	for _, posted := range eventsOf(t, answering) {
-		if posted.Reason == reasonUnarmed {
-			unarmed = append(unarmed, posted)
+		unarmed := []kevents.Event{}
+		for _, posted := range eventsOf(t, answering) {
+			if posted.Reason == reasonUnarmed {
+				unarmed = append(unarmed, posted)
+			}
 		}
-	}
-	if len(unarmed) != 2 {
-		t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
-	}
-	if unarmed[0].Message != "unarmed: the claim names no class of "+driverName {
-		t.Errorf("the event says %q", unarmed[0].Message)
-	}
+		if len(unarmed) != 2 {
+			t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
+		}
+		if unarmed[0].Message != "unarmed: the claim names no class of "+driverName {
+			t.Errorf("the event says %q", unarmed[0].Message)
+		}
+	})
 }
 
 func TestADriverOutsideAClusterArmsNothing(t *testing.T) {

@@ -23,10 +23,30 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			held: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
-				trouble:    "the forge is not there",
+				fetchFault: "the forge is not there",
 			},
 			abnormal: true,
 			says:     "the forge is not there",
+		},
+		{
+			name: "a push that failed",
+			held: &volume{
+				attributes: &attributes{ref: "main"},
+				commit:     "d633176146e997",
+				pushFault:  "the remote refused the push",
+			},
+			abnormal: true,
+			says:     "the remote refused the push",
+		},
+		{
+			name: "an upstream that moved",
+			held: &volume{
+				attributes:    &attributes{ref: "main"},
+				commit:        "d633176146e997",
+				upstreamMoved: "upstream moved: main is at 9b1c0de",
+			},
+			abnormal: true,
+			says:     "upstream moved: main is at 9b1c0de",
 		},
 		{
 			name: "an unarmed volume with work pending",

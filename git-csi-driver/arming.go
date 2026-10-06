@@ -67,8 +67,8 @@ func (n *node) disarm(staged *volume) {
 	n.readings.forget(staged)
 }
 
-// follow finds the claim, then lists it and watches it until the
-// driver stops. The list and the watch select the claim by name, so a
+// follow finds the claim, posts on it the faults the stage found, then
+// lists it and watches it until the driver stops. The list and the watch select the claim by name, so a
 // claim that does not exist yet costs one list, and its creation
 // arrives as an event. It returns only after the watch and the reads
 // have ended.
@@ -81,6 +81,7 @@ func (a *arming) follow(ctx context.Context, staged *volume) {
 	if !found {
 		return
 	}
+	a.node.tellStageFaults(staged, claim)
 	claims := a.client.CoreV1().PersistentVolumeClaims(claim.namespace)
 	selector := "metadata.name=" + claim.name
 	// The slot holds the newest copy of the claim that the reads have
@@ -292,7 +293,7 @@ func (n *node) armed(
 				message = "unarmed: " + invalid
 			}
 		}
-		n.report(ctx, staged, claim, corev1.EventTypeNormal, reason, message)
+		n.report(staged, claim, corev1.EventTypeNormal, reason, message)
 	}
 	if rules != nil && (before == nil || before.quiesce != rules.quiesce) {
 		n.classChanged(staged)

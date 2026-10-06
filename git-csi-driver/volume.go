@@ -26,9 +26,9 @@ const (
 )
 
 // volume is one volume this node holds. It records the commit its tree
-// references, the trouble since the last good fetch, the uncommitted
-// writes, and the claim and class that determine whether commits are
-// allowed.
+// references, the faults that stand since the last good fetch or push,
+// the uncommitted writes, and the claim and class that determine
+// whether commits are allowed.
 type volume struct {
 	id         string
 	attributes *attributes
@@ -48,9 +48,16 @@ type volume struct {
 	// call carries no attributes.
 	context map[string]string
 
-	mu      sync.Mutex
-	commit  string
-	trouble string
+	mu     sync.Mutex
+	commit string
+	// The three faults a volume reports until a success ends them: a
+	// fetch that failed, a push that failed, and an upstream that moved
+	// while the tree held uncommitted writes. Each has a field of its
+	// own, so the first fault of one kind posts its Event while a fault
+	// of another kind stands.
+	fetchFault    string
+	pushFault     string
+	upstreamMoved string
 	// The pod the kubelet named at publish. A stage call names no pod.
 	pod podReference
 	// Every target a read-only claim is bound at on this node, and the
@@ -335,14 +342,17 @@ func (v *volume) reportUnpushed(count int, oldest time.Time) {
 }
 
 // reportPushed records a push that worked, which leaves nothing
-// unpushed and ends the trouble the failures before it reported.
+// unpushed and ends the push failure before it. The remote now holds
+// the tree's commits on top of upstream, so upstream has not moved
+// past the tree either.
 func (v *volume) reportPushed(at time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.unpushed = 0
 	v.oldest = time.Time{}
 	v.lastPush = at
-	v.trouble = ""
+	v.pushFault = ""
+	v.upstreamMoved = ""
 }
 
 // pushing is what the push gauges carry.
@@ -398,8 +408,8 @@ func (v *volume) standingReport() (bool, string) {
 		return true, waiting
 	}
 	switch {
-	case v.trouble != "":
-		return true, v.trouble
+	case v.fault() != "":
+		return true, v.fault()
 	case v.refDeleted:
 		return true, fmt.Sprintf("RefDeleted: the remote holds no %s", v.attributes.ref)
 	case v.diverged != "":
@@ -487,25 +497,20 @@ func (v *volume) pulling() string {
 	return said
 }
 
-// reportCommit records that the tree holds commit and nothing is wrong.
-// A resolved commit means the fetch reached the ref, so a deleted ref is
-// reported no longer.
-func (v *volume) reportCommit(commit string) {
+// reportCommit records that the tree holds commit and that the fetch
+// before it worked. A resolved commit means the fetch reached the ref,
+// so a deleted ref is reported no longer, and the tree holds what
+// upstream holds. It reports whether a fetch failure stood until now,
+// which is when the recovery is worth an Event.
+func (v *volume) reportCommit(commit string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	recovered := v.fetchFault != ""
 	v.commit = commit
-	v.trouble = ""
+	v.fetchFault = ""
+	v.upstreamMoved = ""
 	v.refDeleted = false
-}
-
-// reportTrouble records a failure and reports whether it is the first
-// since the last success, which is when an Event is worth posting.
-func (v *volume) reportTrouble(message string) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	first := v.trouble == ""
-	v.trouble = message
-	return first
+	return recovered
 }
 
 // skippedMessage names every path the size guard left out, so a
@@ -519,8 +524,10 @@ func skippedMessage(skipped []change) string {
 		len(skipped), maxFileSizeParameter, strings.Join(paths, ", "))
 }
 
+// condition is the commit the tree holds and the fault the volume
+// reports first, which is empty when nothing is wrong.
 func (v *volume) condition() (string, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	return v.commit, v.trouble
+	return v.commit, v.fault()
 }

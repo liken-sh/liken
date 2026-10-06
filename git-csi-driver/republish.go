@@ -19,12 +19,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// reasonNoPublishSecret is the Event a volume posts when its
-// PersistentVolume names a stage Secret and no publish Secret. Such a
-// volume works until the driver restarts, and then fetches and pushes
-// nothing until the kubelet stages it again.
-const reasonNoPublishSecret = "GitVolumeNoPublishSecret"
-
 // lostCredential is what a volume reports from the moment a restarted
 // driver resumes it until a republish returns its credential.
 const lostCredential = "the driver restarted and holds no credential for this volume " +
@@ -192,9 +186,9 @@ func (n *node) noPublishSecret(ctx context.Context, held *volume) bool {
 		return false
 	}
 	n.logger.WarnContext(ctx, "no publish Secret", "volume", held.id, "reason", noPublishSecret)
-	n.tell(ctx, held, corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
+	n.tell(held, corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
 	if held.writeable() {
-		n.events.postClaim(ctx, held.claimNow(), corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
+		n.events.postClaim(held.claimNow(), corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
 	}
 	n.noteHealth(ctx, held)
 	return true

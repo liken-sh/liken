@@ -78,7 +78,16 @@ A `Secret` with neither `ssh-privatekey` nor `token` is refused.
 | `GitVolumeRefused` | The publish was refused. The message says why. |
 | `GitVolumeStale` | The fetch failed and `offline: allowStale` published the node's copy. |
 | `GitFetchFailed` | A fetch failed after one that worked. Posted once, until a fetch succeeds. |
+| `GitFetchRecovered` | A fetch worked after a `GitFetchFailed` or a `GitVolumeStale`. A `Normal` event, which shows when the fault ended. |
 | `GitVolumeNoPublishSecret` | The `PersistentVolume` names `nodeStageSecretRef` and no `nodePublishSecretRef`, so a restart of the driver loses the credential. Posted once for each stage and for each restart. |
+
+A repeat of the same event on the same object, with the same message,
+within 10 minutes of the last one, increases the count of the event
+already posted and posts no new one. The kubelet retries a refused
+mount with a backoff that grows to about two minutes, so a pod that is
+refused for an hour carries one `GitVolumeRefused` line, such as
+`(x37 over 1h)`. The API server deletes an event one hour after its
+last change.
 
 ## The gauge
 

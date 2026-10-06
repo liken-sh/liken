@@ -181,7 +181,7 @@ func (n *node) pushNow(ctx context.Context, held *volume, count int) {
 	}
 	held.reportPushed(time.Now())
 	claim, _, _ := held.reading()
-	n.report(ctx, held, claim, corev1.EventTypeNormal, reasonPushed,
+	n.report(held, claim, corev1.EventTypeNormal, reasonPushed,
 		fmt.Sprintf("pushed %d commits to %s at %s", count, remote, short(head)))
 	n.logger.InfoContext(ctx, "pushed",
 		"volume", held.id, "commits", count, "branch", remote, "commit", short(head))
@@ -228,7 +228,7 @@ func (n *node) rebaseAndRetry(ctx context.Context, held *volume, count int) (str
 		// for the record alone rebased nothing.
 		if head != before {
 			claim, _, _ := held.reading()
-			n.report(ctx, held, claim, corev1.EventTypeNormal, reasonRebased,
+			n.report(held, claim, corev1.EventTypeNormal, reasonRebased,
 				fmt.Sprintf("rebased %d commits onto %s and pushed to %s",
 					count, short(upstream), held.attributes.ref))
 			n.logger.InfoContext(ctx, "rebased", "volume", held.id,
@@ -277,9 +277,9 @@ func (n *node) sendTo(ctx context.Context, held *volume, remote string) (gitOutp
 // and posts its Event once, at the first failure after a push that
 // worked.
 func (n *node) pushFailed(ctx context.Context, held *volume, message string) {
-	if held.reportTrouble(message) {
+	if held.reportPushFailed(message) {
 		claim, _, _ := held.reading()
-		n.report(ctx, held, claim, corev1.EventTypeWarning, reasonPushFailed, message)
+		n.report(held, claim, corev1.EventTypeWarning, reasonPushFailed, message)
 	}
 	n.readings.pushFailed(held)
 	n.noteHealth(ctx, held)

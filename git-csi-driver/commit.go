@@ -76,7 +76,7 @@ func (n *node) stageAndCommit(
 func (n *node) skipping(ctx context.Context, held *volume, skipped []change) {
 	claim, _, _ := held.reading()
 	for _, one := range held.reportSkipped(skipped) {
-		n.report(ctx, held, claim, corev1.EventTypeWarning, reasonSkipped,
+		n.report(held, claim, corev1.EventTypeWarning, reasonSkipped,
 			fmt.Sprintf("%s is %d bytes, over %s", one.path, one.size, maxFileSizeParameter))
 	}
 }

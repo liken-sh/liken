@@ -10,7 +10,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	corev1 "k8s.io/api/core/v1"
+	kevents "github.com/liken-sh/liken/kubernetes/events"
 )
 
 // unwatched stops the volume's own loops, so a test drives one pass of
@@ -101,9 +101,9 @@ func TestTheSizeGuardLeavesABigFileOut(t *testing.T) {
 }
 
 // eventsWithReason is every Event the node posted for one reason.
-func eventsWithReason(t *testing.T, answering *node, reason string) []corev1.Event {
+func eventsWithReason(t *testing.T, answering *node, reason string) []kevents.Event {
 	t.Helper()
-	found := []corev1.Event{}
+	found := []kevents.Event{}
 	for _, posted := range eventsOf(t, answering) {
 		if posted.Reason == reason {
 			found = append(found, posted)

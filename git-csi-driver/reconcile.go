@@ -32,7 +32,7 @@ func (n *node) reconcile(ctx context.Context, staging *volume, head, upstream, s
 	// reports that upstream moved. The next stage after a commit
 	// reconciles it.
 	if pending, _ := staging.work.pending(ctx); len(pending) > 0 {
-		staging.reportTrouble(fmt.Sprintf(
+		staging.reportUpstreamMoved(fmt.Sprintf(
 			"upstream moved: %s is at %s and the tree holds %d uncommitted paths",
 			staging.attributes.ref, short(upstream), len(pending)))
 		return nil

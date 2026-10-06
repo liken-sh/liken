@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
@@ -108,23 +109,25 @@ func TestAReadOnlyStageTakesTheAttributesAnInlineVolumeTakes(t *testing.T) {
 }
 
 func TestAReadOnlyStageRefusesAForgeItCannotReach(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "franchises", "")
-	staged := readOnlyStage(t, "franchises",
-		fileURL(filepath.Join(t.TempDir(), "gone")), map[string]string{"pull": "never"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "franchises", "")
+		staged := readOnlyStage(t, "franchises",
+			fileURL(filepath.Join(t.TempDir(), "gone")), map[string]string{"pull": "never"})
 
-	_, err := answering.NodeStageVolume(t.Context(), staged)
-	if got := status.Code(err); got != codes.Unavailable {
-		t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.Unavailable)
-	}
-	if _, err := os.Stat(answering.store.volumeDir("franchises")); err == nil {
-		t.Error("a refused stage left the volume's directory behind")
-	}
-	posted := eventsOf(t, answering)
-	if len(posted) != 1 || posted[0].Reason != reasonRefused ||
-		posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
-		t.Errorf("the refused stage posted %v, want one refusal on the claim", posted)
-	}
+		_, err := answering.NodeStageVolume(t.Context(), staged)
+		if got := status.Code(err); got != codes.Unavailable {
+			t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.Unavailable)
+		}
+		if _, err := os.Stat(answering.store.volumeDir("franchises")); err == nil {
+			t.Error("a refused stage left the volume's directory behind")
+		}
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 || posted[0].Reason != reasonRefused ||
+			posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
+			t.Errorf("the refused stage posted %v, want one refusal on the claim", posted)
+		}
+	})
 }
 
 func TestAReadOnlyClaimBindsEveryPodOnTheNode(t *testing.T) {
@@ -241,63 +244,67 @@ func TestAnUnstageReportsTheDirectoryItCannotRemove(t *testing.T) {
 }
 
 func TestAReadOnlyClaimReportsOnEveryPodAndOnTheClaim(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "franchises", "")
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	url := fileURL(source)
-	staged, held := stagedReadOnly(t, answering, "franchises", url, map[string]string{"pull": "1h"})
-	publishedTo(t, answering, staged, "reader-a")
-	publishedTo(t, answering, staged, "reader-b")
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "franchises", "")
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		url := fileURL(source)
+		staged, held := stagedReadOnly(t, answering, "franchises", url, map[string]string{"pull": "1h"})
+		publishedTo(t, answering, staged, "reader-a")
+		publishedTo(t, answering, staged, "reader-b")
 
-	if err := os.RemoveAll(source); err != nil {
-		t.Fatalf("removing the forge: %v", err)
-	}
-	// The node's own loop, because a loop records the health only of a
-	// volume it holds.
-	answering.mu.Lock()
-	loop := answering.loopOf(held)
-	answering.mu.Unlock()
-	loop.refresh(t.Context(), held)
+		if err := os.RemoveAll(source); err != nil {
+			t.Fatalf("removing the forge: %v", err)
+		}
+		// The node's own loop, because a loop records the health only of a
+		// volume it holds.
+		answering.mu.Lock()
+		loop := answering.loopOf(held)
+		answering.mu.Unlock()
+		loop.refresh(t.Context(), held)
 
-	pods, claims := 0, 0
-	for _, posted := range eventsOf(t, answering) {
-		if posted.Reason != reasonFailed {
-			continue
+		pods, claims := 0, 0
+		for _, posted := range eventsOf(t, answering) {
+			if posted.Reason != reasonFailed {
+				continue
+			}
+			switch posted.InvolvedObject.Kind {
+			case "Pod":
+				pods++
+			case "PersistentVolumeClaim":
+				claims++
+			}
 		}
-		switch posted.InvolvedObject.Kind {
-		case "Pod":
-			pods++
-		case "PersistentVolumeClaim":
-			claims++
+		if pods != 2 || claims != 1 {
+			t.Errorf("the failed fetch reached %d pods and %d claims, want 2 and 1", pods, claims)
 		}
-	}
-	if pods != 2 || claims != 1 {
-		t.Errorf("the failed fetch reached %d pods and %d claims, want 2 and 1", pods, claims)
-	}
-	abnormal, found := abnormalOf(t, answering.readings, "home", "franchises")
-	if !found || abnormal != 1 {
-		t.Errorf("git_csi_volume_abnormal reads %v (found: %v), want 1 under the claim's namespace",
-			abnormal, found)
-	}
+		abnormal, found := abnormalOf(t, answering.readings, "home", "franchises")
+		if !found || abnormal != 1 {
+			t.Errorf("git_csi_volume_abnormal reads %v (found: %v), want 1 under the claim's namespace",
+				abnormal, found)
+		}
+	})
 }
 
 func TestAStaleReadOnlyStageReportsOnTheClaim(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "franchises", "")
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	url := fileURL(source)
-	stagedReadOnly(t, answering, "first", url, map[string]string{"pull": "never"})
-	if err := os.RemoveAll(source); err != nil {
-		t.Fatalf("removing the forge: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "franchises", "")
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		url := fileURL(source)
+		stagedReadOnly(t, answering, "first", url, map[string]string{"pull": "never"})
+		if err := os.RemoveAll(source); err != nil {
+			t.Fatalf("removing the forge: %v", err)
+		}
 
-	stagedReadOnly(t, answering, "franchises", url,
-		map[string]string{"pull": "never", "offline": "allowStale"})
-	posted := eventsOf(t, answering)
-	if len(posted) != 1 || posted[0].Reason != reasonStale ||
-		posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
-		t.Errorf("the stale stage posted %v, want one stale event on the claim", posted)
-	}
+		stagedReadOnly(t, answering, "franchises", url,
+			map[string]string{"pull": "never", "offline": "allowStale"})
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 || posted[0].Reason != reasonStale ||
+			posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
+			t.Errorf("the stale stage posted %v, want one stale event on the claim", posted)
+		}
+	})
 }
 
 func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
@@ -328,29 +335,31 @@ func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			answering, calls := testNode(t, io.Discard)
-			boundVolume(t, answering, "franchises", "")
-			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-			staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
-				map[string]string{"pull": "never"})
-			request := readOnlyPublish(t, staged, "reader-a")
-			c.stand(t, calls, request)
+			synctest.Test(t, func(t *testing.T) {
+				answering, calls := testNode(t, io.Discard)
+				boundVolume(t, answering, "franchises", "")
+				source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+				staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+					map[string]string{"pull": "never"})
+				request := readOnlyPublish(t, staged, "reader-a")
+				c.stand(t, calls, request)
 
-			_, err := answering.NodePublishVolume(t.Context(), request)
-			if got := status.Code(err); got != codes.Internal {
-				t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.Internal)
-			}
-			claimed := false
-			for _, posted := range eventsOf(t, answering) {
-				if posted.Reason == reasonRefused &&
-					posted.InvolvedObject.Kind == "PersistentVolumeClaim" {
-					claimed = true
+				_, err := answering.NodePublishVolume(t.Context(), request)
+				if got := status.Code(err); got != codes.Internal {
+					t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.Internal)
 				}
-			}
-			if !claimed {
-				t.Errorf("the refused publish posted %v, want a refusal on the claim",
-					eventsOf(t, answering))
-			}
+				claimed := false
+				for _, posted := range eventsOf(t, answering) {
+					if posted.Reason == reasonRefused &&
+						posted.InvolvedObject.Kind == "PersistentVolumeClaim" {
+						claimed = true
+					}
+				}
+				if !claimed {
+					t.Errorf("the refused publish posted %v, want a refusal on the claim",
+						eventsOf(t, answering))
+				}
+			})
 		})
 	}
 }
@@ -359,35 +368,37 @@ func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
 // the pod asks for read-only, whatever the driver's own bind says, so
 // a publish that does not ask is refused before anything is bound.
 func TestAReadOnlyClaimRefusesAPodThatDoesNotAskForReadOnly(t *testing.T) {
-	answering, calls := testNode(t, io.Discard)
-	boundVolume(t, answering, "franchises", "")
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
-		map[string]string{"pull": "never"})
-	request := readOnlyPublish(t, staged, "reader-a")
-	request.Readonly = false
-	before := len(calls.mounts)
+	synctest.Test(t, func(t *testing.T) {
+		answering, calls := testNode(t, io.Discard)
+		boundVolume(t, answering, "franchises", "")
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+			map[string]string{"pull": "never"})
+		request := readOnlyPublish(t, staged, "reader-a")
+		request.Readonly = false
+		before := len(calls.mounts)
 
-	_, err := answering.NodePublishVolume(t.Context(), request)
+		_, err := answering.NodePublishVolume(t.Context(), request)
 
-	if got := status.Code(err); got != codes.InvalidArgument {
-		t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.InvalidArgument)
-	}
-	if !strings.Contains(err.Error(), "readOnly") {
-		t.Errorf("the refusal reads %q, want it to name readOnly", err)
-	}
-	if len(calls.mounts) != before {
-		t.Errorf("the refused publish made %d mounts, want none", len(calls.mounts)-before)
-	}
-	onPod := false
-	for _, posted := range eventsOf(t, answering) {
-		if posted.Reason == reasonRefused && posted.InvolvedObject.Kind == "Pod" {
-			onPod = true
+		if got := status.Code(err); got != codes.InvalidArgument {
+			t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.InvalidArgument)
 		}
-	}
-	if !onPod {
-		t.Errorf("the refused publish posted %v, want a refusal on the pod", eventsOf(t, answering))
-	}
+		if !strings.Contains(err.Error(), "readOnly") {
+			t.Errorf("the refusal reads %q, want it to name readOnly", err)
+		}
+		if len(calls.mounts) != before {
+			t.Errorf("the refused publish made %d mounts, want none", len(calls.mounts)-before)
+		}
+		onPod := false
+		for _, posted := range eventsOf(t, answering) {
+			if posted.Reason == reasonRefused && posted.InvolvedObject.Kind == "Pod" {
+				onPod = true
+			}
+		}
+		if !onPod {
+			t.Errorf("the refused publish posted %v, want a refusal on the pod", eventsOf(t, answering))
+		}
+	})
 }
 
 func TestADriverThatRestartsTakesBackAReadOnlyClaim(t *testing.T) {
@@ -542,20 +553,22 @@ func TestTheRecordNamesTheKindOfEveryVolume(t *testing.T) {
 }
 
 func TestAReadOnlyClaimTellsThePodsItIsPublishedTo(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	held := &volume{
-		id:      "franchises",
-		kind:    readOnlyClaim,
-		targets: map[string]podReference{},
-		claim:   claimReference{namespace: "home", name: "config"},
-	}
-	held.bind("/a", podReference{name: "reader-a", namespace: "home"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		held := &volume{
+			id:      "franchises",
+			kind:    readOnlyClaim,
+			targets: map[string]podReference{},
+			claim:   claimReference{namespace: "home", name: "config"},
+		}
+		held.bind("/a", podReference{name: "reader-a", namespace: "home"})
 
-	answering.tell(t.Context(), held, corev1.EventTypeWarning, reasonStale, "the node's copy")
-	posted := eventsOf(t, answering)
-	if len(posted) != 2 {
-		t.Fatalf("the volume told %d objects, want the pod and the claim", len(posted))
-	}
+		answering.tell(held, corev1.EventTypeWarning, reasonStale, "the node's copy")
+		posted := eventsOf(t, answering)
+		if len(posted) != 2 {
+			t.Fatalf("the volume told %d objects, want the pod and the claim", len(posted))
+		}
+	})
 }
 
 func TestADriverOutsideAClusterStagesAReadOnlyClaim(t *testing.T) {
@@ -574,22 +587,24 @@ func TestADriverOutsideAClusterStagesAReadOnlyClaim(t *testing.T) {
 }
 
 func TestAReadOnlyStageReportsTheDirectoryItCannotMake(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "franchises", "")
-	volumes := filepath.Join(answering.store.root, "volumes")
-	if err := os.MkdirAll(volumes, 0o700); err != nil {
-		t.Fatalf("making the store: %v", err)
-	}
-	readOnlyDir(t, volumes)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "franchises", "")
+		volumes := filepath.Join(answering.store.root, "volumes")
+		if err := os.MkdirAll(volumes, 0o700); err != nil {
+			t.Fatalf("making the store: %v", err)
+		}
+		readOnlyDir(t, volumes)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 
-	staged := readOnlyStage(t, "franchises", fileURL(source), map[string]string{"pull": "never"})
-	_, err := answering.NodeStageVolume(t.Context(), staged)
-	if got := status.Code(err); got != codes.Internal {
-		t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.Internal)
-	}
-	posted := eventsOf(t, answering)
-	if len(posted) != 1 || posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
-		t.Errorf("the refused stage posted %v, want one refusal on the claim", posted)
-	}
+		staged := readOnlyStage(t, "franchises", fileURL(source), map[string]string{"pull": "never"})
+		_, err := answering.NodeStageVolume(t.Context(), staged)
+		if got := status.Code(err); got != codes.Internal {
+			t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.Internal)
+		}
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 || posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
+			t.Errorf("the refused stage posted %v, want one refusal on the claim", posted)
+		}
+	})
 }

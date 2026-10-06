@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -331,7 +332,7 @@ func (f *follower) refresh(ctx context.Context, held *volume) bool {
 		return false
 	}
 	if standing, _ := held.condition(); standing == commit {
-		held.reportCommit(commit)
+		f.recovered(held, commit)
 		return true
 	}
 
@@ -339,18 +340,29 @@ func (f *follower) refresh(ctx context.Context, held *volume) bool {
 		f.trouble(ctx, held, err.Error())
 		return false
 	}
-	held.reportCommit(commit)
+	f.recovered(held, commit)
 	f.node.logger.InfoContext(ctx, "the tree moved",
 		"volume", held.id, "ref", held.attributes.ref, "commit", short(commit))
 	return true
+}
+
+// recovered records the commit a fetch that worked found. The first
+// fetch that works after a failure posts one Event, which closes the
+// Warning the failure posted, so `kubectl describe` shows that the
+// fault ended and when.
+func (f *follower) recovered(held *volume, commit string) {
+	if held.reportCommit(commit) {
+		f.node.tell(held, corev1.EventTypeNormal, reasonRecovered,
+			fmt.Sprintf("fetched %s at %s after the fetch failed", held.attributes.ref, short(commit)))
+	}
 }
 
 // trouble records a failed fetch. The first failure after a
 // success posts one Event, and the volume's report carries the failure
 // until a fetch works again.
 func (f *follower) trouble(ctx context.Context, held *volume, message string) {
-	if held.reportTrouble(message) {
-		f.node.tell(ctx, held, corev1.EventTypeWarning, reasonFailed, message)
+	if held.reportFetchFailed(message) {
+		f.node.tell(held, corev1.EventTypeWarning, reasonFailed, message)
 	}
 	f.node.logger.WarnContext(ctx, "the fetch failed",
 		"volume", held.id, "ref", held.attributes.ref, "error", message)

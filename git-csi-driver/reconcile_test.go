@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -150,32 +151,34 @@ func TestAStageLeavesATreeWithUncommittedWritesAlone(t *testing.T) {
 }
 
 func TestARebaseThatConflictsKeepsTheLocalCommitsAndDiverges(t *testing.T) {
-	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "")
-	held, request := stagedVolume(t, answering, "config", fileURL(remote))
-	driverCommit(t, answering, held, map[string]string{"a.txt": "the pod wrote this"})
-	remoteCommit(t, remote, map[string]string{"a.txt": "two"})
+	synctest.Test(t, func(t *testing.T) {
+		remote := bareRemote(t, map[string]string{"a.txt": "one"})
+		answering, _ := testNode(t, io.Discard)
+		boundVolume(t, answering, "config", "")
+		held, request := stagedVolume(t, answering, "config", fileURL(remote))
+		driverCommit(t, answering, held, map[string]string{"a.txt": "the pod wrote this"})
+		remoteCommit(t, remote, map[string]string{"a.txt": "two"})
 
-	again := restaged(t, answering, request)
+		again := restaged(t, answering, request)
 
-	want := map[string]string{"a.txt": "the pod wrote this"}
-	if got := readTree(t, again.tree); !sameTree(got, want) {
-		t.Errorf("the tree holds %v, want %v", got, want)
-	}
-	if got := again.divergedFrom(); got != "main.config" {
-		t.Errorf("the volume pushes to %q, want main.config", got)
-	}
-	if got := again.work.divergedBranch(t.Context()); got != "main.config" {
-		t.Errorf("the git directory records %q, want main.config", got)
-	}
-	abnormal, message := again.report()
-	if !abnormal || !strings.Contains(message, "main.config") || !strings.Contains(message, "Diverged") {
-		t.Errorf("the condition says %v, %q, want Diverged with both branches", abnormal, message)
-	}
-	if got := reasonsOf(t, answering); !strings.Contains(got, reasonDiverged) {
-		t.Errorf("the events are %q, want %s in them", got, reasonDiverged)
-	}
+		want := map[string]string{"a.txt": "the pod wrote this"}
+		if got := readTree(t, again.tree); !sameTree(got, want) {
+			t.Errorf("the tree holds %v, want %v", got, want)
+		}
+		if got := again.divergedFrom(); got != "main.config" {
+			t.Errorf("the volume pushes to %q, want main.config", got)
+		}
+		if got := again.work.divergedBranch(t.Context()); got != "main.config" {
+			t.Errorf("the git directory records %q, want main.config", got)
+		}
+		abnormal, message := again.report()
+		if !abnormal || !strings.Contains(message, "main.config") || !strings.Contains(message, "Diverged") {
+			t.Errorf("the condition says %v, %q, want Diverged with both branches", abnormal, message)
+		}
+		if got := reasonsOf(t, answering); !strings.Contains(got, reasonDiverged) {
+			t.Errorf("the events are %q, want %s in them", got, reasonDiverged)
+		}
+	})
 }
 
 // reasonsOf is every reason the node posted, which is what a

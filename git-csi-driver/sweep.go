@@ -203,7 +203,7 @@ func (n *node) swept(ctx context.Context, id string, when time.Time) {
 			"volume", id, "reason", err)
 		return
 	}
-	n.events.postClaim(ctx, claim, corev1.EventTypeNormal, reasonSwept,
+	n.events.postClaim(claim, corev1.EventTypeNormal, reasonSwept,
 		fmt.Sprintf("swept: the work tree was unstaged %s ago and held nothing unpushed",
 			age(when)))
 }

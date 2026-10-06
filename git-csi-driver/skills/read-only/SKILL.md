@@ -290,9 +290,11 @@ the object it names.
 
 ## What the driver reports
 
-A refused mount, a stale publish, and a fetch that fails after one that
-worked each post an `Event` on the pod. `kubectl describe pod` shows
-them.
+A refused mount, a stale publish, a fetch that fails after one that
+worked, and the first fetch that works after a failure each post an
+`Event` on the pod. `kubectl describe pod` shows them. A refusal that
+the kubelet retries shows as one line with a count, such as
+`(x37 over 1h)`.
 A read-only claim posts each of those on every pod it is published to
 and on the claim, so `kubectl describe pvc` shows them too. The node
 plugin's gauge `git_csi_volume_abnormal`, labeled by the

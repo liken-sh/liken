@@ -6,21 +6,24 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
-	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	kevents "github.com/liken-sh/liken/kubernetes/events"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
-// The reasons identify state changes a person has to see.
+// The reasons identify state changes a person has to see. This list is
+// every reason the driver posts.
 const (
 	reasonRefused = "GitVolumeRefused"
 	reasonStale   = "GitVolumeStale"
 	reasonFailed  = "GitFetchFailed"
+	// The first fetch that works after a failed one, which closes the
+	// GitFetchFailed or the GitVolumeStale before it.
+	reasonRecovered = "GitFetchRecovered"
 	// The three a writeable volume adds: a class armed it, the class left
 	// it, and the tree holds work the driver has not committed.
 	reasonArmed   = "GitVolumeArmed"
@@ -40,97 +43,112 @@ const (
 	// A push the remote rejected was rebased onto what the remote
 	// holds now, and landed on the ref.
 	reasonRebased = "GitVolumeRebased"
+	// The three faults a stage finds in a writeable volume: upstream
+	// moved while the tree held uncommitted writes, the remote deleted
+	// the ref, and another volume's work tree holds unpushed commits.
+	reasonUpstreamMoved = "GitVolumeUpstreamMoved"
+	reasonRefDeleted    = "GitVolumeRefDeleted"
+	reasonAbandoned     = "GitVolumeAbandonedWork"
+	// The PersistentVolume names a stage Secret and no publish Secret.
+	// Such a volume works until the driver restarts, and then fetches
+	// and pushes nothing until the kubelet stages it again.
+	reasonNoPublishSecret = "GitVolumeNoPublishSecret"
 )
 
-// events posts Events through the cluster's API, or posts nothing when
-// the driver runs outside a cluster.
+// events holds the node plugin's two ways into the cluster: the typed
+// clientset that the arming and the demand watch read through, and the
+// recorder that posts Events. Both are nil when the driver runs outside
+// a cluster.
+//
+// The recorder is the shared writer of kubernetes/events. It folds a
+// repeat of the same Event into the Event already posted, so a pod that
+// the kubelet tries to mount again and again carries one line, such as
+// "(x37 over 1h)", and not one Event for each attempt.
 type events struct {
-	client kubernetes.Interface
-	node   string
-	logger *slog.Logger
-	now    func() time.Time
+	client   kubernetes.Interface
+	recorder *kevents.Recorder
 }
 
 // newEvents reads the driver's own credentials from the pod it runs in.
-func newEvents(nodeID string, logger *slog.Logger) *events {
-	return eventsFrom(nodeID, logger, rest.InClusterConfig)
+// The recorder writes until ctx ends.
+func newEvents(ctx context.Context, nodeID string, logger *slog.Logger) *events {
+	return eventsFrom(ctx, nodeID, logger, rest.InClusterConfig)
 }
 
-// eventsFrom builds the client from the configuration load returns. A
+// eventsFrom builds the clients from the configuration load returns. A
 // driver that finds no cluster still serves volumes and says so once,
 // because a mount is worth more than an Event.
-func eventsFrom(nodeID string, logger *slog.Logger, load func() (*rest.Config, error)) *events {
-	posting := &events{node: nodeID, logger: logger, now: time.Now}
+//
+// The clientset and the recorder share one HTTP client, so they share
+// its connections and its way of reading the ServiceAccount token.
+func eventsFrom(
+	ctx context.Context, nodeID string, logger *slog.Logger, load func() (*rest.Config, error),
+) *events {
 	config, err := load()
 	if err != nil {
 		logger.Warn("no events", "reason", err)
-		return posting
+		return &events{}
 	}
-	client, err := kubernetes.NewForConfig(config)
+	httpClient, err := rest.HTTPClientFor(config)
 	if err != nil {
 		logger.Warn("no events", "reason", err)
-		return posting
+		return &events{}
 	}
-	posting.client = client
-	return posting
+	client, err := kubernetes.NewForConfigAndClient(config, httpClient)
+	if err != nil {
+		logger.Warn("no events", "reason", err)
+		return &events{}
+	}
+	return &events{
+		client: client,
+		recorder: kevents.New(ctx, apiclient.New(config.Host, httpClient, ""), driverName,
+			kevents.Options{Instance: nodeID, Log: logTo(logger)}),
+	}
 }
 
-// post creates one Event on the pod. A failure to post is logged and
-// nothing more, because a mount must never fail on the API server.
-func (e *events) post(ctx context.Context, pod podReference, kind, reason, message string) {
+// logTo answers a writer that logs each line the recorder writes, an
+// Event it could not post, as one warning of the driver's own log.
+func logTo(logger *slog.Logger) io.Writer {
+	return slog.NewLogLogger(logger.Handler(), slog.LevelWarn).Writer()
+}
+
+// post queues one Event on the pod. The recorder returns at once, so a
+// mount never waits on the API server and never fails because of it.
+func (e *events) post(pod podReference, kind, reason, message string) {
 	if pod.name == "" || pod.namespace == "" {
 		return
 	}
-	e.create(ctx, corev1.ObjectReference{
-		Kind:       "Pod",
+	e.create(kevents.ObjectReference{
 		APIVersion: "v1",
-		Name:       pod.name,
+		Kind:       "Pod",
 		Namespace:  pod.namespace,
-		UID:        types.UID(pod.uid),
+		Name:       pod.name,
+		UID:        pod.uid,
 	}, kind, reason, message)
 }
 
-// postClaim creates the same Event on the claim, where a person who
+// postClaim queues the same Event on the claim, where a person who
 // describes the claim can check whether the volume is armed.
-func (e *events) postClaim(ctx context.Context, claim claimReference, kind, reason, message string) {
+func (e *events) postClaim(claim claimReference, kind, reason, message string) {
 	if claim.name == "" || claim.namespace == "" {
 		return
 	}
-	e.create(ctx, corev1.ObjectReference{
-		Kind:       "PersistentVolumeClaim",
+	e.create(kevents.ObjectReference{
 		APIVersion: "v1",
-		Name:       claim.name,
+		Kind:       "PersistentVolumeClaim",
 		Namespace:  claim.namespace,
+		Name:       claim.name,
 	}, kind, reason, message)
 }
 
-// create posts one Event on the object it names.
-func (e *events) create(
-	ctx context.Context, involved corev1.ObjectReference, kind, reason, message string,
-) {
-	if e == nil || e.client == nil {
+// create queues one Event of the kind on the object it names. A nil
+// recorder, outside a cluster, posts nothing.
+func (e *events) create(involved kevents.ObjectReference, kind, reason, message string) {
+	if kind == kevents.TypeWarning {
+		e.recorder.Warning(involved, reason, message)
 		return
 	}
-	now := metav1.NewTime(e.now())
-	event := &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: involved.Name + ".",
-			Namespace:    involved.Namespace,
-		},
-		InvolvedObject: involved,
-		Reason:         reason,
-		Message:        message,
-		Type:           kind,
-		Source:         corev1.EventSource{Component: driverName, Host: e.node},
-		FirstTimestamp: now,
-		LastTimestamp:  now,
-		Count:          1,
-	}
-	if _, err := e.client.CoreV1().Events(involved.Namespace).
-		Create(ctx, event, metav1.CreateOptions{}); err != nil {
-		e.logger.WarnContext(ctx, "the event was not posted",
-			"object", involved.Namespace+"/"+involved.Name, "reason", reason, "error", err)
-	}
+	e.recorder.Normal(involved, reason, message)
 }
 
 // tell posts one fact about a volume where its kind says a person
@@ -139,22 +157,20 @@ func (e *events) create(
 // An inline volume and a writeable volume report on the one pod that
 // holds them. A read-only claim reports on every pod it is published to
 // on this node, and on the claim the handle is bound to.
-func (n *node) tell(ctx context.Context, held *volume, kind, reason, message string) {
+func (n *node) tell(held *volume, kind, reason, message string) {
 	if held.kind != readOnlyClaim {
-		n.events.post(ctx, held.podRef(), kind, reason, message)
+		n.events.post(held.podRef(), kind, reason, message)
 		return
 	}
 	for _, pod := range held.boundPods() {
-		n.events.post(ctx, pod, kind, reason, message)
+		n.events.post(pod, kind, reason, message)
 	}
-	n.events.postClaim(ctx, held.claimNow(), kind, reason, message)
+	n.events.postClaim(held.claimNow(), kind, reason, message)
 }
 
 // report posts one fact in both places a person looks: on the pod that
 // mounts the volume and on the claim that binds it.
-func (n *node) report(
-	ctx context.Context, held *volume, claim claimReference, kind, reason, message string,
-) {
-	n.events.post(ctx, held.podRef(), kind, reason, message)
-	n.events.postClaim(ctx, claim, kind, reason, message)
+func (n *node) report(held *volume, claim claimReference, kind, reason, message string) {
+	n.events.post(held.podRef(), kind, reason, message)
+	n.events.postClaim(claim, kind, reason, message)
 }

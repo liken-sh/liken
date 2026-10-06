@@ -82,7 +82,7 @@ func (n *node) diverge(ctx context.Context, held *volume) {
 	}
 	held.reportDiverged(branch)
 	claim := n.claimFor(ctx, held)
-	n.report(ctx, held, claim, corev1.EventTypeWarning, reasonDiverged,
+	n.report(held, claim, corev1.EventTypeWarning, reasonDiverged,
 		fmt.Sprintf("diverged: every push goes to %s, not %s", branch, held.attributes.ref))
 	n.logger.WarnContext(ctx, "diverged", "volume", held.id, "branch", branch)
 	n.readings.record(held)
@@ -173,7 +173,7 @@ func (n *node) healed(ctx context.Context, held *volume, branch string) error {
 	}
 	held.reportHealed()
 	claim := n.claimFor(ctx, held)
-	n.report(ctx, held, claim, corev1.EventTypeNormal, reasonHealed,
+	n.report(held, claim, corev1.EventTypeNormal, reasonHealed,
 		fmt.Sprintf("healed: the tree is back on %s and %s is gone",
 			held.attributes.ref, branch))
 	n.logger.InfoContext(ctx, "healed", "volume", held.id, "branch", branch)

@@ -14,9 +14,11 @@ metadata:
 rules:
   # An Event on the pod is where a person reads why a mount was
   # refused. The pod is in any namespace, so the rule is cluster-wide.
+  # A repeat of the same Event within 10 minutes patches its count in
+  # place of a new Event, so the driver needs patch too.
   - apiGroups: [""]
     resources: [events]
-    verbs: [create]
+    verbs: [create, patch]
   # The kubelet passes the volumeHandle and never the object's name, so
   # the driver lists the PersistentVolumes to find the claim, then
   # watches that claim for the class that arms the volume.

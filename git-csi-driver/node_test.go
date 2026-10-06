@@ -8,18 +8,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	kevents "github.com/liken-sh/liken/kubernetes/events"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // testNode is a node whose mounts are recorded, because a test process
-// may not mount, and whose events go to a client-go fake.
+// may not mount, whose Events go to a fake API server, and whose
+// arming reads a client-go fake.
 //
 // The quiesce and the sweep are short, so a test that writes in a tree
 // moves its bubble's clock by one sweep for the driver to read it.
@@ -81,14 +82,11 @@ func publishRequest(t testing.TB, id, url string, extra map[string]string) *csi.
 	return request
 }
 
-// eventsOf is every Event the node posted, newest last.
-func eventsOf(t *testing.T, answering *node) []corev1.Event {
+// eventsOf is every Event the node posted, newest last, once the
+// recorder has written its queue. The test runs in a synctest bubble.
+func eventsOf(t *testing.T, answering *node) []kevents.Event {
 	t.Helper()
-	list, err := answering.events.client.CoreV1().Events("").List(t.Context(), metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("listing the events: %v", err)
-	}
-	return list.Items
+	return postedEvents(t, answering.events)
 }
 
 func TestNodeGetInfoNamesTheNode(t *testing.T) {
@@ -178,21 +176,46 @@ func TestNodePublishVolumeRefusesACallThatNamesTooLittle(t *testing.T) {
 }
 
 func TestNodePublishVolumePostsARefusalOnThePod(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	request := publishRequest(t, "csi-1", "file:///nowhere", map[string]string{"branch": "main"})
-	if _, err := answering.NodePublishVolume(t.Context(), request); err == nil {
-		t.Fatal("NodePublishVolume answered no error for an unknown attribute")
-	}
-	posted := eventsOf(t, answering)
-	if len(posted) != 1 {
-		t.Fatalf("NodePublishVolume posted %d events, want 1", len(posted))
-	}
-	if posted[0].Reason != reasonRefused || !strings.Contains(posted[0].Message, "branch") {
-		t.Errorf("the event says %q: %q", posted[0].Reason, posted[0].Message)
-	}
-	if posted[0].InvolvedObject.Name != "reader" {
-		t.Errorf("the event is on %q, want the pod", posted[0].InvolvedObject.Name)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		request := publishRequest(t, "csi-1", "file:///nowhere", map[string]string{"branch": "main"})
+		if _, err := answering.NodePublishVolume(t.Context(), request); err == nil {
+			t.Fatal("NodePublishVolume answered no error for an unknown attribute")
+		}
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 {
+			t.Fatalf("NodePublishVolume posted %d events, want 1", len(posted))
+		}
+		if posted[0].Reason != reasonRefused || !strings.Contains(posted[0].Message, "branch") {
+			t.Errorf("the event says %q: %q", posted[0].Reason, posted[0].Message)
+		}
+		if posted[0].InvolvedObject.Name != "reader" {
+			t.Errorf("the event is on %q, want the pod", posted[0].InvolvedObject.Name)
+		}
+	})
+}
+
+// The kubelet retries a refused mount with a backoff that grows to
+// about two minutes, so a pod whose volume the driver refuses for an
+// hour is refused about 37 times. The recorder folds each refusal into
+// the first Event, so the pod carries one Event with the count.
+func TestAnHourOfRefusalsIsOneEventWithACount(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		request := publishRequest(t, "csi-1", "file:///nowhere", map[string]string{"branch": "main"})
+		for range 37 {
+			if _, err := answering.NodePublishVolume(t.Context(), request); err == nil {
+				t.Fatal("NodePublishVolume answered no error for an unknown attribute")
+			}
+			time.Sleep(97 * time.Second)
+		}
+
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 || posted[0].Reason != reasonRefused || posted[0].Count != 37 {
+			t.Errorf("an hour of refusals posted %+v, want one %s Event with a count of 37",
+				posted, reasonRefused)
+		}
+	})
 }
 
 func TestNodePublishVolumeRefusesAVolumeItNeverStaged(t *testing.T) {
@@ -222,33 +245,35 @@ func TestNodePublishVolumeRefusesASecretWithNoCredential(t *testing.T) {
 }
 
 func TestNodePublishVolumeBindsTheTreeReadOnly(t *testing.T) {
-	answering, calls := testNode(t, io.Discard)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one", "docs/b.txt": "two"})
-	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
+	synctest.Test(t, func(t *testing.T) {
+		answering, calls := testNode(t, io.Discard)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one", "docs/b.txt": "two"})
+		request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
 
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
+		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
 
-	tree := filepath.Join(answering.store.volumeDir("csi-1"), "tree")
-	if got := readTree(t, tree); !sameTree(got, map[string]string{"a.txt": "one", "docs/b.txt": "two"}) {
-		t.Errorf("the tree holds %v", got)
-	}
-	if len(calls.mounts) != 2 {
-		t.Fatalf("NodePublishVolume made %v, want a bind and a remount", calls.mounts)
-	}
-	if calls.mounts[0].source != tree || calls.mounts[0].target != request.TargetPath {
-		t.Errorf("the bind is %+v, want %s onto %s", calls.mounts[0], tree, request.TargetPath)
-	}
-	if calls.mounts[1].flags&unix.MS_RDONLY == 0 {
-		t.Errorf("the remount is %+v, want it read-only", calls.mounts[1])
-	}
-	if _, err := os.Stat(request.TargetPath); err != nil {
-		t.Errorf("the target path is not there: %v", err)
-	}
-	if len(eventsOf(t, answering)) != 0 {
-		t.Errorf("a publish that worked posted %v", eventsOf(t, answering))
-	}
+		tree := filepath.Join(answering.store.volumeDir("csi-1"), "tree")
+		if got := readTree(t, tree); !sameTree(got, map[string]string{"a.txt": "one", "docs/b.txt": "two"}) {
+			t.Errorf("the tree holds %v", got)
+		}
+		if len(calls.mounts) != 2 {
+			t.Fatalf("NodePublishVolume made %v, want a bind and a remount", calls.mounts)
+		}
+		if calls.mounts[0].source != tree || calls.mounts[0].target != request.TargetPath {
+			t.Errorf("the bind is %+v, want %s onto %s", calls.mounts[0], tree, request.TargetPath)
+		}
+		if calls.mounts[1].flags&unix.MS_RDONLY == 0 {
+			t.Errorf("the remount is %+v, want it read-only", calls.mounts[1])
+		}
+		if _, err := os.Stat(request.TargetPath); err != nil {
+			t.Errorf("the target path is not there: %v", err)
+		}
+		if len(eventsOf(t, answering)) != 0 {
+			t.Errorf("a publish that worked posted %v", eventsOf(t, answering))
+		}
+	})
 }
 
 func TestNodePublishVolumeAnswersTheSameCallTwice(t *testing.T) {
@@ -324,20 +349,22 @@ func TestNodePublishVolumeTakesTheDepthOfTheFirstVolume(t *testing.T) {
 }
 
 func TestNodePublishVolumeRefusesAForgeItCannotReach(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	request := publishRequest(t, "csi-1",
-		fileURL(filepath.Join(t.TempDir(), "gone")), map[string]string{"pull": "never"})
-	_, err := answering.NodePublishVolume(t.Context(), request)
-	if got := status.Code(err); got != codes.Unavailable {
-		t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.Unavailable)
-	}
-	posted := eventsOf(t, answering)
-	if len(posted) != 1 || posted[0].Reason != reasonRefused {
-		t.Errorf("NodePublishVolume posted %v, want one refusal", posted)
-	}
-	if _, err := os.Stat(answering.store.volumeDir("csi-1")); err == nil {
-		t.Error("a refused publish left the volume's directory behind")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		request := publishRequest(t, "csi-1",
+			fileURL(filepath.Join(t.TempDir(), "gone")), map[string]string{"pull": "never"})
+		_, err := answering.NodePublishVolume(t.Context(), request)
+		if got := status.Code(err); got != codes.Unavailable {
+			t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.Unavailable)
+		}
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 || posted[0].Reason != reasonRefused {
+			t.Errorf("NodePublishVolume posted %v, want one refusal", posted)
+		}
+		if _, err := os.Stat(answering.store.volumeDir("csi-1")); err == nil {
+			t.Error("a refused publish left the volume's directory behind")
+		}
+	})
 }
 
 func TestNodePublishVolumeRefusesARepositoryTheNodeNeverFetched(t *testing.T) {
@@ -354,36 +381,38 @@ func TestNodePublishVolumeRefusesARepositoryTheNodeNeverFetched(t *testing.T) {
 }
 
 func TestNodePublishVolumePublishesAStaleTreeWhenTheVolumeAllowsIt(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	url := fileURL(source)
+	synctest.Test(t, func(t *testing.T) {
+		answering, _ := testNode(t, io.Discard)
+		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+		url := fileURL(source)
 
-	first := publishRequest(t, "csi-1", url, map[string]string{"pull": "never"})
-	if _, err := answering.NodePublishVolume(t.Context(), first); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
-	if err := os.RemoveAll(source); err != nil {
-		t.Fatalf("removing the forge: %v", err)
-	}
+		first := publishRequest(t, "csi-1", url, map[string]string{"pull": "never"})
+		if _, err := answering.NodePublishVolume(t.Context(), first); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
+		if err := os.RemoveAll(source); err != nil {
+			t.Fatalf("removing the forge: %v", err)
+		}
 
-	second := publishRequest(t, "csi-2", url, map[string]string{"pull": "never", "offline": "allowStale"})
-	if _, err := answering.NodePublishVolume(t.Context(), second); err != nil {
-		t.Fatalf("NodePublishVolume with a stale copy: %v", err)
-	}
-	tree := filepath.Join(answering.store.volumeDir("csi-2"), "tree")
-	if got := readTree(t, tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
-		t.Errorf("the stale tree holds %v", got)
-	}
+		second := publishRequest(t, "csi-2", url, map[string]string{"pull": "never", "offline": "allowStale"})
+		if _, err := answering.NodePublishVolume(t.Context(), second); err != nil {
+			t.Fatalf("NodePublishVolume with a stale copy: %v", err)
+		}
+		tree := filepath.Join(answering.store.volumeDir("csi-2"), "tree")
+		if got := readTree(t, tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
+			t.Errorf("the stale tree holds %v", got)
+		}
 
-	abnormal, found := abnormalOf(t, answering.readings, "home", "csi-2")
-	if !found || abnormal != 1 {
-		t.Errorf("git_csi_volume_abnormal reads %v (found: %v) after a stale publish, want 1",
-			abnormal, found)
-	}
-	posted := eventsOf(t, answering)
-	if len(posted) != 1 || posted[0].Reason != reasonStale {
-		t.Errorf("a stale publish posted %v, want one stale event", posted)
-	}
+		abnormal, found := abnormalOf(t, answering.readings, "home", "csi-2")
+		if !found || abnormal != 1 {
+			t.Errorf("git_csi_volume_abnormal reads %v (found: %v) after a stale publish, want 1",
+				abnormal, found)
+		}
+		posted := eventsOf(t, answering)
+		if len(posted) != 1 || posted[0].Reason != reasonStale {
+			t.Errorf("a stale publish posted %v, want one stale event", posted)
+		}
+	})
 }
 
 func TestNodeUnpublishVolumeTakesTheMountAndTheStoreAway(t *testing.T) {

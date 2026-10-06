@@ -11,8 +11,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	kevents "github.com/liken-sh/liken/kubernetes/events"
 	"golang.org/x/sys/unix"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // logbook is a log a test reads while the driver's own loops write it.
@@ -72,7 +72,7 @@ func TestTheWatchPostsOneEventWhenTheTreeFirstHoldsWork(t *testing.T) {
 		time.Sleep(5 * answering.sweep)
 		synctest.Wait()
 
-		pending := []corev1.Event{}
+		pending := []kevents.Event{}
 		for _, posted := range eventsOf(t, answering) {
 			if posted.Reason == reasonPending {
 				pending = append(pending, posted)

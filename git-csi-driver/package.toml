@@ -6,13 +6,15 @@ license = "MIT"
 [docs]
 prefix = "git"
 
+# The Event writer of the shared kubernetes module, the scripts that
+# put the license notices in the image, and the CA bundle that the
+# image copies.
+[depends]
+components = ["kubernetes", "notices", "trust"]
+
 # gofmt, vet, a tidy check of go.mod, and one run of the tests that
 # checks for races and writes the coverage profile, then the coverage
 # gate on that profile. .testcoverage.yml holds the floor.
-# The CA bundle that the image copies.
-[depends]
-components = ["notices", "trust"]
-
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -39,8 +41,11 @@ skip = ["gofmt", "go-vet", "go-mod-tidy"]
 [outputs]
 deploy = "deploy"
 
+# The image builds from this module's go.mod, which replaces the shared
+# kubernetes module with ../kubernetes, so it takes that directory as a
+# build context.
 [[outputs.images]]
 name = "git-csi-driver"
 file = "Dockerfile"
-contexts = { notices = "notices" }
+contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "git-csi-driver/smoke/git-csi-driver.sh"

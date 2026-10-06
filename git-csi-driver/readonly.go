@@ -162,7 +162,7 @@ func (n *node) findClaim(ctx context.Context, held *volume) {
 // A stage call names no pod, so the claim is where a person reads why
 // the pods that mount it stay in ContainerCreating.
 func (n *node) refusedClaim(ctx context.Context, held *volume, err error) error {
-	n.events.postClaim(ctx, held.claimNow(), corev1.EventTypeWarning,
+	n.events.postClaim(held.claimNow(), corev1.EventTypeWarning,
 		reasonRefused, status.Convert(err).Message())
 	return err
 }
