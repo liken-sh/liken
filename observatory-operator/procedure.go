@@ -41,7 +41,18 @@ type membership struct {
 // false for a resource with no such run, which after does not wait for.
 type event struct {
 	member func(t *tree, key string) (membership, bool)
+	// over answers why the event ended, such as a condition that
+	// changed, or nil while it holds. A run of the event waits for
+	// nothing after its event ended. Nil for a lifecycle step, which
+	// its own context ends.
+	over func(t *tree) error
 }
+
+// stopError ends a run whose event ended while it waited. The run
+// stops with no failure, as it does when its context ends.
+type stopError struct{ why error }
+
+func (s stopError) Error() string { return s.why.Error() }
 
 // procCall is one run of one trigger of one resource.
 type procCall struct {
@@ -197,14 +208,19 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 		// The operator stops. The run stays Running, and the next copy
 		// of the operator resumes it.
 		return ctx.Err()
-	case ctx.Err() != nil:
+	case ctx.Err() != nil || errors.As(err, new(stopError)):
 		// The run's work ended for a reason that is no failure, such as
-		// a reservation that ended during its Activation step.
-		why := sentence(context.Cause(ctx).Error())
+		// a reservation that ended during its Activation step, or a
+		// condition that changed while a trigger's run went on.
+		cause := err
+		if ctx.Err() != nil {
+			cause = context.Cause(ctx)
+		}
+		why := sentence(cause.Error())
 		record.State, record.Summary = observatory.StepSkipped, why
 		run.State, run.StopTime, run.Summary = observatory.StepSkipped, &stop, why
 		o.runs.put(key, *run)
-		return context.Cause(ctx)
+		return cause
 	default:
 		record.State, record.Summary = observatory.StepFailed, sentence(err.Error())
 		run.State, run.StopTime = observatory.StepFailed, &stop
@@ -286,6 +302,14 @@ func (o *operator) predecessors(ctx context.Context, c procCall, a action, repor
 		return nil
 	}
 	return o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
+		// The run of another resource for the same event can end
+		// because the event ended. This run then stops too, before it
+		// acts after a run that did not do its work.
+		if c.event.over != nil {
+			if err := c.event.over(t); err != nil {
+				return false, "", stopError{err}
+			}
+		}
 		from := asNow(t, c)
 		for i, ref := range a.After {
 			targets, err := t.resolve(from, fmt.Sprintf("after[%d]", i), ref.Kind, ref.Name, true)

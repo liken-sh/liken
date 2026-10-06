@@ -23,6 +23,25 @@ type Procedures[A any] struct {
 	// Deactivation runs as the resource's Telescope or Observatory
 	// stops being Active, while every device is still connected.
 	Deactivation []A `json:"deactivation,omitempty"`
+	// On lists triggers on conditions, which run while the resource is
+	// active.
+	On []Trigger[A] `json:"on,omitempty"`
+}
+
+// Trigger runs its actions once for each transition of a condition to
+// the status that When names.
+type Trigger[A any] struct {
+	When When `json:"when"`
+	Run  []A  `json:"run"`
+}
+
+// When is the condition of a trigger, and how long its status must
+// hold.
+type When struct {
+	ConditionRef
+	// For is a Go duration such as 20m. With none, the trigger runs at
+	// the transition.
+	For string `json:"for,omitempty"`
 }
 
 // Ref names one resource of the group by its kind and name, as a

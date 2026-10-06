@@ -93,14 +93,16 @@ package's tests and the operator's tests share.
 ## The operator
 
 The operator's files are flat in `package main`, one domain to a file.
-`operator.go` starts the four kinds of goroutine: the supervisor, one
+`operator.go` starts the five kinds of goroutine: the supervisor, one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `moves.go`,
 `finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),
 the status writer (`status.go`, `statustree.go`, `standing.go`,
-`readings.go`, `guiderstatus.go`), and the lock relay (`locks.go`). The
-runner's `Activation` and `Deactivation` steps run the procedures of
-plan 13 (`procsteps.go`): `procedure.go` runs one trigger's actions,
+`readings.go`, `guiderstatus.go`), the lock relay (`locks.go`), and the
+trigger controller (`triggers.go`), which runs the `on` triggers of
+plan 13. The runner's `Activation` and `Deactivation` steps run the
+lifecycle procedures (`procsteps.go`): `procedure.go` runs one
+trigger's actions,
 `action.go` and `cooler.go` carry out one action, `resources.go`
 resolves a procedure's references, `runs.go` holds the record of each
 run, and `activity.go` the `Active` condition. Each
@@ -111,7 +113,8 @@ property's update or message, and except a PHD2 change other than its
 connection or its equipment. The
 status writer, the lock relay, and the waits for a property's value
 use `changed`. The
-supervisor and a Ready telescope's runner use `structure`, so a mount
+supervisor, the trigger controller, and a Ready telescope's runner
+use `structure`, so a mount
 that reports its position several times a second does not wake them.
 `cost_test.go` holds the cost of a reading, and measures the CPU time
 of a minute of readings when `OBSERVATORY_COST` names a profile file.

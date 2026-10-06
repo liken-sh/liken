@@ -316,3 +316,24 @@ func TestAReservationWaitsForItsTelescope(t *testing.T) {
 		}
 	})
 }
+
+// A deactivation step that fails after spec.end waits for its retry on
+// the next change alone. A spec.end that passed must wake nothing: a
+// runner that woke on it would wake again at once, and never block.
+func TestAFailedDeactivationAfterItsEndWaitsForARetry(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		end := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": end})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		w.indi.refuse("Telescope Simulator", "TELESCOPE_PARK")
+		time.Sleep(time.Hour)
+		w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		w.indi.accept("Telescope Simulator", "TELESCOPE_PARK")
+		w.retry("east-tonight")
+		w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
+	})
+}

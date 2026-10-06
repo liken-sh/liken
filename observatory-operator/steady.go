@@ -76,10 +76,12 @@ func (r *runner) steady(ctx context.Context) {
 }
 
 // keepWaiting waits for a change, or for spec.end. The timer is a
-// clock: spec.end.
+// clock: spec.end, while it is still ahead. A spec.end that passed
+// wakes nothing, or a failed step that waits for its retry after
+// spec.end would wake again at once, without end.
 func (r *runner) keepWaiting(ctx context.Context, wake <-chan struct{}) {
 	var end <-chan time.Time
-	if r.res.Spec.End != nil {
+	if r.res.Spec.End != nil && time.Now().Before(*r.res.Spec.End) {
 		timer := time.NewTimer(time.Until(*r.res.Spec.End))
 		defer timer.Stop()
 		end = timer.C

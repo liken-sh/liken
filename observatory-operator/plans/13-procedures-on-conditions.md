@@ -1,8 +1,9 @@
 # 13, Procedures on conditions
 
-Proposed on 2026-10-06. Steps 1, 2, and 3 built on 2026-10-06, and
-tested against the fake API server and the fake INDI servers. The
-drill on the test cluster has not run.
+Proposed on 2026-10-06. Steps 1 to 4 and step 6 built on 2026-10-06,
+and tested against the fake API server and the fake INDI servers.
+Step 5, `job`, is not built. The drill on the test cluster has not
+run.
 
 ## The problem
 
@@ -227,7 +228,24 @@ Step 3 settled these points, which the design above leaves open:
   not written yet is replaced by the earliest activation of an active
   telescope in it.
 - YAML reads a bare `On` or `Off` as a boolean, so a `FlatPanel`'s
-  state is quoted: `state: "Off"`.
+  state is quoted: `state: "Off"`. kubectl's YAML reads a bare `on`
+  key as `true` too, so a manifest quotes the key: `"on":`. A
+  manifest that does not is refused, or loses its triggers, so a
+  name that YAML reads as a string, such as `triggers`, is worth a
+  thought before the API leaves `v1alpha1`.
+
+Step 4 settled these:
+
+- The trigger controller wakes on `structure`, not `changed`, so an
+  INDI reading does not wake it. Each change of a run's record or of
+  the `Active` state rings `structure`.
+- A trigger's run stops, `Skipped` with the reason, when its condition
+  changes before the run ends, or when its resource stops being
+  active. A run that waits in `after` stops when its own condition
+  changes, before it acts after a run that stopped.
+- A trigger's run that failed is not run again for the same
+  transition. A trigger whose `when` names nothing records one failed
+  run with no `since`.
 
 ## What this removes
 
@@ -286,7 +304,7 @@ lifecycle code:
    procedures. Built on 2026-10-06.
 4. **`on` and `for`.** The example closes the dome when
    its weather station reports unsafe for any length of time, and
-   opens it after 20 minutes of safe weather.
+   opens it after 20 minutes of safe weather. Built on 2026-10-06.
 5. **`job`.**
 6. **The defects** from the drills, under "Also in scope". All four
    were fixed on 2026-10-06.

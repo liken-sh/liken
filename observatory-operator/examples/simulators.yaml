@@ -48,6 +48,11 @@
 # in the reverse order. The Reservation's `Activation` and
 # `Deactivation` steps wait for them, and the Reservation's status
 # copies their actions.
+#
+# A resource can also react to a condition while it is active, in
+# `on`: each trigger names a condition and the status that fires it,
+# and runs its actions once for each transition to that status. YAML
+# reads a bare `on` as a boolean, so the key is quoted.
 # The Reservation at the end starts the `east` telescope, and `west`
 # stays down, because each telescope has its own INDI server. Each
 # device of `west` is `Idle`, and the focuser on the shelf is
@@ -83,6 +88,14 @@ spec:
 # parks on deactivation. The tree runs the dome's deactivation after
 # the telescopes', so the mounts are parked first, and the park lock
 # lets the dome park.
+#
+# The dome also parks when the weather turns unsafe, for any length of
+# time. A trigger has no tree order, so `after` makes the park wait for
+# the run of every mount's own trigger on the same transition: the park
+# lock refuses a park while a mount is unparked. The dome unparks again
+# after the weather has been safe for 20 minutes, so a station that
+# flaps between safe and unsafe does not open and close the roof each
+# minute.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Dome
 metadata:
@@ -96,6 +109,14 @@ spec:
     - {kind: WeatherStation, name: lab, type: Safe}
   deactivation:
   - state: Parked
+  "on":
+  - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
+    run:
+    - state: Parked
+      after: [{kind: Mount}]
+  - when: {kind: WeatherStation, name: lab, type: Safe, for: 20m}
+    run:
+    - state: Unparked
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: WeatherStation
@@ -127,7 +148,9 @@ spec:
 ---
 # The mount unparks on activation, after the dome unparked, and parks on
 # deactivation, before the dome parks. The operator leaves tracking off,
-# because the holder aligns and calibrates the mount first.
+# because the holder aligns and calibrates the mount first. It parks
+# when the weather turns unsafe, and stays parked when the weather
+# turns safe again: the holder decides when to unpark it.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Mount
 metadata:
@@ -139,6 +162,10 @@ spec:
   - state: Unparked
   deactivation:
   - state: Parked
+  "on":
+  - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
+    run:
+    - state: Parked
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: GPS
@@ -349,6 +376,10 @@ spec:
   - state: Unparked
   deactivation:
   - state: Parked
+  "on":
+  - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
+    run:
+    - state: Parked
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: OpticalTube

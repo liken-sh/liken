@@ -356,16 +356,20 @@ for an hour.
 
 ## Procedures
 
-Each resource states what the operator does with its equipment, in two
-fields of its spec. Every device kind, the `Telescope`, and the
+Each resource states what the operator does with its equipment, in
+three fields of its spec. Every device kind, the `Telescope`, and the
 `Observatory` have them:
 
 - `activation` runs as the resource's `Telescope` or `Observatory`
   turns `Active`, in the reservation's `Activation` step.
 - `deactivation` runs as it stops being `Active`, in the
   `Deactivation` step, while every device is still connected.
+- `on` lists triggers. Each one names a condition in `when`, and runs
+  its actions in `run`, as "Triggers" below states. YAML reads a bare
+  `on` as a boolean, so quote the key: `"on":`.
 
-Each is a list of actions that run in order. An action is a target
+`activation`, `deactivation`, and each trigger's `run` are lists of
+actions that run in order. An action is a target
 state, so it is safe to run twice: the operator reads what the device
 reports, and sends nothing when the device is there already. Each kind
 accepts only the actions it supports, and the CRD refuses the others:
@@ -446,11 +450,50 @@ kubectl get rsv east-tonight -n observatory \
   -o jsonpath='{.status.steps[?(@.name=="Activation")].actions}'
 ```
 
+### Triggers
+
+A trigger runs its actions once for each transition of its condition
+to the status it names, while its resource is active: from the end of
+its activation run, or from the start of its `Telescope`'s or
+`Observatory`'s activity when it has no activation, until its
+deactivation begins. `when` is `{kind, name, type, status, for}`, with
+the same rules as a reference in `requires`. Each run records the
+condition's `lastTransitionTime` in `since`. A condition that holds
+when the resource's activation ends runs the trigger then, so a dome
+that unparks in bad weather with no `requires` parks again at once.
+
+`for` delays the run until the status has held that long, such as
+`for: 20m`, and a change of the status before then cancels it, as
+`for` does in a Prometheus alert rule. A run that goes on when its
+condition changes, or when its resource's deactivation begins, stops,
+and its record is `Skipped` with the reason, such as
+`WeatherStation lab Safe is no longer False`. A trigger whose
+condition names nothing records one `Failed` run and one Warning.
+
+The tree gives no order to a trigger, so `after` orders the runs of
+one transition: in a trigger, `after` waits for the runs of the other
+resources' triggers on the same condition and status. A resource with
+no such trigger, or one that is not active, is not waited for.
+
+```yaml
+kind: Dome
+spec:
+  "on":
+  - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
+    run:
+    - state: Parked
+      after: [{kind: Mount}]
+  - when: {kind: WeatherStation, name: lab, type: Safe, for: 20m}
+    run: [state: Unparked]
+```
+
 `examples/simulators.yaml` states a whole site this way: the dome
 unparks while the weather station reports `Safe`, the mounts unpark,
-the cap opens, and the camera cools to -10 °C. At the end, the flat
-panel's light goes off, the cap closes, the camera warms to 5 °C, the
-mounts park, and the dome parks.
+the cap opens, and the camera cools to -10 °C. When the weather turns
+unsafe, the mounts park and then the dome parks, and after 20 minutes
+of safe weather the dome unparks again. At the end, the flat panel's
+light goes off, the cap closes, the camera warms to 5 °C, the mounts
+park, and the dome parks.
 
 ## The dome and mount locks
 

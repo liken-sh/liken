@@ -25,12 +25,19 @@ type action struct {
 	Warm  *observatory.Temperature `json:"warm,omitempty"`
 }
 
-// actions answers the actions of a kind that has no action of its own,
-// as the union type.
-func actions(in []observatory.Action) []action {
-	var out []action
-	for _, a := range in {
-		out = append(out, action{ActionBase: a.ActionBase})
+// procedures answers the procedures of a kind that has no action of
+// its own, with the union type.
+func procedures(in observatory.Procedures[observatory.Action]) observatory.Procedures[action] {
+	actions := func(in []observatory.Action) []action {
+		var out []action
+		for _, a := range in {
+			out = append(out, action{ActionBase: a.ActionBase})
+		}
+		return out
+	}
+	out := observatory.Procedures[action]{Activation: actions(in.Activation), Deactivation: actions(in.Deactivation)}
+	for _, trigger := range in.On {
+		out.On = append(out.On, observatory.Trigger[action]{When: trigger.When, Run: actions(trigger.Run)})
 	}
 	return out
 }

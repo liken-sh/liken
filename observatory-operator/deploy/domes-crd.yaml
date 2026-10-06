@@ -403,6 +403,196 @@ spec:
                                 resource of the kind in the observatory,
                                 or the resource's own `Observatory` or
                                 `Telescope`.
+                "on":
+                  type: array
+                  maxItems: 16
+                  description: >-
+                    Triggers on conditions. Each one runs its actions
+                    once for each transition of its condition to the
+                    status it names, while the resource is active: from
+                    when its activation is done until its deactivation
+                    begins. A condition that holds when the activation
+                    ends runs then. YAML reads a bare on as a boolean,
+                    so quote the key, as in `"on":`. Optional.
+                  items:
+                    type: object
+                    required: [when, run]
+                    description: >-
+                      One trigger: a condition, and the actions it runs.
+                    properties:
+                      when:
+                        type: object
+                        required: [type]
+                        description: >-
+                          The condition, and the status that fires the
+                          trigger.
+                        properties:
+                          kind:
+                            type: string
+                            enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                            description: >-
+                              The kind of the resource whose condition
+                              it reads. With no `kind`, the condition is
+                              the resource's own. A `kind` of
+                              `Observatory` or `Telescope` with no
+                              `name` means the resource's own
+                              observatory or telescope.
+                          name:
+                            type: string
+                            minLength: 1
+                            maxLength: 253
+                            pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                            description: >-
+                              The name of the resource, in this
+                              namespace. A device kind needs a name.
+                          type:
+                            type: string
+                            minLength: 1
+                            maxLength: 316
+                            description: >-
+                              The condition's type, such as `Safe` or
+                              `Parked`.
+                          status:
+                            type: string
+                            enum: ["True", "False", Unknown]
+                            default: "True"
+                            description: >-
+                              The status that the condition must have:
+                              `True`, `False`, or `Unknown`. The default
+                              is `True`.
+                          for:
+                            type: string
+                            maxLength: 32
+                            description: >-
+                              How long the status must hold before the
+                              actions run, as a duration such as `20m`.
+                              A change of the status before then cancels
+                              the run. Optional.
+                            x-kubernetes-validations:
+                              - rule: "self.matches('^([0-9]+(\\\\.[0-9]+)?(ms|s|m|h))+$') && duration(self) >= duration('0s')"
+                                message: "for must be a duration, such as 20m or 1h30m"
+                      run:
+                        type: array
+                        minItems: 1
+                        maxItems: 16
+                        description: >-
+                          The actions that run, in order.
+                        items:
+                          type: object
+                          description: >-
+                            One action, which names `state`.
+                          x-kubernetes-validations:
+                            - rule: "has(self.state)"
+                              message: "an action of a Dome names state"
+                          properties:
+                            state:
+                              type: string
+                              enum: [Parked, Unparked]
+                              description: >-
+                                The park to reach: `Parked` or
+                                `Unparked`, written to `DOME_PARK`. A
+                                park that the driver reports already is
+                                not sent again. The default timeout is
+                                10 minutes.
+                            timeout:
+                              type: string
+                              maxLength: 32
+                              description: >-
+                                How long the action may take, its waits
+                                for `requires` and `after` included, as
+                                a duration such as `20m`. An action that
+                                passes it fails. Optional. Each action
+                                has a default.
+                              x-kubernetes-validations:
+                                - rule: "self.matches('^([0-9]+(\\\\.[0-9]+)?(ms|s|m|h))+$') && duration(self) > duration('0s')"
+                                  message: "timeout must be a positive duration, such as 20m or 1h30m"
+                            requires:
+                              type: array
+                              maxItems: 8
+                              description: >-
+                                The conditions that must hold before the
+                                action runs. The operator waits for each
+                                one until the action's timeout. They
+                                bind only the actions that the operator
+                                runs: a move that a person makes in
+                                KStars is stopped only by the drivers'
+                                park locks.
+                              items:
+                                type: object
+                                required: [type]
+                                description: >-
+                                  One condition, and the status it must
+                                  have.
+                                properties:
+                                  kind:
+                                    type: string
+                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                                    description: >-
+                                      The kind of the resource whose
+                                      condition it reads. With no
+                                      `kind`, the condition is the
+                                      resource's own. A `kind` of
+                                      `Observatory` or `Telescope` with
+                                      no `name` means the resource's own
+                                      observatory or telescope.
+                                  name:
+                                    type: string
+                                    minLength: 1
+                                    maxLength: 253
+                                    pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                                    description: >-
+                                      The name of the resource, in this
+                                      namespace. A device kind needs a
+                                      name.
+                                  type:
+                                    type: string
+                                    minLength: 1
+                                    maxLength: 316
+                                    description: >-
+                                      The condition's type, such as
+                                      `Safe` or `Parked`.
+                                  status:
+                                    type: string
+                                    enum: ["True", "False", Unknown]
+                                    default: "True"
+                                    description: >-
+                                      The status that the condition must
+                                      have: `True`, `False`, or
+                                      `Unknown`. The default is `True`.
+                            after:
+                              type: array
+                              maxItems: 8
+                              description: >-
+                                The resources whose runs for the same
+                                event must end before the action runs:
+                                the same lifecycle step, or the same
+                                transition of the same condition. A
+                                resource with no such run is not waited
+                                for. A resource in a later tier of the
+                                tree is waited for until the action's
+                                timeout, and the action then fails.
+                              items:
+                                type: object
+                                required: [kind]
+                                description: >-
+                                  One resource, by its kind and name.
+                                properties:
+                                  kind:
+                                    type: string
+                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                                    description: >-
+                                      The kind of the resource.
+                                  name:
+                                    type: string
+                                    minLength: 1
+                                    maxLength: 253
+                                    pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                                    description: >-
+                                      The name of the resource. With no
+                                      `name`, the reference names every
+                                      resource of the kind in the
+                                      observatory, or the resource's own
+                                      `Observatory` or `Telescope`.
             status:
               type: object
               description: >-

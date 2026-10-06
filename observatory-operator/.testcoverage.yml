@@ -20,10 +20,10 @@ exclude:
     - ^main\.go$
 
 threshold:
-  # The total covers the six packages. The tests measure 95.7%:
-  # observatory/ 100%, indi/ 97.8%, phd2/ 96.1%, phd2/phd2test/ 99.0%,
-  # drivers/ 94.3%, and the operator's package 94.5% with main.go left
-  # out. The floor was 97 before the
+  # The total covers the six packages. The tests measure 95.3%:
+  # observatory/ 100%, indi/ 97.8%, phd2/ 96.6%, phd2/phd2test/ 99.0%,
+  # drivers/ 94.3%, and the operator's package 94.2% with main.go in
+  # it. The floor was 97 before the
   # operator's package joined the total. Most of the rest of that
   # package is one return of an error after one INDI change or one API
   # request fails, at each call in each step. The fakes can fail any

@@ -93,6 +93,9 @@ func TestEachEnumHoldsTheGoConstants(t *testing.T) {
 		{CameraKind, "spec.activation[].requires[].status", conditionStatuses},
 		{ObservatoryKind, "spec.deactivation[].after[].kind", refKinds},
 		{TelescopeKind, "status.procedures[].state", stepStates},
+		{DomeKind, "spec.on[].when.kind", refKinds},
+		{DomeKind, "spec.on[].when.status", conditionStatuses},
+		{MountKind, "spec.on[].run[].state", strs(StateParked, StateUnparked)},
 		{MountKind, "status.procedures[].actions[].state", stepStates},
 	}
 	for _, c := range cases {

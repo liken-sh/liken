@@ -36,9 +36,9 @@ func (r resource) key() string { return r.kind.Name + "/" + r.meta.Name }
 
 func (r resource) String() string { return r.kind.Name + " " + r.meta.Name }
 
-// actionsOf answers the actions of one trigger.
-func (r resource) actionsOf(trigger string) []action {
-	switch trigger {
+// actionsOf answers the actions of a lifecycle trigger.
+func (r resource) actionsOf(name string) []action {
+	switch name {
 	case observatory.TriggerActivation:
 		return r.procedures.Activation
 	case observatory.TriggerDeactivation:
@@ -64,19 +64,13 @@ func (t *tree) ofDevice(d *device) resource {
 
 func ofTelescope(telescope *observatory.Telescope) resource {
 	return resource{kind: observatory.TelescopeKind, meta: telescope.Metadata, conditions: telescope.Status.Conditions,
-		procedures: observatory.Procedures[action]{
-			Activation:   actions(telescope.Spec.Activation),
-			Deactivation: actions(telescope.Spec.Deactivation),
-		},
-		telescope: telescope.Metadata.Name, observatory: telescope.Spec.Observatory}
+		procedures: procedures(telescope.Spec.Procedures),
+		telescope:  telescope.Metadata.Name, observatory: telescope.Spec.Observatory}
 }
 
 func ofObservatory(site *observatory.Observatory) resource {
 	return resource{kind: observatory.ObservatoryKind, meta: site.Metadata, conditions: site.Status.Conditions,
-		procedures: observatory.Procedures[action]{
-			Activation:   actions(site.Spec.Activation),
-			Deactivation: actions(site.Spec.Deactivation),
-		},
+		procedures:  procedures(site.Spec.Procedures),
 		observatory: site.Metadata.Name}
 }
 

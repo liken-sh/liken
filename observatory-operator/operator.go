@@ -1,6 +1,6 @@
 package main
 
-// The operator runs four kinds of goroutine on the stores of the
+// The operator runs five kinds of goroutine on the stores of the
 // watches (watch.go):
 //
 //   - The supervisor below starts a runner for each Reservation that
@@ -14,6 +14,8 @@ package main
 //     (status.go).
 //   - The lock relay sends each park state that a lock policy needs to
 //     the other INDI servers (locks.go).
+//   - The trigger controller runs the procedures of every on trigger
+//     (triggers.go).
 //
 // They wait on two bells. changed rings on every watch event, every
 // INDI event, and every change a guider's PHD2 reports. structure rings
@@ -21,10 +23,13 @@ package main
 // message, which a mount that tracks sends several times a second, and
 // except a PHD2 change other than its connection or its equipment, such
 // as a guide step each second. The status writer, the lock relay, and
-// the steps that wait for a property's value wait on changed. The supervisor, a
-// runner that keeps a Ready telescope, and a runner that waits for its
-// turn, its retry, or its end read only the stores and the devices
-// that each server defines, so they wait on structure.
+// the steps that wait for a property's value wait on changed. The
+// supervisor, a runner that keeps a Ready telescope, and a runner that
+// waits for its turn, its retry, or its end read only the stores and
+// the devices that each server defines, so they wait on structure.
+// The trigger controller reads only the stored conditions and the
+// records of runs and activity, and each change of a record rings
+// structure, so it waits on structure too.
 
 import (
 	"context"
@@ -116,8 +121,11 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 		faults:    map[string]string{},
 		sites:     map[string]lock{},
 	}
-	o.runs = newRunRecords(changed)
-	o.activity = newActivity(changed)
+	// A run or an activity that changes rings structure, which also
+	// rings changed, so the trigger controller wakes on structure and
+	// an INDI reading does not wake it.
+	o.runs = newRunRecords(o.structure)
+	o.activity = newActivity(o.structure)
 	o.servers = newServers(o)
 	o.guiderConns = newGuiderConns(o)
 	return o
@@ -176,6 +184,7 @@ func (o *operator) run(ctx context.Context, watches func(context.Context) *store
 	var group sync.WaitGroup
 	group.Go(func() { o.writeStatuses(ctx) })
 	group.Go(func() { o.keepLocks(ctx) })
+	group.Go(func() { o.keepTriggers(ctx) })
 	defer func() {
 		group.Wait()
 		o.servers.stopAll()
