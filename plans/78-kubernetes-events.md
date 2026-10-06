@@ -374,3 +374,50 @@ The build changed four points of the design as it was first settled:
   found the claim, so the arming posts them on the claim when it finds
   it. Its node plugin gained `patch` on `events`. Coverage is 100% in
   both, against floors of 100%.
+- **`audio-operator`, `display-operator`, and `media-operator`.** Each
+  container that posts builds one recorder, and each component
+  aliases its condition type to `conditions.Condition`
+  (`EndpointCondition`, `DisplayCondition`, and both of
+  `media-operator`'s). Each CRD accepts the shared shape unchanged: a
+  date-time string, an empty message, and no `observedGeneration`.
+  Each posts every condition transition with the condition's own
+  reason after its status write lands, so the survey's `Connected`,
+  `Disconnected`, `PanelDetached`, `ScreenAway`, and `ScreenPresent`
+  are the condition reasons, such as `SpeakerConnected` and `NoPanel`.
+  `display-operator` keeps `NoPanel` because `media-operator` reads it.
+  `Captured` moved to the recorder in all three, so a repeat by the
+  same caller patches one `Event`'s count. `media-operator` no longer
+  names the `Event` after the request id, and the log line keeps the
+  id. Each component's reasons are listed in one file.
+  - `audio-operator` fixes defect 2: `postEvent` is gone. It adds
+    `LayoutWriteFailed`, `SpecRefused`, `PipeWireLost` and
+    `PipeWireRecovered`, and `BluetoothUnavailable` and
+    `BluetoothAvailable`. A fault posts its first failure and its
+    recovery. `PipeWireLost` posts on the first failed graph read,
+    not at the exit that follows the third, because the recorder has
+    no flush and an `Event` queued before `os.Exit` is lost. A `Ready`
+    that goes `False` is a Warning only while `Connected` is `True`,
+    so a TV turned off is Normal. Coverage measured 80.1% on CI's
+    tests, and the floor rose from 78% to 79%.
+  - `display-operator` adds `WriteUnconfirmed`, `ModeChanged`,
+    `CompositorKilled` on every `Display` of the node, and
+    `PanelStandbyFailed`. The reason, not the status, decides Warning
+    or Normal: `Down`, `Hung`, `Ambiguous`, and `LayoutNotFound` are
+    Warnings, and `Retained` is Normal. The operator's grant is a
+    `Role` in `default`, where the `Event`s about a cluster-scoped
+    `Display` must go. Coverage measured 82.1% against a floor of 82%.
+  - `media-operator` adds `PlaybackStarted`, `PlaybackFinished`,
+    `PlaybackFailed`, `InvalidSpec`, `PodRecreated`, `ResumeBackoff`,
+    `Restarting`, and `Running` on a `Play`; `Superseded` and
+    `Retired` on the `Play` and its `Player`; `ReceiverWriteFailed`
+    and `ReceiverWriteRecovered` on a `Player`; and `KeymapRefused` on
+    a `Remote`. A `Play` whose `Player` does not exist stays `Pending`
+    and posts nothing. The `Screen` condition's bad status is
+    `Unknown`, so `NoDisplay` is a Warning and `PanelAway` is Normal.
+    The operator's `ClusterRole` gained `create` and `patch` on
+    `events`. Coverage measured 87.4% against a floor of 87%. A
+    separate fix ends a race in the remote reader: it chose at random
+    between a cancelled batch and the events still in its channel, and
+    lost a press that a node read before it closed, about once in
+    3,000 runs. The reader now reads the channel until it closes, and
+    its six tests run in `synctest` bubbles.
