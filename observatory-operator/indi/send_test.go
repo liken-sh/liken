@@ -281,3 +281,35 @@ func TestSetRefusesWithNoConnection(t *testing.T) {
 		}
 	})
 }
+
+// CONFIG_PROCESS turns CONFIG_SAVE Off again when the save ends, so
+// its answer never carries the change. Answered accepts it, and Settle
+// does not.
+func TestAnsweredAcceptsAnActionThatTurnsItsSwitchOff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "telescope")
+		server.mute()
+		sent, err := c.SetSwitches(server.device, "CONFIG_PROCESS", map[string]bool{"CONFIG_SAVE": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		settled := make(chan error, 1)
+		go func() {
+			_, err := settle(t, c, sent)
+			settled <- err
+		}()
+		server.await("CONFIG_PROCESS")
+		server.send(`<setSwitchVector device="Telescope Simulator" name="CONFIG_PROCESS" state="Ok">` +
+			`<oneSwitch name="CONFIG_LOAD">Off</oneSwitch><oneSwitch name="CONFIG_SAVE">Off</oneSwitch>` +
+			`<oneSwitch name="CONFIG_DEFAULT">Off</oneSwitch><oneSwitch name="CONFIG_PURGE">Off</oneSwitch></setSwitchVector>`)
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+		p, err := c.Answered(ctx, sent)
+		if err != nil || p.State != Ok {
+			t.Fatalf("Answered = %s, %v, want Ok", p.State, err)
+		}
+		if err := <-settled; err == nil {
+			t.Error("Settle accepted an answer that does not carry CONFIG_SAVE On")
+		}
+	})
+}

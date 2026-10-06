@@ -169,12 +169,36 @@ func domePolicies(ctx context.Context, t *tree, site *observatory.Observatory, h
 // lockPolicy writes one lock policy, DOME_POLICY or MOUNT_POLICY, which
 // every INDI mount and dome defines before it connects. A driver that
 // lacks it gets a note.
+//
+// After a change, the driver saves its configuration. INDI's mount
+// reads DOME_POLICY from its configuration file again on each
+// getProperties (Telescope::ISGetProperties). The operator's first
+// write of the mount's location or ACTIVE_DEVICES saved the whole file,
+// with the policy that the mount had then. Without the save, the next
+// client that connects, such as PHD2 or KStars, turns the lock off. A
+// saved policy also holds in a driver that restarts while the operator
+// is down.
 func lockPolicy(ctx context.Context, h handle, property, locks, ignored string, on bool, notes *[]string) (bool, error) {
 	if _, ok := h.property(ctx, property); !ok {
 		*notes = append(*notes, fmt.Sprintf("no %s on %s", property, h))
 		return false, nil
 	}
-	return h.setSwitches(ctx, property, map[string]bool{locks: on, ignored: !on})
+	changed, err := h.setSwitches(ctx, property, map[string]bool{locks: on, ignored: !on})
+	if err != nil || !changed {
+		return changed, err
+	}
+	if _, ok := h.property(ctx, "CONFIG_PROCESS"); !ok {
+		*notes = append(*notes, fmt.Sprintf("no CONFIG_PROCESS on %s to save %s", h, property))
+		return true, nil
+	}
+	sent, err := h.client().SetSwitches(h.name, "CONFIG_PROCESS", map[string]bool{"CONFIG_SAVE": true})
+	if err == nil {
+		_, err = h.client().Answered(ctx, sent)
+	}
+	if err != nil {
+		return true, fmt.Errorf("%s: saving the configuration after %s: %w", h, property, err)
+	}
+	return true, nil
 }
 
 // prepare opens the dust caps, cools each camera that has a setpoint,

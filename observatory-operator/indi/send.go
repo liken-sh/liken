@@ -173,6 +173,20 @@ func (e *AlertError) Error() string {
 // device sent before it read the change, such as the dome's position
 // on its poll, would end the wait early. Alert ends the wait at once.
 func (c *Client) Settle(ctx context.Context, sent Sent) (Property, error) {
+	return c.settle(ctx, sent, true)
+}
+
+// Answered waits for the driver's answer to a sent change, as Settle
+// does, but accepts an answer whatever its values. A switch that starts
+// an action, such as CONFIG_PROCESS, turns its members Off again when
+// the action ends, so its answer never carries the change. A report
+// that the driver sends on a poll would end the wait early, so Answered
+// suits only a property that the driver reports in answer to a change.
+func (c *Client) Answered(ctx context.Context, sent Sent) (Property, error) {
+	return c.settle(ctx, sent, false)
+}
+
+func (c *Client) settle(ctx context.Context, sent Sent, carries bool) (Property, error) {
 	var settled Property
 	err := c.waitFor(ctx, func(s *Store) (bool, error) {
 		if !s.connected || s.connection != sent.connection {
@@ -188,7 +202,7 @@ func (c *Client) Settle(ctx context.Context, sent Sent) (Property, error) {
 		if e.property.State == Alert {
 			return false, &AlertError{Property: e.property.clone()}
 		}
-		if e.busy <= sent.sequence && !sent.carries(e.property) {
+		if carries && e.busy <= sent.sequence && !sent.carries(e.property) {
 			return false, nil
 		}
 		settled = e.property.clone()

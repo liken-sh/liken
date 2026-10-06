@@ -170,6 +170,10 @@ type fakeDriver struct {
 	// (fakelocks_test.go), by "<device>.<property>", each member's
 	// value by its name.
 	snooped map[string]map[string]string
+	// saved holds the driver's configuration file
+	// (fakeconfig_test.go), each property's members by its name, or
+	// nil while the driver has saved none.
+	saved map[string][]fakeMember
 }
 
 var transcriptCache sync.Map
@@ -489,6 +493,7 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 	tag := v.XMLName.Local
 	if tag == "getProperties" {
 		for _, link := range sortedKeys(s.drivers) {
+			s.drivers[link].reloadDomePolicy()
 			for _, prop := range s.drivers[link].props {
 				c.send(prop.def())
 			}
@@ -548,6 +553,7 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 	if w.moving[v.Device+"."+v.Name] {
 		p.State = "Busy"
 	}
+	d.saveConfig(p)
 	s.broadcast(p.set())
 	// An abort ends what moves, as the simulators' abort does.
 	if moving, ok := aborts[p.Name]; ok {
