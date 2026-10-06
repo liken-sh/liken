@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 const (
@@ -44,6 +45,9 @@ type fakeEvent struct {
 
 type fakeAPI struct {
 	server *apiservertest.Server
+
+	// recorded holds the Events the operator posts.
+	recorded *eventstest.Events
 
 	mu      sync.Mutex
 	version int
@@ -81,8 +85,10 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		logs:    map[string]string{},
 		changed: make(chan struct{}),
 		absent:  map[string]bool{},
+
+		recorded: &eventstest.Events{},
 	}
-	api.server = apiservertest.Start(t, api)
+	api.server = apiservertest.Start(t, api.recorded.Around(api))
 	// The reflector waits out its backoff after a refused list without
 	// reading its context, so the bubble waits past it (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })

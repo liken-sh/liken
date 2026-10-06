@@ -1,6 +1,6 @@
 # The operator's identity. It reads every Person and writes each one's
-# status. It starts, reads, and deletes the baker pods that read a
-# picture from NFS or a claim.
+# status, and posts the Events about each Person. It starts, reads, and
+# deletes the baker pods that read a picture from NFS or a claim.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -50,6 +50,35 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: people-operator
+subjects:
+  - kind: ServiceAccount
+    name: people-operator
+    namespace: liken-system
+---
+# The Events about a Person, one for each change of its AvatarReady
+# condition and one for each new picture. A Person is cluster-scoped,
+# and the API server takes an Event about a cluster-scoped object only
+# in default or kube-system, so this Role grants the one namespace the
+# operator posts to. patch counts a repeat on the Event it repeats.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: people-operator-events
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: people-operator-events
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: people-operator-events
 subjects:
   - kind: ServiceAccount
     name: people-operator

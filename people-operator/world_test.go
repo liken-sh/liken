@@ -12,6 +12,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // servedPicture is one file the picture server answers.
@@ -107,7 +109,8 @@ func startWorld(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	bakers := &bakers{client: client, image: image, namespace: operatorNS}
-	operator := newOperator(client, w.pictures.server, bakers)
+	recorder := events.New(t.Context(), client, component, events.Options{Instance: operatorPodName, Log: io.Discard})
+	operator := newOperator(client, w.pictures.server, bakers, recorder)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // outcome is the answer to one Person's spec.avatar.
@@ -60,16 +62,18 @@ func heldPicture(p *person) bool {
 	return p.Status.Thumbnail != "" && !isInitials(p.Status.Thumbnail)
 }
 
-// composeStatus answers the status that an outcome gives a Person. now
-// stamps the condition when its status changes.
-func composeStatus(p *person, out outcome, now time.Time) personStatus {
+// composeStatus answers the status that an outcome gives a Person, and
+// what it changed that posts an Event. now stamps the condition when
+// its status changes.
+func composeStatus(p *person, out outcome, now time.Time) (personStatus, change) {
 	next := p.Status
 	next.Avatar = avatarState{Source: out.source, Checked: out.checked}
-	ready := condition{Type: avatarReady, Status: "True", ObservedGeneration: p.Metadata.Generation}
+	ready := condition{Type: avatarReady, Status: conditions.True, ObservedGeneration: p.Metadata.Generation}
+	var changed change
 
 	switch {
 	case out.err != nil:
-		ready.Status, ready.Reason, ready.Message = "False", reasonOf(out.err), out.err.Error()
+		ready.Status, ready.Reason, ready.Message = conditions.False, reasonOf(out.err), out.err.Error()
 		if heldPicture(p) {
 			// The version stays only with a picture from the same
 			// source. A version from another source would make the
@@ -90,35 +94,22 @@ func composeStatus(p *person, out outcome, now time.Time) personStatus {
 		next.Thumbnail = out.reading.thumbnail
 		next.Avatar = withVersion(next.Avatar, out.reading.version)
 		ready.Reason = out.reason
+		changed.newPicture = next.Thumbnail != p.Status.Thumbnail
 	}
 
-	next.Conditions = setCondition(p.Status.Conditions, ready, now)
-	return next
+	// The list is cloned, because the held status is the API server's
+	// copy until the write lands. Set moves lastTransitionTime only
+	// when the status changes, so a write that changes nothing else
+	// changes nothing.
+	next.Conditions = slices.Clone(p.Status.Conditions)
+	ready.LastTransitionTime = now.UTC().Truncate(time.Second)
+	changed.transitioned = conditions.Set(&next.Conditions, ready)
+	return next, changed
 }
 
 func withVersion(state avatarState, version pictureVersion) avatarState {
 	state.ETag, state.LastModified, state.Size = version.ETag, version.LastModified, version.Size
 	return state
-}
-
-// setCondition answers the conditions with one condition set. The time
-// of the last transition moves only when the condition's status
-// changes, so a write that changes nothing else changes nothing.
-func setCondition(conditions []condition, set condition, now time.Time) []condition {
-	out := slices.Clone(conditions)
-	for index, held := range out {
-		if held.Type != set.Type {
-			continue
-		}
-		set.LastTransitionTime = held.LastTransitionTime
-		if held.Status != set.Status {
-			set.LastTransitionTime = now.UTC().Format(time.RFC3339)
-		}
-		out[index] = set
-		return out
-	}
-	set.LastTransitionTime = now.UTC().Format(time.RFC3339)
-	return append(out, set)
 }
 
 // statusChanged reports whether a composed status differs from the one

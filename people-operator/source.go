@@ -44,18 +44,6 @@ type source interface {
 	successReason() string
 }
 
-// The reasons AvatarReady reports.
-const (
-	reasonFetched           = "Fetched"
-	reasonInline            = "Inline"
-	reasonBaked             = "Baked"
-	reasonInitials          = "Initials"
-	reasonFetchFailed       = "FetchFailed"
-	reasonBakeFailed        = "BakeFailed"
-	reasonDecodeFailed      = "DecodeFailed"
-	reasonUnsupportedScheme = "UnsupportedScheme"
-)
-
 // sourceError is a read that failed, with the reason AvatarReady
 // reports for it.
 type sourceError struct {

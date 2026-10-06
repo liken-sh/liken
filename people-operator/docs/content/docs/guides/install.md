@@ -21,13 +21,15 @@ resources:
   - https://github.com/liken-sh/liken//people-operator/deploy?ref=<ref>
 ```
 
-The base holds three parts:
+The base holds four parts:
 
 - the `Person` resource definition, which is cluster-scoped;
 - the `people-operator` `ServiceAccount` and its `ClusterRole`, which
   reads every `Person`, writes each `Person`'s status, and starts,
   reads, and deletes the pods that read a picture from NFS or a
   claim;
+- a `Role` in `default`, which posts the `Event`s about each
+  `Person`;
 - the `people-operator` `Deployment`, with one replica.
 
 Watch the operator start:

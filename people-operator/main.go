@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -59,6 +60,7 @@ func operate() error {
 		return err
 	}
 	bakers := &bakers{client: client, image: image, namespace: namespace}
-	newOperator(client, http.DefaultTransport, bakers).run(ctx, watcher)
+	recorder := events.New(ctx, client, component, events.Options{Instance: name})
+	newOperator(client, http.DefaultTransport, bakers, recorder).run(ctx, watcher)
 	return nil
 }

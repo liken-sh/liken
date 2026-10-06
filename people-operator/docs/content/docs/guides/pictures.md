@@ -77,6 +77,20 @@ When a picture that worked before fails, the last good picture stays
 in `status.thumbnail`. A `Person` that never had a good picture shows
 their initials.
 
+The condition holds only its last change. The operator also posts a
+Kubernetes `Event` for each change of the condition's status or
+reason, with the same reason and message, so a source that failed and
+then worked again is visible for an hour after. A change to `False` is
+a `Warning`. A new picture that leaves the condition as it was, such
+as a replaced picture at the same URL, posts `AvatarUpdated`. A
+`Person` is cluster-scoped, so its `Event`s are in the namespace
+`default`:
+
+```sh
+kubectl describe person ada
+kubectl events -n default --for person/ada
+```
+
 A pod that reads a claim runs as root with the `DAC_OVERRIDE`
 capability, so it reads a file whatever its owner. An NFS server maps
 root to its anonymous user unless the export says otherwise, so a

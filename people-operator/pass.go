@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -24,16 +25,20 @@ type operator struct {
 	people informer.Held
 	bakers *bakers
 
+	// recorder posts the Events (events.go). Nil posts none.
+	recorder *events.Recorder
+
 	// sources holds the schemes the operator reads in its own process
 	// (source.go).
 	sources map[string]source
 }
 
-func newOperator(client *apiclient.Client, transport http.RoundTripper, bakers *bakers) *operator {
+func newOperator(client *apiclient.Client, transport http.RoundTripper, bakers *bakers, recorder *events.Recorder) *operator {
 	fetch := newHTTPSource(transport)
 	return &operator{
-		client: client,
-		bakers: bakers,
+		client:   client,
+		bakers:   bakers,
+		recorder: recorder,
 		sources: map[string]source{
 			schemeHTTPS: fetch,
 			schemeHTTP:  fetch,
@@ -140,14 +145,19 @@ func (o *operator) followBaker(p *person, baker pod) (time.Time, error) {
 // the pass needs no status.
 func (o *operator) settle(p *person, out outcome) error {
 	now := time.Now()
-	_, err := informer.SettleStatus[person](o.client, o.people.Versions, personPath(p.Metadata.Name), p, func(held *person) bool {
-		next := composeStatus(held, out, now)
+	var changed change
+	written, err := informer.SettleStatus[person](o.client, o.people.Versions, personPath(p.Metadata.Name), p, func(held *person) bool {
+		var next personStatus
+		next, changed = composeStatus(held, out, now)
 		if !statusChanged(held.Status, next) {
 			return false
 		}
 		held.APIVersion, held.Kind, held.Status = personAPIVersion, personKind, next
 		return true
 	})
+	if written {
+		o.post(p, changed)
+	}
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}

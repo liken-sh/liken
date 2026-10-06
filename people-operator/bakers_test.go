@@ -16,6 +16,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // bakedLine runs the bake command against a file on disk, and answers
@@ -95,7 +96,7 @@ func TestABakerPodsResultBecomesTheStatus(t *testing.T) {
 		name       string
 		phase      string
 		log        func(t *testing.T) string
-		wantStatus string
+		wantStatus conditions.Status
 		wantReason string
 	}{
 		{"a picture", podSucceeded, func(t *testing.T) string { return bakedLine(t, solid(t, 64, 64, green)) }, "True", reasonBaked},

@@ -6,6 +6,7 @@ package main
 // a status field missing here would be erased by each write.
 
 import (
+	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -75,28 +76,18 @@ func (a avatarState) version() pictureVersion {
 	return pictureVersion{ETag: a.ETag, LastModified: a.LastModified, Size: a.Size}
 }
 
-// condition has the shape of metav1.Condition. The operator declares
-// its own copy so it does not link k8s.io/api for one struct.
-type condition struct {
-	Type               string `json:"type"`
-	Status             string `json:"status"`
-	Reason             string `json:"reason"`
-	Message            string `json:"message,omitempty"`
-	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
-	LastTransitionTime string `json:"lastTransitionTime"`
-}
+// condition is the condition type that every liken component reports,
+// with the shape of metav1.Condition. A condition with no message
+// writes an empty message, which the CRD's schema takes.
+type condition = conditions.Condition
 
 const avatarReady = "AvatarReady"
 
 // ready answers the AvatarReady condition, or the zero condition when
 // the status holds none.
 func (s personStatus) ready() condition {
-	for _, c := range s.Conditions {
-		if c.Type == avatarReady {
-			return c
-		}
-	}
-	return condition{}
+	c, _ := conditions.Find(s.Conditions, avatarReady)
+	return c
 }
 
 // checkRequest answers the value of the check-avatar annotation, or the

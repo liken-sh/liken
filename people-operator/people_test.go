@@ -271,7 +271,7 @@ func TestTheOperatorsStatusValidates(t *testing.T) {
 	p := ada("https://pictures.example/ada.png")
 	p.APIVersion, p.Kind = personAPIVersion, personKind
 	p.Metadata.Generation = 2
-	p.Status = composeStatus(&p, outcome{
+	p.Status, _ = composeStatus(&p, outcome{
 		source:  p.Spec.Avatar,
 		checked: "again",
 		reason:  reasonFetched,
