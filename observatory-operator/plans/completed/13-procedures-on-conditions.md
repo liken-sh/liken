@@ -377,6 +377,13 @@ found these defects. Each fix lands with a test against the fakes.
   parked Dome lab", and the Events name it after the trigger, as in
   "Procedure triggers[0] (WeatherStation lab Safe=False) started:
   state: Parked". Activation and deactivation keep their names.
+- **A refusal explains itself.** When the dome's lock refused a park,
+  the run failed with "state: Parked: Dome lab: indi: Dome
+  Simulator.DOME_PARK is Alert", while the `DomeParkRefused` Warning
+  beside it said why. A park or an unpark that fails with Alert while
+  its lock holds now fails with the lock's explanation. In a trigger's
+  run, a refused dome park adds that `after: [{kind: Mount}]` orders
+  the dome's park after the mounts' parks.
 
 ## How we test it
 

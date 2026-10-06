@@ -612,8 +612,13 @@ operator relays it again when the driver connects.
 
 When a driver refuses a move under a lock, it answers with `Alert`,
 and the operator posts a `Warning` on the device: `MountUnparkRefused`
-on the `Mount`, or `DomeParkRefused` on the `Dome`. A step that asked
-for the move fails, as it does for any `Alert`.
+on the `Mount`, or `DomeParkRefused` on the `Dome`. A procedure's
+action that asked for the move fails, and its summary gives the same
+explanation as the Warning, such as
+`state: Parked: Dome lab refused to park, because Mount east is unparked or moving`.
+In a trigger's run, the summary of a refused dome park adds that
+`after: [{kind: Mount}]` orders the dome's park after the mounts'
+parks, because the tree gives a trigger no order.
 
 ## The guider
 

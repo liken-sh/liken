@@ -41,6 +41,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -154,6 +155,42 @@ func (o *operator) relayLocks(t *tree) {
 		}
 	}
 	o.locks.sent, o.locks.states = sent, states
+}
+
+// refusedMoves maps the reason of each refusal to the action that the
+// lock refuses.
+var refusedMoves = map[string]string{
+	reasonDomeParkRefused:    observatory.DomeKind.Name + "/" + string(observatory.StateParked),
+	reasonMountUnparkRefused: observatory.MountKind.Name + "/" + string(observatory.StateUnparked),
+}
+
+// explainRefusal answers the error of an action that a driver answered
+// with Alert while its lock held, with the lock's explanation in place
+// of the bare Alert: the same words as the refusal's Warning. A
+// trigger has no tree order, so a dome's park in a trigger meets a
+// mount that still parks unless after orders it, and the explanation
+// says so. Any other error passes through.
+func (o *operator) explainRefusal(c procCall, h handle, a action, err error) error {
+	var alert *indi.AlertError
+	if !errors.As(err, &alert) {
+		return err
+	}
+	t := o.snapshot()
+	site, ok := t.observatories[t.observatoryOf(h.d.kind, h.d.name())]
+	if !ok {
+		return err
+	}
+	refused := lockWatch{h: h, property: alert.Property.Name}.id()
+	for _, w := range o.planLocks(t, site).watches {
+		if w.id() != refused || !w.locked || refusedMoves[w.reason] != h.d.kind.Name+"/"+a.State {
+			continue
+		}
+		if c.condition != "" && w.reason == reasonDomeParkRefused {
+			return errors.New(w.message + ". In a trigger, after: [{kind: Mount}] orders the dome's park after the mounts' parks")
+		}
+		return errors.New(w.message)
+	}
+	return err
 }
 
 // keepLocks relays the locks after each change, until ctx ends.

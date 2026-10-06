@@ -314,8 +314,13 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 	default:
 		record.State, record.Summary = observatory.StepFailed, sentence(err.Error())
 		run.State, run.StopTime = observatory.StepFailed, &stop
+		// The summary starts with the action as its YAML reads, such as
+		// "state: Parked", so the action keeps its lower case.
 		text := a.String() + ": " + err.Error()
-		run.Summary = c.summary(text)
+		run.Summary = text
+		if c.condition != "" {
+			run.Summary = c.summary(text)
+		}
 		o.runs.put(key, *run)
 		o.recorder.Warning(reference(c.res.kind, c.res.meta), reasonProcedureFailed,
 			fmt.Sprintf("Procedure %s failed: %s", c.label(), lowerFirst(text)))
@@ -354,7 +359,8 @@ func (o *operator) perform(ctx, wait context.Context, c procCall, a action, at p
 	if err != nil {
 		return "", err
 	}
-	return o.act(ctx, wait, h, a, report)
+	summary, err := o.act(ctx, wait, h, a, report)
+	return summary, o.explainRefusal(c, h, a, err)
 }
 
 // asNow answers the resource of a call as the tree holds it now, so
