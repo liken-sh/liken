@@ -439,6 +439,27 @@ these defects. Each fix lands with a test against the fakes.
   an object that the stores no longer hold. A status is part of its
   object, so a restart loads each record under the UID of the object
   that holds it. A trigger's run of a deleted object ends.
+- **A device that joins an active parent runs its activation.** Since
+  plan 11, a device that gets a parent during a `Ready` reservation
+  joins the running server. Activation runs as the `Telescope` or the
+  `Observatory` turns `Active`, and a device that joined later missed
+  that transition. A dust cap added during a session stayed closed,
+  and the recreated dome stayed unparked with its shutter closed. Now
+  the trigger controller runs the activation of a device that is
+  connected, whose governing resource is `Active`, while a reservation
+  that governs it is `Ready`, and that has no activation run of the
+  current transition. The run answers the same transition, so its
+  `since` is the time the parent turned `Active`. No step waits on it,
+  its `after` waits for nothing because the step ended every other run
+  of the transition, and its failure posts `ProcedureFailed` as a
+  trigger's does. Its triggers start when it ends. The controller
+  waits for a `Ready` reservation, because during the `Activation`
+  step the step runs the device in the tree's order.
+  A device that leaves while its parent is `Active` runs no
+  deactivation, connected or not: the person who removes it takes it
+  out of the operator's care, and its driver stops as it leaves. A
+  failed activation of a joining device has no retry: the retry
+  annotation of a device runs again only its triggers.
 - **A list of holders takes the plural.** The `Observatory`'s `Active`
   message read "Active for Reservation drill-east, drill-west". With
   more than one holder it now reads "Active for Reservations

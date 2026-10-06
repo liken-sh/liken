@@ -105,6 +105,7 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) ti
 	live := map[string]bool{}
 	for _, r := range t.withProcedures() {
 		live[r.record()] = true
+		o.joinActivation(ctx, t, r, k)
 		retry := k.retryAsked(r)
 		period, active := o.activePeriod(r)
 		for i, trigger := range r.procedures.Triggers {
@@ -222,17 +223,8 @@ func (t *tree) withProcedures() []resource {
 // while it is not active: while its Telescope or Observatory is not
 // Active, and until its activation run for that transition is Done.
 func (o *operator) activePeriod(r resource) (time.Time, bool) {
-	var key string
-	switch {
-	case r.kind == observatory.ObservatoryKind:
-		key = observatoryKey(r.name())
-	case r.kind == observatory.TelescopeKind:
-		key = telescopeKey(r.name())
-	case r.telescope != "":
-		key = telescopeKey(r.telescope)
-	case r.observatory != "":
-		key = observatoryKey(r.observatory)
-	default:
+	key, ok := governor(r)
+	if !ok {
 		return time.Time{}, false
 	}
 	state := o.activity.get(key)
