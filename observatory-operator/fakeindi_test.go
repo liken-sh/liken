@@ -211,15 +211,54 @@ type fakeServer struct {
 	conns   []*fakeConn
 }
 
+// fakeConn queues what the server writes, the way a socket's send
+// buffer does, and a goroutine of its own writes the queue to the pipe.
+// A net.Pipe has no buffer, so a write blocks until the client reads.
+// The fake writes while it holds its lock, and a client that waits for
+// that lock to dial reads nothing, so a write under the lock must never
+// block.
 type fakeConn struct {
-	conn net.Conn
-	mu   sync.Mutex
+	conn  net.Conn
+	mu    sync.Mutex
+	queue []string
+	ready chan struct{}
+}
+
+func newFakeConn(conn net.Conn) *fakeConn {
+	c := &fakeConn{conn: conn, ready: make(chan struct{}, 1)}
+	go c.write()
+	return c
 }
 
 func (c *fakeConn) send(text string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, _ = io.WriteString(c.conn, text)
+	c.queue = append(c.queue, text)
+	select {
+	case c.ready <- struct{}{}:
+	default:
+	}
+}
+
+// write writes the queue until a write fails, as each one does after
+// either end closes the pipe. close wakes it to find that out.
+func (c *fakeConn) write() {
+	for range c.ready {
+		c.mu.Lock()
+		queue := c.queue
+		c.queue = nil
+		c.mu.Unlock()
+		for _, text := range queue {
+			if _, err := io.WriteString(c.conn, text); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *fakeConn) close() {
+	_ = c.conn.Close()
+	c.send("")
 }
 
 type indiWorld struct {
@@ -241,6 +280,11 @@ type indiWorld struct {
 	// moving holds the properties whose driver answers a change with
 	// Busy, as a mount that slews does, until a test sets the state.
 	moving map[string]bool
+
+	// followMu serializes catchUp, and guards last, the pods that the
+	// servers follow now.
+	followMu sync.Mutex
+	last     map[string]map[string]any
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
@@ -250,31 +294,42 @@ func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
 }
 
 // follow brings each server's drivers in line with the pods after each
-// change of the fake API server's pods. A stored object never changes
-// (fakeAPI.store), so follow reads the pods without a copy.
+// change of the fake API server's pods.
 func (w *indiWorld) follow(ctx context.Context) {
-	var last map[string]map[string]any
 	for {
 		w.api.mu.Lock()
 		changed := w.api.changed
-		pods := maps.Clone(w.api.objects[podsCollection])
 		w.api.mu.Unlock()
-		if !samePods(pods, last) {
-			w.sync(pods)
-			last = pods
-		}
+		w.catchUp()
 		select {
 		case <-ctx.Done():
 			w.mu.Lock()
 			for _, s := range w.servers {
 				for _, c := range s.conns {
-					_ = c.conn.Close()
+					c.close()
 				}
 			}
 			w.mu.Unlock()
 			return
 		case <-changed:
 		}
+	}
+}
+
+// catchUp brings each server's drivers in line with the pods that the
+// fake API server holds now. A stored object never changes
+// (fakeAPI.store), so it reads the pods without a copy. A dial calls it
+// too: the operator's watch can deliver a Ready server pod before
+// follow wakes, and the real server listens once its pod is Ready.
+func (w *indiWorld) catchUp() {
+	w.followMu.Lock()
+	defer w.followMu.Unlock()
+	w.api.mu.Lock()
+	pods := maps.Clone(w.api.objects[podsCollection])
+	w.api.mu.Unlock()
+	if !samePods(pods, w.last) {
+		w.sync(pods)
+		w.last = pods
 	}
 }
 
@@ -326,7 +381,7 @@ func (w *indiWorld) sync(pods map[string]map[string]any) {
 			// The server stopped: every connection ends, and every
 			// driver behind it restarts with the next server.
 			for _, c := range s.conns {
-				_ = c.conn.Close()
+				c.close()
 			}
 			delete(w.servers, name)
 		}
@@ -380,6 +435,7 @@ func (s *fakeServer) broadcast(text string) {
 // as east-telescope.observatory.svc:7624, while its pod is Ready.
 func (w *indiWorld) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	name, _, _ := strings.Cut(address, ".")
+	w.catchUp()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	s, ok := w.servers[name]
@@ -387,7 +443,7 @@ func (w *indiWorld) DialContext(ctx context.Context, network, address string) (n
 		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
 	}
 	client, server := net.Pipe()
-	c := &fakeConn{conn: server}
+	c := newFakeConn(server)
 	s.conns = append(s.conns, c)
 	go w.serve(name, s, c)
 	return client, nil
@@ -399,7 +455,7 @@ func (w *indiWorld) serve(name string, s *fakeServer, c *fakeConn) {
 	for {
 		token, err := decoder.Token()
 		if err != nil {
-			_ = c.conn.Close()
+			c.close()
 			return
 		}
 		start, ok := token.(xml.StartElement)
@@ -408,7 +464,7 @@ func (w *indiWorld) serve(name string, s *fakeServer, c *fakeConn) {
 		}
 		var v xmlVector
 		if err := decoder.DecodeElement(&v, &start); err != nil {
-			_ = c.conn.Close()
+			c.close()
 			return
 		}
 		w.answer(name, s, c, v)
@@ -597,4 +653,23 @@ func (w *indiWorld) refuse(device, property string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.refused[device+"."+property] = true
+}
+
+// cut closes every client connection to a server while the server and
+// its drivers run, as a network that drops a connection does.
+func (w *indiWorld) cut(server string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s := w.servers[server]
+	for _, c := range s.conns {
+		c.close()
+	}
+	s.conns = nil
+}
+
+// clients answers how many client connections a server holds.
+func (w *indiWorld) clients(server string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.servers[server].conns)
 }

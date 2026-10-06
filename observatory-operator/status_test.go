@@ -256,6 +256,29 @@ func TestAServerThatRestartsIsSetUpAgain(t *testing.T) {
 	})
 }
 
+// A connection that ends while the server's pod stays Ready brings no
+// pod event, so the operator dials again after a pause, which doubles
+// for each connection that ends early.
+func TestAConnectionThatEndsIsOpenedAgainAfterAPause(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		for _, pause := range []time.Duration{time.Second, 2 * time.Second} {
+			w.indi.cut("east-telescope")
+			time.Sleep(pause - time.Millisecond)
+			synctest.Wait()
+			if n := w.indi.clients("east-telescope"); n != 0 {
+				t.Fatalf("%d connections before the pause of %v ended", n, pause)
+			}
+			time.Sleep(time.Millisecond)
+			synctest.Wait()
+			if n := w.indi.clients("east-telescope"); n != 1 {
+				t.Fatalf("%d connections after the pause of %v, want 1", n, pause)
+			}
+		}
+	})
+}
+
 // A device of the observatory that comes back is connected again, and
 // the dome's policy is written again.
 func TestASiteDeviceThatComesBackIsSetUpAgain(t *testing.T) {
