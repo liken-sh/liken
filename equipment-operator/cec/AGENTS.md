@@ -130,8 +130,11 @@ The kernel's
 [`vivid`](https://docs.kernel.org/admin-guide/media/vivid.html#cec-consumer-electronics-control)
 driver emulates a TV with HDMI inputs and sources on HDMI outputs,
 each with a real kernel CEC adapter on one bus. The `Vivid` tests in
-this package and in the operator skip when no vivid adapter is open
-to the user, which is the case in CI. To run them on a workstation:
+this package and in the operator check the code against the kernel's
+own CEC core, so `cectest` cannot stand in for them. They are a manual
+check on a Linux machine that has the `vivid` module and `v4l-utils`
+installed. They skip when no vivid adapter is open to the user, which
+is the case in CI. To run them:
 
 ```sh
 # Three HDMI inputs and three HDMI outputs. Each output's adapter is
@@ -139,11 +142,8 @@ to the user, which is the case in CI. To run them on a workstation:
 sudo modprobe vivid num_inputs=3 input_types=0x3f num_outputs=3 output_types=0x07
 
 # An output has a physical address only while an input shows it.
-# v4l2-ctl is in v4l-utils; a container keeps it off the host.
-docker run --rm --device /dev/video2 debian:trixie-slim sh -c \
-  'apt-get update -qq && apt-get install -qq -y v4l-utils >/dev/null &&
-   v4l2-ctl -d /dev/video2 -c hdmi_000_0_is_connected_to=2 \
-     -c hdmi_000_1_is_connected_to=3 -c hdmi_000_2_is_connected_to=4'
+sudo v4l2-ctl -d /dev/video2 -c hdmi_000_0_is_connected_to=2 \
+  -c hdmi_000_1_is_connected_to=3 -c hdmi_000_2_is_connected_to=4
 
 # The nodes are root:video 0660.
 sudo chmod 666 /dev/cec*
@@ -154,24 +154,24 @@ sudo modprobe -r vivid
 
 With no follower on vivid's TV adapter, the kernel's CEC core answers
 Give Device Power Status with a Feature Abort, before and after an
-Image View On, so something must play the TV. Each `Vivid` test plays the TV itself on the capture adapter. The wake's test also plays a
+Image View On, so something must play the TV. Each `Vivid` test plays
+the TV itself on the capture adapter. The wake's test also plays a
 streaming player on a second output, which claims Active Source once
 after the node workload's claim, and it skips when only one output is
-connected. The
-test that wakes the TV can leave the TV to `cec-follower` from
-v4l-utils instead, which is an independent implementation of a TV's
-power states: after Image View On it reports Standby for about 2
-seconds and ToOn for about 6 more. Start it, then run that test alone,
-because the other `Vivid` tests claim the same adapter:
+connected. The test that wakes the TV can leave the TV to
+`cec-follower` from `v4l-utils` instead, which is an independent
+implementation of a TV's power states: after Image View On it reports
+Standby for about 2 seconds and ToOn for about 6 more. Start it, then
+run that test alone, because the other `Vivid` tests claim the same
+adapter:
 
 ```sh
 # /dev/cec0 is the adapter named vivid-000-vid-cap0.
-docker run -d --name vivid-tv --device /dev/cec0 debian:trixie-slim sh -c \
-  'apt-get update -qq && apt-get install -qq -y v4l-utils >/dev/null &&
-   cec-ctl -d0 --tv -o TV >/dev/null && exec cec-follower -d0 -s -n'
+cec-ctl -d0 --tv -o TV >/dev/null
+cec-follower -d0 -s -n &
 
 CEC_VIVID_TV=cec-follower go test -run TestVividTheNodeWorkloadWakesTheTV -v .
-docker rm -f vivid-tv
+kill %1
 ```
 
 `/dev/video2` is the capture node named `vivid-000-vid-cap` under
