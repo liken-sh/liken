@@ -418,6 +418,11 @@ found these defects. Each fix lands with a test against the fakes.
   relay's pass now writes `DOME_IGNORED` to each running mount of an
   observatory whose last dome went, and `DOME_LOCKS` when a dome
   comes, and saves the driver's configuration.
+- **How to drive the simulators.** The README gained a section on
+  testing procedures against the simulators with `indi_setprop` and
+  `indi_getprop` through `kubectl exec`. It notes that the simulators
+  keep their park state in the pod, so a device whose pod starts again
+  comes back unparked.
 
 ## How we test it
 

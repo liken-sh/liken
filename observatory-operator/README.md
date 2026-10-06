@@ -589,6 +589,53 @@ of safe weather the dome unparks again. At the end, the flat panel's
 light goes off, the cap closes, the camera warms to 5 °C, the mounts
 park, and the dome parks.
 
+### Testing procedures against the simulators
+
+The INDI server images hold `indi_getprop` and `indi_setprop`. They
+run through `kubectl exec` with no shell, so a person can drive each
+simulator from the laptop while a reservation holds a telescope. The
+observatory's devices run on the pod `lab-observatory`, and each
+telescope's devices on its own pod, such as `east-telescope`.
+
+The weather simulator decides `Safe` from its readings. A strong wind
+turns it unsafe. The simulator publishes its readings each 60 seconds,
+so the second command asks it to publish them now:
+
+```sh
+kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_CONTROL.Wind;Gust=40;30"
+kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_REFRESH.REFRESH=On"
+```
+
+The mounts park, and then the dome parks. A calm wind turns the
+weather safe again, and the dome unparks after the 20 minutes of the
+example's `for`:
+
+```sh
+kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_CONTROL.Wind;Gust=0;0"
+kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_REFRESH.REFRESH=On"
+```
+
+A person parks a mount by hand the same way, and reads a property
+with `indi_getprop`:
+
+```sh
+kubectl -n observatory exec east-telescope -- indi_setprop "Telescope Simulator.TELESCOPE_PARK.PARK=On"
+kubectl -n observatory exec lab-observatory -- indi_getprop "Weather Simulator.SAFETY_STATUS.*"
+```
+
+Each resource's `status.procedures` holds the last run of each
+trigger, and its `Event`s give each run's start and end:
+
+```sh
+kubectl get dome lab -n observatory -o jsonpath='{.status.procedures}'
+kubectl get events -n observatory --field-selector involvedObject.kind=Dome,involvedObject.name=lab
+```
+
+The simulators keep their park state in the pod. A device whose pod
+starts again comes back unparked, and a dome comes back with its
+shutter as the simulator starts it. A real driver reads its park
+state from the hardware.
+
 ## The dome and mount locks
 
 While an `Observatory` has a `Dome`, the domes and the mounts lock
