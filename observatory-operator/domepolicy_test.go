@@ -5,6 +5,7 @@ package main
 // comes locks them again, with no wait for the next Configure.
 
 import (
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -43,6 +44,28 @@ func TestAMountsDomePolicyFollowsTheDomes(t *testing.T) {
 		w.indi.look("east-telescope")
 		if got := w.indi.parked("east-telescope", "Telescope Simulator", "DOME_POLICY"); got != "Ok DOME_LOCKS" {
 			t.Errorf("after a client looks, DOME_POLICY is %q, want the saved DOME_LOCKS", got)
+		}
+	})
+}
+
+// Activation writes a mount's DOME_POLICY once, in Configure, and saves
+// the driver's configuration once for it. A driver rewrites its
+// configuration file on each save.
+func TestActivationWritesAMountsDomePolicyOnce(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		writes, saves := 0, 0
+		for _, c := range w.indi.changes() {
+			switch {
+			case strings.HasPrefix(c, "east-telescope Telescope Simulator.DOME_POLICY "):
+				writes++
+			case strings.HasPrefix(c, "east-telescope Telescope Simulator.CONFIG_PROCESS "):
+				saves++
+			}
+		}
+		if writes != 1 || saves != 1 {
+			t.Errorf("DOME_POLICY written %d times and the configuration saved %d times, want once each", writes, saves)
 		}
 	})
 }

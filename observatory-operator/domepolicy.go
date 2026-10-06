@@ -8,6 +8,14 @@ package main
 // observatory's last dome goes, each running mount of it gets
 // DOME_IGNORED at once, and when a dome comes, DOME_LOCKS. The write
 // saves the driver's configuration, as Configure's does (lockPolicy).
+//
+// The pass acts only on a telescope whose reservation is Ready.
+// Activation's Configure step writes the policy, and the operator
+// writes a mount's settings again when its driver restarts during a
+// session (steady.go), so the pass covers a dome that comes or goes.
+// One write to a mount runs at a time: each save rewrites the driver's
+// configuration file, and the server's epoch moves with each property
+// that a driver defines while the write is on its way.
 
 import (
 	"context"
@@ -29,6 +37,9 @@ const policyWait = 30 * time.Second
 type mountPolicies struct {
 	tried map[string]string
 	group sync.WaitGroup
+	// writing holds each mount whose write runs now.
+	mu      sync.Mutex
+	writing map[string]bool
 	// seen holds the version of the stores and the INDI epoch that the
 	// last pass read. A reading changes neither, so a pass that finds
 	// both the same has nothing new to write, and a mount that reports
@@ -56,7 +67,11 @@ func (o *operator) keepDomePolicies(ctx context.Context, p *mountPolicies) {
 			want = "DOME_LOCKS"
 		}
 		for _, telescope := range sortedNames(t.telescopes) {
-			if _, held := o.claims.holderOf(telescope); !held || t.telescopes[telescope].Spec.Observatory != site {
+			holder, held := o.claims.holderOf(telescope)
+			if !held || t.telescopes[telescope].Spec.Observatory != site {
+				continue
+			}
+			if res := t.reservations[holder]; res == nil || res.Status.Phase != observatory.ReservationReady {
 				continue
 			}
 			ref := serverRef{observatory.TelescopeKind, telescope}
@@ -66,11 +81,12 @@ func (o *operator) keepDomePolicies(ctx context.Context, p *mountPolicies) {
 					continue
 				}
 				id, key := h.server.name+"/"+h.name, fmt.Sprintf("%d %s", h.server.epoch.Load(), want)
-				if p.tried[id] == key {
+				if p.tried[id] == key || !p.start(id) {
 					continue
 				}
 				p.tried[id] = key
 				p.group.Go(func() {
+					defer p.finish(id)
 					wait, cancel := context.WithTimeout(ctx, policyWait)
 					defer cancel()
 					var notes []string
@@ -84,4 +100,25 @@ func (o *operator) keepDomePolicies(ctx context.Context, p *mountPolicies) {
 			}
 		}
 	}
+}
+
+// start marks a write to a mount as running, and answers false when
+// one runs already.
+func (p *mountPolicies) start(id string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.writing == nil {
+		p.writing = map[string]bool{}
+	}
+	if p.writing[id] {
+		return false
+	}
+	p.writing[id] = true
+	return true
+}
+
+func (p *mountPolicies) finish(id string) {
+	p.mu.Lock()
+	delete(p.writing, id)
+	p.mu.Unlock()
 }

@@ -472,6 +472,22 @@ these defects. Each fix lands with a test against the fakes.
   more than one holder it now reads "Active for Reservations
   drill-east, drill-west", and the `Deactivating` message of its
   `Ready` condition follows the same rule.
+- **A device that rejoins activates again.** On the test cluster, the
+  dust cap `east` left the session and closed, then rejoined and ran
+  no activation, because its activation of the same transition was
+  `Done`. The simulator starts open in each new pod, so it read open
+  anyway; a real cap would have stayed closed. Now a leave drops the
+  device's activation record and a rejoin drops its deactivation
+  record, so each move runs its procedure. Two runs in the same second
+  have the same start time, so the times cannot order them.
+- **A mount's `DOME_POLICY` is written once.** The pass that follows the
+  domes wrote the mount's policy and saved the driver's configuration
+  twice in each activation, and nine times when a device left and
+  rejoined, because the server's epoch moves with each property a
+  driver defines while the write is on its way. A real driver rewrites
+  its configuration file on each save. Now the pass acts only for a
+  `Ready` reservation, since `Configure` writes the policy during
+  activation, and one write to a mount runs at a time.
 
 ## How we test it
 
