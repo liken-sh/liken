@@ -8,7 +8,9 @@
 // in a synctest bubble on the fake clock, which a real socket stops.
 //
 // The package phd2 tests its client against it, and the operator tests
-// its guider steps against one Server for each guider pod.
+// its guider steps against one Server for each guider pod. The answers
+// and the events around them follow the transcript in phd2/testdata/,
+// which a real PHD2 sent.
 package phd2test
 
 import (
@@ -136,6 +138,14 @@ func (s *Server) serve(conn net.Conn) {
 			continue
 		}
 		answer := map[string]any{"jsonrpc": "2.0", "id": request.ID}
+		s.mu.Lock()
+		before := s.AppState
+		s.mu.Unlock()
+		if request.Method == "set_connected" {
+			// Connecting the gear writes the profile, and PHD2 reports
+			// that before it answers.
+			send(conn, Event("ConfigurationChange", nil))
+		}
 		result, failure := s.answer(request.Method, request.Params)
 		if failure != "" {
 			answer["error"] = map[string]any{"code": 1, "message": failure}
@@ -146,8 +156,11 @@ func (s *Server) serve(conn net.Conn) {
 			send(conn, answer)
 		}
 		if request.Method == "stop_capture" {
-			// PHD2 reports the end of the loop as an event, and sends
-			// no AppState.
+			// PHD2 reports the end of guiding and of the loop as events
+			// after it answers, and sends no AppState.
+			if before != "Stopped" && before != "Selected" && before != "Looping" {
+				send(conn, Event("GuidingStopped", nil))
+			}
 			send(conn, Event("LoopingExposuresStopped", nil))
 		}
 	}
@@ -165,7 +178,9 @@ func (s *Server) answer(method string, params json.RawMessage) (any, string) {
 	case "get_connected":
 		return s.Equipment, ""
 	case "get_pixel_scale":
-		if s.Scale == nil {
+		// PHD2 knows the camera's pixel size only once the camera is
+		// connected.
+		if s.Scale == nil || !s.Equipment {
 			return nil, ""
 		}
 		return *s.Scale, ""

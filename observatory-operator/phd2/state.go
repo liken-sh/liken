@@ -196,9 +196,9 @@ func (c *Client) applyRead(method string, result json.RawMessage) {
 }
 
 // event applies one event. PHD2 sends AppState only to a new
-// connection, so each event that implies a state sets it, the way
-// PHD2's own sample clients do. A stop implies no state, because PHD2
-// can stop guiding and go on looping, so a stop reads the state again.
+// connection, so each event that implies a state sets it. A stop
+// implies no state, because PHD2 can stop guiding and go on looping,
+// and neither does a lost lock position, so each reads the state again.
 // The caller holds mu.
 func (c *Client) event(m message) {
 	at := time.UnixMilli(int64(math.Round(m.Timestamp * 1000))).UTC()
@@ -209,7 +209,13 @@ func (c *Client) event(m message) {
 	case "AppState":
 		s.AppState = m.State
 	case "LoopingExposures":
-		s.AppState = "Looping"
+		// PHD2 loops in two states: Looping with no star selected, and
+		// Selected with one (Guider::GetExposedState in guider.cpp).
+		if s.AppState != "Selected" {
+			s.AppState = "Looping"
+		}
+	case "StarSelected":
+		s.AppState = "Selected"
 	case "StartCalibration", "Calibrating":
 		s.AppState = "Calibrating"
 		calibrated := false
@@ -228,10 +234,16 @@ func (c *Client) event(m message) {
 		s.Step = &Step{Frame: m.Frame, Time: at, RA: m.RADistanceRaw, Dec: m.DECDistanceRaw, SNR: m.SNR, HFD: m.HFD}
 		s.RMS = c.rms.add(m.RADistanceRaw, m.DECDistanceRaw)
 	case "StarLost":
-		s.AppState = "LostLock"
+		// A star lost while guiding is LostLock. One lost while
+		// looping leaves a state that the event does not say.
+		if s.AppState == "Guiding" || s.AppState == "LostLock" {
+			s.AppState = "LostLock"
+		} else {
+			c.rereadLocked(methodAppState)
+		}
 	case "Paused":
 		s.AppState = "Paused"
-	case "GuidingStopped", "LoopingExposuresStopped":
+	case "GuidingStopped", "LoopingExposuresStopped", "LockPositionLost":
 		c.rereadLocked(methodAppState)
 	case "Alert":
 		// An alert follows most failures of the equipment, such as an

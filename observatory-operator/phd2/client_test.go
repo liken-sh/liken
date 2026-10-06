@@ -12,7 +12,7 @@ import (
 )
 
 // running starts a client of the fake and runs it until the test ends.
-func running(t *testing.T, f *phd2test.Server) *Client {
+func running(t *testing.T, f Dialer) *Client {
 	c := NewClient("east-guider.observatory.svc:4400", WithDialer(f))
 	done := make(chan struct{})
 	go func() {
@@ -64,25 +64,30 @@ func TestAPixelScaleOfNullIsUnknown(t *testing.T) {
 
 func TestEventsMoveTheAppState(t *testing.T) {
 	cases := []struct {
-		event string
-		want  string
+		what   string
+		events []string
+		want   string
 	}{
-		{"LoopingExposures", "Looping"},
-		{"StartCalibration", "Calibrating"},
-		{"Calibrating", "Calibrating"},
-		{"StartGuiding", "Guiding"},
-		{"GuideStep", "Guiding"},
-		{"StarLost", "LostLock"},
-		{"Paused", "Paused"},
-		{"AppState", "Selected"},
+		{"loop", []string{"LoopingExposures"}, "Looping"},
+		{"select a star", []string{"StarSelected"}, "Selected"},
+		{"loop with a star selected", []string{"StarSelected", "LoopingExposures"}, "Selected"},
+		{"start calibrating", []string{"StartCalibration"}, "Calibrating"},
+		{"calibrate", []string{"Calibrating"}, "Calibrating"},
+		{"start guiding", []string{"StartGuiding"}, "Guiding"},
+		{"guide", []string{"GuideStep"}, "Guiding"},
+		{"lose the star while guiding", []string{"StartGuiding", "StarLost"}, "LostLock"},
+		{"pause", []string{"Paused"}, "Paused"},
+		{"connect", []string{"AppState"}, "Selected"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.event, func(t *testing.T) {
+		t.Run(tc.what, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := phd2test.New()
 				c := running(t, f)
 				settled(c)
-				f.Broadcast(phd2test.Event(tc.event, map[string]any{"State": "Selected"}))
+				for _, e := range tc.events {
+					f.Broadcast(phd2test.Event(e, map[string]any{"State": "Selected"}))
+				}
 				if s := settled(c); s.AppState != tc.want {
 					t.Errorf("app state = %q, want %q", s.AppState, tc.want)
 				}
@@ -95,13 +100,13 @@ func TestEventsMoveTheAppState(t *testing.T) {
 // where a stop leaves it: a guider that stops guiding can still loop.
 // So the client reads the state again after each stop.
 func TestAStopReadsTheAppStateAgain(t *testing.T) {
-	for _, stop := range []string{"GuidingStopped", "LoopingExposuresStopped"} {
+	for _, stop := range []string{"GuidingStopped", "LoopingExposuresStopped", "LockPositionLost", "StarLost"} {
 		t.Run(stop, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := phd2test.New()
 				c := running(t, f)
 				settled(c)
-				f.Broadcast(phd2test.Event("StartGuiding", nil))
+				f.Broadcast(phd2test.Event("LoopingExposures", nil))
 				settled(c)
 				f.Set(func(f *phd2test.Server) { f.AppState = "Looping" })
 				f.Clear()

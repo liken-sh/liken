@@ -33,8 +33,15 @@ func exchange(t *testing.T, s *Server, line string) []map[string]any {
 	if _, err := conn.Write([]byte(line + "\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	read()
-	return out
+	// An event can come before the answer, as ConfigurationChange does
+	// before the answer to set_connected.
+	for {
+		read()
+		if _, answer := out[len(out)-1]["jsonrpc"]; answer {
+			out = append(out[:2], out[len(out)-1])
+			return out
+		}
+	}
 }
 
 func TestAnUnknownMethodIsNotFound(t *testing.T) {
@@ -90,8 +97,9 @@ func TestEachReadAnswersTheServersState(t *testing.T) {
 		{"get_app_state", func(s *Server) { s.AppState = "Guiding" }, "Guiding"},
 		{"get_calibrated", func(s *Server) { s.Calibrated = true }, true},
 		{"get_connected", func(s *Server) { s.Equipment = true }, true},
-		{"get_pixel_scale", func(s *Server) { s.Scale = Pointer(2.5) }, 2.5},
-		{"get_pixel_scale", func(s *Server) {}, nil},
+		{"get_pixel_scale", func(s *Server) { s.Scale, s.Equipment = Pointer(2.5), true }, 2.5},
+		{"get_pixel_scale", func(s *Server) { s.Scale = Pointer(2.5) }, nil},
+		{"get_pixel_scale", func(s *Server) { s.Equipment = true }, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.method, func(t *testing.T) {
