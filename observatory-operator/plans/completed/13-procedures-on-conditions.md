@@ -412,6 +412,12 @@ found these defects. Each fix lands with a test against the fakes.
   at `StopSite`. A device whose server only a deactivating reservation
   needs is now `Disconnecting` while it is not connected, and `Idle`
   once its pod is gone.
+- **Deleting a dome unlocks the mounts at once.** With the dome
+  deleted, each mount kept `DOME_LOCKS` and the last relayed park
+  state until its driver restarted or the next `Configure`. The lock
+  relay's pass now writes `DOME_IGNORED` to each running mount of an
+  observatory whose last dome went, and `DOME_LOCKS` when a dome
+  comes, and saves the driver's configuration.
 
 ## How we test it
 

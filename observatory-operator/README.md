@@ -615,7 +615,12 @@ In an observatory with no dome, each mount's `DOME_POLICY` is
 `DOME_IGNORED`. INDI's mount starts locked and unlocks only when a
 dome reports that it is unparked, so with no dome to report, a mount
 under `DOME_LOCKS` never unparks. The observatory then has no
-`LocksRelayed` condition.
+`LocksRelayed` condition. The policy follows the domes at once: when
+an observatory's last `Dome` is deleted, the operator writes
+`DOME_IGNORED` to each running mount of the observatory, and when a
+`Dome` is declared, `DOME_LOCKS`. It saves each driver's configuration
+after the write. Without that, a mount would stay locked to the last
+park state that the operator relayed from the deleted dome.
 
 A driver reads another device's park state through its own INDI
 server, but the dome runs on the observatory's server and each mount

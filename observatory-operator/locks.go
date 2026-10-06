@@ -193,12 +193,18 @@ func (o *operator) explainRefusal(c procCall, h handle, a action, err error) err
 	return err
 }
 
-// keepLocks relays the locks after each change, until ctx ends.
+// keepLocks relays the locks after each change, and keeps each mount's
+// DOME_POLICY in line with its observatory's domes (domepolicy.go),
+// until ctx ends.
 func (o *operator) keepLocks(ctx context.Context) {
+	policies := &mountPolicies{tried: map[string]string{}}
+	defer policies.group.Wait()
 	for {
 		wake := o.changed.wait()
 		if o.stores.ready() {
-			o.relayLocks(o.snapshot())
+			t := o.snapshot()
+			o.relayLocks(t)
+			o.keepDomePolicies(ctx, t, policies)
 		}
 		select {
 		case <-ctx.Done():
