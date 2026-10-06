@@ -392,6 +392,13 @@ found these defects. Each fix lands with a test against the fakes.
   condition still holds with the same transition time, with its `Done`
   actions skipped. The operator then removes the annotation. A
   lifecycle run stays retried through its reservation.
+- **A failed `Job` says why.** A failed `job` action gave only the
+  `Job`'s reason, `BackoffLimitExceeded`. The container's
+  `terminationMessagePolicy` is now `FallbackToLogsOnError`. When the
+  `Job` fails, the operator reads its pod once, and the summary gives
+  the exit code and the last 300 bytes of the termination message.
+  The pod has no `managed-by` label, so no watch holds it, and the
+  `Job`'s `Failed` condition is the event that starts the one read.
 
 ## How we test it
 

@@ -67,8 +67,12 @@ type container struct {
 	SecurityContext *securityContext `json:"securityContext,omitempty"`
 	VolumeMounts    []volumeMount    `json:"volumeMounts,omitempty"`
 	ReadinessProbe  *probe           `json:"readinessProbe,omitempty"`
-	StartupProbe    *probe           `json:"startupProbe,omitempty"`
-	Resources       *resources       `json:"resources,omitempty"`
+	// TerminationMessagePolicy FallbackToLogsOnError makes the kubelet
+	// take a failed container's termination message from the end of
+	// its log when the container writes none.
+	TerminationMessagePolicy string     `json:"terminationMessagePolicy,omitempty"`
+	StartupProbe             *probe     `json:"startupProbe,omitempty"`
+	Resources                *resources `json:"resources,omitempty"`
 }
 
 type containerPort struct {
@@ -163,9 +167,25 @@ type podClaim struct {
 }
 
 type podStatus struct {
-	Phase      string         `json:"phase,omitempty"`
-	PodIP      string         `json:"podIP,omitempty"`
-	Conditions []podCondition `json:"conditions,omitempty"`
+	Phase             string            `json:"phase,omitempty"`
+	PodIP             string            `json:"podIP,omitempty"`
+	Conditions        []podCondition    `json:"conditions,omitempty"`
+	ContainerStatuses []containerStatus `json:"containerStatuses,omitempty"`
+}
+
+// containerStatus holds what a failed Job's container reports when it
+// ended.
+type containerStatus struct {
+	Name  string `json:"name"`
+	State struct {
+		Terminated *terminated `json:"terminated,omitempty"`
+	} `json:"state"`
+}
+
+type terminated struct {
+	ExitCode int32  `json:"exitCode"`
+	Reason   string `json:"reason,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 type podCondition struct {

@@ -120,6 +120,7 @@ func TestAJobRunsOnceAndRestricted(t *testing.T) {
 			{"capabilities.drop", fmt.Sprint(security.Capabilities.Drop), "[ALL]"},
 			{"seccompProfile.type", security.SeccompProfile.Type, "RuntimeDefault"},
 			{"image", pod.Containers[0].Image, "busybox:1.37"},
+			{"terminationMessagePolicy", pod.Containers[0].TerminationMessagePolicy, "FallbackToLogsOnError"},
 			{"the pod's managed-by label", j.Spec.Template.Metadata.Labels[labelManagedBy], ""},
 		}
 		for _, c := range cases {
@@ -155,6 +156,44 @@ func TestAFailedJobFailsTheStepAndARetryRunsItAgain(t *testing.T) {
 			t.Errorf("the operator created %d Jobs, want 2", n)
 		}
 	})
+}
+
+// A Job that fails names its pod's exit code and the last lines of its
+// termination message, which the kubelet takes from the end of the
+// container's log, bounded to 300 bytes. A pod with no terminated
+// container leaves the Job's own reason.
+func TestAFailedJobSaysWhy(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("reading the relay board\n", 40) + "checking the dew heater\n"
+	cases := []struct {
+		name    string
+		pod     bool
+		message string
+		why     string
+	}{
+		{"a short message", true, "checking the dew heater\n", "exit code 3: checking the dew heater"},
+		{"a long message", true, long, "exit code 3: " + strings.Repeat("reading the relay board; ", 11) + "checking the dew heater"},
+		{"no message", true, "", "exit code 3"},
+		{"no pod", false, "", "BackoffLimitExceeded: Job has reached the specified backoff limit"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				w.api.failJobs("BackoffLimitExceeded", "Job has reached the specified backoff limit")
+				if c.pod {
+					w.api.terminateJobPods(3, c.message)
+				}
+				w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+				r := w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)
+				want := "Failed: Observatory lab: job: busybox:1.37: Job " + exampleJob + " failed: " + c.why
+				if got := stepOf(r, observatory.StepActivation).Summary; got != want {
+					t.Errorf("Activation = %q\nwant %q", got, want)
+				}
+			})
+		})
+	}
 }
 
 // An operator that restarts while a Job runs finds the Job it created,

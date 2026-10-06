@@ -363,6 +363,7 @@ func (a *fakeAPI) add(collection string, object map[string]any) map[string]any {
 	metadata["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
 	if plural(collection) == "jobs" {
 		object["status"] = a.jobs.started()
+		defer a.failedPod(object)
 	}
 	if plural(collection) == "pods" {
 		object["status"] = map[string]any{"phase": "Pending"}

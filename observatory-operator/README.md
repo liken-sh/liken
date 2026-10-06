@@ -419,8 +419,15 @@ it.
 A `job` is for what the other actions lack, such as a dew heater's
 relay or a webhook. The operator creates a `batch/v1` `Job` in its own
 namespace, owned by the resource, and the action ends when the `Job`
-ends: `Done` when it succeeds, and `Failed` with the `Job`'s reason and
-message when it fails. The `Job` runs its pod once, with no retry, and
+ends: `Done` when it succeeds, and `Failed` when it fails. A failed
+action's summary gives the exit code of the `Job`'s container and the
+last lines, at most 300 bytes, of its termination message, such as
+`Job observatory-lab-activation-a799431dd4 failed: exit code 3: checking the dew heater`.
+The container's `terminationMessagePolicy` is `FallbackToLogsOnError`,
+so a script that writes no termination message gives the end of its
+log. When no pod reports how its container ended, such as after
+`activeDeadlineSeconds`, the summary gives the `Job`'s own reason and
+message. The `Job` runs its pod once, with no retry, and
 its `activeDeadlineSeconds` is the action's timeout. Kubernetes
 deletes it an hour after it ends, so its logs stay that long. The
 container runs as user 1000 with no capabilities and the

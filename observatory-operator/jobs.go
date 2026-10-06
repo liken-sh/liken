@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -130,7 +131,10 @@ func jobFor(t *tree, name string, r resource, trigger string, spec observatory.J
 					Containers: []container{{
 						Name: "job", Image: spec.Image, Command: spec.Command, Args: spec.Args, Env: env,
 						SecurityContext: security,
-						VolumeMounts:    []volumeMount{{Name: "tmp", MountPath: tmpDir}},
+						// A script that fails usually prints why and exits,
+						// so the end of its log is the reason a person needs.
+						TerminationMessagePolicy: "FallbackToLogsOnError",
+						VolumeMounts:             []volumeMount{{Name: "tmp", MountPath: tmpDir}},
 					}},
 					Volumes: []volume{{Name: "tmp", EmptyDir: &emptyDir{}}},
 				},
@@ -178,6 +182,11 @@ func (o *operator) runJob(ctx context.Context, c procCall, spec observatory.Job,
 			return false, "deleting Job " + name + " of an earlier run", o.deleteJob(name)
 		case held:
 			done, err := j.ended()
+			if err != nil {
+				if why, ok := o.jobPodEnd(name); ok {
+					err = fmt.Errorf("Job %s failed: %s", name, why)
+				}
+			}
 			return done, "running Job " + name, err
 		case created:
 			return false, "waiting for Job " + name, nil
@@ -203,4 +212,64 @@ func (o *operator) deleteJob(name string) error {
 		return nil
 	}
 	return err
+}
+
+// messageTail is how many bytes of a failed container's termination
+// message an action's summary keeps: the last lines, which name what
+// the script did when it failed.
+const messageTail = 300
+
+// jobPodEnd answers how the container of a failed Job's pod ended,
+// such as "exit code 3: checking the dew heater", and false when no
+// pod reports a terminated container. The pod carries no managed-by
+// label, so no watch of the operator holds it. The Job's Failed
+// condition is the event, and this reads the pod once, when it
+// arrives.
+func (o *operator) jobPodEnd(name string) (string, bool) {
+	var pods struct {
+		Items []pod `json:"items"`
+	}
+	path := "/api/v1/namespaces/" + o.namespace + "/pods?labelSelector=" + url.QueryEscape(labelName+"="+name)
+	if err := o.client.RequestJSON(http.MethodGet, path, nil, &pods); err != nil {
+		o.logf("reading the pod of Job %s: %v", name, err)
+		return "", false
+	}
+	for _, p := range pods.Items {
+		for _, c := range p.Status.ContainerStatuses {
+			if end := c.State.Terminated; end != nil {
+				return terminationText(*end), true
+			}
+		}
+	}
+	return "", false
+}
+
+// terminationText says how a container ended: its exit code, a reason
+// other than the plain Error, such as OOMKilled, and the last lines of
+// its message, one line after another.
+func terminationText(end terminated) string {
+	text := fmt.Sprintf("exit code %d", end.ExitCode)
+	if end.Reason != "" && end.Reason != "Error" {
+		text += " (" + end.Reason + ")"
+	}
+	message := strings.TrimSpace(end.Message)
+	if len(message) > messageTail {
+		message = message[len(message)-messageTail:]
+		// The cut can fall inside a line or a character, so the text
+		// starts at the next whole line.
+		if _, rest, found := strings.Cut(message, "\n"); found {
+			message = rest
+		}
+		message = strings.ToValidUTF8(message, "")
+	}
+	var lines []string
+	for line := range strings.Lines(message) {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return text
+	}
+	return text + ": " + strings.Join(lines, "; ")
 }

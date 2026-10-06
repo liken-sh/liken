@@ -11,6 +11,9 @@ type fakeJobController struct {
 	hold bool
 	// failure is the Failed condition of each new Job, when it is set.
 	failure *jobCondition
+	// terminated is the state of the container of each failed Job's
+	// pod, when it is set. Without it, a failed Job has no pod.
+	terminated map[string]any
 }
 
 // started answers the status of a Job that the operator creates now.
@@ -71,4 +74,33 @@ func (a *fakeAPI) completeJob(name string) {
 	next := clone(held)
 	next["status"] = completeJob()
 	a.store(jobsPath, name, next, "MODIFIED")
+}
+
+// terminateJobPods gives each Job that fails from now on a pod whose
+// container ended with an exit code and a termination message, as the
+// kubelet reports it.
+func (a *fakeAPI) terminateJobPods(exitCode int, message string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.jobs.terminated = map[string]any{"exitCode": exitCode, "reason": "Error", "message": message}
+}
+
+// failedPod stores the pod of a Job that failed, with the labels of the
+// Job's template and the label that the Job controller adds. The
+// caller holds a.mu.
+func (a *fakeAPI) failedPod(object map[string]any) {
+	if a.jobs.failure == nil || a.jobs.terminated == nil {
+		return
+	}
+	name := object["metadata"].(map[string]any)["name"].(string)
+	template := object["spec"].(map[string]any)["template"].(map[string]any)
+	labels := clone(template["metadata"].(map[string]any)["labels"].(map[string]any))
+	labels["batch.kubernetes.io/job-name"] = name
+	a.store(podsCollection, name+"-x7k2p", map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{"name": name + "-x7k2p", "namespace": testNamespace, "labels": labels},
+		"status": map[string]any{"phase": "Failed", "containerStatuses": []any{
+			map[string]any{"name": "job", "state": map[string]any{"terminated": a.jobs.terminated}},
+		}},
+	}, "ADDED")
 }
