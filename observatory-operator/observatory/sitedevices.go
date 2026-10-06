@@ -13,8 +13,8 @@ type (
 )
 
 // DomeSpec describes a device with INDI's DOME_INTERFACE: a dome or a
-// roll-off roof. The Observatory's policies set how it and the mounts
-// lock each other.
+// roll-off roof. While an Observatory has a dome, the dome and the
+// mounts lock each other's park, and the shutter follows the park.
 type DomeSpec struct {
 	ObservatoryDevice
 }

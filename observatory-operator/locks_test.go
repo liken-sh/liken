@@ -1,7 +1,7 @@
 package main
 
-// The lock policies of the example's Observatory, which sets both,
-// across the observatory's server and the servers of its telescopes.
+// The park locks of the example's Observatory, which has a dome, across
+// the observatory's server and the servers of its telescopes.
 
 import (
 	"slices"
@@ -46,13 +46,14 @@ func (w *world) relayedLast(server, property, want string) {
 	})
 }
 
-func TestTheOperatorWritesBothLockPolicies(t *testing.T) {
+func TestTheOperatorWritesTheDomePolicies(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := bothReady(t)
 		changes := w.indi.changes()
 		for _, want := range []string{
 			"lab-observatory Dome Simulator.MOUNT_POLICY MOUNT_IGNORED=Off MOUNT_LOCKS=On",
+			"lab-observatory Dome Simulator.DOME_SHUTTER_PARK_POLICY SHUTTER_CLOSE_ON_PARK=On SHUTTER_OPEN_ON_UNPARK=On",
 			"east-telescope Telescope Simulator.DOME_POLICY DOME_IGNORED=Off DOME_LOCKS=On",
 			"west-telescope Telescope Simulator.DOME_POLICY DOME_IGNORED=Off DOME_LOCKS=On",
 		} {
@@ -82,7 +83,7 @@ func TestTheDomeDoesNotParkWhileAnyMountIsUnparked(t *testing.T) {
 		w.until(time.Minute, "no Warning about the dome", func() bool {
 			return len(eventsAbout(w.api, observatory.DomeKind, "lab", reasonDomeParkRefused)) == 1
 		})
-		want := "DomeParkRefused: Dome lab refused to park: Mount west is unparked or moving, and Observatory lab sets mountLocksDome, so the dome stays unparked until every mount parks"
+		want := "DomeParkRefused: Dome lab refused to park, because Mount west is unparked or moving. In Observatory lab, a dome does not park until every mount parks"
 		if got := eventsAbout(w.api, observatory.DomeKind, "lab", reasonDomeParkRefused); got[0] != want {
 			t.Errorf("event = %q\nwant %q", got[0], want)
 		}
@@ -114,7 +115,7 @@ func TestAMountDoesNotUnparkWhileTheDomeIsParked(t *testing.T) {
 		w.until(time.Minute, "no Warning about the mount", func() bool {
 			return len(eventsAbout(w.api, observatory.MountKind, "east", reasonMountUnparkRefused)) == 1
 		})
-		want := "MountUnparkRefused: Mount east refused to unpark: Dome lab is parked or moving, and Observatory lab sets domeLocksMount, so the mount stays parked until the dome unparks"
+		want := "MountUnparkRefused: Mount east refused to unpark, because Dome lab is parked or moving. In Observatory lab, a mount does not unpark until every dome unparks"
 		if got := eventsAbout(w.api, observatory.MountKind, "east", reasonMountUnparkRefused); got[0] != want {
 			t.Errorf("event = %q\nwant %q", got[0], want)
 		}
@@ -207,12 +208,48 @@ func TestTheObservatoryReportsTheRelay(t *testing.T) {
 			t.Errorf("LocksRelayed = %s %q\nwant True %q", c.Status, c.Message, want)
 		}
 
-		site, _ := w.api.object(kindCollection(observatory.ObservatoryKind), "lab")
-		delete(site["spec"].(map[string]any), "policies")
-		w.api.put(kindCollection(observatory.ObservatoryKind), site)
+		w.api.deleteNamed(kindCollection(observatory.DomeKind), "lab")
 		w.until(time.Minute, "the condition is still there", func() bool {
 			return siteLocks(t, w).Type == ""
 		})
+	})
+}
+
+// With no dome, nothing locks a mount. INDI's mount starts locked and
+// waits for a dome's report to unlock it, so the mount ignores the dome.
+func TestAnObservatoryWithNoDomeHasNoLocks(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.api.deleteNamed(kindCollection(observatory.DomeKind), "lab")
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		if got := w.indi.parked("east-telescope", "Telescope Simulator", "DOME_POLICY"); !strings.HasSuffix(got, " DOME_IGNORED") {
+			t.Errorf("DOME_POLICY is %q, want DOME_IGNORED On", got)
+		}
+		if got := w.indi.relays(); len(got) != 0 {
+			t.Errorf("relays = %v, want none", got)
+		}
+		if c := siteLocks(t, w); c.Type != "" {
+			t.Errorf("LocksRelayed = %s %q, want none", c.Status, c.Reason)
+		}
+	})
+}
+
+// A refusal names every device that holds the lock.
+func TestARefusalNamesEveryUnparkedMount(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := bothReady(t)
+		w.relayedLast("lab-observatory", "TELESCOPE_PARK", mountsUnparkedToLab)
+		w.indi.ask("lab-observatory", "Dome Simulator", "DOME_PARK", "PARK=On", "UNPARK=Off")
+		w.until(time.Minute, "no Warning about the dome", func() bool {
+			return len(eventsAbout(w.api, observatory.DomeKind, "lab", reasonDomeParkRefused)) == 1
+		})
+		want := "DomeParkRefused: Dome lab refused to park, because Mount east and Mount west are unparked or moving. In Observatory lab, a dome does not park until every mount parks"
+		if got := eventsAbout(w.api, observatory.DomeKind, "lab", reasonDomeParkRefused); got[0] != want {
+			t.Errorf("event = %q\nwant %q", got[0], want)
+		}
 	})
 }
 

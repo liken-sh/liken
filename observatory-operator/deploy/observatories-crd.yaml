@@ -63,7 +63,7 @@ spec:
             spec:
               type: object
               required: [location]
-              description: "The site and its policies."
+              description: "The site."
               properties:
                 location:
                   type: object
@@ -94,51 +94,6 @@ spec:
                       maximum: 9000
                       description: >-
                         The elevation, in meters above mean sea level.
-                policies:
-                  type: object
-                  description: >-
-                    The rules between the domes and the mounts. Each one
-                    is off unless it is set here. The operator writes
-                    each policy to the drivers, and the drivers enforce
-                    them. The dome enforces the shutter policies alone,
-                    also while the operator is down. A lock policy needs
-                    a driver to read the park state of a device on
-                    another INDI server, so the operator relays each
-                    park state between the observatory's server and the
-                    telescopes' servers, and the `LocksRelayed`
-                    condition reports the relay. While the operator is
-                    down, each driver keeps the last park state that the
-                    operator relayed, and a later park or unpark is not
-                    relayed. Optional.
-                  properties:
-                    domeLocksMount:
-                      type: boolean
-                      description: >-
-                        Sets each mount's `DOME_POLICY` to `DOME_LOCKS`:
-                        the mount does not unpark while a dome of the
-                        observatory is parked or moving. The mount does
-                        not park when the dome parks: INDI leaves that
-                        to its watchdog driver.
-                    mountLocksDome:
-                      type: boolean
-                      description: >-
-                        Sets each dome's `MOUNT_POLICY` to `MOUNT_LOCKS`:
-                        the dome does not park while the mount of any
-                        telescope in the observatory is unparked or
-                        moving. A mount whose server does not run is not
-                        counted: the `Secure` step parked it.
-                    closeShutterOnPark:
-                      type: boolean
-                      description: >-
-                        Sets `SHUTTER_CLOSE_ON_PARK` in the dome's
-                        `DOME_SHUTTER_PARK_POLICY`: the dome closes its
-                        shutter when it parks.
-                    openShutterOnUnpark:
-                      type: boolean
-                      description: >-
-                        Sets `SHUTTER_OPEN_ON_UNPARK` in the dome's
-                        `DOME_SHUTTER_PARK_POLICY`: the dome opens its
-                        shutter when it unparks.
             status:
               type: object
               description: >-
@@ -169,8 +124,8 @@ spec:
                   description: >-
                     `Ready` is `True` while the observatory's server and
                     devices run and are connected. `LocksRelayed` is
-                    present while `spec.policies` sets a lock policy. It
-                    is `True` while the operator relays the park states
+                    present while the observatory has a `Dome`. It is
+                    `True` while the operator relays the park states
                     that the locks need, `False` with the reason
                     `Waiting` while a dome or a mount does not report
                     what the relay needs, and `False` with the reason

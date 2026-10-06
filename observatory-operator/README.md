@@ -65,7 +65,7 @@ so `kubectl get astro` lists the whole observatory. Each resource names
 its parent by name in its spec, so every reference points up the tree:
 
 ```
-Observatory          the site: location, policies, Dome, WeatherStation
+Observatory          the site: location, Dome, WeatherStation
  └─ Telescope        one Mount, one INDI server, one Guider
      ├─ OpticalTube  aperture and focal length; no driver
      └─ OpticalTrain one light path; names one OpticalTube
@@ -132,7 +132,7 @@ Every device kind shares these spec fields:
   none.
 
 The other spec fields are the few that activation needs:
-`Observatory.spec.location` and `spec.policies`, the tube's
+`Observatory.spec.location`, the tube's
 `aperture` and `focalLength` in millimeters, the camera's `gain`,
 `offset`, and `temperature` setpoint in degrees Celsius, the filter
 wheel's `filters`, the guider's `opticalTrain` and `pulses`, and the
@@ -249,7 +249,7 @@ goes on.
 | Step | What it does | Deadline |
 |---|---|---|
 | `Wait` | Waits for `spec.start`, and for no other reservation to hold the telescope. | none |
-| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's shutter policies and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. | 10 min |
+| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. | 10 min |
 | `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. | 10 min |
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the sky quality meters, the receivers, and the cameras, in that order. | 2 min |
@@ -328,17 +328,27 @@ for an hour.
 
 ## The dome and mount locks
 
-`Observatory.spec.policies` can lock the domes and the mounts against
-each other. INDI's drivers enforce both locks, and the operator writes
-each policy and relays what each driver needs to read:
+While an `Observatory` has a `Dome`, the domes and the mounts lock
+each other's park, and no field turns the locks off. INDI's drivers
+enforce both locks, and the operator writes each policy and relays
+what each driver needs to read:
 
-- `domeLocksMount` sets each mount's `DOME_POLICY` to `DOME_LOCKS`.
-  The mount refuses to unpark while a dome is parked or moving. The
-  mount does not park when the dome parks: INDI leaves that to its
-  watchdog driver.
-- `mountLocksDome` sets each dome's `MOUNT_POLICY` to `MOUNT_LOCKS`.
-  The dome refuses to park while the mount of any reserved telescope in
-  the observatory is unparked or moving.
+- Each mount's `DOME_POLICY` is `DOME_LOCKS`. The mount refuses to
+  unpark while a dome is parked or moving. The mount does not park
+  when the dome parks: INDI leaves that to its watchdog driver.
+- Each dome's `MOUNT_POLICY` is `MOUNT_LOCKS`. The dome refuses to
+  park while the mount of any reserved telescope in the observatory is
+  unparked or moving.
+- Each dome's shutter follows its park state:
+  `DOME_SHUTTER_PARK_POLICY` has `SHUTTER_CLOSE_ON_PARK` and
+  `SHUTTER_OPEN_ON_UNPARK` both On. The dome enforces this alone, also
+  while the operator is down.
+
+In an observatory with no dome, each mount's `DOME_POLICY` is
+`DOME_IGNORED`. INDI's mount starts locked and unlocks only when a
+dome reports that it is unparked, so with no dome to report, a mount
+under `DOME_LOCKS` never unparks. The observatory then has no
+`LocksRelayed` condition.
 
 A driver reads another device's park state through its own INDI
 server, but the dome runs on the observatory's server and each mount

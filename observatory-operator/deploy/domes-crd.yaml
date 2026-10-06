@@ -79,8 +79,11 @@ spec:
               required: [driver]
               description: >-
                 One dome or roll-off roof, with INDI's `DOME_INTERFACE`.
-                The `Observatory`'s `spec.policies` set how the dome and
-                the mounts lock each other.
+                While an `Observatory` has a dome, the dome does not
+                park while a mount of the observatory is unparked, a
+                mount does not unpark while the dome is parked, and the
+                shutter closes when the dome parks and opens when it
+                unparks.
               properties:
                 observatory:
                   type: string

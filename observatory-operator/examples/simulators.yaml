@@ -43,14 +43,14 @@
 
 # The site. The location is Cerro Tololo Inter-American Observatory in
 # Chile, a public observatory. The operator writes it to each mount and
-# GPS. The policies are off unless they are set. The operator writes
-# each policy to the drivers, and the drivers enforce them. Here the
-# dome closes its shutter when it parks, a mount does not unpark while
-# the dome is parked, and the dome does not park while the mount of
-# `east` or of `west` is unparked. The dome runs on the observatory's
-# server and each mount on its telescope's, so the operator relays each
-# park state that a lock needs between the servers. The condition
-# `LocksRelayed` on the `Observatory` reports the relay.
+# GPS. The observatory has a dome, so the park locks hold: a mount does
+# not unpark while the dome is parked, and the dome does not park while
+# the mount of `east` or of `west` is unparked. The dome closes its
+# shutter when it parks, and opens it when it unparks. The dome runs on
+# the observatory's server and each mount on its telescope's, so the
+# operator relays each park state that a lock needs between the
+# servers. The condition `LocksRelayed` on the `Observatory` reports
+# the relay.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Observatory
 metadata:
@@ -60,10 +60,6 @@ spec:
     latitude: -30.169
     longitude: -70.806
     elevation: 2207
-  policies:
-    domeLocksMount: true
-    mountLocksDome: true
-    closeShutterOnPark: true
 ---
 # The devices that no telescope owns run on the observatory's own INDI
 # server. That server runs while at least one reservation here is
@@ -334,9 +330,9 @@ spec:
 # reservation is active. A `ResourceClaim` would reserve the real
 # hardware, so the operator creates none for a device on the shelf,
 # even when its spec has a `claim`. To install it, set `opticalTrain`.
-# While the train's telescope is reserved, that edit restarts the
-# telescope's INDI server, which disconnects every device on it for a
-# few seconds.
+# While the train's telescope is reserved, the operator starts the
+# focuser's driver on the running INDI server and connects it. The
+# other devices on that server stay connected.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Focuser
 metadata:

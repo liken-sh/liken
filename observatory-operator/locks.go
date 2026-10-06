@@ -1,8 +1,11 @@
 package main
 
-// The lock policies between an observatory's domes and its mounts.
+// The park locks between an observatory's domes and its mounts. They
+// hold whenever the observatory has a dome, and no field turns them
+// off: a dome that parks onto a telescope pointed through its slit can
+// break the telescope.
 //
-// INDI enforces both policies in the drivers. A mount whose DOME_POLICY
+// INDI enforces both locks in the drivers. A mount whose DOME_POLICY
 // is DOME_LOCKS refuses to unpark while the dome it snoops reports
 // DOME_PARK parked. A dome whose MOUNT_POLICY is MOUNT_LOCKS refuses to
 // park while the mount it snoops reports TELESCOPE_PARK unparked
@@ -96,11 +99,11 @@ type lockWatch struct {
 
 func (l lockWatch) id() string { return l.h.server.name + "/" + l.h.name + "/" + l.property }
 
-// sitePlan is what the lock policies of one observatory need now.
+// sitePlan is what the park locks of one observatory need now.
 type sitePlan struct {
 	relays  []lockRelay
 	watches []lockWatch
-	// condition is nil when the observatory sets no lock policy.
+	// condition is nil when the observatory has no dome.
 	condition *observatory.Condition
 }
 
@@ -168,15 +171,20 @@ func (o *operator) keepLocks(ctx context.Context) {
 	}
 }
 
+// domesOf answers the domes of an observatory, the Dome resources whose
+// spec.observatory names it. The park locks hold while there is one.
+func domesOf(t *tree, site *observatory.Observatory) []*device {
+	return sortedDevices(t.devicesOf(serverRef{observatory.ObservatoryKind, site.Metadata.Name}, observatory.DomeKind))
+}
+
 // planLocks answers the relays, the watches, and the condition of one
-// observatory's lock policies.
+// observatory's park locks.
 func (o *operator) planLocks(t *tree, site *observatory.Observatory) sitePlan {
-	policies := site.Spec.Policies
-	if policies == nil || (!policies.DomeLocksMount && !policies.MountLocksDome) {
+	domeDevices := domesOf(t, site)
+	if len(domeDevices) == 0 {
 		return sitePlan{}
 	}
 	siteRef := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
-	domeDevices := sortedDevices(t.devicesOf(siteRef, observatory.DomeKind))
 	domeHandles := o.handlesOf(t, siteRef, domeDevices)
 	// Only a held telescope's mount counts. A telescope that no
 	// reservation holds has no server, and the Secure step of its last
@@ -207,15 +215,9 @@ func (o *operator) planLocks(t *tree, site *observatory.Observatory) sitePlan {
 	// Secure step parked it before its driver stopped.
 	domes := parkStates(domeHandles, domeDevices, "DOME_PARK", "UNPARK", func(*device) bool { return true })
 	mounts := parkStates(mountHandles, mountDevices, "TELESCOPE_PARK", "PARK", func(d *device) bool { return !secured[d.key()] })
-	var done, waiting []string
-	if policies.DomeLocksMount {
-		d, w := plan.domeLocksMount(site, domes, mountHandles)
-		done, waiting = append(done, d...), append(waiting, w...)
-	}
-	if policies.MountLocksDome {
-		d, w := plan.mountLocksDome(site, domeHandles, mounts)
-		done, waiting = append(done, d...), append(waiting, w...)
-	}
+	done, waiting := plan.domeLocksMount(site, domes, mountHandles)
+	d, w := plan.mountLocksDome(site, domeHandles, mounts)
+	done, waiting = append(done, d...), append(waiting, w...)
 	if len(waiting) > 0 {
 		plan.condition = locksCondition(observatory.ConditionFalse, reasonLocksWaiting, "Waiting for "+strings.Join(waiting, ", and for "))
 		return plan
@@ -238,9 +240,6 @@ func parkedBySecure(r *observatory.Reservation) bool {
 // domeLocksMount relays the domes' park state to each mount. It answers
 // what it relays and what it waits for, for the condition.
 func (plan *sitePlan) domeLocksMount(site *observatory.Observatory, domes []parkState, mounts []handle) (done, waiting []string) {
-	if len(domes) == 0 {
-		return []string{"found no dome to relay"}, nil
-	}
 	holding, silent := holdingAndSilent(domes, "DOME_PARK")
 	waiting = silent
 	parked := len(holding) > 0
@@ -251,8 +250,8 @@ func (plan *sitePlan) domeLocksMount(site *observatory.Observatory, domes []park
 	var to []string
 	for _, h := range mounts {
 		plan.watches = append(plan.watches, lockWatch{h: h, property: "TELESCOPE_PARK", locked: parked, reason: reasonMountUnparkRefused,
-			message: fmt.Sprintf("%s refused to unpark: %s is parked or moving, and Observatory %s sets domeLocksMount, so the mount stays parked until the dome unparks",
-				h, stateNames(holding), site.Metadata.Name)})
+			message: fmt.Sprintf("%s refused to unpark, because %s parked or moving. In Observatory %s, a mount does not unpark until every dome unparks",
+				h, subject(holding), site.Metadata.Name)})
 		dome, ok := snooped(h, "ACTIVE_DOME")
 		if !ok {
 			waiting = append(waiting, h.String()+" to name a dome in ACTIVE_DEVICES")
@@ -288,8 +287,8 @@ func (plan *sitePlan) mountLocksDome(site *observatory.Observatory, domes []hand
 	}
 	for _, h := range domes {
 		plan.watches = append(plan.watches, lockWatch{h: h, property: "DOME_PARK", locked: unparked, reason: reasonDomeParkRefused,
-			message: fmt.Sprintf("%s refused to park: %s is unparked or moving, and Observatory %s sets mountLocksDome, so the dome stays unparked until every mount parks",
-				h, stateNames(holding), site.Metadata.Name)})
+			message: fmt.Sprintf("%s refused to park, because %s unparked or moving. In Observatory %s, a dome does not park until every mount parks",
+				h, subject(holding), site.Metadata.Name)})
 		mount, ok := snooped(h, "ACTIVE_TELESCOPE")
 		if !ok {
 			waiting = append(waiting, h.String()+" to name a mount in ACTIVE_DEVICES")
@@ -368,6 +367,23 @@ func stateNames(states []parkState) string {
 		out = append(out, s.String())
 	}
 	return strings.Join(out, ", ")
+}
+
+// subject answers the devices as the subject of a sentence, with the
+// verb that agrees with them: "Dome lab is", or "Mount east and Mount
+// west are".
+func subject(states []parkState) string {
+	var names []string
+	for _, s := range states {
+		names = append(names, s.String())
+	}
+	switch len(names) {
+	case 0:
+		return "no device is"
+	case 1:
+		return names[0] + " is"
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " are"
 }
 
 func isOn(p indi.Property, member string) bool {
