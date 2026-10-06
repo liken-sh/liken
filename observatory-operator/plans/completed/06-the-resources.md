@@ -268,7 +268,7 @@ policies. A driver snoops only devices on its own server, and the dome
 runs on the observatory's server, so the operator writes neither
 `DOME_POLICY` nor `MOUNT_POLICY`, and it enforces neither across the
 servers.
-[Plan 08](../08-the-reconciler.md) holds that work.
+[Plan 08](08-the-reconciler.md) holds that work.
 
 ## Drivers and images
 

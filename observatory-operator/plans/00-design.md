@@ -71,6 +71,6 @@ must hold.
 | [05](05-the-property-schema.md) | Typed fields generated from the simulators and INDI's documentation |
 | [06](completed/06-the-resources.md) | Built: the resources, as CRDs and the package `observatory` |
 | [07](completed/07-the-operator-runs-the-topology.md) | Built and drilled on a test cluster: the operator creates the topology from the resources |
-| [08](08-the-reconciler.md) | Partly built and drilled: the reconciler, in the operator; the lock policies between the dome and the mounts are not built |
+| [08](completed/08-the-reconciler.md) | Built and drilled: the reconciler, in the operator; the lock policies between the dome and the mounts are not built |
 | [09](completed/09-the-guider.md) | Built and drilled on a test cluster: the guider, PHD2 in its own pod beside a headless weston |
 | [10](10-access-from-a-desktop.md) | KStars on a desktop, which completes mode 1 |

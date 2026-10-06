@@ -1,10 +1,12 @@
 # 08, The reconciler
 
-Proposed on 2026-10-05. Partly built on 2026-10-05, with plan 07, in
-the operator and not in each server's pod. "What was built" names the
-parts that are built and the part that is not. The restart drills ran
-on the two-node test cluster of plan 03 the same day, and "What the
-test cluster measured" gives the results.
+Proposed on 2026-10-05. Built on 2026-10-05, with plan 07, in the
+operator and not in each server's pod. Closed on 2026-10-06. The
+restart drills ran on the two-node test cluster of plan 03 on
+2026-10-05, and "What the test cluster measured" gives the results.
+The lock policies between the dome and the mounts are not built, and
+moved to the open problem [The dome and mount locks cross two
+servers](../open-problems/the-dome-and-mount-locks-cross-two-servers.md).
 
 ## The problem
 
@@ -78,7 +80,9 @@ work below runs there.
   the mount, and the dome runs on the observatory's server and each
   mount on its telescope's. The shutter policies need no snoop, and the
   operator writes them. Enforcing the lock policies across servers is
-  work for the operator.
+  work for the operator. The open problem [The dome and mount locks
+  cross two servers](../open-problems/the-dome-and-mount-locks-cross-two-servers.md)
+  holds it.
 
 The unit tests restart a device's pod and the server's pod while a
 reservation is `Ready`, and each device came back connected with its

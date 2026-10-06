@@ -49,7 +49,8 @@
 # such as `mountLocksDome`: the dome runs on the observatory's server,
 # each mount runs on its telescope's server, and a driver snoops only
 # devices on its own server. `Configure` notes each lock policy that it
-# skips. Plan 08 holds the work.
+# skips. The open problem "The dome and mount locks cross two servers"
+# holds the work.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Observatory
 metadata:

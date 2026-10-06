@@ -31,7 +31,8 @@ type Location struct {
 // driver snoops only devices on its own server, but the dome runs on
 // the observatory's server and each mount on its telescope's. So the
 // operator does not write or enforce the lock policies yet, and
-// Configure notes each one it skips. Plan 08 holds the work.
+// Configure notes each one it skips. The open problem "The dome and
+// mount locks cross two servers" holds the work.
 type Policies struct {
 	// DomeLocksMount sets the mount's DOME_POLICY to DOME_LOCKS: the
 	// mount does not unpark while the dome is parked, and parks when
