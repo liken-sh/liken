@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -26,10 +27,11 @@ import (
 const statusWindow = time.Second
 
 func (o *operator) writeStatuses(ctx context.Context) {
+	seen := &statusMemo{}
 	for {
 		wake := o.changed.wait()
 		if o.stores.ready() {
-			o.writeAll(ctx, o.snapshot())
+			o.writeAll(ctx, o.snapshot(), seen)
 		}
 		select {
 		case <-ctx.Done():
@@ -47,66 +49,84 @@ func (o *operator) writeStatuses(ctx context.Context) {
 }
 
 // writeAll composes and writes every status but the reservations'.
-func (o *operator) writeAll(ctx context.Context, t *tree) {
+func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
 	client := o.client.WithContext(ctx)
+	seen.begin()
 	composed := map[string]deviceStatus{}
 	for _, d := range t.devices {
 		next := o.deviceStatus(t, d)
 		composed[d.key()] = next
 		object := d.object
-		writeStatus(client, d.kind, &object, func(held *deviceObject) bool {
-			next.Conditions = mergeConditions(held.Status.Conditions, next.Conditions)
-			if equalJSON(held.Status, next) {
-				return false
-			}
-			held.APIVersion, held.Kind, held.Status = observatory.APIVersion, d.kind.Name, next
-			return true
-		})
+		writeStatus(client, seen, d.kind, &object,
+			func(held *deviceObject) any { return held.Status },
+			func(held *deviceObject) any {
+				next.Conditions = mergeConditions(held.Status.Conditions, next.Conditions)
+				held.APIVersion, held.Kind, held.Status = observatory.APIVersion, d.kind.Name, next
+				return next
+			})
 	}
 	for _, telescope := range t.telescopes {
 		next := o.telescopeStatus(t, telescope, composed)
-		writeTyped(client, observatory.TelescopeKind, telescope, next, func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions })
+		writeTyped(client, seen, observatory.TelescopeKind, telescope, next, func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions })
 	}
 	for _, site := range t.observatories {
 		next := o.observatoryStatus(t, site, composed)
-		writeTyped(client, observatory.ObservatoryKind, site, next, func(s *observatory.ObservatoryStatus) *[]observatory.Condition { return &s.Conditions })
+		writeTyped(client, seen, observatory.ObservatoryKind, site, next, func(s *observatory.ObservatoryStatus) *[]observatory.Condition { return &s.Conditions })
 	}
 	for _, train := range t.trains {
 		next := trainStatus(t, train, composed)
-		writeTyped(client, observatory.OpticalTrainKind, train, next, func(s *observatory.OpticalTrainStatus) *[]observatory.Condition { return &s.Conditions })
+		writeTyped(client, seen, observatory.OpticalTrainKind, train, next, func(s *observatory.OpticalTrainStatus) *[]observatory.Condition { return &s.Conditions })
 	}
 	for _, tube := range t.tubes {
 		next := tubeStatus(t, tube)
-		writeTyped(client, observatory.OpticalTubeKind, tube, next, func(s *observatory.OpticalTubeStatus) *[]observatory.Condition { return &s.Conditions })
+		writeTyped(client, seen, observatory.OpticalTubeKind, tube, next, func(s *observatory.OpticalTubeStatus) *[]observatory.Condition { return &s.Conditions })
 	}
 	for _, guider := range t.guiders {
 		next := guiderStatus(t, guider)
-		writeTyped(client, observatory.GuiderKind, guider, next, func(s *observatory.GuiderStatus) *[]observatory.Condition { return &s.Conditions })
+		writeTyped(client, seen, observatory.GuiderKind, guider, next, func(s *observatory.GuiderStatus) *[]observatory.Condition { return &s.Conditions })
 	}
 }
 
 // writeTyped writes one status of a kind of the observatory package.
 // conditions answers the status's conditions, which keep their
 // transition times when their status holds.
-func writeTyped[S, T any](client *apiclient.Client, kind observatory.Kind, object *observatory.Object[S, T], next T, conditions func(*T) *[]observatory.Condition) {
+func writeTyped[S, T any](client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *observatory.Object[S, T], next T, conditions func(*T) *[]observatory.Condition) {
 	held := *object
-	writeStatus(client, kind, &held, func(copy *observatory.Object[S, T]) bool {
-		*conditions(&next) = mergeConditions(*conditions(&copy.Status), *conditions(&next))
-		if equalJSON(copy.Status, next) {
-			return false
-		}
-		copy.APIVersion, copy.Kind, copy.Status = observatory.APIVersion, kind.Name, next
-		return true
-	})
+	writeStatus(client, seen, kind, &held,
+		func(copy *observatory.Object[S, T]) any { return copy.Status },
+		func(copy *observatory.Object[S, T]) any {
+			*conditions(&next) = mergeConditions(*conditions(&copy.Status), *conditions(&next))
+			copy.APIVersion, copy.Kind, copy.Status = observatory.APIVersion, kind.Name, next
+			return next
+		})
 }
 
-// writeStatus writes one status, and logs a failure: the next window
-// composes the status again and writes it then. An object deleted
-// since the read needs no status.
-func writeStatus[T any, P memo.Object[T]](client *apiclient.Client, kind observatory.Kind, object *T, apply func(*T) bool) {
+// writeStatus writes one status when it differs from the stored one,
+// and logs a failure: the next window composes the status again and
+// writes it then. An object deleted since the read needs no status.
+// stored answers the object's status, and apply sets the next status
+// on the object and answers it.
+func writeStatus[T any, P memo.Object[T]](client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *T, stored, apply func(*T) any) {
 	meta := P(object).GetObjectMeta()
-	path := objectPath(kind, meta.GetNamespace(), meta.GetName())
-	_, err := informer.SettleStatus[T, P](client, nil, path, object, apply)
+	key, path := kind.Name+"/"+meta.GetName(), objectPath(kind, meta.GetNamespace(), meta.GetName())
+	var body []byte
+	wrote, err := informer.SettleStatus[T, P](client, nil, path, object, func(held *T) bool {
+		was, version := stored(held), P(held).GetObjectMeta().GetResourceVersion()
+		next := apply(held)
+		// An error leaves body nil, which matches no record (statusMemo.same).
+		body, _ = json.Marshal(next)
+		if seen.knows(key, version) {
+			return !seen.same(key, version, body)
+		}
+		if equalJSON(was, next) {
+			seen.note(key, version, body)
+			return false
+		}
+		return true
+	})
+	if wrote {
+		seen.note(key, P(object).GetObjectMeta().GetResourceVersion(), body)
+	}
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Fprintf(os.Stderr, "observatory-operator: writing the status of the %s %s: %v\n", kind.Name, meta.GetName(), err)
 	}
