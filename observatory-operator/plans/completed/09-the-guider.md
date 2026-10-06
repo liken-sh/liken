@@ -8,9 +8,10 @@ event client in `phd2/`, the profile, the guider's pod, the steps
 The PHD2 image `indi-phd2` is built in `indi/`. Drilled on 2026-10-06
 on the two-node test cluster, with the operator's development build
 `2026.10.04-004-dev-048-82139946`. "What the test cluster measured"
-gives the results. The drill found no defect. Two drills have not run
-on the cluster: a guider pod deleted while `Ready`, and an operator
-restart while PHD2 guides.
+gives the results. The drill found no defect. Later on 2026-10-06, two
+more drills ran on the same cluster and build: a guider pod deleted
+while `Ready`, and an operator restart while PHD2 guides. Neither found
+a defect.
 
 ## The problem
 
@@ -363,6 +364,94 @@ that the read-only root holds no shader cache. Neither stopped it.
 When `StopGuider` deleted the pod, the `phd2` container ended with
 the status `Error`, because PHD2 has no handler for `SIGTERM`; the pod
 was gone 2 s after the delete.
+
+### A guider pod deleted while `Ready`, and an operator restart
+
+The second drill used the same build, inventory, and method, with one
+more source of evidence. The `indi-phd2` image has no shell, so an
+ephemeral container from `kubectl debug --target=phd2 --profile=general`
+read PHD2's debug log in `~/PHD2`. PHD2 writes each connection to its
+event server and each request into that log, so the log shows every
+request the operator sent. The images were on the node already.
+
+A `Reservation` for the east telescope was `Ready` in 38 s, with
+`StartGuider` done in 5 s. The drill slewed the mount to declination 0°
+with tracking on, and sent the same requests over the event API as the
+first drill. PHD2 calibrated and guided.
+
+The drill then deleted the pod `east-guider` while PHD2 guided. The
+times are from the delete.
+
+| Time | What happened |
+|---|---|
+| 0.5 s | The `Guider` phase changed to `Activating`, and `Ready` to `False`, with the message "Waiting for pod east-guider (Running)" |
+| 1.1 s | The operator's connection to PHD2 ended. The `Guider`'s state and RMS became empty. |
+| 2.2 s | The operator created a new pod `east-guider` |
+| 5.9 s | The new pod was Ready |
+| 6.9 s | The operator connected to the new PHD2 and read the baseline: `Stopped`, equipment not connected |
+| 7.5 s | The operator sent `set_connected true`, once |
+| 8.6 s | The `Guider` was `Ready` with the state `Stopped`, and the message "PHD2 is connected to its camera and mount" |
+
+For 1 s from 2.2 s, the message was "Waiting for StartGuider to
+create pod east-guider". The runner, not `StartGuider`, creates the pod
+again while the reservation is `Ready`, so that message names the wrong
+step. The `Telescope` stayed `Ready`, and its guider column read
+`Activating`, then `Ready, Stopped`. The `Reservation` stayed `Ready`,
+and its `status.steps` did not change. No Event explains the gap: the
+operator writes Events only for a reservation's phases and steps, and
+its log has one line, "the connection to east-guider ended". The only
+Events are the kubelet's, for the pod's stop and start, and one failed
+readiness probe while PHD2 started. The new PHD2 was idle and not
+calibrated, as expected, because calibration and guiding belong to the
+holder. In PHD2's debug log, the operator sent only the four baseline
+reads, one `set_connected`, and the reads that follow a
+`ConfigurationChange`.
+
+The drill then calibrated and guided again. PHD2 calibrated in 72 s
+and settled in 10 s. After 70 s of guiding, the drill ran
+`kubectl rollout restart` on the `Deployment` `observatory-operator`.
+Flux applied the `Deployment` again 90 s later, which removed the
+restart annotation, so the operator restarted a second time.
+
+| | First restart | Second restart |
+|---|---|---|
+| The old operator's connection ended | 0 s | 0 s |
+| The new operator's pod was Running | 4.7 s | 1.4 s |
+| The new operator connected and read the baseline | 5.5 s | 1.8 s |
+| The `Guider`'s status changed again | 5.8 s | 2.7 s |
+| Time between two writes of the `Guider`'s status | 6.5 s | 3.8 s |
+
+The drill's own connection to the event API stayed open through both
+restarts. From `StartGuiding` to `Abort`, it received 203 `GuideStep`
+events, frames 1 to 203 with no frame missing, and at most 1.56 s
+between two steps. Before `Abort`, PHD2 sent no `Alert`, `StarLost`,
+`GuidingStopped`, or `Paused`. In PHD2's debug
+log, each new operator sent `get_app_state`, `get_calibrated`,
+`get_connected`, and `get_pixel_scale`, and nothing else: no
+`set_connected` and no `stop_capture`. The baseline was `Guiding`,
+calibrated, connected, and 2.475 arc-seconds per pixel. The
+`Reservation`'s `status.steps` were byte-identical before and after
+the restarts. The `Reservation` stayed `Ready`, and the `Telescope`
+did not change. After each restart, the status changed once a second
+again.
+
+Each new operator computes the RMS only from the guide steps it
+receives. Before the first restart, the status showed 0.71
+arc-seconds over 61 steps. After it, the status showed 0.16
+arc-seconds over 1 step. `rms.steps` reports the count, and the RMS
+over 75 steps was 0.50 arc-seconds before the second restart. PHD2's
+event API sends no past guide steps to a new connection, so a new
+client cannot read them.
+
+The drill then deleted the `Reservation`. `Abort` "Stopped PHD2, which
+was Guiding" in 1 s, `Secure` took 64 s, and `StopGuider` deleted the
+pod in 2 s. The `Reservation` reached `Released` 92 s after its
+delete, and the operator then removed it.
+
+PHD2's debug log also shows the pod's readiness probe, a TCP connect
+to port 4400 every 10 s. PHD2 writes its catch-up events to each probe
+connection after the probe closes it, and logs each failed write as a
+"short write". The writes fail with no other effect.
 
 ## Upstream issues
 
