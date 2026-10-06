@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // The node workload's environment.
@@ -101,6 +102,7 @@ func serveCEC(ctx context.Context, devices string) error {
 	}
 	node, err := newCECNode(client, machine, device)
 	if err == nil {
+		node.recorder = events.New(ctx, client.Client, "equipment-operator-cec", events.Options{})
 		err = node.run(ctx)
 	}
 	if err != nil {
@@ -112,6 +114,9 @@ func serveCEC(ctx context.Context, devices string) error {
 // cecNode is one adapter on one machine.
 type cecNode struct {
 	client *Client
+	// recorder posts the Events of the conditions the node workload
+	// writes on a Television. Nil posts none.
+	recorder *events.Recorder
 	// The stores of the watches each pass reads (objectcache.go). The
 	// Display store holds the Displays of this machine; the node
 	// workload writes no Display.

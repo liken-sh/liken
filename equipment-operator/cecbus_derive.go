@@ -13,27 +13,6 @@ import (
 	"time"
 )
 
-// The CECBus conditions and their reasons.
-const (
-	conditionAddressKnown = "AddressKnown"
-	conditionJoined       = "Joined"
-	conditionCoherent     = "Coherent"
-	conditionScanned      = "Scanned"
-
-	reasonListening   = "Listening"
-	reasonNotReported = "NotReported"
-	reasonRefused     = "Refused"
-	reasonNoAddress   = "NoAddress"
-	reasonNoLogical   = "NoLogicalAddress"
-	reasonOneAdapter  = "OneAdapter"
-	reasonApart       = "Apart"
-	reasonScanning    = "Scanning"
-	reasonNoAnswer    = "NoAnswer"
-	reasonSilent      = "Silent"
-	reasonStale       = "Stale"
-	reasonStopped     = "Stopped"
-)
-
 // staleAfter is how old an entry's report may be before the verdicts
 // stop trusting it. The node workload writes its entry every
 // cecReportInterval, and a pod that dies writes nothing more, so an
@@ -127,20 +106,13 @@ func (r reports) lookup(machine string, missing ConditionStatus) (CECAdapterStat
 // the verdict last changed, so the stamp moves only when the status
 // flips.
 func stampCondition(kind string, v verdict, generation int64, previous []Condition, now time.Time) Condition {
-	condition := Condition{
+	return withTransitionTime(previous, Condition{
 		Type:               kind,
 		Status:             v.status,
 		ObservedGeneration: generation,
 		Reason:             v.reason,
 		Message:            v.message,
-		LastTransitionTime: timestamp(now),
-	}
-	for _, held := range previous {
-		if held.Type == kind && held.Status == v.status && held.LastTransitionTime != "" {
-			condition.LastTransitionTime = held.LastTransitionTime
-		}
-	}
-	return condition
+	}, now)
 }
 
 // notReported is the verdict for a machine whose node workload wrote

@@ -192,7 +192,7 @@ func (a *cecAPI) removeReceiver(name string) {
 // first writer's fields survive.
 func TestTheWritersKeepEachOthersFields(t *testing.T) {
 	session := wokeNow()
-	now := timestamp(time.Now())
+	now := time.Now().UTC().Truncate(time.Second)
 	writers := []struct {
 		name    string
 		apply   func(api *cecAPI, stored Television)

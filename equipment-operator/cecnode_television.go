@@ -130,3 +130,11 @@ func (n *cecNode) passPowerRead(bus *CECBus, television *Television) {
 		fmt.Fprintf(os.Stderr, "writing the power read of Television %s: %v\n", television.Metadata.Name, err)
 	}
 }
+
+// postTelevision posts the Event of a condition the node workload wrote
+// on a Television, when the condition transitioned from the one the
+// Television held. The caller calls it after the API server accepted
+// the write.
+func (n *cecNode) postTelevision(television *Television, written Condition) {
+	postTransitions(n.recorder, reference("Television", television.Metadata), television.Status.Conditions, []Condition{written})
+}

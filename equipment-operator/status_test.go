@@ -14,7 +14,7 @@ import (
 // The moment every status test stamps, and one from before it.
 var (
 	statusNow     = time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
-	statusEarlier = "2026-09-01T00:00:00Z"
+	statusEarlier = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 )
 
 // testState is a state whose fields each case overrides.
@@ -106,11 +106,11 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 		status   ConditionStatus
 		previous []Condition
 		reason   string
-		stamp    string
+		stamp    time.Time
 	}{
-		{"answered", ConditionTrue, nil, reasonConnected, timestamp(statusNow)},
-		{"silent", ConditionFalse, nil, reasonUnreachable, timestamp(statusNow)},
-		{"not reached yet", ConditionUnknown, nil, reasonConnecting, timestamp(statusNow)},
+		{"answered", ConditionTrue, nil, reasonConnected, statusNow},
+		{"silent", ConditionFalse, nil, reasonUnreachable, statusNow},
+		{"not reached yet", ConditionUnknown, nil, reasonConnecting, statusNow},
 		{
 			"verdict unchanged keeps the stamp",
 			ConditionTrue,
@@ -123,7 +123,7 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 			ConditionTrue,
 			[]Condition{{Type: reachableConditionType, Status: ConditionFalse, LastTransitionTime: statusEarlier}},
 			reasonConnected,
-			timestamp(statusNow),
+			statusNow,
 		},
 	}
 	for _, one := range cases {

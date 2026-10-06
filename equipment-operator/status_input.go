@@ -12,13 +12,6 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
-const (
-	inputSelectedConditionType = "InputSelected"
-	reasonSessionInput         = "SessionInput"
-	reasonOtherInput           = "OtherInput"
-	reasonNoInputReported      = "NoInputReported"
-)
-
 // onSessionInput answers whether a zone reports the session's input.
 // The ensure and the condition both use it, so the condition is True
 // exactly when an ensure finds no input to send.
@@ -50,7 +43,6 @@ func inputSelected(session *ReceiverSession, state equipment.State, generation i
 	condition := Condition{
 		Type:               inputSelectedConditionType,
 		ObservedGeneration: generation,
-		LastTransitionTime: timestamp(now),
 	}
 	switch {
 	case state.Reachable != ConditionTrue:
@@ -66,10 +58,5 @@ func inputSelected(session *ReceiverSession, state equipment.State, generation i
 		condition.Status, condition.Reason = ConditionFalse, reasonOtherInput
 		condition.Message = fmt.Sprintf("the receiver reports input %s, and Player %s's session uses input %s", zone.Input, session.Player, session.Input)
 	}
-	for _, held := range previous {
-		if held.Type == inputSelectedConditionType && held.Status == condition.Status && held.LastTransitionTime != "" {
-			condition.LastTransitionTime = held.LastTransitionTime
-		}
-	}
-	return condition, true
+	return withTransitionTime(previous, condition, now), true
 }

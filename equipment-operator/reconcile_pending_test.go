@@ -293,7 +293,7 @@ func TestAFieldTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 			ObservedGeneration: receiver.Metadata.Generation,
 			Reason:             reasonNotConfirmed,
 			Message:            "the receiver did not report the declared value after 3 sends: spec.denon.settings.hdmi.arc",
-			LastTransitionTime: timestamp(statusNow),
+			LastTransitionTime: statusNow,
 		})
 
 		receiver.Metadata.Generation++

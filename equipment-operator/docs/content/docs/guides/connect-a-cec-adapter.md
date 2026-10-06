@@ -431,6 +431,24 @@ adapter, and that the `Television`'s `status.displays` lists it. A TV
 that is connected straight to the machine, with no `Receiver`, has no
 session to follow, and it does not wake with the room.
 
+Each change of a condition of a `CECBus` or a `Television` posts one
+Kubernetes `Event` with the condition's reason and message, so
+`kubectl describe` shows what changed in the last hour. A reason that
+a person may need to act on is a Warning: `NotReported`, `Refused`,
+`NoAddress`, `NoLogicalAddress`, `Apart`, `NoAnswer`, `Stale`,
+`NoBus`, `NotFound`, `NoPowerStatus`, `Unconfirmed`, `SourceTaken`,
+and `TooLate`. Every other reason is Normal. When discovery creates or
+deletes a `Television`, the operator posts `TelevisionCreated` or
+`TelevisionDeleted` on its `CECBus`. A `CECBus` and a `Television`
+are cluster-scoped, so their Events are in the `default` namespace,
+and `kubectl events` finds them only with `-n default` or `-A`:
+
+    kubectl describe television living-room
+    kubectl events -n default --for television/living-room
+
+The API server deletes an `Event` one hour after its last change. The
+conditions and the logs keep the facts after that.
+
 The node workload writes one log line for each wake, standby, and
 power read. It also writes one line for each message that a person
 notices, such as Active Source, Routing Change, Image View On, or

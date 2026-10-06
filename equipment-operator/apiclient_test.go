@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -156,7 +157,7 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 			Type:               "Reachable",
 			Status:             ConditionTrue,
 			Reason:             "Answered",
-			LastTransitionTime: "2026-09-07T12:00:00Z",
+			LastTransitionTime: time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC),
 		}},
 	}
 

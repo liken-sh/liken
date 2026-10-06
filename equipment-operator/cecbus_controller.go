@@ -17,6 +17,8 @@ import (
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // cecBusClock is how often the loop runs a pass with no event. It is a
@@ -35,8 +37,12 @@ const cecBusRetry = 30 * time.Second
 
 type cecBusController struct {
 	client *Client
-	now    func() time.Time
-	wake   chan struct{}
+	// recorder posts the Events of each bus's and each Television's
+	// conditions, and of each Television discovery creates or deletes.
+	// Nil posts none.
+	recorder *events.Recorder
+	now      func() time.Time
+	wake     chan struct{}
 	// log takes a line for each Television discovery creates or
 	// deletes.
 	log io.Writer
@@ -71,6 +77,7 @@ func (c *cecBusController) pass() error {
 		bus := &list.Items[index]
 		devices, conditions := deriveCECBus(bus, c.now())
 		changed := !reflect.DeepEqual(devices, bus.Status.Devices) || !reflect.DeepEqual(conditions, bus.Status.Conditions)
+		stored := bus.Status.Conditions
 		// The Television pass reads what this pass derived, so a TV's
 		// power reaches its Television in the same pass that merged it.
 		bus.Status.Devices, bus.Status.Conditions = devices, conditions
@@ -79,7 +86,9 @@ func (c *cecBusController) pass() error {
 		}
 		if err := ApplyCECBusDerived(c.client, bus.Metadata.Name, devices, conditions); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the status of CECBus %s: %v\n", bus.Metadata.Name, err)
+			continue
 		}
+		postTransitions(c.recorder, reference("CECBus", bus.Metadata), stored, conditions)
 	}
 	c.passTelevisions(list.Items)
 	return nil

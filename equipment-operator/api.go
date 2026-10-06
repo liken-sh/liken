@@ -6,6 +6,7 @@ import (
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // The wire types are hand-written, the way liken and the sibling
@@ -370,19 +371,12 @@ const (
 	ConditionUnknown = equipment.ConditionUnknown
 )
 
-// Condition mirrors metav1.Condition, the shape Kubernetes uses
-// everywhere, and liken's own. Anyone who reads kubectl describe
-// output on a Pod already knows how to read one of these.
+// Condition is the shared condition type of every liken component,
+// which has the shape of metav1.Condition. Anyone who reads kubectl
+// describe output on a Pod already knows how to read one of these.
 //
 // ObservedGeneration records which metadata.generation the condition
 // judged. Generation counts spec edits, so a reader can tell "Reachable,
 // for the spec as it stands" from "Reachable, but for a spec two edits
 // ago".
-type Condition struct {
-	Type               string          `json:"type"`
-	Status             ConditionStatus `json:"status"`
-	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
-	Reason             string          `json:"reason,omitempty"`
-	Message            string          `json:"message,omitempty"`
-	LastTransitionTime string          `json:"lastTransitionTime"`
-}
+type Condition = conditions.Condition

@@ -26,6 +26,7 @@ import (
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // How often the loop reconciles with nothing to prompt it. It is a
@@ -52,10 +53,14 @@ const statusDebounce = 250 * time.Millisecond
 type receiverUnit struct {
 	// ctx is the unit's own context. Each goroutine the unit starts runs
 	// under it, and is counted in the group it carries (work.go).
-	ctx         context.Context
-	name        string
-	address     string
-	client      *Client
+	ctx     context.Context
+	name    string
+	address string
+	client  *Client
+	// recorder posts the Events of the Receiver's conditions, about the
+	// object reference names.
+	recorder    *events.Recorder
+	reference   events.ObjectReference
 	dial        dialFunc
 	now         func() time.Time
 	driver      equipment.Driver
@@ -178,6 +183,7 @@ func (u *receiverUnit) write() {
 		fmt.Fprintf(os.Stderr, "writing the status of receiver %s: %v\n", u.name, err)
 		return
 	}
+	postTransitions(u.recorder, u.reference, u.applied.Conditions, status.Conditions)
 	u.applied, u.written = status, true
 }
 
@@ -684,6 +690,9 @@ func (u *receiverUnit) stop() {
 // controller holds what every pass needs and the units it runs.
 type controller struct {
 	client *Client
+	// recorder posts each Receiver's condition transitions as Events.
+	// Nil posts none.
+	recorder *events.Recorder
 	// dial reaches each Denon receiver.
 	dial      dialFunc
 	wake      chan struct{}
@@ -862,23 +871,29 @@ func protocolAddress(spec *ReceiverSpec) string {
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
-		ctx:      ctx,
-		name:     receiver.Metadata.Name,
-		address:  c.resolvedAddress(&receiver.Spec),
-		client:   c.client.withWaits(ctx),
-		sessions: c.sessions,
-		dial:     c.dial,
-		now:      c.now,
-		readings: c.readings,
-		log:      newReceiverLog(c.log, receiver.Metadata.Name),
-		cancel:   cancel,
-		dirty:    make(chan struct{}, 1),
-		budget:   newSendBudget(),
-		settled:  newSettledRecord(receiver.Status, receiver.Spec),
+		ctx:       ctx,
+		name:      receiver.Metadata.Name,
+		address:   c.resolvedAddress(&receiver.Spec),
+		client:    c.client.withWaits(ctx),
+		recorder:  c.recorder,
+		reference: reference("Receiver", receiver.Metadata),
+		sessions:  c.sessions,
+		dial:      c.dial,
+		now:       c.now,
+		readings:  c.readings,
+		log:       newReceiverLog(c.log, receiver.Metadata.Name),
+		cancel:    cancel,
+		dirty:     make(chan struct{}, 1),
+		budget:    newSendBudget(),
+		settled:   newSettledRecord(receiver.Status, receiver.Spec),
 		// The driver's goroutine reads volumeAsks for each line the
 		// receiver sends, so it exists before the driver starts.
 		volumeAsks: newVolumeAsker(),
 	}
+	// The stored conditions are the unit's first previous ones, so an
+	// operator that starts again keeps each lastTransitionTime and posts
+	// an Event only for a condition that changed while it was away.
+	unit.applied.Conditions = receiver.Status.Conditions
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.foreign = c.discovery.skip
 	unit.startDriver(receiver, unit.address, c.readings.reportCommand)
@@ -1046,13 +1061,16 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 
 	// serve returns only after the goroutines it started stop, so none
 	// of them reads the API after it.
+	recorder := events.New(ctx, client.Client, "equipment-operator", events.Options{})
 	operator := newController(client, readings)
+	operator.recorder = recorder
 	if config.dial != nil {
 		operator.dial = config.dial
 	}
 	operator.networkDiscoveryOff = config.networkDiscoveryOff
 	var started sync.WaitGroup
 	buses := newCECBusController(client)
+	buses.recorder = recorder
 	buses.sharedReceivers = true
 	// The two loops share the Receiver and Television stores, so the
 	// process holds each object once.

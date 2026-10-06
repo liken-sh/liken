@@ -17,18 +17,6 @@ import (
 	"github.com/liken-sh/equipment-operator/wiim"
 )
 
-// The conditions this operator reports, and the reason for each
-// verdict.
-const (
-	reachableConditionType = "Reachable"
-	reasonConnected        = "Connected"
-	reasonUnreachable      = "Unreachable"
-	reasonConnecting       = "Connecting"
-
-	settingsConfirmedConditionType = "SettingsConfirmed"
-	reasonNotConfirmed             = "NotConfirmed"
-)
-
 // reachableWords is the reason and the message each verdict carries.
 func reachableWords(status ConditionStatus) (reason, message string) {
 	switch status {
@@ -49,20 +37,13 @@ func timestamp(at time.Time) string {
 // changed, so the stamp moves only when the verdict flips.
 func reachable(status ConditionStatus, generation int64, previous []Condition, now time.Time) Condition {
 	reason, message := reachableWords(status)
-	condition := Condition{
+	return withTransitionTime(previous, Condition{
 		Type:               reachableConditionType,
 		Status:             status,
 		ObservedGeneration: generation,
 		Reason:             reason,
 		Message:            message,
-		LastTransitionTime: timestamp(now),
-	}
-	for _, held := range previous {
-		if held.Type == reachableConditionType && held.Status == status && held.LastTransitionTime != "" {
-			condition.LastTransitionTime = held.LastTransitionTime
-		}
-	}
-	return condition
+	}, now)
 }
 
 // settingsConfirmed builds the condition that names the declared fields
@@ -73,20 +54,13 @@ func settingsConfirmed(unconfirmed []string, generation int64, previous []Condit
 	if len(unconfirmed) == 0 {
 		return Condition{}, false
 	}
-	condition := Condition{
+	return withTransitionTime(previous, Condition{
 		Type:               settingsConfirmedConditionType,
 		Status:             ConditionFalse,
 		ObservedGeneration: generation,
 		Reason:             reasonNotConfirmed,
 		Message:            fmt.Sprintf("the receiver did not report the declared value after %d sends: %s", sendLimit, strings.Join(unconfirmed, ", ")),
-		LastTransitionTime: timestamp(now),
-	}
-	for _, held := range previous {
-		if held.Type == settingsConfirmedConditionType && held.Status == ConditionFalse && held.LastTransitionTime != "" {
-			condition.LastTransitionTime = held.LastTransitionTime
-		}
-	}
-	return condition, true
+	}, now), true
 }
 
 // buildReceiverStatus is the whole status one receiver's state makes,

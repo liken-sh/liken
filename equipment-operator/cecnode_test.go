@@ -30,6 +30,7 @@ func startNode(t *testing.T, api *cecAPI, machine string, device *cec.Device) <-
 	t.Helper()
 	node, err := newCECNode(api.client, machine, device)
 	mustSucceed(t, err)
+	node.recorder = testRecorder(t, api.client)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	stopped := make(chan struct{})

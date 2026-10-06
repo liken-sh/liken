@@ -219,6 +219,7 @@ func (n *cecNode) standbyTV(ctx context.Context, job *standbyJob, own cec.Logica
 		n.retryLater()
 		return
 	}
+	n.postTelevision(&job.television, mark)
 	job.television.Status.Conditions = []Condition{mark}
 	began := time.Now()
 	result := n.confirmPower(ctx, &n.standby.budget, job.key, own, cec.PowerStandby)
@@ -254,9 +255,15 @@ func (n *cecNode) writeStandby() {
 	}
 	if err == nil || err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		n.mutex.Lock()
-		if n.standby.unwritten == record {
+		settled := n.standby.unwritten == record
+		if settled {
 			n.standby.unwritten = nil
 		}
 		n.mutex.Unlock()
+		// A pass and the work that made the record can write it at
+		// once, so only the writer that settles it posts its Event.
+		if settled && err == nil {
+			n.postTelevision(&record.television, record.condition)
+		}
 	}
 }

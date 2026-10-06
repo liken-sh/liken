@@ -13,17 +13,20 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // ConditionStatus is the three-valued verdict a condition carries. It
-// is the same type the Receiver resource uses, so a driver reports
-// reachability in the words the API already holds.
-type ConditionStatus string
+// is the status type of the shared conditions package, which the
+// Receiver resource's conditions use, so a driver reports reachability
+// in the words the API already holds.
+type ConditionStatus = conditions.Status
 
 const (
-	ConditionTrue    ConditionStatus = "True"
-	ConditionFalse   ConditionStatus = "False"
-	ConditionUnknown ConditionStatus = "Unknown"
+	ConditionTrue    = conditions.True
+	ConditionFalse   = conditions.False
+	ConditionUnknown = conditions.Unknown
 )
 
 // Power is what a zone reports, in words every protocol shares. The

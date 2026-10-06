@@ -7,6 +7,7 @@ package main
 
 import (
 	"testing"
+	"time"
 )
 
 // derivedBus is a bus in a mode with the device list and the Scanned
@@ -200,7 +201,7 @@ func TestTheDisplaysAreTheOnesTheAdaptersName(t *testing.T) {
 func TestReachableKeepsItsTransitionTime(t *testing.T) {
 	t.Parallel()
 	television := tvOn("den")
-	earlier := "2026-09-26T11:00:00Z"
+	earlier := time.Date(2026, 9, 26, 11, 0, 0, 0, time.UTC)
 	television.Status.Conditions = []Condition{{Type: conditionReachable, Status: ConditionTrue, LastTransitionTime: earlier}}
 
 	derived := deriveTelevision(television, "den", derivedBus(CECControl, ConditionTrue, tvDevice), nil, nil, derivedAt)

@@ -56,7 +56,11 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 			fmt.Fprintf(os.Stderr, "pruning Television %s: %v\n", name, err)
 			continue
 		}
-		fmt.Fprintf(c.log, "deleted the discovered Television %s: %s\n", name, replacedBy(televisions.Items, name))
+		why := replacedBy(televisions.Items, name)
+		fmt.Fprintf(c.log, "deleted the discovered Television %s: %s\n", name, why)
+		if bus, found := byName[name]; found {
+			c.recorder.Normal(reference("CECBus", bus.Metadata), reasonTelevisionDeleted, fmt.Sprintf("deleted the discovered Television %s: %s", name, why))
+		}
 	}
 	for index := range televisions.Items {
 		television := &televisions.Items[index]
@@ -73,7 +77,9 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 		}
 		if err := ApplyTelevisionDerived(c.client, television.Metadata.Name, derived); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the status of Television %s: %v\n", television.Metadata.Name, err)
+			continue
 		}
+		postTransitions(c.recorder, reference("Television", television.Metadata), television.Status.Conditions, []Condition{derived.reachable, derived.inCharge})
 	}
 }
 
@@ -91,8 +97,10 @@ func (c *cecBusController) createDiscoveredTelevision(bus string, found *CECBus)
 	if !created {
 		return
 	}
-	fmt.Fprintf(c.log, "CECBus %s reports a TV at %s named %q, and no Television names the bus; created Television %s\n",
+	message := fmt.Sprintf("CECBus %s reports a TV at %s named %q, and no Television names the bus; created Television %s",
 		bus, tvOf(found).PhysicalAddress, tvOf(found).OSDName, discoveredTelevisionName(bus))
+	fmt.Fprintln(c.log, message)
+	c.recorder.Normal(reference("CECBus", found.Metadata), reasonTelevisionCreated, message)
 }
 
 // replacedBy says which Television took over the bus of a discovered

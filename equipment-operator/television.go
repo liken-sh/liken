@@ -175,34 +175,6 @@ type EquipmentRef struct {
 	Name string `json:"name"`
 }
 
-// The Television conditions and their reasons. The Deployment writes
-// Reachable and InCharge; the node workloads write PowerApplied,
-// WakeApplied, and StandbyApplied.
-const (
-	conditionReachable      = "Reachable"
-	conditionInCharge       = "InCharge"
-	conditionPowerApplied   = "PowerApplied"
-	conditionWakeApplied    = "WakeApplied"
-	conditionStandbyApplied = "StandbyApplied"
-
-	reasonInCharge        = "InCharge"
-	reasonAnotherInCharge = "AnotherInCharge"
-
-	reasonAnswers         = "Answers"
-	reasonNoBus           = "NoBus"
-	reasonNotScanned      = "NotScanned"
-	reasonNotFound        = "NotFound"
-	reasonNoPower         = "NoPowerStatus"
-	reasonConfirmed       = "Confirmed"
-	reasonUnconfirmed     = "Unconfirmed"
-	reasonTaken           = "SourceTaken"
-	reasonChosen          = "Chosen"
-	reasonTooLate         = "TooLate"
-	reasonSuperseded      = "Superseded"
-	reasonWaking          = "Waking"
-	reasonEnteringStandby = "EnteringStandby"
-)
-
 // discovered answers whether discovery owns this Television: it
 // carries the discovered label and has its bus's name. A labeled
 // Television under another name is a person's, such as a copy of the

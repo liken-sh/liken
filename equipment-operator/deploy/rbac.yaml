@@ -115,6 +115,39 @@ subjects:
     name: equipment-operator
     namespace: liken-system
 ---
+# The Events about a Receiver, a CECBus, and a Television: one for each
+# change of a condition, and one for each Television discovery creates
+# or deletes. Each kind is cluster-scoped, and the API server takes an
+# Event about a cluster-scoped object only in default or kube-system,
+# so this Role grants the one namespace both workloads post to. patch
+# counts a repeat on the Event it repeats.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: equipment-operator-events
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: equipment-operator-events
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: equipment-operator-events
+subjects:
+  - kind: ServiceAccount
+    name: equipment-operator
+    namespace: liken-system
+  - kind: ServiceAccount
+    name: equipment-operator-cec
+    namespace: liken-system
+---
 # The CEC node workload's identity, apart from the Deployment's, so the
 # pod on an adapter's machine can reach only the CECBus and Television
 # objects and the Displays it reads.

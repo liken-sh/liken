@@ -22,6 +22,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 type cecAPI struct {
@@ -52,6 +54,8 @@ type cecAPI struct {
 	watchers []*fakeWatcher
 	deleted  []string
 	client   *Client
+	// events holds the Events the operator posts.
+	events *eventstest.Events
 	// refusing makes every list and every status write fail with a
 	// 500, the way an API server answers while it is unhealthy.
 	// refusingTelevisions does the same for the Television list alone.
@@ -129,8 +133,9 @@ func startCECAPI(t *testing.T) *cecAPI {
 	api := &cecAPI{
 		buses: map[string]*CECBus{}, displays: map[string]*Display{},
 		televisions: map[string]*Television{}, receivers: map[string]Receiver{},
+		events: &eventstest.Events{},
 	}
-	api.client = testAPIClient(t, http.HandlerFunc(api.handle))
+	api.client = testAPIClient(t, api.events.Around(http.HandlerFunc(api.handle)))
 	return api
 }
 

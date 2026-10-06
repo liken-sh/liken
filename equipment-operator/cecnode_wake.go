@@ -336,6 +336,7 @@ func (n *cecNode) wakeTV(ctx context.Context, job *wakeJob, own cec.LogicalAddre
 		n.retryLater()
 		return
 	}
+	n.postTelevision(&job.television, mark)
 	job.television.Status.Conditions = []Condition{mark}
 	fmt.Fprintf(n.log, "%s; the adapter on %s starts the wake\n", asks, n.machine)
 	result := n.runWake(ctx, job, own, physical)
@@ -366,10 +367,16 @@ func (n *cecNode) writeWake() {
 	}
 	if err == nil || err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		n.mutex.Lock()
-		if n.woken.unwritten == record {
+		settled := n.woken.unwritten == record
+		if settled {
 			n.woken.unwritten = nil
 		}
 		n.mutex.Unlock()
+		// A pass and the work that made the record can write it at
+		// once, so only the writer that settles it posts its Event.
+		if settled && err == nil {
+			n.postTelevision(&record.television, record.condition)
+		}
 	}
 }
 

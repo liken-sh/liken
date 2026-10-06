@@ -341,3 +341,20 @@ another input, the status records that input. The operator selects the
 configured input again only when `active` or `awake` changes from false
 to true. If the person turns the volume knob, the status reports the
 new volume, and `media-operator` steps the next press from that level.
+
+## Read what happened to a receiver
+
+Each change of a `Receiver`'s `Reachable`, `SettingsConfirmed`, or
+`InputSelected` condition posts one Kubernetes `Event` with the
+condition's reason and message. A receiver that stops answering posts
+`Unreachable`, a Warning, and posts `Connected` when it answers again.
+A declared setting that the receiver does not confirm after 3 sends
+posts `NotConfirmed`, a Warning. A `Receiver` is cluster-scoped, so its
+Events are in the `default` namespace, and `kubectl events` finds them
+only with `-n default` or `-A`:
+
+    kubectl describe receiver living-room
+    kubectl events -n default --for receiver/living-room
+
+The API server deletes an `Event` one hour after its last change. The
+conditions and the operator's log keep the facts after that.

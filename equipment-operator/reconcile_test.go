@@ -18,6 +18,7 @@ import (
 
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
@@ -38,6 +39,7 @@ func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
 // records every status the operator applies.
 type fakeAPI struct {
 	client  *Client
+	events  *eventstest.Events
 	written chan ReceiverStatus
 	powers  chan equipment.Power
 
@@ -61,8 +63,8 @@ type fakeAPI struct {
 
 func startFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	api := &fakeAPI{written: make(chan ReceiverStatus, 64), powers: make(chan equipment.Power, 64)}
-	api.client = testAPIClient(t, http.HandlerFunc(api.handle))
+	api := &fakeAPI{written: make(chan ReceiverStatus, 64), powers: make(chan equipment.Power, 64), events: &eventstest.Events{}}
+	api.client = testAPIClient(t, api.events.Around(http.HandlerFunc(api.handle)))
 	return api
 }
 
@@ -273,6 +275,7 @@ func startController(t *testing.T, api *fakeAPI) *controller {
 	operator := newController(api.client, testMetrics(t))
 	operator.dial = testNetwork.dial
 	operator.now = func() time.Time { return statusNow }
+	operator.recorder = testRecorder(t, api.client)
 	return operator
 }
 

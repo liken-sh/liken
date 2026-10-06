@@ -200,10 +200,16 @@ func (n *cecNode) writePower() {
 	}
 	if err == nil || err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
 		n.mutex.Lock()
-		if n.powered.unwritten == record {
+		settled := n.powered.unwritten == record
+		if settled {
 			n.powered.unwritten = nil
 		}
 		n.mutex.Unlock()
+		// A pass and the work that made the record can write it at
+		// once, so only the writer that settles it posts its Event.
+		if settled && err == nil {
+			n.postTelevision(&record.television, record.condition)
+		}
 	}
 }
 
