@@ -201,6 +201,16 @@ spec:
                     and its message names the missing resource. A
                     device on the shelf names no parent, and its
                     `ParentFound` is `True` with the reason `NoParent`.
+                    While a device is connected, it also reports the
+                    state that the triggers of procedures read, by
+                    kind: a `Dome` `Parked` and `Open` (the shutter), a
+                    `Mount` `Parked` and `Tracking`, a `DustCap` `Open`,
+                    a `FlatPanel` `Lit` (the light), a `Camera`
+                    `Cooling` (the cooler), and a `WeatherStation`
+                    `Safe`. A park, a shutter, or a cover that moves is
+                    `Unknown` with the reason `Moving`. `Safe` is
+                    `False` with the reason `Warning` or `Danger`. A
+                    device that is not connected has none of them.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

@@ -179,6 +179,31 @@ A device's status has the same fields in every kind, and one
   limits of each member. A vendor's own properties are here. The list
   holds no BLOB data.
 
+While a device is `Connected`, its conditions also give its state, for
+a trigger or for `kubectl wait --for=condition=Parked`. Each one comes
+from the property in the table, and a driver that does not define the
+property gives no condition:
+
+| Kind | Condition | `True` when | Property |
+|---|---|---|---|
+| `Dome` | `Parked` | the dome is parked | `DOME_PARK` |
+| `Dome` | `Open` | the shutter is open | `DOME_SHUTTER` |
+| `Mount` | `Parked` | the mount is parked | `TELESCOPE_PARK` |
+| `Mount` | `Tracking` | tracking is on | `TELESCOPE_TRACK_STATE` |
+| `DustCap` | `Open` | the cover is open | `CAP_PARK` |
+| `FlatPanel` | `Lit` | the light is on | `FLAT_LIGHT_CONTROL` |
+| `Camera` | `Cooling` | the cooler is on | `CCD_COOLER` |
+| `WeatherStation` | `Safe` | the station reports `Safe` | `SAFETY_STATUS` |
+
+The reason names the state, such as `Parked` or `Unparked`, and the
+message names the device, such as `Dome lab is parked`. A park, a
+shutter, or a cover that moves is `Unknown` with the reason `Moving`
+until the move ends. `Safe` is `False` with the reason `Warning` or
+`Danger`. A driver that reports neither side of a switch, or a station
+with no verdict, gives `Unknown` with the reason `NotReported`. A
+device that is not connected has none of these conditions, so a
+trigger never reads a state that the operator cannot confirm.
+
 A `Telescope`'s status names its INDI server in `status.server`, its
 active reservation, its tubes, its trains with their devices, its own
 devices, and its guider's phase and PHD2's state. Its `Guider` column,
@@ -322,8 +347,8 @@ the operator connects each device again.
 
 Each resource except a `Reservation` posts an Event each time a condition first
 appears or changes its status or its reason, with the condition's
-reason and message. A `ParentFound` that is `False`, and a `Ready`
-whose reason is `Error`, are `Warning`s. `kubectl describe` lists them
+reason and message. A `ParentFound` that is `False`, a `Ready` whose
+reason is `Error`, and a `Safe` that is `False` are `Warning`s. `kubectl describe` lists them
 for an hour.
 
 ## The dome and mount locks

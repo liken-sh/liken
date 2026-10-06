@@ -174,6 +174,7 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	}
 	var connection indi.Property
 	defined := false
+	var device *reader
 	maximum := func(string, string) (float64, bool) { return 0, false }
 	ref, placed := t.server(d)
 	if server, open := o.servers.get(ref.String()); placed && hasPod && open && server.client.Connected() {
@@ -188,6 +189,7 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 			next.Readings = readings(d.kind, r)
 			connection, defined = r.property("CONNECTION")
 			maximum = r.maximum
+			device = &r
 		}
 	}
 	next.Display = deviceDisplay(d, next.Readings, maximum)
@@ -205,6 +207,9 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, ref, name, "", standing))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}
+	if next.Phase == observatory.DeviceConnected && device != nil {
+		next.Conditions = append(next.Conditions, stateConditions(d, *device)...)
+	}
 	for i := range next.Conditions {
 		next.Conditions[i].ObservedGeneration = next.ObservedGeneration
 	}

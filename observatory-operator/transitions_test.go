@@ -25,13 +25,17 @@ func typedEvents(a *fakeAPI, kind observatory.Kind, name string) []string {
 
 // A device posts an Event for each condition it first reports, and
 // each time its Ready condition changes its reason. The activation
-// that connects it ends on one Connected Event.
+// that connects it ends on one Connected Event. The camera's Cooling
+// condition, which appears once it is connected, posts the last one,
+// and stateconditions_test.go holds that.
 func TestADevicePostsItsReadyTransitions(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 
-		got := typedEvents(w.api, observatory.CameraKind, "east-main")
+		got := slices.DeleteFunc(typedEvents(w.api, observatory.CameraKind, "east-main"), func(e string) bool {
+			return strings.HasPrefix(e, "Normal CoolerOff: ")
+		})
 
 		want := []string{
 			"Normal Found: Found every parent",
