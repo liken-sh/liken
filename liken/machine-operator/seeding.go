@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -26,10 +27,19 @@ import (
 // that CRD, the operator's requests get a 404. The loop waits
 // instead of crashing, because that 404 is expected during startup,
 // not a sign that something is wrong.
-func ensureMachine(c *apiclient.Client, seed *machine.Machine) (*machine.Machine, error) {
+//
+// A Machine this function creates posts MachineJoined, once the
+// server's copy reads back with its UID: the machine's first boot in
+// the cluster, or its first boot after a person deleted the Machine.
+func ensureMachine(c *apiclient.Client, seed *machine.Machine, recorder *events.Recorder) (*machine.Machine, error) {
+	created := false
 	for {
 		current, err := kubernetes.GetMachine(c, seed.Metadata.Name)
 		if err == nil {
+			if created {
+				recorder.Normal(machineReference(current), reasonMachineJoined,
+					"created the Machine from the boot manifest, because the cluster held none")
+			}
 			return current, nil
 		}
 		if !errors.Is(err, apiclient.ErrNotFound) {
@@ -48,6 +58,7 @@ func ensureMachine(c *apiclient.Client, seed *machine.Machine) (*machine.Machine
 		err = c.RequestJSON(http.MethodPost, kubernetes.MachinesPath, body, nil)
 		if err == nil {
 			fmt.Printf("created machine %s from %s\n", seed.Metadata.Name, machine.BootManifestPath)
+			created = true
 			continue // re-read so the function returns the server's copy, resourceVersion and all
 		}
 		if errors.Is(err, apiclient.ErrNotFound) {

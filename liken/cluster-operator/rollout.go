@@ -277,7 +277,8 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 // to other machines' statuses, and they are safe for the same reason
 // the Lost write is: each write touches only the one condition type
 // that this writer owns. When a 409 happens because of a crossing
-// write, this function simply waits for the next sweep.
+// write, this function simply waits for the next sweep. Each grant
+// and each reclaim that lands posts one Event on the machine.
 func carryOutRollout(reads *fleetReader, machines []machine.Machine, r rollout, now time.Time) {
 	for i := range machines {
 		m := &machines[i]
@@ -294,11 +295,16 @@ func carryOutRollout(reads *fleetReader, machines []machine.Machine, r rollout, 
 				fmt.Printf("granting %s its reboot turn: %v\n", name, err)
 			} else {
 				fmt.Printf("granted %s its reboot turn\n", name)
+				reads.recorder.Normal(machineReference(m), reasonRebootTurnGranted,
+					"the cluster's disruption budget allows this machine to take its reboot turn now")
 			}
 		case slices.Contains(r.revoke, name):
 			status.Conditions = api.RemoveCondition(slices.Clone(m.Status.Conditions), machine.RebootApprovedCondition)
 			if err := reads.publishStatus(m, &status); err != nil {
 				fmt.Printf("reclaiming %s's reboot turn: %v\n", name, err)
+			} else {
+				reads.recorder.Normal(machineReference(m), reasonRebootTurnReclaimed,
+					"the machine is available and asks for no reboot, so its turn returns to the disruption budget")
 			}
 		}
 	}

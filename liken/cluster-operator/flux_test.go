@@ -55,7 +55,7 @@ func TestEnsureFluxDeployKeyDoesNothingWithoutTheFeature(t *testing.T) {
 	}))
 	plain := &cluster.Cluster{}
 	plain.Metadata.Name = "lab"
-	if got := ensureFluxDeployKey(c, plain); got != "" {
+	if got := ensureFluxDeployKey(c, nil, plain); got != "" {
 		t.Errorf("no feature, no key: got %q", got)
 	}
 }
@@ -72,7 +72,7 @@ func TestEnsureFluxDeployKeyReadsAnExistingKey(t *testing.T) {
 			"identity.pub": "c3NoLWVkMjU1MTkgQUFBQSBsaWtlbjpsYWI=",
 			"known_hosts": "Zm9yZ2UuZXhhbXBsZSBzc2gtZWQyNTUxOSBIT1NUS0VZ"}}`))
 	}))
-	got := ensureFluxDeployKey(c, fluxCluster())
+	got := ensureFluxDeployKey(c, nil, fluxCluster())
 	if got != "ssh-ed25519 AAAA liken:lab" {
 		t.Errorf("got %q", got)
 	}
@@ -97,7 +97,7 @@ func TestEnsureFluxDeployKeyRefreshesStaleKnownHosts(t *testing.T) {
 			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
 		}
 	}))
-	if got := ensureFluxDeployKey(c, fluxCluster()); got != "ssh-ed25519 AAAA liken:lab" {
+	if got := ensureFluxDeployKey(c, nil, fluxCluster()); got != "ssh-ed25519 AAAA liken:lab" {
 		t.Errorf("got %q", got)
 	}
 	if !strings.Contains(patched, "forge.example ssh-ed25519 HOSTKEY") {
@@ -124,7 +124,7 @@ func TestEnsureFluxDeployKeyMintsIntoTheSecret(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		}
 	}))
-	got := ensureFluxDeployKey(c, fluxCluster())
+	got := ensureFluxDeployKey(c, nil, fluxCluster())
 	if created.Metadata.Name != "flux-system" || created.Metadata.Namespace != "flux-system" {
 		t.Errorf("the Secret must use Flux's conventional name: %+v", created.Metadata)
 	}
@@ -237,7 +237,7 @@ func TestEnsureFluxEngineLeavesAPresentEngineAlone(t *testing.T) {
 		}
 		w.Write([]byte(`{"metadata": {"name": "kustomize-controller"}}`))
 	}))
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
+	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
 }
 
 func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
@@ -257,7 +257,7 @@ func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		}
 	}))
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
+	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
 	want := []string{
 		"/api/v1/namespaces",
 		"/apis/apiextensions.k8s.io/v1/customresourcedefinitions",
@@ -280,15 +280,15 @@ func TestEnsureFluxEngineProbesOnceAnInterval(t *testing.T) {
 	}))
 	probe := &engineProbe{}
 
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow)
+	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow)
 	if probes != 1 {
 		t.Fatalf("the first sweep probes: %d", probes)
 	}
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(50*time.Second))
+	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(50*time.Second))
 	if probes != 1 {
 		t.Errorf("a sweep inside the interval asks nothing: %d", probes)
 	}
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(engineProbeInterval))
+	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(engineProbeInterval))
 	if probes != 2 {
 		t.Errorf("a sweep at the interval asks again: %d", probes)
 	}
@@ -311,8 +311,8 @@ func TestEnsureFluxEngineCountsAPlantAsAnAsk(t *testing.T) {
 	}))
 	probe := &engineProbe{}
 
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow)
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(10*time.Second))
+	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow)
+	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(10*time.Second))
 	if probes != 1 {
 		t.Errorf("probes: %d, want 1", probes)
 	}
@@ -333,7 +333,7 @@ func TestEnsureFluxEngineDoesNothingWithoutTheFeature(t *testing.T) {
 	plain.Metadata.Name = "lab"
 	probe := &engineProbe{}
 
-	ensureFluxEngine(c, plain, []byte(testSeed), probe, sweepNow)
+	ensureFluxEngine(c, nil, plain, []byte(testSeed), probe, sweepNow)
 
 	if !probe.asked.IsZero() {
 		t.Errorf("an undeclared feature must not spend the interval: %v", probe.asked)
@@ -353,7 +353,7 @@ func TestEnsureFluxDeployKeyYieldsToAConcurrentMint(t *testing.T) {
 			w.Write([]byte(`{"kind": "Status", "reason": "AlreadyExists"}`))
 		}
 	}))
-	if got := ensureFluxDeployKey(c, fluxCluster()); got != "" {
+	if got := ensureFluxDeployKey(c, nil, fluxCluster()); got != "" {
 		t.Errorf("a lost race publishes nothing this pass: got %q", got)
 	}
 }

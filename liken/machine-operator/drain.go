@@ -249,8 +249,10 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 // and releases it only once this machine's node is clear. It cordons
 // the node and evicts pods. Until nothing evictable remains, or the
 // deadline passes, it holds the reboot and reports the drain's
-// progress on the same condition.
-func gateThroughDrain(c *apiclient.Client, node *nodeObject, conv convergence, now time.Time) convergence {
+// progress on the same condition. The cordon posts one Event about
+// the Machine, because it is the start of the drain and the Node
+// carries no record of who cordoned it or why.
+func gateThroughDrain(c *apiclient.Client, node *nodeObject, conv convergence, now time.Time, notes machineEvents) convergence {
 	pods, err := kubernetes.ListPodsOnNode(c, node.Metadata.Name)
 	if err != nil {
 		fmt.Printf("listing pods for the drain: %v\n", err)
@@ -263,6 +265,7 @@ func gateThroughDrain(c *apiclient.Client, node *nodeObject, conv convergence, n
 			return holdForDrain(conv, "cordoning this node failed; retrying")
 		}
 		fmt.Printf("cordoned %s ahead of its reboot\n", node.Metadata.Name)
+		notes.normal(reasonCordoned, fmt.Sprintf("cordoned the Node %s ahead of the reboot; %d pods to move", node.Metadata.Name, step.remaining))
 	}
 	for _, p := range step.evict {
 		if err := kubernetes.EvictPod(c, p); err != nil {

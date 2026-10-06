@@ -178,6 +178,37 @@ subjects:
     name: liken-machine-operator
     namespace: liken-system
 ---
+# The Events about this machine's Machine (events.go). A Machine is
+# cluster-scoped, and the API server accepts an Event about a
+# cluster-scoped object only in default or kube-system, so the
+# operator posts every Event in default. A namespaced Role grants it
+# there and nowhere else. create writes a new Event, and patch raises
+# the count of a repeat within ten minutes, so `kubectl describe`
+# shows one line with a count in place of one line for each repeat.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: liken-machine-operator-events
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: liken-machine-operator-events
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: liken-machine-operator-events
+subjects:
+  - kind: ServiceAccount
+    name: liken-machine-operator
+    namespace: liken-system
+---
 # The one Secret the machine operator may read: the fleet's
 # registry credentials, by exact name (the kubernetes package's
 # secrets.go). This uses a namespaced Role, like the leases' Role,

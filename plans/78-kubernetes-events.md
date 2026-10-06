@@ -322,3 +322,32 @@ The build changed four points of the design as it was first settled:
   `SafeToPowerOff` conditions comes with one of those. A component
   whose own `Event`s already cover each transition with more detail
   may do the same, and says so where it writes the status.
+
+## Wave 2, built on 2026-10-06
+
+- **`liken/` (machine-operator and cluster-operator).** `liken/api`
+  aliases `Condition` and `ConditionStatus` to the shared types. Both
+  CRDs require a reason of at least one character and accept an empty
+  message, so the JSON on the wire is the same. `init` reads these
+  types, and its link guard now admits `kubernetes/conditions`, which
+  imports only `time`. Each operator posts each condition transition
+  after its status write lands (`api.Transitions` compares the written
+  list with the stored one). A Machine transition is a Warning when
+  the phase it argues for is `Blocked`, `Degraded`, or `Unknown`, and
+  its message starts with the condition's type and status, because
+  five convergence conditions share reasons such as `Converged`.
+  Ready's reason is the phase word, so Ready's transitions are the
+  phase changes and no `PhaseChanged` exists. The survey's
+  `SpecRejected` and `ReleaseRolledBack` are the transitions to
+  `StagingRejected` and `RejectedLastBoot`, by the rule that a
+  transition keeps the condition's reason. The other Events are
+  `MachineJoined`, `KernelCrashed`, `BootRefused`, `Cordoned`, and
+  `Uncordoned` from the machine operator, and `MachineLost`,
+  `RebootTurnGranted`, `RebootTurnReclaimed`, `FluxDeployKeyMinted`,
+  and `FluxEngineSeeded` from the cluster operator. The three
+  verdicts on a Machine name the action, not the condition's reason
+  (`HeartbeatStale`, `DisruptionBudgetAllows`), because the cluster
+  operator writes them on an object that another program owns. Both
+  operators hold `create` and `patch` on `events` in `default` only.
+  Coverage measured 88.9% for machine-operator and 86.3% for
+  cluster-operator, against floors of 86%.

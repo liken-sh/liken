@@ -65,10 +65,11 @@ that fails holds its reason on the screen.
 ## A machine shows Lost
 
 The machine stopped sending its heartbeat, so the cluster operator
-wrote the phase on its behalf. The machine is powered off, or it
-cannot reach the cluster. When the machine returns, its next report
-overwrites the phase. If the machine is running and `Lost`, check
-its network path to the leaders.
+wrote the phase on its behalf. The `MachineLost` event gives the time
+of the last heartbeat. The machine is powered off, or it cannot reach
+the cluster. When the machine returns, its next report overwrites the
+phase. If the machine is running and `Lost`, check its network path
+to the leaders.
 
 ## A machine shows Blocked
 
@@ -177,6 +178,45 @@ request.
 
 [Give a workload a device](/docs/guides/devices/#when-a-claim-does-not-schedule)
 gives the checks, in order.
+
+## The recent history of a machine or the cluster
+
+The operators post a Kubernetes `Event` for each change of a
+condition, and for each action they take: a machine marked `Lost`, a
+reboot turn granted, a spec refused, a kernel crash found.
+`kubectl describe` lists the events of the last hour below the
+status:
+
+    kubectl describe machine <name>
+    kubectl describe cluster <name>
+
+A `Machine` and a `Cluster` are in no namespace, so their events are
+in the `default` namespace. `kubectl events` finds them only with
+`-n default` or `-A`:
+
+    kubectl events -n default --for machine/<name>
+
+A `Warning` event needs a person. A `Normal` event records a change
+that went as expected. The API server deletes an event one hour after
+its last repeat, so the conditions and the status fields keep the
+facts that must last longer.
+
+The event of a condition change has the condition's reason, for
+example `StagingRejected` or `RejectedLastBoot`, and its message
+starts with the condition's name. The other events are these:
+
+| Reason | Object | Type | Meaning |
+| --- | --- | --- | --- |
+| `MachineJoined` | `Machine` | `Normal` | The machine's operator created the `Machine` from the boot manifest, because the cluster held none. |
+| `MachineLost` | `Machine` | `Warning` | The heartbeat stopped. The message gives the time of the last heartbeat. |
+| `KernelCrashed` | `Machine` | `Warning` | The boot found a new kernel crash record. [`status.lastCrash`](/docs/reference/machine/#statuslastcrash) holds it. |
+| `BootRefused` | `Machine` | `Warning` | Init refused a boot and powered the machine off. [`status.lastFailStop`](/docs/reference/machine/#status--lastfailstop) holds the reason. |
+| `Cordoned` | `Machine` | `Normal` | The operator cordoned the machine's `Node` before a reboot. |
+| `Uncordoned` | `Machine` | `Normal` | The operator returned the `Node` to the scheduler after the reboot. |
+| `RebootTurnGranted` | `Machine` | `Normal` | The cluster granted the machine a reboot turn. |
+| `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its turn, and the turn returns to the disruption budget. |
+| `FluxDeployKeyMinted` | `Cluster` | `Normal` | The cluster operator made the deploy key. Register its public half at the forge. |
+| `FluxEngineSeeded` | `Cluster` | `Normal` | The flux engine was absent, and the cluster operator created it from the seed that the release carries. |
 
 ## Reading logs
 

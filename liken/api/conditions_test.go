@@ -1,6 +1,7 @@
 package api
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -87,5 +88,28 @@ func TestFindConditionReportsTheNamedType(t *testing.T) {
 func TestFindConditionReportsNilWhenAbsent(t *testing.T) {
 	if c := FindCondition(nil, "Ready"); c != nil {
 		t.Errorf("got %+v", c)
+	}
+}
+
+func TestTransitionsNameEachNewStatusReasonOrCondition(t *testing.T) {
+	before := []Condition{
+		{Type: "Ready", Status: ConditionTrue, Reason: "Reconciled"},
+		{Type: "SpecConverged", Status: ConditionTrue, Reason: "Converged", Message: "old"},
+		{Type: "StorageReady", Status: ConditionFalse, Reason: "RolesInMemory"},
+		{Type: "SysctlsApplied", Status: ConditionTrue, Reason: "Applied"},
+	}
+	after := []Condition{
+		{Type: "Ready", Status: ConditionFalse, Reason: "Blocked"},
+		{Type: "SpecConverged", Status: ConditionTrue, Reason: "Converged", Message: "new"},
+		{Type: "StorageReady", Status: ConditionFalse, Reason: "ApplyFailed"},
+		{Type: "ModulesLoaded", Status: ConditionTrue, Reason: "NothingDeclared"},
+	}
+	var got []string
+	for _, c := range Transitions(before, after) {
+		got = append(got, c.Type+"/"+c.Reason)
+	}
+	want := []string{"Ready/Blocked", "StorageReady/ApplyFailed", "ModulesLoaded/NothingDeclared"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

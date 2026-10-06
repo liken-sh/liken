@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/liken/api"
@@ -96,6 +97,11 @@ const appLabel = "app"
 // which is what the tests of a sweep use.
 type fleetReader struct {
 	client *apiclient.Client
+
+	// recorder posts the Events about the Machines and the Cluster
+	// (events.go). It is here because every part of a sweep that acts
+	// reads through the fleet reader. A nil recorder posts nothing.
+	recorder *events.Recorder
 
 	machineCopy   *informer.Collection
 	clusterCopy   *informer.Collection

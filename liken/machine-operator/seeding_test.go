@@ -68,7 +68,7 @@ func seedMachine() *machine.Machine {
 func TestEnsureMachineCreatesWhenAbsent(t *testing.T) {
 	fake := &machineAPI{}
 	client := testClient(t, fake.handler())
-	current, err := ensureMachine(client, seedMachine())
+	current, err := ensureMachine(client, seedMachine(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestEnsureMachineCreatesWhenAbsent(t *testing.T) {
 func TestEnsureMachineReturnsAnExistingMachine(t *testing.T) {
 	fake := &machineAPI{exists: true}
 	client := testClient(t, fake.handler())
-	if _, err := ensureMachine(client, seedMachine()); err != nil {
+	if _, err := ensureMachine(client, seedMachine(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if fake.creates != 0 {
@@ -99,7 +99,7 @@ func TestEnsureMachineWaitsOutAnUnservedCRD(t *testing.T) {
 		fake := &machineAPI{notServed: 2}
 		client := testClient(t, fake.handler())
 		start := time.Now()
-		if _, err := ensureMachine(client, seedMachine()); err != nil {
+		if _, err := ensureMachine(client, seedMachine(), nil); err != nil {
 			t.Fatal(err)
 		}
 		if fake.creates != 3 {
@@ -116,7 +116,7 @@ func TestEnsureMachineWaitsOutAnUnservedCRD(t *testing.T) {
 func TestEnsureMachineReturnsAHardCreateFailure(t *testing.T) {
 	fake := &machineAPI{fail: true}
 	client := testClient(t, fake.handler())
-	if _, err := ensureMachine(client, seedMachine()); err == nil {
+	if _, err := ensureMachine(client, seedMachine(), nil); err == nil {
 		t.Fatal("a 500 is not a startup condition to wait out; it comes back to the caller")
 	}
 }

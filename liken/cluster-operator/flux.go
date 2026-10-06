@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"golang.org/x/crypto/ssh"
@@ -68,7 +69,11 @@ const (
 // the feature, and k3s may not have applied it yet. The sweep's
 // level-triggered loop absorbs that window; nothing here needs to
 // wait or retry.
-func ensureFluxDeployKey(c *apiclient.Client, clusterDoc *cluster.Cluster) string {
+//
+// A mint posts FluxDeployKeyMinted on the Cluster, because the person
+// must register the new public half at the forge before the first
+// sync.
+func ensureFluxDeployKey(c *apiclient.Client, recorder *events.Recorder, clusterDoc *cluster.Cluster) string {
 	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 		return ""
 	}
@@ -138,6 +143,8 @@ func ensureFluxDeployKey(c *apiclient.Client, clusterDoc *cluster.Cluster) strin
 		return ""
 	}
 	fmt.Printf("minted the flux deploy key; register the public half from the Cluster's status at the forge\n")
+	recorder.Normal(clusterReference(clusterDoc), reasonFluxDeployKeyMinted,
+		"minted the flux deploy key; register the public half from status.flux.publicKey at the forge")
 	return pub
 }
 
@@ -311,8 +318,9 @@ func (p *engineProbe) TryAsk(now time.Time) bool {
 // create, and a conflict means the object already exists, which the
 // planter leaves exactly as it found it: the seed only ever fills
 // absence. Present but broken stays the repository's problem on
-// purpose; liken answers only for gone.
-func ensureFluxEngine(c *apiclient.Client, clusterDoc *cluster.Cluster, seed []byte, probe *engineProbe, now time.Time) {
+// purpose; liken answers only for gone. A planting posts
+// FluxEngineSeeded on the Cluster, with how many objects it created.
+func ensureFluxEngine(c *apiclient.Client, recorder *events.Recorder, clusterDoc *cluster.Cluster, seed []byte, probe *engineProbe, now time.Time) {
 	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 		return
 	}
@@ -333,20 +341,28 @@ func ensureFluxEngine(c *apiclient.Client, clusterDoc *cluster.Cluster, seed []b
 		return
 	}
 	fmt.Printf("the flux engine is absent; planting the seed (%d objects)\n", len(objects))
+	created, present, failed := 0, 0, 0
 	for _, o := range objects {
 		path, err := collectionPath(o)
 		if err != nil {
 			fmt.Printf("planting the engine seed: %v\n", err)
+			failed++
 			continue
 		}
 		err = c.RequestJSON(http.MethodPost, path, o.body, nil)
-		if errors.Is(err, apiclient.ErrConflict) {
-			continue // it already exists; whatever is there stays
-		}
-		if err != nil {
+		switch {
+		case errors.Is(err, apiclient.ErrConflict):
+			present++ // it already exists; whatever is there stays
+		case err != nil:
 			fmt.Printf("planting %s %s: %v\n", o.Kind, o.Name, err)
+			failed++
+		default:
+			created++
 		}
 	}
+	recorder.Normal(clusterReference(clusterDoc), reasonFluxEngineSeeded, fmt.Sprintf(
+		"the flux engine was absent; planted its seed: %d objects created, %d present already, %d failed",
+		created, present, failed))
 }
 
 // mintDeployKey generates the pair: an ed25519 key, the modern SSH

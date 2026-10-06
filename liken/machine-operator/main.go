@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -134,7 +135,11 @@ func main() {
 	// feature closes this loop for good: a deployment that declares
 	// it hands the in-cluster copy to its git repository, and the
 	// two sides converge on every commit.)
-	current, err := ensureMachine(client, m)
+	// The recorder posts the Events about this Machine (events.go). It
+	// writes from its own goroutine, so a pass never waits on an Event.
+	recorder := events.New(context.Background(), client, component, events.Options{})
+
+	current, err := ensureMachine(client, m, recorder)
 	if err != nil {
 		fatal("ensuring machine %s exists: %v", name, err)
 	}
@@ -198,6 +203,7 @@ func main() {
 	wakes := make(chan struct{}, 1)
 	objects := watchThisMachine(context.Background(), watcher, client, name, clusterName,
 		watch.Signal(wakes), operatorMetrics.WatchRestarted)
+	objects.recorder = recorder
 
 	// The facts watch turns init's writes into wakes. inotify does not
 	// recurse, so the watch reconciles its set with the tree before

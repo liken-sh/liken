@@ -63,6 +63,7 @@ import (
 	"strings"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/liken/api"
@@ -107,6 +108,11 @@ var watchKinds = []string{machineKind, nodeKind, clusterWatchKind, secretKind, p
 // the tests of a pass use.
 type reader struct {
 	client *apiclient.Client
+
+	// recorder posts the Events of a pass about its Machine (events.go).
+	// It is here because every part of a pass that acts reads through
+	// the reader. A nil recorder posts nothing.
+	recorder *events.Recorder
 
 	machines    *informer.Collection
 	nodes       *informer.Collection

@@ -33,6 +33,21 @@ import (
 
 // newPassAPI holds the objects one machine's pass reads.
 func newPassAPI() *fakeapi.Server {
+	return newPassAPIWithNode(readyNode())
+}
+
+// readyNode is node-1's Node, Ready and schedulable.
+func readyNode() map[string]any {
+	return fakeapi.Object("v1", "Node", "", "node-1", map[string]any{
+		"status": map[string]any{"conditions": []any{map[string]any{
+			"type": "Ready", "status": "True", "lastTransitionTime": "2026-07-06T11:00:00Z",
+		}}},
+	})
+}
+
+// newPassAPIWithNode holds the objects one machine's pass reads, with
+// node as its Node.
+func newPassAPIWithNode(node map[string]any) *fakeapi.Server {
 	object := fakeapi.Object
 	return fakeapi.New(map[string]*fakeapi.Collection{
 		kubernetes.MachinesPath: {APIVersion: "liken.sh/v1alpha1", Kind: "Machine", Items: []map[string]any{
@@ -43,13 +58,7 @@ func newPassAPI() *fakeapi.Server {
 				"spec": map[string]any{"leaders": []any{"node-1"}},
 			}),
 		}},
-		"/api/v1/nodes": {APIVersion: "v1", Kind: "Node", Items: []map[string]any{
-			object("v1", "Node", "", "node-1", map[string]any{
-				"status": map[string]any{"conditions": []any{map[string]any{
-					"type": "Ready", "status": "True", "lastTransitionTime": "2026-07-06T11:00:00Z",
-				}}},
-			}),
-		}},
+		"/api/v1/nodes": {APIVersion: "v1", Kind: "Node", Items: []map[string]any{node}},
 		"/api/v1/namespaces/liken-system/secrets": {APIVersion: "v1", Kind: "Secret", Items: []map[string]any{
 			object("v1", "Secret", "liken-system", "registry-credentials", map[string]any{
 				"type": "kubernetes.io/dockerconfigjson",

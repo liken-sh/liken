@@ -297,7 +297,7 @@ func TestMarkLostContinuesWhenTheMachineWritesFirst(t *testing.T) {
 		labMachine("node-2", api.PhaseReady),
 	}
 
-	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, sweepNow)
+	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, nil, sweepNow)
 
 	if _, wrote := fake.statuses["node-1"]; wrote {
 		t.Error("the conflicting write must not land")
@@ -315,7 +315,7 @@ func TestMarkLostCarriesOnPastAFailedWrite(t *testing.T) {
 		labMachine("node-2", api.PhaseReady),
 	}
 
-	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, sweepNow)
+	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, nil, sweepNow)
 
 	if _, wrote := fake.statuses["node-1"]; wrote {
 		t.Error("the failed write must not land")

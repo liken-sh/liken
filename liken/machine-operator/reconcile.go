@@ -102,6 +102,9 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, what str
 type disruptions struct {
 	draining  bool
 	rebooting bool
+
+	// events posts the drain's cordon about this Machine.
+	events machineEvents
 }
 
 // gate intercepts one document's convergence decision on its way to
@@ -123,7 +126,7 @@ type disruptions struct {
 func (d *disruptions) gate(c *apiclient.Client, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
 	conv.requestRestart = conv.requestRestart && !d.rebooting
 	if conv.requestReboot && t == turnGranted && nodeErr == nil {
-		conv = gateThroughDrain(c, node, conv, now)
+		conv = gateThroughDrain(c, node, conv, now, d.events)
 		d.draining = d.draining || !conv.requestReboot
 	}
 	d.rebooting = d.rebooting || conv.requestReboot
@@ -156,6 +159,13 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// snapshot is what lets the publish step below skip a write that
 	// would change nothing.
 	before, _ := json.Marshal(&m.Status)
+
+	// The Events of this pass compare the status it writes with the
+	// stored one (events.go), so the stored conditions need their own
+	// copy for the same reason.
+	stored := m.Status
+	stored.Conditions = slices.Clone(m.Status.Conditions)
+	notes := machineEvents{r.recorder, machineReference(m)}
 
 	status := &machine.MachineStatus{}
 
@@ -349,7 +359,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// through the disruption gate on its way to its side effects,
 	// and the gate depends on the order in which the documents
 	// converge (see disruptions).
-	disr := &disruptions{}
+	disr := &disruptions{events: notes}
 	machineStore := machine.MachineManifests(machine.MachineStateDir)
 	machineRejection, _ := machineStore.LoadRejection()
 	conv := disr.gate(c, node, nodeErr, t, now,
@@ -470,6 +480,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
 			} else {
 				fmt.Printf("uncordoned %s; its reboot is complete\n", node.Metadata.Name)
+				notes.normal(reasonUncordoned, "uncordoned the Node "+node.Metadata.Name+"; its reboot is complete")
 			}
 		}
 	}
@@ -531,8 +542,10 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	err = publishOwnStatus(r, m, status, before)
 	if err != nil {
 		fmt.Printf("publishing status: %v\n", err)
+		return err
 	}
-	return err
+	postStatusEvents(notes, &stored, status)
+	return nil
 }
 
 // publishOwnStatus is kubernetes.PublishStatus for the machine

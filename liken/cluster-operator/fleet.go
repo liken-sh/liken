@@ -192,16 +192,16 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 	// public half (see flux.go). The engine gets the same standing
 	// care on a slower cadence: the probe asks once a minute, and gone
 	// means re-planted on the pass that asked.
-	publicKey := ensureFluxDeployKey(c, clusterDoc)
+	publicKey := ensureFluxDeployKey(c, reads.recorder, clusterDoc)
 	if seed, err := engineSeed(); err != nil {
 		if clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 			fmt.Printf("this build carries no engine seed (a plain go build outside make): %v\n", err)
 		}
 	} else {
-		ensureFluxEngine(c, clusterDoc, seed, probe, now)
+		ensureFluxEngine(c, reads.recorder, clusterDoc, seed, probe, now)
 	}
 
-	markLost(reads, machines, s.lost, now)
+	markLost(reads, machines, s.lost, renewals, now)
 	publishClusterStatus(reads, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
 
 	// The fleet's metrics come from the verdict that the write above
@@ -212,8 +212,11 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 }
 
 // markLost writes the Lost verdict onto each machine that the sweep
-// found silent.
-func markLost(reads *fleetReader, machines []machine.Machine, lost []string, now time.Time) {
+// found silent. Each verdict that lands posts MachineLost on the
+// machine, with the last renewal of its heartbeat lease, because the
+// Ready condition holds only that the heartbeat is stale, not since
+// when.
+func markLost(reads *fleetReader, machines []machine.Machine, lost []string, renewals map[string]time.Time, now time.Time) {
 	for _, m := range machines {
 		if !slices.Contains(lost, m.Metadata.Name) {
 			continue
@@ -244,8 +247,19 @@ func markLost(reads *fleetReader, machines []machine.Machine, lost []string, now
 			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)
 		} else {
 			fmt.Printf("machine %s has gone silent; marked Lost\n", m.Metadata.Name)
+			reads.recorder.Warning(machineReference(&m), reasonMachineLost, lostMessage(renewals, m.Metadata.Name))
 		}
 	}
+}
+
+// lostMessage answers the message of a MachineLost Event: when the
+// machine last renewed its heartbeat lease, or that it never did.
+func lostMessage(renewals map[string]time.Time, name string) string {
+	renewed, heard := renewals[name]
+	if !heard {
+		return "the machine has never renewed a heartbeat lease; marked Lost"
+	}
+	return "the heartbeat lease was last renewed at " + renewed.UTC().Format(time.RFC3339) + "; marked Lost"
 }
 
 // publishClusterStatus publishes the sweep's verdict on the Cluster.
@@ -259,7 +273,9 @@ func markLost(reads *fleetReader, machines []machine.Machine, lost []string, now
 // channel's last polled version. The sweep is the only writer of the
 // Cluster's status, so deriving every field is its job. The function
 // writes the status only when something actually changed, so a
-// settled fleet causes no write.
+// settled fleet causes no write. Each condition that transitioned
+// posts its Event after the write lands, so a refused write posts
+// nothing and the next sweep finds the same transition again.
 func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) {
 	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
@@ -306,6 +322,8 @@ func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fle
 		updated.Status.Conditions = conditions
 		if err := reads.publishClusterStatus(&updated); err != nil {
 			fmt.Printf("publishing cluster status: %v\n", err)
+			return
 		}
+		postClusterTransitions(reads.recorder, clusterDoc, clusterDoc.Status.Conditions, conditions)
 	}
 }

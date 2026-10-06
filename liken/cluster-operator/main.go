@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -96,6 +97,11 @@ func main() {
 	wakes := make(chan struct{}, 1)
 	fleet := watchFleet(context.Background(), watcher, client, watch.Signal(wakes),
 		operatorMetrics.WatchRestarted)
+	// The recorder posts the Events about the Machines and the Cluster
+	// (events.go). It writes through the guarded client, so a replica
+	// that lost the election posts nothing, and from its own goroutine,
+	// so a sweep never waits on an Event.
+	fleet.recorder = events.New(stop, client, component, events.Options{})
 
 	// The ticker is a clock. A heartbeat ages past the staleness limit
 	// with no event, because an aging Lease is not a write. A granted

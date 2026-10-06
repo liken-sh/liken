@@ -688,8 +688,10 @@ UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.Im
 # speaks HTTP, and nothing of the shared kubernetes module, which brings
 # net/http and client-go. It reads the machine and cluster packages,
 # which answer the module's metadata type with no import of it
-# (api.Meta). This list finds each import that breaks the rule.
-INIT_HEAVY := go list -deps ./init | grep -E '^(net/http|github\.com/liken-sh/liken/kubernetes)(/|$$)'
+# (api.Meta). The one exception is the module's conditions package,
+# which declares the condition type of every status and imports only
+# time. This list finds each import that breaks the rule.
+INIT_HEAVY := go list -deps ./init | grep -E '^(net/http|github\.com/liken-sh/liken/kubernetes)(/|$$)' | grep -vx 'github\.com/liken-sh/liken/kubernetes/conditions'
 
 test-go:
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
