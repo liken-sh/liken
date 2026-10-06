@@ -30,6 +30,12 @@ measured 1,082 ms from the end of an exposure to a client two hops
 away, at 76 Mbit/s, against 13 ms on one host. The guider's pod runs on
 the node of the server and the guide camera when the link is slow.
 
+The operator of plan 07 places no pod, so this plan places all three:
+the telescope's server, the guide camera's pod, and the guider's pod.
+On the two-node test cluster, the scheduler put the guide camera's pod
+on the other node from the server, so each guide frame crossed the
+76 Mbit/s link.
+
 ## How we test it
 
 PHD2 calibrates and guides on the simulators on the `lab` fleet, as it

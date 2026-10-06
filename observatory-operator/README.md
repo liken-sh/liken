@@ -165,7 +165,7 @@ a message that names the device a step waits for. Each step's state is
 below states what each step does.
 
 ```sh
-kubectl get rsv -n observatory -w
+kubectl get rsv -n observatory -o wide -w
 kubectl wait --for=condition=Ready reservation/east-tonight -n observatory --timeout=10m
 kubectl describe reservation east-tonight -n observatory
 kubectl get rsv east-tonight -n observatory \
@@ -173,10 +173,12 @@ kubectl get rsv east-tonight -n observatory \
 kubectl get cam,mnt,sw -n observatory
 ```
 
-`kubectl get rsv -w` prints a line for each change of the phase or
-the step. `kubectl describe` lists each step, and the reservation's
-Events: one for each step that ends, one for each phase, and a
-`Warning` for a step that fails. The `Ready` condition is `True` while
+`kubectl get rsv -w` prints a line for each change of the status: the
+phase, the step, and the message of the step that runs, such as the
+device it waits for. Without `-o wide`, the `Message` column is
+hidden, and many lines look the same. `kubectl describe` lists each
+step, and the reservation's Events: one for each step that ends, one
+for each phase, and a `Warning` for a step that fails. The `Ready` condition is `True` while
 the phase is `Ready`, and `status.endpoint` then holds the host and
 port for KStars, such as `telescope-east.observatory.svc:7624`.
 `SafeToPowerOff` is `True` when the deactivation steps are done. The

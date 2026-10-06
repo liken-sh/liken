@@ -2,10 +2,12 @@
 
 Proposed on 2026-10-05. Built on 2026-10-05, apart from the two parts
 that "Not built yet" names, and tested against the fake API server and
-the recorded transcripts. The drill on a test cluster has not run:
-applying `examples/simulators.yaml`, then creating and deleting the
-`Reservation`, with the phase timeline and the step durations it
-gives. The plan stays open until that drill runs.
+the recorded transcripts. Drilled the same day on the two-node test
+cluster of plan 03, with the simulators of `examples/simulators.yaml`.
+"What the test cluster measured" gives the results. The drill found
+one defect, a park sent again after an operator restart, and its fix
+is in the operator that the drill ran last. Plan 09 holds the placement
+of the pods, and the fifo is an open problem.
 
 ## The problem
 
@@ -214,13 +216,58 @@ to 5 °C, and `StopSite` 16 s while the dome turned to park. After a
 restart of the camera's container, the camera was connected again,
 with its gain written again, 1.9 seconds later.
 
+## What the test cluster measured
+
+The operator ran from its published development build, applied by
+Flux from the deploy artifact, on the two-node test cluster of plan 03.
+The inventory was `examples/simulators.yaml` without its
+`Reservation`. Each drill created and deleted reservations by hand,
+and read `kubectl get rsv -w`, the step times in `status.steps`, and
+the Events. Step times are to the second, from `status.steps`, and
+the times below a second come from the watch.
+
+| Drill | Result | Timings |
+|---|---|---|
+| Inventory | Passed. With no `Reservation`, each of the 21 resources with a phase reported `Inventory`, and only the operator's pod ran. | none |
+| Activation, images not yet on the nodes | Passed. `kubectl wait --for=condition=Ready` returned, and `status.endpoint` named `telescope-east.observatory.svc:7624`. | 2 min 2 s: `StartSite` 39 s and `StartDevices` 61 s, each while a node pulled the 281 MB `indi-simulators` image in 57 s |
+| Activation, images on the nodes | Passed. | 33 s: `StartSite` 7 s, `PowerOn` 4 s, `StartDevices` 3 s, `Connect` and `Configure` under 1 s, `Prepare` 19 s |
+| A device pod deleted while `Ready` | Passed. The camera came back connected with its gain, offset, and `ACTIVE_DEVICES`. The mount's status read `Starting` 1.1 s after the delete. | camera connected 4 s after the delete, mount 4.2 s |
+| The server's pod deleted while `Ready` | Passed. Every device came back connected. | new pod running 4.2 s after the delete, mount connected 7.2 s after it |
+| The operator's pod deleted while `Ready` | Passed. No pod changed, no step ran, and no Event was written. | status writes resumed within 2 s |
+| A second reservation of `east` | Passed. It waited in `Wait` with the message "waiting for the Reservation east-tonight to release the Telescope east", and took the telescope when the first was `Released`. | 0.1 s from the first's release to the second's `Wait` |
+| A reservation of `west` while `east` was `Ready` | Passed. `west` got its own server, and the observatory's server pod kept its UID and had no restart. `StopSite` of each earlier release was `Skipped` and named the reservation that still held the site. | `Ready` in 7.3 s |
+| The operator restarted during `Prepare` | Passed. `Prepare` kept its start time and finished as an uninterrupted `Prepare` does. | 18 s for the step |
+| The operator restarted during `Secure` | Failed, then passed after the fix. The new operator sent `TELESCOPE_PARK` while the mount moved to park, the simulator aborted the park and answered Alert, and the reservation was `Failed`. The retry annotation ran `Secure` again, and deactivation finished. With the fix, the new operator waited for the park and sent nothing. | 75 s from the delete to the release, with the restart |
+| Deactivation of the last reservation | Passed. The flat panel switched off, the dust cap closed, the mount parked, the camera warmed to 5 °C and its cooler switched off, and then the steps stopped the devices, the outputs, the server, and the site. | 74 s: `Abort` 0 s, `Secure` 50 s (16 s for the park, 29 s to warm from -10 °C), `Disconnect` 0.3 s, `StopDevices` 1.8 s, `PowerOff` 2.8 s, `StopSite` 19 s (17 s for the dome to park) |
+| A reservation that reached `spec.end` | Passed. It stayed `Released`, and `SafeToPowerOff` was `True`. Only the operator's pod ran. | `SafeToPowerOff` 40 s after `spec.end` |
+
+The cold activation took 2 minutes, against 24.9 seconds in Docker,
+because each node pulled the simulators' image. With the image on the
+nodes, the 33 seconds are close to the Docker result, and `Prepare`'s
+cooling is most of them in both.
+
+The operator places no pod, and the scheduler put the guide camera's
+pod on the other node from the telescope's server. On this cluster's
+76 Mbit/s link, that costs the 430 ms for each frame that plan 03
+measured.
+
+The drill also found two faults in the status. Each
+`WeatherStation` and the `Observatory` reported the weather as
+`Unknown`, because the weather simulator sets the state of
+`SAFETY_STATUS` and leaves its `SAFETY` light Idle. A `Prepare` with
+nothing to change read "no mount to unpark" for a mount that was
+unparked already. Both are fixed in the build that the drill ran last.
+
 ## Not built yet
 
 - The placement of the pods. The guide camera's pod and the server's
   pod belong on one node when the link between nodes is slow, and the
-  operator places no pod.
+  operator places no pod. [Plan 09](../09-the-guider.md) places them
+  with the guider's pod.
 - Adding a device to a running server through the `-f` fifo. A change
   to the devices restarts the server, which costs 3 seconds.
+  [Adding a device restarts the server](../open-problems/adding-a-device-restarts-the-server.md)
+  holds it.
 
 ## Upstream issues
 

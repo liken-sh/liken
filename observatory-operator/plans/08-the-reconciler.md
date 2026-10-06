@@ -2,8 +2,9 @@
 
 Proposed on 2026-10-05. Partly built on 2026-10-05, with plan 07, in
 the operator and not in each server's pod. "What was built" names the
-parts that are built and the part that is not. The restart drills on a
-test cluster have not run.
+parts that are built and the part that is not. The restart drills ran
+on the two-node test cluster of plan 03 the same day, and "What the
+test cluster measured" gives the results.
 
 ## The problem
 
@@ -85,3 +86,20 @@ settings. A harness on a workstation, not kept in the repository,
 restarted the CCD simulator's container behind a real `indiserver`,
 and the camera was connected with its gain written again 1.9 seconds
 later.
+
+## What the test cluster measured
+
+Plan 07's drill ran the restart drills of plan 03 against the
+operator's published build, with no script. While the reservation was
+`Ready`:
+
+| Restart | Result | Time from the delete |
+|---|---|---|
+| The camera's pod | Connected again, with its gain, offset, and `ACTIVE_DEVICES` written again | 4 s |
+| The mount's pod | Connected again; its status read `Starting` 1.1 s after the delete | 4.2 s |
+| The telescope's server pod | Every device connected again, with its settings | 7.2 s for the mount |
+| The operator's pod | No device changed, and the status writes resumed | under 2 s |
+
+The status from the INDI updates showed each device's gap and return.
+A mount that does not track writes its status about once a second,
+because its right ascension changes with each update.

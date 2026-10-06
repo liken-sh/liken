@@ -64,7 +64,7 @@ must hold.
 | [04](completed/04-the-indi-client-in-go.md) | Built: the INDI client in Go, the package `indi` |
 | [05](05-the-property-schema.md) | Typed fields generated from the simulators and INDI's documentation |
 | [06](completed/06-the-resources.md) | Built: the resources, as CRDs and the package `observatory` |
-| [07](07-the-operator-runs-the-topology.md) | Built, with the drill on a test cluster still to run: the operator creates the topology from the resources |
-| [08](08-the-reconciler.md) | Partly built: the reconciler, in the operator |
+| [07](completed/07-the-operator-runs-the-topology.md) | Built and drilled on a test cluster: the operator creates the topology from the resources |
+| [08](08-the-reconciler.md) | Partly built and drilled: the reconciler, in the operator; the lock policies between the dome and the mounts are not built |
 | [09](09-the-guider.md) | The guider |
 | [10](10-access-from-a-desktop.md) | KStars on a desktop, which completes mode 1 |
