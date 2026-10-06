@@ -112,6 +112,14 @@ func (r *runRecords) put(key string, run observatory.ProcedureRun) {
 	r.changed.notify()
 }
 
+// drop removes the record of one trigger's run, and rings the bell.
+func (r *runRecords) drop(key, trigger string) {
+	r.mu.Lock()
+	delete(r.runs[key], trigger)
+	r.mu.Unlock()
+	r.changed.notify()
+}
+
 // list answers the runs of one resource, in the order of its triggers:
 // activation, deactivation, and then each item of spec.triggers.
 func (r *runRecords) list(key string) []observatory.ProcedureRun {

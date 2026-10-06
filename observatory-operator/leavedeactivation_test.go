@@ -113,3 +113,30 @@ func TestADeletedDeviceStopsWithNoDeactivation(t *testing.T) {
 		}
 	})
 }
+
+// A device that leaves and joins again in one session runs its
+// procedures each time: a cap that its deactivation closed opens again
+// when it rejoins, and closes again when it leaves again. The
+// reservation's Activation step ran the first activation. The fake
+// driver, like the simulator, starts open in each new pod, so the test
+// counts the runs rather than the moves.
+func TestADeviceThatLeavesAndRejoinsRunsEachProcedureAgain(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		for round := 1; round <= 2; round++ {
+			w.moveDevice(observatory.DustCapKind, "east", "", "")
+			w.until(5*time.Minute, "the dust cap's pod stays", func() bool {
+				return !slices.Contains(w.api.names(podsCollection), "east-dustcap")
+			})
+			w.moveDevice(observatory.DustCapKind, "east", "opticalTrain", "east-imaging")
+			w.until(5*time.Minute, "the rejoined dust cap does not activate", func() bool {
+				return startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerActivation) == round+1 &&
+					lastRun(t, w, observatory.DustCapKind, "east", observatory.TriggerActivation).State == observatory.StepDone
+			})
+		}
+		if n := startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerDeactivation); n != 2 {
+			t.Errorf("the deactivation started %d times, want 2", n)
+		}
+	})
+}

@@ -23,7 +23,11 @@ package main
 // is then not Ready, and that run retries through the reservation.
 //
 // A device that leaves while its parent is Active runs its
-// deactivation before its driver stops (leaves.go).
+// deactivation before its driver stops (leaves.go), and drops the
+// record of its activation, so a device that joins again activates
+// again. Each run's record answers the transition, and the times of
+// two runs in the same second cannot order them, so the record of the
+// other trigger goes instead.
 
 import (
 	"context"
@@ -82,6 +86,12 @@ func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *c
 	resumed := answered && !rerun
 	if !o.governedByReady(t, r) || (!resumed && r.device.object.Status.Phase != observatory.DeviceConnected) {
 		return
+	}
+	if !answered {
+		// A device that left ran its deactivation of this transition,
+		// and dropped its activation's record (leaves.go). It joins
+		// again, so its next leave must run its deactivation again.
+		o.runs.drop(r.record(), observatory.TriggerDeactivation)
 	}
 	k.flights[id] = o.fly(ctx, procCall{res: r, trigger: observatory.TriggerActivation,
 		actions: r.procedures.Activation, since: state.since, rerun: rerun}, &k.group)

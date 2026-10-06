@@ -79,6 +79,9 @@ func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef
 			continue
 		}
 		group.Go(func() {
+			// The device's activation answered this transition, and a
+			// rejoin must answer it again (joins.go).
+			o.runs.drop(r.record(), observatory.TriggerActivation)
 			err := o.runProcedure(ctx, procCall{res: r, trigger: observatory.TriggerDeactivation,
 				actions: r.procedures.Deactivation, since: state.since, ending: true, on: ref})
 			if err != nil {
