@@ -27,7 +27,7 @@ func TestADevicesMessageLeadsWithItsState(t *testing.T) {
 		want string
 	}{
 		{"a device with no pod", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceInventory}}, "", false, "Not reserved"},
-		{"a device whose pod a Ready reservation creates again", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceInventory}}, "", true,
+		{"a device whose pod a Ready reservation creates again", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceStarting}}, "", true,
 			"Creating pod east-main-camera"},
 		{"a pod whose driver has not defined its device", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceStarting, Pod: "camera-east-main"}}, "",
 			false, "Waiting for its driver on east-telescope"},
@@ -47,13 +47,9 @@ func TestADevicesMessageLeadsWithItsState(t *testing.T) {
 // eventMessages answers the reason and the message of each Event, in
 // the order the operator wrote them.
 func eventMessages(a *fakeAPI) []string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	var out []string
-	for _, e := range a.events {
-		if e.collection == eventsCollection && e.kind == "ADDED" {
-			out = append(out, e.object["reason"].(string)+": "+e.object["message"].(string))
-		}
+	for _, e := range a.recorded.List() {
+		out = append(out, e.Reason+": "+e.Message)
 	}
 	return out
 }

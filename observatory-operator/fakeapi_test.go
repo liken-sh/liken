@@ -1,8 +1,9 @@
 package main
 
 // A fake API server that holds every collection the operator reads and
-// writes: the 20 kinds of the group, the pods, the Services, the
-// claims, and the Events. It serves a list and a watch of each
+// writes: the 20 kinds of the group, the pods, the Services, and the
+// claims. The Events go to the shared fake of kubernetes/events. It
+// serves a list and a watch of each
 // collection, a create, a read, a status write, a merge patch of the
 // metadata, and a delete that a finalizer holds, the way the API
 // server does. It answers over the in-memory connections of
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -36,6 +38,8 @@ type fakeEvent struct {
 
 type fakeAPI struct {
 	server *apiservertest.Server
+	// recorded holds the Events the operator writes.
+	recorded *eventstest.Events
 
 	mu      sync.Mutex
 	version int
@@ -60,9 +64,9 @@ type fakeAPI struct {
 	// last finalizer answer 404 after the object goes, as a patch does
 	// when another request deleted the object first.
 	lateDeletes int
-	// statusRefusals and eventRefusals are how many status writes and
-	// Event creates the server refuses next.
-	statusRefusals, eventRefusals int
+	// statusRefusals is how many status writes the server refuses
+	// next.
+	statusRefusals int
 }
 
 // refuse makes the server refuse the next creates and deletes.
@@ -89,7 +93,6 @@ var fakeKinds = func() map[string][2]string {
 	out := map[string][2]string{
 		"pods":           {"v1", "Pod"},
 		"services":       {"v1", "Service"},
-		"events":         {"v1", "Event"},
 		"resourceclaims": {"resource.k8s.io/v1", "ResourceClaim"},
 	}
 	for _, kind := range observatory.Kinds {
@@ -104,8 +107,10 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		changed: make(chan struct{}),
 		pending: map[string]bool{},
 		writes:  map[string]int{},
+
+		recorded: &eventstest.Events{},
 	}
-	api.server = apiservertest.Start(t, api)
+	api.server = apiservertest.Start(t, api.recorded.Around(api))
 	// The reflector waits out its backoff after a refused list without
 	// reading its context, so the bubble waits past it (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })
@@ -316,7 +321,7 @@ func (a *fakeAPI) get(w http.ResponseWriter, collection, name string) {
 }
 
 // create adds an object, and names it from generateName when it has no
-// name, as the API server does for an Event.
+// name, as the API server does.
 func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection string) {
 	var object map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&object)
@@ -324,11 +329,6 @@ func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection stri
 	defer a.mu.Unlock()
 	a.writes["POST "+collection]++
 	if a.refused(w, collection) {
-		return
-	}
-	if plural(collection) == "events" && a.eventRefusals > 0 {
-		a.eventRefusals--
-		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 	added := a.add(collection, object)
@@ -528,7 +528,6 @@ func kindCollection(kind observatory.Kind) string { return kind.Path(testNamespa
 const (
 	podsCollection       = "/api/v1/namespaces/" + testNamespace + "/pods"
 	servicesCollection   = "/api/v1/namespaces/" + testNamespace + "/services"
-	eventsCollection     = "/api/v1/namespaces/" + testNamespace + "/events"
 	configMapsCollection = "/api/v1/namespaces/" + testNamespace + "/configmaps"
 )
 
@@ -623,13 +622,9 @@ func (a *fakeAPI) holdPending(name string) {
 // eventReasons answers the reason of each Event, in the order of their
 // creation.
 func (a *fakeAPI) eventReasons() []string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	var out []string
-	for _, e := range a.events {
-		if e.collection == eventsCollection && e.kind == "ADDED" {
-			out = append(out, e.object["reason"].(string))
-		}
+	for _, e := range a.recorded.List() {
+		out = append(out, e.Reason)
 	}
 	return out
 }

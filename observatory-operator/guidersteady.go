@@ -46,11 +46,7 @@ func (r *runner) keepGuider(ctx context.Context, t *tree, ref serverRef, telesco
 	defer cancel()
 	created, err := r.o.startGuiderPod(ctx, nil, ref, guider, gear)
 	if created {
-		meta := guider.Metadata
-		r.recordPod(involvedObject{
-			APIVersion: observatory.APIVersion, Kind: observatory.GuiderKind.Name,
-			Name: meta.Name, Namespace: meta.Namespace, UID: meta.UID,
-		}, guiderName(guider), "The new PHD2 starts idle and not calibrated.")
+		r.recordPod(reference(observatory.GuiderKind, guider.Metadata), guiderName(guider), "The new PHD2 starts idle and not calibrated.")
 	}
 	if err == nil {
 		err = r.connectNewGuider(ctx, guider, gear)

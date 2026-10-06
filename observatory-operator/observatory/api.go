@@ -17,7 +17,11 @@
 // two cannot drift apart.
 package observatory
 
-import "time"
+import (
+	"time"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
+)
 
 const (
 	// Group is the API group of every kind in this package.
@@ -88,27 +92,23 @@ type List[T any] struct {
 }
 
 // ConditionStatus is a condition's verdict. Unknown is a third state:
-// the operator cannot tell yet.
-type ConditionStatus string
+// the operator cannot tell yet. It is the status type that every
+// liken component shares.
+type ConditionStatus = conditions.Status
 
 const (
-	ConditionTrue    ConditionStatus = "True"
-	ConditionFalse   ConditionStatus = "False"
-	ConditionUnknown ConditionStatus = "Unknown"
+	ConditionTrue    = conditions.True
+	ConditionFalse   = conditions.False
+	ConditionUnknown = conditions.Unknown
 )
 
 // Condition has the shape of metav1.Condition, so `kubectl describe`
 // and `kubectl wait --for=condition=Ready` read it the way they read a
 // Pod's conditions. ObservedGeneration records which
-// metadata.generation the condition judged.
-type Condition struct {
-	Type               string          `json:"type"`
-	Status             ConditionStatus `json:"status"`
-	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
-	Reason             string          `json:"reason"`
-	Message            string          `json:"message"`
-	LastTransitionTime time.Time       `json:"lastTransitionTime"`
-}
+// metadata.generation the condition judged. It is the condition type
+// that every liken component shares, so one setter keeps its
+// lastTransitionTime and posts an Event for each transition.
+type Condition = conditions.Condition
 
 // The condition types that more than one kind reports.
 const (

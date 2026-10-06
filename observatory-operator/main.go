@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -45,6 +46,7 @@ func operate() error {
 		return err
 	}
 	o := newOperator(namespace, client, nil)
+	o.recorder = events.New(ctx, client, managedBy, events.Options{Log: o.logs})
 	o.run(ctx, func(ctx context.Context) *stores { return startWatches(ctx, watcher, namespace, o.structure) })
 	return nil
 }

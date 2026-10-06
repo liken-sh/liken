@@ -4,6 +4,7 @@ package main
 // the step that names the reason.
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -326,14 +327,18 @@ func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
 }
 
 // A status write or an Event that the API server refuses costs nothing
-// but a log line: the next write carries the same facts.
+// but a log line: the next status write carries the same facts, and
+// the recorder sends the Event again.
 func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.mu.Lock()
-		w.api.statusRefusals, w.api.eventRefusals = 40, 3
+		w.api.statusRefusals = 40
 		w.api.mu.Unlock()
+		// The recorder sends each Event three times, so two refusals
+		// delay the first Event and lose none.
+		w.api.recorded.Refuse(2)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		time.Sleep(2 * statusWindow)
@@ -352,6 +357,13 @@ func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
 		if s := camera.Status.Readings.Temperature; s == nil || *s != -12 {
 			t.Errorf("temperature = %s after a refused write, want -12", mustJSON(s))
+		}
+		// The recorder sends a refused Event again after 10 s.
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		reasons := w.api.eventReasons()
+		if !slices.Contains(reasons, string(observatory.StepWait)) || !slices.Contains(reasons, string(observatory.ReservationReady)) || strings.Contains(w.logs.String(), "Event") {
+			t.Errorf("Events %q, and the log says:\n%s\nwant every Event written and no Event lost", reasons, w.logs.String())
 		}
 	})
 }

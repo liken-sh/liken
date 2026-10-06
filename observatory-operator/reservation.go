@@ -292,7 +292,7 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	}
 	r.save(ctx)
 	r.o.logf("Reservation %s: %s", r.name, stepLine(s))
-	r.o.record(r.res, eventNormal, string(name), sentence(strings.TrimPrefix(stepLine(s), string(name)+" ")))
+	r.o.record(r.res, string(name), sentence(strings.TrimPrefix(stepLine(s), string(name)+" ")))
 	return nil
 }
 
@@ -315,7 +315,7 @@ func (r *runner) failure(ctx context.Context, s *observatory.Step, reason string
 	r.o.logf("Reservation %s: %s", r.name, stepLine(s))
 	r.status.Phase = observatory.ReservationFailed
 	r.save(ctx)
-	r.o.record(r.res, eventWarning, reason, failedMessage(s))
+	r.o.recorder.Warning(reference(observatory.ReservationKind, r.res.Metadata), reason, failedMessage(s))
 }
 
 // clearStep empties status.step of a reservation that is Ready or
@@ -365,7 +365,9 @@ func (r *runner) save(ctx context.Context) {
 		objectPath(observatory.ReservationKind, held.Metadata.Namespace, held.Metadata.Name), &held,
 		func(copy *observatory.Reservation) bool {
 			next := r.status
-			next.Conditions = mergeConditions(copy.Status.Conditions, r.status.Conditions)
+			// The runner's own Events cover these transitions
+			// (events.go).
+			next.Conditions, _ = mergeConditions(copy.Status.Conditions, r.status.Conditions)
 			if equalJSON(copy.Status, next) {
 				return false
 			}

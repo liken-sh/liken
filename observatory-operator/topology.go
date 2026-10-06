@@ -63,14 +63,14 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 }
 
 // startServer creates the pod and the Service of one INDI server, with
-// a link for each of the devices.
-func (o *operator) startServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) error {
+// a link for each of the devices. created reports whether the API
+// server created the pod.
+func (o *operator) startServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
 	built, svc, err := serverPod(o.namespace, ref, ownerUID, devices)
 	if err != nil {
-		return err
+		return false, err
 	}
-	_, err = o.ensure(ctx, report, built, svc, nil)
-	return err
+	return o.ensure(ctx, report, built, svc, nil)
 }
 
 // startDevices creates the pod, the Service, and the claim of each

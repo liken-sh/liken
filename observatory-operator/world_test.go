@@ -19,6 +19,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -118,6 +119,7 @@ func (w *world) start() {
 	ctx, cancel := context.WithCancel(w.t.Context())
 	o := newOperator(testNamespace, client.WithContext(ctx), dialers{w.indi, w.guiders})
 	o.logs = w.logs
+	o.recorder = events.New(ctx, client, managedBy, events.Options{Instance: "observatory-operator-0", Log: w.logs})
 	w.o = o
 	w.stop, w.done = cancel, make(chan struct{})
 	done := w.done

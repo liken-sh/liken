@@ -278,11 +278,20 @@ telescope's inventory restarts the server, which then links to it. The
 operator also creates the guider's pod again, and connects the camera
 and the mount of each new PHD2 once.
 
-While such a pod is gone, the `Ready` message of its device or its
-`Guider` reads `Creating pod <name>`. When the operator creates the
-pod, it records a `PodCreated` Event on the device or the `Guider`,
-and writes one line to its log. A new PHD2 starts idle and not
-calibrated, so the holder calibrates and starts guiding again.
+While such a pod is gone, its device is `Starting`, and the `Ready`
+message of the device or its `Guider` reads `Creating pod <name>`.
+When the operator creates the pod, it records a `PodCreated` Event on
+the device, the `Guider`, or the `Telescope` or `Observatory` whose
+INDI server the pod runs, and writes one line to its log. A new PHD2
+starts idle and not calibrated, so the holder calibrates and starts
+guiding again. A new INDI server starts each driver disconnected, and
+the operator connects each device again.
+
+Each resource except a `Reservation` posts an Event each time a condition first
+appears or changes its status or its reason, with the condition's
+reason and message. A `ParentFound` that is `False`, and a `Ready`
+whose reason is `Error`, are `Warning`s. `kubectl describe` lists them
+for an hour.
 
 ## The guider
 

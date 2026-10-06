@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
@@ -92,7 +93,11 @@ func (r *runner) keepWaiting(ctx context.Context, wake <-chan struct{}) {
 // keepPods creates each of the telescope's pods that is gone, and the
 // observatory's, and replaces each whose spec changed.
 func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope *observatory.Telescope, devices []*device) error {
-	if err := r.o.startServer(ctx, nil, ref, telescope.Metadata.UID, devices); err != nil {
+	server, err := r.o.startServer(ctx, nil, ref, telescope.Metadata.UID, devices)
+	if server {
+		r.recordServerPod(ref, telescope.Metadata)
+	}
+	if err != nil {
 		return err
 	}
 	created, err := r.o.startDevices(ctx, nil, ref, devices)
@@ -114,7 +119,11 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 		return err
 	}
 	defer lock.release()
-	if err := r.o.startServer(ctx, nil, siteRef, site.Metadata.UID, siteDevices); err != nil {
+	server, err = r.o.startServer(ctx, nil, siteRef, site.Metadata.UID, siteDevices)
+	if server {
+		r.recordServerPod(siteRef, site.Metadata)
+	}
+	if err != nil {
 		return err
 	}
 	created, err = r.o.startDevices(ctx, nil, siteRef, siteDevices)
@@ -127,12 +136,15 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 func (r *runner) recordDevicePods(devices []*device) {
 	for _, d := range devices {
 		name, _ := objectName(d.kind, d.name())
-		meta := d.object.Metadata
-		r.recordPod(involvedObject{
-			APIVersion: observatory.APIVersion, Kind: d.kind.Name,
-			Name: meta.Name, Namespace: meta.Namespace, UID: meta.UID,
-		}, name, "")
+		r.recordPod(reference(d.kind, d.object.Metadata), name, "")
 	}
+}
+
+// recordServerPod writes an Event and a log line when the runner
+// created the pod of an INDI server, on the Telescope or the
+// Observatory that the server runs for.
+func (r *runner) recordServerPod(ref serverRef, meta observatory.ObjectMeta) {
+	r.recordPod(reference(ref.kind, meta), ref.String(), "Its drivers start disconnected, and the runner connects each device again.")
 }
 
 // recordPod writes an Event on an object and a log line when the runner
@@ -141,12 +153,12 @@ func (r *runner) recordDevicePods(devices []*device) {
 // `kubectl describe` later needs to know that the pod is new, because
 // a new pod starts with nothing that the holder set. note follows the
 // first sentence of the Event's message.
-func (r *runner) recordPod(about involvedObject, pod, note string) {
+func (r *runner) recordPod(about events.ObjectReference, pod, note string) {
 	message := fmt.Sprintf("Created pod %s while Reservation %s is Ready.", pod, r.name)
 	if note != "" {
 		message += " " + note
 	}
-	r.o.recordOn(about, eventNormal, reasonPodCreated, message)
+	r.o.recorder.Normal(about, reasonPodCreated, message)
 	r.o.logf("Reservation %s: created pod %s for %s %s", r.name, pod, about.Kind, about.Name)
 }
 

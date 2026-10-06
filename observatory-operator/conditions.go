@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -20,18 +21,22 @@ func condition(kind string, status observatory.ConditionStatus, reason, message 
 }
 
 // mergeConditions answers the next conditions, with the transition time
-// of each stored condition whose status did not change.
-func mergeConditions(stored, next []observatory.Condition) []observatory.Condition {
-	out := make([]observatory.Condition, len(next))
+// of each stored condition whose status did not change, and each next
+// condition that transitioned from the stored one (conditions.Set). A
+// stored condition of a type that next leaves out is dropped.
+func mergeConditions(stored, next []observatory.Condition) (merged, transitions []observatory.Condition) {
+	merged = make([]observatory.Condition, len(next))
 	for i, c := range next {
-		for _, old := range stored {
-			if old.Type == c.Type && old.Status == c.Status {
-				c.LastTransitionTime = old.LastTransitionTime
-			}
+		var held []observatory.Condition
+		if old, ok := conditions.Find(stored, c.Type); ok {
+			held = []observatory.Condition{old}
 		}
-		out[i] = c
+		if conditions.Set(&held, c) {
+			transitions = append(transitions, held[0])
+		}
+		merged[i] = held[0]
 	}
-	return out
+	return merged, transitions
 }
 
 // equalJSON reports whether two values are the same JSON document
@@ -45,11 +50,7 @@ func equalJSON(a, b any) bool {
 func stamp() time.Time { return time.Now().UTC().Truncate(time.Second) }
 
 // conditionOf answers the condition of one type, or the zero condition.
-func conditionOf(conditions []observatory.Condition, kind string) observatory.Condition {
-	for _, c := range conditions {
-		if c.Type == kind {
-			return c
-		}
-	}
-	return observatory.Condition{}
+func conditionOf(list []observatory.Condition, kind string) observatory.Condition {
+	c, _ := conditions.Find(list, kind)
+	return c
 }

@@ -40,7 +40,7 @@ func (r *runner) deactivate(ctx context.Context) {
 		r.status.Steps = append(r.status.Steps, pendingSteps(observatory.DeactivationSteps)...)
 		r.status.Phase = observatory.ReservationDeactivating
 		r.save(ctx)
-		r.o.record(r.res, eventNormal, string(observatory.ReservationDeactivating), "Deactivating Telescope "+r.res.Spec.Telescope)
+		r.o.record(r.res, string(observatory.ReservationDeactivating), "Deactivating Telescope "+r.res.Spec.Telescope)
 	}
 	steps := map[observatory.StepName]stepFunc{
 		observatory.StepAbort:       r.abort,
@@ -64,7 +64,7 @@ func (r *runner) deactivate(ctx context.Context) {
 	}
 	r.status.Phase, r.status.Step = observatory.ReservationReleased, ""
 	r.save(ctx)
-	r.o.record(r.res, eventNormal, string(observatory.ReservationReleased),
+	r.o.record(r.res, string(observatory.ReservationReleased),
 		fmt.Sprintf("Released in %s: Telescope %s is safe to power off", duration(time.Since(r.began(observatory.DeactivationSteps))), r.res.Spec.Telescope))
 }
 
@@ -87,7 +87,7 @@ func (r *runner) endUnstarted(ctx context.Context) {
 	}
 	r.status.Phase, r.status.Step = observatory.ReservationReleased, ""
 	r.save(ctx)
-	r.o.record(r.res, eventNormal, string(observatory.ReservationReleased), "Released before it took Telescope "+r.res.Spec.Telescope)
+	r.o.record(r.res, string(observatory.ReservationReleased), "Released before it took Telescope "+r.res.Spec.Telescope)
 }
 
 // settleWait bounds how long a deactivation step waits for the

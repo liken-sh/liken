@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
@@ -51,6 +52,8 @@ type operator struct {
 	// logs receives the operator's log (logs.go): standard error in a
 	// pod, and a buffer in a test that reads what the log says.
 	logs io.Writer
+	// recorder posts the Events (events.go). Nil posts none.
+	recorder *events.Recorder
 
 	servers *servers
 	// guiderConns holds the connection to each guider's PHD2.

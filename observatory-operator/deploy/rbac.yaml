@@ -83,10 +83,11 @@ rules:
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
     verbs: [create, delete]
-  # The Events of each reservation's steps.
+  # The Events of each resource's transitions and each reservation's
+  # steps. A repeat of an Event within 10 minutes patches its count.
   - apiGroups: [""]
     resources: [events]
-    verbs: [create]
+    verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

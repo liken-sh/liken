@@ -72,7 +72,7 @@ func (r *runner) activate(ctx context.Context) {
 	r.status.Phase, r.status.Step = observatory.ReservationReady, ""
 	r.save(ctx)
 	endpoint := r.endpoint()
-	r.o.record(r.res, eventNormal, string(observatory.ReservationReady),
+	r.o.record(r.res, string(observatory.ReservationReady),
 		fmt.Sprintf("Ready in %s at %s:%d", duration(time.Since(r.began(observatory.ActivationSteps[1:]))), endpoint.Host, endpoint.Port))
 }
 
@@ -166,7 +166,7 @@ func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	defer lock.release()
-	if err := r.o.startServer(ctx, w.report, ref, site.Metadata.UID, devices); err != nil {
+	if _, err := r.o.startServer(ctx, w.report, ref, site.Metadata.UID, devices); err != nil {
 		return outcome{}, err
 	}
 	switches, others := partition(devices)
@@ -242,7 +242,7 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 	if len(devices) == 0 {
 		return outcome{}, fmt.Errorf("no devices on Telescope %s", telescope.Metadata.Name)
 	}
-	if err := r.o.startServer(ctx, w.report, ref, telescope.Metadata.UID, devices); err != nil {
+	if _, err := r.o.startServer(ctx, w.report, ref, telescope.Metadata.UID, devices); err != nil {
 		return outcome{}, err
 	}
 	switches, _ := partition(devices)

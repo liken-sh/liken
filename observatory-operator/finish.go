@@ -37,7 +37,7 @@ func (r *runner) failed(ctx context.Context) {
 			}
 			r.status.Phase = phaseOf(r.status.Step)
 			r.save(ctx)
-			r.o.record(r.res, eventNormal, "Retry", "Retrying "+string(r.status.Step))
+			r.o.record(r.res, "Retry", "Retrying "+string(r.status.Step))
 			r.awaitStore(ctx, func(res *observatory.Reservation) bool {
 				_, still := res.Metadata.Annotations[annotationRetry]
 				return !still
