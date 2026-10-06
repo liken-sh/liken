@@ -58,7 +58,12 @@ type event struct {
 type procCall struct {
 	res     resource
 	trigger string
-	actions []action
+	// condition names the condition of a trigger in spec.triggers, such
+	// as "WeatherStation lab Safe=False", and is "" for activation and
+	// deactivation. A person reads it in the run's summary and Events,
+	// where triggers[0] alone says nothing.
+	condition string
+	actions   []action
 	// since is the transition time that the run answers.
 	since time.Time
 	// period is the start of the resource's current activity, or zero.
@@ -74,6 +79,24 @@ type procCall struct {
 	// connected every device.
 	ending bool
 	event  event
+}
+
+// label names the trigger's run for a person: the trigger, and the
+// condition of a trigger in spec.triggers.
+func (c procCall) label() string {
+	if c.condition == "" {
+		return c.trigger
+	}
+	return c.trigger + " (" + c.condition + ")"
+}
+
+// summary answers the summary of a run's record, which starts with the
+// condition of a trigger in spec.triggers.
+func (c procCall) summary(text string) string {
+	if c.condition == "" {
+		return sentence(text)
+	}
+	return "When " + c.condition + ": " + lowerFirst(text)
 }
 
 // answers reports whether a run answers a transition in an activity
@@ -127,7 +150,7 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	}
 	key := c.res.key()
 	pending := false
-	err := o.runs.acquire(ctx, key, c.trigger, func(holder string) {
+	err := o.runs.acquire(ctx, key, c.label(), func(holder string) {
 		if run, found := o.runs.get(key, c.trigger); found && answers(run, c.since, c.period) && run.State == observatory.StepRunning {
 			// A run that an operator restart interrupted keeps its
 			// record while it waits.
@@ -198,10 +221,11 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	if skippedAll {
 		run.State = observatory.StepSkipped
 	}
-	run.Summary = sentence(strings.Join(did, "; "))
+	text := strings.Join(did, "; ")
+	run.Summary = c.summary(text)
 	o.runs.put(key, run)
 	o.recorder.Normal(reference(c.res.kind, c.res.meta), reasonProcedureDone,
-		fmt.Sprintf("Procedure %s %s in %s: %s", c.trigger, strings.ToLower(string(run.State)), duration(stop.Sub(*run.StartTime)), lowerFirst(run.Summary)))
+		fmt.Sprintf("Procedure %s %s in %s: %s", c.label(), strings.ToLower(string(run.State)), duration(stop.Sub(*run.StartTime)), lowerFirst(text)))
 	return nil
 }
 
@@ -210,7 +234,7 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 func pendingRun(c procCall, holder string) observatory.ProcedureRun {
 	since := c.since
 	run := observatory.ProcedureRun{Trigger: c.trigger, Since: &since, State: observatory.StepPending,
-		Summary: "Waiting for the run of " + holder + " to end"}
+		Summary: c.summary("waiting for the run of " + holder + " to end")}
 	for _, a := range c.actions {
 		run.Actions = append(run.Actions, observatory.ActionRun{Action: a.String(), State: observatory.StepPending})
 	}
@@ -222,7 +246,7 @@ func pendingRun(c procCall, holder string) observatory.ProcedureRun {
 func skippedRun(c procCall, why error) observatory.ProcedureRun {
 	run := pendingRun(c, "")
 	now := stamp()
-	run.State, run.StopTime, run.Summary = observatory.StepSkipped, &now, sentence(why.Error())+", so the run did not begin"
+	run.State, run.StopTime, run.Summary = observatory.StepSkipped, &now, c.summary(why.Error()+", so the run did not begin")
 	for i := range run.Actions {
 		run.Actions[i].State = observatory.StepSkipped
 	}
@@ -235,7 +259,7 @@ func (o *operator) procedureStarted(c procCall) {
 		described = append(described, a.String())
 	}
 	o.recorder.Normal(reference(c.res.kind, c.res.meta), reasonProcedureStarted,
-		fmt.Sprintf("Procedure %s started: %s", c.trigger, strings.Join(described, ", ")))
+		fmt.Sprintf("Procedure %s started: %s", c.label(), strings.Join(described, ", ")))
 }
 
 // runAction runs one action of a run, and records its state in the
@@ -283,19 +307,19 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 		if ctx.Err() != nil {
 			cause = context.Cause(ctx)
 		}
-		why := sentence(cause.Error())
-		record.State, record.Summary = observatory.StepSkipped, why
-		run.State, run.StopTime, run.Summary = observatory.StepSkipped, &stop, why
+		record.State, record.Summary = observatory.StepSkipped, sentence(cause.Error())
+		run.State, run.StopTime, run.Summary = observatory.StepSkipped, &stop, c.summary(cause.Error())
 		o.runs.put(key, *run)
 		return cause
 	default:
 		record.State, record.Summary = observatory.StepFailed, sentence(err.Error())
 		run.State, run.StopTime = observatory.StepFailed, &stop
-		run.Summary = a.String() + ": " + err.Error()
+		text := a.String() + ": " + err.Error()
+		run.Summary = c.summary(text)
 		o.runs.put(key, *run)
 		o.recorder.Warning(reference(c.res.kind, c.res.meta), reasonProcedureFailed,
-			fmt.Sprintf("Procedure %s failed: %s", c.trigger, lowerFirst(run.Summary)))
-		return fmt.Errorf("%s: %s", c.res, run.Summary)
+			fmt.Sprintf("Procedure %s failed: %s", c.label(), lowerFirst(text)))
+		return fmt.Errorf("%s: %s", c.res, text)
 	}
 	o.runs.put(key, *run)
 	return nil

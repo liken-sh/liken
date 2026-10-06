@@ -370,6 +370,13 @@ found these defects. Each fix lands with a test against the fakes.
   closed. The action now sets `DOME_SHUTTER` after the park move, or
   when no move was needed, when the shutter is not where the rule puts
   it: open after `state: Unparked`, and closed after `state: Parked`.
+- **A trigger's run names its condition.** Events and records said
+  "Procedure triggers[0] started", which tells a reader nothing. The
+  record keeps `trigger: triggers[0]` as its key. Its summary starts
+  with the condition, as in "When WeatherStation lab Safe=False:
+  parked Dome lab", and the Events name it after the trigger, as in
+  "Procedure triggers[0] (WeatherStation lab Safe=False) started:
+  state: Parked". Activation and deactivation keep their names.
 
 ## How we test it
 

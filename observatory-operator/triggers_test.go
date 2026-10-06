@@ -5,6 +5,7 @@ package main
 // minutes of safe weather.
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -18,7 +19,7 @@ import (
 func startedRuns(a *fakeAPI, kind observatory.Kind, name, trigger string) int {
 	n := 0
 	for _, e := range a.recorded.About(kind.Name, name) {
-		if e.Reason == reasonProcedureStarted && strings.HasPrefix(e.Message, "Procedure "+trigger+" started") {
+		if e.Reason == reasonProcedureStarted && strings.HasPrefix(e.Message, "Procedure "+trigger+" ") {
 			n += int(e.Count)
 		}
 	}
@@ -64,7 +65,7 @@ func TestUnsafeWeatherParksTheMountsAndThenTheDome(t *testing.T) {
 		w := readyWorld(t)
 		w.weather("Alert")
 		dome := w.runEnds(observatory.DomeKind, "lab", "triggers[0]", time.Minute)
-		if dome.State != observatory.StepDone || dome.Summary != "Parked Dome lab" {
+		if dome.State != observatory.StepDone || dome.Summary != "When WeatherStation lab Safe=False: parked Dome lab" {
 			t.Errorf("the dome's run = %s %q", dome.State, dome.Summary)
 		}
 		if !w.indi.sentBefore("east-telescope Telescope Simulator.TELESCOPE_PARK PARK=On", "lab-observatory Dome Simulator.DOME_PARK PARK=On") {
@@ -77,6 +78,31 @@ func TestUnsafeWeatherParksTheMountsAndThenTheDome(t *testing.T) {
 		unsafe := conditionOf(station.Status.Conditions, observatory.ConditionSafe)
 		if mount := lastRun(t, w, observatory.MountKind, "east", "triggers[0]"); mount.Since == nil || !mount.Since.Equal(unsafe.LastTransitionTime) {
 			t.Errorf("the mount's run answers %v, want the transition at %v", mount.Since, unsafe.LastTransitionTime)
+		}
+	})
+}
+
+// A trigger's run names its condition in its record and its Events,
+// so a person reads what started it. The record keeps the trigger's
+// name as its key.
+func TestATriggersRunNamesItsCondition(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.weather("Alert")
+		run := w.runEnds(observatory.DomeKind, "lab", "triggers[0]", time.Minute)
+		if run.Trigger != "triggers[0]" || run.Summary != "When WeatherStation lab Safe=False: parked Dome lab" {
+			t.Errorf("the dome's run = %s %q", run.Trigger, run.Summary)
+		}
+		got := w.eventsWith(observatory.DomeKind, "lab", reasonProcedureStarted, reasonProcedureDone)
+		want := []string{
+			"Normal ProcedureStarted: Procedure activation started: state: Unparked x1",
+			"Normal ProcedureDone: Procedure activation done in 1 s: found Dome lab unparked and opened its shutter x1",
+			"Normal ProcedureStarted: Procedure triggers[0] (WeatherStation lab Safe=False) started: state: Parked x1",
+			"Normal ProcedureDone: Procedure triggers[0] (WeatherStation lab Safe=False) done in 0 s: parked Dome lab x1",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("the dome's Events =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 		}
 	})
 }
@@ -105,7 +131,7 @@ func TestATriggerRunsOnceForEachTransition(t *testing.T) {
 			second = lastRun(t, w, observatory.MountKind, "east", "triggers[0]")
 			return second.StopTime != nil && second.Since.After(*first.Since)
 		})
-		if second.Summary != "Found Mount east parked" {
+		if second.Summary != "When WeatherStation lab Safe=False: found Mount east parked" {
 			t.Errorf("the second run = %q", second.Summary)
 		}
 	})
@@ -135,7 +161,7 @@ func TestForWaitsOutAFlap(t *testing.T) {
 		w.weather("Ok")
 		safe := time.Now()
 		run := w.runEnds(observatory.DomeKind, "lab", "triggers[1]", 25*time.Minute)
-		if run.State != observatory.StepDone || run.Summary != "Unparked Dome lab" {
+		if run.State != observatory.StepDone || run.Summary != "When WeatherStation lab Safe=True for 20m: unparked Dome lab" {
 			t.Errorf("the dome's unpark = %s %q", run.State, run.Summary)
 		}
 		if waited := run.StartTime.Sub(safe); waited < 20*time.Minute || waited > 21*time.Minute {
@@ -165,7 +191,7 @@ func TestATriggerWhoseConditionHoldsAtActivationRunsThen(t *testing.T) {
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		run := w.runEnds(observatory.DustCapKind, "east", "triggers[0]", time.Minute)
 		activation := lastRun(t, w, observatory.DustCapKind, "east", observatory.TriggerActivation)
-		if run.State != observatory.StepDone || run.Summary != "Closed DustCap east" || run.StartTime.Before(*activation.StopTime) {
+		if run.State != observatory.StepDone || run.Summary != "When WeatherStation lab Safe=False: closed DustCap east" || run.StartTime.Before(*activation.StopTime) {
 			t.Errorf("the cap's trigger = %+v, after its activation ended at %v", run, activation.StopTime)
 		}
 	})
@@ -192,7 +218,8 @@ func TestARunThatStartedRunsToItsEnd(t *testing.T) {
 			kind    observatory.Kind
 			name    string
 			summary string
-		}{{observatory.MountKind, "east", "Parked Mount east"}, {observatory.DomeKind, "lab", "Parked Dome lab"}} {
+		}{{observatory.MountKind, "east", "When WeatherStation lab Safe=False: parked Mount east"},
+			{observatory.DomeKind, "lab", "When WeatherStation lab Safe=False: parked Dome lab"}} {
 			run := w.runEnds(d.kind, d.name, "triggers[0]", time.Minute)
 			if run.State != observatory.StepDone || run.Summary != d.summary {
 				t.Errorf("the run of %s %s = %s %q", d.kind.Name, d.name, run.State, run.Summary)
@@ -218,7 +245,7 @@ func TestDeactivationStopsATriggersRun(t *testing.T) {
 		at := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": at})
 		run := w.runEnds(observatory.MountKind, "east", "triggers[0]", 5*time.Minute)
-		if run.State != observatory.StepSkipped || run.Summary != "The activity of Mount east ended" {
+		if run.State != observatory.StepSkipped || run.Summary != "When WeatherStation lab Safe=False: the activity of Mount east ended" {
 			t.Errorf("the mount's trigger = %s %q", run.State, run.Summary)
 		}
 		r := w.phase("east-tonight", observatory.ReservationReleased, 15*time.Minute)
@@ -272,7 +299,7 @@ func TestANewOperatorResumesARunWhoseConditionChanged(t *testing.T) {
 			return strings.HasPrefix(w.stateOf(observatory.WeatherStationKind, "lab", observatory.ConditionSafe), "True")
 		})
 		w.indi.setState("east-telescope", "Telescope Simulator", "TELESCOPE_PARK", "Ok")
-		if run := w.runEnds(observatory.MountKind, "east", "triggers[0]", time.Minute); run.State != observatory.StepDone || run.Summary != "Parked Mount east" {
+		if run := w.runEnds(observatory.MountKind, "east", "triggers[0]", time.Minute); run.State != observatory.StepDone || run.Summary != "When WeatherStation lab Safe=False: parked Mount east" {
 			t.Errorf("the mount's run = %s %q", run.State, run.Summary)
 		}
 		if n := w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK"); n != 1 {

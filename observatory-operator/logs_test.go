@@ -25,6 +25,8 @@ func TestEachStepEndIsOneLogLine(t *testing.T) {
 			Summary: "Timed out after 20 min: cooling Camera east-main to -10 °C"}, "Activation timed out after 20 min: cooling Camera east-main to -10 °C"},
 		{"a summary that starts with an acronym", observatory.Step{Name: observatory.StepConfigure, State: observatory.StepDone, StartTime: &start, StopTime: &stop,
 			Summary: "INDI wrote nothing"}, "Configure done in 19 s: INDI wrote nothing"},
+		{"a summary that starts with a kind", observatory.Step{Name: observatory.StepActivation, State: observatory.StepDone, StartTime: &start, StopTime: &stop,
+			Summary: "DustCap east is open"}, "Activation done in 19 s: DustCap east is open"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

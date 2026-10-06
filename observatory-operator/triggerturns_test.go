@@ -44,7 +44,7 @@ func parkingDome(t *testing.T) *world {
 	w.weather("Ok")
 	time.Sleep(21 * time.Minute)
 	synctest.Wait()
-	if run := lastRun(t, w, observatory.DomeKind, "lab", "triggers[1]"); run.State != observatory.StepPending || run.Summary != "Waiting for the run of triggers[0] to end" {
+	if run := lastRun(t, w, observatory.DomeKind, "lab", "triggers[1]"); run.State != observatory.StepPending || run.Summary != "When WeatherStation lab Safe=True for 20m: waiting for the run of triggers[0] (WeatherStation lab Safe=False) to end" {
 		t.Fatalf("the dome's unpark = %s %q", run.State, run.Summary)
 	}
 	return w
@@ -63,7 +63,7 @@ func TestARunThatBecomesDueWaitsForTheRunOfItsResource(t *testing.T) {
 		w.indi.setState("lab-observatory", "Dome Simulator", "DOME_PARK", "Ok")
 		park := w.runEnds(observatory.DomeKind, "lab", "triggers[0]", time.Minute)
 		unpark := w.runEnds(observatory.DomeKind, "lab", "triggers[1]", time.Minute)
-		if park.State != observatory.StepDone || unpark.State != observatory.StepDone || unpark.Summary != "Unparked Dome lab" {
+		if park.State != observatory.StepDone || unpark.State != observatory.StepDone || unpark.Summary != "When WeatherStation lab Safe=True for 20m: unparked Dome lab" {
 			t.Errorf("the park = %s %q, the unpark = %s %q", park.State, park.Summary, unpark.State, unpark.Summary)
 		}
 		if unpark.StartTime.Before(*park.StopTime) {
@@ -82,7 +82,7 @@ func TestARunWhoseConditionChangedWhileItWaitedDoesNotBegin(t *testing.T) {
 		w.settle()
 		w.indi.setState("lab-observatory", "Dome Simulator", "DOME_PARK", "Ok")
 		unpark := w.runEnds(observatory.DomeKind, "lab", "triggers[1]", time.Minute)
-		if unpark.State != observatory.StepSkipped || unpark.Summary != "WeatherStation lab Safe is no longer True, so the run did not begin" {
+		if unpark.State != observatory.StepSkipped || unpark.Summary != "When WeatherStation lab Safe=True for 20m: WeatherStation lab Safe is no longer True, so the run did not begin" {
 			t.Errorf("the unpark = %s %q", unpark.State, unpark.Summary)
 		}
 		if n := w.indi.count("lab-observatory", "Dome Simulator.DOME_PARK"); n != 1 {
@@ -100,8 +100,8 @@ func TestDeactivationEndsARunThatWaits(t *testing.T) {
 		at := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": at})
 		for _, c := range []struct{ trigger, summary string }{
-			{"triggers[0]", "The activity of Dome lab ended"},
-			{"triggers[1]", "The activity of Dome lab ended, so the run did not begin"},
+			{"triggers[0]", "When WeatherStation lab Safe=False: the activity of Dome lab ended"},
+			{"triggers[1]", "When WeatherStation lab Safe=True for 20m: the activity of Dome lab ended, so the run did not begin"},
 		} {
 			if run := w.runEnds(observatory.DomeKind, "lab", c.trigger, 5*time.Minute); run.State != observatory.StepSkipped || run.Summary != c.summary {
 				t.Errorf("%s = %s %q", c.trigger, run.State, run.Summary)

@@ -70,15 +70,16 @@ func sentence(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-// lowerFirst makes a sentence fit after a colon. A word in capitals,
-// such as INDI, keeps its case.
+// lowerFirst makes a sentence fit after a colon. A first word with a
+// capital after its first letter keeps its case: a word in capitals,
+// such as INDI, and a kind, such as WeatherStation.
 func lowerFirst(s string) string {
 	if s == "" {
 		return s
 	}
 	r, size := utf8.DecodeRuneInString(s)
-	next, _ := utf8.DecodeRuneInString(s[size:])
-	if unicode.IsUpper(next) {
+	word, _, _ := strings.Cut(s[size:], " ")
+	if strings.ContainsFunc(word, unicode.IsUpper) {
 		return s
 	}
 	return string(unicode.ToLower(r)) + s[size:]

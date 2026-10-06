@@ -116,11 +116,11 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 			want := conditionStatus(when.Status)
 			c := conditionOf(conditions, when.Type)
 			holds, since := c.Status == want, c.LastTransitionTime
-			call := procCall{res: r, trigger: name, actions: trigger.Run, period: period}
+			call := procCall{res: r, trigger: name, condition: conditionText(targets[0], when), actions: trigger.Run, period: period}
 			if run, ok := o.runs.get(r.key(), name); ok && run.State == observatory.StepRunning && run.Since != nil && answers(run, *run.Since, period) {
 				// An operator restart interrupted the run, and it
 				// resumes, whatever its condition reads now.
-				call.since, call.event = *run.Since, o.conditionEvent(targets[0], when.Type, want, *run.Since)
+				call.since, call.event = *run.Since, o.conditionEvent(r, targets[0], when.Type, want, *run.Since)
 				flights[id] = o.fly(ctx, call, group)
 				continue
 			}
@@ -136,11 +136,22 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 				}
 				continue
 			}
-			call.since, call.event = since, o.conditionEvent(targets[0], when.Type, want, since)
+			call.since, call.event = since, o.conditionEvent(r, targets[0], when.Type, want, since)
 			flights[id] = o.fly(ctx, call, group)
 		}
 	}
 	return due
+}
+
+// conditionText names a trigger's condition as a person reads it, such
+// as "WeatherStation lab Safe=False" or "WeatherStation lab Safe=True
+// for 20m".
+func conditionText(g target, when observatory.When) string {
+	text := fmt.Sprintf("%s %s=%s", g, when.Type, conditionStatus(when.Status))
+	if when.For != "" {
+		text += " for " + when.For
+	}
+	return text
 }
 
 // fly starts one trigger's run.
@@ -211,9 +222,16 @@ func (o *operator) activePeriod(r resource) (time.Time, bool) {
 
 // conditionEvent answers the transition of one condition to one status
 // as the event that each action's after waits on: the runs of the
-// other resources' triggers that answer the same transition.
-func (o *operator) conditionEvent(g target, conditionType string, status observatory.ConditionStatus, since time.Time) event {
+// other resources' triggers that answer the same transition. For the
+// run of r, the event is also over when r's activity ended. The
+// activity ends before the controller stops r's runs, one by one, so
+// a run that waited for its turn behind a run that just stopped does
+// not begin.
+func (o *operator) conditionEvent(r resource, g target, conditionType string, status observatory.ConditionStatus, since time.Time) event {
 	over := func(t *tree) error {
+		if _, active := o.activePeriod(r); !active {
+			return fmt.Errorf("the activity of %s ended", r)
+		}
 		conditions, _ := t.conditionsOf(g.kind, g.name)
 		switch c := conditionOf(conditions, conditionType); {
 		case c.Status != status:
