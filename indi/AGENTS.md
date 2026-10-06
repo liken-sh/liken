@@ -8,7 +8,7 @@ bump. Load the `releases` and `bump-components` skills under
 
 A change to anything that Docker sends the build, the `Dockerfile`,
 the scripts, `images/`, or the shim's source, changes the recipe and
-needs the next revision. That rebuilds all 16 images, so batch such
+needs the next revision. That rebuilds all 17 images, so batch such
 changes into one revision.
 
 `shim/` is a Go module with its own tests: `make -C shim test`. The

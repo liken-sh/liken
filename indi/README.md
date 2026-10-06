@@ -10,6 +10,7 @@ protocol on TCP port 7624.
 |---|---|
 | `indi` | `indiserver`, `socat`, every program in `indi-bin` (the core drivers, the simulators, and the tools), and `indi-shim` |
 | `indi-simulators` | the GSC star catalog that the CCD and guide simulators draw from |
+| `indi-phd2` | PHD2, the guider, as a client of an INDI server, with the GTK files it reads by name |
 | `indi-open` | the third-party drivers that link no vendor SDK |
 | `indi-zwo`, `indi-qhy`, `indi-playerone`, `indi-svbony`, `indi-atik`, `indi-fli`, `indi-sbig`, `indi-mi`, `indi-qsi`, `indi-apogee`, `indi-astroasis`, `indi-gphoto`, `indi-touptek` | one vendor SDK family each |
 
@@ -18,8 +19,9 @@ list in `images/` names, every library the loader resolves for them,
 and the files they read by name. `indi` is about 73 MB, where Ubuntu
 with the same packages is about 1 GB. Every other image builds on
 `indi` and adds its own drivers, from under 1 MB for SBIG to 344 MB for
-the eleven ToupTek brands. Only `indi-simulators` has a shell, because
-the CCD simulator runs `gsc` through `popen()`.
+the eleven ToupTek brands. Only `indi-simulators` and `indi-phd2` have
+a shell: the CCD simulator runs `gsc` through `popen()`, and PHD2's
+entrypoint is a script.
 
 ## The shim
 
@@ -34,6 +36,45 @@ either side closes. The device pod serves its driver with
 `observatory-operator/plans/completed/03-the-topology-by-hand.md` gives the
 design.
 
+## PHD2
+
+`indi-phd2` runs [PHD2](https://openphdguiding.org/) from the PHD2 PPA
+(`ppa:pch/phd2`). It builds on `indi`, so PHD2 links the same
+`libindiclient` as the server it connects to. PHD2 is a wxWidgets
+program on GTK 3 with no headless mode, so it needs a Wayland
+compositor. `observatory-operator` runs the `weston` image beside it,
+headless, in the same pod. Root plan 74, "Guiding", gives the design.
+The image is 513 MB, about 440 MB more than `indi`, because PHD2 links
+OpenCV, and OpenCV links GDAL, FFmpeg, and GStreamer.
+
+The image runs as UID 1000 and reads these paths:
+
+- `/etc/phd2/PHDGuidingV2`: the whole profile, mounted as a file.
+  PHD2 rewrites its config while it runs, so the entrypoint,
+  `/usr/bin/phd2-start`, copies this file to `$HOME/.PHDGuidingV2`
+  before each start.
+- `$HOME`, which is `/home/phd2`: the config, the logs in
+  `$HOME/PHD2`, and the instance lock `$HOME/phd2.1`. The entrypoint
+  removes the lock before each start, because a lock that a crash left
+  names process 1, and PHD2 is process 1 again.
+- `$XDG_RUNTIME_DIR`, which is `/run/wayland`: the directory with the
+  compositor's socket, `$WAYLAND_DISPLAY`, which is `wayland-0`.
+  The compositor must run as the same UID, because it creates the
+  socket with no write permission for other users.
+
+PHD2 serves its event API on TCP port 4400. A modal dialog ends PHD2
+on a compositor with no `wl_seat`, so the profile must hold
+`ConfigVersion=2001`, which stops the first-light wizard, and the
+image sets no `LANG`, which stops a dialog about the locale.
+
+GTK reads files by name that no `ldd` lists: the XKB rules, fontconfig,
+the icon theme, the shared MIME database, and the compiled settings
+schemas. gdk-pixbuf decodes every icon through glycin, which runs a
+loader program in a `bwrap` sandbox. A container cannot create that
+sandbox, and glycin then runs the loader without one, so the image
+holds `bwrap` for glycin to try. The comments in `images/phd2` give
+the reason for each entry.
+
 ## The version and the revision
 
 `indi` is a pinned component. Its `package.toml` states a version and
@@ -41,10 +82,10 @@ a revision, and every image publishes under the tag
 `<version>-<revision>`, for example `20261005-1`.
 
 - The **version** is the date of the snapshots that the build installs
-  from: Ubuntu 26.04 from `snapshot.ubuntu.com`, and the INDI PPA from
-  `snapshot.ppa.launchpadcontent.net`. The PPA itself keeps only its
-  newest build of each package, so only a snapshot builds the same
-  files again.
+  from: Ubuntu 26.04 from `snapshot.ubuntu.com`, and the INDI PPA and
+  the PHD2 PPA from `snapshot.ppa.launchpadcontent.net`. A PPA itself
+  keeps only its newest build of each package, so only a snapshot
+  builds the same files again.
 - The **revision** counts the changes to the recipe at one version.
 - `[package.upstream]` states the package versions that the date
   installs. Each one is a label of every image,
@@ -56,13 +97,14 @@ images build when someone bumps them, and at no other time.
 
 ## Bump the snapshot
 
-1. Choose a date, and read the versions that the PPA snapshot of that
-   date serves:
-   `https://snapshot.ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/<date>T000000Z/dists/resolute/main/binary-amd64/Packages.gz`.
+1. Choose a date, and read the versions that the PPA snapshots of that
+   date serve:
+   `https://snapshot.ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/<date>T000000Z/dists/resolute/main/binary-amd64/Packages.gz`
+   and the same path under `pch/phd2`.
 2. Set `version` to the date and `revision` to 1, and update
    `[package.upstream]`.
 3. Run `make workflows` at the top of the repository.
-4. Build every image with `docker buildx bake --load` and the 16
+4. Build every image with `docker buildx bake --load` and the 17
    targets of `package.toml`, and run each image's smoke check with
    its tag.
 

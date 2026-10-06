@@ -182,13 +182,13 @@ left the bundle before taking the bump.
 
 ## 5a. The INDI images
 
-`indi` is a pinned component too, with the 16 images that
+`indi` is a pinned component too, with the 17 images that
 observatory-operator runs. It is not one of the five bases above: it
-installs from Ubuntu 26.04 and the INDI PPA, through dated snapshots of
-both, and it moves on its own schedule. Its `version` is the date of
-those snapshots, and `[package.upstream]` states the `indi-bin`,
-`indi-3rdparty-drivers`, and `gsc` package versions that the date
-installs. Its smoke checks fail when the image holds other versions.
+installs from Ubuntu 26.04, the INDI PPA, and the PHD2 PPA, through
+dated snapshots of all three, and it moves on its own schedule. Its
+`version` is the date of those snapshots, and `[package.upstream]`
+states the `indi-bin`, `indi-3rdparty-drivers`, `gsc`, and `phd2`
+package versions that the date installs. Its smoke checks fail when the image holds other versions.
 
 Bump it only when asked, or for a security fix in `indiserver`. Set the
 date and revision 1, update `[package.upstream]` from the snapshot's
@@ -199,7 +199,7 @@ section "The notices" in `indi/README.md` holds the steps. Build every target in
 `indi/package.toml` and run each smoke check. The build fails when a
 new release adds a third-party driver that no list in `indi/images/`
 names; add it to an image's list or to `indi/images/unpublished`, and
-say which in the report. CI builds the 16 images only when this tag is
+say which in the report. CI builds the 17 images only when this tag is
 new.
 
 ## 6. Report

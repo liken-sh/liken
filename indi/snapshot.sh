@@ -1,9 +1,11 @@
 #!/bin/sh
 # Points apt at the snapshots of one date: Ubuntu 26.04 at
-# snapshot.ubuntu.com and the INDI PPA at
+# snapshot.ubuntu.com, and the INDI PPA and the PHD2 PPA at
 # snapshot.ppa.launchpadcontent.net, each as it stood at midnight UTC.
-# The PPA itself keeps only its newest build of each package, so only a
-# snapshot installs the same files again.
+# A PPA itself keeps only its newest build of each package, so only a
+# snapshot installs the same files again. Only the indi-phd2 image
+# installs from the PHD2 PPA, and no package of it replaces a package
+# of the other two archives.
 #
 # Both services answer only over HTTPS, and the Ubuntu image has no CA
 # bundle. The Dockerfile copies the trust component's bundle in before
@@ -36,4 +38,10 @@ URIs: https://snapshot.ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/$stamp/
 Suites: resolute
 Components: main
 Signed-By: /etc/apt/trusted.gpg.d/mutlaqja.asc
+
+Types: deb
+URIs: https://snapshot.ppa.launchpadcontent.net/pch/phd2/ubuntu/$stamp/
+Suites: resolute
+Components: main
+Signed-By: /etc/apt/trusted.gpg.d/pch.asc
 SOURCES

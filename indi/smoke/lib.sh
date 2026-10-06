@@ -71,6 +71,22 @@ expect_upstream() {
 	done
 }
 
+# expect_phd2 checks that the PHD2 package in the indi-phd2 image is
+# the release that package.toml states.
+expect_phd2() {
+	local image=$1 name versions upstream
+	name=$(docker create "$image")
+	versions=$(docker cp "$name:/etc/indi-versions" - | tar -xO)
+	docker rm "$name" >/dev/null
+	upstream=$(sed -n 's/^phd2 = "\(.*\)"$/\1/p' "$indi/package.toml")
+	if ! grep -qx "phd2	$upstream" <<<"$versions"; then
+		echo "the image holds:" >&2
+		echo "$versions" >&2
+		echo "package.toml states phd2 = \"$upstream\"" >&2
+		return 1
+	fi
+}
+
 # expect_notices checks that the image holds the copyright file of each
 # package it took files from, the Go license of the shim, and the
 # license file of each vendor SDK that its list in images/ names.

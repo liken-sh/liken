@@ -1,0 +1,48 @@
+# ghcr.io/liken-sh/indi-phd2: PHD2, the guider, as a client of an INDI
+# server. It builds on indi, so PHD2 links the same libindiclient as the
+# server it talks to. PHD2 is a wxWidgets program on GTK 3, and it draws
+# on a Wayland compositor in another container of its pod.
+#
+# The package's /usr/bin/phd2 is a shell wrapper that sets
+# LD_LIBRARY_PATH to a directory the package does not install, so the
+# image runs phd2.bin directly.
+seed /usr/bin/phd2.bin
+# The help and the translations, which PHD2 opens by name.
+data /usr/share/phd2
+# The entrypoint is a shell script: it copies the mounted profile into
+# $HOME, removes the instance lock, and starts PHD2.
+seed /usr/bin/dash
+link /bin/sh /usr/bin/dash
+seed /usr/bin/cp
+seed /usr/bin/rm
+# GTK aborts when a settings schema that it reads is not compiled.
+data /usr/share/glib-2.0/schemas/gschemas.compiled
+# Pango draws every label through fontconfig, which reads its config
+# and finds no font without one. The files in /etc/fonts/conf.d are
+# symbolic links into conf.avail.
+data /etc/fonts
+data /usr/share/fontconfig/conf.avail
+data /usr/share/fonts/truetype/dejavu
+# GTK compiles a default keymap from the XKB rules when it opens the
+# Wayland display, and it ends PHD2 when the rules are missing.
+# /usr/share/X11/xkb is a symbolic link to the directory below it.
+data /usr/share/X11/xkb
+data /usr/share/xkeyboard-config-2
+# GTK draws its own widgets from the icon theme, and falls back to
+# hicolor for a name that Adwaita does not have.
+data /usr/share/icons/Adwaita
+data /usr/share/icons/hicolor
+# gdk-pixbuf decodes every icon through glycin, which runs one loader
+# program for each format, and GTK aborts when the image-missing icon
+# does not decode. glycin finds the loader by the MIME type that the
+# shared MIME database gives the file.
+seed /usr/libexec/glycin-loaders/2+/glycin-svg
+seed /usr/libexec/glycin-loaders/2+/glycin-image-rs
+data /usr/share/glycin-loaders/2+/conf.d/glycin-svg.conf
+data /usr/share/glycin-loaders/2+/conf.d/glycin-image-rs.conf
+data /usr/share/mime
+# glycin starts each loader in a bwrap sandbox. A container cannot
+# create the namespaces that bwrap needs, and glycin starts the loader
+# with no sandbox only after bwrap reports that failure. Without bwrap,
+# glycin cannot tell why the start failed, and no icon decodes.
+seed /usr/bin/bwrap

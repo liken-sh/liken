@@ -157,10 +157,10 @@ revision, and so does each pinned component that builds on it. CI fails
 when a recipe changed with no new revision. Each base lists the
 upstream releases it holds under `[package.upstream]`, and each entry
 becomes the image label `sh.liken.upstream.<name>`. `indi` is pinned
-the same way, on dated snapshots of Ubuntu and the INDI PPA, and CI
-builds its 16 images only when its tag is new. `trust` pins the CA
-bundle that the OS build and every image that verifies TLS read, so one
-bump reaches all of them. The `bump-components`
+the same way, on dated snapshots of Ubuntu, the INDI PPA, and the PHD2
+PPA, and CI builds its 17 images only when its tag is new. `trust` pins
+the CA bundle that the OS build and every image that verifies TLS read,
+so one bump reaches all of them. The `bump-components`
 skill under `.agents/skills` holds the procedure.
 
 The `releases` skill under `.agents/skills` holds the calendar scheme,
