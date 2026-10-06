@@ -49,10 +49,10 @@ func TestAStatusThatAnotherWriterChangesIsWrittenAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		collection := kindCollection(observatory.FocuserKind)
-		w.api.overwriteStatus(collection, "east-focuser", map[string]any{"phase": "Error"})
+		w.api.overwriteStatus(collection, "east", map[string]any{"phase": "Error"})
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
-		focuser, _ := decode[observatory.Focuser](t, w.api, collection, "east-focuser")
+		focuser, _ := decode[observatory.Focuser](t, w.api, collection, "east")
 		if focuser.Status.Phase != observatory.DeviceConnected {
 			t.Errorf("phase = %q, want %q", focuser.Status.Phase, observatory.DeviceConnected)
 		}
