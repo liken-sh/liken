@@ -3,9 +3,15 @@
 Proposed and built on 2026-10-06, and tested against the fake API
 server and the fake INDI servers. A local experiment with the real
 `indiserver` and the real simulators of the pinned `indi-simulators`
-image chose the design. The drill on the test cluster has not run yet.
-"The drill" below gives its steps. This plan closes the open problem
-"The dome and mount locks cross two servers", which plan 08 recorded.
+image chose the design. The drill ran on the two-node test cluster on
+2026-10-06. On `2026.10.04-004-dev-077-4a3db556`, a mount unparked
+under a parked dome, because the next client to connect turned
+`DOME_POLICY` off. Commit 35c9c1d9 saves the driver's configuration
+after the operator writes a lock policy, and on
+`2026.10.04-004-dev-078-35c9c1d9` every step of the drill held. "What
+the test cluster measured" gives the results. This plan closes the
+open problem "The dome and mount locks cross two servers", which plan
+08 recorded.
 
 ## The problem
 
@@ -241,6 +247,87 @@ left out of the relay's key, the restart test failed. With the relay at
 the start of `StopSite` removed, the release test still passed: in the
 fake, `keepLocks` relays first, so the test does not hold that order.
 `make test` measured 95.7% total coverage, over the floor of 95%.
+
+## What the test cluster measured
+
+The inventory was `examples/simulators.yaml`, with `closeShutterOnPark`,
+`domeLocksMount`, and `mountLocksDome` set on `Observatory` `lab`, and
+reservations of `east` and `west` created by hand. The drill acted as
+the holder through `indi_setprop` and `indi_getprop` on port-forwards
+to the three servers, and a small client timestamped each
+`TELESCOPE_PARK`, `DOME_PARK`, `DOME_POLICY`, and `MOUNT_POLICY`.
+
+### The lock that a client turned off
+
+On `2026.10.04-004-dev-077-4a3db556`, both mounts reported
+`DOME_IGNORED` On a few minutes after `Configure`. A new client's
+`getProperties` drew two definitions of `DOME_POLICY` from the west
+mount 6 ms apart: `DOME_LOCKS` On, then `DOME_IGNORED` On. With both
+mounts and the dome parked, `east`'s mount unparked with `Ok`. The
+dome's lock held: it refused to park with `Alert` while a mount was
+unparked, and `DomeParkRefused` posted 97 ms after the request.
+
+`Telescope::ISGetProperties` in `libs/indibase/inditelescope.cpp`
+reads `DOME_POLICY` from the driver's configuration file before it
+defines the property. The operator's first write of the mount's
+location or `ACTIVE_DEVICES` made the driver save its whole
+configuration, because `saveConfig` of one property writes every
+property when no file exists, and `DOME_POLICY` was `DOME_IGNORED`
+then. The operator's later write of `DOME_LOCKS` changed only the
+driver's memory. So each new client, such as PHD2 after `StartGuider`
+or a person's KStars, turned the lock off. The dome reads
+`MOUNT_POLICY` from its file only at start, so its lock held. The fake
+mount did not model the file, and the tests passed.
+
+Commit 35c9c1d9 makes the operator send `CONFIG_PROCESS` `CONFIG_SAVE`
+after it changes a lock policy, and adds `indi.Client.Answered`,
+because `CONFIG_PROCESS` turns `CONFIG_SAVE` Off again when the save
+ends. The fake now keeps a configuration file, and
+`TestAClientThatConnectsLaterLeavesTheMountLocked` failed before the
+change. `make test` measured 95.6% total coverage.
+
+### The drill on the fixed build
+
+On `2026.10.04-004-dev-078-35c9c1d9`, both reservations were `Ready`
+41 s after they were created. Each new client after `Configure`,
+PHD2 among them, read `DOME_LOCKS` On from both mounts.
+
+| Step | Result |
+|---|---|
+| `kubectl get observatory lab` | `LocksRelayed` `True`, `Relayed`, naming both mounts and the dome |
+| Park `east`, then park the dome | `DOME_PARK` `Alert` with `UNPARK` On. `DomeParkRefused` on `Dome` `lab` named `Mount west`, 78 ms after the request |
+| Park `west`, then park the dome | Parked in 17 s, with the shutter closed |
+| Unpark `east` | `TELESCOPE_PARK` `Alert` with `PARK` On. `MountUnparkRefused` on `Mount` `east`, 145 ms after the request |
+| Scale the operator to 0, unpark the dome, unpark `east` | The mount refused with `Alert`, and no `Event` posted |
+| Scale the operator to 1, unpark `east` | The operator relayed the unparked dome, and `LocksRelayed` named it. The unpark succeeded |
+| Park `east` and the dome, delete `east-mount` | The new driver connected 4 s later. The operator wrote `DOME_LOCKS` 70 ms after the driver defined it, and relayed the parked dome 5 ms after that |
+| Park the new mount, then unpark it | `Alert` with `PARK` On, and `MountUnparkRefused` |
+
+The condition's message changed with each park, and `Waiting for
+Mount east to report TELESCOPE_PARK` appeared for 1 s while
+`east-mount` restarted.
+
+### Release with the locks on
+
+| Start | Result |
+|---|---|
+| Dome parked, `east`'s mount unparked by the defect, on dev-077 | Both `Released` in 41 s. `Secure` parked `east`'s mount, and `StopSite` found the dome parked. No Warning |
+| Dome and both mounts parked, on dev-078 | Both `Released` in 39 s, and no Warning |
+| Dome and both mounts unparked, on dev-078 | `Secure` parked both mounts, `StopSite` parked the dome in 18 s, and the last reservation was `Released` 73 s after the delete. No Warning |
+
+The limit that no step unparks the dome did not show: each new
+`lab-dome` pod starts its simulator unparked, so the next activation
+found the dome unparked.
+
+### What the drill noted
+
+- `DomeParkRefused` with two mounts reads "Mount east, Mount west is
+  unparked or moving".
+- A refusal posts an `Event` only on a transition into `Alert`. A
+  second refused park while `DOME_PARK` was still `Alert` posted none.
+- The drill stopped the operator with `kubectl scale` to 0 and
+  started it again with a scale to 1, because a deleted pod comes back
+  within seconds.
 
 ## The drill
 

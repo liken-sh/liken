@@ -3,9 +3,13 @@
 Proposed and built on 2026-10-06, and tested against the fake API
 server, the fake INDI servers, and a fake `indiserver` for the shim.
 A local run of the real `indiserver` from the `indi` image confirmed
-the fifo's commands. The drill on the test cluster has not run yet.
-"The drill" below gives its steps. This plan closes the open problem
-"Adding a device restarts the server", which plan 07 recorded.
+the fifo's commands. The drill ran on the two-node test cluster on
+2026-10-06, on the development build `2026.10.04-004-dev-077-4a3db556`.
+"What the test cluster measured" gives the results: no server
+restarted, and the exposure finished. The drill found three defects,
+which that section lists and this plan leaves open. This plan closes
+the open problem "Adding a device restarts the server", which plan 07
+recorded.
 
 ## The problem
 
@@ -189,6 +193,84 @@ a host directory held the drivers file in the kubelet's layout:
   telescope stayed `CONNECT=On`.
 - The container restarted 0 times, and `docker stop` ended it in 84 ms.
 - The image's smoke check, `indi/smoke/indi.sh`, passed.
+
+## What the test cluster measured
+
+The operator ran from `2026.10.04-004-dev-077-4a3db556`, applied by
+Flux from the deploy artifact, with `examples/simulators.yaml` as the
+inventory and both lock policies set. The drill reserved `east` by
+hand, and it was `Ready` in 2 min 33 s, most of it image pulls of the
+`indi` revision 5. A port-forward to `east-telescope` carried a small
+INDI client that timestamped every `CONNECTION`, `CCD_EXPOSURE`, and
+`delProperty`, and a second one did the same for `lab-observatory`.
+Each edit was a `kubectl patch` of `spec.opticalTrain` or
+`spec.observatory`, timestamped on the laptop. The shim's `start` and
+`stop` times are from the server's log, and the `Event` times from
+`kubectl get events -w`.
+
+A 300 s exposure on `Camera east-main` started before the first edit.
+It counted down once a second through every edit and ended `Ok`
+301 s after it started. The `east-telescope` pod kept its UID and a
+restart count of 0, and each device that the edit did not name stayed
+`CONNECT=On` in the client's view.
+
+| Edit | Edit to the shim's line | Edit to the device's definition | Edit to `CONNECT=On` |
+|---|---|---|---|
+| `Focuser spare` joins `east-imaging` | 0.34 s, `start` | 2.62 s | 2.63 s |
+| `Rotator east` joins `east-imaging` | 0.42 s, `start` | 1.47 s | 1.48 s |
+| `Focuser east` joins `east-imaging` | 0.31 s, `start` | 2.61 s | 2.62 s |
+| `SkyQualityMeter lab` joins `lab` | 0.32 s, `start` | 1.35 s | 1.35 s |
+| `Focuser east` leaves | 0.22 s, `stop` | | |
+| `Rotator east` leaves | 0.17 s, `stop` | | |
+| `Focuser spare` leaves | 0.15 s and 0.26 s, `stop` | | |
+| `SkyQualityMeter lab` leaves | 0.20 s, `stop` | | |
+
+So the kubelet wrote the downward API file within 0.15 s to 0.42 s of
+the patch, under the estimate of about a second. The rest of a join is
+the device's pod starting. The `DriverStarted` and `DriverStopped`
+`Event`s posted within 0.1 s of each patch, and each leaving device's
+pod, `Service`, and claim were gone within 1.7 s. The
+`lab-observatory` pod kept its UID and a restart count of 0, and the
+dome and the weather station stayed connected.
+
+Deleting the `east-telescope` pod created a new one 0.55 s later with
+12 drivers in its annotation, and the server started all 12. Every
+device was `Connected` 3.2 s after the delete. The runner posted
+`PodCreated` on the `Telescope`, and no `DriverStarted`.
+
+### The defects the drill found
+
+- **A leaving device's pod goes before its driver stops.** The runner
+  patches the annotation and then deletes the pod at once, so the
+  order is of the API calls, not of their effect. In three of the five
+  departures, the pod's connection ended 50 ms to 75 ms before the
+  shim wrote `stop`. `indiserver` logged `read EOF` and `restart #0`,
+  started the driver again, and the `stop` then ended it. No other
+  device was affected. A fix needs a signal that the driver stopped,
+  such as the server's `delProperty` for the device, and a bound on
+  the wait.
+- **A second device with the same driver breaks the first.** The
+  first edit put `Focuser spare` into `east-guiding` while `Focuser
+  east` ran on the same server. The runner started the second driver,
+  which defined `Focuser Simulator` again, disconnected. Both
+  `Focuser`s then reported `Error` with "same driver as another device
+  on this server". Putting `spare` back on the shelf stopped its
+  driver, and `indiserver`'s `delProperty` for `Focuser Simulator`
+  removed the running `Focuser east` from every client's view. The
+  operator's client kept `Focuser east` in `Starting` until another
+  client's `getProperties` made its driver define the device again,
+  52 s later. The check for a shared driver runs only when the
+  operator looks up a device's INDI name, after the driver started.
+- **A new server leaves PHD2 disconnected.** After the server pod was
+  replaced, PHD2 reported "INDI server disconnected" and stayed
+  `Stopped`, and the `Guider` stayed `Activating`, "Waiting for PHD2 to
+  connect its camera and mount", when the drill checked it 74 s later. The
+  runner connects PHD2's equipment once for each guider pod, and the
+  guider pod did not change.
+
+The example's comment on the spare focuser still says that setting
+`opticalTrain` restarts the telescope's INDI server, and installing it
+on `east` beside `Focuser east` hits the second defect.
 
 ## The drill
 

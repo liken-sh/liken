@@ -486,6 +486,30 @@ The build changed four points of the design as it was first settled:
 The coverage of these four was measured on 2026-10-06 with
 `go test -coverprofile` and each component's `.testcoverage.yml`.
 
+## The test cluster
+
+On 2026-10-06, the drills of `observatory-operator`'s plans 11 and 12
+showed this plan's `Event`s on the two-node test cluster for the first
+time. `kubectl describe` showed them as written, and `kubectl` grouped
+repeats such as `DriverStarted (x2 over 16m)`. Examples:
+
+- On `Telescope` `east`: `DriverStarted`, "Started the driver of
+  Focuser spare on server east-telescope while Reservation east-drill
+  is Ready. The server did not restart.", and `PodCreated` when the
+  server's pod was replaced.
+- On `Observatory` `lab`: `Relayed`, `Waiting`, and `Ready` from the
+  conditions, and `DriverStopped` for the `SkyQualityMeter`.
+- On `Dome` `lab` and `Mount` `east`: the Warnings `DomeParkRefused`
+  and `MountUnparkRefused`, within 0.15 s of the refused move.
+- On `Focuser` `spare`: a Warning `Error` for a driver that another
+  device on the server shared.
+
+Three readings are noisy or misleading. A replaced server pod posts
+`Starting` and then `Connected` on each of its 12 devices. A device on
+the shelf posts `NoParent` "Names no parent" beside `Inventory`. During
+a release, the `Observatory` posts `Activating` "Waiting for Dome lab
+(Disconnecting)". The drill found no `Event` missing.
+
 ## What stays open
 
 - **The `Event` TTL.** The API server deletes an `Event` one hour after
