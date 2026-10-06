@@ -97,7 +97,7 @@ every machine liken has run is Gen9 or newer.
 
 ## What was measured
 
-Built on vega on 2026-09-08 from the closure stage at
+Built on the laptop on 2026-09-08 from the closure stage at
 `debian:trixie-slim`, with mesa 25.0.7-2+deb13u1, libvulkan1
 1.4.309.0-1, and libllvm19 1:19.1.7-3+b1:
 

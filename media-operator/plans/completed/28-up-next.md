@@ -194,7 +194,7 @@ the reader now allows 256 KiB.
 
 The plan as written:
 
-Local first, on vega, in the headless harness: a `Play` with a `next`
+Local first, on the laptop, in the headless harness: a `Play` with a `next`
 block draws the chip, the card at ninety percent, the sliver, and the
 waiting state, captured as frames. Then on `liken-1` with the browser
 as the idle controller: an episode played from a series page offers

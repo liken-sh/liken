@@ -1,6 +1,6 @@
 # 02, The lab
 
-Built and run on `vega` on 2026-09-05. `make -C lab smoke` takes 78
+Built and run on the laptop on 2026-09-05. `make -C lab smoke` takes 78
 seconds with a warm channel: fetch 4 s, install 6 to 10 s, boot to
 `Ready` 15 s, deploy 35 s. The cold fetch of the 497 MB release took
 62 s.
@@ -100,6 +100,6 @@ is a bug, not a reason to raise the guest's memory.
 - `make -C lab smoke` ends with one `Ready` node, a `Ready`
   `DaemonSet`, `git.liken.sh` in `kubectl get csinode`, and the
   store's mount source printed, inside the deadlines, from a clean
-  checkout on `vega`.
+  checkout on the laptop.
 - A pod in the lab clones `hello` from the host forge and pushes a
   commit to it.

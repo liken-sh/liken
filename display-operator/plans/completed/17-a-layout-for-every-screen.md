@@ -67,7 +67,7 @@ The closure seeds gain `ivi-shell.so` and lose nothing: the
 weston 14 has no `ivi-module=` key. A controller is an ordinary
 module in the `[core]` `modules=` list, loaded after the shell, and
 it finds the shell through `ivi_layout_get_api`. The prototype on
-vega (2026-09-10, below) proved the load order.
+the laptop (2026-09-10, below) proved the load order.
 
 The module is an executor. It holds no layout of its own and makes
 no decision. It does six things:
@@ -354,7 +354,7 @@ and the two open problems below.
 
 ## What was measured and what was read
 
-Measured on vega, 2026-09-10, weston 14.0.2 from Debian trixie in a
+Measured on the laptop, 2026-09-10, weston 14.0.2 from Debian trixie in a
 container, headless and then nested in the desktop session with the
 pixman renderer: a 110-line controller module loaded through
 `--modules=`, placed three surfaces from three containers on one
@@ -367,7 +367,7 @@ the module after the shell. Plain xdg-shell clients arrived on
 `weston-screenshooter` refuses a client the compositor did not
 start unless weston runs with `--debug`.
 
-Measured in the module's own smoke test on vega, 2026-09-10, weston
+Measured in the module's own smoke test on the laptop, 2026-09-10, weston
 14.0.2 headless on pixman: a claim's socket opened on request and a
 client's surface reported under that socket's name; a placement
 painted every pixel of its rectangle and none outside it; a move
