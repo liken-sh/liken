@@ -1,9 +1,10 @@
 # 13, Procedures on conditions
 
 Proposed on 2026-10-06. Built on 2026-10-06, all six steps, and
-tested against the fake API server and the fake INDI servers. The
-first drill on the test cluster ran on 2026-10-06, and "What the first
-drill found" lists its defects and their fixes.
+tested against the fake API server and the fake INDI servers. Two
+drills on the test cluster ran on 2026-10-06. "What the first drill
+found" and "What the second drill found" list their defects and their
+fixes.
 
 ## The problem
 
@@ -423,6 +424,26 @@ found these defects. Each fix lands with a test against the fakes.
   `indi_getprop` through `kubectl exec`. It notes that the simulators
   keep their park state in the pod, so a device whose pod starts again
   comes back unparked.
+
+## What the second drill found
+
+The second drill on the test cluster ran on 2026-10-06, and found
+these defects. Each fix lands with a test against the fakes.
+
+- **The record of a run belongs to one object, not one name.** The
+  drill deleted `Dome` `lab` during a session and created it again
+  with the same name. The operator kept its runs in memory by
+  `Dome/lab`, so the new object's `status.procedures` showed the old
+  object's runs, and its activation counted as `Done`. The records are
+  now kept by the object's UID, and the operator drops the records of
+  an object that the stores no longer hold. A status is part of its
+  object, so a restart loads each record under the UID of the object
+  that holds it. A trigger's run of a deleted object ends.
+- **A list of holders takes the plural.** The `Observatory`'s `Active`
+  message read "Active for Reservation drill-east, drill-west". With
+  more than one holder it now reads "Active for Reservations
+  drill-east, drill-west", and the `Deactivating` message of its
+  `Ready` condition follows the same rule.
 
 ## How we test it
 

@@ -23,7 +23,7 @@ func TestTheObservatorysActiveNamesItsHoldersNow(t *testing.T) {
 		var before observatory.Condition
 		w.until(time.Minute, "Active does not name both holders", func() bool {
 			before = active()
-			return before.Message == "Active for Reservation east-tonight, west-tonight"
+			return before.Message == "Active for Reservations east-tonight, west-tonight"
 		})
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		var after observatory.Condition

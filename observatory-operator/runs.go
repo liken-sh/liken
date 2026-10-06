@@ -5,6 +5,11 @@ package main
 // status.procedures. The status is the record that outlives the
 // operator: a new copy loads the runs from the stored statuses before
 // any runner or trigger runs, and resumes a run that was Running.
+//
+// The records belong to one object, by its UID. A Dome that a person
+// deletes and creates again with the same name is a new object, and
+// starts with no runs: the runs of the old one answered transitions
+// that the new one never saw, and its activation must run.
 
 import (
 	"context"
@@ -18,11 +23,11 @@ import (
 
 type runRecords struct {
 	mu sync.Mutex
-	// runs holds the last run of each trigger, by resource key and
-	// then by trigger.
+	// runs holds the last run of each trigger, by recordKey and then
+	// by trigger.
 	runs map[string]map[string]observatory.ProcedureRun
-	// busy holds the trigger of the run that goes on now, by resource
-	// key, so a resource runs one procedure at a time.
+	// busy holds the trigger of the run that goes on now, by
+	// recordKey, so a resource runs one procedure at a time.
 	busy map[string]string
 	// changed rings on each change of a record, so the status writer
 	// writes it, and a wait for another resource's run reads it.
@@ -33,8 +38,18 @@ func newRunRecords(changed *bell) *runRecords {
 	return &runRecords{runs: map[string]map[string]observatory.ProcedureRun{}, busy: map[string]string{}, changed: changed}
 }
 
+// recordKey names the records of one object: its kind, its name, and
+// its UID.
+func recordKey(kind observatory.Kind, meta observatory.ObjectMeta) string {
+	return kind.Name + "/" + meta.Name + "/" + meta.UID
+}
+
+// record names the records of a resource's object.
+func (r resource) record() string { return recordKey(r.kind, r.meta) }
+
 // seed loads the runs from the status of each resource with
-// procedures.
+// procedures. A status is part of its object, so each record loads
+// under the UID of the object that holds it.
 func (r *runRecords) seed(t *tree) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -47,13 +62,32 @@ func (r *runRecords) seed(t *tree) {
 		}
 	}
 	for _, d := range t.devices {
-		load(d.key(), d.object.Status.Procedures)
+		load(recordKey(d.kind, d.object.Metadata), d.object.Status.Procedures)
 	}
-	for name, telescope := range t.telescopes {
-		load(observatory.TelescopeKind.Name+"/"+name, telescope.Status.Procedures)
+	for _, telescope := range t.telescopes {
+		load(recordKey(observatory.TelescopeKind, telescope.Metadata), telescope.Status.Procedures)
 	}
-	for name, site := range t.observatories {
-		load(observatory.ObservatoryKind.Name+"/"+name, site.Status.Procedures)
+	for _, site := range t.observatories {
+		load(recordKey(observatory.ObservatoryKind, site.Metadata), site.Status.Procedures)
+	}
+}
+
+// forget drops the records of each object that the stores no longer
+// hold. It reads the tree while it holds the records, so a run that
+// read a newer tree, with an object this pass has not seen, writes its
+// record only after the pass. A run of a deleted object that writes
+// after the pass leaves a record that the next pass drops.
+func (r *runRecords) forget(snapshot func() *tree) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	live := map[string]bool{}
+	for _, res := range snapshot().withProcedures() {
+		live[res.record()] = true
+	}
+	for key := range r.runs {
+		if !live[key] {
+			delete(r.runs, key)
+		}
 	}
 }
 

@@ -230,6 +230,7 @@ func (o *operator) supervise(ctx context.Context, t *tree) {
 	}
 	o.claims.forgetGone(t)
 	o.activity.forgetUnheld(t, o.claims)
+	o.runs.forget(o.snapshot)
 	o.servers.sync(ctx, t)
 	o.guiderConns.sync(ctx, t)
 	if err := o.sweep(t); err != nil {

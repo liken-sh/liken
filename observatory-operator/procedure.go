@@ -122,7 +122,7 @@ func sameActions(run observatory.ProcedureRun, actions []action) bool {
 // with the error of a run that failed and that the call does not run
 // again.
 func (o *operator) settled(c procCall) (bool, error) {
-	run, found := o.runs.get(c.res.key(), c.trigger)
+	run, found := o.runs.get(c.res.record(), c.trigger)
 	if !found || !answers(run, c.since, c.period) || !sameActions(run, c.actions) {
 		return false, nil
 	}
@@ -148,7 +148,7 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	if done, err := o.settled(c); done {
 		return err
 	}
-	key := c.res.key()
+	key := c.res.record()
 	pending := false
 	err := o.runs.acquire(ctx, key, c.label(), func(holder string) {
 		if run, found := o.runs.get(key, c.trigger); found && answers(run, c.since, c.period) && run.State == observatory.StepRunning {
@@ -265,7 +265,7 @@ func (o *operator) procedureStarted(c procCall) {
 // runAction runs one action of a run, and records its state in the
 // run as it goes.
 func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.ProcedureRun, i int) error {
-	key, a := c.res.key(), c.actions[i]
+	key, a := c.res.record(), c.actions[i]
 	record := &run.Actions[i]
 	now := stamp()
 	record.State, record.StartTime, record.StopTime, record.Summary = observatory.StepRunning, &now, nil, ""
@@ -423,7 +423,8 @@ func (o *operator) predecessors(ctx context.Context, c procCall, a action, repor
 				if !ok || g.key() == from.key() {
 					continue
 				}
-				run, found := o.runs.get(g.key(), m.trigger)
+				x, _ := t.resource(g.kind, g.name)
+				run, found := o.runs.get(x.record(), m.trigger)
 				answered := found && answers(run, m.since, m.period)
 				switch {
 				case answered && run.State == observatory.StepFailed:

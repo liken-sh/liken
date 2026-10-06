@@ -212,7 +212,7 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, ref, name, "", standing))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}
-	next.Procedures = o.runs.list(d.key())
+	next.Procedures = o.runs.list(recordKey(d.kind, d.object.Metadata))
 	if next.Phase == observatory.DeviceConnected && device != nil {
 		next.Conditions = append(next.Conditions, stateConditions(d, *device)...)
 	}

@@ -23,6 +23,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -37,13 +38,15 @@ func triggerName(i int) string { return fmt.Sprintf("triggers[%d]", i) }
 
 // flight is one trigger's run that goes on now.
 type flight struct {
+	// record names the object whose run it is.
+	record string
 	cancel context.CancelCauseFunc
 	done   chan struct{}
 }
 
 // control is the trigger controller's own state between passes.
 type control struct {
-	// flights holds the runs that go on, by resource key and trigger.
+	// flights holds the runs that go on, by recordKey and trigger.
 	flights map[string]*flight
 	// retried holds the resourceVersion of each resource whose retry
 	// annotation the controller acted on, so a pass that reads the
@@ -99,12 +102,14 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) ti
 		}
 	}
 	var due time.Time
+	live := map[string]bool{}
 	for _, r := range t.withProcedures() {
+		live[r.record()] = true
 		retry := k.retryAsked(r)
 		period, active := o.activePeriod(r)
 		for i, trigger := range r.procedures.Triggers {
 			name := triggerName(i)
-			id := r.key() + "/" + name
+			id := r.record() + "/" + name
 			f := flights[id]
 			if !active {
 				if f != nil {
@@ -131,7 +136,7 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) ti
 			c := conditionOf(conditions, when.Type)
 			holds, since := c.Status == want, c.LastTransitionTime
 			call := procCall{res: r, trigger: name, condition: conditionText(targets[0], when), actions: trigger.Run, period: period}
-			if run, ok := o.runs.get(r.key(), name); ok && run.State == observatory.StepRunning && run.Since != nil && answers(run, *run.Since, period) {
+			if run, ok := o.runs.get(r.record(), name); ok && run.State == observatory.StepRunning && run.Since != nil && answers(run, *run.Since, period) {
 				// An operator restart interrupted the run, and it
 				// resumes, whatever its condition reads now.
 				call.since, call.event = *run.Since, o.conditionEvent(r, targets[0], when.Type, want, *run.Since)
@@ -141,7 +146,7 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) ti
 			if !holds {
 				continue
 			}
-			if run, ok := o.runs.get(r.key(), name); ok && answers(run, since, period) {
+			if run, ok := o.runs.get(r.record(), name); ok && answers(run, since, period) {
 				if !retry || run.State != observatory.StepFailed {
 					continue
 				}
@@ -158,6 +163,14 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) ti
 		}
 		if retry {
 			o.clearRetryOf(ctx, r, k)
+		}
+	}
+	// A run of an object that a person deleted has nothing left to act
+	// on. An object created again with the same name is a new object,
+	// and its own runs start while the old run ends.
+	for _, f := range flights {
+		if !live[f.record] {
+			f.cancel(errors.New("its object was deleted"))
 		}
 	}
 	return due
@@ -177,7 +190,7 @@ func conditionText(g target, when observatory.When) string {
 // fly starts one trigger's run.
 func (o *operator) fly(ctx context.Context, call procCall, group *sync.WaitGroup) *flight {
 	runCtx, cancel := context.WithCancelCause(ctx)
-	f := &flight{cancel: cancel, done: make(chan struct{})}
+	f := &flight{record: call.res.record(), cancel: cancel, done: make(chan struct{})}
 	group.Go(func() {
 		defer o.structure.notify()
 		defer close(f.done)
@@ -227,7 +240,7 @@ func (o *operator) activePeriod(r resource) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	if len(r.procedures.Activation) > 0 {
-		run, ok := o.runs.get(r.key(), observatory.TriggerActivation)
+		run, ok := o.runs.get(r.record(), observatory.TriggerActivation)
 		if !ok || !answers(run, state.since, time.Time{}) || !ended(run.State) {
 			return time.Time{}, false
 		}
@@ -282,10 +295,10 @@ func (o *operator) conditionEvent(r resource, g target, conditionType string, st
 // condition names a resource that does not exist, as a failed run with
 // no transition. It posts one Warning for each new reason.
 func (o *operator) refuseTrigger(r resource, name string, err error) {
-	if run, ok := o.runs.get(r.key(), name); ok && run.Since == nil && run.State == observatory.StepFailed && run.Summary == err.Error() {
+	if run, ok := o.runs.get(r.record(), name); ok && run.Since == nil && run.State == observatory.StepFailed && run.Summary == err.Error() {
 		return
 	}
 	now := stamp()
-	o.runs.put(r.key(), observatory.ProcedureRun{Trigger: name, State: observatory.StepFailed, StartTime: &now, StopTime: &now, Summary: err.Error()})
+	o.runs.put(r.record(), observatory.ProcedureRun{Trigger: name, State: observatory.StepFailed, StartTime: &now, StopTime: &now, Summary: err.Error()})
 	o.recorder.Warning(reference(r.kind, r.meta), reasonProcedureFailed, fmt.Sprintf("Procedure %s failed: %v", name, err))
 }

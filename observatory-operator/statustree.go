@@ -168,7 +168,7 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 		readyCondition(phase, message),
 		o.activity.condition(telescopeKey(name)),
 	}, next.ObservedGeneration)
-	next.Procedures = o.runs.list(telescopeKey(name))
+	next.Procedures = o.runs.list(recordKey(observatory.TelescopeKind, telescope.Metadata))
 	return next
 }
 
@@ -209,7 +209,7 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 	next.Phase = observatory.PhaseIdle
 	message := "Not reserved"
 	if len(leaving) > 0 && !keeping {
-		next.Phase, message = observatory.PhaseDeactivating, "Deactivating for Reservation "+strings.Join(leaving, ", ")
+		next.Phase, message = observatory.PhaseDeactivating, "Deactivating for "+reservationList(leaving)
 	} else if len(next.Reservations) > 0 {
 		next.Phase, message = observatory.PhaseReady, "Connected every device"
 		for _, d := range devices {
@@ -226,15 +226,24 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		// while others hold telescopes in it, so the message names the
 		// holders now. A new message alone is no transition, so the
 		// condition keeps its time.
-		active.Message = "Active for Reservation " + strings.Join(next.Reservations, ", ")
+		active.Message = "Active for " + reservationList(next.Reservations)
 	}
 	conditions := []observatory.Condition{readyCondition(next.Phase, message), active}
 	if locks := o.planLocks(t, site).condition; locks != nil {
 		conditions = append(conditions, *locks)
 	}
 	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
-	next.Procedures = o.runs.list(observatoryKey(name))
+	next.Procedures = o.runs.list(recordKey(observatory.ObservatoryKind, site.Metadata))
 	return next
+}
+
+// reservationList names one or more reservations, as "Reservation
+// east" or "Reservations east, west".
+func reservationList(names []string) string {
+	if len(names) == 1 {
+		return "Reservation " + names[0]
+	}
+	return "Reservations " + strings.Join(names, ", ")
 }
 
 // worstWeather answers the worst verdict of the weather stations that

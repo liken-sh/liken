@@ -150,7 +150,7 @@ func (r *runner) copyActions(w *stepWork, plan *stepPlan) {
 	var actions []observatory.StepAction
 	var running []string
 	for _, m := range plan.runners() {
-		run, ok := r.o.runs.get(m.res.key(), plan.trigger)
+		run, ok := r.o.runs.get(m.res.record(), plan.trigger)
 		if !ok || !answers(run, m.since, time.Time{}) {
 			continue
 		}
