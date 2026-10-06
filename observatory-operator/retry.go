@@ -8,9 +8,11 @@ package main
 // the resource's triggers whose condition still holds with the same
 // transition time, and skips its Done actions. It then removes the
 // annotation. A run whose transition is over stays Failed, because
-// its condition no longer asks for it. A lifecycle run, activation or
-// deactivation, runs again through the retry annotation of the
-// Reservation whose step it failed.
+// its condition no longer asks for it. The annotation also runs again
+// the Failed activation of a device that joined an Active parent
+// (joins.go). Any other lifecycle run, activation or deactivation,
+// runs again through the retry annotation of the Reservation whose
+// step it failed.
 
 import (
 	"context"

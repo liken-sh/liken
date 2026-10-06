@@ -455,11 +455,18 @@ these defects. Each fix lands with a test against the fakes.
   trigger's does. Its triggers start when it ends. The controller
   waits for a `Ready` reservation, because during the `Activation`
   step the step runs the device in the tree's order.
-  A device that leaves while its parent is `Active` runs no
-  deactivation, connected or not: the person who removes it takes it
-  out of the operator's care, and its driver stops as it leaves. A
-  failed activation of a joining device has no retry: the retry
-  annotation of a device runs again only its triggers.
+- **A device that leaves an active parent runs its deactivation.** A
+  device whose spec moves it to the shelf or to another parent while
+  its old parent is `Active` runs its deactivation through its driver
+  on the old server, and the driver stops after the run ends, also
+  after a failure, which posts `ProcedureFailed`. A deleted device
+  runs no deactivation: its spec is gone, and to keep it the operator
+  would need a finalizer on every device.
+- **The retry annotation runs a joining device's failed activation
+  again.** While a reservation that governs the device is `Ready`, the
+  annotation on the device runs its `Failed` activation of the current
+  transition again. A failure in the `Activation` step fails the
+  reservation, so that run still retries through the reservation.
 - **A list of holders takes the plural.** The `Observatory`'s `Active`
   message read "Active for Reservation drill-east, drill-west". With
   more than one holder it now reads "Active for Reservations

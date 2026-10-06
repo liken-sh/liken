@@ -99,9 +99,11 @@ func (m *driversMemo) wrote(p *pod, list string) {
 // nothing to change: the next pod starts with the devices of the pod
 // that ensure creates.
 //
-// setDrivers returns only after the server reports the driver of each
-// device that left stopped, or after driverStopLimit, so the caller
-// can delete those pods (stopping).
+// A device that left while its parent is Active runs its deactivation
+// before its driver stops (leaves.go). setDrivers returns only after
+// the server reports the driver of each device that left stopped, or
+// after driverStopLimit, so the caller can delete those pods
+// (stopping).
 func (o *operator) setDrivers(ctx context.Context, report func(string), ref serverRef, devices []*device) (joined []*device, left []string, err error) {
 	want, err := driverList(devices)
 	if err != nil {
@@ -130,6 +132,7 @@ func (o *operator) setDrivers(ctx context.Context, report func(string), ref serv
 			left = append(left, name)
 		}
 	}
+	o.deactivateLeavers(ctx, t, ref, left)
 	stopped, cancel := o.stopping(ctx, t, ref, left)
 	defer cancel()
 	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{annotationDrivers: want}}})

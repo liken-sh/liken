@@ -81,3 +81,37 @@ func activeOf(t *testing.T, w *world, kind observatory.Kind, name string) observ
 	site, _ := decode[observatory.Observatory](t, w.api, kindCollection(kind), name)
 	return conditionOf(site.Status.Conditions, observatory.ConditionActive)
 }
+
+// A joining device's activation that fails runs again through the
+// retry annotation on the device, with its Done actions skipped.
+func TestTheRetryAnnotationRerunsAJoiningDevicesFailedActivation(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		collection := kindCollection(observatory.DustCapKind)
+		object, _ := w.api.object(collection, "east")
+		w.api.deleteNamed(collection, "east")
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+
+		w.indi.preset("Dust Cover Simulator", "CAP_PARK", "PARK")
+		w.indi.refuse("Dust Cover Simulator", "CAP_PARK")
+		w.put(observatory.DustCapKind, "east", object["spec"].(map[string]any))
+		if run := w.runEnds(observatory.DustCapKind, "east", observatory.TriggerActivation, 5*time.Minute); run.State != observatory.StepFailed {
+			t.Fatalf("the joining activation = %s %q, want Failed", run.State, run.Summary)
+		}
+		w.indi.accept("Dust Cover Simulator", "CAP_PARK")
+		w.annotateRetry(observatory.DustCapKind, "east")
+		var run observatory.ProcedureRun
+		w.until(5*time.Minute, "the retried activation is not Done", func() bool {
+			run = lastRun(t, w, observatory.DustCapKind, "east", observatory.TriggerActivation)
+			return run.State == observatory.StepDone
+		})
+		if got := run.Actions[0].Summary; got != "Opened DustCap east" {
+			t.Errorf("the action's summary = %q, want %q", got, "Opened DustCap east")
+		}
+		if n := startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerActivation); n != 2 {
+			t.Errorf("the activation started %d times, want 2", n)
+		}
+	})
+}

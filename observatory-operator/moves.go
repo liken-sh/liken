@@ -5,6 +5,8 @@ package main
 // train, telescope, or observatory. The runner handles the change as
 // it handles a device that joins:
 //
+//   - The device runs its deactivation through its driver on the
+//     running server, while its old parent is Active (leaves.go).
 //   - The runner stops the device's driver on the running server
 //     (serverdrivers.go), and posts an Event on the Telescope or the
 //     Observatory. The other devices on the server stay connected.

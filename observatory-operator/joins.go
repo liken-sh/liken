@@ -13,12 +13,17 @@ package main
 // device's activation in the tree's order, and a run here would race
 // it. No step waits on the run, and its after waits for nothing: the
 // step already ended every other run of the transition. A failure
-// posts ProcedureFailed, as a trigger's does. The device's triggers
-// start when the run ends (activePeriod).
+// posts ProcedureFailed, as a trigger's does, and the retry annotation
+// on the device runs it again, with its Done actions skipped. The
+// device's triggers start when the run ends (activePeriod).
 //
-// A device that leaves while its parent is Active runs no
-// deactivation. The person who removes it takes it out of the
-// operator's care, and its driver stops as it leaves.
+// While a governing reservation is Ready, a Failed activation of the
+// current transition is a run that this controller started. A failure
+// in the reservation's Activation step fails the reservation, which
+// is then not Ready, and that run retries through the reservation.
+//
+// A device that leaves while its parent is Active runs its
+// deactivation before its driver stops (leaves.go).
 
 import (
 	"context"
@@ -46,8 +51,9 @@ func governor(r resource) (string, bool) {
 }
 
 // joinActivation starts the activation of a device that joined an
-// Active parent, and stops it when the parent's activity ends.
-func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *control) {
+// Active parent, and stops it when the parent's activity ends. retry
+// runs a Failed activation of the current transition again.
+func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *control, retry bool) {
 	if r.device == nil || len(r.procedures.Activation) == 0 {
 		return
 	}
@@ -66,16 +72,19 @@ func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *c
 	}
 	run, ok := o.runs.get(r.record(), observatory.TriggerActivation)
 	answered := ok && answers(run, state.since, time.Time{})
-	if answered && run.State != observatory.StepRunning && run.State != observatory.StepPending {
+	rerun := answered && retry && run.State == observatory.StepFailed
+	if answered && !rerun && run.State != observatory.StepRunning && run.State != observatory.StepPending {
 		return
 	}
 	// A run that an operator restart interrupted resumes whatever the
-	// device reads now, and a new run needs a connected device.
-	if !o.governedByReady(t, r) || (!answered && r.device.object.Status.Phase != observatory.DeviceConnected) {
+	// device reads now. A new run, or one run again, needs a connected
+	// device.
+	resumed := answered && !rerun
+	if !o.governedByReady(t, r) || (!resumed && r.device.object.Status.Phase != observatory.DeviceConnected) {
 		return
 	}
 	k.flights[id] = o.fly(ctx, procCall{res: r, trigger: observatory.TriggerActivation,
-		actions: r.procedures.Activation, since: state.since}, &k.group)
+		actions: r.procedures.Activation, since: state.since, rerun: rerun}, &k.group)
 }
 
 // governedByReady reports whether a reservation that governs a device

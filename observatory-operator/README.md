@@ -322,9 +322,11 @@ kubectl annotate dome lab -n observatory observatory.liken.sh/retry=1
 The operator runs again each `Failed` run of the resource's
 `spec.triggers` whose condition still holds with the same transition
 time, skips the actions that are `Done`, and removes the annotation.
-A run whose condition changed since stays `Failed`. A run of
-`activation` or `deactivation` runs again through the retry annotation
-of its reservation.
+A run whose condition changed since stays `Failed`. The annotation on
+a device also runs again its `Failed` `activation` after the device
+joined an `Active` parent. Any other run of `activation` or
+`deactivation` runs again through the retry annotation of its
+reservation.
 
 One telescope serves one reservation at a time. A second reservation
 of the telescope waits in `Wait`, and its summary names the reservation
@@ -344,9 +346,15 @@ reservation is an ordinary edit, and the operator refuses no change.
 While the reservation is `Ready`, the server keeps running, and the
 other devices on it stay connected. A device that joins gets its pod,
 and then its driver starts on the running server, and the operator
-connects it and writes its settings. A device that leaves, to the
-shelf or to another telescope, has its driver stopped on the server,
-and then loses its pod, its `Service`, and its `ResourceClaim`. The
+connects it, writes its settings, and runs its `activation`. A device
+that leaves, to the shelf or to another telescope, first runs its
+`deactivation` through the driver on the server it leaves, within the
+timeouts of its actions. Then its driver stops on the server, also
+after a `deactivation` that failed with a `ProcedureFailed` Warning,
+and the device loses its pod, its `Service`, and its `ResourceClaim`.
+A device that a person deletes runs no `deactivation`: its spec is
+gone, and to keep it the operator would need a finalizer on every
+device. The
 operator posts a `DriverStarted` or a `DriverStopped` Event on the
 `Telescope` or the `Observatory`, and the device that left gets a
 `PodDeleted` Event. A device that leaves during activation keeps its

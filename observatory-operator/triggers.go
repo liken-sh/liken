@@ -105,8 +105,8 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) ti
 	live := map[string]bool{}
 	for _, r := range t.withProcedures() {
 		live[r.record()] = true
-		o.joinActivation(ctx, t, r, k)
 		retry := k.retryAsked(r)
+		o.joinActivation(ctx, t, r, k, retry)
 		period, active := o.activePeriod(r)
 		for i, trigger := range r.procedures.Triggers {
 			name := triggerName(i)

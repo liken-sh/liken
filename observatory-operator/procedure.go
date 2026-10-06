@@ -78,7 +78,12 @@ type procCall struct {
 	// deactivation does after an activation that failed before it
 	// connected every device.
 	ending bool
-	event  event
+	// on is the server whose driver the run acts through, for a
+	// device that left that server and whose driver still runs there
+	// (leaves.go). It is zero for every other run, which acts through
+	// the device's own server.
+	on    serverRef
+	event event
 }
 
 // label names the trigger's run for a person: the trigger, and the
@@ -364,8 +369,12 @@ func (o *operator) perform(ctx, wait context.Context, c procCall, a action, at p
 }
 
 // asNow answers the resource of a call as the tree holds it now, so
-// a reference resolves against the tree's current shape.
+// a reference resolves against the tree's current shape. A device that
+// left its server keeps the place it left, because its run acts there.
 func asNow(t *tree, c procCall) resource {
+	if c.on != (serverRef{}) {
+		return c.res
+	}
 	if r, ok := t.resource(c.res.kind, c.res.name()); ok {
 		return r
 	}
@@ -453,6 +462,9 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 		return handle{}, fmt.Errorf("%s is gone", c.res)
 	}
 	ref, placed := t.server(d)
+	if c.on != (serverRef{}) {
+		ref, placed = c.on, true
+	}
 	if !placed {
 		return handle{}, skip(fmt.Sprintf("%s is on the shelf", c.res))
 	}
