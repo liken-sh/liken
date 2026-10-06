@@ -62,6 +62,63 @@ func TestADeviceTakenOffAReadyTelescopeStopsOnTheRunningServer(t *testing.T) {
 	})
 }
 
+// A leaving device's pod goes only after the server reports its driver
+// stopped. A pod that went first would end the driver's connection,
+// and indiserver would start the driver again. A shim that never stops
+// the driver holds the pod for driverStopLimit, and no longer.
+func TestALeavingDevicesPodGoesAfterItsDriverStops(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		shim     time.Duration
+		bounded  bool
+		restarts []string
+	}{
+		{name: "a shim that stops the driver in a second", shim: time.Second},
+		{name: "a shim that never stops the driver", shim: time.Hour, bounded: true, restarts: []string{"east-telescope east-focuser"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := readyWorld(t)
+				w.indi.slowShim(c.shim)
+				start := time.Now()
+
+				w.put(observatory.FocuserKind, "east", map[string]any{"driver": map[string]any{"name": "indi_simulator_focus"}})
+				w.until(5*time.Minute, "the focuser's pod stays", func() bool {
+					return !slices.Contains(w.api.names(podsCollection), "east-focuser")
+				})
+
+				if got := w.indi.restarted(); !slices.Equal(got, c.restarts) {
+					t.Errorf("restarted drivers = %q, want %q", got, c.restarts)
+				}
+				if waited := time.Since(start); (waited >= driverStopLimit) != c.bounded {
+					t.Errorf("the pod went after %v; the bound is %v", waited, driverStopLimit)
+				}
+			})
+		})
+	}
+}
+
+// A release stops each driver on its running server before it deletes
+// the driver's pod, as a device that leaves does.
+func TestAReleaseStopsEachDriverBeforeItsPod(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.indi.slowShim(time.Second)
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.until(10*time.Minute, "the Reservation is still there", func() bool {
+			_, ok := w.reservation("east-tonight")
+			return !ok
+		})
+		if got := w.indi.restarted(); len(got) != 0 {
+			t.Errorf("restarted drivers = %q, want none", got)
+		}
+	})
+}
+
 // A device that leaves the observatory stops on the observatory's
 // server, and the dome on that server stays connected.
 func TestADeviceTakenOffTheObservatoryStopsOnItsRunningServer(t *testing.T) {

@@ -209,13 +209,17 @@ the fields go with no conversion.
 
 ## Also in scope
 
-Two defects from plan 11's drill on 2026-10-06 sit in the same
+Two defects from plan 11's drill on 2026-10-06 are in the same
 lifecycle code:
 
 - The operator deletes a leaving device's pod before its driver has
   stopped, in 3 of 5 removals. The driver restarts once and dies 50 to
   75 ms later. The operator waits for the server to report the driver
   gone before it deletes the pod.
+  **Fixed on 2026-10-06.** `setDrivers` waits up to 30 s for the
+  server's `delProperty` of each leaving driver. `StopDevices` stops
+  the drivers the same way, and a server's pod goes before the pods
+  of its devices.
 - After the server's pod is replaced, PHD2 stays disconnected and the
   `Guider` stays `Activating`. The guider's connection follows the
   server's, as every device's does.

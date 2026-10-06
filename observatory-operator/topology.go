@@ -246,6 +246,23 @@ func (o *operator) stopPods(ctx context.Context, report func(string), selected f
 	return stopped, err
 }
 
+// stopServer deletes a server's pod, and then the pods and objects of
+// its devices. indiserver ends its drivers when it exits. A device pod
+// that went first would end its driver's connection, and indiserver
+// would start the driver again.
+func (o *operator) stopServer(ctx context.Context, report func(string), ref serverRef) ([]string, error) {
+	first, err := o.stopPods(ctx, report, func(l map[string]string) bool {
+		return l[labelServer] == ref.String() && l[labelRole] == roleServer
+	})
+	if err != nil {
+		return first, err
+	}
+	rest, err := o.stopPods(ctx, report, onServer(ref, func(string) bool { return true }))
+	stopped := append(first, rest...)
+	sort.Strings(stopped)
+	return stopped, err
+}
+
 // onServer selects the objects of one server whose kind passes keep.
 func onServer(ref serverRef, keep func(kind string) bool) func(map[string]string) bool {
 	return func(l map[string]string) bool {

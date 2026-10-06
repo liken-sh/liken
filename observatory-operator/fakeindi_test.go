@@ -30,6 +30,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 )
 
 type fakeMember struct {
@@ -217,6 +218,10 @@ type fakeServer struct {
 	drivers map[string]*fakeDriver
 	uids    map[string]string
 	conns   []*fakeConn
+	// applied is the list of device pods that the shim applied last,
+	// and target is the list that the server pod's annotation names
+	// now (fakeshim_test.go).
+	applied, target []string
 }
 
 // fakeConn queues what the server writes, the way a socket's send
@@ -294,6 +299,12 @@ type indiWorld struct {
 	// lateDials holds how many dials each server refuses after its pod
 	// is Ready, as an indiserver that has not opened its port yet does.
 	lateDials map[string]int
+	// shimDelay is the time from a change of a server pod's annotation
+	// to the shim's start or stop of a driver (fakeshim_test.go).
+	shimDelay time.Duration
+	// restarts records each driver whose device pod was gone while the
+	// shim still listed it, as "<server> <pod>".
+	restarts []string
 
 	// followMu serializes catchUp, and guards last, the pods that the
 	// servers follow now.
@@ -408,12 +419,16 @@ func (w *indiWorld) sync(pods map[string]map[string]any) {
 		}
 		s, ok := w.servers[name]
 		if !ok {
-			s = &fakeServer{uid: podUID(p), drivers: map[string]*fakeDriver{}, uids: map[string]string{}}
+			s = &fakeServer{uid: podUID(p), drivers: map[string]*fakeDriver{}, uids: map[string]string{}, applied: links(p), target: links(p)}
 			w.servers[name] = s
 		}
+		w.shim(s, links(p))
 		running := map[string]bool{}
-		for _, link := range links(p) {
+		for _, link := range s.applied {
 			device, ok := pods[link]
+			if _, runs := s.drivers[link]; runs && !ok {
+				w.restarts = append(w.restarts, name+" "+link)
+			}
 			if !ok || !podReady(device) {
 				continue
 			}

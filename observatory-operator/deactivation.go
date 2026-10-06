@@ -296,10 +296,15 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(append([]string{"disconnected in order: " + strings.Join(disconnected, ", ")}, notes...), "; "))
 }
 
-// stopTelescopeDevices deletes the pods of the telescope's devices,
-// apart from its Switch devices.
+// stopTelescopeDevices stops the drivers of the telescope's devices,
+// apart from its Switch devices, on the server that keeps running, and
+// then deletes their pods (setDrivers).
 func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome, error) {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
+	switches, _ := partition(r.o.snapshot().devicesOn(ref))
+	if _, _, err := r.o.setDrivers(ctx, w.report, ref, switches); err != nil {
+		return outcome{}, err
+	}
 	stopped, err := r.o.stopPods(ctx, w.report, func(l map[string]string) bool {
 		return l[labelServer] == ref.String() && l[labelRole] == roleDevice && !isSwitch(l[labelKind])
 	})
@@ -331,7 +336,7 @@ func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 			return outcome{}, err
 		}
 	}
-	stopped, err := r.o.stopPods(ctx, w.report, onServer(ref, func(string) bool { return true }))
+	stopped, err := r.o.stopServer(ctx, w.report, ref)
 	if err != nil {
 		return outcome{}, err
 	}
@@ -406,7 +411,7 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 			return outcome{}, err
 		}
 	}
-	stopped, err := r.o.stopPods(ctx, w.report, onServer(ref, func(string) bool { return true }))
+	stopped, err := r.o.stopServer(ctx, w.report, ref)
 	if err != nil {
 		return outcome{}, err
 	}

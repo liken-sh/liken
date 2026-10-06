@@ -42,16 +42,7 @@ func indiName(c *indi.Client, onServer []*device, d *device) (string, error) {
 			return "", fmt.Errorf("%s %s: %w (%s)", d.kind.Name, d.name(), errAmbiguous, driver)
 		}
 	}
-	for _, name := range c.Devices() {
-		info, ok := c.Property(name, "DRIVER_INFO")
-		if !ok {
-			continue
-		}
-		if exec, ok := info.Member("DRIVER_EXEC"); ok && exec.Text == driver {
-			return name, nil
-		}
-	}
-	return "", nil
+	return definedBy(c, driver), nil
 }
 
 // handle is one device on its server.
