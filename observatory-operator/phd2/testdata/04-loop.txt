@@ -1,0 +1,8 @@
+> {"method":"loop","id":9}
+< {"jsonrpc":"2.0","result":0,"id":9}
+< {"Event":"LoopingExposures","Timestamp":1791289179.317,"Host":"phd2","Inst":1,"Frame":1,"ErrorCode":8,"Status":"No star selected"}
+< {"Event":"LoopingExposures","Timestamp":1791289180.410,"Host":"phd2","Inst":1,"Frame":2,"ErrorCode":8,"Status":"No star selected"}
+< {"Event":"LoopingExposures","Timestamp":1791289181.463,"Host":"phd2","Inst":1,"Frame":3,"ErrorCode":8,"Status":"No star selected"}
+< {"Event":"LoopingExposures","Timestamp":1791289182.567,"Host":"phd2","Inst":1,"Frame":4,"ErrorCode":8,"Status":"No star selected"}
+< {"Event":"LoopingExposures","Timestamp":1791289183.667,"Host":"phd2","Inst":1,"Frame":5,"ErrorCode":8,"Status":"No star selected"}
+< {"Event":"LoopingExposures","Timestamp":1791289184.709,"Host":"phd2","Inst":1,"Frame":6,"ErrorCode":8,"Status":"No star selected"}

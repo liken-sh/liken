@@ -1,0 +1,6 @@
+> {"method":"stop_capture","id":15}
+< {"jsonrpc":"2.0","result":0,"id":15}
+< {"Event":"GuidingStopped","Timestamp":1791289274.264,"Host":"phd2","Inst":1}
+< {"Event":"LoopingExposuresStopped","Timestamp":1791289274.265,"Host":"phd2","Inst":1}
+> {"method":"get_app_state","id":16}
+< {"jsonrpc":"2.0","result":"Stopped","id":16}

@@ -1,0 +1,13 @@
+> {"method":"find_star","id":10}
+< {"Event":"ConfigurationChange","Timestamp":1791289185.069,"Host":"phd2","Inst":1}
+< {"Event":"LockPositionSet","Timestamp":1791289185.070,"Host":"phd2","Inst":1,"X":1045.093,"Y":44.959}
+< {"Event":"LoopingExposures","Timestamp":1791289185.071,"Host":"phd2","Inst":1,"Frame":6,"StarMass":13688,"SNR":81.37,"HFD":4.51}
+< {"Event":"StarSelected","Timestamp":1791289185.071,"Host":"phd2","Inst":1,"X":1045.093,"Y":44.959}
+< {"jsonrpc":"2.0","result":[1045.09,44.96],"id":10}
+< {"Event":"LoopingExposures","Timestamp":1791289185.757,"Host":"phd2","Inst":1,"Frame":7,"StarMass":13611,"SNR":81.07,"HFD":4.69}
+< {"Event":"LoopingExposures","Timestamp":1791289186.851,"Host":"phd2","Inst":1,"Frame":8,"StarMass":13674,"SNR":81.37,"HFD":4.64}
+< {"Event":"LoopingExposures","Timestamp":1791289187.961,"Host":"phd2","Inst":1,"Frame":9,"StarMass":13692,"SNR":81.36,"HFD":4.80}
+< {"Event":"LoopingExposures","Timestamp":1791289188.997,"Host":"phd2","Inst":1,"Frame":10,"StarMass":13579,"SNR":81.07,"HFD":4.97}
+> {"method":"get_app_state","id":11}
+< {"jsonrpc":"2.0","result":"Selected","id":11}
+< {"Event":"LoopingExposures","Timestamp":1791289190.092,"Host":"phd2","Inst":1,"Frame":11,"StarMass":13590,"SNR":81.27,"HFD":4.57}

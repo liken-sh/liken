@@ -1,0 +1,9 @@
+> {"method":"set_connected","id":5,"params":[true]}
+< {"Event":"ConfigurationChange","Timestamp":1791289173.999,"Host":"phd2","Inst":1}
+< {"jsonrpc":"2.0","result":0,"id":5}
+> {"method":"get_connected","id":6}
+< {"jsonrpc":"2.0","result":true,"id":6}
+> {"method":"get_pixel_scale","id":7}
+< {"jsonrpc":"2.0","result":1.23759,"id":7}
+> {"method":"get_app_state","id":8}
+< {"jsonrpc":"2.0","result":"Stopped","id":8}

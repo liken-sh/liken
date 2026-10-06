@@ -1,0 +1,2 @@
+< {"Event":"Version","Timestamp":1791289168.462,"Host":"phd2","Inst":1,"PHDVersion":"2.6.14","PHDSubver":"","OverlapSupport":true,"MsgVersion":1}
+< {"Event":"AppState","Timestamp":1791289168.462,"Host":"phd2","Inst":1,"State":"Stopped"}

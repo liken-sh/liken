@@ -1,0 +1,30 @@
+> {"method":"guide","id":12,"params":{"settle":{"pixels":1.5,"time":5,"timeout":60},"recalibrate":true}}
+< {"Event":"StartCalibration","Timestamp":1791289190.298,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]"}
+< {"jsonrpc":"2.0","result":0,"id":12}
+< {"Event":"Calibrating","Timestamp":1791289191.195,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"West","dist":0,"dx":0,"dy":0,"pos":[1043.96,44.92],"step":0,"State":"West step   1, dist= 0.0"}
+< {"Event":"Calibrating","Timestamp":1791289192.916,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"West","dist":4.4654,"dx":-4.45783,"dy":-0.259862,"pos":[1048.42,45.18],"step":1,"State":"West step   2, dist= 4.5"}
+< {"Event":"Calibrating","Timestamp":1791289194.625,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"West","dist":8.50283,"dx":-8.49052,"dy":-0.457491,"pos":[1052.45,45.38],"step":2,"State":"West step   3, dist= 8.5"}
+< {"Event":"Calibrating","Timestamp":1791289196.425,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"West","dist":12.7601,"dx":-12.7514,"dy":-0.470495,"pos":[1056.71,45.39],"step":3,"State":"West step   4, dist=12.8"}
+< {"Event":"Calibrating","Timestamp":1791289198.130,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"West","dist":17.2367,"dx":-17.2285,"dy":-0.530482,"pos":[1061.19,45.45],"step":4,"State":"West step   5, dist=17.2"}
+< {"Event":"Calibrating","Timestamp":1791289199.921,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"West","dist":21.5985,"dx":-21.5848,"dy":-0.767013,"pos":[1065.55,45.69],"step":5,"State":"West step   6, dist=21.6"}
+< {"Event":"Calibrating","Timestamp":1791289201.670,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"East","dist":25.8905,"dx":-25.8792,"dy":-0.765702,"pos":[1069.84,45.69],"step":2,"State":"East step   2, dist=25.9"}
+< {"Event":"Calibrating","Timestamp":1791289205.176,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"East","dist":10.4429,"dx":-10.4212,"dy":-0.67311,"pos":[1054.38,45.60],"step":1,"State":"East step   1, dist=10.4"}
+< {"Event":"Calibrating","Timestamp":1791289208.181,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"Backlash","dist":0,"dx":0,"dy":0,"pos":[1042.25,45.83],"step":0,"State":"Clearing backlash step 1"}
+< {"Event":"Calibrating","Timestamp":1791289209.939,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"Backlash","dist":4.65142,"dx":0.0598017,"dy":4.65104,"pos":[1042.19,41.18],"step":1,"State":"Clearing backlash step   2"}
+< {"Event":"Calibrating","Timestamp":1791289211.716,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"Backlash","dist":9.26671,"dx":0.0478308,"dy":9.26658,"pos":[1042.20,36.57],"step":2,"State":"Clearing backlash step   3"}
+< {"Event":"Calibrating","Timestamp":1791289213.392,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"North","dist":4.43849,"dx":0.0126703,"dy":4.43848,"pos":[1042.18,32.13],"step":1,"State":"North step   2, dist= 4.4"}
+< {"Event":"Calibrating","Timestamp":1791289215.184,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"North","dist":8.49021,"dx":-0.00062238,"dy":8.49021,"pos":[1042.20,28.08],"step":2,"State":"North step   3, dist= 8.5"}
+< {"Event":"Calibrating","Timestamp":1791289216.936,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"North","dist":13.3554,"dx":0.071793,"dy":13.3552,"pos":[1042.13,23.21],"step":3,"State":"North step   4, dist=13.4"}
+< {"Event":"Calibrating","Timestamp":1791289218.690,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"North","dist":17.8801,"dx":0.0836332,"dy":17.8799,"pos":[1042.11,18.69],"step":4,"State":"North step   5, dist=17.9"}
+< {"Event":"Calibrating","Timestamp":1791289220.443,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"North","dist":22.237,"dx":0.0109522,"dy":22.237,"pos":[1042.19,14.33],"step":5,"State":"North step   6, dist=22.2"}
+< {"Event":"Calibrating","Timestamp":1791289222.192,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"South","dist":26.4247,"dx":0.00753406,"dy":26.4247,"pos":[1042.19,10.14],"step":3,"State":"South step   3, dist=26.4"}
+< {"Event":"Calibrating","Timestamp":1791289225.445,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"South","dist":14.1625,"dx":-0.191697,"dy":14.1612,"pos":[1042.39,22.41],"step":2,"State":"South step   2, dist=14.2"}
+< {"Event":"Calibrating","Timestamp":1791289228.702,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"South","dist":1.90193,"dx":-0.510513,"dy":1.83214,"pos":[1042.71,34.73],"step":1,"State":"South step   1, dist= 1.9"}
+< {"Event":"Calibrating","Timestamp":1791289230.205,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"NudgeSouth","dist":0.798003,"dx":-0.358912,"dy":-0.712735,"pos":[1042.56,37.28],"step":1,"State":"Nudge South   1"}
+< {"Event":"Calibrating","Timestamp":1791289231.952,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]","dir":"NudgeSouth","dist":5.45217,"dx":-0.40323,"dy":-5.43723,"pos":[1042.60,42.00],"step":2,"State":"Nudge South   2"}
+< {"Event":"ConfigurationChange","Timestamp":1791289233.719,"Host":"phd2","Inst":1}
+< {"Event":"CalibrationComplete","Timestamp":1791289233.719,"Host":"phd2","Inst":1,"Mount":"INDI Mount [Telescope Simulator]"}
+< {"Event":"StartGuiding","Timestamp":1791289233.720,"Host":"phd2","Inst":1}
+< {"Event":"SettleBegin","Timestamp":1791289233.720,"Host":"phd2","Inst":1}
+> {"method":"get_calibrated","id":13}
+< {"jsonrpc":"2.0","result":true,"id":13}
