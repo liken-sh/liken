@@ -30,6 +30,13 @@ and hold them to the Go types:
 - `shared_test.go` holds the fields that every device shares equal in
   all 14 device CRDs, descriptions and rules included. A change to
   `DeviceSpec` or `DeviceStatus` is a change to all 14 files.
+- `procedureschema_test.go` holds the procedure schema equal in the
+  16 CRDs with procedures, descriptions and rules included:
+  `spec.activation`, `spec.deactivation`, `spec.triggers`, and
+  `status.procedures`. Only the action fields that some kinds lack,
+  `state` with its enum, `cool`, and `warm`, differ by kind, with the
+  action's description and its rule. A change to any other part is a
+  change to all 16 files.
 - `enum_test.go` holds each CRD enum equal to the Go constants.
 - `validation_test.go` runs resources that a person could write
   through the structural schema and the CEL rules.

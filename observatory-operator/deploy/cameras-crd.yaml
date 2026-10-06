@@ -185,13 +185,14 @@ spec:
                   type: array
                   maxItems: 16
                   description: >-
-                    The actions that run, in order, as the device's
+                    The actions that run, in order, as this resource's
                     `Telescope` or `Observatory` turns `Active`, while
-                    every device is still connected. The `Reservation`'s
-                    `Activation` step waits for them. Each action is a
-                    target state, so a run that an operator restart
-                    interrupted runs again each action that is not
-                    `Done`. Optional.
+                    every device is still connected. For a `Telescope`
+                    or an `Observatory`, that is the resource itself.
+                    The `Reservation`'s `Activation` step waits for
+                    them. Each action is a target state, so a run that
+                    an operator restart interrupted runs again each
+                    action that is not `Done`. Optional.
                   items:
                     type: object
                     description: >-
@@ -352,13 +353,14 @@ spec:
                   type: array
                   maxItems: 16
                   description: >-
-                    The actions that run, in order, as the device's
+                    The actions that run, in order, as this resource's
                     `Telescope` or `Observatory` stops being `Active`,
-                    while every device is still connected. The
-                    `Reservation`'s `Deactivation` step waits for them.
-                    Each action is a target state, so a run that an
-                    operator restart interrupted runs again each action
-                    that is not `Done`. Optional.
+                    while every device is still connected. For a
+                    `Telescope` or an `Observatory`, that is the
+                    resource itself. The `Reservation`'s `Deactivation`
+                    step waits for them. Each action is a target state,
+                    so a run that an operator restart interrupted runs
+                    again each action that is not `Done`. Optional.
                   items:
                     type: object
                     description: >-
