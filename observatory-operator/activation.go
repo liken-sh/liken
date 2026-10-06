@@ -313,7 +313,7 @@ func (r *runner) connect(ctx context.Context, w *stepWork) (outcome, error) {
 		if err != nil {
 			return outcome{}, err
 		}
-		connected = append(connected, h.d.name())
+		connected = append(connected, h.String())
 	}
 	return done("connected %s, in that order", strings.Join(connected, ", "))
 }

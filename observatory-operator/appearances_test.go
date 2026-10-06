@@ -9,7 +9,7 @@ import "testing"
 func TestEachDeviceCountsOnceAfterASubscription(t *testing.T) {
 	t.Parallel()
 	a := newAppearances()
-	a.opened("telescope-east")
+	a.opened("east-telescope")
 	cases := []struct {
 		look, device string
 		want         bool
@@ -20,9 +20,9 @@ func TestEachDeviceCountsOnceAfterASubscription(t *testing.T) {
 		{"a device on another server", "Dome Simulator", false},
 	}
 	for _, c := range cases {
-		server := "telescope-east"
+		server := "east-telescope"
 		if c.device == "Dome Simulator" {
-			server = "observatory-lab"
+			server = "lab-observatory"
 		}
 		if got := a.take(server, c.device); got != c.want {
 			t.Errorf("%s: take(%s, %s) = %v, want %v", c.look, server, c.device, got, c.want)

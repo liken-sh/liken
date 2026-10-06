@@ -33,9 +33,9 @@ func repository(image string) string {
 // them.
 func eastDevices() []*device {
 	return []*device{
-		simulator(observatory.MountKind, "east-mount", "indi_simulator_telescope"),
+		simulator(observatory.MountKind, "east", "indi_simulator_telescope"),
 		simulator(observatory.CameraKind, "east-main", "indi_simulator_ccd"),
-		simulator(observatory.FocuserKind, "east-focuser", "indi_simulator_focus"),
+		simulator(observatory.FocuserKind, "east", "indi_simulator_focus"),
 	}
 }
 
@@ -54,7 +54,7 @@ func TestADevicePodServesItsDriverThroughSocat(t *testing.T) {
 	for _, d := range eastDevices() {
 		t.Run(d.name(), func(t *testing.T) {
 			t.Parallel()
-			p, svc, claim, err := devicePod("observatory", east, d)
+			p, svc, claim, err := devicePod("observatory", east, d, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,7 +103,7 @@ func TestTheServerPodLinksAShimToEachDevice(t *testing.T) {
 		t.Fatalf("pod spec = %s", mustJSON(p.Spec))
 	}
 	links, server := p.Spec.InitContainers[0], p.Spec.Containers[0]
-	targets := []string{"mount-east-mount:7625", "camera-east-main:7625", "focuser-east-focuser:7625"}
+	targets := []string{"east-mount:7625", "east-main-camera:7625", "east-focuser:7625"}
 	var paths []string
 	for _, target := range targets {
 		paths = append(paths, "/run/indi/drivers/"+target)
@@ -130,9 +130,9 @@ func TestTheServerPodLinksAShimToEachDevice(t *testing.T) {
 		// indiserver ignores SIGTERM as process 1, so a longer grace
 		// period left every device offline for 31 s on plan 03's cluster.
 		{"grace period", p.Spec.TerminationGracePeriodSeconds, int64Pointer(1)},
-		{"service name", svc.Metadata.Name, "telescope-east"},
+		{"service name", svc.Metadata.Name, "east-telescope"},
 		{"service ports", svc.Spec.Ports, []servicePort{{Name: "indi", Port: 7624, TargetPort: "indi"}}},
-		{"service selector", svc.Spec.Selector, map[string]string{labelName: "telescope-east"}},
+		{"service selector", svc.Spec.Selector, map[string]string{labelName: "east-telescope"}},
 	}
 	for _, c := range cases {
 		if !reflect.DeepEqual(c.got, c.want) {
@@ -145,7 +145,7 @@ func TestEveryObjectHasItsOwnerAndTheOperatorsLabels(t *testing.T) {
 	t.Parallel()
 	east := serverRef{observatory.TelescopeKind, "east"}
 	camera := simulator(observatory.CameraKind, "east-main", "indi_simulator_ccd")
-	devicePodBuilt, deviceService, _, err := devicePod("observatory", east, camera)
+	devicePodBuilt, deviceService, _, err := devicePod("observatory", east, camera, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestEveryObjectHasItsOwnerAndTheOperatorsLabels(t *testing.T) {
 			if len(refs) != 1 || refs[0].Kind+"/"+refs[0].Name+"/"+refs[0].UID != c.owner || !refs[0].Controller || refs[0].APIVersion != observatory.APIVersion {
 				t.Errorf("owner references = %+v, want %s", refs, c.owner)
 			}
-			if c.object.Labels[labelManagedBy] != managedBy || c.object.Labels[labelRole] != c.role || c.object.Labels[labelServer] != "telescope-east" {
+			if c.object.Labels[labelManagedBy] != managedBy || c.object.Labels[labelRole] != c.role || c.object.Labels[labelServer] != "east-telescope" {
 				t.Errorf("labels = %v", c.object.Labels)
 			}
 		})
@@ -183,17 +183,17 @@ func TestADeviceWithAClaimGetsAResourceClaim(t *testing.T) {
 	t.Parallel()
 	camera := simulator(observatory.CameraKind, "east-main", "indi_asi_ccd")
 	camera.object.Spec.Claim = json.RawMessage(`{"devices":{"requests":[{"name":"camera","exactly":{"deviceClassName":"usb.liken.sh"}}]}}`)
-	p, _, claim, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera)
+	p, _, claim, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claim == nil || claim.Metadata.Name != "camera-east-main" || claim.Kind != "ResourceClaim" {
+	if claim == nil || claim.Metadata.Name != "east-main-camera" || claim.Kind != "ResourceClaim" {
 		t.Fatalf("claim = %+v", claim)
 	}
 	if mustJSON(claim.Spec) != `{"devices":{"requests":[{"exactly":{"deviceClassName":"usb.liken.sh"},"name":"camera"}]}}` {
 		t.Errorf("claim spec = %s", mustJSON(claim.Spec))
 	}
-	if len(p.Spec.ResourceClaims) != 1 || p.Spec.ResourceClaims[0].ResourceClaimName != "camera-east-main" ||
+	if len(p.Spec.ResourceClaims) != 1 || p.Spec.ResourceClaims[0].ResourceClaimName != "east-main-camera" ||
 		p.Spec.Containers[0].Resources == nil || p.Spec.Containers[0].Resources.Claims[0].Name != p.Spec.ResourceClaims[0].Name {
 		t.Errorf("the pod does not use the claim: %s", mustJSON(p.Spec))
 	}
@@ -202,17 +202,75 @@ func TestADeviceWithAClaimGetsAResourceClaim(t *testing.T) {
 	}
 }
 
-func TestANameThatIsNoServiceNameIsRefused(t *testing.T) {
+// Each object takes the name <resource-name>-<kind>, so kubectl get pods
+// lists one telescope's objects together.
+func TestEachObjectIsNamedForItsResourceThenItsKind(t *testing.T) {
 	t.Parallel()
-	cases := []string{"east.main", strings.Repeat("a", 60)}
-	for _, name := range cases {
-		t.Run(name, func(t *testing.T) {
+	cases := []struct {
+		kind observatory.Kind
+		name string
+		want string
+	}{
+		{observatory.MountKind, "east", "east-mount"},
+		{observatory.CameraKind, "east-guide", "east-guide-camera"},
+		{observatory.SkyQualityMeterKind, "lab", "lab-skyqualitymeter"},
+	}
+	for _, c := range cases {
+		t.Run(c.want, func(t *testing.T) {
 			t.Parallel()
-			camera := simulator(observatory.CameraKind, name, "indi_simulator_ccd")
-			if _, _, _, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera); err == nil {
-				t.Errorf("devicePod accepted the name %q", name)
+			p, svc, _, err := devicePod("observatory", east, simulator(c.kind, c.name, "indi_simulator_ccd"), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Metadata.Name != c.want || svc.Metadata.Name != c.want {
+				t.Errorf("pod %s and Service %s, want %s", p.Metadata.Name, svc.Metadata.Name, c.want)
 			}
 		})
+	}
+}
+
+// A Service name is a DNS label of 63 characters or fewer, and the
+// shims dial a device by its Service name. A resource whose generated
+// name breaks that rule is refused with a message that says how to fix
+// the name.
+func TestANameThatIsNoServiceNameIsRefused(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		what    string
+		build   func() error
+		message string
+	}{
+		{"a dot", func() error {
+			_, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, "east.main", "indi_simulator_ccd"), false)
+			return err
+		}, `the pod and Service name "east.main-camera" is not a DNS label: use only lowercase letters, digits, and "-", and start with a letter`},
+		{"a camera of 57 characters", func() error {
+			_, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, strings.Repeat("a", 57), "indi_simulator_ccd"), false)
+			return err
+		}, `the pod and Service name "` + strings.Repeat("a", 57) + `-camera" has 64 characters, and Kubernetes allows 63: shorten the name of the Camera to 56 characters or fewer`},
+		{"a telescope of 54 characters", func() error {
+			_, _, err := serverPod("observatory", serverRef{observatory.TelescopeKind, strings.Repeat("a", 54)}, "uid", nil)
+			return err
+		}, `the pod and Service name "` + strings.Repeat("a", 54) + `-telescope" has 64 characters, and Kubernetes allows 63: shorten the name of the Telescope to 53 characters or fewer`},
+	}
+	for _, c := range cases {
+		t.Run(c.what, func(t *testing.T) {
+			t.Parallel()
+			if err := c.build(); err == nil || err.Error() != c.message {
+				t.Errorf("error = %v\nwant %s", err, c.message)
+			}
+		})
+	}
+}
+
+// The longest names that fit are accepted.
+func TestTheLongestNamesThatFitAreAccepted(t *testing.T) {
+	t.Parallel()
+	if _, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, strings.Repeat("a", 56), "indi_simulator_ccd"), false); err != nil {
+		t.Error(err)
+	}
+	if _, _, err := serverPod("observatory", serverRef{observatory.TelescopeKind, strings.Repeat("a", 53)}, "uid", nil); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -221,7 +279,7 @@ func TestANameThatIsNoServiceNameIsRefused(t *testing.T) {
 func TestTheDigestFollowsTheSpec(t *testing.T) {
 	t.Parallel()
 	east := serverRef{observatory.TelescopeKind, "east"}
-	mount := simulator(observatory.MountKind, "east-mount", "indi_simulator_telescope")
+	mount := simulator(observatory.MountKind, "east", "indi_simulator_telescope")
 	camera := simulator(observatory.CameraKind, "east-main", "indi_simulator_ccd")
 	one, _, _ := serverPod("observatory", east, "uid", []*device{mount})
 	same, _, _ := serverPod("observatory", east, "uid", []*device{mount})

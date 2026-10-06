@@ -377,7 +377,7 @@ func (s *fakeServer) broadcast(text string) {
 }
 
 // DialContext answers a pipe to the server that an address names, such
-// as telescope-east.observatory.svc:7624, while its pod is Ready.
+// as east-telescope.observatory.svc:7624, while its pod is Ready.
 func (w *indiWorld) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	name, _, _ := strings.Cut(address, ".")
 	w.mu.Lock()

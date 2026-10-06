@@ -14,7 +14,8 @@ this component and `astrophotography-operator` share, and the
 simulator tests that support it.
 
 `make test` runs every check CI runs. `pods_test.go` holds the
-operator's pods to the properties that plan 03 measured.
+operator's pods to the properties that plan 03 measured, and
+`placement_test.go` holds the guide camera's pod on its server's node.
 
 ## The resources
 

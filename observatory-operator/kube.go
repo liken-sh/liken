@@ -51,6 +51,7 @@ type podSpec struct {
 	Containers                    []container `json:"containers"`
 	Volumes                       []volume    `json:"volumes,omitempty"`
 	ResourceClaims                []podClaim  `json:"resourceClaims,omitempty"`
+	Affinity                      *affinity   `json:"affinity,omitempty"`
 }
 
 type container struct {

@@ -31,15 +31,15 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 		{
 			name: "a driver in no image",
 			change: func(w *world) {
-				w.put(observatory.FocuserKind, "east-focuser", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_fishcamp_ccd"}})
+				w.put(observatory.FocuserKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_fishcamp_ccd"}})
 			},
 			step:    observatory.StepStartDevices,
-			message: "Focuser east-focuser: indi_fishcamp_ccd: no image of the indi build holds this driver",
+			message: "Focuser east: indi_fishcamp_ccd: no image of the indi build holds this driver",
 		},
 		{
 			name: "a Switch that does not exist",
 			change: func(w *world) {
-				w.put(observatory.RotatorKind, "east-rotator", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "nowhere", "output": 1}})
+				w.put(observatory.RotatorKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "nowhere", "output": 1}})
 			},
 			step:    observatory.StepPowerOn,
 			message: "a device names the Switch nowhere in spec.power, and no Switch of that name exists",
@@ -47,10 +47,10 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 		{
 			name: "a Switch output that does not exist",
 			change: func(w *world) {
-				w.put(observatory.RotatorKind, "east-rotator", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "east-power", "output": 9}})
+				w.put(observatory.RotatorKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "east", "output": 9}})
 			},
 			step:    observatory.StepPowerOn,
-			message: "Switch east-power defines no DIGITAL_OUTPUT_9",
+			message: "Switch east defines no DIGITAL_OUTPUT_9",
 		},
 		{
 			name: "two devices that INDI names alike on one server",
@@ -72,10 +72,10 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 			name: "a name that is no Service name",
 			change: func(w *world) {
 				w.put(observatory.ReceiverKind, "east.radio", map[string]any{"telescope": "east", "driver": map[string]any{"name": "indi_simulator_receiver"}})
-				w.api.deleteNamed(kindCollection(observatory.ReceiverKind), "east-radio")
+				w.api.deleteNamed(kindCollection(observatory.ReceiverKind), "east")
 			},
 			step:    observatory.StepPowerOn,
-			message: "is not a DNS label",
+			message: `Receiver east.radio: the pod and Service name "east.radio-receiver" is not a DNS label`,
 		},
 	}
 	for _, c := range cases {
@@ -115,12 +115,12 @@ func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.put(observatory.CameraKind, "east-guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_guide"}, "temperature": -5, "offset": 3})
-		w.put(observatory.FilterWheelKind, "east-wheel", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_wheel"},
+		w.put(observatory.FilterWheelKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_wheel"},
 			"filters": []any{"L", "R", "G", "B", "Ha", "OIII", "SII", "Dark", "Spare"}})
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 15*time.Minute)
 		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure: {"Camera east-guide defines no CCD_OFFSET", "FilterWheel east-wheel has 8 slots, so 1 filters have no slot"},
+			observatory.StepConfigure: {"Camera east-guide defines no CCD_OFFSET", "FilterWheel east has 8 slots, so 1 filters have no slot"},
 			observatory.StepPrepare:   {"Camera east-guide has no cooler: its driver's CCD_TEMPERATURE is read-only"},
 		}
 		for name, want := range notes {
@@ -139,8 +139,8 @@ func TestAbortStopsWhatMoves(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		w.indi.setState("telescope-east", "CCD Simulator", "CCD_EXPOSURE", "Busy")
-		w.indi.setState("telescope-east", "Telescope Simulator", "EQUATORIAL_EOD_COORD", "Busy")
+		w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
+		w.indi.setState("east-telescope", "Telescope Simulator", "EQUATORIAL_EOD_COORD", "Busy")
 		synctest.Wait()
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		w.until(10*time.Minute, "the reservation stays", func() bool {
@@ -148,11 +148,11 @@ func TestAbortStopsWhatMoves(t *testing.T) {
 			return !ok
 		})
 		for _, property := range []string{"CCD Simulator.CCD_ABORT_EXPOSURE", "Telescope Simulator.TELESCOPE_ABORT_MOTION"} {
-			if n := w.indi.count("telescope-east", property); n != 1 {
+			if n := w.indi.count("east-telescope", property); n != 1 {
 				t.Errorf("%s received %d changes, want 1", property, n)
 			}
 		}
-		if n := w.indi.count("telescope-east", "Guide Simulator.CCD_ABORT_EXPOSURE"); n != 0 {
+		if n := w.indi.count("east-telescope", "Guide Simulator.CCD_ABORT_EXPOSURE"); n != 0 {
 			t.Errorf("the idle guide camera received %d aborts", n)
 		}
 	})
@@ -174,12 +174,12 @@ func TestTheObservatorysServerStopsAfterTheLastReservation(t *testing.T) {
 		if step := stepOf(r, observatory.StepStopSite); step.State != observatory.StepSkipped || step.Message != "the server of the Observatory lab stays up for the Reservation west-tonight" {
 			t.Errorf("StopSite = %+v", step)
 		}
-		if _, ok := w.api.object(podsCollection, "observatory-lab"); !ok {
+		if _, ok := w.api.object(podsCollection, "lab-observatory"); !ok {
 			t.Error("the observatory's server stopped while west holds its telescope")
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "west-tonight")
 		w.until(10*time.Minute, "the observatory's server runs", func() bool {
-			_, ok := w.api.object(podsCollection, "observatory-lab")
+			_, ok := w.api.object(podsCollection, "lab-observatory")
 			return !ok
 		})
 	})
@@ -287,7 +287,7 @@ func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		w.indi.setState("telescope-east", "CCD Simulator", "CCD_EXPOSURE", "Busy")
+		w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
 		w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
 		synctest.Wait()
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
@@ -324,7 +324,7 @@ func TestADeviceThatComesBackAndRefusesItsSettingsShowsTheFault(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		w.indi.refuse("CCD Simulator", "CCD_GAIN")
-		w.api.deleteNamed(podsCollection, "camera-east-main")
+		w.api.deleteNamed(podsCollection, "east-main-camera")
 		w.until(time.Minute, "the camera shows no fault", func() bool {
 			camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
 			ready := conditionOf(camera.Status.Conditions, observatory.ConditionReady)

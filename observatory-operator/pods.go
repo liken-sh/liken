@@ -63,8 +63,9 @@ func boolPointer(b bool) *bool    { return &b }
 func int64Pointer(i int64) *int64 { return &i }
 
 // devicePod answers the pod, the Service, and, for a device with
-// spec.claim, the ResourceClaim of one device on one server.
-func devicePod(namespace string, server serverRef, d *device) (*pod, *service, *resourceClaim, error) {
+// spec.claim, the ResourceClaim of one device on one server. guides is
+// true for a camera that a Guider guides with (placement.go).
+func devicePod(namespace string, server serverRef, d *device, guides bool) (*pod, *service, *resourceClaim, error) {
 	name, err := objectName(d.kind, d.name())
 	if err != nil {
 		return nil, nil, nil, err
@@ -101,6 +102,7 @@ func devicePod(namespace string, server serverRef, d *device) (*pod, *service, *
 			AutomountServiceAccountToken: boolPointer(false),
 			Containers:                   []container{driver},
 			Volumes:                      []volume{{Name: "tmp", EmptyDir: &emptyDir{}}},
+			Affinity:                     placement(server, d, guides),
 		},
 	}
 	var claim *resourceClaim
@@ -123,15 +125,15 @@ func devicePod(namespace string, server serverRef, d *device) (*pod, *service, *
 // serverPod answers the pod and the Service of one INDI server, with a
 // link to the shim for each device it serves.
 func serverPod(namespace string, server serverRef, ownerUID string, devices []*device) (*pod, *service, error) {
-	name := server.String()
-	if len(name) > 63 || !serviceName.MatchString(name) {
-		return nil, nil, fmt.Errorf("the %s %s needs the Service name %q, which is not a DNS label of 63 characters or fewer", server.kind.Name, server.name, name)
+	name, err := objectName(server.kind, server.name)
+	if err != nil {
+		return nil, nil, err
 	}
 	var targets, links []string
 	for _, d := range devices {
 		object, err := objectName(d.kind, d.name())
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
 		}
 		target := object + ":" + strconv.Itoa(devicePort)
 		targets = append(targets, target)

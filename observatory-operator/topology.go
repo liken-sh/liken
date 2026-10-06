@@ -67,10 +67,13 @@ func (o *operator) startServer(ctx context.Context, report func(string), ref ser
 }
 
 // startDevices creates the pod, the Service, and the claim of each
-// device.
+// device. The tree of now decides which camera a Guider names, so a
+// Guider created during a reservation places its camera at the next
+// start of the camera's pod.
 func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) error {
+	t := o.snapshot()
 	for _, d := range devices {
-		built, svc, claim, err := devicePod(o.namespace, ref, d)
+		built, svc, claim, err := devicePod(o.namespace, ref, d, t.guides(ref, d))
 		if err != nil {
 			o.fault(d, err)
 			return fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
@@ -223,7 +226,7 @@ func isSwitch(kind string) bool { return kind == observatory.SwitchKind.Name }
 func names(devices []*device) string {
 	var out []string
 	for _, d := range devices {
-		out = append(out, d.name())
+		out = append(out, d.kind.Name+" "+d.name())
 	}
 	return strings.Join(out, ", ")
 }

@@ -1,6 +1,7 @@
 # 09, The guider
 
-Proposed on 2026-10-05. Not built.
+Proposed on 2026-10-05. The guide camera's placement is built; the
+rest is not.
 
 ## The problem
 
@@ -35,6 +36,29 @@ the telescope's server, the guide camera's pod, and the guider's pod.
 On the two-node test cluster, the scheduler put the guide camera's pod
 on the other node from the server, so each guide frame crossed the
 76 Mbit/s link.
+
+### The guide camera's placement is built
+
+Built on 2026-10-05, before the guider's pod, and tested against the
+fake API server in `placement_test.go`. Not drilled on the test
+cluster yet.
+
+The camera of the `OpticalTrain` that a `Guider` names has a required
+pod affinity to its telescope's server pod, on the node label
+`kubernetes.io/hostname`. With no `Guider`, no pod has an affinity.
+
+The camera follows the server, not the reverse. `PowerOn` creates the
+server's pod before the guide camera's pod exists, and the `Switch`
+that can power the camera runs on that server. A server with an
+affinity to the camera would wait for a pod that waits for the server.
+
+A guide camera with a `spec.claim` gets no affinity. The node of its
+device decides where its pod runs, so an affinity to a server on
+another node would hold the pod Pending until the step's deadline. On
+real hardware, the server still lands on any node, and a guide frame
+crosses the link when the server and the camera are apart. Placing the
+server on the node of the claimed devices stays with this plan, with
+the guider's pod.
 
 ## How we test it
 

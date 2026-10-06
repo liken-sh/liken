@@ -263,7 +263,10 @@ unparked already. Both are fixed in the build that the drill ran last.
 - The placement of the pods. The guide camera's pod and the server's
   pod belong on one node when the link between nodes is slow, and the
   operator places no pod. [Plan 09](../09-the-guider.md) places them
-  with the guider's pod.
+  with the guider's pod. Built later on 2026-10-05, ahead of the rest
+  of plan 09: the camera of the `OpticalTrain` that a `Guider` names
+  has a required pod affinity to its telescope's server, unless the
+  camera has a claim. Plan 09 gives the reasons.
 - Adding a device to a running server through the `-f` fifo. A change
   to the devices restarts the server, which costs 3 seconds.
   [Adding a device restarts the server](../open-problems/adding-a-device-restarts-the-server.md)

@@ -1,11 +1,13 @@
 package main
 
-// The names and labels of the objects the operator creates. Each
-// device's pod and Service take the name <kind>-<resource>, such as
-// camera-east-main, and each INDI server's pod and Service take the
-// name of its owner's kind and name, such as telescope-east. Two kinds
-// can hold resources of one name, such as the Telescope east and the
-// Guider east, and the kind in the name keeps the objects apart.
+// The names and labels of the objects the operator creates. Each pod
+// and Service takes the name <resource-name>-<kind>: the Camera
+// east-main runs in the pod east-main-camera, and the INDI server of the
+// Telescope east runs in the pod east-telescope. The resource's name
+// comes first, so kubectl get pods lists one telescope's objects
+// together. The kind keeps apart two resources of one name, such as the
+// Mount east and the Telescope east. A kind's name holds no "-", so two
+// resources never share a generated name.
 
 import (
 	"fmt"
@@ -57,16 +59,31 @@ const (
 )
 
 // serviceName matches a DNS-1035 label, which is what a Service name
-// must be. A resource name can be longer or hold a dot, so a name that
-// does not fit is refused with a message.
+// must be. A resource name can hold a dot or start with a digit, so a
+// generated name that does not match is refused with a message.
 var serviceName = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
 
+// maxName is the longest DNS label. The shims dial each device by its
+// Service name, so a longer name cannot be used.
+const maxName = 63
+
+// generatedName answers the name of the pod and the Service that the
+// operator creates for one resource, with no check.
+func generatedName(kind observatory.Kind, name string) string {
+	return name + "-" + strings.ToLower(kind.Name)
+}
+
 // objectName answers the name of the pod and the Service that the
-// operator creates for one resource.
+// operator creates for one resource. The error states how to fix a
+// resource's name when the generated name is no Service name.
 func objectName(kind observatory.Kind, name string) (string, error) {
-	object := strings.ToLower(kind.Name) + "-" + name
-	if len(object) > 63 || !serviceName.MatchString(object) {
-		return "", fmt.Errorf("the %s %s needs the Service name %q, which is not a DNS label of 63 characters or fewer", kind.Name, name, object)
+	object := generatedName(kind, name)
+	if len(object) > maxName {
+		return "", fmt.Errorf("the pod and Service name %q has %d characters, and Kubernetes allows %d: shorten the name of the %s to %d characters or fewer",
+			object, len(object), maxName, kind.Name, maxName-len(object)+len(name))
+	}
+	if !serviceName.MatchString(object) {
+		return "", fmt.Errorf(`the pod and Service name %q is not a DNS label: use only lowercase letters, digits, and "-", and start with a letter`, object)
 	}
 	return object, nil
 }

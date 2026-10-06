@@ -31,7 +31,7 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 		w := readyWorld(t)
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
 		s := camera.Status
-		if s.Phase != observatory.DeviceConnected || s.IndiDevice != "CCD Simulator" || s.Pod != "camera-east-main" || s.Node != "node-1" ||
+		if s.Phase != observatory.DeviceConnected || s.IndiDevice != "CCD Simulator" || s.Pod != "east-main-camera" || s.Node != "node-1" ||
 			s.Driver != "indi_simulator_ccd" || !strings.HasPrefix(s.Image, "ghcr.io/liken-sh/indi-simulators:") {
 			t.Errorf("camera status = %+v", s)
 		}
@@ -56,24 +56,24 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 			t.Errorf("ParentFound = %+v", c)
 		}
 
-		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-wheel")
+		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if wheel.Status.Readings.Slot == nil || wheel.Status.Readings.Filter != "Luminance" {
 			t.Errorf("filter wheel readings = %+v", wheel.Status.Readings)
 		}
-		power, _ := decode[observatory.Switch](t, w.api, kindCollection(observatory.SwitchKind), "east-power")
+		power, _ := decode[observatory.Switch](t, w.api, kindCollection(observatory.SwitchKind), "east")
 		if !slices.Equal(power.Status.Readings.On, []int32{1, 2, 3}) {
 			t.Errorf("outputs on = %v", power.Status.Readings.On)
 		}
-		mount, _ := decode[observatory.Mount](t, w.api, kindCollection(observatory.MountKind), "east-mount")
+		mount, _ := decode[observatory.Mount](t, w.api, kindCollection(observatory.MountKind), "east")
 		if mount.Status.Readings.Parked == nil || *mount.Status.Readings.Parked || mount.Status.Readings.RightAscension == nil {
 			t.Errorf("mount readings = %+v", mount.Status.Readings)
 		}
 
 		// A cover that moves reports Moving.
-		w.indi.setState("telescope-east", "Dust Cover Simulator", "CAP_PARK", "Busy")
+		w.indi.setState("east-telescope", "Dust Cover Simulator", "CAP_PARK", "Busy")
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
-		cap, _ := decode[observatory.DustCap](t, w.api, kindCollection(observatory.DustCapKind), "east-cap")
+		cap, _ := decode[observatory.DustCap](t, w.api, kindCollection(observatory.DustCapKind), "east")
 		if cap.Status.Readings.Cover != observatory.CoverMoving {
 			t.Errorf("cover = %q, want Moving", cap.Status.Readings.Cover)
 		}
@@ -93,7 +93,7 @@ func TestTheTreeReportsDownward(t *testing.T) {
 		w := readyWorld(t)
 		east, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "east")
 		s := east.Status
-		if s.Phase != observatory.PhaseReady || s.Server == nil || s.Server.Host != "telescope-east.observatory.svc" || s.Server.Port != 7624 || s.Server.Pod != "telescope-east" {
+		if s.Phase != observatory.PhaseReady || s.Server == nil || s.Server.Host != "east-telescope.observatory.svc" || s.Server.Port != 7624 || s.Server.Pod != "east-telescope" {
 			t.Errorf("east = %+v", s)
 		}
 		if s.Reservation == nil || s.Reservation.Name != "east-tonight" || s.Reservation.Holder != "desktop" {
@@ -182,9 +182,9 @@ func TestStatusWritesAreCoalesced(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		before := w.api.statusWrites(kindCollection(observatory.FocuserKind), "east-focuser")
+		before := w.api.statusWrites(kindCollection(observatory.FocuserKind), "east")
 		w.indi.mu.Lock()
-		server := w.indi.servers["telescope-east"]
+		server := w.indi.servers["east-telescope"]
 		w.indi.mu.Unlock()
 		// The focuser moves: fifty updates in five seconds.
 		for i := range 50 {
@@ -200,11 +200,11 @@ func TestStatusWritesAreCoalesced(t *testing.T) {
 		}
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
-		writes := w.api.statusWrites(kindCollection(observatory.FocuserKind), "east-focuser") - before
+		writes := w.api.statusWrites(kindCollection(observatory.FocuserKind), "east") - before
 		if writes > 7 {
 			t.Errorf("%d status writes for 50 updates in 5 seconds, want at most one a second", writes)
 		}
-		focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east-focuser")
+		focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
 		if focuser.Status.Readings.Position == nil || *focuser.Status.Readings.Position != 19000 {
 			t.Errorf("position = %v, want the last update", focuser.Status.Readings.Position)
 		}
@@ -217,24 +217,24 @@ func TestADeviceThatComesBackIsSetUpAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		gains := w.indi.count("telescope-east", "CCD Simulator.CCD_GAIN")
-		w.api.deleteNamed(podsCollection, "camera-east-main")
+		gains := w.indi.count("east-telescope", "CCD Simulator.CCD_GAIN")
+		w.api.deleteNamed(podsCollection, "east-main-camera")
 		w.until(time.Minute, "the camera is not set up again", func() bool {
-			return slices.Contains(w.indi.connected("telescope-east"), "CCD Simulator") &&
-				w.indi.count("telescope-east", "CCD Simulator.CCD_GAIN") == gains+1
+			return slices.Contains(w.indi.connected("east-telescope"), "CCD Simulator") &&
+				w.indi.count("east-telescope", "CCD Simulator.CCD_GAIN") == gains+1
 		})
 		// A device that a person disconnects stays disconnected.
-		connects := w.indi.count("telescope-east", "Focuser Simulator.CONNECTION")
-		client, _ := w.indi.DialContext(t.Context(), "tcp", "telescope-east.observatory.svc:7624")
+		connects := w.indi.count("east-telescope", "Focuser Simulator.CONNECTION")
+		client, _ := w.indi.DialContext(t.Context(), "tcp", "east-telescope.observatory.svc:7624")
 		defer client.Close()
 		go func() { _, _ = io.Copy(io.Discard, client) }()
 		_, _ = client.Write([]byte(`<newSwitchVector device="Focuser Simulator" name="CONNECTION"><oneSwitch name="CONNECT">Off</oneSwitch><oneSwitch name="DISCONNECT">On</oneSwitch></newSwitchVector>`))
 		time.Sleep(time.Minute)
 		synctest.Wait()
-		if slices.Contains(w.indi.connected("telescope-east"), "Focuser Simulator") {
+		if slices.Contains(w.indi.connected("east-telescope"), "Focuser Simulator") {
 			t.Error("the focuser is connected again")
 		}
-		if n := w.indi.count("telescope-east", "Focuser Simulator.CONNECTION"); n != connects+1 {
+		if n := w.indi.count("east-telescope", "Focuser Simulator.CONNECTION"); n != connects+1 {
 			t.Errorf("CONNECTION changes = %d, want only the person's", n-connects)
 		}
 	})
@@ -246,9 +246,9 @@ func TestAServerThatRestartsIsSetUpAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		w.api.deleteNamed(podsCollection, "telescope-east")
+		w.api.deleteNamed(podsCollection, "east-telescope")
 		w.until(time.Minute, "the devices are not connected again", func() bool {
-			return len(w.indi.connected("telescope-east")) == 12
+			return len(w.indi.connected("east-telescope")) == 12
 		})
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
 			t.Errorf("the reservation is %s", r.Status.Phase)
@@ -262,11 +262,11 @@ func TestASiteDeviceThatComesBackIsSetUpAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		policies := w.indi.count("observatory-lab", "Dome Simulator.DOME_SHUTTER_PARK_POLICY")
-		w.api.deleteNamed(podsCollection, "dome-dome")
+		policies := w.indi.count("lab-observatory", "Dome Simulator.DOME_SHUTTER_PARK_POLICY")
+		w.api.deleteNamed(podsCollection, "lab-dome")
 		w.until(time.Minute, "the dome is not set up again", func() bool {
-			return slices.Contains(w.indi.connected("observatory-lab"), "Dome Simulator") &&
-				w.indi.count("observatory-lab", "Dome Simulator.DOME_SHUTTER_PARK_POLICY") == policies+1
+			return slices.Contains(w.indi.connected("lab-observatory"), "Dome Simulator") &&
+				w.indi.count("lab-observatory", "Dome Simulator.DOME_SHUTTER_PARK_POLICY") == policies+1
 		})
 	})
 }

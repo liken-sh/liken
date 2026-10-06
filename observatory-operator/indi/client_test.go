@@ -366,13 +366,13 @@ func TestADialerReplacesTheNetwork(t *testing.T) {
 			dialed = append(dialed, address)
 			return server.DialContext(ctx, network, address)
 		})
-		c := NewClient("telescope-east.observatory.svc:7624", WithDialer(dialer))
+		c := NewClient("east-telescope.observatory.svc:7624", WithDialer(dialer))
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
 		events := c.Subscribe(ctx)
 		run(t, c)
 		awaitDefinitions(t, events, 1)
-		if !slices.Equal(dialed, []string{"telescope-east.observatory.svc:7624"}) {
+		if !slices.Equal(dialed, []string{"east-telescope.observatory.svc:7624"}) {
 			t.Errorf("the dialer received %v, want the client's address", dialed)
 		}
 	})

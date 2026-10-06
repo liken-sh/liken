@@ -74,12 +74,12 @@ func TestDriversThatLackTheirKindsPropertiesAreNoted(t *testing.T) {
 		// ACTIVE_DEVICES, no CCD_GAIN, and no SCOPE_INFO, and the polar
 		// aligner no FILTER_NAME.
 		w.put(observatory.CameraKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_sqm"}, "temperature": -5, "gain": 1})
-		w.put(observatory.FilterWheelKind, "east-odd-wheel", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_pac"}, "filters": []any{"L"}})
-		w.api.deleteNamed(kindCollection(observatory.PolarAlignerKind), "east-pac")
+		w.put(observatory.FilterWheelKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_pac"}, "filters": []any{"L"}})
+		w.api.deleteNamed(kindCollection(observatory.PolarAlignerKind), "east")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure: {"Camera east-odd defines no CCD_GAIN", "Camera east-odd defines no SCOPE_INFO", "FilterWheel east-odd-wheel defines no FILTER_NAME"},
+			observatory.StepConfigure: {"Camera east-odd defines no CCD_GAIN", "Camera east-odd defines no SCOPE_INFO", "FilterWheel east-odd defines no FILTER_NAME"},
 			observatory.StepPrepare:   {"Camera east-odd has no cooler: its driver defines no CCD_TEMPERATURE"},
 		}
 		for name, want := range notes {
@@ -143,16 +143,16 @@ func TestADeviceAddedWhileReadyRestartsTheServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		before, _ := w.api.object(podsCollection, "telescope-east")
-		w.put(observatory.SkyQualityMeterKind, "east-sky", map[string]any{"telescope": "east", "driver": map[string]any{"name": "indi_simulator_sqm"}})
+		before, _ := w.api.object(podsCollection, "east-telescope")
+		w.put(observatory.SkyQualityMeterKind, "east", map[string]any{"telescope": "east", "driver": map[string]any{"name": "indi_simulator_sqm"}})
 		w.until(time.Minute, "the new device is not connected", func() bool {
-			return slices.Contains(w.indi.connected("telescope-east"), "SQM Simulator") && len(w.indi.connected("telescope-east")) == 13
+			return slices.Contains(w.indi.connected("east-telescope"), "SQM Simulator") && len(w.indi.connected("east-telescope")) == 13
 		})
-		after, _ := w.api.object(podsCollection, "telescope-east")
+		after, _ := w.api.object(podsCollection, "east-telescope")
 		if podUID(before) == podUID(after) {
 			t.Error("the server pod was not replaced")
 		}
-		if !slices.Contains(links(after), "skyqualitymeter-east-sky") {
+		if !slices.Contains(links(after), "east-skyqualitymeter") {
 			t.Errorf("the new server links %v", links(after))
 		}
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
@@ -167,14 +167,14 @@ func TestAClaimLivesAsLongAsItsDevicesPod(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		w.put(observatory.FocuserKind, "east-focuser", map[string]any{
+		w.put(observatory.FocuserKind, "east", map[string]any{
 			"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_focus"},
 			"claim": map[string]any{"devices": map[string]any{"requests": []any{map[string]any{"name": "focuser", "exactly": map[string]any{"deviceClassName": "usb.liken.sh"}}}}},
 		})
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		claims := "/apis/resource.k8s.io/v1/namespaces/" + testNamespace + "/resourceclaims"
-		if names := w.api.names(claims); !slices.Equal(names, []string{"focuser-east-focuser"}) {
+		if names := w.api.names(claims); !slices.Equal(names, []string{"east-focuser"}) {
 			t.Errorf("claims = %v", names)
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")

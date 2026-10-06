@@ -21,13 +21,13 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		w.api.holdPending("camera-east-main")
+		w.api.holdPending("east-main-camera")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationActivating, time.Minute)
 		began := time.Now()
 		r := w.phase("east-tonight", observatory.ReservationFailed, 15*time.Minute)
 		step := stepOf(r, observatory.StepStartDevices)
-		if step.State != observatory.StepFailed || !strings.Contains(step.Message, "timed out after 10m0s") || !strings.Contains(step.Message, "camera-east-main") {
+		if step.State != observatory.StepFailed || !strings.Contains(step.Message, "timed out after 10m0s") || !strings.Contains(step.Message, "east-main-camera") {
 			t.Errorf("StartDevices = %+v", step)
 		}
 		if waited := time.Since(began); waited < 10*time.Minute-time.Second || waited > 11*time.Minute {
@@ -95,7 +95,7 @@ func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
 			return stepOf(r, observatory.StepPrepare).State == observatory.StepRunning
 		})
 		before, _ := w.reservation("east-tonight")
-		connects := w.indi.count("telescope-east", "Telescope Simulator.CONNECTION")
+		connects := w.indi.count("east-telescope", "Telescope Simulator.CONNECTION")
 
 		w.restart()
 		w.indi.release("CCD Simulator", "CCD_TEMPERATURE")
@@ -105,10 +105,10 @@ func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
 				t.Errorf("%s started at %v before the restart and %v after it", name, a, b)
 			}
 		}
-		if after := w.indi.count("telescope-east", "Telescope Simulator.CONNECTION"); after != connects {
+		if after := w.indi.count("east-telescope", "Telescope Simulator.CONNECTION"); after != connects {
 			t.Errorf("the mount received CONNECTION %d times before the restart and %d after it", connects, after)
 		}
-		if n := w.indi.count("telescope-east", "CCD Simulator.CCD_TEMPERATURE"); n != 2 {
+		if n := w.indi.count("east-telescope", "CCD Simulator.CCD_TEMPERATURE"); n != 2 {
 			t.Errorf("the camera received its setpoint %d times, want once from each copy of the operator", n)
 		}
 	})
@@ -137,7 +137,7 @@ func TestANewOperatorContinuesDeactivation(t *testing.T) {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
-		if n := w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK"); n != 2 {
+		if n := w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK"); n != 2 {
 			t.Errorf("the mount received TELESCOPE_PARK %d times; want the park and the park again", n)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
@@ -157,25 +157,25 @@ func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		w.indi.move("Telescope Simulator", "TELESCOPE_PARK")
-		parks := w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK")
+		parks := w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK")
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		w.until(time.Minute, "the park is not sent", func() bool {
-			return w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK") == parks+1
+			return w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK") == parks+1
 		})
 		synctest.Wait()
 		r, _ := w.reservation("east-tonight")
-		if message := stepOf(r, observatory.StepSecure).Message; message != "parking Mount east-mount" {
+		if message := stepOf(r, observatory.StepSecure).Message; message != "parking Mount east" {
 			t.Errorf("Secure's message during the park = %q", message)
 		}
 
 		w.restart()
 		synctest.Wait()
-		w.indi.setState("telescope-east", "Telescope Simulator", "TELESCOPE_PARK", "Ok")
+		w.indi.setState("east-telescope", "Telescope Simulator", "TELESCOPE_PARK", "Ok")
 		w.until(25*time.Minute, "the reservation stays", func() bool {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
-		if n := w.indi.count("telescope-east", "Telescope Simulator.TELESCOPE_PARK"); n != parks+1 {
+		if n := w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK"); n != parks+1 {
 			t.Errorf("the mount received TELESCOPE_PARK %d times after Ready, want once", n-parks)
 		}
 	})
@@ -272,11 +272,11 @@ func TestTheRetryAnnotationRunsTheFailedStepAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		w.api.holdPending("camera-east-main")
+		w.api.holdPending("east-main-camera")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationFailed, 15*time.Minute)
 		// The person powers the camera on, and asks for a retry.
-		w.api.setPodReady("camera-east-main")
+		w.api.setPodReady("east-main-camera")
 		object, _ := w.api.object(kindCollection(observatory.ReservationKind), "east-tonight")
 		object["metadata"].(map[string]any)["annotations"] = map[string]any{annotationRetry: "1"}
 		w.api.mu.Lock()

@@ -180,7 +180,7 @@ hidden, and many lines look the same. `kubectl describe` lists each
 step, and the reservation's Events: one for each step that ends, one
 for each phase, and a `Warning` for a step that fails. The `Ready` condition is `True` while
 the phase is `Ready`, and `status.endpoint` then holds the host and
-port for KStars, such as `telescope-east.observatory.svc:7624`.
+port for KStars, such as `east-telescope.observatory.svc:7624`.
 `SafeToPowerOff` is `True` when the deactivation steps are done. The
 `Guider` kind has its CRD, but its pod is [plan 09](plans/09-the-guider.md):
 its `Ready` condition is `False` with the reason `NotImplemented`.
@@ -239,6 +239,31 @@ disconnected, after its pod or the server restarted, the operator
 connects it and writes its settings again. A device that a person
 disconnects in KStars stays disconnected. A device added to the
 telescope's inventory restarts the server, which then links to it.
+
+## The pods and their names
+
+The operator names each pod, `Service`, and `ResourceClaim` it creates
+`<resource-name>-<kind>`, with the kind in lowercase. The `Mount`
+`east` runs in the pod `east-mount`, the `Camera` `east-main` in
+`east-main-camera`, and the INDI server of the `Telescope` `east` in
+`east-telescope`. So `kubectl get pods` lists one telescope's pods
+together. Give a device the name of its telescope, and add a word only
+when the telescope has two devices of one kind, as the example does
+for its cameras.
+
+A generated name must be a DNS label of 63 characters or fewer,
+because each shim dials its device by the `Service` name. The operator
+refuses a resource whose generated name breaks that rule, and the step
+that needs the name fails with a message that gives the longest
+resource name that fits.
+
+The scheduler places most pods. The camera of the `OpticalTrain` that
+the telescope's `Guider` names has a required pod affinity to the
+telescope's server, so it runs on the server's node and its guide
+frames cross no link between nodes. A guide camera with a
+`spec.claim` gets no affinity, because the node of its device decides
+where it runs. A telescope with no `Guider` has no affinity on any
+pod.
 
 ## The INDI client
 

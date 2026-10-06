@@ -35,7 +35,7 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 		for _, s := range r.Status.Steps {
 			t.Logf("%s: %s", s.Name, s.Message)
 		}
-		if r.Status.Endpoint == nil || r.Status.Endpoint.Host != "telescope-east.observatory.svc" || r.Status.Endpoint.Port != 7624 {
+		if r.Status.Endpoint == nil || r.Status.Endpoint.Host != "east-telescope.observatory.svc" || r.Status.Endpoint.Port != 7624 {
 			t.Errorf("endpoint = %+v", r.Status.Endpoint)
 		}
 		if !slices.Contains(r.Metadata.Finalizers, observatory.ReservationFinalizer) {
@@ -44,10 +44,9 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 		pods := w.api.names(podsCollection)
 		slices.Sort(pods)
 		wantPods := []string{
-			"camera-east-guide", "camera-east-main", "dome-dome", "dustcap-east-cap", "filterwheel-east-wheel",
-			"flatpanel-east-flat", "focuser-east-focuser", "gps-east-gps", "mount-east-mount", "observatory-lab",
-			"polaraligner-east-pac", "receiver-east-radio", "rotator-east-rotator", "skyqualitymeter-sky",
-			"switch-east-power", "telescope-east", "weatherstation-weather",
+			"east-dustcap", "east-filterwheel", "east-flatpanel", "east-focuser", "east-gps", "east-guide-camera",
+			"east-main-camera", "east-mount", "east-polaraligner", "east-receiver", "east-rotator", "east-switch",
+			"east-telescope", "lab-dome", "lab-observatory", "lab-skyqualitymeter", "lab-weatherstation",
 		}
 		if !slices.Equal(pods, wantPods) {
 			t.Errorf("pods = %v\nwant %v", pods, wantPods)
@@ -84,7 +83,7 @@ func TestPrepareNamesTheDevicesThatWereReadyAlready(t *testing.T) {
 		w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
 		r := w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
 		step := stepOf(r, observatory.StepPrepare)
-		if step.State != observatory.StepSkipped || step.Message != "west-mount was unparked already" {
+		if step.State != observatory.StepSkipped || step.Message != "Mount west was unparked already" {
 			t.Errorf("Prepare = %s %q", step.State, step.Message)
 		}
 	})
@@ -143,14 +142,14 @@ func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
 		// stop. The flat panel's light was off, and the transcript's
 		// cooler reports itself off, so neither receives a change.
 		order := []string{
-			"telescope-east Dust Cover Simulator.CAP_PARK PARK=On",
-			"telescope-east Telescope Simulator.TELESCOPE_PARK PARK=On",
-			"telescope-east CCD Simulator.CCD_TEMPERATURE CCD_TEMPERATURE_VALUE=5",
-			"telescope-east CCD Simulator.CONNECTION CONNECT=Off",
-			"telescope-east Telescope Simulator.CONNECTION CONNECT=Off",
-			"telescope-east Simulator IO.DIGITAL_OUTPUT_1 OFF=On",
-			"telescope-east Simulator IO.CONNECTION CONNECT=Off",
-			"observatory-lab Dome Simulator.DOME_PARK PARK=On",
+			"east-telescope Dust Cover Simulator.CAP_PARK PARK=On",
+			"east-telescope Telescope Simulator.TELESCOPE_PARK PARK=On",
+			"east-telescope CCD Simulator.CCD_TEMPERATURE CCD_TEMPERATURE_VALUE=5",
+			"east-telescope CCD Simulator.CONNECTION CONNECT=Off",
+			"east-telescope Telescope Simulator.CONNECTION CONNECT=Off",
+			"east-telescope Simulator IO.DIGITAL_OUTPUT_1 OFF=On",
+			"east-telescope Simulator IO.CONNECTION CONNECT=Off",
+			"lab-observatory Dome Simulator.DOME_PARK PARK=On",
 		}
 		changes := w.indi.changes()
 		at := 0

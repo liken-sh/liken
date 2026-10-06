@@ -8,7 +8,6 @@ package main
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
@@ -63,7 +62,9 @@ type serverRef struct {
 	name string
 }
 
-func (s serverRef) String() string { return strings.ToLower(s.kind.Name) + "-" + s.name }
+// String answers the name of the server's pod and Service, which is
+// also its key among the operator's INDI connections.
+func (s serverRef) String() string { return generatedName(s.kind, s.name) }
 
 // tree is one copy of every watched object. The goroutines that read
 // between two changes share one tree (operator.snapshot), so no code

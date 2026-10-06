@@ -33,7 +33,7 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 			return outcome{}, err
 		}
 		if changed {
-			wrote = append(wrote, h.d.name())
+			wrote = append(wrote, h.String())
 		}
 	}
 	if site.Spec.Policies != nil && (site.Spec.Policies.DomeLocksMount || site.Spec.Policies.MountLocksDome) {
@@ -147,7 +147,7 @@ func domePolicies(ctx context.Context, t *tree, site *observatory.Observatory, h
 			return nil, err
 		}
 		if changed {
-			notes = append(notes, "wrote the shutter policy of "+d.name())
+			notes = append(notes, "wrote the shutter policy of "+d.kind.Name+" "+d.name())
 		}
 	}
 	return notes, nil
@@ -171,9 +171,9 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 			return outcome{}, err
 		}
 		if changed {
-			did = append(did, "opened "+h.d.name())
+			did = append(did, "opened "+h.String())
 		} else {
-			already = append(already, h.d.name()+" was open already")
+			already = append(already, h.String()+" was open already")
 		}
 	}
 	var cameras []handle
@@ -188,7 +188,7 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 		if err := setTemperature(ctx, h, target, w.report); err != nil {
 			return outcome{}, err
 		}
-		did = append(did, fmt.Sprintf("cooled %s to %.1f °C", h.d.name(), target))
+		did = append(did, fmt.Sprintf("cooled %s to %.1f °C", h.String(), target))
 	}
 	for _, h := range ofKind(handles, observatory.MountKind) {
 		w.report("unparking " + h.String())
@@ -197,9 +197,9 @@ func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
 			return outcome{}, err
 		}
 		if changed {
-			did = append(did, "unparked "+h.d.name())
+			did = append(did, "unparked "+h.String())
 		} else {
-			already = append(already, h.d.name()+" was unparked already")
+			already = append(already, h.String()+" was unparked already")
 		}
 	}
 	notes = append(already, notes...)

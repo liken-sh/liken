@@ -162,7 +162,7 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 		if err := r.o.waitFor(ctx, nil, func(*tree) (bool, string, error) { return !busy(h, watched), "", nil }); err != nil {
 			return fmt.Errorf("%s still reports %s Busy: %w", h, watched, err)
 		}
-		did = append(did, "aborted "+h.d.name())
+		did = append(did, "aborted "+h.String())
 		return nil
 	}
 	for _, h := range handles {
@@ -210,7 +210,7 @@ func (r *runner) secure(ctx context.Context, w *stepWork) (outcome, error) {
 				return outcome{}, err
 			}
 			if changed {
-				did = append(did, move.verb+" "+h.d.name())
+				did = append(did, move.verb+" "+h.String())
 			}
 		}
 	}
@@ -238,7 +238,7 @@ func (r *runner) secure(ctx context.Context, w *stepWork) (outcome, error) {
 func warm(ctx context.Context, h handle, report func(string)) (string, error) {
 	p, _ := h.client().Property(h.name, "CCD_TEMPERATURE")
 	now, _ := number(p, "CCD_TEMPERATURE_VALUE")
-	note := fmt.Sprintf("%s was at %.1f °C", h.d.name(), now)
+	note := fmt.Sprintf("%s was at %.1f °C", h.String(), now)
 	if now < warmTarget-coolTolerance {
 		report(fmt.Sprintf("warming %s from %.1f °C to %.1f °C", h, now, warmTarget))
 		wait, cancel := context.WithTimeout(ctx, warmLimit)
@@ -246,11 +246,11 @@ func warm(ctx context.Context, h handle, report func(string)) (string, error) {
 		cancel()
 		switch {
 		case err == nil:
-			note = fmt.Sprintf("warmed %s to %.1f °C", h.d.name(), warmTarget)
+			note = fmt.Sprintf("warmed %s to %.1f °C", h.String(), warmTarget)
 		case ctx.Err() != nil:
 			return "", err
 		default:
-			note = fmt.Sprintf("warmed %s for %v: %v", h.d.name(), warmLimit, err)
+			note = fmt.Sprintf("warmed %s for %v: %v", h.String(), warmLimit, err)
 		}
 	}
 	if _, ok := h.client().Property(h.name, "CCD_COOLER"); ok {
@@ -281,7 +281,7 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 		if err := h.disconnect(ctx); err != nil {
 			return outcome{}, err
 		}
-		disconnected = append(disconnected, h.d.name())
+		disconnected = append(disconnected, h.String())
 	}
 	return done("%s", strings.Join(append([]string{"disconnected " + strings.Join(disconnected, ", ") + ", in that order"}, notes...), "; "))
 }
@@ -371,7 +371,7 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 				return outcome{}, err
 			}
 			if changed {
-				did = append(did, "parked "+h.d.name())
+				did = append(did, "parked "+h.String())
 			}
 		}
 	}

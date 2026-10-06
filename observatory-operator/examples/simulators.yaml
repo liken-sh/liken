@@ -25,10 +25,16 @@
 #            └─ OpticalTrain west-imaging
 #                 Camera
 #
-# Each resource names its parent in its spec. These resources are
-# inventory: the operator starts nothing for them. The Reservation at
-# the end starts the `east` telescope, and `west` stays down, because
-# each telescope has its own INDI server.
+# Each resource names its parent in its spec. A device takes the name
+# of its telescope or its observatory, and a second device of one kind
+# adds a word, such as the cameras `east-main` and `east-guide`. The
+# operator names each pod and `Service` `<resource-name>-<kind>`, so
+# `kubectl get pods` lists `east-mount`, `east-main-camera`, and the
+# server `east-telescope` together.
+#
+# These resources are inventory: the operator starts nothing for them.
+# The Reservation at the end starts the `east` telescope, and `west`
+# stays down, because each telescope has its own INDI server.
 
 # The site. The location is Cerro Tololo Inter-American Observatory in
 # Chile, a public observatory. The operator writes it to each mount and
@@ -55,7 +61,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Dome
 metadata:
-  name: dome
+  name: lab
 spec:
   observatory: lab
   driver: {name: indi_simulator_dome}
@@ -63,7 +69,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: WeatherStation
 metadata:
-  name: weather
+  name: lab
 spec:
   observatory: lab
   driver: {name: indi_simulator_weather}
@@ -73,7 +79,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: SkyQualityMeter
 metadata:
-  name: sky
+  name: lab
 spec:
   observatory: lab
   driver: {name: indi_simulator_sqm}
@@ -91,7 +97,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Mount
 metadata:
-  name: east-mount
+  name: east
 spec:
   telescope: east
   driver: {name: indi_simulator_telescope}
@@ -99,7 +105,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: GPS
 metadata:
-  name: east-gps
+  name: east
 spec:
   telescope: east
   driver: {name: indi_simulator_gps}
@@ -107,7 +113,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: PolarAligner
 metadata:
-  name: east-pac
+  name: east
 spec:
   telescope: east
   driver: {name: indi_simulator_pac}
@@ -119,7 +125,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Switch
 metadata:
-  name: east-power
+  name: east
 spec:
   telescope: east
   driver: {name: indi_simulator_io}
@@ -128,7 +134,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Receiver
 metadata:
-  name: east-radio
+  name: east
 spec:
   telescope: east
   driver: {name: indi_simulator_receiver}
@@ -182,7 +188,7 @@ metadata:
 spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_ccd}
-  power: {switch: east-power, output: 1}
+  power: {switch: east, output: 1}
   gain: 100
   offset: 10
   temperature: -10
@@ -192,31 +198,31 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: FilterWheel
 metadata:
-  name: east-wheel
+  name: east
 spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_wheel}
-  power: {switch: east-power, output: 2}
+  power: {switch: east, output: 2}
   # The filter in each slot, from slot 1. The simulator has 8 slots.
   filters: [Luminance, Red, Green, Blue, H_Alpha, OIII, SII, Dark]
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Focuser
 metadata:
-  name: east-focuser
+  name: east
 spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_focus}
-  power: {switch: east-power, output: 2}
+  power: {switch: east, output: 2}
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Rotator
 metadata:
-  name: east-rotator
+  name: east
 spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_rotator}
-  power: {switch: east-power, output: 2}
+  power: {switch: east, output: 2}
 ---
 # The dust cap and the flat panel are on output 3. Activation opens the
 # cap. Deactivation switches the panel's light off and closes the cap
@@ -224,20 +230,20 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: DustCap
 metadata:
-  name: east-cap
+  name: east
 spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_dustcover}
-  power: {switch: east-power, output: 3}
+  power: {switch: east, output: 3}
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: FlatPanel
 metadata:
-  name: east-flat
+  name: east
 spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_lightpanel}
-  power: {switch: east-power, output: 3}
+  power: {switch: east, output: 3}
 ---
 # The guide camera, behind the guide scope. It has no power output, so
 # a person powers it by hand.
@@ -250,8 +256,10 @@ spec:
   driver: {name: indi_simulator_guide}
 ---
 # PHD2 guides the east telescope with the guide train's camera, and
-# sends its corrections to the mount. The guider's pod is not built
-# yet, so its Ready condition is False with the reason NotImplemented.
+# sends its corrections to the mount. The operator runs the guide
+# camera's pod on the node of the telescope's server, so a guide frame
+# crosses no link between nodes. The guider's pod is not built yet, so
+# its Ready condition is False with the reason NotImplemented.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Guider
 metadata:
@@ -274,7 +282,7 @@ spec:
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Mount
 metadata:
-  name: west-mount
+  name: west
 spec:
   telescope: west
   driver: {name: indi_simulator_telescope}
