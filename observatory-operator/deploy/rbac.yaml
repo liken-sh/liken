@@ -65,9 +65,27 @@ rules:
       - reservations/status
     verbs: [update]
   # A merge patch of a reservation's metadata adds and removes its
-  # finalizer, and removes the retry annotation.
+  # finalizer, and removes the retry annotation. A merge patch of any
+  # other resource with procedures removes its retry annotation.
   - apiGroups: [observatory.liken.sh]
-    resources: [reservations]
+    resources:
+      - reservations
+      - observatories
+      - telescopes
+      - mounts
+      - cameras
+      - filterwheels
+      - focusers
+      - rotators
+      - dustcaps
+      - flatpanels
+      - polaraligners
+      - gpses
+      - domes
+      - weatherstations
+      - skyqualitymeters
+      - switches
+      - receivers
     verbs: [patch]
   # The topology: a pod and a Service for each device and each INDI
   # server. The watches select them by the operator's label.
