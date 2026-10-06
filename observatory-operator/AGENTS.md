@@ -93,18 +93,19 @@ package's tests and the operator's tests share.
 ## The operator
 
 The operator's files are flat in `package main`, one domain to a file.
-`operator.go` starts the three kinds of goroutine: the supervisor, one
+`operator.go` starts the four kinds of goroutine: the supervisor, one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `moves.go`,
 `finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),
-and the status writer (`status.go`, `statustree.go`, `standing.go`,
-`readings.go`, `guiderstatus.go`). Each
+the status writer (`status.go`, `statustree.go`, `standing.go`,
+`readings.go`, `guiderstatus.go`), and the lock relay (`locks.go`). Each
 of them waits on a bell and reads the watches' stores again. `changed`
 rings on every watch event, every INDI event, and every change that a
 PHD2 reports, and `structure` on the same events except an INDI
 property's update or message, and except a PHD2 change other than its
 connection or its equipment. The
-status writer and the waits for a property's value use `changed`. The
+status writer, the lock relay, and the waits for a property's value
+use `changed`. The
 supervisor and a Ready telescope's runner use `structure`, so a mount
 that reports its position several times a second does not wake them.
 `cost_test.go` holds the cost of a reading, and measures the CPU time
@@ -136,6 +137,9 @@ fakes, so a step's deadline of 20 minutes takes no real time:
   adds what the connect transcript defines, and answers every other
   change with the values sent. A test can hold a property, so its
   driver never answers, or refuse it, so its driver answers Alert.
+  `fakelocks_test.go` gives the fake mount and dome the lock policies
+  of INDI's base classes, and hands each report that a client relays
+  to the driver that snoops it.
 - `fakeguider_test.go` runs a fake PHD2 from `phd2/phd2test` in each
   guider pod that is Ready, and starts a new one, with nothing
   connected, for each new pod.

@@ -263,9 +263,23 @@ func (m member) blob() (BLOB, error) {
 // newVector writes a new*Vector, the element a client sends to change a
 // property. It writes every member of the property.
 func newVector(p Property) []byte {
+	return vector("new", p, "")
+}
+
+// setVector writes a set*Vector with the property's state, the element
+// a driver sends to report a property. A client sends one only to relay
+// a device that its server does not hold (Client.Relay).
+func setVector(p Property) []byte {
+	return vector("set", p, ` state=`+attribute(string(p.State)))
+}
+
+// vector writes a new*Vector or a set*Vector, with every member of the
+// property. attributes follows the name, and is empty or starts with a
+// space.
+func vector(verb string, p Property, attributes string) []byte {
 	var b bytes.Buffer
-	tag := "new" + string(p.Type) + "Vector"
-	fmt.Fprintf(&b, "<%s device=%s name=%s>\n", tag, attribute(p.Device), attribute(p.Name))
+	tag := verb + string(p.Type) + "Vector"
+	fmt.Fprintf(&b, "<%s device=%s name=%s%s>\n", tag, attribute(p.Device), attribute(p.Name), attributes)
 	for _, m := range p.Members {
 		var value string
 		switch p.Type {

@@ -27,6 +27,7 @@ type request struct {
 	XMLName xml.Name
 	Device  string `xml:"device,attr"`
 	Name    string `xml:"name,attr"`
+	State   string `xml:"state,attr"`
 	Version string `xml:"version,attr"`
 	UID     string `xml:"uid,attr"`
 	Members []struct {

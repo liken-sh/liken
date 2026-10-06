@@ -44,13 +44,13 @@
 # The site. The location is Cerro Tololo Inter-American Observatory in
 # Chile, a public observatory. The operator writes it to each mount and
 # GPS. The policies are off unless they are set. The operator writes
-# the shutter policies to the dome, so here the dome closes its shutter
-# when it parks. It does not write or enforce the lock policies yet,
-# such as `mountLocksDome`: the dome runs on the observatory's server,
-# each mount runs on its telescope's server, and a driver snoops only
-# devices on its own server. `Configure` notes each lock policy that it
-# skips. The open problem "The dome and mount locks cross two servers"
-# holds the work.
+# each policy to the drivers, and the drivers enforce them. Here the
+# dome closes its shutter when it parks, a mount does not unpark while
+# the dome is parked, and the dome does not park while the mount of
+# `east` or of `west` is unparked. The dome runs on the observatory's
+# server and each mount on its telescope's, so the operator relays each
+# park state that a lock needs between the servers. The condition
+# `LocksRelayed` on the `Observatory` reports the relay.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Observatory
 metadata:
@@ -61,6 +61,7 @@ spec:
     longitude: -70.806
     elevation: 2207
   policies:
+    domeLocksMount: true
     mountLocksDome: true
     closeShutterOnPark: true
 ---

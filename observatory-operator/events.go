@@ -23,6 +23,8 @@ package main
 //     on its Telescope or Observatory (serverdrivers.go), and the pod
 //     of a device that left the server is one Event on the device
 //     (moves.go).
+//   - A move that a mount or a dome refuses under a lock policy is one
+//     Warning on the device (locks.go).
 
 import (
 	"github.com/liken-sh/liken/kubernetes/conditions"

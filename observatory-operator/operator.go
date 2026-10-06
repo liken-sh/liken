@@ -1,6 +1,6 @@
 package main
 
-// The operator runs three kinds of goroutine on the stores of the
+// The operator runs four kinds of goroutine on the stores of the
 // watches (watch.go):
 //
 //   - The supervisor below starts a runner for each Reservation that
@@ -12,14 +12,16 @@ package main
 //     (reservation.go).
 //   - The status writer writes the status of every other resource
 //     (status.go).
+//   - The lock relay sends each park state that a lock policy needs to
+//     the other INDI servers (locks.go).
 //
 // They wait on two bells. changed rings on every watch event, every
 // INDI event, and every change a guider's PHD2 reports. structure rings
 // on the same events except an INDI property's update and a device's
 // message, which a mount that tracks sends several times a second, and
 // except a PHD2 change other than its connection or its equipment, such
-// as a guide step each second. The status writer and the steps that
-// wait for a property's value wait on changed. The supervisor, a
+// as a guide step each second. The status writer, the lock relay, and
+// the steps that wait for a property's value wait on changed. The supervisor, a
 // runner that keeps a Ready telescope, and a runner that waits for its
 // turn, its retry, or its end read only the stores and the devices
 // that each server defines, so they wait on structure.
@@ -66,6 +68,9 @@ type operator struct {
 	// serverDrivers records the devices that the operator wrote last on
 	// each server's pod (serverdrivers.go).
 	serverDrivers driversMemo
+
+	// locks records what the lock relay sent (locks.go).
+	locks lockMemo
 
 	mu      sync.Mutex
 	runners map[string]*runner
@@ -157,6 +162,7 @@ func (o *operator) run(ctx context.Context, watches func(context.Context) *store
 	o.stores = watches(ctx)
 	var group sync.WaitGroup
 	group.Go(func() { o.writeStatuses(ctx) })
+	group.Go(func() { o.keepLocks(ctx) })
 	defer func() {
 		group.Wait()
 		o.servers.stopAll()

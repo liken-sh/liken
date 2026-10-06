@@ -373,6 +373,9 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	devices := t.devicesOn(ref)
 	switches, others := partition(devices)
 	live, did := r.o.connectedHandles(ctx, w.report, t, ref, inOrder(others, siteOrder))
+	// The mounts parked in Secure, and the dome must hold that state
+	// before it is asked to park, or mountLocksDome refuses the park.
+	r.o.relayLocks(r.o.snapshot())
 	for _, h := range live {
 		if h.d.kind == observatory.DomeKind {
 			w.report("parking " + h.String())

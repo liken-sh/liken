@@ -23,6 +23,12 @@ and reads its state from PHD2's event server. The holder calibrates and
 guides.
 Plan 03 tested this topology on a cluster.
 
+The dome and the mounts run on different servers, and a driver reads
+another device's state only through its own server. So the operator
+relays the park states that the lock policies need between the
+servers, and INDI's drivers enforce the locks ([plan
+12](completed/12-the-dome-and-mount-locks-across-servers.md)).
+
 ## The resources
 
 The resources are in the API group `observatory.liken.sh`. [Plan
@@ -73,7 +79,8 @@ must hold.
 | [05](05-the-property-schema.md) | Typed fields generated from the simulators and INDI's documentation |
 | [06](completed/06-the-resources.md) | Built: the resources, as CRDs and the package `observatory` |
 | [07](completed/07-the-operator-runs-the-topology.md) | Built and drilled on a test cluster: the operator creates the topology from the resources |
-| [08](completed/08-the-reconciler.md) | Built and drilled: the reconciler, in the operator; the lock policies between the dome and the mounts are not built |
+| [08](completed/08-the-reconciler.md) | Built and drilled: the reconciler, in the operator; the lock policies between the dome and the mounts came in plan 12 |
 | [09](completed/09-the-guider.md) | Built and drilled on a test cluster: the guider, PHD2 in its own pod beside a headless weston |
 | [10](10-access-from-a-desktop.md) | KStars on a desktop, which completes mode 1 |
 | [11](completed/11-devices-join-a-running-server.md) | Built: a device joins or leaves a running server, with no restart of the server; the test-cluster drill has not run |
+| [12](completed/12-the-dome-and-mount-locks-across-servers.md) | Built: the operator relays the park states between the servers, so the drivers enforce the dome and mount locks; the test-cluster drill has not run |

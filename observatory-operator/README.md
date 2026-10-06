@@ -249,11 +249,11 @@ goes on.
 | Step | What it does | Deadline |
 |---|---|---|
 | `Wait` | Waits for `spec.start`, and for no other reservation to hold the telescope. | none |
-| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's shutter policies. Another reservation in the observatory may have started them already. | 10 min |
+| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's shutter policies and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. | 10 min |
 | `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. | 10 min |
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the sky quality meters, the receivers, and the cameras, in that order. | 2 min |
-| `Configure` | Writes the observatory's location to the mount and the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. | 2 min |
+| `Configure` | Writes the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. It then relays the dome's park state to the mount, before `Prepare` unparks it. | 2 min |
 | `Prepare` | Opens the dust caps, cools each camera to `spec.temperature` within 0.5 °C, and unparks the mount. It does not switch tracking on, because the holder, KStars in mode 1 or a `Session` in mode 2, aligns and calibrates the mount first. | 20 min |
 | `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. A telescope with no `Guider` skips it. | 10 min |
 | `Abort` | Stops PHD2's exposures and guiding with `stop_capture`, then ends each exposure and stops the mount if it moves. | 2 min |
@@ -262,7 +262,7 @@ goes on.
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
 | `StopDevices` | Deletes the device pods. | 2 min |
 | `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. | 5 min |
-| `StopSite` | Parks the dome, disconnects the observatory's devices, and stops its server, unless a reservation of another telescope in the observatory is active. | 10 min |
+| `StopSite` | Relays the parked mounts to the dome, parks the dome, disconnects the observatory's devices, and stops its server, unless a reservation of another telescope in the observatory is active. | 10 min |
 
 Deactivation begins at `spec.end`, or when a person deletes the
 reservation. The finalizer `observatory.liken.sh/deactivate` holds a
@@ -325,6 +325,45 @@ appears or changes its status or its reason, with the condition's
 reason and message. A `ParentFound` that is `False`, and a `Ready`
 whose reason is `Error`, are `Warning`s. `kubectl describe` lists them
 for an hour.
+
+## The dome and mount locks
+
+`Observatory.spec.policies` can lock the domes and the mounts against
+each other. INDI's drivers enforce both locks, and the operator writes
+each policy and relays what each driver needs to read:
+
+- `domeLocksMount` sets each mount's `DOME_POLICY` to `DOME_LOCKS`.
+  The mount refuses to unpark while a dome is parked or moving. The
+  mount does not park when the dome parks: INDI leaves that to its
+  watchdog driver.
+- `mountLocksDome` sets each dome's `MOUNT_POLICY` to `MOUNT_LOCKS`.
+  The dome refuses to park while the mount of any reserved telescope in
+  the observatory is unparked or moving.
+
+A driver reads another device's park state through its own INDI
+server, but the dome runs on the observatory's server and each mount
+on its telescope's. So the operator relays the park states between the
+servers. Each mount receives the domes' state under the name in its
+`ACTIVE_DEVICES.ACTIVE_DOME`. The dome receives one state for every
+mount under the name in its `ACTIVE_DEVICES.ACTIVE_TELESCOPE`:
+unparked while any mount is unparked, moving, or silent. A mount that
+does not report its park state counts as unparked until the `Secure`
+step of its reservation has parked it. A dome that does not report
+counts as parked.
+
+The `Observatory`'s `LocksRelayed` condition reports the relay. It is
+`True` while the operator relays each state, and its message names
+what it relays. It is `False` with the reason `Waiting` while a device
+does not report what the relay needs, and with the reason `Idle` while
+no dome or mount runs. While the operator is down, each driver keeps
+the last state that the operator relayed, and a later park or unpark is
+not relayed. A driver that restarts forgets that state, and the
+operator relays it again when the driver connects.
+
+When a driver refuses a move under a lock, it answers with `Alert`,
+and the operator posts a `Warning` on the device: `MountUnparkRefused`
+on the `Mount`, or `DomeParkRefused` on the `Dome`. A step that asked
+for the move fails, as it does for any `Alert`.
 
 ## The guider
 

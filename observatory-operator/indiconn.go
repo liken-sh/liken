@@ -13,6 +13,7 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -39,6 +40,9 @@ type indiServer struct {
 	// runners that share a site server do not interleave their changes
 	// to one device.
 	lock lock
+	// epoch is the number of the server's last structural change, from
+	// epochs (locks.go).
+	epoch atomic.Uint64
 }
 
 type servers struct {
@@ -102,6 +106,7 @@ func (s *servers) open(parent context.Context, name string) *indiServer {
 		options = append(options, indi.WithDialer(s.o.dialer))
 	}
 	server := &indiServer{name: name, client: indi.NewClient(address, options...), lock: newLock(), cancel: cancel, done: make(chan struct{})}
+	server.epoch.Store(epochs.Add(1))
 	events := server.client.Subscribe(ctx)
 	var group sync.WaitGroup
 	// Every INDI event wakes the operator, as a watch event does: a
@@ -113,6 +118,7 @@ func (s *servers) open(parent context.Context, name string) *indiServer {
 			if e.Kind == indi.Updated || e.Kind == indi.Message {
 				s.o.changed.notify()
 			} else {
+				server.epoch.Store(epochs.Add(1))
 				s.o.structure.notify()
 			}
 		}

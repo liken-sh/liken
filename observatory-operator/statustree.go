@@ -199,7 +199,11 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		}
 	}
 	next.Weather = worstWeather(devices, composed)
-	next.Conditions = withGeneration([]observatory.Condition{readyCondition(next.Phase, message)}, next.ObservedGeneration)
+	conditions := []observatory.Condition{readyCondition(next.Phase, message)}
+	if locks := o.planLocks(t, site).condition; locks != nil {
+		conditions = append(conditions, *locks)
+	}
+	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	return next
 }
 

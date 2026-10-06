@@ -5,8 +5,9 @@ operator and not in each server's pod. Closed on 2026-10-06. The
 restart drills ran on the two-node test cluster of plan 03 on
 2026-10-05, and "What the test cluster measured" gives the results.
 The lock policies between the dome and the mounts are not built, and
-moved to the open problem [The dome and mount locks cross two
-servers](../open-problems/the-dome-and-mount-locks-cross-two-servers.md).
+moved to the open problem "The dome and mount locks cross two
+servers", which [plan 12](12-the-dome-and-mount-locks-across-servers.md)
+closed.
 
 ## The problem
 
@@ -80,9 +81,9 @@ work below runs there.
   the mount, and the dome runs on the observatory's server and each
   mount on its telescope's. The shutter policies need no snoop, and the
   operator writes them. Enforcing the lock policies across servers is
-  work for the operator. The open problem [The dome and mount locks
-  cross two servers](../open-problems/the-dome-and-mount-locks-cross-two-servers.md)
-  holds it.
+  work for the operator. The open problem "The dome and mount locks
+  cross two servers" held it, and [plan
+  12](12-the-dome-and-mount-locks-across-servers.md) closed it.
 
 The unit tests restart a device's pod and the server's pod while a
 reservation is `Ready`, and each device came back connected with its

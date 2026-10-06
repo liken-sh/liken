@@ -166,6 +166,10 @@ type fakeDriver struct {
 	onConnect []*fakeProperty
 	props     []*fakeProperty
 	connected bool
+	// snooped holds the reports that clients relayed to the driver
+	// (fakelocks_test.go), by "<device>.<property>", each member's
+	// value by its name.
+	snooped map[string]map[string]string
 }
 
 var transcriptCache sync.Map
@@ -270,6 +274,9 @@ type indiWorld struct {
 	// sent records each change that a client sent, as
 	// "<server> <device>.<property> <member>=<value> ...".
 	sent []string
+	// relayed records each report that a client relayed, in the same
+	// form (fakelocks_test.go).
+	relayed []string
 	// held holds the properties, as "<device>.<property>", whose
 	// driver never answers a change.
 	held map[string]bool
@@ -488,6 +495,10 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		}
 		return
 	}
+	if strings.HasPrefix(tag, "set") {
+		w.relay(name, s, v)
+		return
+	}
 	if !strings.HasPrefix(tag, "new") {
 		return
 	}
@@ -510,6 +521,10 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 	}
 	w.sent = append(w.sent, fmt.Sprintf("%s %s.%s %s", name, v.Device, v.Name, strings.Join(change, " ")))
 	if w.held[v.Device+"."+v.Name] {
+		return
+	}
+	if d.lockRefuses(p, v) {
+		s.broadcast(p.set())
 		return
 	}
 	if w.refused[v.Device+"."+v.Name] {

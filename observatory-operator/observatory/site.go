@@ -24,22 +24,24 @@ type Location struct {
 	Elevation float64 `json:"elevation"`
 }
 
-// Policies are the rules between the dome and the mounts. Each one is
-// off unless the spec sets it. The operator writes the shutter
-// policies to the dome, and the dome enforces them while the operator
-// is down. The lock policies need the dome to snoop a mount, and a
-// driver snoops only devices on its own server, but the dome runs on
-// the observatory's server and each mount on its telescope's. So the
-// operator does not write or enforce the lock policies yet, and
-// Configure notes each one it skips. The open problem "The dome and
-// mount locks cross two servers" holds the work.
+// Policies are the rules between the domes and the mounts. Each one is
+// off unless the spec sets it. The operator writes each policy to the
+// drivers, and the drivers enforce them. The shutter policies need
+// nothing more, and the dome enforces them while the operator is down.
+// A lock policy needs a driver to snoop the park state of a device on
+// another INDI server: the dome runs on the observatory's server, and
+// each mount on its telescope's. So the operator relays each park
+// state across the servers, and the condition LocksRelayed reports
+// the relay. While the operator is down, each driver keeps the last
+// state that the operator relayed.
 type Policies struct {
-	// DomeLocksMount sets the mount's DOME_POLICY to DOME_LOCKS: the
-	// mount does not unpark while the dome is parked, and parks when
-	// the dome parks.
+	// DomeLocksMount sets each mount's DOME_POLICY to DOME_LOCKS: the
+	// mount does not unpark while a dome is parked. The mount does not
+	// park when the dome parks: INDI leaves that to its watchdog driver.
 	DomeLocksMount bool `json:"domeLocksMount,omitempty"`
-	// MountLocksDome sets the dome's MOUNT_POLICY to MOUNT_LOCKS: the
-	// dome does not park while a mount is unparked.
+	// MountLocksDome sets each dome's MOUNT_POLICY to MOUNT_LOCKS: the
+	// dome does not park while a mount of any telescope in the
+	// observatory is unparked.
 	MountLocksDome bool `json:"mountLocksDome,omitempty"`
 	// CloseShutterOnPark sets SHUTTER_CLOSE_ON_PARK in the dome's
 	// DOME_SHUTTER_PARK_POLICY.
@@ -48,6 +50,11 @@ type Policies struct {
 	// DOME_SHUTTER_PARK_POLICY.
 	OpenShutterOnUnpark bool `json:"openShutterOnUnpark,omitempty"`
 }
+
+// ConditionLocksRelayed is True while the operator relays the park
+// states that the lock policies need between the servers. An
+// Observatory that sets no lock policy has no such condition.
+const ConditionLocksRelayed = "LocksRelayed"
 
 type ObservatoryStatus struct {
 	ObservedGeneration int64       `json:"observedGeneration,omitempty"`

@@ -12,9 +12,11 @@ import (
 )
 
 // configure writes each setting that the resources state: the
-// observatory's location to the mount and the GPS, each camera's
-// ACTIVE_DEVICES from its train, the camera's gain, offset, and the
-// tube's aperture and focal length, and the filter wheel's names.
+// observatory's location to the mount and the GPS, the mount's dome
+// policy, each camera's ACTIVE_DEVICES from its train, the camera's
+// gain, offset, and the tube's aperture and focal length, and the
+// filter wheel's names. It then relays the domes' park state to the
+// mount (locks.go), so the mount holds it before Prepare unparks it.
 func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	t, handles, err := r.telescopeHandles(ctx, w)
 	if err != nil {
@@ -36,9 +38,7 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 			wrote = append(wrote, h.String())
 		}
 	}
-	if site.Spec.Policies != nil && (site.Spec.Policies.DomeLocksMount || site.Spec.Policies.MountLocksDome) {
-		notes = append(notes, "skipped the lock policies: a driver snoops only its own server, but the dome is on the observatory's server")
-	}
+	r.o.relayLocks(r.o.snapshot())
 	if len(wrote) == 0 && len(notes) == 0 {
 		return skipped("found every setting in place")
 	}
@@ -61,6 +61,9 @@ func configureDevice(ctx context.Context, t *tree, site *observatory.Observatory
 		err = note(location(ctx, h, site.Spec.Location))
 		if err == nil {
 			err = note(activeDevices(ctx, h, map[string]string{"ACTIVE_GPS": nameOf(all, observatory.GPSKind, "")}))
+		}
+		if err == nil && site.Spec.Policies != nil {
+			err = note(lockPolicy(ctx, h, "DOME_POLICY", "DOME_LOCKS", "DOME_IGNORED", site.Spec.Policies.DomeLocksMount, notes))
 		}
 	case observatory.GPSKind:
 		err = note(location(ctx, h, site.Spec.Location))
@@ -127,8 +130,10 @@ func nameOf(handles []handle, kind observatory.Kind, train string) string {
 	return ""
 }
 
-// domePolicies writes the shutter policies that the observatory states
-// to each dome. The dome enforces them alone, with no snoop.
+// domePolicies writes the policies that the observatory states to each
+// dome: the shutter policies, which the dome enforces alone, and the
+// mount policy, which needs the mounts' park state that the operator
+// relays (locks.go).
 func domePolicies(ctx context.Context, t *tree, site *observatory.Observatory, handles map[string]handle) ([]string, error) {
 	policies := site.Spec.Policies
 	if policies == nil {
@@ -150,8 +155,26 @@ func domePolicies(ctx context.Context, t *tree, site *observatory.Observatory, h
 		if changed {
 			notes = append(notes, "wrote the shutter policy of "+d.kind.Name+" "+d.name())
 		}
+		changed, err = lockPolicy(ctx, h, "MOUNT_POLICY", "MOUNT_LOCKS", "MOUNT_IGNORED", policies.MountLocksDome, &notes)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			notes = append(notes, "wrote the mount policy of "+d.kind.Name+" "+d.name())
+		}
 	}
 	return notes, nil
+}
+
+// lockPolicy writes one lock policy, DOME_POLICY or MOUNT_POLICY, which
+// every INDI mount and dome defines before it connects. A driver that
+// lacks it gets a note.
+func lockPolicy(ctx context.Context, h handle, property, locks, ignored string, on bool, notes *[]string) (bool, error) {
+	if _, ok := h.property(ctx, property); !ok {
+		*notes = append(*notes, fmt.Sprintf("no %s on %s", property, h))
+		return false, nil
+	}
+	return h.setSwitches(ctx, property, map[string]bool{locks: on, ignored: !on})
 }
 
 // prepare opens the dust caps, cools each camera that has a setpoint,
