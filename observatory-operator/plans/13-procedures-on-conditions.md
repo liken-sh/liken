@@ -63,7 +63,9 @@ spec:
   deactivation: [state: Parked]
   on:
   - when: {kind: WeatherStation, name: lab, type: Safe, status: "False"}
-    run: [state: Parked]
+    run:
+    - state: Parked
+      after: [{kind: Mount}]
   - when: {kind: WeatherStation, name: lab, type: Safe, for: 20m}
     run: [state: Unparked]
 ---
@@ -87,7 +89,9 @@ spec:
   `name` means the resource's own observatory or telescope. A
   reference names a resource with `kind` and `name`, as a
   `scaleTargetRef` or a `roleRef` does, so one shape serves `when`,
-  `requires`, and `after`, and one schema serves every CRD.
+  `requires`, and `after`, and one schema serves every CRD. In
+  `after`, a `kind` with no `name` means every resource of that kind in
+  the observatory, such as `{kind: Mount}`.
   Conditions are level-triggered: an operator that restarts reads the
   current status and acts on it, so a missed transition loses nothing.
   `for` stops a flapping weather station from opening and closing the
@@ -126,13 +130,15 @@ spec:
   turns `False`, while every device is still connected.
 - **One rule makes a trigger a barrier.** The operator does not take
   the next lifecycle step until every procedure that the last
-  lifecycle transition triggered has finished. `StartSite` waits for
-  the observatory's activation procedures, a new `Activation` step
-  after `Configure` waits for the telescope's, and the telescope
-  becomes `Ready` only after them. A new `Deactivation` step after
-  `Abort` waits for the telescope's deactivation procedures, and then,
-  when no other reservation holds a telescope in the observatory, for
-  the observatory's, before `Disconnect` starts. A procedure on any
+  lifecycle transition triggered has finished. A new `Activation`
+  step after `Configure` runs the observatory's activation procedures,
+  when the observatory is not active yet, and then the telescope's,
+  and the telescope becomes `Ready` only after them. `StartSite` stays
+  a bring-up step, so its deadline still covers only image pulls. A
+  new `Deactivation` step after `Abort` runs the telescope's
+  deactivation procedures, and then, when no other reservation holds
+  a telescope in the observatory, the observatory's, before
+  `Disconnect` starts. A procedure on any
   other trigger, such as the weather, runs with no step waiting on it.
   A step that finds a failed procedure of the same transition, such as
   the observatory's activation that an earlier reservation started,
@@ -143,8 +149,13 @@ spec:
   up. So the dome unparks before the mount, and the mount parks
   before the dome, with no edge declared. Siblings run in parallel,
   and the actions of one resource run in order. An action's `after`
-  names other resources whose procedure of the same lifecycle
-  transition must finish first, for an order the tree does not give.
+  names other resources whose runs for the same event must finish
+  first: the same lifecycle step, or the same transition of the same
+  condition for an `on` trigger. A named resource with no such run is
+  not waited for. The tree gives no order to an `on` trigger, so the
+  example's dome parks in bad weather `after: [{kind: Mount}]`.
+  Without it, the dome's lock refuses the park while a mount is
+  unparked, and the run fails with the driver's refusal.
   An `after` that names a resource in a later tier waits until the
   action's timeout, and the failure names both resources.
 - **`requires` gates the operator's own actions.** An action can
