@@ -34,7 +34,8 @@
 # `kubectl get pods` lists `east-mount`, `east-main-camera`, and the
 # server `east-telescope` together.
 #
-# These resources are inventory: the operator starts nothing for them.
+# The operator starts nothing for these resources until a Reservation
+# activates their telescope.
 # The Reservation at the end starts the `east` telescope, and `west`
 # stays down, because each telescope has its own INDI server. Each
 # device of `west` is `Idle`, and the focuser on the shelf is
